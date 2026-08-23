@@ -83,6 +83,20 @@ async def test_stream_output_preserves_utf8_split_across_chunks() -> None:
     assert output.getvalue() == "price: €10"
 
 
+async def test_stream_output_keeps_draining_after_sink_failure() -> None:
+    class FailedOutput(StringIO):
+        def write(self, value: str) -> int:
+            raise OSError("terminal closed")
+
+    source = asyncio.StreamReader()
+    source.feed_data(b"x" * 200_000)
+    source.feed_eof()
+
+    await stream_output(source, FailedOutput())
+
+    assert source.at_eof()
+
+
 async def test_a_child_outside_the_group_cannot_hold_completion_open() -> None:
     child = shlex.quote(sys.executable)
     result = await asyncio.wait_for(

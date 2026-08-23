@@ -8,7 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from hud.utils.process import finish_output, write_output
+from hud.utils.process import finish_output, output_writer
 
 from .core import Runtime, RuntimeConfig
 
@@ -265,12 +265,18 @@ class DaytonaRuntime:
                 )
 
                 async def follow_logs() -> None:
-                    await sandbox.process.get_session_command_logs_async(
-                        session,
-                        session_command.cmd_id,
-                        lambda chunk: write_output(sys.stdout, chunk),
-                        lambda chunk: write_output(sys.stderr, chunk),
-                    )
+                    write_stdout, finish_stdout = output_writer(sys.stdout)
+                    write_stderr, finish_stderr = output_writer(sys.stderr)
+                    try:
+                        await sandbox.process.get_session_command_logs_async(
+                            session,
+                            session_command.cmd_id,
+                            write_stdout,
+                            write_stderr,
+                        )
+                    finally:
+                        finish_stdout()
+                        finish_stderr()
 
                 output_task = asyncio.create_task(follow_logs())
                 ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)

@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 from hud.utils.process import (
     create_process_group_exec,
     finish_output,
+    output_writer,
     stream_output,
-    write_output,
 )
 
 from .core import Runtime
@@ -192,39 +192,44 @@ class SubprocessRuntime:
         error_tail: deque[str] = deque(maxlen=50)
         stdout_drain: asyncio.Task[None] | None = None
 
-        async def stream_stderr() -> None:
-            while chunk := await error.read(65536):
-                error_tail.append(chunk.decode("utf-8", "replace").strip()[-1024:])
-                write_output(sys.stderr, chunk)
+        def capture_error(text: str) -> None:
+            error_tail.append(text.strip()[-1024:])
 
-        stderr_drain = asyncio.create_task(stream_stderr())
+        stderr_drain = asyncio.create_task(stream_output(error, sys.stderr, capture=capture_error))
         try:
             from hud.environment.server import PORT_ANNOUNCEMENT
 
             port = None
             line_continues = False
-            async with asyncio.timeout(self.ready_timeout):
-                while True:
-                    eof = False
-                    try:
-                        line = await output.readuntil()
-                    except asyncio.LimitOverrunError as exc:
-                        line = await output.read(exc.consumed)
-                        line_continues = True
-                    except asyncio.IncompleteReadError as exc:
-                        line = exc.partial
-                        eof = True
-                    if not line:
-                        break
-                    text = line.decode("utf-8", "replace").strip()
-                    if not line_continues and text.startswith(PORT_ANNOUNCEMENT):
-                        port = int(text.removeprefix(PORT_ANNOUNCEMENT))
-                        break
-                    output_tail.append(text[-1024:])
-                    write_output(sys.stdout, line)
-                    line_continues = not line.endswith(b"\n")
-                    if eof:
-                        break
+            write_stdout, finish_stdout = output_writer(
+                sys.stdout,
+                capture=lambda text: output_tail.append(text.strip()[-1024:]),
+            )
+            try:
+                async with asyncio.timeout(self.ready_timeout):
+                    while True:
+                        eof = False
+                        try:
+                            line = await output.readuntil()
+                        except asyncio.LimitOverrunError as exc:
+                            line = await output.read(exc.consumed)
+                            line_continues = True
+                        except asyncio.IncompleteReadError as exc:
+                            line = exc.partial
+                            eof = True
+                        if not line:
+                            break
+                        if not line_continues:
+                            text = line.decode("utf-8", "replace").strip()
+                            if text.startswith(PORT_ANNOUNCEMENT):
+                                port = int(text.removeprefix(PORT_ANNOUNCEMENT))
+                                break
+                        write_stdout(line)
+                        line_continues = not line.endswith(b"\n")
+                        if eof:
+                            break
+            finally:
+                finish_stdout()
             if port is None:
                 await finish_output(stderr_drain)
                 tail = "\n".join((*output_tail, *error_tail)).strip()

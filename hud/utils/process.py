@@ -12,49 +12,71 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterable
+    from collections.abc import AsyncIterable, Callable
     from typing import TextIO
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
 OUTPUT_DRAIN_TIMEOUT = 1.0
 
 
-def write_output(output: TextIO, chunk: str | bytes) -> None:
-    if isinstance(chunk, bytes) and isinstance(output, io.TextIOWrapper):
-        output.flush()
-        output.buffer.write(chunk)
-        output.buffer.flush()
-        return
-    output.write(chunk.decode("utf-8", "replace") if isinstance(chunk, bytes) else chunk)
-    output.flush()
+def output_writer(
+    output: TextIO,
+    *,
+    capture: Callable[[str], None] | None = None,
+) -> tuple[Callable[[str | bytes], None], Callable[[], None]]:
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    sink_failed = False
+
+    def write(chunk: str | bytes) -> None:
+        nonlocal sink_failed
+        text = decoder.decode(chunk) if isinstance(chunk, bytes) else chunk
+        if capture is not None and text:
+            capture(text)
+        if sink_failed:
+            return
+        try:
+            if isinstance(chunk, bytes) and isinstance(output, io.TextIOWrapper):
+                output.flush()
+                output.buffer.write(chunk)
+                output.buffer.flush()
+            elif text:
+                output.write(text)
+                output.flush()
+        except Exception:
+            sink_failed = True
+
+    def finish() -> None:
+        nonlocal sink_failed
+        text = decoder.decode(b"", final=True)
+        if capture is not None and text:
+            capture(text)
+        if not text or isinstance(output, io.TextIOWrapper) or sink_failed:
+            return
+        try:
+            output.write(text)
+            output.flush()
+        except Exception:
+            sink_failed = True
+
+    return write, finish
 
 
 async def stream_output(
     source: AsyncIterable[str] | AsyncIterable[bytes],
     output: TextIO,
+    *,
+    capture: Callable[[str], None] | None = None,
 ) -> None:
-    decoder = (
-        None
-        if isinstance(output, io.TextIOWrapper)
-        else codecs.getincrementaldecoder("utf-8")(errors="replace")
-    )
-
-    def relay(chunk: str | bytes) -> None:
-        if isinstance(chunk, bytes) and decoder is not None:
-            text = decoder.decode(chunk)
-            if text:
-                write_output(output, text)
-            return
-        write_output(output, chunk)
-
-    if isinstance(source, asyncio.StreamReader):
-        while chunk := await source.read(65536):
-            relay(chunk)
-    else:
-        async for chunk in source:
-            relay(chunk)
-    if decoder is not None and (text := decoder.decode(b"", final=True)):
-        write_output(output, text)
+    write, finish = output_writer(output, capture=capture)
+    try:
+        if isinstance(source, asyncio.StreamReader):
+            while chunk := await source.read(65536):
+                write(chunk)
+        else:
+            async for chunk in source:
+                write(chunk)
+    finally:
+        finish()
 
 
 async def finish_output(*tasks: asyncio.Task[None]) -> None:
