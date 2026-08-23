@@ -130,8 +130,8 @@ services:
 ```
 
 ```dockerfile
-COPY --from=hud env.py install.sh config.json /media/hud/
-COPY --from=hud packages /media/hud/packages
+COPY --from=hud env.py install.sh config.json /controller/
+COPY --from=hud packages /controller/packages
 ```
 
 </div>

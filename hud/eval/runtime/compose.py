@@ -563,24 +563,32 @@ class ComposeProject(BaseModel):
         if not isinstance(self.document, Path):
             raise ValueError("Compose project is not available on the local filesystem")
         compose = self.document.resolve()
+        volumes: list[dict[str, str | bool]] = [
+            {
+                "type": "volume",
+                "source": "hud-runtime-sessions",
+                "target": target,
+            }
+            for target in ("/runtime/sessions", "/media/hud/sessions")
+        ]
+        volumes.extend(mount.compose_volume() for mount in bind_mounts)
+        if service_socket is not None:
+            volumes.extend(
+                {
+                    "type": "bind",
+                    "source": service_socket,
+                    "target": target,
+                }
+                for target in ("/var/run/docker.sock", "/media/hud/docker.sock")
+            )
         main: dict[str, Any] = {
             "security_opt": [
                 f"seccomp={seccomp}",
                 "systempaths=unconfined",
                 "apparmor=unconfined",
             ],
+            "volumes": volumes,
         }
-        volumes = [mount.compose_volume() for mount in bind_mounts]
-        if service_socket is not None:
-            volumes.append(
-                {
-                    "type": "bind",
-                    "source": service_socket,
-                    "target": "/media/hud/docker.sock",
-                }
-            )
-        if volumes:
-            main["volumes"] = volumes
         if env_vars:
             main["environment"] = dict(env_vars)
         if cpu is not None:
@@ -601,7 +609,12 @@ class ComposeProject(BaseModel):
             )
             override = root / "override.json"
             override.write_text(
-                json.dumps({"services": {"main": main}}),
+                json.dumps(
+                    {
+                        "services": {"main": main},
+                        "volumes": {"hud-runtime-sessions": {}},
+                    }
+                ),
                 encoding="utf-8",
             )
             ports = root / "ports.yaml"

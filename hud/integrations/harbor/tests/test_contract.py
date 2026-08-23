@@ -53,7 +53,7 @@ def _assert_stock_compose_complete(compose_path: Path) -> dict[str, Any]:
             if not isinstance(volume, str):
                 continue
             source, separator, target = volume.partition(":")
-            if separator and target == "/media/hud/tests:ro":
+            if separator and target == "/controller/tests:ro":
                 tests = (compose_path.parent / source).resolve()
                 tests.relative_to(compose_path.parent.resolve())
                 assert tests.is_dir(), (name, tests)
@@ -130,6 +130,7 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     served = (context / "env.py").read_text(encoding="utf-8")
     assert f'Environment("{context.name}")' in served
     assert 'Environment(CONFIG["name"])' not in served
+    assert 'Mount("rw", src=str(TASK_ROOT), dst="/")' in served
     project_root = context / "compose-project"
     assert _tree_snapshot(project_root / "environment") == authored_environment
     payload = project_root / "hud"
@@ -139,6 +140,11 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
         "install.sh",
         "packages",
     }
+    config = json.loads((payload / "config.json").read_text("utf-8"))
+    assert "controller_root" not in config
+    assert "rootfs" not in config
+    assert "runtime_root" not in config
+    assert config["mounts"] == []
     build_script = (project_root / "build.sh").read_text("utf-8")
     assert "docker image inspect" in build_script
     assert 'docker tag "$(docker compose' in build_script
@@ -161,12 +167,16 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
         "context": "./environment",
         "dockerfile": "../Dockerfile",
     }
-    assert main["volumes"] == ["./tests:/media/hud/tests:ro"]
+    assert "HUD_RUNTIME_ROOT" not in main.get("environment", {})
+    assert main["volumes"] == ["./tests:/controller/tests:ro"]
     combined = project_root / "Dockerfile"
     assert combined.read_text("utf-8").startswith("FROM python:3.11-slim AS hud-base\n")
+    assert "FROM hud-base AS hud-authored-root" in combined.read_text("utf-8")
+    assert "FROM python:3.12-slim AS hud-runtime" in combined.read_text("utf-8")
+    assert "COPY --from=hud-authored-root / /rootfs" in combined.read_text("utf-8")
     recipe = _assert_stock_compose_complete(context / "compose.yaml")
     assert recipe["services"]["main"]["build"]["context"] == ("./compose-project/environment")
-    assert recipe["services"]["main"]["volumes"] == ["./compose-project/tests:/media/hud/tests:ro"]
+    assert recipe["services"]["main"]["volumes"] == ["./compose-project/tests:/controller/tests:ro"]
 
 
 def test_task_content_changes_do_not_rebuild_the_environment(tmp_path: Path) -> None:
@@ -218,7 +228,7 @@ def test_image_task_preserves_a_named_final_stage_verbatim(tmp_path: Path) -> No
     environment = context / "compose-project" / "environment"
     assert (environment / "Dockerfile").read_bytes() == dockerfile.encode("utf-8")
     combined = (environment.parent / "Dockerfile").read_bytes().decode("utf-8")
-    assert combined.startswith(dockerfile + "\nFROM final AS hud-runtime\n")
+    assert combined.startswith(dockerfile + "\nFROM final AS hud-authored-root\n")
 
 
 def test_image_task_names_an_unnamed_multiline_final_stage(tmp_path: Path) -> None:
@@ -231,7 +241,7 @@ def test_image_task_names_an_unnamed_multiline_final_stage(tmp_path: Path) -> No
     combined = (context / "compose-project" / "Dockerfile").read_text("utf-8")
     assert combined.startswith(
         "FROM --platform=linux/amd64 \\\n  python:3.12-slim AS hud-base\n"
-        "RUN true\n\nFROM hud-base AS hud-runtime\n"
+        "RUN true\n\nFROM hud-base AS hud-authored-root\n"
     )
 
 
@@ -246,7 +256,7 @@ def test_image_task_ignores_from_inside_dockerfile_heredoc(tmp_path: Path, delim
     _adapt(tmp_path)
 
 
-@pytest.mark.parametrize("stage", ["hud-base", "HUD-RUNTIME"])
+@pytest.mark.parametrize("stage", ["hud-authored-root", "hud-base", "HUD-RUNTIME"])
 def test_image_task_rejects_reserved_user_stage_names(
     tmp_path: Path,
     stage: str,
@@ -398,9 +408,9 @@ services:
     assert manifest["peers"] == [{"name": "redis", "port": 6379}]
     assert manifest["healthy_services"] == ["redis"]
     assert project["services"]["main"]["command"] == [
-        "/media/hud/venv/bin/hud",
+        "/controller/venv/bin/hud",
         "serve",
-        "/media/hud/env.py",
+        "/controller/env.py",
         "--host",
         "0.0.0.0",
         "--port",
@@ -428,7 +438,12 @@ def test_compose_adapt_retains_builds_without_local_docker(
 services:
   main:
     env_file: ./main.env
-    volumes: [./main-data:/var/lib/main]
+    volumes:
+      - ./main-data:/var/lib/main
+      - type: bind
+        source: ./readonly
+        target: /etc/authored
+        read_only: true
   database:
     build:
       context: ./database
@@ -443,6 +458,7 @@ services:
     )
     (task / "environment" / "main.env").write_text("MAIN=true\n", encoding="utf-8")
     (task / "environment" / "main-data").mkdir()
+    (task / "environment" / "readonly").mkdir()
 
     (row,) = list(_adapt(tmp_path))
 
@@ -458,7 +474,28 @@ services:
         "./environment/database/data:/var/lib/postgresql/data"
     ]
     assert project["services"]["main"]["env_file"] == "./environment/main.env"
-    assert "./environment/main-data:/var/lib/main" in project["services"]["main"]["volumes"]
+    assert "./environment/main-data:/mounts/0" in (project["services"]["main"]["volumes"])
+    assert {
+        "type": "bind",
+        "source": "./environment/readonly",
+        "target": "/mounts/1",
+        "read_only": True,
+    } in project["services"]["main"]["volumes"]
+    context = row.runtime_config.compose.root
+    assert isinstance(context, Path)
+    manifest = _environment_config(context)
+    assert manifest["mounts"] == [
+        {
+            "read_only": False,
+            "source": "/mounts/0",
+            "target": "/var/lib/main",
+        },
+        {
+            "read_only": True,
+            "source": "/mounts/1",
+            "target": "/etc/authored",
+        },
+    ]
     assert project["services"]["redis"]["image"] == "redis:7-alpine"
     assert project["services"]["main"]["build"]["additional_contexts"] == {
         "hud-base": "service:hud-base"
@@ -1034,7 +1071,7 @@ timeout_sec = 10
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
-    assert manifest["verifier_root"] == "/media/hud/verifier"
+    assert manifest["verifier_root"] == "/verifier"
     assert manifest["verifier_image"]["workdir"] == "/judge"
     assert manifest["verifier"] == {
         "user": None,
@@ -1115,7 +1152,7 @@ gpu_types = ["H100"]
     assert project["services"]["hud-verifier"]["scale"] == 0
     combined = (row.runtime_config.compose.document.parent / "Dockerfile").read_text("utf-8")
     assert "FROM hud-verifier AS hud-verifier-root" in combined
-    assert "COPY --from=hud-verifier-root / /media/hud/verifier" in combined
+    assert "COPY --from=hud-verifier-root / /verifier" in combined
 
 
 def test_separate_verifier_groups_have_distinct_environment_names(

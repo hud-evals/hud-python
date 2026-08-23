@@ -352,7 +352,7 @@ def test_separate_verifier_rejects_artifact_symlinks(
     solution.write_text(
         solution.read_text("utf-8")
         + "\nrm -f /app/main.html\n"
-        + "ln -s /media/hud/verifier/tests /app/main.html\n",
+        + "ln -s /verifier/tests /app/main.html\n",
         encoding="utf-8",
     )
 
@@ -476,7 +476,7 @@ timeout_sec = 30
     )
     solution = task / "solution" / "solve.sh"
     solution.write_text(
-        "#!/bin/sh\nset -eu\nln -s /media/hud/verifier /app/linked\n",
+        "#!/bin/sh\nset -eu\nln -s /verifier /app/linked\n",
         encoding="utf-8",
     )
 
