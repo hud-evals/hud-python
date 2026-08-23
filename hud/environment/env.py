@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
-import secrets
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, cast
 
@@ -18,8 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
 from hud.capabilities import Capability
 
-from .egress import Peer
-from .platform_inference import InferenceBinding, PlatformInferenceProxy
+from .egress import Peer, WorkspaceRoute
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -165,10 +163,8 @@ class Environment:
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         # Per task-session end (cancel / bye / post-grade cleanup).
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
-        self._workspaces: list[Workspace] = []
-        self._platform_inference = PlatformInferenceProxy()
-        self._platform_peer_port: int | None = None
-        self._platform_peer_name: str | None = None
+        self._workspaces: dict[str, Workspace] = {}
+        self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None]] = {}
 
     # ─── task registration ───────────────────────────────────────────
 
@@ -291,8 +287,10 @@ class Environment:
             from hud.settings import settings
 
             track_files = settings.file_tracking_enabled
+        if name in self._workspaces:
+            raise ValueError(f"workspace capability {name!r} is already attached")
         ws = Workspace(root, track_files=track_files, **kwargs)
-        self._workspaces.append(ws)
+        self._workspaces[name] = ws
 
         @self.initialize
         async def _up() -> None:
@@ -357,70 +355,66 @@ class Environment:
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
-        if self._platform_peer_name is not None:
-            for workspace in self._workspaces:
-                workspace.remove_peer(self._platform_peer_name)
-        self._platform_inference.stop()
-        self._platform_peer_name = None
-        self._platform_peer_port = None
+        for workspace, peer in reversed(self._workspace_routes.values()):
+            if peer is not None:
+                workspace.remove_peer(peer)
+        self._workspace_routes.clear()
         self._started = False
         self._hooks_done = False
 
-    def _bind_platform_peer(self) -> None:
-        if self._platform_peer_port is not None or not self._workspaces:
-            return
-        unavailable = {
-            port
-            for workspace in self._workspaces
-            for port in (*workspace.ports, *(peer.port for peer in workspace.peers))
-        }
-        for _ in range(100):
-            port = 20_000 + secrets.randbelow(40_000)
-            if port not in unavailable:
-                break
-        else:
-            raise RuntimeError("could not allocate a workspace-local platform service port")
-        peer_name = "platform-" + secrets.token_hex(8)
-        peer = Peer(
-            peer_name,
-            port,
-            target=self._platform_inference.address,
-        )
-        for workspace in self._workspaces:
-            workspace.add_peer(peer, first=True)
-        self._platform_peer_name = peer_name
-        self._platform_peer_port = port
+    def bind_workspace_routes(self, routes: Sequence[WorkspaceRoute]) -> None:
+        """Install controller routes before a workspace starts its sandbox."""
+        if not self._started:
+            raise RuntimeError("environment must be started before workspace routes are bound")
 
-    def bind_platform_inference(
-        self,
-        session_id: str,
-        *,
-        upstream_url: str,
-        token: str,
-        trace_id: str | None,
-    ) -> InferenceBinding:
-        """Bind one control session to inference through every bounded workspace."""
-        if not self._started or not self._workspaces:
-            raise RuntimeError("environment has no workspace available for platform inference")
-        if any(not workspace.bwrap_available for workspace in self._workspaces):
-            raise RuntimeError("platform inference requires bwrap-isolated workspaces")
-        if any(not workspace.owns_netns for workspace in self._workspaces):
-            raise RuntimeError("platform inference requires network-isolated workspaces")
-        if self._platform_peer_port is None:
-            self._platform_inference.start()
-            try:
-                self._bind_platform_peer()
-            except BaseException:
-                self._platform_inference.stop()
-                raise
-        assert self._platform_peer_port is not None
-        return self._platform_inference.register(
-            session_id,
-            upstream_url=upstream_url,
-            token=token,
-            trace_id=trace_id,
-            workspace_url=f"http://127.0.0.1:{self._platform_peer_port}",
-        )
+        planned: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+        for route in dict.fromkeys(routes):
+            if route in self._workspace_routes:
+                continue
+            workspace = self._workspaces.get(route.capability)
+            if workspace is None and route.capability in {"ssh", "ssh/2"}:
+                if len(self._workspaces) > 1:
+                    names = ", ".join(sorted(self._workspaces))
+                    raise RuntimeError(
+                        f"workspace capability {route.capability!r} is ambiguous: {names}"
+                    )
+                workspace = next(iter(self._workspaces.values()), None)
+            if workspace is None:
+                raise RuntimeError(f"workspace capability {route.capability!r} does not exist")
+            if not workspace.bwrap_available or not workspace.owns_netns:
+                raise RuntimeError(
+                    f"workspace route for {route.capability!r} requires an isolated network"
+                )
+            matching = [
+                peer
+                for peer in workspace.peers
+                if peer.name == route.host and peer.port == route.port
+            ]
+            if matching:
+                if any(peer.address != (route.host, route.port) for peer in matching):
+                    raise RuntimeError(
+                        f"workspace route {route.host}:{route.port} conflicts with an authored peer"
+                    )
+                planned.append((route, workspace, None))
+                continue
+            planned.append(
+                (
+                    route,
+                    workspace,
+                    Peer(route.host, route.port, target=(route.host, route.port)),
+                )
+            )
 
-    def unbind_platform_inference(self, session_id: str) -> None:
-        self._platform_inference.unregister(session_id)
+        bound: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+        try:
+            for route, workspace, peer in planned:
+                if peer is not None:
+                    workspace.add_peer(peer, first=True)
+                self._workspace_routes[route] = (workspace, peer)
+                bound.append((route, workspace, peer))
+        except BaseException:
+            for route, workspace, peer in reversed(bound):
+                if peer is not None:
+                    workspace.remove_peer(peer)
+                self._workspace_routes.pop(route, None)
+            raise

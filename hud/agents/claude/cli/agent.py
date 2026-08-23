@@ -18,7 +18,6 @@ from hud.agents.cli import (
     WINDOWS_SHELLS,
     powershell,
     powershell_quote,
-    require_platform_isolation,
     resolve_executable,
     run_jsonl,
 )
@@ -32,8 +31,7 @@ from . import computer_mcp
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
-    from hud.environment.platform_inference import InferenceBinding
-    from hud.eval.run import Run
+    from hud.eval.run import InferenceAccess, Run
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +168,7 @@ def claude_command(
     shell: str,
     mcp_config_path: str | None = None,
     executable: str = "claude",
-    inference: InferenceBinding | None = None,
+    inference: InferenceAccess | None = None,
 ) -> str:
     env: dict[str, str] = {}
     use_hud_gateway = config.use_hud_gateway
@@ -256,7 +254,7 @@ async def run_claude(
     mcp_servers: dict[str, dict[str, Any]],
     prompt: str,
     executable: str = "claude",
-    inference: InferenceBinding | None = None,
+    inference: InferenceAccess | None = None,
 ) -> None:
     files: dict[str, str] = {}
     input_text = (
@@ -324,7 +322,6 @@ class ClaudeCLIAgent(Agent):
     async def __call__(self, run: Run) -> None:
         mcp_servers: dict[str, dict[str, Any]] = {}
         ssh = cast("SSHClient", await run.client.open("ssh"))
-        require_platform_isolation(ssh, run.client.inference)
         manifest = run.client.manifest
         assert manifest is not None
         bindings = manifest.bindings
@@ -373,7 +370,7 @@ class ClaudeCLIAgent(Agent):
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
                 executable=executable,
-                inference=run.client.inference,
+                inference=run.inference,
             )
 
 

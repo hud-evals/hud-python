@@ -23,7 +23,7 @@ from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
 from .arguments import DataFileArg, DataFileRef, DataFilesArg, GradingArg, PromptArg
-from .egress import Peer
+from .egress import Peer, WorkspaceRoute
 from .env import Answer, Environment
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
 
@@ -100,5 +100,6 @@ __all__ = [
     "Peer",
     "PromptArg",
     "Workspace",
+    "WorkspaceRoute",
     "load_environment",
 ]
