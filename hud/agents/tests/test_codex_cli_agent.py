@@ -393,11 +393,11 @@ async def test_executable_resolution_prefers_matching_managed_bundle() -> None:
     executable = await resolve_executable(
         cast("Any", ssh),
         "codex",
-        {"linux-x64": "/media/hud/bin/codex/bin/codex"},
+        {"linux-x64": "/usr/local/lib/agents/codex/bin/codex"},
         RuntimeConfig(resources=RuntimeResources(os="linux")),
     )
 
-    assert executable == "/media/hud/bin/codex/bin/codex"
+    assert executable == "/usr/local/lib/agents/codex/bin/codex"
     assert ssh.run.await_count == 2
 
 
