@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from hud.clients.client import HudClient
 
     from .runtime import Provider
-    from .runtime.core import RuntimeConfig, RuntimeSession
+    from .runtime.core import RuntimeConfig
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -512,7 +512,7 @@ async def rollout(
         async def _drive() -> None:
             nonlocal client, run, _phase
             actor_result: dict[str, Any] = {}
-            actor_session: RuntimeSession | None = None
+            actor_session_id: str | None = None
             verifier = task.verifier
             shared_verifier = (
                 verifier is not None
@@ -572,7 +572,7 @@ async def rollout(
                     if verifier is not None:
                         actor_result = live.grade.raw
                         assert actor_client.manifest is not None
-                        actor_session = addr.session(actor_client.manifest.session_id)
+                        actor_session_id = actor_client.manifest.session_id
                         # The verifier is authoritative. Once its phase begins,
                         # an actor-side grade must not survive a verifier failure.
                         live.grade = Grade()
@@ -591,9 +591,9 @@ async def rollout(
                     _phase = "cleanup"
                     return
 
-                assert actor_session is not None
+                assert actor_session_id is not None
                 _phase = "snapshotting actor"
-                async with actor_session.snapshot() as archive:
+                async with addr.snapshot_session(actor_session_id) as archive:
                     _phase = "actor cleanup"
                     await actor.aclose()
                     client = None
@@ -604,8 +604,9 @@ async def rollout(
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
                     if archive is not None:
                         assert verifier_client.manifest is not None
-                        await verifier_addr.session(verifier_client.manifest.session_id).restore(
-                            archive
+                        await verifier_addr.restore_session(
+                            verifier_client.manifest.session_id,
+                            archive,
                         )
                     client = verifier_client
                     _phase = "verifying"

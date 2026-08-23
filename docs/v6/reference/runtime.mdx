@@ -96,6 +96,12 @@ than `rollout_timeout`; an agent timeout must also be less than the actor enviro
 SDK adds no overall deadline; configured phase limits and limits imposed by the selected runtime
 still apply.
 
+When the SDK owns the environment process, its output is part of the local eval:
+`SubprocessRuntime`, Docker image and Compose runtimes, Modal image and Compose sandboxes,
+and Daytona sandboxes stream stdout and stderr directly to the terminal without
+reformatting them. `LocalRuntime` already shares the eval process's terminal. HUD-hosted
+runtimes retain environment output on the hosted trace instead.
+
 ## Runtime directory
 
 The constructor for each built-in runtime:
@@ -151,7 +157,7 @@ security override are documented in
 ### `ModalRuntime`
 
 ```python
-ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None)
+ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None, secrets=None)
 ```
 
 - **`image_name`** - published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
@@ -161,6 +167,7 @@ ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=No
 - **`app`** - an already-running, caller-owned Modal app. `ModalRuntime` does not manage its lifecycle.
 - **`app_name`** - a Modal app to look up. Defaults to `hud-envs` when `app` is not supplied; `app` and `app_name` are mutually exclusive.
 - **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables.
+- **`secrets`** - Modal `Secret` objects to attach to the sandbox. Resolve named secrets with `modal.Secret.from_name(...)`; their values never pass through the local process. Secrets require an image runtime and are rejected for Docker-in-Docker Compose because attaching them to the outer sandbox would not expose them to `main`.
 
 For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
 sandbox in your Modal account and merges `env_vars` into `main` at acquisition
@@ -229,6 +236,11 @@ Runtime(url, params=..., config=...)
 
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
+
+Provisioned runtimes expose `snapshot_session(session_id)` and
+`restore_session(session_id, archive)` for transferring session files to an
+independent verifier. The base runtime is a no-op; providers such as Docker and
+Modal implement the transfer directly on their provisioned endpoint.
 
 ### `Shared`
 

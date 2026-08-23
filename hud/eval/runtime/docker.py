@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import tarfile
 import tempfile
 import uuid
@@ -15,10 +16,10 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from hud.utils.docker import docker as _docker
-from hud.utils.process import create_process_group_exec
+from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import ComposeConfig
-from .core import Runtime, RuntimeConfig, RuntimeSession
+from .core import Runtime, RuntimeConfig, validate_session_id
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -96,6 +97,27 @@ async def _docker_deadline(
     finally:
         expiry.cancel()
         await asyncio.gather(expiry, return_exceptions=True)
+
+
+@asynccontextmanager
+async def _docker_output(*args: str) -> AsyncIterator[None]:
+    process = await create_process_group_exec(
+        "docker",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    tasks = (
+        asyncio.create_task(stream_output(process.stdout, sys.stdout)),
+        asyncio.create_task(stream_output(process.stderr, sys.stderr)),
+    )
+    try:
+        yield
+    finally:
+        await process.terminate()
+        await finish_output(*tasks)
 
 
 class DockerRuntime:
@@ -231,8 +253,16 @@ class DockerRuntime:
                         )
                     host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
                     container, _ = await _docker(*command, "ps", "--quiet", "main")
-                    async with _docker_deadline(run_timeout, teardown):
-                        yield _DockerEndpoint(
+                    async with (
+                        _docker_output(
+                            *command,
+                            "logs",
+                            "--follow",
+                            "--no-color",
+                        ),
+                        _docker_deadline(run_timeout, teardown),
+                    ):
+                        yield DockerEndpoint(
                             f"tcp://127.0.0.1:{host_port}",
                             params=params,
                             config=config if config.model_dump(exclude_none=True) else None,
@@ -292,8 +322,15 @@ class DockerRuntime:
                     f"{self.port}:\n{(logs_err or logs_out).strip()}",
                 )
             host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-            async with _docker_deadline(run_timeout, teardown):
-                yield _DockerEndpoint(
+            async with (
+                _docker_output(
+                    "logs",
+                    "--follow",
+                    container,
+                ),
+                _docker_deadline(run_timeout, teardown),
+            ):
+                yield DockerEndpoint(
                     f"tcp://127.0.0.1:{host_port}",
                     params=params,
                     config=config,
@@ -306,22 +343,15 @@ class DockerRuntime:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _DockerEndpoint(Runtime):
-    container: str
-
-    def session(self, session_id: str) -> RuntimeSession:
-        return _DockerSession(session_id=session_id, container=self.container)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class _DockerSession(RuntimeSession):
+class DockerEndpoint(Runtime):
     container: str
 
     @asynccontextmanager
-    async def snapshot(self) -> AsyncIterator[Path | None]:
+    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+        validate_session_id(session_id)
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            root = f"/media/hud/sessions/{self.session_id}"
+            root = f"/media/hud/sessions/{session_id}"
             exists, _ = await _docker(
                 "exec",
                 self.container,
@@ -369,8 +399,9 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
                 )
             yield destination
 
-    async def restore(self, source: Path) -> None:
-        target = f"/media/hud/sessions/{self.session_id}"
+    async def restore_session(self, session_id: str, source: Path) -> None:
+        validate_session_id(session_id)
+        target = f"/media/hud/sessions/{session_id}"
         with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
             root = Path(directory)
             _extract_session_archive(source, root)

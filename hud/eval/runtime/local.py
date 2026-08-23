@@ -10,7 +10,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hud.utils.process import create_process_group_exec
+from hud.utils.process import (
+    create_process_group_exec,
+    finish_output,
+    output_writer,
+    stream_output,
+)
 
 from .core import Runtime
 
@@ -176,42 +181,72 @@ class SubprocessRuntime:
             *cmd,
             term_timeout=10.0,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+            stderr=asyncio.subprocess.PIPE,
             cwd=self.source if self.source.is_dir() else self.source.parent,
         )
-        assert proc.stdout is not None
         output = proc.stdout
+        error = proc.stderr
+        assert output is not None
+        assert error is not None
         output_tail: deque[str] = deque(maxlen=50)
+        error_tail: deque[str] = deque(maxlen=50)
+        stdout_drain: asyncio.Task[None] | None = None
+
+        def capture_error(text: str) -> None:
+            error_tail.append(text.strip()[-1024:])
+
+        stderr_drain = asyncio.create_task(stream_output(error, sys.stderr, capture=capture_error))
         try:
             from hud.environment.server import PORT_ANNOUNCEMENT
 
             port = None
-            async with asyncio.timeout(self.ready_timeout):
-                while line := await output.readline():
-                    text = line.decode("utf-8", "replace").strip()
-                    if text.startswith(PORT_ANNOUNCEMENT):
-                        port = int(text.removeprefix(PORT_ANNOUNCEMENT))
-                        break
-                    output_tail.append(text)
+            line_continues = False
+            write_stdout, finish_stdout = output_writer(
+                sys.stdout,
+                capture=lambda text: output_tail.append(text.strip()[-1024:]),
+            )
+            try:
+                async with asyncio.timeout(self.ready_timeout):
+                    while True:
+                        eof = False
+                        try:
+                            line = await output.readuntil()
+                        except asyncio.LimitOverrunError as exc:
+                            line = await output.read(exc.consumed)
+                            line_continues = True
+                        except asyncio.IncompleteReadError as exc:
+                            line = exc.partial
+                            eof = True
+                        if not line:
+                            break
+                        if not line_continues:
+                            text = line.decode("utf-8", "replace").strip()
+                            if text.startswith(PORT_ANNOUNCEMENT):
+                                port = int(text.removeprefix(PORT_ANNOUNCEMENT))
+                                break
+                        write_stdout(line)
+                        line_continues = not line.endswith(b"\n")
+                        if eof:
+                            break
+            finally:
+                finish_stdout()
             if port is None:
-                code = await proc.wait()
-                tail = "\n".join(output_tail).strip()
+                await finish_output(stderr_drain)
+                tail = "\n".join((*output_tail, *error_tail)).strip()
                 detail = f":\n{tail}" if tail else " (no output captured)"
+                status = (
+                    f"exited with code {proc.returncode}"
+                    if proc.returncode is not None
+                    else "closed stdout"
+                )
                 raise RuntimeError(
-                    f"spawned env exited with code {code} before serving "
-                    f"(source: {self.source}){detail}"
+                    f"spawned env {status} before serving (source: {self.source}){detail}"
                 )
 
-            async def discard_output() -> None:
-                while await output.read(65536):
-                    pass
-
-            drain = asyncio.create_task(discard_output())
-            try:
-                yield Runtime(f"tcp://127.0.0.1:{port}")
-            finally:
-                drain.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await drain
+            stdout_drain = asyncio.create_task(stream_output(output, sys.stdout))
+            yield Runtime(f"tcp://127.0.0.1:{port}")
         finally:
             await proc.terminate()
+            await finish_output(
+                *(task for task in (stdout_drain, stderr_drain) if task is not None)
+            )

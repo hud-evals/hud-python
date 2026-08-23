@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+
+from hud.utils.process import finish_output, output_writer
 
 from .core import Runtime, RuntimeConfig
 
@@ -249,6 +252,7 @@ class DaytonaRuntime:
                 sandbox_params,
                 timeout=create_timeout,
             )
+            output_task: asyncio.Task[None] | None = None
             try:
                 # Start the env server in a background session (the snapshot's CMD is
                 # not the sandbox's main process). connect() retries the handshake,
@@ -259,6 +263,22 @@ class DaytonaRuntime:
                 session_command = await sandbox.process.execute_session_command(
                     session, SessionExecuteRequest(command=cmd, run_async=True)
                 )
+
+                async def follow_logs() -> None:
+                    write_stdout, finish_stdout = output_writer(sys.stdout)
+                    write_stderr, finish_stderr = output_writer(sys.stderr)
+                    try:
+                        await sandbox.process.get_session_command_logs_async(
+                            session,
+                            session_command.cmd_id,
+                            write_stdout,
+                            write_stderr,
+                        )
+                    finally:
+                        finish_stdout()
+                        finish_stderr()
+
+                output_task = asyncio.create_task(follow_logs())
                 ssh = await sandbox.create_ssh_access(expires_in_minutes=self.ssh_expires_minutes)
                 async with asyncssh.connect(
                     self.ssh_host, username=ssh.token, known_hosts=None
@@ -297,3 +317,5 @@ class DaytonaRuntime:
                         sandbox.id,
                         exc_info=True,
                     )
+                if output_task is not None:
+                    await finish_output(output_task)

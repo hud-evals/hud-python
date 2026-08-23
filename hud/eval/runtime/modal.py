@@ -6,14 +6,17 @@ import asyncio
 import contextlib
 import logging
 import shlex
+import sys
 import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from hud.utils.process import finish_output, stream_output
+
 from .compose import ComposeConfig
-from .core import Runtime, RuntimeConfig, RuntimeSession
+from .core import Runtime, RuntimeConfig, validate_session_id
 from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
@@ -30,20 +33,7 @@ _MODAL_COMPOSE_MEMORY_MB = 8192
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _ModalEndpoint(Runtime):
-    sandbox: modal.Sandbox
-    compose: str | None
-
-    def session(self, session_id: str) -> RuntimeSession:
-        return _ModalSession(
-            session_id=session_id,
-            sandbox=self.sandbox,
-            compose=self.compose,
-        )
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class _ModalSession(RuntimeSession):
+class ModalEndpoint(Runtime):
     sandbox: modal.Sandbox
     compose: str | None
 
@@ -67,10 +57,11 @@ class _ModalSession(RuntimeSession):
         return stdout
 
     @asynccontextmanager
-    async def snapshot(self) -> AsyncIterator[Path | None]:
+    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+        validate_session_id(session_id)
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            session = f"/media/hud/sessions/{self.session_id}"
+            session = f"/media/hud/sessions/{session_id}"
             if self.compose is None:
                 root = session
                 command = ""
@@ -100,8 +91,9 @@ class _ModalSession(RuntimeSession):
             )
             yield destination
 
-    async def restore(self, source: Path) -> None:
-        session = f"/media/hud/sessions/{self.session_id}"
+    async def restore_session(self, session_id: str, source: Path) -> None:
+        validate_session_id(session_id)
+        session = f"/media/hud/sessions/{session_id}"
         await self.sandbox.filesystem.copy_from_local.aio(source, "/media/hud/session.tar.gz")
         if self.compose is None:
             command = (
@@ -146,12 +138,14 @@ class ModalRuntime:
         port: int = 8765,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
+        secrets: Sequence[modal.Secret] | None = None,
     ) -> None:
         if app is not None and app_name is not None:
             raise ValueError("ModalRuntime accepts either app or app_name, not both")
         self.image_name = image_name
         self.port = port
         self.env_vars = dict(env_vars or {})
+        self.secrets = tuple(secrets or ())
         self.workdir = workdir
         # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
         # workdir unset by default so Modal preserves the image WORKDIR.
@@ -201,6 +195,11 @@ class ModalRuntime:
             raise ValueError(
                 "ModalRuntime cannot attach GPUs to services inside Docker-in-Docker; "
                 "use a materialized image or omit runtime_config.compose"
+            )
+        if compose is not None and self.secrets:
+            raise ValueError(
+                "ModalRuntime secrets require an image runtime; attaching them to "
+                "the outer Docker-in-Docker sandbox would not expose them to main"
             )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
         if compose is not None:
@@ -254,6 +253,8 @@ class ModalRuntime:
                 sandbox_kwargs["memory"] = resources.memory_mb
             if self.env_vars:
                 sandbox_kwargs["env"] = self.env_vars
+            if self.secrets:
+                sandbox_kwargs["secrets"] = self.secrets
         if resources is not None and resources.gpu is not None:
             gpu_types = resources.gpu.acceptable_types
             gpu_type = gpu_types[0] if gpu_types else "any"
@@ -278,6 +279,12 @@ class ModalRuntime:
             **({"experimental_options": {"vm_runtime": True}} if compose is not None else {}),
             **sandbox_kwargs,
         )
+        output_tasks: tuple[asyncio.Task[None], ...] = ()
+        if compose is None:
+            output_tasks = (
+                asyncio.create_task(stream_output(sb.stdout, sys.stdout)),
+                asyncio.create_task(stream_output(sb.stderr, sys.stderr)),
+            )
         compose_path: str | None = None
         try:
             if project is None:
@@ -335,8 +342,27 @@ class ModalRuntime:
                 if returncode != 0:
                     error = (await process.stderr.read.aio()).strip()
                     raise RuntimeError(f"Modal Compose startup failed: {error}")
+                logs = await sb.exec.aio(
+                    "docker",
+                    "compose",
+                    "--project-directory",
+                    project_directory,
+                    "--file",
+                    compose_path,
+                    "--file",
+                    "/hud/override.json",
+                    "--file",
+                    "/hud/ports.yaml",
+                    "logs",
+                    "--follow",
+                    "--no-color",
+                )
+                output_tasks = (
+                    asyncio.create_task(stream_output(logs.stdout, sys.stdout)),
+                    asyncio.create_task(stream_output(logs.stderr, sys.stderr)),
+                )
             host, port = (await sb.tunnels.aio())[self.port].tcp_socket
-            yield _ModalEndpoint(
+            yield ModalEndpoint(
                 url=f"tcp://{host}:{port}",
                 params={
                     "provider": "modal",
@@ -370,3 +396,4 @@ class ModalRuntime:
                     await process.wait.aio()
             with contextlib.suppress(Exception):
                 await sb.terminate.aio()
+            await finish_output(*output_tasks)

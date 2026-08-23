@@ -7,12 +7,13 @@ import os
 import shlex
 import signal
 import sys
+from io import StringIO
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec, stream_output
 
 pytestmark = [
     pytest.mark.asyncio,
@@ -57,6 +58,43 @@ async def test_a_chatty_process_does_not_block_on_a_full_pipe() -> None:
 
     assert result.timed_out is False
     assert len(result.stdout) == 500000
+
+
+async def test_stream_output_drains_lines_larger_than_the_reader_limit() -> None:
+    source = asyncio.StreamReader()
+    source.feed_data(b"x" * 100_000)
+    source.feed_eof()
+    output = StringIO()
+
+    await stream_output(source, output)
+
+    assert output.getvalue() == "x" * 100_000
+
+
+async def test_stream_output_preserves_utf8_split_across_chunks() -> None:
+    async def chunks():
+        yield b"price: \xe2"
+        yield b"\x82\xac10"
+
+    output = StringIO()
+
+    await stream_output(chunks(), output)
+
+    assert output.getvalue() == "price: €10"
+
+
+async def test_stream_output_keeps_draining_after_sink_failure() -> None:
+    class FailedOutput(StringIO):
+        def write(self, value: str) -> int:
+            raise OSError("terminal closed")
+
+    source = asyncio.StreamReader()
+    source.feed_data(b"x" * 200_000)
+    source.feed_eof()
+
+    await stream_output(source, FailedOutput())
+
+    assert source.at_eof()
 
 
 async def test_a_child_outside_the_group_cannot_hold_completion_open() -> None:

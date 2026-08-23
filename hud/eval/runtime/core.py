@@ -149,29 +149,9 @@ class _ConfiguredProvider(Protocol):
     runtime_config: RuntimeConfig | None
 
 
-@dataclass(frozen=True)
-class RuntimeSession:
-    """One control session in a provisioned runtime."""
-
-    session_id: str
-
-    def __post_init__(self) -> None:
-        if (
-            not self.session_id
-            or self.session_id in {".", ".."}
-            or "/" in self.session_id
-            or "\\" in self.session_id
-        ):
-            raise ValueError("runtime session id must be a single path component")
-
-    @asynccontextmanager
-    async def snapshot(self) -> AsyncIterator[Path | None]:
-        """Yield a portable archive of this session's files when present."""
-        yield None
-
-    async def restore(self, source: Path) -> None:
-        """Restore a portable session archive into this session."""
-        return
+def validate_session_id(session_id: str) -> None:
+    if not session_id or session_id in {".", ".."} or "/" in session_id or "\\" in session_id:
+        raise ValueError("runtime session id must be a single path component")
 
 
 @dataclass(frozen=True)
@@ -194,9 +174,15 @@ class Runtime:
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
 
-    def session(self, session_id: str) -> RuntimeSession:
-        """Bind a negotiated control session to this runtime."""
-        return RuntimeSession(session_id)
+    @asynccontextmanager
+    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+        """Yield a portable archive of one control session's files when present."""
+        validate_session_id(session_id)
+        yield None
+
+    async def restore_session(self, session_id: str, source: Path) -> None:
+        """Restore a portable archive into one control session."""
+        validate_session_id(session_id)
 
 
 class Shared:
