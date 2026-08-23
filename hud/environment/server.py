@@ -28,6 +28,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.graders.results import EvaluationResult
 
+from .egress import WorkspaceRoute
 from .env import Answer, current_session_id
 from .utils import error, read_frame, reply, send_frame, splice
 
@@ -255,7 +256,6 @@ class _ControlChannel:
             return await runner.grade(payload)
         finally:
             current_session_id.reset(token)
-            self.env.unbind_platform_inference(claim_sid)
 
     def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
@@ -282,10 +282,7 @@ class _ControlChannel:
             current_session_id.reset(token)
 
     async def cancel(self, session_id: str) -> None:
-        try:
-            await self._cancel_runner(session_id)
-        finally:
-            self.env.unbind_platform_inference(session_id)
+        await self._cancel_runner(session_id)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
@@ -341,6 +338,20 @@ class _ControlChannel:
                             self._live.add(session_id)
                             current_session_id.reset(session_token)
                             session_token = current_session_id.set(session_id)
+                        raw_routes = params.get("workspace_routes", [])
+                        if not isinstance(raw_routes, list):
+                            await error_to(
+                                msg_id, -32602, "hello: 'workspace_routes' must be a list"
+                            )
+                            continue
+                        try:
+                            workspace_routes = [
+                                WorkspaceRoute.from_wire(route) for route in raw_routes
+                            ]
+                        except ValueError as exc:
+                            await error_to(msg_id, -32602, f"hello: {exc}")
+                            continue
+                        env.bind_workspace_routes(workspace_routes)
                         # env.start() ran before serving, so hook-published
                         # capabilities (e.g. a workspace's ssh address) are
                         # already concrete here.
@@ -358,35 +369,6 @@ class _ControlChannel:
                         await reply_to(
                             msg_id,
                             {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
-                        )
-
-                    elif method == "platform.inference.bind":
-                        upstream_url = params.get("upstream_url")
-                        token = params.get("token")
-                        trace_id = params.get("trace_id")
-                        if not isinstance(upstream_url, str) or not isinstance(token, str):
-                            await error_to(
-                                msg_id,
-                                -32602,
-                                "platform.inference.bind: upstream_url and token must be strings",
-                            )
-                            continue
-                        if trace_id is not None and not isinstance(trace_id, str):
-                            await error_to(
-                                msg_id,
-                                -32602,
-                                "platform.inference.bind: trace_id must be a string",
-                            )
-                            continue
-                        binding = env.bind_platform_inference(
-                            session_id,
-                            upstream_url=upstream_url,
-                            token=token,
-                            trace_id=trace_id,
-                        )
-                        await reply_to(
-                            msg_id,
-                            {"base_url": binding.base_url, "api_key": binding.api_key},
                         )
 
                     elif method == "tasks.start":

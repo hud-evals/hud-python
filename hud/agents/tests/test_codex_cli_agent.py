@@ -16,7 +16,7 @@ from hud.agents.codex import CodexCLIAgent
 from hud.agents.codex.agent import codex_command, run_codex
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
-from hud.environment.platform_inference import InferenceBinding
+from hud.eval import InferenceAccess
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -170,16 +170,16 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert command.endswith(" -")
 
 
-def test_command_prefers_environment_inference_binding() -> None:
-    binding = InferenceBinding(
-        base_url="http://127.0.0.1:49123/p/opaque",
-        api_key="workspace-key",
+def test_command_prefers_rollout_inference_access() -> None:
+    inference = InferenceAccess(
+        base_url="https://inference.hud.so",
+        api_key="scoped-runtime-token",
     )
 
-    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", inference=binding)
+    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", inference=inference)
 
-    assert "HUD_API_KEY=workspace-key" in command
-    assert 'model_providers.hud.base_url="http://127.0.0.1:49123/p/opaque"' in command
+    assert "HUD_API_KEY=scoped-runtime-token" in command
+    assert 'model_providers.hud.base_url="https://inference.hud.so"' in command
     assert "Trace-Id" not in command
 
 
@@ -364,7 +364,9 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
     agent = CodexCLIAgent()
     execute = AsyncMock()
     monkeypatch.setattr("hud.agents.codex.agent.run_codex", execute)
-    run = SimpleNamespace(client=Client(), prompt_text="Fix it", runtime_config=None)
+    run = SimpleNamespace(
+        client=Client(), prompt_text="Fix it", runtime_config=None, inference=None
+    )
 
     await agent(cast("Any", run))
 

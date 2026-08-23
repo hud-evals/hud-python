@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from .client import HudClient, HudProtocolError, InferenceBinding, Manifest, ServerInfo, connect
+from .client import HudClient, HudProtocolError, Manifest, ServerInfo, connect
 
 __all__ = [
     "HudClient",
     "HudProtocolError",
-    "InferenceBinding",
     "Manifest",
     "ServerInfo",
     "connect",

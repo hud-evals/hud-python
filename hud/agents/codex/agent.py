@@ -14,7 +14,6 @@ from hud.agents.cli import (
     WINDOWS_SHELLS,
     powershell,
     powershell_quote,
-    require_platform_isolation,
     resolve_executable,
     run_jsonl,
 )
@@ -26,8 +25,7 @@ from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
-    from hud.environment.platform_inference import InferenceBinding
-    from hud.eval.run import Run
+    from hud.eval.run import InferenceAccess, Run
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +212,7 @@ def codex_command(
     config: CodexCLIConfig,
     shell: str,
     executable: str = "codex",
-    inference: InferenceBinding | None = None,
+    inference: InferenceAccess | None = None,
 ) -> str:
     env: dict[str, str] = {}
     args = [
@@ -303,7 +301,7 @@ async def run_codex(
     shell: str,
     prompt: str,
     executable: str = "codex",
-    inference: InferenceBinding | None = None,
+    inference: InferenceAccess | None = None,
 ) -> None:
     command = codex_command(config, shell, executable, inference=inference)
     logger.info("SSH exec codex CLI (%d chars)", len(command))
@@ -323,7 +321,6 @@ class CodexCLIAgent(Agent):
 
     async def __call__(self, run: Run) -> None:
         ssh = cast("SSHClient", await run.client.open("ssh"))
-        require_platform_isolation(ssh, run.client.inference)
         executable = await resolve_executable(
             ssh,
             "codex",
@@ -337,7 +334,7 @@ class CodexCLIAgent(Agent):
             shell=ssh.capability.params.get("shell", "bash"),
             prompt=run.prompt_text,
             executable=executable,
-            inference=run.client.inference,
+            inference=run.inference,
         )
 
 
