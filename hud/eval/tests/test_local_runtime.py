@@ -11,7 +11,7 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.environment import Environment
-from hud.eval import LocalRuntime, Task, Taskset
+from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset
 
 _SUMS_ENV = """\
 from hud import Environment
@@ -81,6 +81,26 @@ async def test_source_path_serves_a_fresh_env_per_rollout(tmp_path) -> None:
     )
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
+
+
+async def test_subprocess_runtime_streams_environment_output(
+    tmp_path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "env.py"
+    source.write_text(
+        "from hud import Environment\n\n"
+        'env = Environment("sums")\n\n'
+        "@env.initialize\n"
+        "async def start():\n"
+        '    print("environment booted", flush=True)\n',
+        encoding="utf-8",
+    )
+
+    async with SubprocessRuntime(source)(Task(env="sums", id="add")):
+        pass
+
+    assert "environment booted" in capsys.readouterr().out
 
 
 async def test_constructor_builds_fresh_per_rollout_from_the_row() -> None:

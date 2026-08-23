@@ -42,6 +42,8 @@ from hud.eval.runtime.compose import (
 from hud.eval.task import Task
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from daytona import Image as DaytonaImage
 
 FAKE_DOCKER_SH = """\
@@ -154,6 +156,25 @@ class _ModalImageRef:
         return _ModalImageRef(self.kind, self.name, dict(vars))
 
 
+@dataclass(frozen=True)
+class _ModalSecretRef:
+    name: str
+
+
+class _FakeModalStream:
+    def __init__(self, calls: dict[str, Any], key: str) -> None:
+        self._calls = calls
+        self._key = key
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[str]:
+        output = cast("str", self._calls.get(self._key, ""))
+        if output:
+            yield output
+
+
 class _FakeModalSandbox:
     object_id = "sb-1"
 
@@ -163,6 +184,8 @@ class _FakeModalSandbox:
         self.wait_until_ready = SimpleNamespace(aio=self._wait_until_ready)
         self.tunnels = SimpleNamespace(aio=self._tunnels)
         self.terminate = SimpleNamespace(aio=self._terminate)
+        self.stdout = _FakeModalStream(calls, "sandbox_stdout")
+        self.stderr = _FakeModalStream(calls, "sandbox_stderr")
         self.filesystem = SimpleNamespace(
             copy_from_local=SimpleNamespace(aio=self._copy_from_local),
             copy_to_local=SimpleNamespace(aio=self._copy_to_local),
@@ -212,6 +235,13 @@ class _FakeModalSandbox:
                 if "sessions/sess-actor" in command
                 and ("test -d" in command or "if [ -d" in command)
                 else ""
+            )
+
+        if "logs" in args:
+            return SimpleNamespace(
+                wait=SimpleNamespace(aio=wait),
+                stdout=_FakeModalStream(self._calls, "compose_stdout"),
+                stderr=_FakeModalStream(self._calls, "compose_stderr"),
             )
 
         return SimpleNamespace(
@@ -336,6 +366,17 @@ class _FakeDaytonaProcess:
     async def get_session_command_logs(self, session: str, cmd_id: str) -> SimpleNamespace:
         self._calls["logs"] = (session, cmd_id)
         return self.logs
+
+    async def get_session_command_logs_async(
+        self,
+        session: str,
+        cmd_id: str,
+        on_stdout: Any,
+        on_stderr: Any,
+    ) -> None:
+        self._calls["stream_logs"] = (session, cmd_id)
+        on_stdout(cast("str", self._calls.get("daytona_stdout", "")))
+        on_stderr(cast("str", self._calls.get("daytona_stderr", "")))
 
     async def exec(self, command: str, **kwargs: object) -> SimpleNamespace:
         commands = self._calls.setdefault("process_execs", [])
@@ -533,13 +574,17 @@ def _install_fake_daytona(monkeypatch: pytest.MonkeyPatch) -> _FakeDaytonaClient
 
 
 async def test_acquisition_publishes_ephemeral_port_and_removes_container(
-    tmp_path: Path, docker_log: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    docker_log: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
 
     provider = DockerRuntime("img:tag", run_args=("-e", "X=1"))
     async with provider(_row()) as runtime:
         assert runtime.url == "tcp://127.0.0.1:43210"
+        await asyncio.sleep(0.05)
         calls = await _docker_calls(docker_log)
         assert calls[0] == (
             f"run --detach -e X=1 {_docker_security_args()} --publish 127.0.0.1::8765 img:tag"
@@ -547,6 +592,7 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
         assert calls[1] == "port cid-42 8765"
 
     assert (await _docker_calls(docker_log))[-1] == "rm --force cid-42"
+    assert capsys.readouterr().out == "ImportError: boom\n"
 
 
 async def test_docker_session_archives_inside_the_container(
@@ -561,10 +607,10 @@ async def test_docker_session_archives_inside_the_container(
         return "", ""
 
     monkeypatch.setattr(runtime_module, "_docker", fake_docker)
-    async with runtime_module._DockerSession(
-        session_id="sess-actor",
+    async with runtime_module.DockerEndpoint(
+        url="tcp://127.0.0.1:8765",
         container="cid-42",
-    ).snapshot() as destination:
+    ).snapshot_session("sess-actor") as destination:
         assert destination is not None
 
     probe, export, copy, cleanup = calls
@@ -1054,8 +1100,11 @@ async def test_modal_runtime_rejects_gpu_alternatives() -> None:
 async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls = _install_fake_modal(monkeypatch)
+    calls["compose_stdout"] = "main  | server ready\n"
+    calls["compose_stderr"] = "grader | warning\n"
     project = tmp_path / "artifact"
     compose = project / "compose-project" / "compose.yaml"
     compose.parent.mkdir(parents=True)
@@ -1070,9 +1119,9 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     )(_row()) as runtime:
         assert runtime.url == "tcp://modal.host:4567"
         assert runtime.params == {"provider": "modal", "instance_id": "sb-1", "ready_timeout": 600}
-        async with runtime.session("sess-actor").snapshot() as archive:
+        async with runtime.snapshot_session("sess-actor") as archive:
             assert archive is not None
-            await runtime.session("sess-verifier").restore(archive)
+            await runtime.restore_session("sess-verifier", archive)
 
     assert calls["registry_image"] == "docker:28.3.3-dind"
     kwargs = calls["sandbox_kwargs"]
@@ -1108,6 +1157,8 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert "--file /hud/project/compose-project/compose.yaml" in startup
     assert "sh /hud/project/build.sh" in startup
     assert 'up --detach "$BUILD_FLAG" --remove-orphans' in startup
+    compose_logs = execs[1][0]
+    assert compose_logs[-3:] == ("logs", "--follow", "--no-color")
     session_commands = [
         call[0][-1]
         for call in execs[1:-1]
@@ -1126,6 +1177,9 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert "down" in teardown
     assert execs[0][1]["timeout"] == 600
     assert calls["downloads"] == [("/media/hud/session.tar.gz", "session.tar.gz")]
+    captured = capsys.readouterr()
+    assert captured.out == "main  | server ready\n"
+    assert captured.err == "grader | warning\n"
 
 
 async def test_modal_runtime_bounds_compose_startup(
@@ -1260,6 +1314,56 @@ async def test_modal_runtime_passes_env_vars_to_sandbox(
     assert sandbox_kwargs["env"] == {"TOKEN": "secret"}
 
 
+async def test_modal_runtime_streams_sandbox_output_to_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    calls["sandbox_stdout"] = "server ready\nrequest complete"
+    calls["sandbox_stderr"] = "grader warning\n"
+    provider = ModalRuntime(runtime_config=RuntimeConfig(image="img:tag"))
+
+    async with provider(_row()):
+        pass
+
+    captured = capsys.readouterr()
+    assert captured.out == "server ready\nrequest complete"
+    assert captured.err == "grader warning\n"
+
+
+async def test_modal_runtime_attaches_secrets_to_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    secret = _ModalSecretRef("datacuration-cpu50-grader-auth")
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(image="img:tag"),
+        secrets=[cast("Any", secret)],
+    )
+
+    async with provider(_row()):
+        pass
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["secrets"] == (secret,)
+
+
+async def test_modal_runtime_rejects_secrets_for_compose(
+    tmp_path: Path,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
+        secrets=[cast("Any", _ModalSecretRef("grader-auth"))],
+    )
+
+    with pytest.raises(ValueError, match="secrets require an image runtime"):
+        async with provider(_row()):
+            pass
+
+
 async def test_daytona_runtime_config_flows_into_daytona_sdk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1312,6 +1416,23 @@ async def test_daytona_runtime_config_flows_into_daytona_sdk(
     )
     assert calls["forward"] == ("127.0.0.1", 0, "127.0.0.1", 8765)
     assert calls["delete"] == "sandbox-1"
+
+
+async def test_daytona_runtime_streams_sandbox_output_to_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _install_fake_daytona(monkeypatch).calls
+    calls["daytona_stdout"] = "server ready\n"
+    calls["daytona_stderr"] = "grader warning\n"
+
+    async with DaytonaRuntime("snapshot")(_row()):
+        pass
+
+    captured = capsys.readouterr()
+    assert captured.out == "server ready\n"
+    assert captured.err == "grader warning\n"
+    assert calls["stream_logs"] == ("hud-serve", "cmd-1")
 
 
 async def test_daytona_runtime_rejects_compose(

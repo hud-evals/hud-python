@@ -7,9 +7,26 @@ import contextlib
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterable
+    from typing import TextIO
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
+
+
+def write_output(output: TextIO, chunk: str | bytes) -> None:
+    output.write(chunk.decode("utf-8", "replace") if isinstance(chunk, bytes) else chunk)
+    output.flush()
+
+
+async def stream_output(
+    source: AsyncIterable[str] | AsyncIterable[bytes],
+    output: TextIO,
+) -> None:
+    async for chunk in source:
+        write_output(output, chunk)
 
 
 @dataclass(frozen=True, slots=True)

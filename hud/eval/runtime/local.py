@@ -10,7 +10,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hud.utils.process import create_process_group_exec
+from hud.utils.process import (
+    create_process_group_exec,
+    stream_output,
+    write_output,
+)
 
 from .core import Runtime
 
@@ -182,6 +186,7 @@ class SubprocessRuntime:
         assert proc.stdout is not None
         output = proc.stdout
         output_tail: deque[str] = deque(maxlen=50)
+        drain: asyncio.Task[None] | None = None
         try:
             from hud.environment.server import PORT_ANNOUNCEMENT
 
@@ -193,6 +198,7 @@ class SubprocessRuntime:
                         port = int(text.removeprefix(PORT_ANNOUNCEMENT))
                         break
                     output_tail.append(text)
+                    write_output(sys.stdout, line)
             if port is None:
                 code = await proc.wait()
                 tail = "\n".join(output_tail).strip()
@@ -202,16 +208,9 @@ class SubprocessRuntime:
                     f"(source: {self.source}){detail}"
                 )
 
-            async def discard_output() -> None:
-                while await output.read(65536):
-                    pass
-
-            drain = asyncio.create_task(discard_output())
-            try:
-                yield Runtime(f"tcp://127.0.0.1:{port}")
-            finally:
-                drain.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await drain
+            drain = asyncio.create_task(stream_output(output, sys.stdout))
+            yield Runtime(f"tcp://127.0.0.1:{port}")
         finally:
             await proc.terminate()
+            if drain is not None:
+                await asyncio.gather(drain, return_exceptions=True)

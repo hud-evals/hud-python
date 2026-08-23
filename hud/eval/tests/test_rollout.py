@@ -34,7 +34,6 @@ from hud.agents.types import OpenAIChatConfig
 from hud.environment import Answer, Environment
 from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
-from hud.eval.runtime import RuntimeSession
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -284,27 +283,19 @@ async def test_independent_verifier_receives_runtime_session_files(tmp_path: Pat
         yield ""
         yield 1.0
 
-    class ActorSession(RuntimeSession):
+    class ActorRuntime(Runtime):
         @asynccontextmanager
-        async def snapshot(self) -> AsyncIterator[Path | None]:
+        async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
             destination = tmp_path / "session.tar.gz"
-            await asyncio.to_thread(destination.write_text, self.session_id, encoding="utf-8")
-            transfers.append(("actor", self.session_id))
+            await asyncio.to_thread(destination.write_text, session_id, encoding="utf-8")
+            transfers.append(("actor", session_id))
             yield destination
 
-    class VerifierSession(RuntimeSession):
-        async def restore(self, source: Path) -> None:
+    class VerifierRuntime(Runtime):
+        async def restore_session(self, session_id: str, source: Path) -> None:
             content = await asyncio.to_thread(source.read_text, encoding="utf-8")
             assert content.startswith("sess-")
-            transfers.append(("verifier", self.session_id))
-
-    class ActorRuntime(Runtime):
-        def session(self, session_id: str) -> RuntimeSession:
-            return ActorSession(session_id)
-
-    class VerifierRuntime(Runtime):
-        def session(self, session_id: str) -> RuntimeSession:
-            return VerifierSession(session_id)
+            transfers.append(("verifier", session_id))
 
     @asynccontextmanager
     async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
@@ -326,6 +317,16 @@ async def test_independent_verifier_receives_runtime_session_files(tmp_path: Pat
     assert transfers[0][1].startswith("sess-")
     assert transfers[1][1].startswith("sess-")
     assert transfers[0][1] != transfers[1][1]
+
+
+async def test_runtime_session_transfer_rejects_invalid_ids(tmp_path: Path) -> None:
+    runtime = Runtime("tcp://127.0.0.1:8765")
+
+    with pytest.raises(ValueError, match="single path component"):
+        async with runtime.snapshot_session("../actor"):
+            pass
+    with pytest.raises(ValueError, match="single path component"):
+        await runtime.restore_session("", tmp_path / "session.tar.gz")
 
 
 async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> None:

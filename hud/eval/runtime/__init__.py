@@ -8,7 +8,6 @@ from .core import (
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
-    RuntimeSession,
     RuntimeTPU,
     Shared,
 )
@@ -33,7 +32,6 @@ __all__ = [
     "RuntimeGPU",
     "RuntimeLimits",
     "RuntimeResources",
-    "RuntimeSession",
     "RuntimeTPU",
     "Shared",
     "SubprocessRuntime",
