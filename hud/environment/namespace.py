@@ -324,20 +324,6 @@ class _NamespaceHost:
         self.session_used = False
         self.forwarders: list[asyncio.AbstractServer] = []
 
-    def _prepare_bwrap(self, argv: list[str]) -> list[str]:
-        argv = list(argv)
-        try:
-            index = argv.index(self.bwrap)
-        except ValueError:
-            return argv
-        argv[index:index] = [
-            sys.executable,
-            "-I",
-            "-S",
-            str(Path(__file__).with_name("capexec.py")),
-        ]
-        return argv
-
     async def serve(self) -> None:
         server: asyncssh.SSHAcceptor | None = None
         try:
@@ -422,7 +408,6 @@ class _NamespaceHost:
             argv = list(self.holder_argv)
             index = argv.index(self.bwrap) + 1
             argv[index:index] = ["--info-fd", str(write_fd)]
-            argv = self._prepare_bwrap(argv)
             if self.map_identities:
                 block_read, block_write = os.pipe()
                 os.set_inheritable(block_read, True)
@@ -533,7 +518,6 @@ class _NamespaceHost:
         if held is None:
             raise RuntimeError(f"workspace {scope} holder is not running")
         _, holder_pid = held
-        request_argv = self._prepare_bwrap(request["argv"])
         argv = [
             shutil.which("nsenter") or "/usr/bin/nsenter",
             "--target",
@@ -549,7 +533,7 @@ class _NamespaceHost:
             ),
             "--",
             *command_prefix,
-            *request_argv,
+            *request["argv"],
         ]
         process: ProcessGroup | None = None
         if channel.term_type:
