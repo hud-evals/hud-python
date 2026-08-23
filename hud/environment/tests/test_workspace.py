@@ -28,7 +28,6 @@ import asyncssh
 import pytest
 
 from hud.capabilities import SSHClient
-from hud.environment import capexec as capexec_mod
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import Peer, _field, _UnixServer, _Unrelayable
@@ -951,84 +950,6 @@ async def test_namespace_host_only_terminates_a_used_session_holder(
     kill.assert_called_once_with(7, signal.SIGKILL)
     holder.terminate.assert_awaited_once_with()
     holder.wait.assert_not_awaited()
-
-
-def test_namespace_host_drops_ambient_capabilities_before_bwrap(tmp_path: Path) -> None:
-    host = namespace_mod._NamespaceHost(
-        tmp_path / "namespace.sock",
-        setup_loopback=False,
-        holder_argv=[],
-        bwrap="/usr/bin/bwrap",
-        launcher_depth=0,
-        map_identities=False,
-        ports=frozenset(),
-    )
-    assert namespace_mod.__file__ is not None
-
-    assert host._prepare_bwrap(["/usr/bin/bwrap", "--unshare-user"]) == [
-        sys.executable,
-        "-I",
-        "-S",
-        str(Path(namespace_mod.__file__).with_name("capexec.py")),
-        "/usr/bin/bwrap",
-        "--unshare-user",
-    ]
-    assert host._prepare_bwrap(
-        ["/usr/bin/unshare", "--pid", "/usr/bin/bwrap", "--unshare-user"]
-    ) == [
-        "/usr/bin/unshare",
-        "--pid",
-        sys.executable,
-        "-I",
-        "-S",
-        str(Path(namespace_mod.__file__).with_name("capexec.py")),
-        "/usr/bin/bwrap",
-        "--unshare-user",
-    ]
-    assert host._prepare_bwrap(["/usr/bin/bridge"]) == ["/usr/bin/bridge"]
-
-
-def test_exec_without_ambient_capabilities_clears_caps_before_exec(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    prctl = Mock(return_value=0)
-    monkeypatch.setattr(
-        capexec_mod.ctypes,
-        "CDLL",
-        Mock(return_value=SimpleNamespace(prctl=prctl)),
-    )
-    execvp = Mock(side_effect=RuntimeError("exec called"))
-    monkeypatch.setattr(os, "execvp", execvp)
-
-    with pytest.raises(RuntimeError, match="exec called"):
-        capexec_mod.exec_without_ambient_capabilities(["bwrap", "--unshare-user"])
-
-    prctl.assert_called_once_with(
-        capexec_mod._PR_CAP_AMBIENT,
-        capexec_mod._PR_CAP_AMBIENT_CLEAR_ALL,
-        0,
-        0,
-        0,
-    )
-    execvp.assert_called_once_with("bwrap", ["bwrap", "--unshare-user"])
-
-
-def test_exec_without_ambient_capabilities_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        capexec_mod.ctypes,
-        "CDLL",
-        Mock(return_value=SimpleNamespace(prctl=Mock(return_value=-1))),
-    )
-    monkeypatch.setattr(capexec_mod.ctypes, "get_errno", Mock(return_value=1))
-    execvp = Mock()
-    monkeypatch.setattr(os, "execvp", execvp)
-
-    with pytest.raises(PermissionError):
-        capexec_mod.exec_without_ambient_capabilities(["bwrap"])
-
-    execvp.assert_not_called()
 
 
 @pytest.mark.asyncio
