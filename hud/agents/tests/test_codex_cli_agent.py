@@ -18,7 +18,7 @@ from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
-from hud.eval import InferenceAccess
+from hud.eval import InferenceConnection
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -105,17 +105,36 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert command.endswith(" -")
 
 
-def test_command_prefers_rollout_inference_access() -> None:
-    inference = InferenceAccess(
+def test_command_prefers_rollout_inference_connection() -> None:
+    inference = InferenceConnection(
         base_url="https://inference.hud.so",
-        api_key="scoped-runtime-token",
+        credential="scoped-runtime-token",
     )
 
     command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", inference=inference)
 
-    assert "HUD_API_KEY=scoped-runtime-token" in command
+    assert "HUD_RUNTIME_INFERENCE_TOKEN=scoped-runtime-token" in command
+    assert 'model_providers.hud.env_key="HUD_RUNTIME_INFERENCE_TOKEN"' in command
+    assert "HUD_API_KEY" not in command
     assert 'model_providers.hud.base_url="https://inference.hud.so"' in command
     assert "Trace-Id" not in command
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_command_preserves_ambient_codex_login_without_explicit_credentials(shell: str) -> None:
+    command = codex_command(CodexCLIConfig(use_hud_gateway=False), shell)
+    script = (
+        base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+        if shell == "powershell"
+        else command
+    )
+
+    assert "CODEX_HOME" not in script
+    assert "CODEX_API_KEY" not in script
+    assert "HUD_API_KEY" not in script
+    assert "HUD_RUNTIME_INFERENCE_TOKEN" not in script
+    assert "mktemp" not in script
+    assert "codex exec" in script or "& 'codex' 'exec'" in script
 
 
 def test_windows_command_encodes_environment_and_arguments(

@@ -26,6 +26,19 @@ from hud.eval.runtime import Runtime
 HELLO_RESULT = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 
 
+def test_workspace_route_from_url_extracts_transport_address() -> None:
+    assert WorkspaceRoute.from_url("ssh", "https://inference.hud.so/v1") == WorkspaceRoute(
+        "ssh",
+        "inference.hud.so",
+        443,
+    )
+    assert WorkspaceRoute.from_url("shell", "http://gateway.test:8080") == WorkspaceRoute(
+        "shell",
+        "gateway.test",
+        8080,
+    )
+
+
 async def test_connect_sends_workspace_routes_in_hello() -> None:
     requests: list[dict[str, object]] = []
 

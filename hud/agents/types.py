@@ -182,7 +182,11 @@ class ClaudeCLIConfig(AgentConfig):
 
 
 class CodexCLIConfig(AgentConfig):
-    """Configuration for CodexCLIAgent (runs ``codex exec`` over SSH)."""
+    """Configuration for CodexCLIAgent (runs ``codex exec`` over SSH).
+
+    Without an explicit inference connection or API key, the agent leaves
+    ``CODEX_HOME`` unchanged so a login in that execution environment can apply.
+    """
 
     model_name: str = "Codex CLI"
     model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)

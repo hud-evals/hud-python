@@ -32,7 +32,6 @@ from urllib.parse import urlsplit
 import mcp.types as mcp_types
 
 from hud.clients import HudProtocolError, connect
-from hud.environment import WorkspaceRoute
 from hud.graders.results import SubScore
 from hud.telemetry.context import set_trace_context
 from hud.types import Step, TaskCall, Trace
@@ -42,10 +41,12 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
+    from hud.environment import WorkspaceRoute
 
     from .runtime import Provider
     from .runtime.core import RuntimeConfig
@@ -55,12 +56,11 @@ logger = logging.getLogger("hud.eval.run")
 
 
 @dataclass(frozen=True, slots=True)
-class InferenceAccess:
-    """Scoped inference access for an agent running inside a workspace."""
+class InferenceConnection:
+    """Execution-scoped inference connection exposed to a live agent."""
 
     base_url: str
-    api_key: str = field(repr=False)
-    workspace: str = "ssh"
+    credential: str = field(repr=False)
 
     def __post_init__(self) -> None:
         parts = urlsplit(self.base_url)
@@ -70,17 +70,8 @@ class InferenceAccess:
             raise ValueError("inference base_url must not contain credentials")
         if parts.query or parts.fragment:
             raise ValueError("inference base_url must not contain a query or fragment")
-        if not self.api_key:
-            raise ValueError("inference api_key must not be empty")
-
-    def workspace_route(self) -> WorkspaceRoute:
-        parts = urlsplit(self.base_url)
-        assert parts.hostname is not None
-        return WorkspaceRoute(
-            capability=self.workspace,
-            host=parts.hostname,
-            port=parts.port or (443 if parts.scheme == "https" else 80),
-        )
+        if not self.credential:
+            raise ValueError("inference credential must not be empty")
 
 
 def validate_rollout_timeouts(
@@ -231,7 +222,7 @@ class Run:
         *,
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
-        inference: InferenceAccess | None = None,
+        inference: InferenceConnection | None = None,
     ) -> None:
         self._client = client
         self._task_id = task_id
@@ -478,7 +469,8 @@ async def rollout(
     group_id: str | None = None,
     trace_id: str | None = None,
     rollout_timeout: float | None = None,
-    inference: InferenceAccess | None = None,
+    inference: InferenceConnection | None = None,
+    workspace_routes: Sequence[WorkspaceRoute] = (),
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
@@ -569,7 +561,6 @@ async def rollout(
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
                 _phase = "starting task"
-                workspace_routes = (inference.workspace_route(),) if inference is not None else ()
                 async with connect(addr, workspace_routes=workspace_routes) as actor_client:
                     client = actor_client
                     live = Run(
@@ -585,29 +576,32 @@ async def rollout(
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
                         try:
-                            async with file_tracking_observer(actor_client):
-                                if agent_timeout is None:
-                                    await agent(run)
-                                else:
-                                    deadline = asyncio.timeout(agent_timeout)
-                                    try:
-                                        async with deadline:
-                                            await agent(run)
-                                    except TimeoutError:
-                                        if not deadline.expired():
-                                            raise
-                                        detail = f"agent timed out after {agent_timeout:g}s"
-                                        logger.warning(detail)
-                                        run.trace.status = "error"
-                                        run.trace.stop_reason = "timeout"
-                                        run.record(Step(source="system", error=detail))
-                        except Exception as exc:
-                            if task.verifier is None:
-                                raise
-                            detail = "".join(traceback.format_exception_only(exc)).strip()
-                            logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
-                            run.trace.status = "error"
-                            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                            try:
+                                async with file_tracking_observer(actor_client):
+                                    if agent_timeout is None:
+                                        await agent(run)
+                                    else:
+                                        deadline = asyncio.timeout(agent_timeout)
+                                        try:
+                                            async with deadline:
+                                                await agent(run)
+                                        except TimeoutError:
+                                            if not deadline.expired():
+                                                raise
+                                            detail = f"agent timed out after {agent_timeout:g}s"
+                                            logger.warning(detail)
+                                            run.trace.status = "error"
+                                            run.trace.stop_reason = "timeout"
+                                            run.record(Step(source="system", error=detail))
+                            except Exception as exc:
+                                if task.verifier is None:
+                                    raise
+                                detail = "".join(traceback.format_exception_only(exc)).strip()
+                                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
+                                run.trace.status = "error"
+                                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                        finally:
+                            run.inference = None
                         _phase = "grading"
 
                     if verifier is not None:
@@ -707,6 +701,7 @@ async def rollout(
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
         assert run is not None  # the body bound it, or the handler synthesized it
+        run.inference = None
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id
@@ -720,4 +715,4 @@ def _consume_task_result(task: asyncio.Future[Any]) -> None:
         task.result()
 
 
-__all__ = ["Grade", "InferenceAccess", "Run", "rollout"]
+__all__ = ["Grade", "InferenceConnection", "Run", "rollout"]
