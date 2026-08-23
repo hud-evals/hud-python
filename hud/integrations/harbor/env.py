@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
 from hud.environment import Environment, Mount, Peer, Workspace
-from hud.environment.egress import ANY_HOST, BRIDGE_PORT, VISITOR_PORT
+from hud.environment.egress import ANY_HOST
 from hud.environment.env import current_session_id
 from hud.graders import EvaluationResult
 from hud.utils.process import ProcessResult, create_process_group_exec
@@ -40,71 +40,6 @@ TASK_ROOT = Path("/rootfs")
 RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
-
-
-def load_image_config(name: str) -> dict[str, Any]:
-    value = json.loads((CONTROLLER_ROOT / name).read_text("utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must contain an OCI image config object")
-    return value
-
-
-def image_environment(config: dict[str, Any]) -> dict[str, str]:
-    entries = config.get("Env") or []
-    if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
-        raise ValueError("OCI image Env must be a list of strings")
-    return {
-        key: value
-        for entry in entries
-        for key, separator, value in (entry.partition("="),)
-        if separator
-    }
-
-
-IMAGE_CONFIG = load_image_config("image-config.json")
-VERIFIER_IMAGE_CONFIG = load_image_config("verifier-image-config.json")
-CONFIG["image_env"] = image_environment(IMAGE_CONFIG)
-if CONFIG["image_user"] is None:
-    CONFIG["image_user"] = IMAGE_CONFIG.get("User") or None
-if CONFIG["workdir"] is None:
-    CONFIG["workdir"] = IMAGE_CONFIG.get("WorkingDir") or "/"
-if CONFIG["entrypoint"] is None:
-    CONFIG["entrypoint"] = IMAGE_CONFIG.get("Entrypoint") or []
-exposed = IMAGE_CONFIG.get("ExposedPorts") or {}
-if not isinstance(exposed, dict):
-    raise ValueError("OCI image ExposedPorts must be an object")
-CONFIG["ports"] = sorted(
-    {
-        *CONFIG["ports"],
-        *(int(port) for value in exposed if (port := str(value).partition("/")[0]).isdigit()),
-    }
-)
-for service, config_path in CONFIG["peer_image_configs"].items():
-    peer_config = load_image_config(config_path)
-    peer_exposed = peer_config.get("ExposedPorts") or {}
-    if not isinstance(peer_exposed, dict):
-        raise ValueError(
-            f"OCI image ExposedPorts for Compose service {service!r} must be an object"
-        )
-    peer_ports = sorted(
-        int(port)
-        for value in peer_exposed
-        if (port := str(value).partition("/")[0]).isdigit()
-        and str(value).partition("/")[2] in {"", "tcp"}
-    )
-    if not peer_ports:
-        raise ValueError(
-            f"Compose service {service!r} declares no TCP ports in Compose or its image"
-        )
-    CONFIG["peers"].extend({"name": service, "port": port} for port in peer_ports)
-if conflict := set(CONFIG["ports"]) & {BRIDGE_PORT, VISITOR_PORT, 8765}:
-    raise ValueError(f"Harbor main service port {min(conflict)} conflicts with a HUD reserved port")
-verifier_image = CONFIG["verifier_image"]
-if verifier_image["user"] is None:
-    verifier_image["user"] = VERIFIER_IMAGE_CONFIG.get("User") or None
-if verifier_image["workdir"] is None:
-    verifier_image["workdir"] = VERIFIER_IMAGE_CONFIG.get("WorkingDir") or "/"
-verifier_image["env"] = image_environment(VERIFIER_IMAGE_CONFIG)
 
 ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
 
@@ -446,11 +381,11 @@ def exclude_artifact_paths(root: Path, patterns: list[str]) -> None:
             entry.unlink()
 
 
-def copy_artifact(source: Path, target: Path, exclude: list[str]) -> None:
+def copy_artifact(source: Path, target: Path, exclude: list[str], *, name: str) -> None:
     if source.is_symlink():
-        raise RuntimeError(f"artifact {source} is a symbolic link")
+        raise RuntimeError(f"artifact {name} is a symbolic link")
     if source.resolve(strict=False) != source.absolute():
-        raise RuntimeError(f"artifact {source} has a symbolic link in its path")
+        raise RuntimeError(f"artifact {name} has a symbolic link in its path")
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
         shutil.copytree(source, target, symlinks=True)
@@ -531,7 +466,7 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
                 continue
             exclude_artifact_paths(target, exclude)
         else:
-            copy_artifact(TASK_ROOT / source.lstrip("/"), target, exclude)
+            copy_artifact(TASK_ROOT / source.lstrip("/"), target, exclude, name=source)
         if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
             raise RuntimeError(f"artifact {source} contains a symbolic link")
 

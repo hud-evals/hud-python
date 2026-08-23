@@ -664,7 +664,11 @@ timeout_sec = 120
     # process proves itself, so an early abort is only observable from the
     # adapted artifact: run its main service in the foreground.
     subprocess.run(
-        ["sh", "build.sh"], cwd=compose.parent, check=True, capture_output=True, timeout=600
+        ["docker", "compose", "--file", str(compose), "build"],
+        cwd=compose.parent,
+        check=True,
+        capture_output=True,
+        timeout=600,
     )
     command = ["docker", "compose", "--file", str(compose), "run", "--rm", "main"]
     try:

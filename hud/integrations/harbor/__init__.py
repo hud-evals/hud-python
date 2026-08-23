@@ -1,7 +1,7 @@
 """Experimental Harbor task interop.
 
-``adapt()`` packages Harbor task directories as runnable HUD tasksets and
-self-contained Compose projects for the selected runtime to build.
+``adapt()`` resolves Harbor images and packages task directories as runnable
+HUD tasksets and conventional Compose projects.
 ``export()`` writes HUD tasks back to Harbor directories.
 
 This API may change between minor releases while the integration is experimental.

@@ -121,7 +121,7 @@ tasksets and can export authored HUD tasks back to Harbor folders.
 ```python
 from hud.integrations import harbor
 
-taskset = await harbor.adapt("./benchmark")
+taskset = harbor.adapt("./benchmark").taskset
 ```
 
 → [Harbor interop](https://docs.hud.ai/v6/advanced/harbor-convert)

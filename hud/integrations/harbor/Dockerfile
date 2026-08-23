@@ -13,8 +13,7 @@ FROM python:3.12-slim AS runtime
 USER root
 ARG HUD_REQUIREMENT=hud
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /controller/bin/uv
-COPY env.py install.sh config.json image-config.json verifier-image-config.json /controller/
-COPY peer-image-configs /controller/peer-image-configs
+COPY env.py install.sh config.json /controller/
 COPY packages /controller/packages
 COPY --from=authored-root / /rootfs
 RUN sh /controller/install.sh "${HUD_REQUIREMENT}" && mkdir -p /runtime

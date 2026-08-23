@@ -771,18 +771,13 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         "services:\n  main:\n    image: hud-env:one\n  db:\n    image: postgres:17\n",
         encoding="utf-8",
     )
-    marker = tmp_path / "prepared"
-    (tmp_path / "build.sh").write_text(
-        f"#!/bin/sh\nprintf prepared > {marker}\n",
-        encoding="utf-8",
-    )
 
     async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
         nonlocal port_override
         calls.append(args)
         if args[:2] == ("context", "inspect"):
             return "unix:///Users/test/.docker/run/docker.sock\n", ""
-        if args[-4:] == ("up", "--detach", "--no-build", "--remove-orphans"):
+        if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
             files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
             compose_file, override, ports = files
             recipe.update(json.loads(compose_file.read_text("utf-8")))
@@ -806,7 +801,6 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
         assert runtime.url == "tcp://127.0.0.1:43210"
         assert runtime.config == task.runtime_config
 
-    assert marker.read_text("utf-8") == "prepared"
     assert recipe["services"]["main"]["image"] == "hud-env:one"
     assert rendered["services"]["main"] == {
         "security_opt": [
@@ -842,7 +836,7 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     assert rendered["volumes"] == {"hud-runtime-sessions": {}}
     assert 'ports: !override ["127.0.0.1::8765"]' in port_override
     up = next(
-        call for call in calls if call[-4:] == ("up", "--detach", "--no-build", "--remove-orphans")
+        call for call in calls if call[-4:] == ("up", "--detach", "--build", "--remove-orphans")
     )
     assert up[up.index("--project-directory") + 1] == str(tmp_path)
     assert str(compose) not in up
@@ -895,80 +889,6 @@ async def test_docker_runtime_stages_env_vars_into_the_compose_override(
         pass
 
     assert rendered["services"]["main"]["environment"] == {"OPENAI_API_KEY": "sk-test"}
-
-
-async def test_docker_runtime_serializes_shared_compose_preparation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    compose = tmp_path / "compose.yaml"
-    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
-    active = 0
-    peak = 0
-
-    async def prepare(_compose: Path, _max_wait: float | None) -> bool:
-        nonlocal active, peak
-        active += 1
-        peak = max(peak, active)
-        await asyncio.sleep(0.01)
-        active -= 1
-        return True
-
-    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
-        if args[-3:] == ("port", "main", "8765"):
-            return "127.0.0.1:43210\n", ""
-        return "", ""
-
-    monkeypatch.setattr(runtime_module, "_prepare_compose_project", prepare)
-    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
-    task = Task(
-        env="any-env",
-        id="t",
-        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
-    )
-    provider = DockerRuntime()
-
-    async def acquire() -> None:
-        async with provider(task):
-            pass
-
-    await asyncio.gather(acquire(), acquire())
-
-    assert peak == 1
-
-
-async def test_docker_times_out_compose_preparation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    compose = tmp_path / "compose.yaml"
-    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
-    (tmp_path / "build.sh").touch()
-    max_waits: list[float | None] = []
-
-    class Process:
-        async def complete(self, *, max_wait: float | None = None) -> SimpleNamespace:
-            max_waits.append(max_wait)
-            return SimpleNamespace(returncode=None, stdout=b"", stderr=b"", timed_out=True)
-
-    async def create_process(*_args: str, **_kwargs: Any) -> Process:
-        return Process()
-
-    monkeypatch.setattr(runtime_module, "create_process_group_exec", create_process)
-    task = Task(
-        env="any-env",
-        id="t",
-        runtime_config=RuntimeConfig(
-            compose=ComposeProject(document=compose),
-            limits=RuntimeLimits(startup_timeout_s=45),
-        ),
-    )
-
-    with pytest.raises(TimeoutError, match="Compose project build timed out after 45 seconds"):
-        async with DockerRuntime()(task):
-            pass
-
-    assert max_waits == [45]
 
 
 async def test_docker_runtime_rejects_remote_compose_service_access(
@@ -1230,8 +1150,8 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert "docker compose" in startup
     assert "--project-directory /hud/project/compose-project" in startup
     assert "--file /hud/project/compose-project/compose.yaml" in startup
-    assert "sh /hud/project/build.sh" in startup
-    assert 'up --detach "$BUILD_FLAG" --remove-orphans' in startup
+    assert "build.sh" not in startup
+    assert "up --detach --build --remove-orphans" in startup
     compose_logs = execs[1][0]
     assert compose_logs[-3:] == ("logs", "--follow", "--no-color")
     session_commands = [

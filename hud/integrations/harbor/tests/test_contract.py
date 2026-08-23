@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
@@ -14,6 +15,50 @@ from hud.eval import RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU, Ta
 from hud.integrations import harbor
 
 from .conftest import make_harbor_task, make_multi_step_task
+
+adapt_module = importlib.import_module("hud.integrations.harbor.adapt")
+build_module = importlib.import_module("hud.integrations.harbor.build")
+
+
+@pytest.fixture(autouse=True)
+def resolved_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    def resolve(
+        source: Any,
+        compose_project: Any,
+        *,
+        verifier_image: str,
+        peer_services: set[str],
+    ) -> Any:
+        del compose_project, verifier_image
+        dockerfile = source.dockerfile.read_text("utf-8") if source.dockerfile.is_file() else ""
+        main: dict[str, Any] = {
+            "Env": [],
+            "User": "",
+            "WorkingDir": "/workspace",
+            "Entrypoint": [],
+            "ExposedPorts": {},
+        }
+        if "USER 1000:2000" in dockerfile:
+            main["User"] = "1000:2000"
+        if "WORKDIR /workspace" not in dockerfile:
+            main["WorkingDir"] = ""
+        if "ENV IMAGE_ONLY=present VALUE_WITH_EQUALS=one=two" in dockerfile:
+            main["Env"] = ["IMAGE_ONLY=present", "VALUE_WITH_EQUALS=one=two"]
+        if 'ENTRYPOINT ["/usr/local/bin/start-environment"]' in dockerfile:
+            main["Entrypoint"] = ["/usr/local/bin/start-environment"]
+        peers = {
+            service: {
+                "Env": [],
+                "User": "",
+                "WorkingDir": "",
+                "Entrypoint": [],
+                "ExposedPorts": {"6379/tcp": {}},
+            }
+            for service in peer_services
+        }
+        return build_module.ResolvedImages(main=main, verifier=main, peers=peers)
+
+    monkeypatch.setattr(adapt_module, "resolve_images", resolve)
 
 
 def _adapt(path: Path, *, hud_requirement: str = "hud") -> Taskset:
@@ -94,6 +139,45 @@ def _environment_config(context: Path) -> dict[str, Any]:
     return config
 
 
+def test_image_resolution_builds_and_inspects_the_authored_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    source, findings = adapt_module._inspect_task(task)
+    assert findings == ()
+    assert source is not None
+    calls: list[tuple[str, ...]] = []
+    config = {
+        "Env": ["FROM_IMAGE=yes"],
+        "User": "1000:1000",
+        "WorkingDir": "/workspace",
+        "Entrypoint": ["/bin/start"],
+        "ExposedPorts": {"8080/tcp": {}},
+    }
+
+    def docker(*args: str, **_kwargs: Any) -> str:
+        calls.append(args)
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Config": config}])
+        return ""
+
+    monkeypatch.setattr(build_module, "docker", docker)
+
+    resolved = build_module.resolve_images(
+        source,
+        None,
+        verifier_image=source.base_image,
+        peer_services=set(),
+    )
+
+    assert calls[0][:3] == ("build", "--tag", source.base_image)
+    assert calls[1] == ("image", "inspect", source.base_image)
+    assert resolved.main == config
+    assert resolved.verifier == config
+    assert resolved.peers == {}
+
+
 def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> None:
     task_dir = make_harbor_task(tmp_path, "task-a")
     authored_environment = _tree_snapshot(task_dir / "environment")
@@ -119,7 +203,6 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert not (context / "Dockerfile").exists()
     assert not any(path.name == ".hud" for path in context.rglob(".hud"))
     assert {entry.name for entry in context.iterdir()} == {
-        "build.sh",
         "compose-project",
         "compose.yaml",
         "env.py",
@@ -145,12 +228,7 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert "rootfs" not in config
     assert "runtime_root" not in config
     assert config["mounts"] == []
-    build_script = (project_root / "build.sh").read_text("utf-8")
-    assert "docker image inspect" in build_script
-    assert 'docker tag "$(docker compose' in build_script
-    assert "compose-project/build.sh" in (context / "build.sh").read_text("utf-8")
-    subprocess.run(["sh", "-n", context / "build.sh"], check=True)
-    subprocess.run(["sh", "-n", project_root / "build.sh"], check=True)
+    assert not (project_root / "build.sh").exists()
     assert (project_root / "tests" / "task-a" / "test.sh").is_file()
     assert not any(path.name in {"tasks", "tasks.json"} for path in payload.rglob("*"))
     assert not (context / "compose.json").exists()
@@ -419,10 +497,9 @@ services:
     assert "healthcheck" not in project["services"]["main"]
 
 
-def test_compose_adapt_retains_builds_without_local_docker(
+def test_compose_adapt_retains_source_builds_in_the_generated_project(
     tmp_path: Path,
 ) -> None:
-    """Hosted adaptation produces a private-build project without a local daemon."""
     task = make_harbor_task(tmp_path, "task-a")
     (task / "environment" / "Dockerfile").write_text(
         'FROM python:3.12\nWORKDIR /app\nENTRYPOINT ["/app/start"]\n',
@@ -587,7 +664,7 @@ def test_adapt_uses_compose_healthcheck_defaults(tmp_path: Path) -> None:
 def test_adapt_merges_implicit_main_into_authored_compose(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
     (task / "environment" / "docker-compose.yaml").write_text(
-        "services:\n  default:\n    image: sidecar:latest\n",
+        "services:\n  default:\n    image: sidecar:latest\n    expose: [1234]\n",
         encoding="utf-8",
     )
 
@@ -596,7 +673,7 @@ def test_adapt_merges_implicit_main_into_authored_compose(tmp_path: Path) -> Non
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
     assert {"main", "default"} <= compose["services"].keys()
-    assert _environment_config(context)["peers"] == []
+    assert _environment_config(context)["peers"] == [{"name": "default", "port": 1234}]
 
 
 def test_network_mcp_servers_become_named_capabilities(
@@ -774,7 +851,7 @@ VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"
         assert b"sk-live-secret" not in persisted.read_bytes(), persisted
 
 
-def test_prebuilt_harbor_image_is_inspected_by_the_project_build(
+def test_prebuilt_harbor_image_emits_a_conventional_wrapper_build(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "prebuilt", dockerfile=None)
@@ -792,9 +869,7 @@ def test_prebuilt_harbor_image_is_inspected_by_the_project_build(
         .read_text("utf-8")
         .startswith("FROM registry.example/base:latest AS hud-base\n")
     )
-    script = (project / "build.sh").read_text("utf-8")
-    assert "docker pull registry.example/base:latest" in script
-    assert "inspect_image registry.example/base:latest" in script
+    assert not (project / "build.sh").exists()
 
 
 def test_zero_gpus_is_a_valid_harbor_resource_declaration(
@@ -895,10 +970,13 @@ CMD ["ignored-by-harbor"]
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
-    assert manifest["image_env"] == {}
-    assert manifest["entrypoint"] is None
-    script = (context / "compose-project" / "build.sh").read_text("utf-8")
-    assert "docker image inspect" in script
+    assert manifest["image_env"] == {
+        "IMAGE_ONLY": "present",
+        "VALUE_WITH_EQUALS": "one=two",
+    }
+    assert manifest["image_user"] == "1000:2000"
+    assert manifest["workdir"] == "/workspace"
+    assert manifest["entrypoint"] == ["/usr/local/bin/start-environment"]
 
 
 def test_dataset_adaptation_returns_successes_and_all_detectable_findings(
@@ -1326,13 +1404,8 @@ def test_portless_sidecar_ports_are_resolved_from_its_built_image(tmp_path: Path
     context = row.runtime_config.compose.root
     assert isinstance(context, Path)
     manifest = _environment_config(context)
-    assert manifest["peers"] == []
-    assert manifest["peer_image_configs"] == {"redis": "peer-image-configs/redis.json"}
-    script = (context / "compose-project" / "build.sh").read_text("utf-8")
-    assert "pull redis" in script
-    assert "inspect_peer redis:7-alpine redis" in script
-    assert "declares no TCP ports in Compose or its image" in script
-    assert "peer-image-configs/redis.json" in script
+    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+    assert "peer_image_configs" not in manifest
 
 
 def test_completed_compose_dependencies_are_not_routed_as_peers(tmp_path: Path) -> None:
@@ -1360,7 +1433,4 @@ def test_completed_compose_dependencies_are_not_routed_as_peers(tmp_path: Path) 
     assert isinstance(context, Path)
     manifest = _environment_config(context)
     assert manifest["peers"] == []
-    assert manifest["peer_image_configs"] == {}
-    assert (context / "compose-project" / "main" / "peer-image-configs" / ".keep").is_file()
-    script = (context / "compose-project" / "build.sh").read_text("utf-8")
-    assert script.count("inspect_peer") == 1
+    assert "peer_image_configs" not in manifest

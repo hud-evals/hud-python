@@ -30,6 +30,8 @@ from hud.eval.runtime.compose import (
 )
 from hud.utils.naming import normalize_environment_name
 
+from .build import COMPOSE_FILENAME, image_environment, image_ports, resolve_images
+
 LOGGER = logging.getLogger(__name__)
 ASSETS = Path(__file__).parent
 CONTROLLER_ROOT = Path("/controller")
@@ -47,7 +49,6 @@ IGNORED = shutil.ignore_patterns(
 NetworkMode = Literal["public", "no-network", "allowlist"]
 MCPTransport = Literal["sse", "streamable-http", "stdio"]
 FindingKind = Literal["contract", "invalid"]
-COMPOSE_FILENAME = "docker-compose.yaml"
 
 
 class Artifact(BaseModel):
@@ -552,7 +553,7 @@ def adapt(
     *,
     hud_requirement: str = "hud",
 ) -> AdaptResult:
-    """Package Harbor tasks as buildable Compose projects."""
+    """Resolve Harbor images and package tasks as conventional Compose projects."""
     root = Path(path).resolve()
     if (root / "task.toml").is_file():
         task_dirs = [root]
@@ -663,7 +664,7 @@ def adapt(
 
         peers = []
         healthy_services = []
-        peer_image_configs: dict[str, str] = {}
+        peer_services: set[str] = set()
         if compose is not None:
             completed_services: set[str] = set()
             for service in compose.services.values():
@@ -692,16 +693,27 @@ def adapt(
                         {"name": service_name, "port": port} for port in sorted(service.tcp_ports)
                     )
                 else:
-                    peer_image_configs[service_name] = f"peer-image-configs/{service_name}.json"
+                    peer_services.add(service_name)
+        resolved = resolve_images(
+            source,
+            compose_project,
+            verifier_image=verifier_image,
+            peer_services=peer_services,
+        )
+        for service_name, image_config in resolved.peers.items():
+            service_ports = image_ports(image_config, image=f"Compose service {service_name!r}")
+            if not service_ports:
+                raise ValueError(
+                    f"Compose service {service_name!r} declares no TCP ports "
+                    "in Compose or its image"
+                )
+            peers.extend({"name": service_name, "port": port} for port in sorted(service_ports))
         context = dataset / ".hud-adapt" / name
         if context.exists():
             shutil.rmtree(context)
         project = context / "compose-project"
         payload = project / ("main" if compose is not None else "hud")
         (payload / "packages").mkdir(parents=True)
-        if compose is not None:
-            (payload / "peer-image-configs").mkdir()
-            (payload / "peer-image-configs" / ".keep").touch()
         shutil.copy2(ASSETS / "install.sh", payload / "install.sh")
         if compose is not None:
             shutil.copy2(ASSETS / "Dockerfile", payload / "Dockerfile")
@@ -716,8 +728,33 @@ def adapt(
         for target in (context / "env.py", payload / "env.py"):
             target.write_text(served, encoding="utf-8", newline="\n")
 
-        workdir = environment.workdir or compose_main.working_dir
-        ports = compose_main.tcp_ports
+        workdir = environment.workdir or compose_main.working_dir or resolved.main.get("WorkingDir")
+        if workdir is not None and not isinstance(workdir, str):
+            raise ValueError("OCI image WorkingDir must be a string")
+        workdir = workdir or "/"
+        image_user = compose_main.user
+        if image_user is None:
+            image_user = resolved.main.get("User") or None
+        if image_user is not None and not isinstance(image_user, (str, int)):
+            raise ValueError("OCI image User must be a string")
+        entrypoint = compose_main.entrypoint if compose is not None else None
+        if entrypoint is None:
+            entrypoint = resolved.main.get("Entrypoint") or []
+        if not isinstance(entrypoint, list) or not all(
+            isinstance(argument, str) for argument in entrypoint
+        ):
+            raise ValueError("OCI image Entrypoint must be a list of strings")
+        ports = compose_main.tcp_ports | image_ports(resolved.main, image="main image")
+        if conflict := ports & {BRIDGE_PORT, VISITOR_PORT, 8765}:
+            raise ValueError(
+                f"Harbor main service port {min(conflict)} conflicts with a HUD reserved port"
+            )
+        verifier_user = resolved.verifier.get("User") or None
+        verifier_workdir = (
+            verifier_environment.workdir or resolved.verifier.get("WorkingDir") or "/"
+        )
+        if not isinstance(verifier_workdir, str):
+            raise ValueError("OCI verifier image WorkingDir must be a string")
         healthcheck = environment.healthcheck
         if healthcheck is None and compose_main.healthcheck is not None:
             healthcheck = HealthcheckConfig.from_compose(compose_main.healthcheck)
@@ -737,15 +774,15 @@ def adapt(
             "name": name,
             "mounts": workspace_mounts,
             "workdir": workdir,
-            "image_user": compose_main.user,
-            "image_env": {},
-            "entrypoint": compose_main.entrypoint if compose is not None else None,
+            "image_user": image_user,
+            "image_env": image_environment(resolved.main),
+            "entrypoint": entrypoint,
             "ports": sorted(ports),
             "verifier_root": "/verifier" if separate else None,
             "verifier_image": {
-                "user": None,
-                "workdir": verifier_environment.workdir,
-                "env": {},
+                "user": verifier_user,
+                "workdir": verifier_workdir,
+                "env": image_environment(resolved.verifier),
             },
             "environment": {
                 "env": {
@@ -771,7 +808,6 @@ def adapt(
             "local_aliases": ["main"],
             "peers": peers,
             "healthy_services": sorted(healthy_services),
-            "peer_image_configs": peer_image_configs,
         }
         (payload / "config.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -800,7 +836,6 @@ def adapt(
             "--port",
             "8765",
         ]
-        base_target: str | None = None
         base_build: str | dict[str, Any] | None = None
         if compose is None:
             project_environment = project / "environment"
@@ -829,7 +864,6 @@ def adapt(
                     f"{content[: suffix.start()]} AS hud-base{content[suffix.start() :]}{ending}"
                 )
                 base_stage = "hud-base"
-            base_target = base_stage
             combined = "".join(lines)
             if combined and not combined.endswith("\n"):
                 combined += "\n"
@@ -855,8 +889,7 @@ FROM python:3.12-slim AS hud-runtime
 
 USER root
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /controller/bin/uv
-COPY --from=hud env.py install.sh config.json image-config.json /controller/
-COPY --from=hud verifier-image-config.json /controller/
+COPY --from=hud env.py install.sh config.json /controller/
 COPY --from=hud packages /controller/packages
 COPY --from=hud-authored-root / /rootfs
 RUN sh /controller/install.sh {shlex.quote(requirement)} && mkdir -p /runtime
@@ -994,86 +1027,6 @@ CMD ["/controller/venv/bin/hud","serve","/controller/env.py","--host","0.0.0.0",
             + "\n",
             encoding="utf-8",
         )
-        assert base_image is not None
-        compose_command = (
-            'docker compose --project-directory "$PROJECT" --file "$PROJECT/compose.json"'
-        )
-        if compose is not None and base_build is not None:
-            prepare_base = f"{compose_command} build hud-base"
-        elif compose is None and dockerfile.is_file():
-            assert base_target is not None
-            prepare_base = (
-                f"docker build --target {shlex.quote(base_target)} "
-                f'--tag {shlex.quote(base_image)} --file "$PROJECT/Dockerfile" '
-                '"$PROJECT/environment"'
-            )
-        else:
-            prepare_base = f"docker pull {shlex.quote(base_image)}"
-        image_config_path = f'"$PROJECT/{payload.name}/image-config.json"'
-        verifier_config_path = f'"$PROJECT/{payload.name}/verifier-image-config.json"'
-        peer_config_paths = {
-            service: f'"$PROJECT/{payload.name}/{path}"'
-            for service, path in peer_image_configs.items()
-        }
-        prepare_peer_lines = []
-        for service, path in peer_config_paths.items():
-            peer = compose_project.services[service]
-            assert peer.image is not None
-            operation = "build" if peer.build is not None else "pull"
-            prepare_peer_lines.append(
-                f"{compose_command} {operation} {shlex.quote(service)}\n"
-                f"inspect_peer {shlex.quote(peer.image)} {shlex.quote(service)} > {path}"
-            )
-        prepare_peers = "\n".join(prepare_peer_lines)
-        prepare_verifier = (
-            f"{compose_command} build hud-verifier"
-            if separate
-            else f"cp {image_config_path} {verifier_config_path}"
-        )
-        inspect_verifier = (
-            f"inspect_image {shlex.quote(str(verifier_image))} > {verifier_config_path}"
-            if separate
-            else ""
-        )
-        build_script = f"""#!/bin/sh
-set -eu
-PROJECT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cleanup() {{
-  rm -f {image_config_path} {verifier_config_path} {" ".join(peer_config_paths.values())}
-}}
-trap cleanup EXIT HUP INT TERM
-inspect_image() {{
-  docker image inspect --format '{{{{json .Config}}}}' "$1"
-}}
-inspect_peer() {{
-  if ! docker image inspect --format \
-    '{{{{range $port, $_ := .Config.ExposedPorts}}}}{{{{println $port}}}}{{{{end}}}}' "$1" \
-    | grep -Eq '^[0-9]+/tcp$'; then
-    echo "Compose service '$2' declares no TCP ports in Compose or its image" >&2
-    return 1
-  fi
-  inspect_image "$1"
-}}
-{prepare_base}
-inspect_image {shlex.quote(base_image)} > {image_config_path}
-{prepare_verifier}
-{inspect_verifier}
-{prepare_peers}
-{compose_command} build
-if [ "$#" -gt 0 ]; then
-  docker tag "$({compose_command} images -q main)" "$1"
-fi
-"""
-        script = project / "build.sh"
-        script.write_text(build_script, encoding="utf-8", newline="\n")
-        script.chmod(0o755)
-        launcher = context / "build.sh"
-        launcher.write_text(
-            '#!/bin/sh\nset -eu\nexec sh "$(dirname -- "$0")/compose-project/build.sh" "$@"\n',
-            encoding="utf-8",
-            newline="\n",
-        )
-        launcher.chmod(0o755)
         recipe = compose_project.with_project_directory("./compose-project")
         (context / "compose.yaml").write_text(
             json.dumps(

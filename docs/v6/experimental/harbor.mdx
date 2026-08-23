@@ -10,8 +10,9 @@ change without a major version.
 
 The **Harbor adapter** (`hud/integrations/harbor/`) translates between Harbor
 task directories and HUD's native `Environment`, `Task`, and `Taskset`
-contracts. `adapt()` packages Harbor tasks without building or publishing
-images. `export()` materializes HUD tasks as self-contained Harbor folders.
+contracts. `adapt()` resolves the authored images and packages Harbor tasks as
+standard Compose projects without publishing them. `export()` materializes HUD
+tasks as self-contained Harbor folders.
 
 ## Adapt Harbor tasks
 
@@ -44,18 +45,21 @@ packaged.
 
 ```text
 .hud-adapt/<environment>/
-├── build.sh
 ├── compose.yaml
 ├── env.py
 ├── tasks.json
 └── compose-project/
-    ├── build.sh
     ├── compose.json
     ├── environment/
     ├── hud/ or main/           # HUD build payload (depends on source shape)
     ├── tests/                 # inline-verifier task tests
     └── verifier/              # verifier-environment build context, when declared
 ```
+
+Adaptation requires a Docker-compatible builder when an authored image must be
+built or pulled. It captures the resolved image execution settings in the
+generated environment configuration before returning, so the resulting project
+has no HUD-specific preparation hook.
 
 The artifact is self-contained. Authored build contexts and Compose-relative
 paths are rebased beneath `compose-project/`; task instructions remain in
@@ -71,9 +75,9 @@ verifier image and artifact contract are task-specific.
 
 ### Run locally
 
-`DockerRuntime()` reads the Compose project from each task row, runs the adjacent
-`build.sh` preparation hook, starts the `main` service and its sidecars, and
-applies the workspace security profile automatically.
+`DockerRuntime()` reads the Compose project from each task row, builds and starts
+the `main` service and its sidecars with Docker Compose, and applies the
+workspace security profile automatically.
 
 The generated task data is independent from the environment build. Editing an
 instruction, verifier timeout, or inline `tests/` content updates `tasks.json`

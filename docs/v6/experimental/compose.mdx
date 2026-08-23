@@ -38,9 +38,9 @@ the `.env` beside the Compose file and from defaults in the document; HUD does n
 the process environment, so an unbound variable is rejected. `include` and `extends` are not part
 of the serialized contract: the document that uploads is the document that runs.
 
-Every runnable service has an `image`, a `build`, or both; paths are relative to the project. An
-optional `build.sh` beside the document is a preparation hook - it resolves or builds prerequisite
-images before the runtime starts the project.
+Every runnable service has an `image`, a `build`, or both; paths are relative to the project. The
+project must be buildable with the ordinary Compose build graph; runtimes do not execute adjacent
+project hooks.
 
 </div>
 <div className="guide-aside">
@@ -154,9 +154,8 @@ Two consequences do most of the work:
 
 ## Runtime behavior
 
-**Local `DockerRuntime`** (`hud/eval/runtime/docker.py`) runs `build.sh` when present, stages override
-files for `main`'s security options, resources, and an ephemeral host port, starts the project with
-`docker compose up` (`--no-build` after a successful preparation hook, otherwise `--build`),
+**Local `DockerRuntime`** (`hud/eval/runtime/docker.py`) stages override files for `main`'s security
+options, resources, and an ephemeral host port, starts the project with `docker compose up --build`,
 returns the published control-channel address, and removes the project and its volumes when the
 rollout ends.
 
@@ -179,25 +178,16 @@ rollout.
 
 ## Build on owned infrastructure
 
-An ordinary Compose project builds with the Compose CLI:
+An ordinary or Harbor-adapted Compose project builds with the Compose CLI:
 
 ```bash
+cd .hud-adapt/<environment>/compose-project
 docker compose build
-```
-
-A generated Harbor project has a preparation script that resolves base image configuration, builds
-build-only services, and then runs the project build:
-
-```bash
-cd .hud-adapt/<environment>
-sh build.sh registry.example/acme/task:tag
-docker push registry.example/acme/task:tag
 ```
 
 For a single-image recipe whose Dockerfile consumes a local `hud` named context, the direct
 BuildKit form is below. The `hud/` directory must contain every file named by the Dockerfile;
-generated Harbor projects use `build.sh` to materialize their image-configuration inputs before
-this build step.
+Harbor adaptation has already captured the authored image configuration before this build step.
 
 ```bash
 cd compose-project
@@ -208,9 +198,9 @@ docker build \
   ./environment
 ```
 
-`service:` additional contexts require the Compose build graph; use `docker compose build` or the
-generated `build.sh` when the project contains build-only services. Both forms require a Docker
-builder with BuildKit named context support.
+`service:` additional contexts require the Compose build graph; use `docker compose build` when the
+project contains build-only services. Both forms require a Docker builder with BuildKit named
+context support.
 
 ## Run an image directly
 
