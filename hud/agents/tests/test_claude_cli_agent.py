@@ -28,7 +28,7 @@ from hud.agents.claude.cli.agent import ClaudeCLIAgent, claude_command, run_clau
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
-from hud.eval import InferenceAccess
+from hud.eval import InferenceConnection
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolResult
@@ -65,10 +65,10 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
     assert "ANTHROPIC_MODEL=claude-sonnet-5" in provider
 
 
-def test_command_prefers_rollout_inference_access() -> None:
-    inference = InferenceAccess(
+def test_command_prefers_rollout_inference_connection() -> None:
+    inference = InferenceConnection(
         base_url="https://inference.hud.so",
-        api_key="scoped-runtime-token",
+        credential="scoped-runtime-token",
     )
 
     gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash", inference=inference)
@@ -77,6 +77,15 @@ def test_command_prefers_rollout_inference_access() -> None:
     assert "ANTHROPIC_API_KEY=scoped-runtime-token" in gateway
     assert "HUD_API_KEY" not in gateway
     assert "Trace-Id" not in gateway
+    for name in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert f"{name}=claude-sonnet-5" in gateway
 
 
 def test_windows_command_encodes_environment_and_arguments(

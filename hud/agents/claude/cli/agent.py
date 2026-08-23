@@ -31,7 +31,7 @@ from . import computer_mcp
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
-    from hud.eval.run import InferenceAccess, Run
+    from hud.eval.run import InferenceConnection, Run
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def claude_command(
     shell: str,
     mcp_config_path: str | None = None,
     executable: str = "claude",
-    inference: InferenceAccess | None = None,
+    inference: InferenceConnection | None = None,
 ) -> str:
     env: dict[str, str] = {}
     use_hud_gateway = config.use_hud_gateway
@@ -178,7 +178,7 @@ def claude_command(
     if use_hud_gateway:
         if inference is not None:
             base_url = inference.base_url
-            api_key = inference.api_key
+            api_key = inference.credential
         elif settings.api_key:
             base_url = settings.hud_gateway_url
             api_key = settings.api_key
@@ -254,7 +254,7 @@ async def run_claude(
     mcp_servers: dict[str, dict[str, Any]],
     prompt: str,
     executable: str = "claude",
-    inference: InferenceAccess | None = None,
+    inference: InferenceConnection | None = None,
 ) -> None:
     files: dict[str, str] = {}
     input_text = (
