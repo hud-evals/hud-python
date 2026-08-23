@@ -89,18 +89,22 @@ async def test_subprocess_runtime_streams_environment_output(
 ) -> None:
     source = tmp_path / "env.py"
     source.write_text(
+        "import sys\n\n"
         "from hud import Environment\n\n"
         'env = Environment("sums")\n\n'
         "@env.initialize\n"
         "async def start():\n"
-        '    print("environment booted", flush=True)\n',
+        '    print("environment booted", flush=True)\n'
+        '    print("environment warning", file=sys.stderr, flush=True)\n',
         encoding="utf-8",
     )
 
     async with SubprocessRuntime(source)(Task(env="sums", id="add")):
         pass
 
-    assert "environment booted" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "environment booted" in captured.out
+    assert "environment warning" in captured.err
 
 
 async def test_constructor_builds_fresh_per_rollout_from_the_row() -> None:

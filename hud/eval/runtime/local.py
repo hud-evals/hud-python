@@ -181,13 +181,23 @@ class SubprocessRuntime:
             *cmd,
             term_timeout=10.0,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+            stderr=asyncio.subprocess.PIPE,
             cwd=self.source if self.source.is_dir() else self.source.parent,
         )
-        assert proc.stdout is not None
         output = proc.stdout
+        error = proc.stderr
+        assert output is not None
+        assert error is not None
         output_tail: deque[str] = deque(maxlen=50)
-        drain: asyncio.Task[None] | None = None
+        error_tail: deque[str] = deque(maxlen=50)
+        stdout_drain: asyncio.Task[None] | None = None
+
+        async def stream_stderr() -> None:
+            while line := await error.readline():
+                error_tail.append(line.decode("utf-8", "replace").strip())
+                write_output(sys.stderr, line)
+
+        stderr_drain = asyncio.create_task(stream_stderr())
         try:
             from hud.environment.server import PORT_ANNOUNCEMENT
 
@@ -202,16 +212,18 @@ class SubprocessRuntime:
                     write_output(sys.stdout, line)
             if port is None:
                 code = await proc.wait()
-                tail = "\n".join(output_tail).strip()
+                await finish_output(stderr_drain)
+                tail = "\n".join((*output_tail, *error_tail)).strip()
                 detail = f":\n{tail}" if tail else " (no output captured)"
                 raise RuntimeError(
                     f"spawned env exited with code {code} before serving "
                     f"(source: {self.source}){detail}"
                 )
 
-            drain = asyncio.create_task(stream_output(output, sys.stdout))
+            stdout_drain = asyncio.create_task(stream_output(output, sys.stdout))
             yield Runtime(f"tcp://127.0.0.1:{port}")
         finally:
             await proc.terminate()
-            if drain is not None:
-                await finish_output(drain)
+            await finish_output(
+                *(task for task in (stdout_drain, stderr_drain) if task is not None)
+            )
