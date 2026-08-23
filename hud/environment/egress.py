@@ -211,6 +211,20 @@ class WorkspaceRoute:
         return {"capability": self.capability, "host": self.host, "port": self.port}
 
     @classmethod
+    def from_url(cls, capability: str, url: str) -> WorkspaceRoute:
+        """Build a host route for one HTTP(S) endpoint."""
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme not in {"http", "https"} or parts.hostname is None:
+            raise ValueError("workspace route URL must be HTTP(S) with a hostname")
+        if parts.username is not None or parts.password is not None:
+            raise ValueError("workspace route URL must not contain credentials")
+        return cls(
+            capability=capability,
+            host=parts.hostname,
+            port=parts.port or (443 if parts.scheme == "https" else 80),
+        )
+
+    @classmethod
     def from_wire(cls, value: object) -> WorkspaceRoute:
         if not isinstance(value, dict):
             raise ValueError("workspace routes must be objects")
