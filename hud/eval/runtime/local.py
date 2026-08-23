@@ -193,31 +193,49 @@ class SubprocessRuntime:
         stdout_drain: asyncio.Task[None] | None = None
 
         async def stream_stderr() -> None:
-            while line := await error.readline():
-                error_tail.append(line.decode("utf-8", "replace").strip())
-                write_output(sys.stderr, line)
+            while chunk := await error.read(65536):
+                error_tail.append(chunk.decode("utf-8", "replace").strip()[-1024:])
+                write_output(sys.stderr, chunk)
 
         stderr_drain = asyncio.create_task(stream_stderr())
         try:
             from hud.environment.server import PORT_ANNOUNCEMENT
 
             port = None
+            line_continues = False
             async with asyncio.timeout(self.ready_timeout):
-                while line := await output.readline():
+                while True:
+                    eof = False
+                    try:
+                        line = await output.readuntil()
+                    except asyncio.LimitOverrunError as exc:
+                        line = await output.read(exc.consumed)
+                        line_continues = True
+                    except asyncio.IncompleteReadError as exc:
+                        line = exc.partial
+                        eof = True
+                    if not line:
+                        break
                     text = line.decode("utf-8", "replace").strip()
-                    if text.startswith(PORT_ANNOUNCEMENT):
+                    if not line_continues and text.startswith(PORT_ANNOUNCEMENT):
                         port = int(text.removeprefix(PORT_ANNOUNCEMENT))
                         break
-                    output_tail.append(text)
+                    output_tail.append(text[-1024:])
                     write_output(sys.stdout, line)
+                    line_continues = not line.endswith(b"\n")
+                    if eof:
+                        break
             if port is None:
-                code = await proc.wait()
                 await finish_output(stderr_drain)
                 tail = "\n".join((*output_tail, *error_tail)).strip()
                 detail = f":\n{tail}" if tail else " (no output captured)"
+                status = (
+                    f"exited with code {proc.returncode}"
+                    if proc.returncode is not None
+                    else "closed stdout"
+                )
                 raise RuntimeError(
-                    f"spawned env exited with code {code} before serving "
-                    f"(source: {self.source}){detail}"
+                    f"spawned env {status} before serving (source: {self.source}){detail}"
                 )
 
             stdout_drain = asyncio.create_task(stream_output(output, sys.stdout))

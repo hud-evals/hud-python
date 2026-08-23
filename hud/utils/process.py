@@ -26,6 +26,10 @@ async def stream_output(
     source: AsyncIterable[str] | AsyncIterable[bytes],
     output: TextIO,
 ) -> None:
+    if isinstance(source, asyncio.StreamReader):
+        while chunk := await source.read(65536):
+            write_output(output, chunk)
+        return
     async for chunk in source:
         write_output(output, chunk)
 

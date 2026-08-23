@@ -94,7 +94,9 @@ async def test_subprocess_runtime_streams_environment_output(
         'env = Environment("sums")\n\n'
         "@env.initialize\n"
         "async def start():\n"
+        '    print("x" * 100_000, flush=True)\n'
         '    print("environment booted", flush=True)\n'
+        '    print("y" * 100_000, file=sys.stderr, flush=True)\n'
         '    print("environment warning", file=sys.stderr, flush=True)\n',
         encoding="utf-8",
     )
@@ -103,8 +105,35 @@ async def test_subprocess_runtime_streams_environment_output(
         pass
 
     captured = capsys.readouterr()
+    assert "x" * 100_000 in captured.out
     assert "environment booted" in captured.out
+    assert "y" * 100_000 in captured.err
     assert "environment warning" in captured.err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
+async def test_subprocess_runtime_fails_when_stdout_closes_before_serving(tmp_path) -> None:
+    source = tmp_path / "env.py"
+    source.write_text(
+        "import asyncio\n"
+        "import os\n"
+        "import sys\n\n"
+        "from hud import Environment\n\n"
+        'env = Environment("closed")\n\n'
+        "@env.initialize\n"
+        "async def start():\n"
+        "    os.close(sys.stdout.fileno())\n"
+        '    print("stdout closed", file=sys.stderr, flush=True)\n'
+        "    await asyncio.sleep(120)\n",
+        encoding="utf-8",
+    )
+
+    async def run() -> None:
+        async with SubprocessRuntime(source, ready_timeout=30)(Task(env="closed", id="noop")):
+            pass
+
+    with pytest.raises(RuntimeError, match=r"(?s)closed stdout.*stdout closed"):
+        await asyncio.wait_for(run(), timeout=3)
 
 
 async def test_constructor_builds_fresh_per_rollout_from_the_row() -> None:
