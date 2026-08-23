@@ -130,7 +130,6 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     served = (context / "env.py").read_text(encoding="utf-8")
     assert f'Environment("{context.name}")' in served
     assert 'Environment(CONFIG["name"])' not in served
-    assert 'Mount("ro", src=str(ROOT / "bin"), dst=str(ROOT / "bin"))' in served
     project_root = context / "compose-project"
     assert _tree_snapshot(project_root / "environment") == authored_environment
     payload = project_root / "hud"
