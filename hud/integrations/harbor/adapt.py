@@ -32,7 +32,9 @@ from hud.utils.naming import normalize_environment_name
 
 LOGGER = logging.getLogger(__name__)
 ASSETS = Path(__file__).parent
-HUD_ROOT = Path("/media/hud")
+CONTROLLER_ROOT = Path("/controller")
+MOUNTS_ROOT = Path("/mounts")
+TASK_ROOT = Path("/rootfs")
 IGNORED = shutil.ignore_patterns(
     "__pycache__",
     "*.pyc",
@@ -488,12 +490,6 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                         "harbor.invalid.sidecar_recipe",
                         f"Compose service {service_name!r} has neither image nor build",
                     )
-        workdir = environment.workdir or compose_main.working_dir
-        if workdir is not None and Path(workdir).is_relative_to(HUD_ROOT):
-            add(
-                "harbor.invalid.reserved_workdir",
-                f"Harbor workdir {workdir!r} is inside reserved path {HUD_ROOT}",
-            )
         for port in sorted(compose_main.tcp_ports & {BRIDGE_PORT, VISITOR_PORT, 8765}):
             add(
                 "harbor.invalid.reserved_main_port",
@@ -517,7 +513,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                 stage_names = {
                     stage_name.lower() for _, stage_name in stages if stage_name is not None
                 }
-                reserved_names = {"hud-base", "hud-runtime"}
+                reserved_names = {"hud-authored-root", "hud-base", "hud-runtime"}
                 if config.verifier.separate:
                     reserved_names.update({"hud-docker-cli", "hud-verifier", "hud-verifier-root"})
                 for stage in sorted(reserved_names & stage_names):
@@ -626,6 +622,35 @@ def adapt(
                         update={"image": f"hud-harbor-sidecar:{sidecar_tag}"}
                     )
         compose_main = compose.services["main"] if compose is not None else ComposeService()
+        workspace_mounts: list[dict[str, Any]] = []
+        if compose_project is not None:
+            main = compose_project.services["main"]
+            runtime_volumes: list[str | dict[str, Any]] = []
+            for index, volume in enumerate(main.volumes):
+                if isinstance(volume, str):
+                    parts = volume.split(":")
+                    target_index = 0 if len(parts) == 1 else 1
+                    target = PurePosixPath(parts[target_index])
+                    if not target.is_absolute():
+                        raise ValueError(f"Compose main volume target must be absolute: {volume!r}")
+                    read_only = len(parts) > 2 and "ro" in parts[2].split(",")
+                    parts[target_index] = str(MOUNTS_ROOT / str(index))
+                    runtime_volumes.append(":".join(parts))
+                else:
+                    target_value = volume.get("target")
+                    target = PurePosixPath(target_value) if isinstance(target_value, str) else None
+                    if target is None or not target.is_absolute():
+                        raise ValueError(f"Compose main volume target must be absolute: {volume!r}")
+                    read_only = volume.get("read_only") is True
+                    runtime_volumes.append({**volume, "target": str(MOUNTS_ROOT / str(index))})
+                workspace_mounts.append(
+                    {
+                        "source": str(MOUNTS_ROOT / str(index)),
+                        "target": str(target),
+                        "read_only": read_only,
+                    }
+                )
+            compose_project.services["main"] = main.model_copy(update={"volumes": runtime_volumes})
         dockerfile = source.dockerfile
         base_image = source.base_image
 
@@ -710,12 +735,13 @@ def adapt(
             }
         manifest = {
             "name": name,
+            "mounts": workspace_mounts,
             "workdir": workdir,
             "image_user": compose_main.user,
             "image_env": {},
             "entrypoint": compose_main.entrypoint if compose is not None else None,
             "ports": sorted(ports),
-            "verifier_root": str(HUD_ROOT / "verifier") if separate else None,
+            "verifier_root": "/verifier" if separate else None,
             "verifier_image": {
                 "user": None,
                 "workdir": verifier_environment.workdir,
@@ -756,7 +782,7 @@ def adapt(
         requirement = hud_requirement
         if wheel.suffix == ".whl" and wheel.is_file():
             shutil.copy2(wheel, payload / "packages" / wheel.name)
-            requirement = f"{HUD_ROOT}/packages/{wheel.name}"
+            requirement = f"{CONTROLLER_ROOT}/packages/{wheel.name}"
 
         tag = _tree_hash(payload)
         image = f"hud-harbor:{name}-{tag}"
@@ -766,9 +792,9 @@ def adapt(
             for item in (*task.config.verifier.collect, *task.config.artifacts)
         )
         runtime_command = [
-            "/media/hud/venv/bin/hud",
+            "/controller/venv/bin/hud",
             "serve",
-            "/media/hud/env.py",
+            "/controller/env.py",
             "--host",
             "0.0.0.0",  # noqa: S104 - container control channel
             "--port",
@@ -814,25 +840,31 @@ def adapt(
                 else ""
             )
             verifier_copies = (
-                "COPY --from=hud-docker-cli /usr/local/bin/docker /media/hud/bin/docker\n"
-                "COPY --from=hud-verifier-root / /media/hud/verifier\n"
+                "COPY --from=hud-docker-cli /usr/local/bin/docker /controller/bin/docker\n"
+                "COPY --from=hud-verifier-root / /verifier\n"
                 if separate
                 else ""
             )
             combined += f"""{verifier_stages}
-FROM {base_stage} AS hud-runtime
+FROM {base_stage} AS hud-authored-root
+USER root
+COPY --from=hud install.sh /tmp/hud-install.sh
+RUN sh /tmp/hud-install.sh --system-only && rm /tmp/hud-install.sh
+
+FROM python:3.12-slim AS hud-runtime
 
 USER root
-COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /media/hud/bin/uv
-COPY --from=hud env.py install.sh config.json image-config.json /media/hud/
-COPY --from=hud verifier-image-config.json /media/hud/
-COPY --from=hud packages /media/hud/packages
-RUN sh /media/hud/install.sh {shlex.quote(requirement)}
+COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /controller/bin/uv
+COPY --from=hud env.py install.sh config.json image-config.json /controller/
+COPY --from=hud verifier-image-config.json /controller/
+COPY --from=hud packages /controller/packages
+COPY --from=hud-authored-root / /rootfs
+RUN sh /controller/install.sh {shlex.quote(requirement)} && mkdir -p /runtime
 {verifier_copies}
 ENV HUD_SKIP_VERSION_CHECK=1
 EXPOSE 8765
 ENTRYPOINT []
-CMD ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["/controller/venv/bin/hud","serve","/controller/env.py","--host","0.0.0.0","--port","8765"]
 """
             (project / "Dockerfile").write_bytes(combined.encode("utf-8"))
 
@@ -950,7 +982,7 @@ CMD ["/media/hud/venv/bin/hud", "serve", "/media/hud/env.py", "--host", "0.0.0.0
                 )
             main = compose_project.services["main"]
             compose_project.services["main"] = main.model_copy(
-                update={"volumes": [*main.volumes, "./tests:/media/hud/tests:ro"]}
+                update={"volumes": [*main.volumes, "./tests:/controller/tests:ro"]}
             )
         project_compose = context / "compose-project" / "compose.json"
         project_compose.write_text(
