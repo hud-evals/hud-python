@@ -665,7 +665,11 @@ timeout_sec = 120
     # process proves itself, so an early abort is only observable from the
     # adapted artifact: run its main service in the foreground.
     subprocess.run(
-        ["sh", "build.sh"], cwd=compose.parent, check=True, capture_output=True, timeout=600
+        ["docker", "compose", "--file", str(compose), "build"],
+        cwd=compose.parent,
+        check=True,
+        capture_output=True,
+        timeout=600,
     )
     command = ["docker", "compose", "--file", str(compose), "run", "--rm", "main"]
     try:
@@ -819,15 +823,18 @@ def test_adapter_install_ignores_vendor_uv_configuration(
     (adapted,) = _adapt(dataset, hud_requirement=str(wheel))
     assert adapted.runtime_config is not None
     assert adapted.runtime_config.compose is not None
+    compose = adapted.runtime_config.compose.document
     context = adapted.runtime_config.compose.root
+    assert isinstance(compose, Path)
     assert isinstance(context, Path)
 
     build = subprocess.run(
-        ["sh", str(context / "build.sh")],
+        ["docker", "compose", "--file", str(compose), "build"],
+        cwd=compose.parent,
         capture_output=True,
         text=True,
         check=False,
-        timeout=300,
+        timeout=600,
     )
 
     assert build.returncode == 0, build.stdout[-4000:] + build.stderr[-4000:]

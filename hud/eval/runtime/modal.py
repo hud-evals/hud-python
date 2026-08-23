@@ -341,13 +341,10 @@ class ModalRuntime:
                     "mkdir -p /hud/project /runtime && "
                     "tar -xzf /hud/project.tar.gz -C /hud/project && "
                     "until docker info >/dev/null 2>&1; do sleep 1; done && "
-                    "BUILD_FLAG=--build && "
-                    "if [ -f /hud/project/build.sh ]; then "
-                    "sh /hud/project/build.sh && BUILD_FLAG=--no-build; fi && "
                     f"docker compose --project-directory {shlex.quote(project_directory)} "
                     f"--file {shlex.quote(compose_path)} "
                     "--file /hud/override.json --file /hud/ports.yaml "
-                    'up --detach "$BUILD_FLAG" --remove-orphans'
+                    "up --detach --build --remove-orphans"
                 )
                 try:
                     async with asyncio.timeout(ready_timeout):
