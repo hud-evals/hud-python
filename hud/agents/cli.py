@@ -14,20 +14,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from hud.capabilities import SSHClient
-    from hud.environment.platform_inference import InferenceBinding
     from hud.eval.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 PROCESS_CLOSE_TIMEOUT_S = 5.0
-
-
-def require_platform_isolation(ssh: SSHClient, binding: InferenceBinding | None) -> None:
-    """Refuse a platform credential binding when the remote shell is not isolated."""
-    if binding is not None and ssh.capability.params.get("isolation") != "bwrap":
-        raise RuntimeError(
-            "platform inference requires a bwrap-isolated workspace; refusing to expose "
-            "the workspace-local binding to an unisolated SSH session"
-        )
 
 
 async def resolve_executable(

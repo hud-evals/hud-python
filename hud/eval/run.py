@@ -27,10 +27,12 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
+from urllib.parse import urlsplit
 
 import mcp.types as mcp_types
 
 from hud.clients import HudProtocolError, connect
+from hud.environment import WorkspaceRoute
 from hud.graders.results import SubScore
 from hud.telemetry.context import set_trace_context
 from hud.types import Step, TaskCall, Trace
@@ -50,6 +52,35 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceAccess:
+    """Scoped inference access for an agent running inside a workspace."""
+
+    base_url: str
+    api_key: str = field(repr=False)
+    workspace: str = "ssh"
+
+    def __post_init__(self) -> None:
+        parts = urlsplit(self.base_url)
+        if parts.scheme not in {"http", "https"} or parts.hostname is None:
+            raise ValueError("inference base_url must be an HTTP(S) URL with a hostname")
+        if parts.username is not None or parts.password is not None:
+            raise ValueError("inference base_url must not contain credentials")
+        if parts.query or parts.fragment:
+            raise ValueError("inference base_url must not contain a query or fragment")
+        if not self.api_key:
+            raise ValueError("inference api_key must not be empty")
+
+    def workspace_route(self) -> WorkspaceRoute:
+        parts = urlsplit(self.base_url)
+        assert parts.hostname is not None
+        return WorkspaceRoute(
+            capability=self.workspace,
+            host=parts.hostname,
+            port=parts.port or (443 if parts.scheme == "https" else 80),
+        )
 
 
 def validate_rollout_timeouts(
@@ -200,12 +231,14 @@ class Run:
         *,
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
+        inference: InferenceAccess | None = None,
     ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
+        self.inference = inference
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -445,6 +478,7 @@ async def rollout(
     group_id: str | None = None,
     trace_id: str | None = None,
     rollout_timeout: float | None = None,
+    inference: InferenceAccess | None = None,
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
@@ -535,7 +569,8 @@ async def rollout(
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
                 _phase = "starting task"
-                async with connect(addr) as actor_client:
+                workspace_routes = (inference.workspace_route(),) if inference is not None else ()
+                async with connect(addr, workspace_routes=workspace_routes) as actor_client:
                     client = actor_client
                     live = Run(
                         actor_client,
@@ -543,6 +578,7 @@ async def rollout(
                         task.args,
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
+                        inference=inference,
                     )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
@@ -684,4 +720,4 @@ def _consume_task_result(task: asyncio.Future[Any]) -> None:
         task.result()
 
 
-__all__ = ["Grade", "Run", "rollout"]
+__all__ = ["Grade", "InferenceAccess", "Run", "rollout"]

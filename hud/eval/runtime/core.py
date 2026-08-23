@@ -170,7 +170,6 @@ class Runtime:
     url: str
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
-    inference: RuntimeInference | None = field(default=None, repr=False, compare=False)
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
@@ -184,15 +183,6 @@ class Runtime:
     async def restore_session(self, session_id: str, source: Path) -> None:
         """Restore a portable archive into one control session."""
         validate_session_id(session_id)
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeInference:
-    """Controller-only material the environment binds as a workspace-local peer."""
-
-    upstream_url: str
-    token: str = field(repr=False)
-    trace_id: str | None = None
 
 
 class Shared:

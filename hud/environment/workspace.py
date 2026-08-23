@@ -641,11 +641,11 @@ class Workspace:
         if self._hosts_path is not None:
             self._hosts_path = self._write_hosts()
 
-    def remove_peer(self, name: str) -> None:
+    def remove_peer(self, peer: Peer) -> None:
         """Remove a substrate service after the workspace has stopped."""
         if self._sandbox is not None:
             raise RuntimeError("workspace peers must be unbound after its sandbox stops")
-        self.peers = tuple(peer for peer in self.peers if peer.name != name)
+        self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
         if self._hosts_path is not None:
             self._hosts_path = self._write_hosts()
 

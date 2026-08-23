@@ -185,6 +185,45 @@ class Peer:
         return self.target or ("127.0.0.1", self.port)
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceRoute:
+    """A controller-provided host route exposed through one workspace capability."""
+
+    capability: str
+    host: str
+    port: int
+
+    def __post_init__(self) -> None:
+        if not self.capability or self.capability.strip() != self.capability:
+            raise ValueError("workspace route capability must not be empty or padded")
+        if not self.host or self.host.strip() != self.host or any(c.isspace() for c in self.host):
+            raise ValueError("workspace route host must be a hostname without whitespace")
+        try:
+            ipaddress.ip_address(self.host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("workspace routes require a hostname, not an IP address")
+        if not 1 <= self.port <= 65535:
+            raise ValueError("workspace route port must be between 1 and 65535")
+
+    def to_wire(self) -> dict[str, str | int]:
+        return {"capability": self.capability, "host": self.host, "port": self.port}
+
+    @classmethod
+    def from_wire(cls, value: object) -> WorkspaceRoute:
+        if not isinstance(value, dict):
+            raise ValueError("workspace routes must be objects")
+        capability = value.get("capability")
+        host = value.get("host")
+        port = value.get("port")
+        if not isinstance(capability, str) or not isinstance(host, str):
+            raise ValueError("workspace route capability and host must be strings")
+        if isinstance(port, bool) or not isinstance(port, int):
+            raise ValueError("workspace route port must be an integer")
+        return cls(capability=capability, host=host, port=port)
+
+
 def bind_addresses(
     peers: Sequence[Peer],
     *,
@@ -665,6 +704,7 @@ __all__ = [
     "VISITOR_PORT",
     "Egress",
     "Peer",
+    "WorkspaceRoute",
     "bind_addresses",
     "hosts_text",
     "permitted",

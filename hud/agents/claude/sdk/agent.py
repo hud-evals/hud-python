@@ -21,7 +21,6 @@ from hud.agents.cli import (
     WINDOWS_SHELLS,
     powershell,
     powershell_quote,
-    require_platform_isolation,
     resolve_executable,
     run_jsonl,
 )
@@ -35,8 +34,7 @@ from .events import ClaudeEvents
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
-    from hud.environment.platform_inference import InferenceBinding
-    from hud.eval.run import Run
+    from hud.eval.run import InferenceAccess, Run
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +64,6 @@ class ClaudeCLIAgent(Agent):
     async def __call__(self, run: Run) -> None:
         mcp_servers: dict[str, dict[str, Any]] = {}
         ssh = cast("SSHClient", await run.client.open("ssh"))
-        require_platform_isolation(ssh, run.client.inference)
         manifest = run.client.manifest
         assert manifest is not None
         bindings = manifest.bindings
@@ -114,7 +111,7 @@ class ClaudeCLIAgent(Agent):
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
                 executable=executable,
-                inference=run.client.inference,
+                inference=run.inference,
             )
 
     async def _exec(
@@ -126,7 +123,7 @@ class ClaudeCLIAgent(Agent):
         mcp_servers: dict[str, dict[str, Any]],
         prompt: str,
         executable: str = "claude",
-        inference: InferenceBinding | None = None,
+        inference: InferenceAccess | None = None,
     ) -> None:
         mcp_config_path = await self._write_mcp_config(ssh, mcp_servers)
         input_text = (
@@ -179,7 +176,7 @@ class ClaudeCLIAgent(Agent):
                 except (OSError, asyncssh.Error):
                     logger.warning("Failed to remove Claude CLI runtime files")
 
-    def _build_env_vars(self, inference: InferenceBinding | None = None) -> dict[str, str]:
+    def _build_env_vars(self, inference: InferenceAccess | None = None) -> dict[str, str]:
         env: dict[str, str] = {}
         use_hud_gateway = self.config.use_hud_gateway
         if use_hud_gateway is None:
@@ -239,7 +236,7 @@ class ClaudeCLIAgent(Agent):
         shell: str,
         mcp_config_path: str | None = None,
         executable: str = "claude",
-        inference: InferenceBinding | None = None,
+        inference: InferenceAccess | None = None,
     ) -> str:
         env_vars = self._build_env_vars(inference)
         is_win = shell in WINDOWS_SHELLS
