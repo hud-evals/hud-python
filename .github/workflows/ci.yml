@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [blank, coding, cua]
+        template: [blank, coding, cua, argument-hints]
 
     steps:
       - name: Check out code

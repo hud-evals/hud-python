@@ -30,6 +30,10 @@ ENVIRONMENT_PRESETS: dict[str, EnvironmentPreset] = {
         "Computer Use",
         "A virtual Linux desktop with deterministic and model-judged grading.",
     ),
+    "argument-hints": EnvironmentPreset(
+        "Argument Hints",
+        "A prompt, data-file attachments, and rubric grading via console form hints.",
+    ),
     "blank": EnvironmentPreset(
         "Blank",
         "A minimal letter-counting task for building an environment from scratch.",

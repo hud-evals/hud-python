@@ -13,6 +13,11 @@ def test_coding_template_registered():
     assert env.tasks["coding-task"].manifest_entry()["id"] == "coding-task"
 
 
+def test_description_declares_prompt_hint():
+    args = env.tasks["coding-task"].manifest_entry()["args"]["properties"]
+    assert args["description"]["x-hud-hint"] == "prompt"
+
+
 @pytest.mark.asyncio
 async def test_coding_task_uses_description_as_prompt(monkeypatch):
     monkeypatch.setattr(coding_env, "_setup", AsyncMock())

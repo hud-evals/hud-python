@@ -1,0 +1,11 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+WORKDIR /hud
+COPY . .
+RUN uv sync
+
+# The solver's shell reads the staged files here.
+RUN mkdir -p /workspace && chmod 777 /workspace
+
+EXPOSE 8765
+CMD ["uv", "run", "hud", "serve", "env.py", "--host", "0.0.0.0", "--port", "8765"]

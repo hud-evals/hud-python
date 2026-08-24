@@ -10,10 +10,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Annotated
 
 from hud.environment import Environment, Workspace
 from hud.graders import EvaluationResult, combine
 from hud.settings import settings
+from pydantic import Field
 
 from grader import JUnitGrader
 
@@ -191,7 +193,7 @@ async def _grade(
 
 @env.template(id="coding-task", description="Modify a repository and grade it with hidden tests.")
 async def coding_task(
-    description: str,
+    description: Annotated[str, Field(json_schema_extra={"x-hud-hint": "prompt"})],
     test_command: str,
     test_patch: str,
     test_path: str,

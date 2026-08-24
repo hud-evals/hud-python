@@ -129,3 +129,9 @@ def test_shannon_research_requires_exact_file_and_open_pages():
             "weight": 1.0,
         },
     ]
+
+
+def test_platform_args_declared():
+    args = M.cua_task.manifest_entry()["args"]["properties"]
+    assert args["prompt"]["x-hud-hint"] == "prompt"
+    assert "hud_api_key" in args

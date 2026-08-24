@@ -5,12 +5,13 @@
 # annotations as real objects.
 import asyncio
 from collections.abc import Awaitable
-from typing import Any
+from typing import Annotated, Any
 
 from hud import Environment
 from hud.capabilities import Capability
 from hud.graders import BashGrader, LLMJudgeGrader, SubScore, combine
 from hud.settings import settings
+from pydantic import Field
 
 env = Environment(name="cua")  # literal name - `hud deploy` static-parses it
 _task_started = False
@@ -42,13 +43,19 @@ async def _up() -> None:
 
 @env.template()
 async def cua_task(
-    prompt: str,
+    prompt: Annotated[str, Field(json_schema_extra={"x-hud-hint": "prompt"})],
     bash_checks: list[dict[str, Any]] | None = None,
     grading_criteria: list[str] | None = None,
+    hud_api_key: str | None = None,
 ):
-    """Run a computer-use task with shell checks, an LLM judge, or both."""
+    """Run a computer-use task with shell checks, an LLM judge, or both.
+
+    Declaring ``hud_api_key`` opts hosted rollouts into key injection for the judge.
+    """
     global _task_started
 
+    if hud_api_key and not settings.api_key:
+        settings.api_key = hud_api_key
     if not bash_checks and not grading_criteria:
         raise ValueError("CUA tasks require at least one grader")
     if any(c.get("weight", 1.0) < 0 for c in (bash_checks or [])):

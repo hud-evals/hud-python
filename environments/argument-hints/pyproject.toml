@@ -1,0 +1,15 @@
+[project]
+name = "argument-hints-env"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["hud[agents]", "httpx>=0.27.0"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "C4", "UP"]
