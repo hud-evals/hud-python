@@ -15,6 +15,9 @@ straight to ``LLMJudgeGrader``, whose input shape they are.
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
@@ -26,7 +29,12 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 env = Environment(name="argument-hints")
 
-WORKSPACE_ROOT = Path("/workspace")
+if workspace_dir := os.environ.get("WORKSPACE_DIR"):
+    WORKSPACE_ROOT = Path(workspace_dir)
+    _LOCAL = False
+else:
+    WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "hud-argument-hints" / str(os.getpid())
+    _LOCAL = True
 FILES_DIRNAME = "files"
 
 _TIMEOUT = httpx.Timeout(30.0, read=300.0)
@@ -34,6 +42,12 @@ _CHUNK = 1 << 20
 
 # The workspace serves the agent a shell and streams its file diffs.
 env.workspace(WORKSPACE_ROOT)
+
+
+@env.shutdown
+async def _cleanup() -> None:
+    if _LOCAL:
+        shutil.rmtree(WORKSPACE_ROOT, ignore_errors=True)
 
 
 class StrictModel(BaseModel):
@@ -73,21 +87,6 @@ class DataFileError(RuntimeError):
     """A referenced data file could not be staged."""
 
 
-def _adopt_api_key(hud_api_key: str | None) -> None:
-    """Adopt the platform-injected key; staging and grading both call HUD APIs.
-
-    The daemon injects ``hud_api_key`` only when the scenario declares it. Local
-    runs fall back to the caller's own ``HUD_API_KEY`` (``settings.api_key``).
-    """
-    key = hud_api_key or settings.api_key
-    if not key:
-        raise RuntimeError(
-            "No HUD API key available: hosted runs inject hud_api_key; set HUD_API_KEY when running elsewhere"
-        )
-    if not settings.api_key:
-        settings.api_key = key
-
-
 def _destination(root: Path, relative: str) -> Path:
     """Resolve a files-directory-relative path, refusing anything that escapes it."""
     candidate = PurePosixPath(relative)
@@ -96,15 +95,20 @@ def _destination(root: Path, relative: str) -> Path:
     return root / candidate
 
 
-async def _stage(refs: list[DataFileRef], root: Path) -> list[dict[str, str]]:
+async def _stage(
+    refs: list[DataFileRef],
+    root: Path,
+    hud_api_key: str | None = None,
+) -> list[dict[str, str]]:
     """Pull each referenced file into ``root``; returns the start-frame declarations."""
     if not refs:
         return []
-    if not settings.api_key:
+    api_key = (hud_api_key or settings.api_key or "").strip()
+    if not api_key:
         raise DataFileError("HUD_API_KEY is unset; the environment cannot read data files")
 
     base = settings.hud_api_url.rstrip("/")
-    headers = {"Authorization": f"Bearer {settings.api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}"}
     declared: list[dict[str, str]] = []
 
     async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
@@ -166,13 +170,14 @@ async def review_files(
     hud_api_key: str | None = None,
 ):
     """Answer a prompt about uploaded files, graded by weighted criteria."""
-    _adopt_api_key(hud_api_key)
     refs = _ATTACHMENTS.validate_python(attachments)
     rows = _CRITERIA.validate_python(criteria)
 
     files_dir = WORKSPACE_ROOT / FILES_DIRNAME
-    files_dir.mkdir(parents=True, exist_ok=True)
-    declared = await _stage(refs, files_dir)
+    # Clear prior tasks' leftovers so staging never writes through a stale symlink.
+    shutil.rmtree(files_dir, ignore_errors=True)
+    files_dir.mkdir(parents=True)
+    declared = await _stage(refs, files_dir, hud_api_key)
 
     listing = "\n".join(f"- {entry['path']}" for entry in declared) or "- (none)"
     # A template that declares no `returns` is sent the agent's final text.

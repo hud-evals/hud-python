@@ -5,6 +5,7 @@ COPY . .
 RUN uv sync
 
 # The solver's shell reads the staged files here.
+ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p /workspace && chmod 777 /workspace
 
 EXPOSE 8765

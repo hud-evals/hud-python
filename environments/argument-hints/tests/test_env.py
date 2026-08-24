@@ -19,16 +19,12 @@ def test_every_editable_argument_declares_its_hint():
     assert properties["prompt"]["x-hud-hint"] == "prompt"
     assert properties["attachments"]["x-hud-hint"] == "data-files"
     assert properties["criteria"]["x-hud-hint"] == "grading"
+    assert "hud_api_key" in properties
+    required = env_module.review_files.manifest_entry()["args"].get("required") or []
+    assert "hud_api_key" not in required
     # The console resolves the reference through the $defs discovery bundles.
     assert properties["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
     assert "file_id" in env_module.review_files.manifest_entry()["args"]["$defs"]["DataFileRef"]["properties"]
-
-
-def test_hud_api_key_is_declared_so_the_platform_injects_it():
-    """The daemon injects the key only for scenarios that declare this argument;
-    dropping it silently breaks staging and grading on hosted runs."""
-    properties = env_module.review_files.manifest_entry()["args"]["properties"]
-    assert "hud_api_key" in properties
 
 
 def test_staging_refuses_a_path_that_leaves_the_files_directory(tmp_path: Path):
@@ -67,6 +63,33 @@ async def test_no_criteria_scores_zero_without_raising():
     assert result.reward == pytest.approx(0.0)
 
 
+async def test_staging_directory_is_cleared_between_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """A prior task's leftovers (including symlinks) must not survive into staging."""
+
+    async def fake_compute_score(**kwargs: object):
+        return SubScore(name="LLMJudgeGrader", value=1.0)
+
+    async def fake_stage(refs, root: Path, hud_api_key=None):
+        return []
+
+    monkeypatch.setattr(env_module.LLMJudgeGrader, "compute_score", fake_compute_score)
+    monkeypatch.setattr(env_module, "_stage", fake_stage)
+    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
+
+    files_dir = tmp_path / env_module.FILES_DIRNAME
+    files_dir.mkdir(parents=True)
+    (files_dir / "escape").symlink_to(tmp_path / "outside")
+
+    task = env_module.review_files.func(prompt="p", attachments=[], criteria=[])
+    await task.asend(None)
+
+    assert files_dir.is_dir()
+    assert list(files_dir.iterdir()) == []
+
+
 async def test_arguments_arrive_as_plain_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -80,7 +103,11 @@ async def test_arguments_arrive_as_plain_json(
 
     staged: list[env_module.DataFileRef] = []
 
-    async def fake_stage(refs: list[env_module.DataFileRef], root: Path):
+    async def fake_stage(
+        refs: list[env_module.DataFileRef],
+        root: Path,
+        hud_api_key: str | None = None,
+    ):
         staged.extend(refs)
         return [{"path": "files/resume.pdf", "file_id": refs[0].file_id}]
 
