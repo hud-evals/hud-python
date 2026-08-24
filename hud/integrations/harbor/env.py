@@ -73,6 +73,28 @@ WORKDIR = Path(CONFIG["workdir"])
 if not WORKDIR.is_absolute():
     raise ValueError(f"Harbor workdir must be absolute: {WORKDIR}")
 TASK_WORKDIR = TASK_ROOT / WORKDIR.relative_to("/")
+GPU_DRIVER_MOUNTS = tuple(
+    Mount("ro", src=str(path), dst=str(path))
+    for path in sorted(
+        (
+            {
+                path
+                for root in (Path("/usr/lib"), Path("/usr/lib64"))
+                if root.is_dir()
+                for path in root.rglob("*.so*")
+                if path.name.startswith(("libcuda.so", "libnvidia-"))
+                and (path.is_file() or path.is_symlink())
+            }
+            | {
+                path
+                for path in Path("/usr/bin").glob("nvidia-*")
+                if path.is_file() or path.is_symlink()
+            }
+        )
+        if Path("/dev/nvidiactl").exists()
+        else set()
+    )
+)
 
 
 def network(phase: dict[str, Any] | None) -> tuple[bool, frozenset[str]]:
@@ -193,6 +215,7 @@ workspace = env.workspace(
         Mount("rw", src=str(TASK_ROOT), dst="/"),
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
+        *GPU_DRIVER_MOUNTS,
     ),
     mounts=agent_mounts,
     credentials_dir=RUNTIME_ROOT / "session-keys",
@@ -640,28 +663,11 @@ def materialized_artifacts(
     artifacts: Path,
     verifier_identity: tuple[int, int] | None,
 ) -> Iterator[list[Mount]]:
-    driver_files = (
-        {
-            path
-            for root in (Path("/usr/lib"), Path("/usr/lib64"))
-            if root.is_dir()
-            for path in root.rglob("*.so*")
-            if path.name.startswith(("libcuda.so", "libnvidia-"))
-            and (path.is_file() or path.is_symlink())
-        }
-        | {
-            path
-            for path in Path("/usr/bin").glob("nvidia-*")
-            if path.is_file() or path.is_symlink()
-        }
-        if Path("/dev/nvidiactl").exists()
-        else set()
-    )
     mounts = [
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
         Mount("rw", src=str(LOGS), dst="/logs"),
-        *(Mount("ro", src=str(path), dst=str(path)) for path in sorted(driver_files)),
+        *GPU_DRIVER_MOUNTS,
     ]
     with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=RUNTIME_ROOT) as directory:
         backup_root = Path(directory)
