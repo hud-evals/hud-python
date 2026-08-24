@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import socket
 import struct
 import sys
@@ -218,6 +217,7 @@ class NamespaceHost:
         terminal_size: tuple[int, int, int, int] = (80, 24, 0, 0),
         persistent: bool = False,
         scope: Literal["session", "environment"] = "session",
+        session_owned: bool = False,
     ) -> NamespaceProcess:
         connection = self._require_connection()
         request = json.dumps(
@@ -229,6 +229,7 @@ class NamespaceHost:
                 "identity": identity,
                 "persistent": persistent,
                 "scope": scope,
+                "session_owned": session_owned,
             }
         )
         if tty:
@@ -323,7 +324,7 @@ class _NamespaceHost:
         self.map_identities = map_identities
         self.ports = ports
         self.holders: dict[Literal["session", "environment"], tuple[ProcessGroup, int]] = {}
-        self.session_used = False
+        self.sessions: list[ProcessGroup] = []
         self.forwarders: list[asyncio.AbstractServer] = []
 
     async def serve(self) -> None:
@@ -472,15 +473,8 @@ class _NamespaceHost:
         return detail.decode(errors="replace").strip() or "sandbox holder did not become ready"
 
     async def _terminate_sessions(self) -> None:
-        if not self.session_used:
-            return
-        self.session_used = False
-        held = self.holders.pop("session", None)
-        if held is not None:
-            holder, holder_pid = held
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(holder_pid, signal.SIGKILL)
-            await holder.terminate()
+        sessions, self.sessions = self.sessions, []
+        await asyncio.gather(*(session.terminate() for session in sessions))
 
     async def _spawn(
         self,
@@ -623,8 +617,8 @@ class _NamespaceHost:
                     if descriptor != -1:
                         os.close(descriptor)
         assert process is not None
-        if scope == "session":
-            self.session_used = True
+        if request["session_owned"]:
+            self.sessions.append(process)
         wait_task = asyncio.create_task(process.wait())
         closed_task = asyncio.create_task(channel.channel.wait_closed())
         try:

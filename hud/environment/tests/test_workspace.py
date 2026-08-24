@@ -9,7 +9,6 @@ import itertools
 import json
 import os
 import shutil
-import signal
 import socket
 import struct
 import subprocess
@@ -858,7 +857,7 @@ async def test_staged_verifier_is_launched_by_the_namespace_host(
 
 
 @pytest.mark.asyncio
-async def test_launch_keeps_an_environment_entrypoint_outside_agent_sessions(
+async def test_launch_can_keep_infrastructure_outside_workload_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = Workspace(tmp_path / "root")
@@ -933,9 +932,8 @@ async def test_namespace_management_does_not_share_process_connections(
 
 
 @pytest.mark.asyncio
-async def test_namespace_host_only_terminates_a_used_session_holder(
+async def test_namespace_host_terminates_session_processes_without_the_holder(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     host = namespace_mod._NamespaceHost(
         tmp_path / "namespace.sock",
@@ -948,18 +946,16 @@ async def test_namespace_host_only_terminates_a_used_session_holder(
     )
     holder = AsyncMock()
     host.holders["session"] = (holder, 7)
-    kill = Mock()
-    monkeypatch.setattr(os, "kill", kill)
+    first = AsyncMock()
+    second = AsyncMock()
+    host.sessions.extend((first, second))
 
     await host._terminate_sessions()
+
+    first.terminate.assert_awaited_once_with()
+    second.terminate.assert_awaited_once_with()
     holder.terminate.assert_not_awaited()
-    kill.assert_not_called()
-
-    host.session_used = True
-    await host._terminate_sessions()
-    kill.assert_called_once_with(7, signal.SIGKILL)
-    holder.terminate.assert_awaited_once_with()
-    holder.wait.assert_not_awaited()
+    assert host.sessions == []
 
 
 @pytest.mark.asyncio

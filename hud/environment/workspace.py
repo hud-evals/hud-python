@@ -1408,7 +1408,7 @@ class Workspace:
             await asyncio.wait_for(sandbox.wait(), 10.0)
 
     async def terminate_sessions(self) -> None:
-        """Kill the agent-visible PID namespace while preserving its environment."""
+        """Terminate session-owned processes while preserving the workload."""
         if self._namespace is not None:
             await self._namespace.terminate_sessions()
 
@@ -1769,6 +1769,7 @@ class Workspace:
                     tty=wants_tty,
                     terminal_size=process.get_terminal_size() if wants_tty else (80, 24, 0, 0),
                     persistent=True,
+                    session_owned=True,
                 )
         except FileNotFoundError as exc:
             if pty_pair is not None:
