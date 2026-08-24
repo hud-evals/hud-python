@@ -21,10 +21,7 @@ def test_every_editable_argument_declares_its_hint():
     assert properties["criteria"]["x-hud-hint"] == "grading"
     # The console resolves the reference through the $defs discovery bundles.
     assert properties["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
-    assert (
-        "file_id"
-        in env_module.review_files.manifest_entry()["args"]["$defs"]["DataFileRef"]["properties"]
-    )
+    assert "file_id" in env_module.review_files.manifest_entry()["args"]["$defs"]["DataFileRef"]["properties"]
 
 
 def test_hud_api_key_is_declared_so_the_platform_injects_it():

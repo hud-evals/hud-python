@@ -82,8 +82,7 @@ def _adopt_api_key(hud_api_key: str | None) -> None:
     key = hud_api_key or settings.api_key
     if not key:
         raise RuntimeError(
-            "No HUD API key available: hosted runs inject hud_api_key; "
-            "set HUD_API_KEY when running elsewhere"
+            "No HUD API key available: hosted runs inject hud_api_key; set HUD_API_KEY when running elsewhere"
         )
     if not settings.api_key:
         settings.api_key = key
@@ -130,9 +129,7 @@ async def _stage(refs: list[DataFileRef], root: Path) -> list[dict[str, str]]:
             # The presigned URL carries its own credentials; ours would be rejected.
             async with client.stream("GET", url) as response:
                 if response.is_error:
-                    raise DataFileError(
-                        f"downloading data file {ref.file_id} failed: {response.status_code}"
-                    )
+                    raise DataFileError(f"downloading data file {ref.file_id} failed: {response.status_code}")
                 with destination.open("wb") as out:
                     async for chunk in response.aiter_bytes(_CHUNK):
                         out.write(chunk)
