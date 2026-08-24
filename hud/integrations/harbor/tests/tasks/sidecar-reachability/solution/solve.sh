@@ -28,8 +28,8 @@ for pid in $(pgrep -x python3); do
     break
   fi
 done
-if [ "$entrypoint_visible" = true ]; then
-  echo "the environment entrypoint process is visible in the agent process namespace" >&2
+if [ "$entrypoint_visible" = false ]; then
+  echo "the environment entrypoint process is absent from the agent process namespace" >&2
   exit 1
 fi
 processes=$(ps -ef)

@@ -232,7 +232,6 @@ async def start_entrypoint() -> NamespaceProcess | None:
         inherit_workspace_env=False,
         no_new_privs=False,
         persistent=True,
-        scope="environment",
     )
     await asyncio.sleep(0)
     if process.returncode is not None:
@@ -265,7 +264,6 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
                 allowed_hosts=None if environment_hosts == agent_hosts else environment_hosts,
                 no_new_privs=False,
                 max_wait=healthcheck["timeout_sec"],
-                scope="environment",
             )
             if result.returncode == 0 and not result.timed_out:
                 break
@@ -437,7 +435,6 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
                 allowed_hosts=None,
                 no_new_privs=False,
                 max_wait=hook["timeout_sec"],
-                scope="environment",
             )
             if execution.timed_out:
                 raise TimeoutError(
