@@ -214,6 +214,7 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert f'Environment("{context.name}")' in served
     assert 'Environment(CONFIG["name"])' not in served
     assert 'Mount("rw", src=str(TASK_ROOT), dst="/")' in served
+    assert served.count("*GPU_DRIVER_MOUNTS") == 2
     project_root = context / "compose-project"
     assert _tree_snapshot(project_root / "environment") == authored_environment
     payload = project_root / "hud"
