@@ -38,6 +38,8 @@ class Task(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     _env: Environment | None = PrivateAttr(default=None)
+    _platform_task_version_id: str | None = PrivateAttr(default=None)
+    _platform_signature: str | None = PrivateAttr(default=None)
 
     env: str = Field(min_length=1)
     id: str = Field(min_length=1)
@@ -92,6 +94,23 @@ class Task(BaseModel):
             if config is not None
             else None
         )
+
+    def _content_signature(self) -> str:
+        return json.dumps(
+            self.model_dump(mode="json", exclude_none=True),
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+
+    def _bind_platform_version(self, task_version_id: str) -> None:
+        self._platform_task_version_id = task_version_id
+        self._platform_signature = self._content_signature()
+
+    def _current_platform_version_id(self) -> str | None:
+        if self._platform_signature != self._content_signature():
+            return None
+        return self._platform_task_version_id
 
     # ─── execution ────────────────────────────────────────────────────
 

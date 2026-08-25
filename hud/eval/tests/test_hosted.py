@@ -227,30 +227,69 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert run.group_id == "g1"
     assert platform.polled == 3
     (path, payload) = platform.posts[0]
-    assert path == "/rollouts/submit"
+    assert path == "/rollouts"
     # Hex ids travel as canonical UUID strings.
     assert payload["trace_id"] == str(uuid.UUID(trace_id))
     assert payload["job_id"] == str(uuid.UUID(job_id))
-    assert payload["env"] == "sums"
-    assert payload["task"] == "add"
-    assert payload["slug"] == "sums-add"
-    assert payload["args"] == {"a": 1, "b": 2}
+    assert payload["target"] == {
+        "type": "inline_task",
+        "env": "sums",
+        "task": "add",
+        "slug": "sums-add",
+        "args": {"a": 1, "b": 2},
+        "verifier": {
+            "env": "judge",
+            "id": "verify",
+            "args": {"expected": 3},
+            "slug": "verify-5579a3e5",
+            "runtime_config": {"resources": {"memory_mb": 4096}},
+        },
+    }
     assert payload["runtime_config"] == {
         "image": "registry.example/sums:latest",
         "resources": {"cpu": 2.0, "gpu": {"type": "L4", "count": 1}},
         "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
     }
-    assert payload["verifier"] == {
-        "env": "judge",
-        "id": "verify",
-        "args": {"expected": 3},
-        "slug": "verify-5579a3e5",
-        "runtime_config": {"resources": {"memory_mb": 4096}},
-    }
     assert payload["group_id"] == "g1"
-    assert payload["agent"]["type"] == "openai_compatible"
-    assert payload["agent"]["config"]["model"] == "test-model"
+    assert payload["agent"]["model"] == "test-model"
     assert payload["agent"]["config"]["timeout_seconds"] == 45.0
+    assert "max_steps" not in payload["agent"]["config"]
+    assert payload["max_steps"] == 10
+
+
+@pytest.mark.asyncio
+async def test_run_uses_stored_version_only_while_platform_task_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _FakePlatform(
+        [
+            {"status": "completed", "reward": 1.0},
+            {"status": "completed", "reward": 1.0},
+        ]
+    )
+    monkeypatch.setattr(
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    version_id = str(uuid.uuid4())
+    task = Task(env="sums", id="add", slug="one", args={"a": 1})
+    task._bind_platform_version(version_id)
+    hosted = HostedRuntime(poll_interval=0.0)
+
+    await hosted.run(task, _agent(), job_id=uuid.uuid4().hex, trace_id=uuid.uuid4().hex)
+    task.args["a"] = 2
+    await hosted.run(task, _agent(), job_id=uuid.uuid4().hex, trace_id=uuid.uuid4().hex)
+
+    assert platform.posts[0][1]["target"] == {
+        "type": "task_version",
+        "task_version_id": version_id,
+    }
+    assert platform.posts[1][1]["target"] == {
+        "type": "inline_task",
+        "env": "sums",
+        "task": "add",
+        "slug": "one",
+        "args": {"a": 2},
+    }
 
 
 @pytest.mark.asyncio
@@ -358,7 +397,7 @@ async def test_omitted_rollout_timeout_allows_long_environment_timeout(
     )
 
     assert run.trace.status == "completed"
-    assert platform.posts[0][0] == "/rollouts/submit"
+    assert platform.posts[0][0] == "/rollouts"
 
 
 @pytest.mark.asyncio
@@ -409,7 +448,7 @@ async def test_taskset_rollout_timeout_reaches_hosted_runtime(
     )
 
     assert job.runs[0].trace.status == "completed"
-    assert platform.posts[0][0] == "/rollouts/submit"
+    assert platform.posts[0][0] == "/rollouts"
 
 
 @pytest.mark.asyncio
@@ -541,7 +580,7 @@ async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.Monke
     class _StuckSubmitPlatform(_FakePlatform):
         async def apost(self, path: str, *, json: Any | None = None) -> Any:
             self.posts.append((path, json or {}))
-            if path == "/rollouts/submit":
+            if path == "/rollouts":
                 await never.wait()
             return {"status": "queued"}
 

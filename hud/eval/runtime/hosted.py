@@ -132,6 +132,13 @@ class HostedRuntime:
                 **spec,
                 "config": {**spec.get("config", {}), **task.agent_config},
             }
+        config = dict(spec.get("config", {}))
+        model = config.pop("model", None)
+        if not isinstance(model, str) or not model:
+            raise ValueError("hosted agent config requires a model")
+        max_steps = config.pop("max_steps", 100)
+        if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps < 1:
+            raise ValueError("hosted agent config requires max_steps to be a positive integer")
         platform = PlatformClient.from_settings()
         if not platform.api_key:
             raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
@@ -139,11 +146,9 @@ class HostedRuntime:
             # The SDK's hex ids travel as canonical UUID strings.
             "trace_id": str(uuid.UUID(trace_id)),
             "job_id": str(uuid.UUID(job_id)),
-            "env": task.env,
-            "task": task.id,
-            "slug": task.slug,
-            "args": task.args,
-            "agent": spec,
+            "target": self._target(task),
+            "agent": {"model": model, "config": config},
+            "max_steps": max_steps,
         }
         if group_id is not None:
             payload["group_id"] = group_id
@@ -151,10 +156,24 @@ class HostedRuntime:
             runtime_config = task.runtime_config.model_dump(mode="json", exclude_unset=True)
             if runtime_config:
                 payload["runtime_config"] = runtime_config
-        if task.verifier is not None:
-            payload["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
-        await platform.apost("/rollouts/submit", json=payload)
+        await platform.apost("/rollouts", json=payload)
         return await self._await_terminal(platform, payload["trace_id"])
+
+    @staticmethod
+    def _target(task: Task) -> dict[str, Any]:
+        task_version_id = task._current_platform_version_id()
+        if task_version_id is not None:
+            return {"type": "task_version", "task_version_id": task_version_id}
+        target: dict[str, Any] = {
+            "type": "inline_task",
+            "env": task.env,
+            "task": task.id,
+            "slug": task.slug,
+            "args": task.args,
+        }
+        if task.verifier is not None:
+            target["verifier"] = task.verifier.model_dump(mode="json", exclude_none=True)
+        return target
 
     @staticmethod
     def _fold(state: dict[str, Any], trace_id: str) -> Run:

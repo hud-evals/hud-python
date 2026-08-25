@@ -58,8 +58,21 @@ def test_fetched_tasks_map_canonical_export_fields(
         "taskset_id": "ts-id",
         "name": "demo",
         "tasks": [
-            {"scenario": "solve", "env": "myenv", "name": "a", "args": {"n": 1}},
-            {"scenario": "fix_bug", "env": "other", "name": "b"},
+            {
+                "task_id": "task-a",
+                "task_version_id": "version-a",
+                "scenario": "solve",
+                "env": "myenv",
+                "name": "a",
+                "args": {"n": 1},
+            },
+            {
+                "task_id": "task-b",
+                "task_version_id": "version-b",
+                "scenario": "fix_bug",
+                "env": "other",
+                "name": "b",
+            },
         ],
     }
 
@@ -76,6 +89,10 @@ def test_fetched_tasks_map_canonical_export_fields(
     assert [(t.env, t.id, t.slug) for t in tasks] == [
         ("myenv", "solve", "a"),
         ("other", "fix_bug", "b"),
+    ]
+    assert [task._current_platform_version_id() for task in tasks] == [
+        "version-a",
+        "version-b",
     ]
 
 

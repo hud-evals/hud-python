@@ -113,7 +113,7 @@ def fetch_taskset_tasks(
 
 def _record_to_task(record: dict[str, Any]) -> Task:
     """Map one platform export record onto the portable row shape."""
-    return Task.model_validate(
+    task = Task.model_validate(
         {
             "env": record.get("env"),
             "id": record.get("scenario") or "",
@@ -126,6 +126,10 @@ def _record_to_task(record: dict[str, Any]) -> Task:
             "verifier": record.get("verifier"),
         }
     )
+    task_version_id = record.get("task_version_id")
+    if isinstance(task_version_id, str):
+        task._bind_platform_version(task_version_id)
+    return task
 
 
 # ─── upload ─────────────────────────────────────────────────────────────
