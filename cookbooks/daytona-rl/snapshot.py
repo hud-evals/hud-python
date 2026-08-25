@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-INPUTS = ("env.py", "bugs.py", "Dockerfile.hud", "pyproject.toml")
+# uv.lock is in here because Dockerfile.hud installs from it (`uv sync --frozen`):
+# a dependency bump with no source change still produces a different image.
+INPUTS = ("env.py", "bugs.py", "Dockerfile.hud", "pyproject.toml", "uv.lock")
 
 
 def snapshot_name(prefix: str = "hud-smoke") -> str:

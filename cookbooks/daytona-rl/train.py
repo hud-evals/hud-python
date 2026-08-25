@@ -96,11 +96,15 @@ async def main(
     # DaytonaRuntime only builds the snapshot on its first acquisition — so take
     # one sandbox first to force the build, then pool against it.
     print("building snapshot (first run only)...", flush=True)
-    async with runtime(fix_calc(variant=0)):
-        pass
+    async with runtime(fix_calc(variant=0)) as warmup:
+        # The pool must sit in the same region the runtime creates sandboxes in,
+        # or Daytona never serves from it. The runtime sets no target, so take
+        # the region from this sandbox rather than assuming one.
+        target = await pool.region_of(warmup.params["instance_id"])
+    print(f"region: {target}", flush=True)
 
     await pool.drop(SNAPSHOT)
-    await pool.create(SNAPSHOT, concurrent)
+    await pool.create(SNAPSHOT, concurrent, target)
     try:
         filled = await pool.wait_full(SNAPSHOT, concurrent)
         if filled < concurrent:

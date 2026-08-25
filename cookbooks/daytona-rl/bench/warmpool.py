@@ -73,7 +73,7 @@ async def wave(n: int, label: str) -> dict:
     return row
 
 
-async def fill_pool(snapshot: str, n: int, timeout_s: int = 600) -> int:
+async def fill_pool(snapshot: str, n: int, target: str, timeout_s: int = 600) -> int:
     """Create the pool, then wait for sandboxes that actually exist.
 
     The pool's own ``current_size`` reports the target roughly 12s before the
@@ -83,7 +83,7 @@ async def fill_pool(snapshot: str, n: int, timeout_s: int = 600) -> int:
     """
     async with _api() as api:
         await WarmPoolsApi(api).create_warm_pool(
-            CreateWarmPool(snapshot=snapshot, pool=n, target="eu")
+            CreateWarmPool(snapshot=snapshot, pool=n, target=target)
         )
     return await pool.wait_full(snapshot, n, timeout_s=timeout_s)
 
@@ -111,8 +111,14 @@ async def main(n: int) -> None:
         built = next(s.name for s in page.items if s.name.startswith(snapshot))
     print(f"pool target snapshot: {built}")
 
+    # Match the pool's region to where the runtime actually creates sandboxes.
+    provider = DaytonaRuntime(built, image=Image.from_dockerfile("Dockerfile.hud"))
+    async with provider(fix_calc(variant=0)) as probe:
+        target = await pool.region_of(probe.params["instance_id"])
+    print(f"region: {target}")
+
     try:
-        filled = await fill_pool(built, n)
+        filled = await fill_pool(built, n, target)
         print(f"pool reported {filled}/{n}\n")
         warm = await wave(n, "warm pool")
     finally:

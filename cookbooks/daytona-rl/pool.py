@@ -54,7 +54,20 @@ async def unclaimed(snapshot: str) -> int:
     return len(warm - claimed)
 
 
-async def create(snapshot: str, size: int, target: str = "eu") -> None:
+async def region_of(sandbox_id: str) -> str:
+    """The region a sandbox actually landed in.
+
+    DaytonaRuntime creates sandboxes without a target, so they go to the org
+    default. Daytona only serves a pooled sandbox when the create request's
+    region matches the pool's, so a hardcoded region silently bills for a pool
+    nobody claims. Read it off a real sandbox instead.
+    """
+    async with _api() as api:
+        sandbox = await SandboxApi(api).get_sandbox(sandbox_id)
+    return str(sandbox.target)
+
+
+async def create(snapshot: str, size: int, target: str) -> None:
     async with _api() as api:
         await WarmPoolsApi(api).create_warm_pool(
             CreateWarmPool(snapshot=snapshot, pool=size, target=target)
