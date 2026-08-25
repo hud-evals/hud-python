@@ -21,15 +21,10 @@ import httpx
 import typer
 
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 
 from .presets import ENVIRONMENT_PRESETS, PRESETS_BY_ID, EnvironmentPreset, materialize_preset
 from .templates import DOCKERFILE_HUD, ENV_PY, PYPROJECT_TOML, TASKS_PY
-
-
-def _python_name(name: str) -> str:
-    """Normalize a package name into a Python-identifier-ish env name."""
-    name = name.replace("-", "_").replace(" ", "_")
-    return "".join(c if c.isalnum() or c == "_" else "_" for c in name)
 
 
 def _resolve_preset(preset: str | None, hud_console: HUDConsole) -> EnvironmentPreset | None:
@@ -157,7 +152,7 @@ def init_command(
             raise typer.Exit(1) from exc
         hud_console.status_item(f"{chosen.owner}/{chosen.repo}", "✓")
     else:
-        _write_local_scaffold(target, _python_name(target.name), hud_console)
+        _write_local_scaffold(target, normalize_environment_name(target.name), hud_console)
 
     hud_console.section_title("Next Steps")
     hud_console.info("")

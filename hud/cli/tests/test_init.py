@@ -40,7 +40,7 @@ def test_init_scaffolds_a_runnable_package(tmp_path: Path) -> None:
     }
 
     env_py = (target / "env.py").read_text()
-    assert 'Environment(name="my_cool_env")' in env_py
+    assert 'Environment(name="my-cool-env")' in env_py
     assert (target / "tasks.py").read_text().startswith('"""')
     assert 'name = "my-cool-env"' in (target / "pyproject.toml").read_text()
 
