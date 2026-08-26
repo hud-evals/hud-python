@@ -27,10 +27,17 @@ from unittest.mock import AsyncMock, Mock
 import asyncssh
 import pytest
 
-from hud.capabilities import SSHClient
+from hud.capabilities import Connection, SSHClient
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
-from hud.environment.egress import Peer, WorkspaceRoute, _field, _UnixServer, _Unrelayable
+from hud.environment.egress import (
+    ConnectionRelay,
+    Peer,
+    WorkspaceRoute,
+    _field,
+    _UnixServer,
+    _Unrelayable,
+)
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessGroup, ProcessResult
 
@@ -1619,6 +1626,65 @@ def test_the_proxy_normalizes_http_framing_in_both_directions(
     assert Chunked.request_transfer is None
 
 
+def test_connection_relay_replaces_credentials_and_preserves_streaming() -> None:
+    import http.client
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Upstream(BaseHTTPRequestHandler):
+        authorization: str | None = None
+        api_key: str | None = None
+        body = b""
+
+        def do_POST(self) -> None:
+            type(self).authorization = self.headers.get("Authorization")
+            type(self).api_key = self.headers.get("X-Api-Key")
+            type(self).body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            self.wfile.write(b"5\r\nfirst\r\n6\r\nsecond\r\n0\r\n\r\n")
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    upstream = HTTPServer(("127.0.0.1", 0), Upstream)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    token = "scoped-runtime-token"
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url=f"http://127.0.0.1:{upstream.server_address[1]}/v1",
+        headers={"Authorization": f"Bearer {token}", "X-Api-Key": token},
+    )
+    relay = ConnectionRelay(connection)
+    relay.start()
+    try:
+        client = http.client.HTTPConnection("127.0.0.1", relay.port, timeout=5)
+        client.request(
+            "POST",
+            "/v1/messages",
+            body=b"request",
+            headers={
+                "Authorization": "Bearer model-visible",
+                "X-Api-Key": "model-visible",
+            },
+        )
+        response = client.getresponse()
+        assert response.status == 200
+        assert response.read() == b"firstsecond"
+        client.close()
+    finally:
+        relay.stop()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join()
+
+    assert Upstream.authorization == f"Bearer {token}"
+    assert Upstream.api_key == token
+    assert Upstream.body == b"request"
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -1854,7 +1920,7 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
     ws = Workspace(tmp_path / "root")
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
     ws._namespace = cast("Any", SimpleNamespace(spawn=capture_spawn))
-    process = SimpleNamespace(term_type=None, command="true")
+    process = SimpleNamespace(term_type=None, command="true", env={})
 
     with pytest.raises(SpawnCaptured) as captured:
         await ws._handle_process(cast("Any", process))

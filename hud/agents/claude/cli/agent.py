@@ -30,8 +30,8 @@ from hud.utils.time import now_iso
 from . import computer_mcp
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
-    from hud.eval.run import InferenceConnection, Run
+    from hud.capabilities import Connection, SSHClient
+    from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
 
@@ -168,17 +168,17 @@ def claude_command(
     shell: str,
     mcp_config_path: str | None = None,
     executable: str = "claude",
-    inference: InferenceConnection | None = None,
+    connection: Connection | None = None,
 ) -> str:
     env: dict[str, str] = {}
     use_hud_gateway = config.use_hud_gateway
     if use_hud_gateway is None:
-        use_hud_gateway = inference is not None or settings.api_key is not None
+        use_hud_gateway = connection is not None or settings.api_key is not None
 
     if use_hud_gateway:
-        if inference is not None:
-            base_url = inference.base_url
-            api_key = inference.credential
+        if connection is not None:
+            base_url = connection.client_url
+            api_key = "hud-process-bound"
         elif settings.api_key:
             base_url = settings.hud_gateway_url
             api_key = settings.api_key
@@ -188,7 +188,7 @@ def claude_command(
         env["ANTHROPIC_API_KEY"] = api_key
         env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
         env["DISABLE_AUTO_COMPACT"] = "1"
-        if inference is None and (trace_id := get_current_trace_id()):
+        if connection is None and (trace_id := get_current_trace_id()):
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
     elif settings.anthropic_api_key:
         env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
@@ -242,7 +242,10 @@ def claude_command(
 
     command = " ".join(shlex.quote(arg) for arg in args)
     env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-    return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {command}'
+    invocation = f"{env_prefix} {command}"
+    if connection is not None:
+        invocation = f"exec env {env_prefix} {command}"
+    return f'export PATH="$HOME/.local/bin:$PATH"; {invocation}'
 
 
 async def run_claude(
@@ -254,7 +257,7 @@ async def run_claude(
     mcp_servers: dict[str, dict[str, Any]],
     prompt: str,
     executable: str = "claude",
-    inference: InferenceConnection | None = None,
+    connection: Connection | None = None,
 ) -> None:
     files: dict[str, str] = {}
     input_text = (
@@ -280,7 +283,7 @@ async def run_claude(
         shell,
         mcp_config_path=mcp_config_path,
         executable=executable,
-        inference=inference,
+        connection=connection,
     )
     if shell in WINDOWS_SHELLS:
         files[RUN_SCRIPT_PATH] = f"@echo off\r\n{command}\r\n"
@@ -296,6 +299,7 @@ async def run_claude(
             command,
             events.consume,
             input_text=None if shell in WINDOWS_SHELLS else input_text,
+            connections=(connection,) if connection is not None else (),
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)
@@ -370,7 +374,7 @@ class ClaudeCLIAgent(Agent):
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
                 executable=executable,
-                inference=run.inference,
+                connection=run.connections.get("inference"),
             )
 
 

@@ -8,7 +8,8 @@ import asyncssh
 import pytest
 
 from hud.capabilities.base import Capability
-from hud.capabilities.ssh import SSHClient, SSHConnectionError
+from hud.capabilities.connection import Connection
+from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST, SSHClient, SSHConnectionError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -77,6 +78,7 @@ class _Connection:
         self.open_error = open_error
         self.open_cancelled = False
         self.commands: list[str] = []
+        self.process_kwargs: dict[str, Any] = {}
 
     def is_closed(self) -> bool:
         return self.closed
@@ -97,7 +99,7 @@ class _Connection:
         return _Completed()
 
     async def create_process(self, *args: object, **kwargs: Any) -> _Process:
-        del kwargs
+        self.process_kwargs = kwargs
         self.commands.append(str(args[0]))
         if self.stall_open:
             try:
@@ -194,6 +196,53 @@ async def test_create_process_reconnects_before_opening_channel(
     reconnect.assert_awaited_once_with(client.capability)
     assert dropped.commands == []
     assert replacement.commands == ["bridge"]
+
+
+async def test_create_process_sends_only_connection_names() -> None:
+    transport = _Connection()
+    capability = _capability()
+    capability.params["process_connections"] = True
+    client = SSHClient(capability, cast("Any", transport))
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-secret"},
+    )
+
+    await client.create_process("agent", connections=(connection,))
+
+    assert transport.process_kwargs["env"] == {PROCESS_CONNECTIONS_REQUEST: '["inference"]'}
+    assert "scoped-secret" not in str(transport.process_kwargs)
+
+
+async def test_create_process_rejects_connections_the_server_did_not_advertise() -> None:
+    client = _client(_Connection())
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-secret"},
+    )
+
+    with pytest.raises(ValueError, match="does not support"):
+        await client.create_process("agent", connections=(connection,))
+
+
+async def test_create_process_rejects_connections_for_another_capability() -> None:
+    transport = _Connection()
+    capability = _capability()
+    capability.params["process_connections"] = True
+    client = SSHClient(capability, cast("Any", transport))
+    connection = Connection(
+        name="inference",
+        capability="other-workspace",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-secret"},
+    )
+
+    with pytest.raises(ValueError, match="do not belong"):
+        await client.create_process("agent", connections=(connection,))
 
 
 async def test_create_process_preserves_reconnect_failure(

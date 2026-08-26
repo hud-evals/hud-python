@@ -24,8 +24,8 @@ from hud.types import MCPToolCall, MCPToolResult, Step
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
-    from hud.eval.run import InferenceConnection, Run
+    from hud.capabilities import Connection, SSHClient
+    from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,7 @@ def codex_command(
     config: CodexCLIConfig,
     shell: str,
     executable: str = "codex",
-    inference: InferenceConnection | None = None,
+    connection: Connection | None = None,
 ) -> str:
     env: dict[str, str] = {}
     args = [
@@ -231,12 +231,12 @@ def codex_command(
 
     use_hud_gateway = config.use_hud_gateway
     if use_hud_gateway is None:
-        use_hud_gateway = inference is not None or settings.api_key is not None
+        use_hud_gateway = connection is not None or settings.api_key is not None
     if use_hud_gateway:
-        if inference is not None:
-            base_url = inference.base_url
-            credential = inference.credential
-            credential_env = "HUD_RUNTIME_INFERENCE_TOKEN"
+        if connection is not None:
+            base_url = connection.client_url
+            credential = "hud-process-bound"
+            credential_env = "HUD_CONNECTION_CREDENTIAL"
         elif settings.api_key:
             base_url = settings.hud_gateway_url
             credential = settings.api_key
@@ -253,7 +253,7 @@ def codex_command(
         }
         for key, value in overrides.items():
             args.extend(["-c", f"{key}={json.dumps(value)}"])
-        if inference is None and (trace_id := get_current_trace_id()):
+        if connection is None and (trace_id := get_current_trace_id()):
             args.extend(
                 [
                     "-c",
@@ -292,7 +292,14 @@ def codex_command(
     env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
     invocation = f"{env_prefix} {command}" if env_prefix else command
     statements = ['export PATH="$HOME/.local/bin:$PATH"', invocation]
-    if isolate_home:
+    if connection is not None:
+        statements = [
+            'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
+            'export CODEX_HOME="$codex_home"',
+            'export PATH="$HOME/.local/bin:$PATH"',
+            f"exec env {env_prefix} {command}",
+        ]
+    elif isolate_home:
         statements = [
             'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
             "trap 'rm -rf -- \"$codex_home\"' EXIT",
@@ -310,12 +317,18 @@ async def run_codex(
     shell: str,
     prompt: str,
     executable: str = "codex",
-    inference: InferenceConnection | None = None,
+    connection: Connection | None = None,
 ) -> None:
-    command = codex_command(config, shell, executable, inference=inference)
+    command = codex_command(config, shell, executable, connection=connection)
     logger.info("SSH exec codex CLI (%d chars)", len(command))
     events = CodexEvents(run, model=config.model, started_at=now_iso())
-    returncode, stderr = await run_jsonl(ssh, command, events.consume, input_text=prompt)
+    returncode, stderr = await run_jsonl(
+        ssh,
+        command,
+        events.consume,
+        input_text=prompt,
+        connections=(connection,) if connection is not None else (),
+    )
     logger.info("exit=%s stderr=%d", returncode, len(stderr))
     events.finish(returncode=returncode, stderr=stderr)
 
@@ -343,7 +356,7 @@ class CodexCLIAgent(Agent):
             shell=ssh.capability.params.get("shell", "bash"),
             prompt=run.prompt_text,
             executable=executable,
-            inference=run.inference,
+            connection=run.connections.get("inference"),
         )
 
 

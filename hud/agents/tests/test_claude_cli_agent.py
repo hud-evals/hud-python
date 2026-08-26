@@ -26,9 +26,8 @@ from mcp.types import ImageContent, TextContent
 from hud.agents.claude.cli import computer_mcp
 from hud.agents.claude.cli.agent import ClaudeCLIAgent, claude_command, run_claude
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
-from hud.capabilities import Capability, SSHClient
+from hud.capabilities import Capability, Connection, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
-from hud.eval import InferenceConnection
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolResult
@@ -65,18 +64,22 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
     assert "ANTHROPIC_MODEL=claude-sonnet-5" in provider
 
 
-def test_command_prefers_rollout_inference_connection() -> None:
-    inference = InferenceConnection(
-        base_url="https://inference.hud.so",
-        credential="scoped-runtime-token",
+def test_command_uses_process_bound_connection_without_its_credential() -> None:
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
     )
 
-    gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash", inference=inference)
+    gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash", connection=connection)
 
-    assert "ANTHROPIC_BASE_URL=https://inference.hud.so" in gateway
-    assert "ANTHROPIC_API_KEY=scoped-runtime-token" in gateway
+    assert f"ANTHROPIC_BASE_URL={connection.client_url}" in gateway
+    assert "ANTHROPIC_API_KEY=hud-process-bound" in gateway
+    assert "scoped-runtime-token" not in gateway
     assert "HUD_API_KEY" not in gateway
     assert "Trace-Id" not in gateway
+    assert "exec env" in gateway
     for name in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_SMALL_FAST_MODEL",
@@ -546,7 +549,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
         cast(
             "Any",
             SimpleNamespace(
-                client=Client(), prompt_text="call the tool", runtime_config=None, inference=None
+                client=Client(), prompt_text="call the tool", runtime_config=None, connections={}
             ),
         )
     )
@@ -620,7 +623,7 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
         cast(
             "Any",
             SimpleNamespace(
-                client=Client(), prompt_text="use the computer", runtime_config=None, inference=None
+                client=Client(), prompt_text="use the computer", runtime_config=None, connections={}
             ),
         )
     )
@@ -713,7 +716,7 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
                 client=Client(),
                 prompt_text="use both screens",
                 runtime_config=None,
-                inference=None,
+                connections={},
             ),
         )
     )
@@ -981,13 +984,13 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
     agent = ClaudeCLIAgent()
     monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute)
     run_a = SimpleNamespace(
-        client=Client(shell_a, ssh_a), prompt_text="first", runtime_config=None, inference=None
+        client=Client(shell_a, ssh_a), prompt_text="first", runtime_config=None, connections={}
     )
     run_b = SimpleNamespace(
         client=Client(shell_b, ssh_b),
         prompt_text="second",
         runtime_config=None,
-        inference=None,
+        connections={},
     )
 
     first = asyncio.create_task(agent(cast("Any", run_a)))

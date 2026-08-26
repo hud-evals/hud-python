@@ -7,6 +7,7 @@ from __future__ import annotations
 
 # Apply patches to third-party libraries early, before other imports
 from . import patches as _patches  # noqa: F401
+from .capabilities import Connection
 from .clients import connect
 from .environment import Environment
 from .eval import (
@@ -16,7 +17,6 @@ from .eval import (
     Grade,
     HostedRuntime,
     HUDRuntime,
-    InferenceConnection,
     Job,
     LocalRuntime,
     Run,
@@ -39,12 +39,12 @@ from .version import __version__
 __all__ = [
     "Chat",
     "ComposeProject",
+    "Connection",
     "DockerRuntime",
     "Environment",
     "Grade",
     "HUDRuntime",
     "HostedRuntime",
-    "InferenceConnection",
     "Job",
     "LocalRuntime",
     "Run",

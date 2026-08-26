@@ -26,6 +26,7 @@ from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from hud.capabilities import Connection
 from hud.graders.results import EvaluationResult
 
 from .egress import WorkspaceRoute
@@ -351,6 +352,18 @@ class _ControlChannel:
                         except ValueError as exc:
                             await error_to(msg_id, -32602, f"hello: {exc}")
                             continue
+                        raw_connections = params.get("connections", [])
+                        if not isinstance(raw_connections, list):
+                            await error_to(msg_id, -32602, "hello: 'connections' must be a list")
+                            continue
+                        try:
+                            connections = [
+                                Connection.from_wire(connection) for connection in raw_connections
+                            ]
+                        except ValueError as exc:
+                            await error_to(msg_id, -32602, f"hello: {exc}")
+                            continue
+                        env.bind_connections(connections)
                         env.bind_workspace_routes(workspace_routes)
                         # env.start() ran before serving, so hook-published
                         # capabilities (e.g. a workspace's ssh address) are
