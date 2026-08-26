@@ -1,0 +1,94 @@
+---
+title: "RL on Daytona sandboxes"
+description: "Run 256 parallel graded rollouts on Daytona and train on the results."
+icon: "/logo/daytona.svg"
+---
+
+Define one coding environment, run it 256 wide on Daytona sandboxes, and train a model on the graded rollouts. This page shows the HUD path. The full walkthrough, with the concurrency and warm-pool measurements, lives in [Daytona's guide](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
+
+<Card title="Open the source" icon="github" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/daytona-rl">
+  The complete project: the environment, the training loop, and the benchmark receipts behind the numbers.
+</Card>
+
+## The environment
+
+One file. A workspace with a shell, a seeded bug in `calc.py`, and a pytest grader that pays 1.0 only when every test passes.
+
+```python
+from hud.environment import Environment
+
+env = Environment(name="smoke")
+ws = env.workspace(WORKSPACE, network=True)
+
+@env.template(id="fix_calc")
+async def fix_calc(variant: int = 0):
+    seed_bug(variant)
+    yield (
+        f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
+    )
+    passed, total = await run_pytest()
+    yield 1.0 if passed == total else 0.0
+```
+
+Run it locally first, no API key needed:
+
+```bash
+hud eval tasks.py claude
+```
+
+## Place rollouts on Daytona
+
+The environment travels as a Docker image. `DaytonaRuntime` builds it into a Daytona snapshot on first run and reuses it after.
+
+```python
+runtime = DaytonaRuntime(SNAPSHOT, image=Image.from_dockerfile("Dockerfile.hud"))
+```
+
+Same task, same agent, one argument changed. A fresh sandbox is usable in about 3 seconds at low concurrency and about 10 at 256 wide, and the full ladder to 256 ran 1,272 creates without a failure. For spin-up numbers, warm pools, and sizing rules, see [Daytona's guide](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
+
+## Train on the graded rollouts
+
+Every rollout already carries what training needs, the tokens and the reward, so training is a few lines against the runs you just watched. No GPUs on your side.
+
+```python
+GROUP, WIDTH, CHUNK = 8, 128, 16
+
+agent = create_agent(MODEL, completion_kwargs={
+    "max_tokens": 2048,
+    "extra_body": {"return_token_ids": True},
+})
+trainer = TrainingClient(MODEL)
+taskset = Taskset("calc", [fix_calc(variant=v) for v in range(16)])
+
+session = await Job.start("calc-rl", group=GROUP)
+for step in range(10):
+    start = len(session.runs)
+    await taskset.run(agent, runtime=runtime, job=session,
+                      group=GROUP, max_concurrent=WIDTH)
+    batch = session.runs[start:]
+    for i in range(0, len(batch), CHUNK):
+        await trainer.forward_backward(batch[i:i + CHUNK],
+                                       loss_fn="importance_sampling", group_size=GROUP)
+    await trainer.optim_step(learning_rate=1e-5)
+```
+
+The `return_token_ids` flag is load-bearing, and chunks must not split groups. Ten steps took a Qwen3.5 4B fork from 35.9% to 81.2% pass rate on held-out bugs it never trained on.
+
+The same runs served three purposes. They tested the environment, measured the model, and became the training batch.
+
+## Run it
+
+<CardGroup cols={2}>
+  <Card title="Source code" icon="github" href="https://github.com/hud-evals/hud-python/tree/main/cookbooks/daytona-rl">
+    Runnable project, plus `bench/` with the concurrency and warm-pool receipts.
+  </Card>
+  <Card title="Training agents" icon="dumbbell" href="/v6/guides/training-agents">
+    How HUD turns tasksets, grouped rollouts, and rewards into a training loop.
+  </Card>
+  <Card title="Designing tasks for training" icon="signal" href="/v6/reference/advice">
+    Build rewards with enough signal to distinguish better trajectories.
+  </Card>
+  <Card title="Daytona sandboxes" icon={<svg className="size-6 m-0! shrink-0 bg-primary dark:bg-primary-light" aria-hidden="true" style={{ maskImage: "url(/logo/daytona.svg)", maskRepeat: "no-repeat", maskPosition: "center", maskSize: "contain", WebkitMaskImage: "url(/logo/daytona.svg)", WebkitMaskRepeat: "no-repeat", WebkitMaskPosition: "center", WebkitMaskSize: "contain" }} />} href="https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook">
+    Spin-up measurements to 256 concurrent, warm pools, and sizing rules.
+  </Card>
+</CardGroup>
