@@ -121,6 +121,7 @@ class OpenAIConfig(AgentConfig):
     text: Any = None  # {"verbosity": "low"|"medium"|"high"}
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
+    prompt_cache_key: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class OpenAIChatConfig(AgentConfig):
@@ -256,6 +257,7 @@ class Usage(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cached_tokens: int | None = None
+    cache_write_tokens: int | None = None
     cost_usd: float | None = None
     llm_call_count: int | None = None
 

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import mcp.types as mcp_types
+from openai import Omit
 from openai.types.responses import ResponseOutputText
 
 from hud.agents.openai.agent import OpenAIAgent, OpenAIRunState
@@ -32,8 +33,16 @@ class FakeOpenAI:
         self.responses = FakeResponses(response)
 
 
-def _agent(response: Any) -> OpenAIAgent:
-    return OpenAIAgent(OpenAIConfig(model="gpt-test", model_client=FakeOpenAI(response)))
+def _agent(
+    response: Any, *, model: str = "gpt-test", prompt_cache_key: str | None = None
+) -> OpenAIAgent:
+    return OpenAIAgent(
+        OpenAIConfig(
+            model=model,
+            model_client=FakeOpenAI(response),
+            prompt_cache_key=prompt_cache_key,
+        )
+    )
 
 
 def test_format_message_shapes_user_text() -> None:
@@ -106,7 +115,7 @@ async def test_get_response_parses_text_and_function_call() -> None:
         usage=SimpleNamespace(
             input_tokens=9,
             output_tokens=4,
-            input_tokens_details=SimpleNamespace(cached_tokens=2),
+            input_tokens_details=SimpleNamespace(cached_tokens=2, cache_write_tokens=3),
         ),
     )
     agent = _agent(response)
@@ -125,6 +134,50 @@ async def test_get_response_parses_text_and_function_call() -> None:
     assert result.usage.prompt_tokens == 9
     assert result.usage.completion_tokens == 4
     assert result.usage.cached_tokens == 2
+    assert result.usage.cache_write_tokens == 3
+
+
+async def test_get_response_caches_gpt_5_6_system_prompt_before_user_input() -> None:
+    agent = _agent(
+        _api_response("resp_cache", []),
+        model="gpt-5.6",
+        prompt_cache_key="shared-agent-v1",
+    )
+    user_message = agent._format_message("user", "dynamic input")
+    state = OpenAIRunState(messages=[user_message])
+
+    await agent.get_response(state, system_prompt="stable instructions")
+
+    call = cast("Any", agent.openai_client.responses).calls[0]
+    assert isinstance(call["instructions"], Omit)
+    assert call["prompt_cache_key"] == "shared-agent-v1"
+    assert call["prompt_cache_options"] == {"mode": "explicit"}
+    assert call["input"] == [
+        {
+            "role": "developer",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "stable instructions",
+                    "prompt_cache_breakpoint": {"mode": "explicit"},
+                }
+            ],
+        },
+        user_message,
+    ]
+
+
+async def test_get_response_keeps_system_prompt_as_instructions_before_gpt_5_6() -> None:
+    agent = _agent(_api_response("resp_legacy", []), model="gpt-5.5")
+    user_message = agent._format_message("user", "input")
+    state = OpenAIRunState(messages=[user_message])
+
+    await agent.get_response(state, system_prompt="instructions")
+
+    call = cast("Any", agent.openai_client.responses).calls[0]
+    assert call["instructions"] == "instructions"
+    assert isinstance(call["prompt_cache_options"], Omit)
+    assert call["input"] == [user_message]
 
 
 async def test_get_response_done_when_no_tool_calls() -> None:

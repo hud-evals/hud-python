@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -16,7 +17,10 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.easy_input_message_param import EasyInputMessageParam
-from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
+from openai.types.responses.response_create_params import (  # noqa: TC002
+    PromptCacheOptions,
+    ToolChoice,
+)
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
     Message,
@@ -39,6 +43,15 @@ if TYPE_CHECKING:
     import mcp.types as mcp_types
 
 logger = logging.getLogger(__name__)
+
+_GPT_MODEL_VERSION = re.compile(r"(?:^|[./])gpt-(\d+)(?:\.(\d+))?(?:-|$)")
+
+
+def _supports_explicit_prompt_caching(model: str) -> bool:
+    match = _GPT_MODEL_VERSION.search(model.lower())
+    if match is None:
+        return False
+    return (int(match.group(1)), int(match.group(2) or 0)) >= (5, 6)
 
 
 @dataclass
@@ -78,6 +91,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         self.reasoning: Reasoning | None = config.reasoning
         self.tool_choice: ToolChoice | None = config.tool_choice
         self.parallel_tool_calls = config.parallel_tool_calls
+        self.prompt_cache_key = config.prompt_cache_key
         self.text = config.text
         self.truncation: Literal["auto", "disabled"] | None = config.truncation
 
@@ -178,6 +192,29 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             else:
                 return AgentStep(content="", done=True)
 
+        explicit_prompt_caching = system_prompt is not None and _supports_explicit_prompt_caching(
+            self._model
+        )
+        if explicit_prompt_caching and oai_state.last_response_id is None:
+            new_items = [
+                Message(
+                    role="developer",
+                    content=[
+                        ResponseInputTextParam(
+                            type="input_text",
+                            text=system_prompt,
+                            prompt_cache_breakpoint={"mode": "explicit"},
+                        )
+                    ],
+                ),
+                *new_items,
+            ]
+
+        instructions_param: str | Omit | None = Omit() if explicit_prompt_caching else system_prompt
+        prompt_cache_options: PromptCacheOptions | Omit = (
+            {"mode": "explicit"} if explicit_prompt_caching else Omit()
+        )
+
         include_param: list[ResponseIncludable] | Omit = Omit()
         if citations_enabled:
             include_param = ["web_search_call.action.sources"]
@@ -212,7 +249,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         response = await self.openai_client.responses.create(
             model=self._model,
             input=new_items,
-            instructions=system_prompt,
+            instructions=instructions_param,
             max_output_tokens=self.max_output_tokens,
             temperature=self.temperature,
             text=self.text if self.text is not None else Omit(),
@@ -223,6 +260,8 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             previous_response_id=(
                 oai_state.last_response_id if oai_state.last_response_id is not None else Omit()
             ),
+            prompt_cache_key=self.prompt_cache_key if self.prompt_cache_key is not None else Omit(),
+            prompt_cache_options=prompt_cache_options,
             truncation=self.truncation if self.truncation is not None else Omit(),
             include=include_param,
         )
@@ -319,6 +358,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                 prompt_tokens=response.usage.input_tokens,
                 completion_tokens=response.usage.output_tokens,
                 cached_tokens=response.usage.input_tokens_details.cached_tokens,
+                cache_write_tokens=response.usage.input_tokens_details.cache_write_tokens,
             )
         # The Responses API has no finish_reason; truncation surfaces as
         # incomplete_details.reason ("max_output_tokens" / "content_filter").
