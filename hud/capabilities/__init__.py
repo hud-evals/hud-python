@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from .base import Capability, CapabilityClient
 from .cdp import CDPClient
+from .connection import Connection
 from .mcp import MCPClient
 from .rfb import RFBClient
 from .ssh import SSHClient
@@ -28,6 +29,7 @@ __all__ = [
     "CDPClient",
     "Capability",
     "CapabilityClient",
+    "Connection",
     "MCPClient",
     "RFBClient",
     "RobotClient",

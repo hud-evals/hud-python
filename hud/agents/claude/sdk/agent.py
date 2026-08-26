@@ -33,8 +33,8 @@ from . import computer_mcp
 from .events import ClaudeEvents
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
-    from hud.eval.run import InferenceConnection, Run
+    from hud.capabilities import Connection, SSHClient
+    from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class ClaudeCLIAgent(Agent):
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
                 executable=executable,
-                inference=run.inference,
+                connection=run.connections.get("inference"),
             )
 
     async def _exec(
@@ -123,7 +123,7 @@ class ClaudeCLIAgent(Agent):
         mcp_servers: dict[str, dict[str, Any]],
         prompt: str,
         executable: str = "claude",
-        inference: InferenceConnection | None = None,
+        connection: Connection | None = None,
     ) -> None:
         mcp_config_path = await self._write_mcp_config(ssh, mcp_servers)
         input_text = (
@@ -147,7 +147,7 @@ class ClaudeCLIAgent(Agent):
             shell=shell,
             mcp_config_path=mcp_config_path,
             executable=executable,
-            inference=inference,
+            connection=connection,
         )
         if shell in WINDOWS_SHELLS:
             await ssh.write_text(RUN_SCRIPT_PATH, f"@echo off\r\n{command}\r\n")
@@ -162,6 +162,7 @@ class ClaudeCLIAgent(Agent):
                 command,
                 events.consume,
                 input_text=None if shell in WINDOWS_SHELLS else input_text,
+                connections=(connection,) if connection is not None else (),
             )
             logger.info("exit=%s stderr=%d", returncode, len(stderr))
             events.finish(returncode=returncode, stderr=stderr)
@@ -176,16 +177,16 @@ class ClaudeCLIAgent(Agent):
                 except (OSError, asyncssh.Error):
                     logger.warning("Failed to remove Claude CLI runtime files")
 
-    def _build_env_vars(self, inference: InferenceConnection | None = None) -> dict[str, str]:
+    def _build_env_vars(self, connection: Connection | None = None) -> dict[str, str]:
         env: dict[str, str] = {}
         use_hud_gateway = self.config.use_hud_gateway
         if use_hud_gateway is None:
-            use_hud_gateway = inference is not None or settings.api_key is not None
+            use_hud_gateway = connection is not None or settings.api_key is not None
 
         if use_hud_gateway:
-            if inference is not None:
-                base_url = inference.base_url
-                api_key = inference.credential
+            if connection is not None:
+                base_url = connection.client_url
+                api_key = "hud-process-bound"
             elif settings.api_key:
                 base_url = settings.hud_gateway_url
                 api_key = settings.api_key
@@ -195,7 +196,7 @@ class ClaudeCLIAgent(Agent):
             env["ANTHROPIC_API_KEY"] = api_key
             env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
             env["DISABLE_AUTO_COMPACT"] = "1"
-            if inference is None and (trace_id := get_current_trace_id()):
+            if connection is None and (trace_id := get_current_trace_id()):
                 env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
         elif settings.anthropic_api_key:
             env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
@@ -236,9 +237,9 @@ class ClaudeCLIAgent(Agent):
         shell: str,
         mcp_config_path: str | None = None,
         executable: str = "claude",
-        inference: InferenceConnection | None = None,
+        connection: Connection | None = None,
     ) -> str:
-        env_vars = self._build_env_vars(inference)
+        env_vars = self._build_env_vars(connection)
         is_win = shell in WINDOWS_SHELLS
         base_args: list[str] = [
             executable,
@@ -272,7 +273,10 @@ class ClaudeCLIAgent(Agent):
         cli_parts = [shlex.quote(a) for a in base_args]
         cli_cmd = " ".join(cli_parts)
         env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
-        return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli_cmd}'
+        invocation = f"{env_prefix} {cli_cmd}"
+        if connection is not None:
+            invocation = f"exec env {env_prefix} {cli_cmd}"
+        return f'export PATH="$HOME/.local/bin:$PATH"; {invocation}'
 
 
 __all__ = ["ClaudeCLIAgent"]

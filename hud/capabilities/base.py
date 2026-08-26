@@ -93,6 +93,7 @@ class Capability:
         shell: str | None = None,
         cwd: str | None = None,
         isolation: Literal["bwrap", "none"] | None = None,
+        process_connections: bool = False,
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
@@ -119,6 +120,8 @@ class Capability:
             params["cwd"] = cwd
         if isolation is not None:
             params["isolation"] = isolation
+        if process_connections:
+            params["process_connections"] = True
         return cls(name=name, protocol="ssh/2", url=normalized, params=params)
 
     @classmethod

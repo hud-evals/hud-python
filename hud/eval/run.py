@@ -27,7 +27,6 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
-from urllib.parse import urlsplit
 
 import mcp.types as mcp_types
 
@@ -45,6 +44,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.agents.base import Agent
+    from hud.capabilities import Connection
     from hud.clients.client import HudClient
     from hud.environment import WorkspaceRoute
 
@@ -53,25 +53,6 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
-
-
-@dataclass(frozen=True, slots=True)
-class InferenceConnection:
-    """Execution-scoped inference connection exposed to a live agent."""
-
-    base_url: str
-    credential: str = field(repr=False)
-
-    def __post_init__(self) -> None:
-        parts = urlsplit(self.base_url)
-        if parts.scheme not in {"http", "https"} or parts.hostname is None:
-            raise ValueError("inference base_url must be an HTTP(S) URL with a hostname")
-        if parts.username is not None or parts.password is not None:
-            raise ValueError("inference base_url must not contain credentials")
-        if parts.query or parts.fragment:
-            raise ValueError("inference base_url must not contain a query or fragment")
-        if not self.credential:
-            raise ValueError("inference credential must not be empty")
 
 
 def validate_rollout_timeouts(
@@ -222,14 +203,14 @@ class Run:
         *,
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
-        inference: InferenceConnection | None = None,
+        connections: Sequence[Connection] = (),
     ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
-        self.inference = inference
+        self.connections = {connection.name: connection for connection in connections}
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -469,7 +450,7 @@ async def rollout(
     group_id: str | None = None,
     trace_id: str | None = None,
     rollout_timeout: float | None = None,
-    inference: InferenceConnection | None = None,
+    connections: Sequence[Connection] = (),
     workspace_routes: Sequence[WorkspaceRoute] = (),
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
@@ -561,7 +542,11 @@ async def rollout(
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
                 _phase = "starting task"
-                async with connect(addr, workspace_routes=workspace_routes) as actor_client:
+                async with connect(
+                    addr,
+                    workspace_routes=workspace_routes,
+                    connections=connections,
+                ) as actor_client:
                     client = actor_client
                     live = Run(
                         actor_client,
@@ -569,7 +554,7 @@ async def rollout(
                         task.args,
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
-                        inference=inference,
+                        connections=connections,
                     )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
@@ -601,7 +586,7 @@ async def rollout(
                                 run.trace.status = "error"
                                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         finally:
-                            run.inference = None
+                            run.connections.clear()
                         _phase = "grading"
 
                     if verifier is not None:
@@ -701,7 +686,7 @@ async def rollout(
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
         assert run is not None  # the body bound it, or the handler synthesized it
-        run.inference = None
+        run.connections.clear()
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id
@@ -715,4 +700,4 @@ def _consume_task_result(task: asyncio.Future[Any]) -> None:
         task.result()
 
 
-__all__ = ["Grade", "InferenceConnection", "Run", "rollout"]
+__all__ = ["Grade", "Run", "rollout"]

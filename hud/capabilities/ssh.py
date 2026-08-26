@@ -5,17 +5,24 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import shlex
-from typing import Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 from urllib.parse import urlsplit
 
 import asyncssh
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from .connection import Connection
 
 from .base import Capability, CapabilityClient
 
 SSH_RECONNECT_ATTEMPTS = 3
 SSH_RECONNECT_BASE_DELAY_S = 0.25
 SSH_SESSION_CLOSE_TIMEOUT_S = 5.0
+PROCESS_CONNECTIONS_REQUEST = "HUD_PROCESS_CONNECTIONS"
 
 
 class SSHConnectionError(ConnectionError):
@@ -75,11 +82,38 @@ class SSHClient(CapabilityClient):
         """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
 
-    async def create_process(self, command: str) -> asyncssh.SSHClientProcess[bytes]:
+    async def create_process(
+        self,
+        command: str,
+        *,
+        connections: Sequence[Connection] = (),
+    ) -> asyncssh.SSHClientProcess[bytes]:
         """Open a binary exec channel after restoring a dropped SSH transport."""
+        if connections and self.capability.params.get("process_connections") is not True:
+            raise ValueError("SSH capability does not support process-bound connections")
+        capability_refs = {
+            self.capability.name,
+            self.capability.protocol,
+            self.capability.protocol.split("/", 1)[0],
+        }
+        if mismatched := [
+            connection.name
+            for connection in connections
+            if connection.capability not in capability_refs
+        ]:
+            raise ValueError(
+                f"connections do not belong to SSH capability {self.capability.name!r}: "
+                f"{', '.join(mismatched)}"
+            )
+        requested = list(dict.fromkeys(connection.name for connection in connections))
         try:
             conn = await self._connection()
-            return await conn.create_process(command, encoding=None)
+            kwargs: dict[str, Any] = {"encoding": None}
+            if requested:
+                kwargs["env"] = {
+                    PROCESS_CONNECTIONS_REQUEST: json.dumps(requested, separators=(",", ":"))
+                }
+            return await conn.create_process(command, **kwargs)
         except asyncssh.ChannelOpenError as exc:
             raise SSHConnectionError("SSH server rejected the session") from exc
         except asyncssh.ConnectionLost as exc:
@@ -274,4 +308,4 @@ def _powershell_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-__all__ = ["SSHClient"]
+__all__ = ["PROCESS_CONNECTIONS_REQUEST", "SSHClient"]
