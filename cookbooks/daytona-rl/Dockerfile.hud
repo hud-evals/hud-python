@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+# Not uv.lock* — Docker lets that glob match nothing, Daytona's builder errors
+# with "Path does not exist: uv.lock*". The lock is committed, so copy it by name.
+COPY pyproject.toml uv.lock ./
+RUN pip install uv && uv sync --frozen --no-dev
+COPY env.py tasks.py bugs.py ./
+
+EXPOSE 8765
+CMD ["uv", "run", "hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]

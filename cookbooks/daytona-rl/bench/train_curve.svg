@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="ui-sans-serif,system-ui,sans-serif">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="64" y="26" font-size="14" font-weight="600" fill="#111">Pass rate over 10 GRPO steps (128 rollouts per step)</text>
+<text x="64" y="43" font-size="11" fill="#666">Qwen3.5-4B on seeded pytest bugs; dashed lines are held-out variants 16-23</text>
+<line x1="64" y1="344.0" x2="590" y2="344.0" stroke="#eee"/>
+<text x="56" y="348.0" font-size="10" fill="#888" text-anchor="end">0%</text>
+<line x1="64" y1="272.0" x2="590" y2="272.0" stroke="#eee"/>
+<text x="56" y="276.0" font-size="10" fill="#888" text-anchor="end">25%</text>
+<line x1="64" y1="200.0" x2="590" y2="200.0" stroke="#eee"/>
+<text x="56" y="204.0" font-size="10" fill="#888" text-anchor="end">50%</text>
+<line x1="64" y1="128.0" x2="590" y2="128.0" stroke="#eee"/>
+<text x="56" y="132.0" font-size="10" fill="#888" text-anchor="end">75%</text>
+<line x1="64" y1="56.0" x2="590" y2="56.0" stroke="#eee"/>
+<text x="56" y="60.0" font-size="10" fill="#888" text-anchor="end">100%</text>
+<line x1="64" y1="240.6" x2="590" y2="240.6" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="5,4"/>
+<text x="598" y="244.6" font-size="10" fill="#9ca3af">held-out before 36%</text>
+<line x1="64" y1="110.1" x2="590" y2="110.1" stroke="#047857" stroke-width="1.5" stroke-dasharray="5,4"/>
+<text x="598" y="114.1" font-size="10" fill="#047857">held-out after 81%</text>
+<polyline points="64.0,238.2 122.4,233.8 180.9,242.7 239.3,215.8 297.8,209.0 356.2,184.2 414.7,161.8 473.1,166.2 531.6,134.7 590.0,152.7" fill="none" stroke="#4338ca" stroke-width="2.5"/>
+<circle cx="64.0" cy="238.2" r="4" fill="#4338ca"/>
+<text x="64.0" y="362.0" font-size="10" text-anchor="middle" fill="#444">0</text>
+<circle cx="122.4" cy="233.8" r="4" fill="#4338ca"/>
+<text x="122.4" y="362.0" font-size="10" text-anchor="middle" fill="#444">1</text>
+<circle cx="180.9" cy="242.7" r="4" fill="#4338ca"/>
+<text x="180.9" y="362.0" font-size="10" text-anchor="middle" fill="#444">2</text>
+<circle cx="239.3" cy="215.8" r="4" fill="#4338ca"/>
+<text x="239.3" y="362.0" font-size="10" text-anchor="middle" fill="#444">3</text>
+<circle cx="297.8" cy="209.0" r="4" fill="#4338ca"/>
+<text x="297.8" y="362.0" font-size="10" text-anchor="middle" fill="#444">4</text>
+<circle cx="356.2" cy="184.2" r="4" fill="#4338ca"/>
+<text x="356.2" y="362.0" font-size="10" text-anchor="middle" fill="#444">5</text>
+<circle cx="414.7" cy="161.8" r="4" fill="#4338ca"/>
+<text x="414.7" y="362.0" font-size="10" text-anchor="middle" fill="#444">6</text>
+<circle cx="473.1" cy="166.2" r="4" fill="#4338ca"/>
+<text x="473.1" y="362.0" font-size="10" text-anchor="middle" fill="#444">7</text>
+<circle cx="531.6" cy="134.7" r="4" fill="#4338ca"/>
+<text x="531.6" y="362.0" font-size="10" text-anchor="middle" fill="#444">8</text>
+<circle cx="590.0" cy="152.7" r="4" fill="#4338ca"/>
+<text x="590.0" y="362.0" font-size="10" text-anchor="middle" fill="#444">9</text>
+<text x="327.0" y="382" font-size="11" fill="#555" text-anchor="middle">training step</text>
+</svg>
