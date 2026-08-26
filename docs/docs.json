@@ -72,7 +72,7 @@
             { "group": "Experimental", "expanded": false, "pages": ["v6/experimental/index", "v6/experimental/harbor", "v6/experimental/compose", "v6/experimental/verifier-environments"] }
           ] },
           { "group": "Cookbooks", "pages": [
-            { "group": "Cookbooks", "expanded": false, "pages": ["v6/cookbooks/index", "v6/cookbooks/fireworks-rl-training", "v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] }
+            { "group": "Cookbooks", "expanded": false, "pages": ["v6/cookbooks/index", "v6/cookbooks/fireworks-rl-training", "v6/cookbooks/daytona-rl", "v6/cookbooks/coding-agent", "v6/cookbooks/ops-diagnostics", "v6/cookbooks/a2a-chat", "v6/cookbooks/robot-benchmark"] }
           ] },
           { "group": "Internals", "pages": [
             { "group": "Internals", "expanded": false, "pages": ["v6/internals/index", "v6/internals/walkthrough", "v6/internals/placement", "v6/internals/control-channel"] }

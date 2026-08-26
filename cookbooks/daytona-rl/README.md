@@ -11,7 +11,7 @@ passes. Ten GRPO steps at 128 parallel rollouts took a Qwen3.5 4B fork from
 ![training curve](bench/train_curve.svg)
 
 The full measured walkthrough — spin-up ladders to 256 concurrent, warm pools,
-and sizing rules — is [the guide on Daytona's docs](DAYTONA_GUIDE_URL). The
+and sizing rules — is [the guide on Daytona's docs](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook). The
 condensed HUD-side walkthrough is
 [on the HUD docs](https://docs.hud.ai/v6/cookbooks/daytona-rl).
 
