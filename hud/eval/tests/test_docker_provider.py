@@ -26,6 +26,7 @@ import hud.eval.runtime.docker as runtime_module
 import hud.utils.process as process_module
 from hud.eval.runtime import (
     DaytonaRuntime,
+    DockerBindMount,
     DockerRuntime,
     ModalRuntime,
     RuntimeConfig,
@@ -602,6 +603,46 @@ async def test_acquisition_publishes_ephemeral_port_and_removes_container(
     assert capsys.readouterr().out == "ImportError: boom\n"
 
 
+async def test_docker_runtime_injects_provider_bind_mount(
+    tmp_path: Path,
+    docker_log: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_docker(tmp_path, port_behavior="echo 127.0.0.1:43210", monkeypatch=monkeypatch)
+    bundle = tmp_path / "agents" / "codex"
+    bundle.mkdir(parents=True)
+
+    provider = DockerRuntime(
+        "img:tag",
+        bind_mounts=(DockerBindMount(bundle, "/usr/local/lib/agents/codex"),),
+    )
+    async with provider(_row()):
+        pass
+
+    assert (await _docker_calls(docker_log))[0] == (
+        f"run --detach --mount type=bind,source={bundle},"
+        "target=/usr/local/lib/agents/codex,readonly "
+        f"{_docker_security_args()} --publish 127.0.0.1::8765 img:tag"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "message"),
+    [
+        ("relative", "/opt/agents", "source must be absolute"),
+        ("/opt/agents", "relative", "target must be absolute"),
+        ("/opt/agents,old", "/opt/agents", "paths cannot contain commas"),
+    ],
+)
+def test_docker_bind_mount_rejects_ambiguous_paths(
+    source: str,
+    target: str,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        DockerBindMount(source, target)
+
+
 async def test_docker_session_archives_inside_the_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -991,6 +1032,53 @@ async def test_docker_runtime_mounts_the_daemon_visible_socket(
             "source": "/vm/run/docker.sock",
             "target": "/media/hud/docker.sock",
         }
+    ]
+
+
+async def test_docker_runtime_stages_provider_mount_with_service_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    bundle = tmp_path / "agents" / "claude"
+    bundle.mkdir(parents=True)
+    rendered: dict[str, Any] = {}
+
+    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        if args[-4:] == ("up", "--detach", "--build", "--remove-orphans"):
+            files = [Path(args[index + 1]) for index, value in enumerate(args) if value == "--file"]
+            rendered.update(json.loads(files[1].read_text("utf-8")))
+        if args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    task = Task(
+        env="any-env",
+        id="t",
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose, service_access=True)),
+    )
+    provider = DockerRuntime(
+        compose_service_socket="/vm/run/docker.sock",
+        bind_mounts=(DockerBindMount(bundle, "/usr/local/lib/agents/claude"),),
+    )
+
+    async with provider(task):
+        pass
+
+    assert rendered["services"]["main"]["volumes"] == [
+        {
+            "type": "bind",
+            "source": str(bundle),
+            "target": "/usr/local/lib/agents/claude",
+            "read_only": True,
+        },
+        {
+            "type": "bind",
+            "source": "/vm/run/docker.sock",
+            "target": "/media/hud/docker.sock",
+        },
     ]
 
 
