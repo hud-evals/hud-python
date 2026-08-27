@@ -283,8 +283,7 @@ def codex_command(
                 "New-Item -ItemType Directory -Force -Path $codexHome | Out-Null",
                 "$env:CODEX_HOME=$codexHome",
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                f"try {{ {invocation} }} finally {{ Remove-Item -Recurse -Force "
-                "$codexHome }",
+                f"try {{ {invocation} }} finally {{ Remove-Item -Recurse -Force $codexHome }}",
                 "exit $hudExitCode",
             ]
         return powershell(";".join(statements))
