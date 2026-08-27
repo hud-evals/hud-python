@@ -27,12 +27,9 @@ def test_url_encodes_repeated_query_parameters() -> None:
     platform = PlatformClient("https://api.example", "key")
 
     assert platform.url(
-        "/qa-agents/results/resources",
-        {"subject_type": "taskset", "subject_ids": ["first", "second"]},
-    ) == (
-        "https://api.example/v2/qa-agents/results/resources?"
-        "subject_type=taskset&subject_ids=first&subject_ids=second"
-    )
+        "/tasks",
+        {"taskset_ids": ["first", "second"]},
+    ) == ("https://api.example/v2/tasks?taskset_ids=first&taskset_ids=second")
 
 
 def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
