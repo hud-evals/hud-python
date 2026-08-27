@@ -237,6 +237,7 @@ def codex_command(
             base_url = connection.client_url
             credential = "hud-process-bound"
             credential_env = "HUD_CONNECTION_CREDENTIAL"
+            args.extend(["--disable", "plugins"])
         elif settings.api_key:
             base_url = settings.hud_gateway_url
             credential = settings.api_key
