@@ -8,7 +8,6 @@ import contextlib
 import json
 import logging
 import os
-import pty
 import shutil
 import signal
 import socket
@@ -21,6 +20,9 @@ import asyncssh
 
 from hud.environment.utils import splice
 from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
+
+if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
+    import pty
 
 _AF_NETLINK = getattr(socket, "AF_NETLINK", 16)
 _NETLINK_ROUTE = getattr(socket, "NETLINK_ROUTE", 0)
