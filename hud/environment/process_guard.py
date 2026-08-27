@@ -191,11 +191,11 @@ def _destination(raw: bytes) -> tuple[str, int] | None:
     return None
 
 
-def _emulate_connect(pid: int, descriptor: int, address: bytes) -> int:
+def _emulate_connect(tgid: int, descriptor: int, address: bytes) -> int:
     pidfd_open = getattr(os, "pidfd_open", None)
     if pidfd_open is None:
         return -errno.ENOSYS
-    pidfd = int(pidfd_open(pid))
+    pidfd = int(pidfd_open(tgid))
     try:
         duplicate = _LIBC.syscall(_PIDFD_GETFD_SYSCALL, pidfd, descriptor, 0)
         if duplicate < 0:
@@ -338,7 +338,7 @@ class ProcessConnectionGuard:
                         response.error = -errno.EPERM
                     else:
                         result = _emulate_connect(
-                            notification.pid,
+                            process_tgid,
                             notification.data.args[0],
                             address,
                         )

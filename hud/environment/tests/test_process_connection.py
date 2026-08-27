@@ -64,6 +64,17 @@ def _fetch_script(url: str) -> str:
     return f"exec {shlex.quote(sys.executable)} -c {shlex.quote(_fetch_source(url))}"
 
 
+def _threaded_fetch_source(url: str) -> str:
+    return (
+        "import threading,urllib.request;"
+        "result=[];"
+        f"request=urllib.request.Request({url!r});"
+        "thread=threading.Thread(target=lambda:result.append("
+        "urllib.request.urlopen(request,timeout=5).read().decode()));"
+        "thread.start();thread.join();print(result[0])"
+    )
+
+
 def _proxy_fetch_source(url: str) -> str:
     return (
         "import http.client,sys;"
@@ -125,6 +136,15 @@ async def test_only_bound_process_reaches_controller_connection(tmp_path: Path) 
             completed = await bound.wait()
             assert completed.returncode == 0
             assert completed.stdout == b"ok\n"
+
+            threaded = await ssh.create_process(
+                f"exec {shlex.quote(sys.executable)} -c "
+                f"{shlex.quote(_threaded_fetch_source(connection.client_url))}",
+                connections=(connection,),
+            )
+            threaded_result = await threaded.wait()
+            assert threaded_result.returncode == 0
+            assert threaded_result.stdout == b"ok\n"
 
             child_source = (
                 "import subprocess,sys;"

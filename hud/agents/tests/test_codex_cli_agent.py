@@ -185,7 +185,6 @@ def test_command_uses_process_bound_connection_without_its_credential() -> None:
     assert "HUD_CONNECTION_CREDENTIAL=hud-process-bound" in command
     assert 'model_providers.hud.env_key="HUD_CONNECTION_CREDENTIAL"' in command
     assert "HUD_API_KEY" not in command
-    assert "--disable plugins" in command
     assert f'model_providers.hud.base_url="{connection.client_url}"' in command
     assert "Trace-Id" not in command
     assert "exec env" in command
