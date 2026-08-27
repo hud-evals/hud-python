@@ -69,6 +69,12 @@ def _request_device_code(client: httpx.Client, hud_console: HUDConsole) -> dict[
         hud_console.info(f"HUD_API_URL={_api_url()}")
         raise typer.Exit(1) from exc
 
+    if response.status_code == 404:
+        hud_console.error(f"No browser login at {_api_url()}{DEVICE_CODE_PATH} (404).")
+        hud_console.info("This HUD deployment does not serve the device flow.")
+        hud_console.info(f"Get your key at: {settings.hud_web_url}/settings")
+        hud_console.info("Set it via: hud set HUD_API_KEY=your-key-here")
+        raise typer.Exit(1)
     if response.status_code != 200:
         hud_console.error(f"HUD API returned {response.status_code} when starting login.")
         hud_console.info(response.text[:500])
