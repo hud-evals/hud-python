@@ -57,6 +57,11 @@ _TH32CS_SNAPTHREAD = 0x00000004
 _INVALID_DWORD = 0xFFFFFFFF
 
 
+def _guarded_process_argv(socket_path: str, argv: Sequence[str]) -> list[str]:
+    guard_path = Path(__file__).with_name("process_guard.py")
+    return [sys.executable, str(guard_path), socket_path, "--", *argv]
+
+
 class _WindowsJob:
     """Windows Job Object which owns a subprocess and all of its descendants."""
 
@@ -1696,15 +1701,13 @@ class Workspace:
                     if process.command is not None
                     else ["bash", "-l"]
                 )
-                guarded_command = [
-                    sys.executable,
-                    "-m",
-                    "hud.environment.process_guard",
+                guarded_command = _guarded_process_argv(
                     guard.sandbox_socket,
-                    "--",
-                    *self._drop_argv(),
-                    *shell_command,
-                ]
+                    [
+                        *self._drop_argv(),
+                        *shell_command,
+                    ],
+                )
                 argv = self.bwrap_argv(
                     guarded_command,
                     env=session_env,

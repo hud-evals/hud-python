@@ -910,6 +910,28 @@ async def test_namespace_management_does_not_share_process_connections(
     management.wait_closed.assert_awaited_once_with()
 
 
+def test_process_guard_executes_packaged_file_without_module_reentry() -> None:
+    argv = workspace_mod._guarded_process_argv("/tmp/guard.sock", ["bash", "-lc", "true"])
+
+    assert argv == [
+        sys.executable,
+        str(Path(workspace_mod.__file__).with_name("process_guard.py")),
+        "/tmp/guard.sock",
+        "--",
+        "bash",
+        "-lc",
+        "true",
+    ]
+    result = subprocess.run(
+        [*argv[:2], "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
 @pytest.mark.asyncio
 async def test_namespace_host_only_terminates_a_used_session_holder(
     tmp_path: Path,
