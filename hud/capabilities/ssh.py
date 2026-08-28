@@ -5,18 +5,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import ntpath
-import os
-import secrets
 import shlex
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
+from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
 
 import asyncssh
-
-if TYPE_CHECKING:
-    from typing import BinaryIO
 
 from .base import Capability, CapabilityClient
 
@@ -226,85 +219,6 @@ class SSHClient(CapabilityClient):
             # AsyncSSH treats empty input as absent; DEVNULL still delivers EOF.
             run_kwargs["stdin"] = asyncssh.DEVNULL
         await self.run(f"cat > {shlex.quote(path)}", check=True, timeout=timeout_s, **run_kwargs)
-
-    async def upload(
-        self,
-        source: str | os.PathLike[str],
-        destination: str,
-        *,
-        executable: bool = False,
-        timeout_s: float | None = None,
-    ) -> None:
-        """Stream a local file into the SSH namespace and install it atomically."""
-        source_path = os.fspath(source)
-        temporary = f"{destination}.hud-upload-{secrets.token_hex(8)}"
-        if self._is_windows:
-            parent = ntpath.dirname(destination) or "."
-            command = _powershell(
-                f"New-Item -ItemType Directory -Force -Path {_powershell_quote(parent)} "
-                "| Out-Null;"
-                f"$out=[IO.File]::Open({_powershell_quote(temporary)},"
-                "[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);"
-                "try{[Console]::OpenStandardInput().CopyTo($out)}finally{$out.Dispose()}"
-            )
-        else:
-            parent = os.path.dirname(destination) or "."
-            command = f"mkdir -p -- {shlex.quote(parent)} && cat > {shlex.quote(temporary)}"
-
-        source_file = cast(
-            "BinaryIO",
-            await asyncio.to_thread(Path(source_path).open, "rb"),
-        )
-        try:
-            process = await self.create_process(command)
-            try:
-                async with asyncio.timeout(timeout_s):
-                    while chunk := await asyncio.to_thread(source_file.read, 1024 * 1024):
-                        process.stdin.write(chunk)
-                        await process.stdin.drain()
-                    process.stdin.write_eof()
-                    completed = await process.wait(check=True, timeout=None)
-                if completed.returncode is None:
-                    raise SSHConnectionError("SSH upload ended without an exit status")
-
-                if self._is_windows:
-                    install = (
-                        f"Move-Item -Force -LiteralPath {_powershell_quote(temporary)} "
-                        f"-Destination {_powershell_quote(destination)}"
-                    )
-                    install_result = await self.run(
-                        _powershell(install),
-                        check=False,
-                        encoding=None,
-                        timeout=timeout_s,
-                    )
-                else:
-                    mode = "0555" if executable else "0444"
-                    install_result = await self.run(
-                        f"chmod {mode} {shlex.quote(temporary)} && "
-                        f"mv -f -- {shlex.quote(temporary)} {shlex.quote(destination)}",
-                        check=False,
-                        encoding=None,
-                        timeout=timeout_s,
-                    )
-                if install_result.returncode != 0:
-                    message = _decode(install_result.stderr).strip()
-                    raise RuntimeError(f"SSH upload install failed: {message}")
-            except BaseException:
-                process.close()
-                cleanup = (
-                    _powershell(
-                        "Remove-Item -Force -ErrorAction SilentlyContinue "
-                        f"-LiteralPath {_powershell_quote(temporary)}"
-                    )
-                    if self._is_windows
-                    else f"rm -f -- {shlex.quote(temporary)}"
-                )
-                with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
-                    await self.run(cleanup, check=False, timeout=SSH_SESSION_CLOSE_TIMEOUT_S)
-                raise
-        finally:
-            await asyncio.to_thread(source_file.close)
 
     async def listdir(self, path: str, *, timeout_s: float | None = None) -> list[str]:
         """List direct children through the exec channel."""
