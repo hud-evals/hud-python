@@ -14,6 +14,8 @@ from mcp.types import TextContent
 from hud.agents.cli import resolve_executable
 from hud.agents.codex import CodexCLIAgent
 from hud.agents.codex.agent import codex_command, run_codex
+from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
+from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
@@ -31,67 +33,6 @@ def _clear_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-class _FakeReader:
-    def __init__(self, value: str, *, pause_after: int | None = None) -> None:
-        self._raw = value.encode()
-        self._lines = self._raw.splitlines(keepends=True)
-        self._pause_after = pause_after
-        self._index = 0
-        self.blocked = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def readline(self) -> bytes:
-        if self._pause_after == self._index:
-            self.blocked.set()
-            await self.release.wait()
-            self._pause_after = None
-        if self._index == len(self._lines):
-            return b""
-        line = self._lines[self._index]
-        self._index += 1
-        return line
-
-    async def read(self) -> bytes:
-        return self._raw
-
-
-class _FakeWriter:
-    def __init__(self) -> None:
-        self.data = b""
-        self.eof = False
-
-    def write(self, data: bytes) -> None:
-        self.data += data
-
-    async def drain(self) -> None:
-        pass
-
-    def write_eof(self) -> None:
-        self.eof = True
-
-
-class _FakeProcess:
-    def __init__(
-        self,
-        stdout: str,
-        *,
-        stderr: str = "",
-        returncode: int | None = 0,
-        pause_after: int | None = None,
-    ) -> None:
-        self.stdin = _FakeWriter()
-        self.stdout = _FakeReader(stdout, pause_after=pause_after)
-        self.stderr = _FakeReader(stderr)
-        self.returncode = returncode
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
-
-    async def wait_closed(self) -> None:
-        pass
-
-
 class _FakeSSH:
     def __init__(self, process: _FakeProcess, *, shell: str = "bash") -> None:
         self.process = process
@@ -106,12 +47,6 @@ class _FakeSSH:
     async def create_process(self, command: str) -> _FakeProcess:
         self.commands.append(command)
         return self.process
-
-
-def _fake_run() -> Any:
-    trace = SimpleNamespace(status=None, content="", extra={})
-    steps: list[Any] = []
-    return SimpleNamespace(trace=trace, record=steps.append, steps=steps)
 
 
 _STREAM_JSON = (

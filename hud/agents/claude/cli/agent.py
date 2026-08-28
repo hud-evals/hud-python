@@ -163,147 +163,13 @@ class ClaudeEvents:
             raise RuntimeError(error)
 
 
-def claude_command(
-    config: ClaudeCLIConfig,
-    shell: str,
-    mcp_config_path: str | None = None,
-    executable: str = "claude",
-) -> str:
-    env: dict[str, str] = {}
-    use_hud_gateway = config.use_hud_gateway
-    if use_hud_gateway is None:
-        use_hud_gateway = settings.api_key is not None
-
-    if use_hud_gateway:
-        if not settings.api_key:
-            raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-        env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
-        env["ANTHROPIC_API_KEY"] = settings.api_key
-        env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-        env["DISABLE_AUTO_COMPACT"] = "1"
-        if trace_id := get_current_trace_id():
-            env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
-    elif settings.anthropic_api_key:
-        env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
-
-    env["ANTHROPIC_MODEL"] = config.model
-    env["ANTHROPIC_SMALL_FAST_MODEL"] = config.model
-
-    # A custom base URL must own every model tier; otherwise background calls
-    # can escape to Anthropic instead of using the configured gateway.
-    if "ANTHROPIC_BASE_URL" in env:
-        for name in (
-            "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            "CLAUDE_CODE_SUBAGENT_MODEL",
-        ):
-            env[name] = config.model
-
-    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-    env["DISABLE_AUTOUPDATER"] = "1"
-    env["IS_SANDBOX"] = "1"
-
-    args: list[str] = [
-        executable,
-        "--verbose",
-        "--input-format=stream-json",
-        "--output-format=stream-json",
-        "--print",
-        f"--permission-mode={config.permission_mode}",
-    ]
-    if config.max_steps > 0:
-        args.append(f"--max-turns={config.max_steps}")
-    if config.system_prompt:
-        args.extend(["--system-prompt", config.system_prompt])
-    for tool in config.allowed_tools:
-        args.extend(["--allowedTools", tool])
-    if mcp_config_path:
-        args.extend(["--mcp-config", mcp_config_path])
-
-    if shell in WINDOWS_SHELLS:
-        script = ";".join(
-            [
-                *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                f"Get-Content -Raw -Encoding UTF8 {powershell_quote(INPUT_PATH)}"
-                f" | & {powershell_quote(executable)} "
-                f"{' '.join(powershell_quote(arg) for arg in args[1:])}",
-                "exit $LASTEXITCODE",
-            ]
-        )
-        return powershell(script)
-
-    command = " ".join(shlex.quote(arg) for arg in args)
-    env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-    return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {command}'
-
-
-async def run_claude(
-    config: ClaudeCLIConfig,
-    run: Run,
-    *,
-    ssh: SSHClient,
-    shell: str,
-    mcp_servers: dict[str, dict[str, Any]],
-    prompt: str,
-    executable: str = "claude",
-) -> None:
-    files: dict[str, str] = {}
-    input_text = (
-        json.dumps(
-            {
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": [{"type": "text", "text": prompt}],
-                },
-            }
-        )
-        + "\n"
-    )
-    mcp_config_path = MCP_CONFIG_PATH if mcp_servers else None
-    if mcp_servers:
-        files[MCP_CONFIG_PATH] = json.dumps({"mcpServers": mcp_servers}, indent=2)
-    if shell in WINDOWS_SHELLS:
-        files[INPUT_PATH] = input_text
-
-    command = claude_command(
-        config,
-        shell,
-        mcp_config_path=mcp_config_path,
-        executable=executable,
-    )
-    if shell in WINDOWS_SHELLS:
-        files[RUN_SCRIPT_PATH] = f"@echo off\r\n{command}\r\n"
-        command = f"cmd /c {RUN_SCRIPT_PATH}"
-
-    try:
-        for path, content in files.items():
-            await ssh.write_text(path, content)
-        logger.info("SSH exec claude CLI (%d chars)", len(command))
-        events = ClaudeEvents(run, started_at=now_iso())
-        returncode, stderr = await run_jsonl(
-            ssh,
-            command,
-            events.consume,
-            input_text=None if shell in WINDOWS_SHELLS else input_text,
-        )
-        logger.info("exit=%s stderr=%d", returncode, len(stderr))
-        events.finish(returncode=returncode, stderr=stderr)
-    finally:
-        if files:
-            if shell in WINDOWS_SHELLS:
-                cleanup = f"cmd /c del /f /q {' '.join(files)} 2>nul"
-            else:
-                cleanup = "rm -f -- " + " ".join(shlex.quote(path) for path in files)
-            try:
-                await ssh.run(cleanup, check=False)
-            except (OSError, asyncssh.Error):
-                logger.warning("Failed to remove Claude CLI runtime files")
-
-
 class ClaudeCLIAgent(Agent):
-    """Runs ``claude`` CLI over SSH inside the environment workspace."""
+    """Runs ``claude`` CLI over SSH inside the env workspace.
+
+    Stateless w.r.t. the env: driven by ``await agent(run)``. SSH is opened
+    live off the run. Environment MCP bindings are used directly; computer MCP
+    servers are bridged over the run's SSH connection.
+    """
 
     config: ClaudeCLIConfig
 
@@ -353,8 +219,7 @@ class ClaudeCLIAgent(Agent):
                         )
                     )
 
-            await run_claude(
-                self.config,
+            await self._exec(
                 run,
                 ssh=ssh,
                 shell=shell,
@@ -362,6 +227,158 @@ class ClaudeCLIAgent(Agent):
                 prompt=run.prompt_text,
                 executable=executable,
             )
+
+    async def _exec(
+        self,
+        run: Run,
+        *,
+        ssh: SSHClient,
+        shell: str,
+        mcp_servers: dict[str, dict[str, Any]],
+        prompt: str,
+        executable: str = "claude",
+    ) -> None:
+        mcp_config_path = await self._write_mcp_config(ssh, mcp_servers)
+        input_text = (
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "text", "text": prompt}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        files = [mcp_config_path] if mcp_config_path else []
+        if shell in WINDOWS_SHELLS:
+            await ssh.write_text(INPUT_PATH, input_text)
+            files.append(INPUT_PATH)
+
+        command = self._build_cli_command(
+            shell=shell,
+            mcp_config_path=mcp_config_path,
+            executable=executable,
+        )
+        if shell in WINDOWS_SHELLS:
+            await ssh.write_text(RUN_SCRIPT_PATH, f"@echo off\r\n{command}\r\n")
+            files.append(RUN_SCRIPT_PATH)
+            command = f"cmd /c {RUN_SCRIPT_PATH}"
+
+        try:
+            logger.info("SSH exec claude CLI (%d chars)", len(command))
+            events = ClaudeEvents(run, started_at=now_iso())
+            returncode, stderr = await run_jsonl(
+                ssh,
+                command,
+                events.consume,
+                input_text=None if shell in WINDOWS_SHELLS else input_text,
+            )
+            logger.info("exit=%s stderr=%d", returncode, len(stderr))
+            events.finish(returncode=returncode, stderr=stderr)
+        finally:
+            if files:
+                if shell in WINDOWS_SHELLS:
+                    cleanup = f"cmd /c del /f /q {' '.join(files)} 2>nul"
+                else:
+                    cleanup = "rm -f -- " + " ".join(shlex.quote(path) for path in files)
+                try:
+                    await ssh.run(cleanup, check=False)
+                except (OSError, asyncssh.Error):
+                    logger.warning("Failed to remove Claude CLI runtime files")
+
+    def _build_env_vars(self) -> dict[str, str]:
+        env: dict[str, str] = {}
+        use_hud_gateway = self.config.use_hud_gateway
+        if use_hud_gateway is None:
+            use_hud_gateway = settings.api_key is not None
+
+        if use_hud_gateway:
+            if not settings.api_key:
+                raise ValueError("HUD_API_KEY is required for HUD gateway routing")
+            env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
+            env["ANTHROPIC_API_KEY"] = settings.api_key
+            env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+            env["DISABLE_AUTO_COMPACT"] = "1"
+            if trace_id := get_current_trace_id():
+                env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
+        elif settings.anthropic_api_key:
+            env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+
+        env["ANTHROPIC_MODEL"] = self.config.model
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = self.config.model
+
+        # A custom base URL must own every model tier; otherwise background calls
+        # can escape to Anthropic instead of using the configured gateway.
+        if "ANTHROPIC_BASE_URL" in env:
+            for name in (
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                "CLAUDE_CODE_SUBAGENT_MODEL",
+            ):
+                env[name] = self.config.model
+
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        env["DISABLE_AUTOUPDATER"] = "1"
+        env["IS_SANDBOX"] = "1"
+        return env
+
+    async def _write_mcp_config(
+        self,
+        ssh: SSHClient,
+        mcp_servers: dict[str, dict[str, Any]],
+    ) -> str | None:
+        """Write MCP config into the workspace and return its path."""
+        if not mcp_servers:
+            return None
+        await ssh.write_text(
+            MCP_CONFIG_PATH,
+            json.dumps({"mcpServers": mcp_servers}, indent=2),
+        )
+        return MCP_CONFIG_PATH
+
+    def _build_cli_command(
+        self,
+        *,
+        shell: str,
+        mcp_config_path: str | None = None,
+        executable: str = "claude",
+    ) -> str:
+        env = self._build_env_vars()
+        args: list[str] = [
+            executable,
+            "--verbose",
+            "--input-format=stream-json",
+            "--output-format=stream-json",
+            "--print",
+            f"--permission-mode={self.config.permission_mode}",
+        ]
+        if self.config.max_steps > 0:
+            args.append(f"--max-turns={self.config.max_steps}")
+        if self.config.system_prompt:
+            args.extend(["--system-prompt", self.config.system_prompt])
+        for tool in self.config.allowed_tools:
+            args.extend(["--allowedTools", tool])
+        if mcp_config_path:
+            args.extend(["--mcp-config", mcp_config_path])
+
+        if shell in WINDOWS_SHELLS:
+            script = ";".join(
+                [
+                    *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
+                    f"Get-Content -Raw -Encoding UTF8 {powershell_quote(INPUT_PATH)}"
+                    f" | & {powershell_quote(executable)} "
+                    f"{' '.join(powershell_quote(arg) for arg in args[1:])}",
+                    "exit $LASTEXITCODE",
+                ]
+            )
+            return powershell(script)
+
+        command = " ".join(shlex.quote(arg) for arg in args)
+        env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+        return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {command}'
 
 
 __all__ = ["ClaudeCLIAgent"]

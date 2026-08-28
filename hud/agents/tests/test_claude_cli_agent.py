@@ -24,7 +24,9 @@ import pytest
 from mcp.types import ImageContent, TextContent
 
 from hud.agents.claude.cli import computer_mcp
-from hud.agents.claude.cli.agent import ClaudeCLIAgent, claude_command, run_claude
+from hud.agents.claude.cli.agent import ClaudeCLIAgent
+from hud.agents.tests.cli_fakes import FakeProcess as _FakeStreamProcess
+from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
@@ -50,8 +52,10 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings, "api_key", "hud-key")
     monkeypatch.setattr(settings, "anthropic_api_key", "anthropic-key")
 
-    gateway = claude_command(ClaudeCLIConfig(use_hud_gateway=True), "bash")
-    provider = claude_command(ClaudeCLIConfig(use_hud_gateway=False), "bash")
+    gateway_agent = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=True))
+    provider_agent = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=False))
+    gateway = gateway_agent._build_cli_command(shell="bash")
+    provider = provider_agent._build_cli_command(shell="bash")
 
     assert f"ANTHROPIC_BASE_URL={settings.hud_gateway_url}" in gateway
     assert "ANTHROPIC_API_KEY=hud-key" in gateway
@@ -73,7 +77,8 @@ def test_windows_command_encodes_environment_and_arguments(
         max_steps=3,
         system_prompt="don't $expand",
     )
-    command = claude_command(config, "powershell")
+    agent = ClaudeCLIAgent(config)
+    command = agent._build_cli_command(shell="powershell")
 
     encoded = command.rsplit(" ", 1)[1]
     script = base64.b64decode(encoded).decode("utf-16-le")
@@ -84,73 +89,6 @@ def test_windows_command_encodes_environment_and_arguments(
     assert "Get-Content -Raw -Encoding UTF8 '.hud_input.jsonl' | & 'claude'" in script
     assert "'--input-format=stream-json'" in script
     assert "python" not in script
-
-
-class _FakeReader:
-    def __init__(self, value: str, *, pause_after: int | None = None) -> None:
-        self._raw = value.encode()
-        self._lines = self._raw.splitlines(keepends=True)
-        self._pause_after = pause_after
-        self._index = 0
-        self.blocked = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def readline(self) -> bytes:
-        if self._pause_after == self._index:
-            self.blocked.set()
-            await self.release.wait()
-            self._pause_after = None
-        if self._index == len(self._lines):
-            return b""
-        line = self._lines[self._index]
-        self._index += 1
-        return line
-
-    async def read(self) -> bytes:
-        return self._raw
-
-
-class _FakeStreamProcess:
-    def __init__(
-        self,
-        stdout: str,
-        *,
-        stderr: str = "",
-        exit_status: int | None = 0,
-        returncode: int | None = None,
-        pause_after: int | None = None,
-    ) -> None:
-        self.stdin = _FakeWriter()
-        self.stdout = _FakeReader(stdout, pause_after=pause_after)
-        self.stderr = _FakeReader(stderr)
-        self.exit_status = exit_status
-        self.returncode = exit_status if returncode is None else returncode
-        self.closed = False
-        self.terminated = False
-
-    def terminate(self) -> None:
-        self.terminated = True
-
-    def close(self) -> None:
-        self.closed = True
-
-    async def wait_closed(self) -> None:
-        pass
-
-
-class _FakeWriter:
-    def __init__(self) -> None:
-        self.data = bytearray()
-        self.eof = False
-
-    def write(self, data: bytes) -> None:
-        self.data.extend(data)
-
-    async def drain(self) -> None:
-        pass
-
-    def write_eof(self) -> None:
-        self.eof = True
 
 
 class _FakeCompletedProcess:
@@ -212,10 +150,23 @@ class _FakeConn:
         return self._process
 
 
-def _fake_run() -> Any:
-    trace = SimpleNamespace(status=None, content="", extra={})
-    steps: list[Any] = []
-    return SimpleNamespace(trace=trace, record=steps.append, steps=steps)
+async def run_claude(
+    config: ClaudeCLIConfig,
+    run: Any,
+    *,
+    ssh: SSHClient,
+    shell: str,
+    mcp_servers: dict[str, dict[str, Any]],
+    prompt: str,
+) -> None:
+    agent = ClaudeCLIAgent(config)
+    await agent._exec(
+        run,
+        ssh=ssh,
+        shell=shell,
+        mcp_servers=mcp_servers,
+        prompt=prompt,
+    )
 
 
 _STREAM_JSON = (
@@ -515,7 +466,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
 
     agent = ClaudeCLIAgent()
     execute = AsyncMock()
-    monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute)
+    monkeypatch.setattr(agent, "_exec", execute)
 
     await agent(
         cast(
@@ -586,7 +537,7 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
 
     execute_mock = AsyncMock(side_effect=execute)
     monkeypatch.setattr(computer_mcp, "bridge_computer_mcp", bridge)
-    monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute_mock)
+    monkeypatch.setattr(agent, "_exec", execute_mock)
 
     await agent(
         cast(
@@ -673,7 +624,7 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
 
     agent = ClaudeCLIAgent()
     monkeypatch.setattr(computer_mcp, "bridge_computer_mcp", bridge)
-    monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute)
+    monkeypatch.setattr(agent, "_exec", execute)
 
     await agent(
         cast(
@@ -931,7 +882,6 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
     seen: list[tuple[Any, SSHClient, str]] = []
 
     async def execute(
-        _config: ClaudeCLIConfig,
         run: Any,
         *,
         ssh: SSHClient,
@@ -946,7 +896,7 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
             await release_first.wait()
 
     agent = ClaudeCLIAgent()
-    monkeypatch.setattr("hud.agents.claude.cli.agent.run_claude", execute)
+    monkeypatch.setattr(agent, "_exec", execute)
     run_a = SimpleNamespace(client=Client(shell_a, ssh_a), prompt_text="first", runtime_config=None)
     run_b = SimpleNamespace(
         client=Client(shell_b, ssh_b), prompt_text="second", runtime_config=None
