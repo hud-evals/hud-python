@@ -23,8 +23,8 @@ import fastmcp
 import pytest
 from mcp.types import ImageContent, TextContent
 
-from hud.agents.claude.cli import computer_mcp
-from hud.agents.claude.cli.agent import ClaudeCLIAgent
+from hud.agents.claude.sdk import computer_mcp
+from hud.agents.claude.sdk.agent import ClaudeCLIAgent
 from hud.agents.tests.cli_fakes import FakeProcess as _FakeStreamProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
@@ -43,7 +43,7 @@ def _clear_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "api_key", None)
     monkeypatch.setattr(settings, "anthropic_api_key", None)
     monkeypatch.setattr(
-        "hud.agents.claude.cli.agent.resolve_executable",
+        "hud.agents.claude.sdk.agent.resolve_executable",
         AsyncMock(return_value="claude"),
     )
 
@@ -773,7 +773,7 @@ async def test_computer_mcp_bridge_uses_controller_python_and_owns_resources(
     assert spawn_args[:3] == (
         sys.executable,
         "-m",
-        "hud.agents.claude.cli.computer_mcp",
+        "hud.agents.claude.sdk.computer_mcp",
     )
     environ = spawn_call.kwargs["env"]
     assert json.loads(environ[computer_mcp.RFB_CAPABILITY_ENV]) == screen.to_manifest()

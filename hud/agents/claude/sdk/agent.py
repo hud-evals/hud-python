@@ -1,4 +1,10 @@
-"""Claude CLI harness over a workspace SSH capability."""
+"""ClaudeCLIAgent — runs ``claude`` CLI over SSH inside the env workspace.
+
+SSH-execs the ``claude`` CLI on the remote workspace so all built-in tools
+(Bash, Read, Write, Edit, Glob, Grep) operate on the env's filesystem.
+MCP capabilities from the manifest are written as MCP server config so the
+CLI can call env-hosted MCP tools too.
+"""
 
 from __future__ import annotations
 
@@ -9,11 +15,8 @@ from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, cast
 
 import asyncssh
-import mcp.types as mcp_types
-from anthropic.types.beta import BetaMessage
 
 from hud.agents.base import Agent
-from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.cli import (
     WINDOWS_SHELLS,
     powershell,
@@ -21,13 +24,13 @@ from hud.agents.cli import (
     resolve_executable,
     run_jsonl,
 )
-from hud.agents.types import ClaudeCLIConfig, ToolStep
+from hud.agents.types import ClaudeCLIConfig
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
-from hud.types import MCPToolCall, MCPToolResult
 from hud.utils.time import now_iso
 
 from . import computer_mcp
+from .events import ClaudeEvents
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
@@ -43,124 +46,6 @@ _MANAGED_CLAUDE_PATHS = {
     "linux-x64": "/media/hud/bin/claude/linux-x64/claude",
     "linux-x64-musl": "/media/hud/bin/claude/linux-x64-musl/claude",
 }
-
-
-class ClaudeEvents:
-    """Translate Claude CLI stream messages into canonical HUD steps."""
-
-    def __init__(self, run: Run, *, started_at: str) -> None:
-        self.run = run
-        self.agent_started_at = started_at
-        self.pending_calls: dict[str, tuple[MCPToolCall, str]] = {}
-        self.saw_result = False
-        self.error: str | None = None
-
-    def consume(self, line: str) -> None:
-        line = line.strip()
-        if not line:
-            return
-        message = json.loads(line)
-        if not isinstance(message, dict):
-            raise ValueError("Claude stream event must be an object")
-        received_at = now_iso()
-        match message.get("type"):
-            case "system" if message.get("subtype") == "init":
-                self.agent_started_at = received_at
-            case "assistant":
-                step = ClaudeAgent.message_to_agent_step(
-                    BetaMessage.model_validate(message["message"])
-                )
-                step.started_at = self.agent_started_at
-                step.ended_at = received_at
-                if step.content:
-                    self.run.trace.content = step.content
-                self.run.record(step)
-                for call in step.tool_calls:
-                    self.pending_calls[call.id] = (call, received_at)
-            case "user":
-                saw_result = False
-                for block in message["message"]["content"]:
-                    if block["type"] != "tool_result":
-                        continue
-                    call_id = block["tool_use_id"]
-                    try:
-                        call, started_at = self.pending_calls.pop(call_id)
-                    except KeyError:
-                        raise ValueError(
-                            f"Claude returned a result for unknown tool call {call_id!r}"
-                        ) from None
-
-                    raw_result = block.get("content")
-                    raw_items = raw_result if isinstance(raw_result, list) else [raw_result]
-                    content: list[mcp_types.ContentBlock] = []
-                    for item in raw_items:
-                        if isinstance(item, str):
-                            content.append(mcp_types.TextContent(type="text", text=item))
-                        elif item["type"] == "text":
-                            content.append(mcp_types.TextContent(type="text", text=item["text"]))
-                        elif item["type"] == "image":
-                            source = item["source"]
-                            content.append(
-                                mcp_types.ImageContent(
-                                    type="image",
-                                    data=source["data"],
-                                    mimeType=source["media_type"],
-                                )
-                            )
-                        else:
-                            raise ValueError(f"unsupported Claude tool result block: {item!r}")
-
-                    self.run.record(
-                        ToolStep(
-                            call=call,
-                            result=MCPToolResult(
-                                call_id=call_id,
-                                content=content,
-                                isError=block.get("is_error") is True,
-                            ),
-                            started_at=started_at,
-                            ended_at=received_at,
-                        )
-                    )
-                    saw_result = True
-                if saw_result:
-                    self.agent_started_at = received_at
-            case "result":
-                self.saw_result = True
-                trace = self.run.trace
-                result = message.get("result")
-                if isinstance(result, str):
-                    trace.content = result
-                if message.get("is_error") is True:
-                    self.error = trace.content or "claude CLI reported an error"
-                for key in (
-                    "subtype",
-                    "session_id",
-                    "duration_ms",
-                    "duration_api_ms",
-                    "stop_reason",
-                    "num_turns",
-                    "total_cost_usd",
-                ):
-                    if (value := message.get(key)) is not None:
-                        trace.extra[key] = value
-
-    def finish(self, *, returncode: int, stderr: str) -> None:
-        trace = self.run.trace
-        error = self.error
-        if returncode != 0:
-            trace.extra["returncode"] = returncode
-            error = stderr.strip() or f"claude CLI exited with return code {returncode}"
-        elif not self.saw_result:
-            error = "claude CLI exited without a result event"
-        elif self.pending_calls:
-            missing = ", ".join(sorted(self.pending_calls))
-            error = f"claude CLI exited without results for tool calls: {missing}"
-
-        if error is not None and stderr:
-            trace.extra["stderr"] = stderr
-        if error is not None:
-            raise RuntimeError(error)
 
 
 class ClaudeCLIAgent(Agent):
@@ -309,16 +194,13 @@ class ClaudeCLIAgent(Agent):
         env["ANTHROPIC_MODEL"] = self.config.model
         env["ANTHROPIC_SMALL_FAST_MODEL"] = self.config.model
 
-        # A custom base URL must own every model tier; otherwise background calls
-        # can escape to Anthropic instead of using the configured gateway.
+        # When using a custom base URL, alias all model tiers to the same model
+        # so the CLI doesn't try to reach Anthropic for background requests.
         if "ANTHROPIC_BASE_URL" in env:
-            for name in (
-                "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                "CLAUDE_CODE_SUBAGENT_MODEL",
-            ):
-                env[name] = self.config.model
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
 
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["DISABLE_AUTOUPDATER"] = "1"
@@ -333,11 +215,11 @@ class ClaudeCLIAgent(Agent):
         """Write MCP config into the workspace and return its path."""
         if not mcp_servers:
             return None
-        await ssh.write_text(
-            MCP_CONFIG_PATH,
-            json.dumps({"mcpServers": mcp_servers}, indent=2),
-        )
-        return MCP_CONFIG_PATH
+        mcp_json = json.dumps({"mcpServers": mcp_servers}, indent=2)
+        path = MCP_CONFIG_PATH
+        await ssh.write_text(path, mcp_json)
+        logger.info("Wrote MCP config")
+        return path
 
     def _build_cli_command(
         self,
@@ -346,8 +228,9 @@ class ClaudeCLIAgent(Agent):
         mcp_config_path: str | None = None,
         executable: str = "claude",
     ) -> str:
-        env = self._build_env_vars()
-        args: list[str] = [
+        env_vars = self._build_env_vars()
+        is_win = shell in WINDOWS_SHELLS
+        base_args: list[str] = [
             executable,
             "--verbose",
             "--input-format=stream-json",
@@ -356,29 +239,30 @@ class ClaudeCLIAgent(Agent):
             f"--permission-mode={self.config.permission_mode}",
         ]
         if self.config.max_steps > 0:
-            args.append(f"--max-turns={self.config.max_steps}")
+            base_args.append(f"--max-turns={self.config.max_steps}")
         if self.config.system_prompt:
-            args.extend(["--system-prompt", self.config.system_prompt])
+            base_args.extend(["--system-prompt", self.config.system_prompt])
         for tool in self.config.allowed_tools:
-            args.extend(["--allowedTools", tool])
+            base_args.extend(["--allowedTools", tool])
         if mcp_config_path:
-            args.extend(["--mcp-config", mcp_config_path])
+            base_args.extend(["--mcp-config", mcp_config_path])
 
-        if shell in WINDOWS_SHELLS:
+        if is_win:
             script = ";".join(
                 [
-                    *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
+                    *(f"$env:{key}={powershell_quote(value)}" for key, value in env_vars.items()),
                     f"Get-Content -Raw -Encoding UTF8 {powershell_quote(INPUT_PATH)}"
                     f" | & {powershell_quote(executable)} "
-                    f"{' '.join(powershell_quote(arg) for arg in args[1:])}",
+                    f"{' '.join(powershell_quote(arg) for arg in base_args[1:])}",
                     "exit $LASTEXITCODE",
                 ]
             )
             return powershell(script)
 
-        command = " ".join(shlex.quote(arg) for arg in args)
-        env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-        return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {command}'
+        cli_parts = [shlex.quote(a) for a in base_args]
+        cli_cmd = " ".join(cli_parts)
+        env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
+        return f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli_cmd}'
 
 
 __all__ = ["ClaudeCLIAgent"]

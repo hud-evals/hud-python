@@ -7,7 +7,7 @@ from .agent import (
     AsyncAnthropicBedrock,
     ClaudeAgent,
 )
-from .cli import ClaudeCLIAgent, ClaudeCLIConfig
+from .sdk import ClaudeCLIAgent, ClaudeCLIConfig
 from .tools import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 
 __all__ = [
