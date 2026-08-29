@@ -215,6 +215,7 @@ def codex_command(
     connection: Connection | None = None,
 ) -> str:
     env: dict[str, str] = {}
+    sandbox = "danger-full-access" if connection is not None else config.sandbox
     args = [
         executable,
         "exec",
@@ -224,7 +225,7 @@ def codex_command(
         "--color",
         "never",
         "--sandbox",
-        config.sandbox,
+        sandbox,
         "--model",
         config.model,
     ]

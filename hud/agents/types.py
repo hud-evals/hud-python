@@ -186,6 +186,8 @@ class CodexCLIConfig(AgentConfig):
 
     Without an explicit inference connection or API key, the agent leaves
     ``CODEX_HOME`` unchanged so a login in that execution environment can apply.
+    A process-bound inference connection runs Codex without its inner sandbox;
+    the connection is available only inside the environment's isolated workspace.
     """
 
     model_name: str = "Codex CLI"
