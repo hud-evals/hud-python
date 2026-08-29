@@ -366,22 +366,18 @@ class Taskset:
                 parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
             job.runs.extend(run for part in parts for run in part)
             submission_failed = bool(job.errors)
-            # Drain telemetry before returning. The exporter uploads in parallel and
-            # flush is completion-based (waits for in-flight uploads, not a fixed
-            # sleep), so the timeout is only a safety cap for a wedged network.
-            if not await asyncio.to_thread(flush, timeout=120.0):
-                logger.warning(
-                    "telemetry flush did not fully drain within 120s; some spans may lag"
-                )
-            return job
-        except asyncio.CancelledError:
-            raise
         except Exception:
             submission_failed = True
             raise
         finally:
             if owns_job:
                 await job_exit(job_id, failed=submission_failed)
+        # Drain telemetry before returning. The exporter uploads in parallel and
+        # flush is completion-based (waits for in-flight uploads, not a fixed
+        # sleep), so the timeout is only a safety cap for a wedged network.
+        if not await asyncio.to_thread(flush, timeout=120.0):
+            logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
+        return job
 
 
 __all__ = ["Job", "Taskset"]
