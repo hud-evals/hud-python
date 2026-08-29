@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
 from hud.capabilities import Capability
 
+from .egress import Peer, WorkspaceRoute
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -162,6 +163,8 @@ class Environment:
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         # Per task-session end (cancel / bye / post-grade cleanup).
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
+        self._workspaces: dict[str, Workspace] = {}
+        self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None]] = {}
 
     # ─── task registration ───────────────────────────────────────────
 
@@ -284,7 +287,10 @@ class Environment:
             from hud.settings import settings
 
             track_files = settings.file_tracking_enabled
+        if name in self._workspaces:
+            raise ValueError(f"workspace capability {name!r} is already attached")
         ws = Workspace(root, track_files=track_files, **kwargs)
+        self._workspaces[name] = ws
 
         @self.initialize
         async def _up() -> None:
@@ -349,5 +355,66 @@ class Environment:
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
+        for workspace, peer in reversed(self._workspace_routes.values()):
+            if peer is not None:
+                workspace.remove_peer(peer)
+        self._workspace_routes.clear()
         self._started = False
         self._hooks_done = False
+
+    def bind_workspace_routes(self, routes: Sequence[WorkspaceRoute]) -> None:
+        """Install controller routes before a workspace starts its sandbox."""
+        if not self._started:
+            raise RuntimeError("environment must be started before workspace routes are bound")
+
+        planned: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+        for route in dict.fromkeys(routes):
+            if route in self._workspace_routes:
+                continue
+            workspace = self._workspaces.get(route.capability)
+            if workspace is None and route.capability in {"ssh", "ssh/2"}:
+                if len(self._workspaces) > 1:
+                    names = ", ".join(sorted(self._workspaces))
+                    raise RuntimeError(
+                        f"workspace capability {route.capability!r} is ambiguous: {names}"
+                    )
+                workspace = next(iter(self._workspaces.values()), None)
+            if workspace is None:
+                raise RuntimeError(f"workspace capability {route.capability!r} does not exist")
+            if not workspace.bwrap_available or not workspace.owns_netns:
+                raise RuntimeError(
+                    f"workspace route for {route.capability!r} requires an isolated network"
+                )
+            matching = [
+                peer
+                for peer in workspace.peers
+                if peer.name == route.host and peer.port == route.port
+            ]
+            if matching:
+                if any(peer.address != (route.host, route.port) for peer in matching):
+                    raise RuntimeError(
+                        f"workspace route {route.host}:{route.port} conflicts with an authored peer"
+                    )
+                planned.append((route, workspace, None))
+                continue
+            planned.append(
+                (
+                    route,
+                    workspace,
+                    Peer(route.host, route.port, target=(route.host, route.port)),
+                )
+            )
+
+        bound: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+        try:
+            for route, workspace, peer in planned:
+                if peer is not None:
+                    workspace.add_peer(peer, first=True)
+                self._workspace_routes[route] = (workspace, peer)
+                bound.append((route, workspace, peer))
+        except BaseException:
+            for route, workspace, peer in reversed(bound):
+                if peer is not None:
+                    workspace.remove_peer(peer)
+                self._workspace_routes.pop(route, None)
+            raise

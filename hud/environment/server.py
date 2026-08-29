@@ -28,6 +28,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.graders.results import EvaluationResult
 
+from .egress import WorkspaceRoute
 from .env import Answer, current_session_id
 from .utils import error, read_frame, reply, send_frame, splice
 
@@ -234,7 +235,7 @@ class _ControlChannel:
         self._live: set[str] = set()
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
-        await self.cancel(session_id)
+        await self._cancel_runner(session_id)
         runner = TaskRunner(self.env.tasks[task_id], args)
         self._runners[session_id] = runner
         try:
@@ -269,7 +270,7 @@ class _ControlChannel:
         sid = parked[0]
         return sid, self._runners.pop(sid)
 
-    async def cancel(self, session_id: str) -> None:
+    async def _cancel_runner(self, session_id: str) -> None:
         runner = self._runners.pop(session_id, None)
         if runner is None:
             return
@@ -279,6 +280,9 @@ class _ControlChannel:
             await runner.cancel()
         finally:
             current_session_id.reset(token)
+
+    async def cancel(self, session_id: str) -> None:
+        await self._cancel_runner(session_id)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
@@ -334,6 +338,20 @@ class _ControlChannel:
                             self._live.add(session_id)
                             current_session_id.reset(session_token)
                             session_token = current_session_id.set(session_id)
+                        raw_routes = params.get("workspace_routes", [])
+                        if not isinstance(raw_routes, list):
+                            await error_to(
+                                msg_id, -32602, "hello: 'workspace_routes' must be a list"
+                            )
+                            continue
+                        try:
+                            workspace_routes = [
+                                WorkspaceRoute.from_wire(route) for route in raw_routes
+                            ]
+                        except ValueError as exc:
+                            await error_to(msg_id, -32602, f"hello: {exc}")
+                            continue
+                        env.bind_workspace_routes(workspace_routes)
                         # env.start() ran before serving, so hook-published
                         # capabilities (e.g. a workspace's ssh address) are
                         # already concrete here.

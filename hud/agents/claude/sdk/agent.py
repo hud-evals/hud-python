@@ -34,7 +34,7 @@ from .events import ClaudeEvents
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
-    from hud.eval.run import Run
+    from hud.eval.run import InferenceConnection, Run
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
 
 _MANAGED_CLAUDE_PATHS = {
-    "linux-x64": "/media/hud/bin/claude/linux-x64/claude",
-    "linux-x64-musl": "/media/hud/bin/claude/linux-x64-musl/claude",
+    "linux-x64": "/usr/local/lib/agents/claude/linux-x64/claude",
+    "linux-x64-musl": "/usr/local/lib/agents/claude/linux-x64-musl/claude",
 }
 
 
@@ -111,6 +111,7 @@ class ClaudeCLIAgent(Agent):
                 mcp_servers=mcp_servers,
                 prompt=run.prompt_text,
                 executable=executable,
+                inference=run.inference,
             )
 
     async def _exec(
@@ -122,6 +123,7 @@ class ClaudeCLIAgent(Agent):
         mcp_servers: dict[str, dict[str, Any]],
         prompt: str,
         executable: str = "claude",
+        inference: InferenceConnection | None = None,
     ) -> None:
         mcp_config_path = await self._write_mcp_config(ssh, mcp_servers)
         input_text = (
@@ -145,6 +147,7 @@ class ClaudeCLIAgent(Agent):
             shell=shell,
             mcp_config_path=mcp_config_path,
             executable=executable,
+            inference=inference,
         )
         if shell in WINDOWS_SHELLS:
             await ssh.write_text(RUN_SCRIPT_PATH, f"@echo off\r\n{command}\r\n")
@@ -173,20 +176,26 @@ class ClaudeCLIAgent(Agent):
                 except (OSError, asyncssh.Error):
                     logger.warning("Failed to remove Claude CLI runtime files")
 
-    def _build_env_vars(self) -> dict[str, str]:
+    def _build_env_vars(self, inference: InferenceConnection | None = None) -> dict[str, str]:
         env: dict[str, str] = {}
         use_hud_gateway = self.config.use_hud_gateway
         if use_hud_gateway is None:
-            use_hud_gateway = settings.api_key is not None
+            use_hud_gateway = inference is not None or settings.api_key is not None
 
         if use_hud_gateway:
-            if not settings.api_key:
+            if inference is not None:
+                base_url = inference.base_url
+                api_key = inference.credential
+            elif settings.api_key:
+                base_url = settings.hud_gateway_url
+                api_key = settings.api_key
+            else:
                 raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-            env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
-            env["ANTHROPIC_API_KEY"] = settings.api_key
+            env["ANTHROPIC_BASE_URL"] = base_url
+            env["ANTHROPIC_API_KEY"] = api_key
             env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
             env["DISABLE_AUTO_COMPACT"] = "1"
-            if trace_id := get_current_trace_id():
+            if inference is None and (trace_id := get_current_trace_id()):
                 env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
         elif settings.anthropic_api_key:
             env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
@@ -227,8 +236,9 @@ class ClaudeCLIAgent(Agent):
         shell: str,
         mcp_config_path: str | None = None,
         executable: str = "claude",
+        inference: InferenceConnection | None = None,
     ) -> str:
-        env_vars = self._build_env_vars()
+        env_vars = self._build_env_vars(inference)
         is_win = shell in WINDOWS_SHELLS
         base_args: list[str] = [
             executable,

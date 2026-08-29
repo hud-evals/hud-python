@@ -30,7 +30,7 @@ import pytest
 from hud.capabilities import SSHClient
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
-from hud.environment.egress import Peer, _field, _UnixServer, _Unrelayable
+from hud.environment.egress import Peer, WorkspaceRoute, _field, _UnixServer, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessGroup, ProcessResult
 
@@ -1134,6 +1134,28 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
 
     with pytest.raises(ValueError, match="declares port 5432 twice"):
         bind_addresses([Peer("db", 5432), Peer("db", 5432)])
+
+
+async def test_workspace_route_is_bound_once_and_removed_on_stop(tmp_path: Path) -> None:
+    from hud.environment import Environment
+
+    env = Environment()
+    workspace = env.workspace(tmp_path / "root", track_files=False)
+    workspace._bwrap = cast("Any", object())
+    env._started = True
+    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
+
+    env.bind_workspace_routes([route, route])
+    env.bind_workspace_routes([route])
+
+    assert workspace.peers == (Peer("inference.hud.so", 443, target=("inference.hud.so", 443)),)
+    await env.stop()
+    assert workspace.peers == ()
+
+
+def test_workspace_route_rejects_ip_literals() -> None:
+    with pytest.raises(ValueError, match="hostname"):
+        WorkspaceRoute("ssh", "127.0.0.1", 443)
 
 
 def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:

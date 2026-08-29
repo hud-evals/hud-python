@@ -25,13 +25,13 @@ from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.capabilities import SSHClient
-    from hud.eval.run import Run
+    from hud.eval.run import InferenceConnection, Run
 
 logger = logging.getLogger(__name__)
 
 _MANAGED_CODEX_PATHS = {
-    "linux-x64": "/media/hud/bin/codex/bin/codex",
-    "linux-x64-musl": "/media/hud/bin/codex/bin/codex",
+    "linux-x64": "/usr/local/lib/agents/codex/bin/codex",
+    "linux-x64-musl": "/usr/local/lib/agents/codex/bin/codex",
 }
 
 
@@ -208,7 +208,12 @@ class CodexEvents:
         )
 
 
-def codex_command(config: CodexCLIConfig, shell: str, executable: str = "codex") -> str:
+def codex_command(
+    config: CodexCLIConfig,
+    shell: str,
+    executable: str = "codex",
+    inference: InferenceConnection | None = None,
+) -> str:
     env: dict[str, str] = {}
     args = [
         executable,
@@ -226,21 +231,29 @@ def codex_command(config: CodexCLIConfig, shell: str, executable: str = "codex")
 
     use_hud_gateway = config.use_hud_gateway
     if use_hud_gateway is None:
-        use_hud_gateway = settings.api_key is not None
+        use_hud_gateway = inference is not None or settings.api_key is not None
     if use_hud_gateway:
-        if not settings.api_key:
+        if inference is not None:
+            base_url = inference.base_url
+            credential = inference.credential
+            credential_env = "HUD_RUNTIME_INFERENCE_TOKEN"
+        elif settings.api_key:
+            base_url = settings.hud_gateway_url
+            credential = settings.api_key
+            credential_env = "HUD_API_KEY"
+        else:
             raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-        env["HUD_API_KEY"] = settings.api_key
+        env[credential_env] = credential
         overrides = {
             "model_provider": "hud",
             "model_providers.hud.name": "HUD",
-            "model_providers.hud.base_url": settings.hud_gateway_url,
-            "model_providers.hud.env_key": "HUD_API_KEY",
+            "model_providers.hud.base_url": base_url,
+            "model_providers.hud.env_key": credential_env,
             "model_providers.hud.wire_api": "responses",
         }
         for key, value in overrides.items():
             args.extend(["-c", f"{key}={json.dumps(value)}"])
-        if trace_id := get_current_trace_id():
+        if inference is None and (trace_id := get_current_trace_id()):
             args.extend(
                 [
                     "-c",
@@ -251,35 +264,42 @@ def codex_command(config: CodexCLIConfig, shell: str, executable: str = "codex")
         env["CODEX_API_KEY"] = settings.openai_api_key
 
     args.append("-")
+    isolate_home = bool(env)
     if shell in WINDOWS_SHELLS:
-        script = ";".join(
-            [
+        invocation = (
+            f"& {powershell_quote(executable)} "
+            f"{' '.join(powershell_quote(arg) for arg in args[1:])}; "
+            "$hudExitCode=$LASTEXITCODE"
+        )
+        statements = [
+            *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
+            invocation,
+            "exit $hudExitCode",
+        ]
+        if isolate_home:
+            statements = [
                 "$codexHome=Join-Path ([System.IO.Path]::GetTempPath()) "
                 "('hud-codex-' + [System.Guid]::NewGuid())",
                 "New-Item -ItemType Directory -Force -Path $codexHome | Out-Null",
                 "$env:CODEX_HOME=$codexHome",
                 *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                f"try {{ & {powershell_quote(executable)} "
-                f"{' '.join(powershell_quote(arg) for arg in args[1:])}; "
-                "$hudExitCode=$LASTEXITCODE } finally { Remove-Item -Recurse -Force "
-                "$codexHome }",
+                f"try {{ {invocation} }} finally {{ Remove-Item -Recurse -Force $codexHome }}",
                 "exit $hudExitCode",
             ]
-        )
-        return powershell(script)
+        return powershell(";".join(statements))
 
     command = " ".join(shlex.quote(arg) for arg in args)
     env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
     invocation = f"{env_prefix} {command}" if env_prefix else command
-    return "; ".join(
-        [
+    statements = ['export PATH="$HOME/.local/bin:$PATH"', invocation]
+    if isolate_home:
+        statements = [
             'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
             "trap 'rm -rf -- \"$codex_home\"' EXIT",
             'export CODEX_HOME="$codex_home"',
-            'export PATH="$HOME/.local/bin:$PATH"',
-            invocation,
+            *statements,
         ]
-    )
+    return "; ".join(statements)
 
 
 async def run_codex(
@@ -290,8 +310,9 @@ async def run_codex(
     shell: str,
     prompt: str,
     executable: str = "codex",
+    inference: InferenceConnection | None = None,
 ) -> None:
-    command = codex_command(config, shell, executable)
+    command = codex_command(config, shell, executable, inference=inference)
     logger.info("SSH exec codex CLI (%d chars)", len(command))
     events = CodexEvents(run, model=config.model, started_at=now_iso())
     returncode, stderr = await run_jsonl(ssh, command, events.consume, input_text=prompt)
@@ -322,6 +343,7 @@ class CodexCLIAgent(Agent):
             shell=ssh.capability.params.get("shell", "bash"),
             prompt=run.prompt_text,
             executable=executable,
+            inference=run.inference,
         )
 
 

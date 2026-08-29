@@ -26,6 +26,7 @@ class TestInitModule:
             "Job",
             "HUDRuntime",
             "HostedRuntime",
+            "InferenceConnection",
             "Run",
             "Runtime",
             "RuntimeConfig",
