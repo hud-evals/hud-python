@@ -161,6 +161,9 @@ environment-owned, workspace-local endpoint. The endpoint is available only to
 `bwrap` workspaces with network isolation and is bound to the exact CLI process
 selected by the harness. Platform credentials stay in the environment-owned
 relay rather than the CLI environment, workspace manifest, or child processes.
+The workspace probes its substrate and uses either seccomp notification or a
+ptrace-backed seccomp guard; it does not advertise process-bound connections
+when neither enforcement backend is available.
 
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 

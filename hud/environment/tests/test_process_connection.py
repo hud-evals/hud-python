@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import shlex
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -14,15 +17,24 @@ from hud.capabilities import Connection, SSHClient
 from hud.clients import connect
 from hud.environment import Environment, Peer
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT
-from hud.environment.process_guard import process_connections_supported
+from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.eval import LocalRuntime, Task
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 pytestmark = pytest.mark.skipif(
     not process_connections_supported(),
-    reason="seccomp user notification is unavailable",
+    reason="process connection guards are unavailable",
+)
+
+_GUARD_PATH = Path(__file__).parents[1] / "process_guard.py"
+_PTRACE_SUPPORTED = (
+    sys.platform == "linux"
+    and subprocess.run(
+        [sys.executable, str(_GUARD_PATH), "--probe", "ptrace"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode
+    == 0
 )
 
 
@@ -92,6 +104,75 @@ def _direct_fetch_source(host: str, port: int) -> str:
         "connection.request('GET','/');"
         "print(connection.getresponse().read().decode())"
     )
+
+
+def test_guard_projects_a_standalone_helper(tmp_path: Path) -> None:
+    guard = ProcessConnectionGuard(tmp_path / "guard", set(), set(), backend="notify")
+    try:
+        guard.start()
+        assert guard.helper_path.read_bytes() == _GUARD_PATH.read_bytes()
+        assert guard.helper_path.stat().st_mode & 0o777 == 0o500
+    finally:
+        guard.close()
+
+
+@pytest.mark.skipif(not _PTRACE_SUPPORTED, reason="ptrace guard backend is unavailable")
+@pytest.mark.asyncio
+async def test_ptrace_backend_emulates_connects_and_blocks_descendants(tmp_path: Path) -> None:
+    protected, protected_thread = _server(_ProtectedUpstream)
+    ordinary, ordinary_thread = _server(_OrdinaryUpstream)
+    protected_url = f"http://127.0.0.1:{protected.server_address[1]}"
+    ordinary_url = f"http://127.0.0.1:{ordinary.server_address[1]}"
+    child = (
+        "import subprocess,sys,threading,urllib.request;"
+        f"protected={_fetch_source(protected_url)!r};"
+        f"ordinary={_fetch_source(ordinary_url)!r};"
+        f"print(urllib.request.urlopen({protected_url!r},timeout=5).read().decode());"
+        "threaded=[];"
+        f"thread=threading.Thread(target=lambda:threaded.append(urllib.request.urlopen({protected_url!r},timeout=5).read().decode()));"
+        "thread.start();thread.join();print(threaded[0]);"
+        "blocked=subprocess.run([sys.executable,'-c',protected]);"
+        "print(f'blocked={blocked.returncode}');"
+        "permitted=subprocess.run([sys.executable,'-c',ordinary]);"
+        "print(f'ordinary={permitted.returncode}')"
+    )
+    target = ("127.0.0.1", protected.server_address[1])
+    guard = ProcessConnectionGuard(tmp_path / "guard", {target}, {target}, backend="ptrace")
+    process = None
+    try:
+        guard.start()
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(_GUARD_PATH),
+            "--backend",
+            "ptrace",
+            str(guard.socket_path),
+            "--",
+            sys.executable,
+            "-c",
+            child,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await guard.wait_ready()
+        stdout, stderr = await asyncio.wait_for(process.communicate(), 20)
+        assert process.returncode == 0, stderr.decode(errors="replace")
+        lines = stdout.decode().splitlines()
+        assert lines[:2] == ["ok", "ok"]
+        assert lines[2] != "blocked=0"
+        assert lines[3:] == ["ok", "ordinary=0"]
+    finally:
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.wait()
+        guard.close()
+        for server, thread in (
+            (protected, protected_thread),
+            (ordinary, ordinary_thread),
+        ):
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
 
 async def test_only_bound_process_reaches_controller_connection(tmp_path: Path) -> None:

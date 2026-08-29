@@ -57,9 +57,38 @@ _TH32CS_SNAPTHREAD = 0x00000004
 _INVALID_DWORD = 0xFFFFFFFF
 
 
-def _guarded_process_argv(socket_path: str, argv: Sequence[str]) -> list[str]:
-    guard_path = Path(__file__).with_name("process_guard.py")
-    return [sys.executable, str(guard_path), socket_path, "--", *argv]
+def _process_guard_interpreter() -> str | None:
+    candidates = (
+        Path("/usr/bin/python3"),
+        Path("/usr/local/bin/python3"),
+        Path(sys.executable).resolve(),
+    )
+    return next(
+        (
+            str(candidate)
+            for candidate in dict.fromkeys(candidates)
+            if candidate.is_file()
+            and os.access(candidate, os.X_OK)
+            and candidate.is_relative_to("/usr")
+        ),
+        None,
+    )
+
+
+def _guarded_process_argv(
+    interpreter: str,
+    guard: ProcessConnectionGuard,
+    argv: Sequence[str],
+) -> list[str]:
+    return [
+        interpreter,
+        guard.sandbox_helper,
+        "--backend",
+        guard.backend,
+        guard.sandbox_socket,
+        "--",
+        *argv,
+    ]
 
 
 class _WindowsJob:
@@ -666,7 +695,12 @@ class Workspace:
 
     @property
     def supports_process_connections(self) -> bool:
-        return self.bwrap_available and self.owns_netns and process_connections_supported()
+        return (
+            self.bwrap_available
+            and self.owns_netns
+            and _process_guard_interpreter() is not None
+            and process_connections_supported()
+        )
 
     def add_process_connection(self, name: str, peer: Peer) -> None:
         if name in self._process_connections:
@@ -1684,7 +1718,12 @@ class Workspace:
             session_env = {"TERM": term_type} if term_type else None
             requested_connections = self._requested_process_connections(process)
             if self._process_connections:
-                if pid is None or not self.supports_process_connections:
+                guard_interpreter = _process_guard_interpreter()
+                if (
+                    pid is None
+                    or not self.supports_process_connections
+                    or guard_interpreter is None
+                ):
                     raise RuntimeError("process-bound connections require an isolated workspace")
                 guard_directory = Path(
                     tempfile.mkdtemp(prefix="process-connection-", dir=self._credentials_dir())
@@ -1702,7 +1741,8 @@ class Workspace:
                     else ["bash", "-l"]
                 )
                 guarded_command = _guarded_process_argv(
-                    guard.sandbox_socket,
+                    guard_interpreter,
+                    guard,
                     [
                         *self._drop_argv(),
                         *shell_command,

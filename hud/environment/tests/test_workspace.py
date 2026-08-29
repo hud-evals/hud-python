@@ -29,6 +29,7 @@ import pytest
 
 from hud.capabilities import Connection, SSHClient
 from hud.environment import namespace as namespace_mod
+from hud.environment import process_guard as process_guard_mod
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import (
     ConnectionRelay,
@@ -910,26 +911,52 @@ async def test_namespace_management_does_not_share_process_connections(
     management.wait_closed.assert_awaited_once_with()
 
 
-def test_process_guard_executes_packaged_file_without_module_reentry() -> None:
-    argv = workspace_mod._guarded_process_argv("/tmp/guard.sock", ["bash", "-lc", "true"])
+def test_process_guard_executes_projected_file_without_module_reentry() -> None:
+    guard = cast(
+        "Any",
+        SimpleNamespace(
+            backend="ptrace",
+            sandbox_helper="/tmp/.hud-process-connection/process_guard.py",
+            sandbox_socket="/tmp/.hud-process-connection/control.sock",
+        ),
+    )
+    argv = workspace_mod._guarded_process_argv(
+        "/usr/bin/python3",
+        guard,
+        ["bash", "-lc", "true"],
+    )
 
     assert argv == [
-        sys.executable,
-        str(Path(workspace_mod.__file__).with_name("process_guard.py")),
-        "/tmp/guard.sock",
+        "/usr/bin/python3",
+        "/tmp/.hud-process-connection/process_guard.py",
+        "--backend",
+        "ptrace",
+        "/tmp/.hud-process-connection/control.sock",
         "--",
         "bash",
         "-lc",
         "true",
     ]
     result = subprocess.run(
-        [*argv[:2], "--help"],
+        [sys.executable, str(Path(workspace_mod.__file__).with_name("process_guard.py")), "--help"],
         check=False,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
     assert result.stderr == ""
+
+
+def test_process_guard_selects_probed_ptrace_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(process_guard_mod, "_backend", None)
+    monkeypatch.setattr(process_guard_mod, "_backend_probed", False)
+    monkeypatch.setattr(process_guard_mod.sys, "platform", "linux")
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="ptrace\n"))
+    monkeypatch.setattr(process_guard_mod.subprocess, "run", run)
+
+    assert process_guard_mod._detected_backend() == "ptrace"
+    assert process_guard_mod._detected_backend() == "ptrace"
+    run.assert_called_once()
 
 
 @pytest.mark.asyncio
