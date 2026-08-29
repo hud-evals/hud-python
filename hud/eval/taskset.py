@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
-from .job import Job, job_enter
+from .job import Job, job_enter, job_exit
 from .run import rollout, validate_rollout_timeouts
 from .runtime import (
     HostedRuntime,
@@ -300,7 +300,8 @@ class Taskset:
             group_id = uuid.uuid4().hex
             expanded.extend((task, group_id) for _ in range(group))
 
-        if job is None:
+        owns_job = job is None
+        if owns_job:
             job = Job(
                 id=uuid.uuid4().hex,
                 name=_job_name(self.name, task_list, group),
@@ -312,8 +313,9 @@ class Taskset:
                 name=job.name,
                 group=group,
                 taskset_id=self.taskset_id,
-                expected_trace_count=len(expanded),
+                is_open=True,
             )
+        assert job is not None
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
@@ -353,20 +355,33 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        async with contextlib.AsyncExitStack() as stack:
-            # A placement may own pooled resources across rollouts (e.g.
-            # Shared's one substrate for many leases); a context-manager
-            # placement is scoped to this call unless already open.
-            if isinstance(placement, contextlib.AbstractAsyncContextManager):
-                await stack.enter_async_context(placement)
-            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.runs.extend(run for part in parts for run in part)
-        # Drain telemetry before returning. The exporter uploads in parallel and
-        # flush is completion-based (waits for in-flight uploads, not a fixed
-        # sleep), so the timeout is only a safety cap for a wedged network.
-        if not await asyncio.to_thread(flush, timeout=120.0):
-            logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
-        return job
+        submission_failed = False
+        try:
+            async with contextlib.AsyncExitStack() as stack:
+                # A placement may own pooled resources across rollouts (e.g.
+                # Shared's one substrate for many leases); a context-manager
+                # placement is scoped to this call unless already open.
+                if isinstance(placement, contextlib.AbstractAsyncContextManager):
+                    await stack.enter_async_context(placement)
+                parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
+            job.runs.extend(run for part in parts for run in part)
+            submission_failed = bool(job.errors)
+            # Drain telemetry before returning. The exporter uploads in parallel and
+            # flush is completion-based (waits for in-flight uploads, not a fixed
+            # sleep), so the timeout is only a safety cap for a wedged network.
+            if not await asyncio.to_thread(flush, timeout=120.0):
+                logger.warning(
+                    "telemetry flush did not fully drain within 120s; some spans may lag"
+                )
+            return job
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            submission_failed = True
+            raise
+        finally:
+            if owns_job:
+                await job_exit(job_id, failed=submission_failed)
 
 
 __all__ = ["Job", "Taskset"]

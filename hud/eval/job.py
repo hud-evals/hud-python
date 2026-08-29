@@ -111,7 +111,7 @@ async def job_enter(
     name: str,
     group: int,
     taskset_id: str | None = None,
-    expected_trace_count: int | None = None,
+    is_open: bool = False,
 ) -> None:
     """Register a batch job with the platform.
 
@@ -127,12 +127,19 @@ async def job_enter(
             "name": name,
             "group": group,
             "taskset_id": taskset_id,
-            "expected_trace_count": expected_trace_count,
+            "is_open": is_open,
         },
     )
     from hud.settings import settings
 
     logger.info("job: %s/jobs/%s", settings.hud_web_url, job_id)
+
+
+async def job_exit(job_id: str, *, failed: bool = False) -> None:
+    """Report that an incrementally submitted job will receive no more traces."""
+    if not _reporting_enabled():
+        return
+    await _report(f"/trace/job/{job_id}/exit", {"failed": failed})
 
 
 async def trace_enter(

@@ -46,14 +46,15 @@ def _run_with(trace_id: str, *, extra: dict[str, Any]) -> Run:
     return run
 
 
-async def test_job_enter_reports_expected_trace_count(recorder: _Recorder) -> None:
+async def test_open_job_reports_submission_lifecycle(recorder: _Recorder) -> None:
     await job_mod.job_enter(
         "job-1",
         name="benchmark",
         group=2,
         taskset_id="taskset-1",
-        expected_trace_count=6,
+        is_open=True,
     )
+    await job_mod.job_exit("job-1")
 
     assert recorder.calls == [
         (
@@ -62,9 +63,10 @@ async def test_job_enter_reports_expected_trace_count(recorder: _Recorder) -> No
                 "name": "benchmark",
                 "group": 2,
                 "taskset_id": "taskset-1",
-                "expected_trace_count": 6,
+                "is_open": True,
             },
-        )
+        ),
+        ("/trace/job/job-1/exit", {"failed": False}),
     ]
 
 
