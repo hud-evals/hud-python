@@ -40,12 +40,14 @@ import sys
 import threading
 import urllib.parse
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
+
+    from hud.capabilities import Connection
 
 LOGGER = logging.getLogger("hud.environment.egress")
 
@@ -589,6 +591,172 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
         return request, ("workspace", 0)
 
 
+class _ConnectionProxy(BaseHTTPRequestHandler):
+    """Fixed-upstream reverse proxy which replaces controller-owned headers."""
+
+    protocol_version = "HTTP/1.1"
+    binding: Connection
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """The bound process's traffic is not the environment's log."""
+
+    def _fail(self, status: int, reason: str) -> None:
+        self.send_response(status)
+        self.send_header("X-Connection-Error", reason)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+    def _request_body(self) -> bytes | None:
+        transfer = self.headers.get("Transfer-Encoding")
+        length = self.headers.get("Content-Length")
+        if transfer is None:
+            if length is None:
+                return None
+            size = int(length)
+            if size < 0:
+                raise ValueError
+            body = self.rfile.read(size)
+            if len(body) != size:
+                raise ValueError
+            return body
+        if length is not None or transfer.strip().lower() != "chunked":
+            raise ValueError
+
+        chunks: list[bytes] = []
+        while True:
+            line = self.rfile.readline(65537)
+            if len(line) > 65536 or not line.endswith(b"\r\n"):
+                raise ValueError
+            size_text = line[:-2].split(b";", 1)[0].strip()
+            if not size_text or any(byte not in b"0123456789abcdefABCDEF" for byte in size_text):
+                raise ValueError
+            size = int(size_text, 16)
+            if size == 0:
+                while True:
+                    trailer = self.rfile.readline(65537)
+                    if len(trailer) > 65536 or not trailer.endswith(b"\r\n"):
+                        raise ValueError
+                    if trailer == b"\r\n":
+                        return b"".join(chunks)
+            chunk = self.rfile.read(size)
+            if len(chunk) != size or self.rfile.read(2) != b"\r\n":
+                raise ValueError
+            chunks.append(chunk)
+
+    def _forward(self) -> None:
+        request_target = urllib.parse.urlsplit(self.path)
+        if request_target.scheme or request_target.netloc:
+            self._fail(400, "absolute-request-target")
+            return
+        upstream = urllib.parse.urlsplit(self.binding.url)
+        base_path = upstream.path.rstrip("/")
+        request_path = request_target.path or "/"
+        if base_path and request_path != base_path and not request_path.startswith(f"{base_path}/"):
+            self._fail(403, "outside-connection-prefix")
+            return
+        try:
+            body = self._request_body()
+        except ValueError:
+            self._fail(400, "invalid-request-body")
+            return
+
+        replacements = {
+            name.casefold(): (name, value) for name, value in self.binding.headers.items()
+        }
+        headers = {
+            key: value
+            for key, value in self.headers.items()
+            if key.casefold() not in _HOP_BY_HOP
+            and key.casefold() not in {"host", "content-length"}
+            and key.casefold() not in replacements
+        }
+        headers.update(dict(replacements.values()))
+        path = urllib.parse.urlunsplit(("", "", request_path, request_target.query, ""))
+        connection_type = (
+            http.client.HTTPSConnection
+            if upstream.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_type(
+            upstream.hostname or "",
+            upstream.port,
+            timeout=300,
+        )
+        response_started = False
+        try:
+            connection.request(self.command, path, body=body, headers=headers)
+            response = connection.getresponse()
+            relayed = [
+                _field(key, value)
+                for key, value in response.getheaders()
+                if key.casefold() not in _HOP_BY_HOP and key.casefold() != "content-length"
+            ]
+            length = response.getheader("Content-Length")
+            framed = length is not None and length.strip().isdigit()
+            _field("Reason", response.reason or "")
+            response_started = True
+            self.send_response(response.status, response.reason)
+            for key, value in relayed:
+                self.send_header(key, value)
+            if framed:
+                assert length is not None
+                self.send_header("Content-Length", length.strip())
+            else:
+                self.send_header("Connection", "close")
+                self.close_connection = True
+            self.end_headers()
+            while chunk := response.read1(65536):
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except _Unrelayable as error:
+            LOGGER.warning("refusing to relay connection response: %s", error)
+            self._fail(502, "unrelayable-upstream-header")
+        except (OSError, http.client.HTTPException):
+            if response_started:
+                self.close_connection = True
+            else:
+                self._fail(502, "upstream-failure")
+        finally:
+            connection.close()
+
+    do_GET = _forward
+    do_HEAD = _forward
+    do_POST = _forward
+    do_PUT = _forward
+    do_DELETE = _forward
+    do_PATCH = _forward
+    do_OPTIONS = _forward
+
+
+class ConnectionRelay:
+    """Credential-owning HTTP relay for one controller-provided connection."""
+
+    def __init__(self, connection: Connection) -> None:
+        self.connection = connection
+        handler = type(
+            f"_{connection.name.title().replace('_', '')}ConnectionProxy",
+            (_ConnectionProxy,),
+            {"binding": connection},
+        )
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self._server.daemon_threads = True
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    @property
+    def port(self) -> int:
+        return int(self._server.server_address[1])
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join()
+
+
 class Egress:
     """A workspace's routes out, and the policy applied to them.
 
@@ -716,6 +884,7 @@ __all__ = [
     "ANY_HOST",
     "BRIDGE_PORT",
     "VISITOR_PORT",
+    "ConnectionRelay",
     "Egress",
     "Peer",
     "WorkspaceRoute",

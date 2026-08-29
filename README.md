@@ -158,9 +158,9 @@ From the [platform UI](https://hud.ai) you can run batches, compare models on th
 
 Hosted Claude Code and Codex harnesses reach platform inference through an
 environment-owned, workspace-local endpoint. The endpoint is available only to
-`bwrap` workspaces with network isolation; the workspace receives an opaque
-per-session key, while platform credentials and trace attribution stay outside
-its environment and manifest.
+`bwrap` workspaces with network isolation and is bound to the exact CLI process
+selected by the harness. Platform credentials stay in the environment-owned
+relay rather than the CLI environment, workspace manifest, or child processes.
 
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 

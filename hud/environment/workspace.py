@@ -21,8 +21,17 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
-from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
+from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
+from hud.environment.egress import (
+    VISITOR_PORT,
+    Egress,
+    Peer,
+    bind_addresses,
+    hosts_text,
+    proxy_environment,
+)
 from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
+from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -516,6 +525,7 @@ class Workspace:
         #: named here to exist for it. Nothing to do where sessions share the
         #: substrate's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
+        self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
         self.ports = frozenset(ports)
         self._egress: Egress | None = None
@@ -648,6 +658,22 @@ class Workspace:
         self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
         if self._hosts_path is not None:
             self._hosts_path = self._write_hosts()
+
+    @property
+    def supports_process_connections(self) -> bool:
+        return self.bwrap_available and self.owns_netns and process_connections_supported()
+
+    def add_process_connection(self, name: str, peer: Peer) -> None:
+        if name in self._process_connections:
+            raise RuntimeError(f"process connection {name!r} was already bound")
+        if peer not in self.peers:
+            raise RuntimeError("process connection peer must be installed first")
+        self._process_connections[name] = peer
+
+    def remove_process_connection(self, name: str, peer: Peer) -> None:
+        if self._process_connections.get(name) != peer:
+            raise RuntimeError(f"process connection {name!r} is not bound to that peer")
+        del self._process_connections[name]
 
     def _setpriv(self) -> str | None:
         """Absolute path to ``setpriv``, resolved via the *server's* PATH.
@@ -846,6 +872,7 @@ class Workspace:
             client_key_path=key_path,
             cwd=self._guest_path,
             isolation="bwrap" if self.bwrap_available else "none",
+            process_connections=self.supports_process_connections,
         )
 
     @property
@@ -1613,7 +1640,35 @@ class Workspace:
             return {**base, **self.env}
         return {**os.environ, **self.env} if self.env else None
 
+    def _requested_process_connections(
+        self,
+        process: asyncssh.SSHServerProcess[bytes],
+    ) -> tuple[str, ...]:
+        raw = getattr(process, "env", {}).get(PROCESS_CONNECTIONS_REQUEST)
+        if raw is None:
+            return ()
+        try:
+            requested = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid process connection request") from exc
+        if not isinstance(requested, list) or not all(isinstance(name, str) for name in requested):
+            raise ValueError("process connection request must be a list of names")
+        names = tuple(dict.fromkeys(str(name) for name in requested))
+        missing = [name for name in names if name not in self._process_connections]
+        if missing:
+            raise ValueError(f"process connection is not bound: {', '.join(missing)}")
+        return names
+
+    def _process_connection_targets(self, names: Sequence[str]) -> frozenset[tuple[str, int]]:
+        addresses = bind_addresses(self.peers, reserved_ports=self.ports)
+        return frozenset(
+            (addresses[peer.name], peer.port)
+            for name in names
+            for peer in (self._process_connections[name],)
+        )
+
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
+        guard: ProcessConnectionGuard | None = None
         try:
             pid = await self.sandbox_pid()
             # Sessions start from an exact environment, so a terminal's TERM has to
@@ -1622,11 +1677,53 @@ class Workspace:
             term_type = process.term_type
             wants_tty = bool(term_type)
             session_env = {"TERM": term_type} if term_type else None
-            argv = (
-                self.shell_argv(process.command, env=session_env, tty=wants_tty)
-                if pid is None
-                else self.session_argv(process.command, env=session_env, tty=wants_tty)
-            )
+            requested_connections = self._requested_process_connections(process)
+            if self._process_connections:
+                if pid is None or not self.supports_process_connections:
+                    raise RuntimeError("process-bound connections require an isolated workspace")
+                guard_directory = Path(
+                    tempfile.mkdtemp(prefix="process-connection-", dir=self._credentials_dir())
+                )
+                guard = ProcessConnectionGuard(
+                    guard_directory,
+                    self._process_connection_targets(tuple(self._process_connections)),
+                    self._process_connection_targets(requested_connections),
+                )
+                guard.start()
+                sandbox_directory = str(Path(guard.sandbox_socket).parent)
+                shell_command = (
+                    ["bash", "-lc", process.command]
+                    if process.command is not None
+                    else ["bash", "-l"]
+                )
+                guarded_command = [
+                    sys.executable,
+                    "-m",
+                    "hud.environment.process_guard",
+                    guard.sandbox_socket,
+                    "--",
+                    *self._drop_argv(),
+                    *shell_command,
+                ]
+                argv = self.bwrap_argv(
+                    guarded_command,
+                    env=session_env,
+                    network=True,
+                    isolate_processes=False,
+                    isolate_users=False,
+                    bind_devices=True,
+                    mounts=(
+                        *self.mounts,
+                        Mount("ro", src=str(guard.directory), dst=sandbox_directory),
+                    ),
+                    tty=wants_tty,
+                )
+            else:
+                argv = (
+                    self.shell_argv(process.command, env=session_env, tty=wants_tty)
+                    if pid is None
+                    else self.session_argv(process.command, env=session_env, tty=wants_tty)
+                )
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
                 # loader variables or server secrets. The inner payload injects
@@ -1637,6 +1734,8 @@ class Workspace:
             else:
                 proc_env = self._session_env()
         except Exception as exc:
+            if guard is not None:
+                guard.close()
             LOGGER.warning("workspace session setup failed: %s", exc)
             if not process.channel.is_closing():
                 process.stderr.write(f"workspace: cannot prepare shell: {exc}\n".encode())
@@ -1760,6 +1859,7 @@ class Workspace:
             return
 
         pty_pair = _open_pty(process) if wants_tty and pid is None else None
+        sub: ProcessGroup | NamespaceProcess | None = None
         try:
             if pid is None:
                 child_fds: dict[str, Any] = (
@@ -1771,7 +1871,7 @@ class Workspace:
                     if pty_pair is None
                     else {"stdin": pty_pair[1], "stdout": pty_pair[1], "stderr": pty_pair[1]}
                 )
-                sub: ProcessGroup | NamespaceProcess = await create_process_group_exec(
+                sub = await create_process_group_exec(
                     *argv, **child_fds, cwd=str(self.root), env=proc_env
                 )
             else:
@@ -1780,18 +1880,35 @@ class Workspace:
                     argv,
                     cwd=self.root,
                     env=proc_env,
+                    mount_view="host" if guard is not None else "workspace",
                     tty=wants_tty,
                     terminal_size=process.get_terminal_size() if wants_tty else (80, 24, 0, 0),
-                    persistent=True,
+                    persistent=guard is None,
                 )
+                if guard is not None:
+                    await guard.wait_ready()
         except FileNotFoundError as exc:
+            if guard is not None:
+                guard.close()
             if pty_pair is not None:
                 os.close(pty_pair[0])
                 os.close(pty_pair[1])
             process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
             process.exit(127)
             return
+        except (OSError, RuntimeError) as exc:
+            if sub is not None:
+                await sub.terminate()
+            if guard is not None:
+                guard.close()
+            if pty_pair is not None:
+                os.close(pty_pair[0])
+                os.close(pty_pair[1])
+            process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
+            process.exit(1)
+            return
 
+        assert sub is not None
         if pty_pair is not None:
             # The child holds the terminal now; this side keeps only the master.
             os.close(pty_pair[1])
@@ -1909,6 +2026,8 @@ class Workspace:
             for task in output_pending:
                 task.cancel()
             await asyncio.gather(*output_tasks, return_exceptions=True)
+            if guard is not None:
+                guard.close()
 
         if process.channel.is_closing():
             return

@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, ca
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
-from hud.capabilities import Capability
+from hud.capabilities import Capability, Connection
 
-from .egress import Peer, WorkspaceRoute
+from .egress import ConnectionRelay, Peer, WorkspaceRoute
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -165,6 +165,7 @@ class Environment:
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
         self._workspaces: dict[str, Workspace] = {}
         self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None]] = {}
+        self._connections: dict[str, tuple[Connection, Workspace, Peer, ConnectionRelay]] = {}
 
     # ─── task registration ───────────────────────────────────────────
 
@@ -359,8 +360,71 @@ class Environment:
             if peer is not None:
                 workspace.remove_peer(peer)
         self._workspace_routes.clear()
+        for connection, workspace, peer, relay in reversed(self._connections.values()):
+            workspace.remove_process_connection(connection.name, peer)
+            workspace.remove_peer(peer)
+            relay.stop()
+        self._connections.clear()
         self._started = False
         self._hooks_done = False
+
+    def _workspace_for(self, capability: str) -> Workspace:
+        workspace = self._workspaces.get(capability)
+        if workspace is None and capability in {"ssh", "ssh/2"}:
+            if len(self._workspaces) > 1:
+                names = ", ".join(sorted(self._workspaces))
+                raise RuntimeError(f"workspace capability {capability!r} is ambiguous: {names}")
+            workspace = next(iter(self._workspaces.values()), None)
+        if workspace is None:
+            raise RuntimeError(f"workspace capability {capability!r} does not exist")
+        return workspace
+
+    def bind_connections(self, connections: Sequence[Connection]) -> None:
+        """Install controller connections before a workspace starts its sandbox."""
+        if not self._started:
+            raise RuntimeError("environment must be started before connections are bound")
+
+        bound: list[tuple[Connection, Workspace, Peer, ConnectionRelay]] = []
+        try:
+            for connection in connections:
+                existing = self._connections.get(connection.name)
+                if existing is not None:
+                    if existing[0] != connection:
+                        raise RuntimeError(f"connection {connection.name!r} was already bound")
+                    continue
+                workspace = self._workspace_for(connection.capability)
+                if not workspace.supports_process_connections:
+                    raise RuntimeError(
+                        f"workspace capability {connection.capability!r} does not support "
+                        "process-bound connections"
+                    )
+                if any(
+                    peer.name == connection.host and peer.port == connection.port
+                    for peer in workspace.peers
+                ):
+                    raise RuntimeError(
+                        f"connection endpoint {connection.host}:{connection.port} conflicts with "
+                        "an authored peer"
+                    )
+                relay = ConnectionRelay(connection)
+                relay.start()
+                peer = Peer(
+                    connection.host,
+                    connection.port,
+                    target=("127.0.0.1", relay.port),
+                )
+                workspace.add_peer(peer, first=True)
+                workspace.add_process_connection(connection.name, peer)
+                record = (connection, workspace, peer, relay)
+                self._connections[connection.name] = record
+                bound.append(record)
+        except BaseException:
+            for connection, workspace, peer, relay in reversed(bound):
+                workspace.remove_process_connection(connection.name, peer)
+                workspace.remove_peer(peer)
+                relay.stop()
+                self._connections.pop(connection.name, None)
+            raise
 
     def bind_workspace_routes(self, routes: Sequence[WorkspaceRoute]) -> None:
         """Install controller routes before a workspace starts its sandbox."""
@@ -371,16 +435,7 @@ class Environment:
         for route in dict.fromkeys(routes):
             if route in self._workspace_routes:
                 continue
-            workspace = self._workspaces.get(route.capability)
-            if workspace is None and route.capability in {"ssh", "ssh/2"}:
-                if len(self._workspaces) > 1:
-                    names = ", ".join(sorted(self._workspaces))
-                    raise RuntimeError(
-                        f"workspace capability {route.capability!r} is ambiguous: {names}"
-                    )
-                workspace = next(iter(self._workspaces.values()), None)
-            if workspace is None:
-                raise RuntimeError(f"workspace capability {route.capability!r} does not exist")
+            workspace = self._workspace_for(route.capability)
             if not workspace.bwrap_available or not workspace.owns_netns:
                 raise RuntimeError(
                     f"workspace route for {route.capability!r} requires an isolated network"

@@ -23,6 +23,7 @@ from hud.capabilities import (
     Capability,
     CapabilityClient,
     CDPClient,
+    Connection,
     MCPClient,
     RFBClient,
     SSHClient,
@@ -161,6 +162,7 @@ class HudClient:
         session_id: str | None = None,
         *,
         workspace_routes: Sequence[WorkspaceRoute] = (),
+        connections: Sequence[Connection] = (),
     ) -> Manifest:
         """Send ``hello``; cache and return the parsed ``Manifest``.
 
@@ -171,6 +173,8 @@ class HudClient:
         params: dict[str, Any] = {}
         if workspace_routes:
             params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
+        if connections:
+            params["connections"] = [connection.to_wire() for connection in connections]
         if session_id is not None:
             params["session_id"] = session_id
         result = await self._call("hello", params)
@@ -384,6 +388,7 @@ async def _connect_ready(
     *,
     ready_timeout: float,
     workspace_routes: Sequence[WorkspaceRoute],
+    connections: Sequence[Connection],
     interval: float = 0.5,
 ) -> HudClient:
     """Connect and complete ``hello``, retrying until the env is ready.
@@ -407,7 +412,7 @@ async def _connect_ready(
 
         client = HudClient(reader, writer, endpoint=(host, port))
         try:
-            await client.hello(workspace_routes=workspace_routes)
+            await client.hello(workspace_routes=workspace_routes, connections=connections)
         except asyncio.CancelledError:
             client.abort()
             raise
@@ -445,6 +450,7 @@ async def connect(
     *,
     ready_timeout: float = 240.0,
     workspace_routes: Sequence[WorkspaceRoute] = (),
+    connections: Sequence[Connection] = (),
 ) -> AsyncIterator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
 
@@ -463,6 +469,7 @@ async def connect(
         parts.port or 0,
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
         workspace_routes=workspace_routes,
+        connections=connections,
     )
     owner = asyncio.current_task()
     assert owner is not None
@@ -477,6 +484,8 @@ async def connect(
                 params: dict[str, Any] = {"session_id": client.manifest.session_id}
                 if workspace_routes:
                     params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
+                if connections:
+                    params["connections"] = [connection.to_wire() for connection in connections]
                 await client._call(
                     "hello",
                     params,
