@@ -7,10 +7,11 @@ registers when called bare.
 
 Backend reporting contract:
 - ``POST /trace/job/{job_id}/enter`` — register the batch job.
+- ``POST /trace/job/{job_id}/exit``  — close incremental submission.
 - ``POST /trace/{trace_id}/enter``   — a rollout started.
 - ``POST /trace/{trace_id}/exit``    — a rollout finished (reward / success).
 
-All three are best-effort no-ops without telemetry + an API key, so local runs
+All four are best-effort no-ops without telemetry + an API key, so local runs
 never depend on the platform.
 """
 

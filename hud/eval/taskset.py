@@ -301,19 +301,13 @@ class Taskset:
             expanded.extend((task, group_id) for _ in range(group))
 
         owns_job = job is None
+        submission_failed = False
         if owns_job:
             job = Job(
                 id=uuid.uuid4().hex,
                 name=_job_name(self.name, task_list, group),
                 group=group,
                 taskset_id=self.taskset_id,
-            )
-            await job_enter(
-                job.id,
-                name=job.name,
-                group=group,
-                taskset_id=self.taskset_id,
-                is_open=True,
             )
         assert job is not None
         job_id = job.id
@@ -355,8 +349,15 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        submission_failed = False
         try:
+            if owns_job:
+                await job_enter(
+                    job.id,
+                    name=job.name,
+                    group=group,
+                    taskset_id=self.taskset_id,
+                    is_open=True,
+                )
             async with contextlib.AsyncExitStack() as stack:
                 # A placement may own pooled resources across rollouts (e.g.
                 # Shared's one substrate for many leases); a context-manager
@@ -366,6 +367,9 @@ class Taskset:
                 parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
             job.runs.extend(run for part in parts for run in part)
             submission_failed = bool(job.errors)
+        except asyncio.CancelledError:
+            submission_failed = True
+            raise
         except Exception:
             submission_failed = True
             raise

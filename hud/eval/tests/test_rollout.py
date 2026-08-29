@@ -1256,6 +1256,40 @@ async def test_task_run_closes_after_hosted_launch_failure(
     assert calls[-1] == (f"/trace/job/{job.id}/exit", {"failed": True})
 
 
+async def test_task_run_closes_as_failed_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import job as job_mod
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    launch_started = asyncio.Event()
+    runtime = HostedRuntime()
+
+    async def hang_launch(*args: Any, **kwargs: Any) -> Run:
+        launch_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def record(path: str, payload: dict[str, Any]) -> None:
+        calls.append((path, payload))
+
+    monkeypatch.setattr(runtime, "run", hang_launch)
+    monkeypatch.setattr(job_mod, "_reporting_enabled", lambda: True)
+    monkeypatch.setattr(job_mod, "_report", record)
+
+    run_task = asyncio.create_task(
+        _add_task(2, 3).run(_FnAgent(_solve_add), runtime=runtime),
+    )
+    await launch_started.wait()
+    run_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+
+    job_id = calls[0][0].split("/")[-2]
+    assert calls[-1] == (f"/trace/job/{job_id}/exit", {"failed": True})
+
+
 async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None:
     job = await _add_task(1, 2).run(
         _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file), group=2, max_concurrent=1
