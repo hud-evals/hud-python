@@ -46,6 +46,28 @@ def _run_with(trace_id: str, *, extra: dict[str, Any]) -> Run:
     return run
 
 
+async def test_job_enter_reports_expected_trace_count(recorder: _Recorder) -> None:
+    await job_mod.job_enter(
+        "job-1",
+        name="benchmark",
+        group=2,
+        taskset_id="taskset-1",
+        expected_trace_count=6,
+    )
+
+    assert recorder.calls == [
+        (
+            "/trace/job/job-1/enter",
+            {
+                "name": "benchmark",
+                "group": 2,
+                "taskset_id": "taskset-1",
+                "expected_trace_count": 6,
+            },
+        )
+    ]
+
+
 async def test_trace_enter_reports_task_and_group_identity(recorder: _Recorder) -> None:
     await job_mod.trace_enter(
         "abc",

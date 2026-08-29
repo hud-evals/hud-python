@@ -1200,6 +1200,37 @@ async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
     assert run.job_id == job.id  # the run's trace reports under the job
 
 
+async def test_task_run_declares_all_rollouts_before_submission(
+    env_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import job as job_mod
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def record(path: str, payload: dict[str, Any]) -> None:
+        calls.append((path, payload))
+
+    monkeypatch.setattr(job_mod, "_reporting_enabled", lambda: True)
+    monkeypatch.setattr(job_mod, "_report", record)
+
+    job = await _add_task(2, 3).run(
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        group=2,
+    )
+
+    assert calls[0] == (
+        f"/trace/job/{job.id}/enter",
+        {
+            "name": "add (2 times)",
+            "group": 2,
+            "taskset_id": None,
+            "expected_trace_count": 2,
+        },
+    )
+
+
 async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None:
     job = await _add_task(1, 2).run(
         _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file), group=2, max_concurrent=1

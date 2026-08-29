@@ -307,7 +307,13 @@ class Taskset:
                 group=group,
                 taskset_id=self.taskset_id,
             )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
+            await job_enter(
+                job.id,
+                name=job.name,
+                group=group,
+                taskset_id=self.taskset_id,
+                expected_trace_count=len(expanded),
+            )
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 

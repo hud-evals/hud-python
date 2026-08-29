@@ -105,7 +105,14 @@ def _reporting_enabled() -> bool:
     return bool(settings.telemetry_enabled and settings.api_key)
 
 
-async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | None = None) -> None:
+async def job_enter(
+    job_id: str,
+    *,
+    name: str,
+    group: int,
+    taskset_id: str | None = None,
+    expected_trace_count: int | None = None,
+) -> None:
     """Register a batch job with the platform.
 
     ``taskset_id`` links the job to a synced taskset (set when running
@@ -116,7 +123,12 @@ async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | Non
         return
     await _report(
         f"/trace/job/{job_id}/enter",
-        {"name": name, "group": group, "taskset_id": taskset_id},
+        {
+            "name": name,
+            "group": group,
+            "taskset_id": taskset_id,
+            "expected_trace_count": expected_trace_count,
+        },
     )
     from hud.settings import settings
 
