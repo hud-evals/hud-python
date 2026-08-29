@@ -1266,13 +1266,15 @@ def test_authored_runtime_assets_are_valid_source() -> None:
     assert result.returncode == 0, result.stderr.decode()
 
 
-def test_public_surface_exposes_results_and_the_two_real_operations() -> None:
+def test_public_surface_exposes_results_and_operations() -> None:
     assert harbor.__all__ == [
         "AdaptFailure",
         "AdaptFinding",
         "AdaptResult",
+        "HarborImportResult",
         "adapt",
         "export",
+        "import_results",
     ]
 
 

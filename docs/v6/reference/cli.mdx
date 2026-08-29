@@ -286,6 +286,20 @@ remain in their original Project. The first upload from a directory records the 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).
 
+### `hud import`
+
+Import completed Harbor results as an asynchronous HUD job:
+
+```bash
+hud import harbor harbor-job.zip --taskset my-harbor-tasks   # upload and import
+hud import harbor --data-file-id <data-file-id>              # retry without uploading again
+```
+
+`--taskset` accepts a taskset name or ID and associates imported trials with its
+versioned tasks. `--data-file-id` reuses an uploaded Data File. Pass `--json` for
+the Data File, job, and trace identifiers. See the
+[Harbor integration](/v6/experimental/harbor) for details.
+
 ### Platform QA
 
 ```bash

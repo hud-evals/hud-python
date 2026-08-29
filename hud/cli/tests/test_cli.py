@@ -636,6 +636,7 @@ def test_root_help_lists_nouns() -> None:
         "task",
         "project",
         "sync",
+        "import",
         "qa",
         "jobs",
         "cancel",

@@ -294,6 +294,7 @@ class CLIGroup(TyperGroup):
         "task",
         "project",
         "sync",
+        "import",
         "qa",
         "jobs",
         "cancel",

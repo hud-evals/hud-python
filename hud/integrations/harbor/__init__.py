@@ -2,6 +2,7 @@
 
 ``adapt()`` packages Harbor task directories as runnable HUD tasksets and
 self-contained Compose projects for the selected runtime to build.
+``import_results()`` submits completed Harbor jobs to the HUD platform.
 ``export()`` writes HUD tasks back to Harbor directories.
 
 This API may change between minor releases while the integration is experimental.
@@ -9,5 +10,14 @@ This API may change between minor releases while the integration is experimental
 
 from .adapt import AdaptFailure, AdaptFinding, AdaptResult, adapt
 from .export import export
+from .import_results import HarborImportResult, import_results
 
-__all__ = ["AdaptFailure", "AdaptFinding", "AdaptResult", "adapt", "export"]
+__all__ = [
+    "AdaptFailure",
+    "AdaptFinding",
+    "AdaptResult",
+    "HarborImportResult",
+    "adapt",
+    "export",
+    "import_results",
+]

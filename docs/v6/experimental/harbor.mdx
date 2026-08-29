@@ -1,6 +1,6 @@
 ---
 title: "Harbor interoperability"
-description: "Adapt Harbor tasks into runnable HUD tasksets and Compose artifacts, or export HUD tasks to Harbor folders."
+description: "Adapt Harbor tasks, import completed Harbor results, or export HUD tasks to Harbor folders."
 icon: "ship"
 tag: "Experimental"
 ---
@@ -11,7 +11,8 @@ change without a major version.
 The **Harbor adapter** (`hud/integrations/harbor/`) translates between Harbor
 task directories and HUD's native `Environment`, `Task`, and `Taskset`
 contracts. `adapt()` packages Harbor tasks without building or publishing
-images. `export()` materializes HUD tasks as self-contained Harbor folders.
+images. `import_results()` submits completed Harbor jobs to HUD. `export()`
+materializes HUD tasks as self-contained Harbor folders.
 
 ## Adapt Harbor tasks
 
@@ -109,6 +110,38 @@ the agent/verifier phase boundary. Artifact collection, phase ordering, and
 runtime isolation are described in
 [Verifier environments](/v6/experimental/verifier-environments#harbor-verifier-environments).
 
+## Import completed Harbor results
+
+Import a completed Harbor job or trial archive as an asynchronous HUD job:
+
+```bash
+hud import harbor harbor-job.zip --taskset my-harbor-tasks
+```
+
+`--taskset` accepts a taskset name or ID. When supplied, imported trials are
+associated with the taskset's current task versions. Omit it to import the
+traces without versioned task attribution.
+
+The command uploads the archive as a HUD Data File and prints the resulting
+Data File, job, and placeholder trace IDs. If submission needs to be retried,
+reuse the uploaded file without transferring the archive again:
+
+```bash
+hud import harbor --data-file-id <data-file-id> --taskset my-harbor-tasks
+```
+
+The same operation is available from Python:
+
+```python
+from hud.integrations.harbor import import_results
+
+result = import_results("harbor-job.zip", taskset="my-harbor-tasks")
+print(result.job_id)
+```
+
+The SDK treats the archive as opaque. Archive parsing, trial validation, and
+job materialization remain platform responsibilities.
+
 ## Supported Harbor surface
 
 The adapter handles:
@@ -180,6 +213,7 @@ covers that review.
 | Function | Contract |
 | --- | --- |
 | `harbor.adapt(path, *, hud_requirement="hud") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. Raises `ValueError` when no task directories exist. |
+| `harbor.import_results(archive=None, *, taskset=None, data_file_id=None) -> HarborImportResult` | Upload and asynchronously import a completed Harbor archive. Pass an existing Data File ID to retry without uploading again. |
 | `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
 
 <CardGroup cols={2}>
