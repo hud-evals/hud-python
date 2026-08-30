@@ -106,6 +106,15 @@ def _direct_fetch_source(host: str, port: int) -> str:
     )
 
 
+def _proxy_environment_source() -> str:
+    return (
+        "import os;"
+        "print(os.environ.get('http_proxy',''));"
+        "print(os.environ.get('https_proxy',''));"
+        "print(os.environ.get('no_proxy',''))"
+    )
+
+
 def test_guard_projects_a_standalone_helper(tmp_path: Path) -> None:
     guard = ProcessConnectionGuard(tmp_path / "guard", set(), set(), backend="notify")
     try:
@@ -217,6 +226,17 @@ async def test_only_bound_process_reaches_controller_connection(tmp_path: Path) 
             completed = await bound.wait()
             assert completed.returncode == 0
             assert completed.stdout == b"ok\n"
+
+            proxy_environment = await ssh.create_process(
+                f"exec {shlex.quote(sys.executable)} -c {shlex.quote(_proxy_environment_source())}",
+                connections=(connection,),
+            )
+            proxy_environment_result = await proxy_environment.wait()
+            assert proxy_environment_result.returncode == 0
+            assert isinstance(proxy_environment_result.stdout, bytes)
+            proxy_values = proxy_environment_result.stdout.decode().splitlines()
+            assert proxy_values[:2] == [f"http://127.0.0.1:{BRIDGE_PORT}"] * 2
+            assert "ordinary.hud.invalid" in proxy_values[2].split(",")
 
             threaded = await ssh.create_process(
                 f"exec {shlex.quote(sys.executable)} -c "

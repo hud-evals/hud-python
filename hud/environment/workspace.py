@@ -1750,7 +1750,9 @@ class Workspace:
                 )
                 argv = self.bwrap_argv(
                     guarded_command,
-                    env=session_env,
+                    env=self._full_env(session_env),
+                    inherit_host_env=False,
+                    inherit_workspace_env=False,
                     network=True,
                     isolate_processes=False,
                     isolate_users=False,
