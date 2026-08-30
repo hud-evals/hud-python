@@ -195,7 +195,6 @@ class ClaudeCLIAgent(Agent):
             env["ANTHROPIC_BASE_URL"] = base_url
             env["ANTHROPIC_API_KEY"] = api_key
             env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-            env["DISABLE_AUTO_COMPACT"] = "1"
             if connection is None and (trace_id := get_current_trace_id()):
                 env["ANTHROPIC_CUSTOM_HEADERS"] = f"Trace-Id: {trace_id}"
         elif settings.anthropic_api_key:

@@ -28,7 +28,9 @@ import asyncssh
 import pytest
 
 from hud.capabilities import Connection, SSHClient
+from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
 from hud.environment import namespace as namespace_mod
+from hud.environment import process_guard as process_guard_mod
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import (
     ConnectionRelay,
@@ -908,6 +910,54 @@ async def test_namespace_management_does_not_share_process_connections(
     process_connection.run.assert_not_awaited()
     management.close.assert_called_once_with()
     management.wait_closed.assert_awaited_once_with()
+
+
+def test_process_guard_executes_projected_file_without_module_reentry() -> None:
+    guard = cast(
+        "Any",
+        SimpleNamespace(
+            backend="ptrace",
+            sandbox_helper="/tmp/.hud-process-connection/process_guard.py",
+            sandbox_socket="/tmp/.hud-process-connection/control.sock",
+        ),
+    )
+    argv = workspace_mod._guarded_process_argv(
+        "/usr/bin/python3",
+        guard,
+        ["bash", "-lc", "true"],
+    )
+
+    assert argv == [
+        "/usr/bin/python3",
+        "/tmp/.hud-process-connection/process_guard.py",
+        "--backend",
+        "ptrace",
+        "/tmp/.hud-process-connection/control.sock",
+        "--",
+        "bash",
+        "-lc",
+        "true",
+    ]
+    result = subprocess.run(
+        [sys.executable, str(Path(workspace_mod.__file__).with_name("process_guard.py")), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_process_guard_selects_probed_ptrace_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(process_guard_mod, "_backend", None)
+    monkeypatch.setattr(process_guard_mod, "_backend_probed", False)
+    monkeypatch.setattr(process_guard_mod.sys, "platform", "linux")
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="ptrace\n"))
+    monkeypatch.setattr(process_guard_mod.subprocess, "run", run)
+
+    assert process_guard_mod._detected_backend() == "ptrace"
+    assert process_guard_mod._detected_backend() == "ptrace"
+    run.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1907,6 +1957,66 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
         await ws._handle_process(cast("Any", process))
 
     assert captured.value.env == {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+
+
+@pytest.mark.asyncio
+async def test_process_guard_preserves_session_proxy_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    class Guard:
+        sandbox_helper = "/run/hud/process_guard.py"
+        sandbox_socket = "/run/hud/process_guard.sock"
+        backend = "notify"
+
+        def __init__(self, directory: Path, *_args: object) -> None:
+            self.directory = directory
+
+        def start(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def capture_bwrap(*_args: object, **kwargs: Any) -> list[str]:
+        captured.append(kwargs)
+        raise RuntimeError("captured")
+
+    proxy = {
+        "http_proxy": "http://127.0.0.1:3128",
+        "https_proxy": "http://127.0.0.1:3128",
+        "no_proxy": "127.0.0.1,localhost,main",
+    }
+    monkeypatch.setenv("HUD_API_KEY", "server-secret")
+    monkeypatch.setattr(workspace_mod, "_process_guard_interpreter", lambda: "/usr/bin/python3")
+    monkeypatch.setattr(workspace_mod, "ProcessConnectionGuard", Guard)
+    monkeypatch.setattr(Workspace, "supports_process_connections", True)
+    ws = Workspace(tmp_path / "root", env={"WORKSPACE_ENV": "present"})
+    ws._process_connections["inference"] = cast("Any", object())
+    ws._egress = cast("Any", SimpleNamespace(environment=lambda: proxy))
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    monkeypatch.setattr(ws, "_process_connection_targets", lambda _names: frozenset())
+    monkeypatch.setattr(ws, "bwrap_argv", capture_bwrap)
+    process = SimpleNamespace(
+        term_type="xterm-256color",
+        command="true",
+        env={PROCESS_CONNECTIONS_REQUEST: '["inference"]'},
+        channel=SimpleNamespace(is_closing=Mock(return_value=False)),
+        stderr=SimpleNamespace(write=Mock()),
+        exit=Mock(),
+    )
+
+    await ws._handle_process(cast("Any", process))
+
+    assert len(captured) == 1
+    session_env = captured[0]["env"]
+    assert {name: session_env[name] for name in proxy} == proxy
+    assert session_env["WORKSPACE_ENV"] == "present"
+    assert session_env["TERM"] == "xterm-256color"
+    assert "HUD_API_KEY" not in session_env
+    assert captured[0]["inherit_host_env"] is False
+    assert captured[0]["inherit_workspace_env"] is False
 
 
 @pytest.mark.asyncio
