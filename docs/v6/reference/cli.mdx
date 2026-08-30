@@ -137,21 +137,17 @@ experimental [Harbor integration](/v6/experimental/harbor).
 ### Platform QA
 
 ```bash
-hud qa templates
-hud qa create --name "Failure Analysis" --template <template-id> --model <model-id>
-hud qa agents
+hud qa
 hud qa run <agent-id> <trace-id>
 hud qa results <trace-id>
 ```
 
-`hud qa` authors and runs **trace** agents. Pass `--description`, `--max-steps`,
-`--args '{"threshold": 0.5}'`, or `--public` on create. `hud qa update` and
-`hud qa delete` take an agent id.
-
-`hud qa run` reuses matching evidence by default and waits for every requested
-trace. Pass `--overwrite` to create a fresh attempt, `--no-wait` to return
-after launch, or `--json` for machine-readable output. Exit code `1` means a
-completed QA result failed or the SDK could not complete the command.
+`hud qa` lists **trace** agents (name and UUID), including public ones.
+Copy an id into `hud qa run`. Reuses matching evidence by default and waits
+for every requested trace. Pass `--overwrite` to create a fresh attempt,
+`--no-wait` to return after launch, or `--json` for machine-readable output.
+Exit code `1` means a completed QA result failed or the SDK could not
+complete the command.
 
 ## Inspect
 

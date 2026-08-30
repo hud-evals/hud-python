@@ -1,4 +1,4 @@
-"""Author, run, and inspect trace-level platform QA agents."""
+"""List, run, and inspect trace-level platform QA agents."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from typing import Any, cast
 
 import typer
 
-from hud.cli.models import _resolve_model_id
 from hud.cli.utils.api import require_api_key
 from hud.utils.exceptions import HudTimeoutError
 from hud.utils.platform import PlatformClient
@@ -19,10 +18,10 @@ _TRACE_SUBJECT = "trace"
 
 qa_app = typer.Typer(
     name="qa",
-    help="Author, run, and inspect trace-level platform QA agents.",
+    help="List, run, and inspect trace-level platform QA agents.",
     add_completion=False,
     rich_markup_mode="rich",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 
 
@@ -35,14 +34,8 @@ def _print_json(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
 
-def _print_agent(agent: dict[str, Any], *, json_output: bool = False) -> None:
-    if json_output:
-        _print_json(agent)
-        return
-    typer.echo(
-        f"{agent.get('id', '-')}\t{agent.get('name', '-')}\t"
-        f"{agent.get('subject_type', '-')}\t{agent.get('model_name') or '-'}"
-    )
+def _print_agent(agent: dict[str, Any]) -> None:
+    typer.echo(f"{agent.get('name', '-')}\t{agent.get('id', '-')}")
 
 
 def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
@@ -61,19 +54,6 @@ def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
         stale = " stale" if result.get("stale") is True else ""
         line = f"{subject_id}\t{agent}\t{verdict}{stale}"
         typer.echo(f"{line}\t{summary}" if summary else line)
-
-
-def _parse_args(raw: str | None) -> dict[str, Any] | None:
-    if raw is None:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        parsed = None
-    if not isinstance(parsed, dict):
-        typer.echo("--args must be a JSON object.", err=True)
-        raise typer.Exit(1)
-    return parsed
 
 
 def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
@@ -139,39 +119,16 @@ def _wait_for_results(
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-@qa_app.command("templates")
-def list_templates(
-    json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
-    limit: int = typer.Option(500, "--limit", min=1, max=1000, help="Maximum templates to return."),
-) -> None:
-    """List templates that can be used to author a trace QA agent."""
-    templates = cast(
-        "list[dict[str, Any]]",
-        _platform().get(
-            "/qa-agents/scenarios",
-            params={"subject_type": _TRACE_SUBJECT, "limit": limit},
-        ),
-    )
-    if json_output:
-        _print_json(templates)
-        return
-    if not templates:
-        typer.echo("No trace QA templates found.")
-        return
-    for template in templates:
-        typer.echo(
-            f"{template.get('id', '-')}\t{template.get('name', '-')}\t"
-            f"{template.get('registry_display_name') or '-'}"
-        )
-
-
-@qa_app.command("agents")
+@qa_app.callback(invoke_without_command=True)
 def list_agents(
+    ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
     limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
     offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
 ) -> None:
     """List trace QA agents available to this team."""
+    if ctx.invoked_subcommand is not None:
+        return
     response = cast(
         "dict[str, Any]",
         _platform().get(
@@ -188,111 +145,6 @@ def list_agents(
         return
     for agent in agents:
         _print_agent(agent)
-
-
-@qa_app.command("create")
-def create_agent(
-    name: str = typer.Option(..., "--name", help="Display name for the agent."),
-    template: str = typer.Option(
-        ...,
-        "--template",
-        help="Template UUID from `hud qa templates`.",
-    ),
-    model: str = typer.Option(
-        ...,
-        "--model",
-        help="Model UUID or slug from `hud models list`.",
-    ),
-    description: str | None = typer.Option(
-        None,
-        "--description",
-        help="Optional agent description.",
-    ),
-    max_steps: int | None = typer.Option(
-        None,
-        "--max-steps",
-        min=1,
-        help="Maximum analysis steps.",
-    ),
-    args: str | None = typer.Option(None, "--args", help="JSON object of template partial args."),
-    public: bool = typer.Option(False, "--public", help="Make the agent visible to other teams."),
-    json_output: bool = typer.Option(False, "--json", help="Output the created agent as JSON."),
-) -> None:
-    """Create a trace QA agent."""
-    body: dict[str, Any] = {
-        "name": name,
-        "scenario_id": template,
-        "model_id": _resolve_model_id(model),
-        "subject_type": _TRACE_SUBJECT,
-    }
-    if description is not None:
-        body["description"] = description
-    if max_steps is not None:
-        body["max_steps"] = max_steps
-    if args is not None:
-        body["partial_args"] = _parse_args(args)
-    if public:
-        body["public"] = True
-    _print_agent(
-        cast("dict[str, Any]", _platform().post("/qa-agents", json=body)),
-        json_output=json_output,
-    )
-
-
-@qa_app.command("update")
-def update_agent(
-    agent_id: str = typer.Argument(..., help="QA agent UUID."),
-    name: str | None = typer.Option(None, "--name", help="New display name."),
-    model: str | None = typer.Option(None, "--model", help="Model UUID or slug."),
-    description: str | None = typer.Option(None, "--description", help="New description."),
-    max_steps: int | None = typer.Option(
-        None,
-        "--max-steps",
-        min=1,
-        help="Maximum analysis steps.",
-    ),
-    args: str | None = typer.Option(None, "--args", help="JSON object of template partial args."),
-    public: bool | None = typer.Option(
-        None,
-        "--public/--private",
-        help="Whether this agent is visible to other teams.",
-    ),
-    json_output: bool = typer.Option(False, "--json", help="Output the updated agent as JSON."),
-) -> None:
-    """Update a trace QA agent's configuration."""
-    platform = _platform()
-    _require_trace_agent(platform, agent_id)
-    body: dict[str, Any] = {}
-    if name is not None:
-        body["name"] = name
-    if model is not None:
-        body["model_id"] = _resolve_model_id(model)
-    if description is not None:
-        body["description"] = description
-    if max_steps is not None:
-        body["max_steps"] = max_steps
-    if args is not None:
-        body["partial_args"] = _parse_args(args)
-    if public is not None:
-        body["public"] = public
-    if not body:
-        typer.echo("Pass at least one field to update.", err=True)
-        raise typer.Exit(1)
-    _print_agent(
-        cast("dict[str, Any]", platform.patch(f"/qa-agents/{agent_id}", json=body)),
-        json_output=json_output,
-    )
-
-
-@qa_app.command("delete")
-def delete_agent(
-    agent_id: str = typer.Argument(..., help="QA agent UUID."),
-) -> None:
-    """Delete a trace QA agent."""
-    platform = _platform()
-    _require_trace_agent(platform, agent_id)
-    platform.delete(f"/qa-agents/{agent_id}")
-    typer.echo(f"Deleted {agent_id}.")
 
 
 @qa_app.command("run")
