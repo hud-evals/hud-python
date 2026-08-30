@@ -139,13 +139,13 @@ def _wait_for_results(
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-@qa_app.command("scenarios")
-def list_scenarios(
+@qa_app.command("templates")
+def list_templates(
     json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
-    limit: int = typer.Option(500, "--limit", min=1, max=1000, help="Maximum scenarios to return."),
+    limit: int = typer.Option(500, "--limit", min=1, max=1000, help="Maximum templates to return."),
 ) -> None:
-    """List scenarios that can be used to author a trace QA agent."""
-    scenarios = cast(
+    """List templates that can be used to author a trace QA agent."""
+    templates = cast(
         "list[dict[str, Any]]",
         _platform().get(
             "/qa-agents/scenarios",
@@ -153,15 +153,15 @@ def list_scenarios(
         ),
     )
     if json_output:
-        _print_json(scenarios)
+        _print_json(templates)
         return
-    if not scenarios:
-        typer.echo("No trace QA scenarios found.")
+    if not templates:
+        typer.echo("No trace QA templates found.")
         return
-    for scenario in scenarios:
+    for template in templates:
         typer.echo(
-            f"{scenario.get('id', '-')}\t{scenario.get('name', '-')}\t"
-            f"{scenario.get('registry_display_name') or '-'}"
+            f"{template.get('id', '-')}\t{template.get('name', '-')}\t"
+            f"{template.get('registry_display_name') or '-'}"
         )
 
 
@@ -193,10 +193,10 @@ def list_agents(
 @qa_app.command("create")
 def create_agent(
     name: str = typer.Option(..., "--name", help="Display name for the agent."),
-    scenario: str = typer.Option(
+    template: str = typer.Option(
         ...,
-        "--scenario",
-        help="Scenario UUID from `hud qa scenarios`.",
+        "--template",
+        help="Template UUID from `hud qa templates`.",
     ),
     model: str = typer.Option(
         ...,
@@ -214,14 +214,14 @@ def create_agent(
         min=1,
         help="Maximum analysis steps.",
     ),
-    args: str | None = typer.Option(None, "--args", help="JSON object of scenario partial args."),
+    args: str | None = typer.Option(None, "--args", help="JSON object of template partial args."),
     public: bool = typer.Option(False, "--public", help="Make the agent visible to other teams."),
     json_output: bool = typer.Option(False, "--json", help="Output the created agent as JSON."),
 ) -> None:
     """Create a trace QA agent."""
     body: dict[str, Any] = {
         "name": name,
-        "scenario_id": scenario,
+        "scenario_id": template,
         "model_id": _resolve_model_id(model),
         "subject_type": _TRACE_SUBJECT,
     }
@@ -251,7 +251,7 @@ def update_agent(
         min=1,
         help="Maximum analysis steps.",
     ),
-    args: str | None = typer.Option(None, "--args", help="JSON object of scenario partial args."),
+    args: str | None = typer.Option(None, "--args", help="JSON object of template partial args."),
     public: bool | None = typer.Option(
         None,
         "--public/--private",

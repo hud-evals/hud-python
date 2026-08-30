@@ -16,7 +16,7 @@ _AGENT_ID = "00000000-0000-4000-a000-000000000001"
 _TRACE_ID = "00000000-0000-4000-a000-000000000002"
 _RESULT_ID = "00000000-0000-4000-a000-000000000003"
 _OTHER_AGENT_ID = "00000000-0000-4000-a000-000000000004"
-_SCENARIO_ID = "00000000-0000-4000-a000-000000000005"
+_TEMPLATE_ID = "00000000-0000-4000-a000-000000000005"
 _MODEL_ID = "00000000-0000-4000-a000-000000000006"
 
 
@@ -83,16 +83,16 @@ def test_qa_agents_lists_trace_scope() -> None:
     )
 
 
-def test_qa_scenarios_lists_trace_candidates() -> None:
+def test_qa_templates_lists_trace_candidates() -> None:
     platform = MagicMock()
     platform.get.return_value = [
-        {"id": _SCENARIO_ID, "name": "qa:failure-analysis", "registry_display_name": "Trace QA"},
+        {"id": _TEMPLATE_ID, "name": "qa:failure-analysis", "registry_display_name": "Trace QA"},
     ]
 
-    result = _invoke(platform, ["qa", "scenarios"])
+    result = _invoke(platform, ["qa", "templates"])
 
     assert result.exit_code == 0
-    assert _SCENARIO_ID in result.output
+    assert _TEMPLATE_ID in result.output
     platform.get.assert_called_once_with(
         "/qa-agents/scenarios",
         params={"subject_type": "trace", "limit": 500},
@@ -110,8 +110,8 @@ def test_qa_create_posts_a_trace_agent() -> None:
             "create",
             "--name",
             "Failure Analysis",
-            "--scenario",
-            _SCENARIO_ID,
+            "--template",
+            _TEMPLATE_ID,
             "--model",
             _MODEL_ID,
             "--args",
@@ -126,7 +126,7 @@ def test_qa_create_posts_a_trace_agent() -> None:
         "/qa-agents",
         json={
             "name": "Failure Analysis",
-            "scenario_id": _SCENARIO_ID,
+            "scenario_id": _TEMPLATE_ID,
             "model_id": _MODEL_ID,
             "subject_type": "trace",
             "partial_args": {"threshold": 0.5},
@@ -144,8 +144,8 @@ def test_qa_create_rejects_invalid_args() -> None:
             "create",
             "--name",
             "Failure Analysis",
-            "--scenario",
-            _SCENARIO_ID,
+            "--template",
+            _TEMPLATE_ID,
             "--model",
             _MODEL_ID,
             "--args",
