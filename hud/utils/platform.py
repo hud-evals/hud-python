@@ -55,6 +55,12 @@ class PlatformClient:
     def post(self, path: str, *, json: Any | None = None) -> Any:
         return make_request_sync("POST", self.url(path), json=json, api_key=self.api_key)
 
+    def patch(self, path: str, *, json: Any | None = None) -> Any:
+        return make_request_sync("PATCH", self.url(path), json=json, api_key=self.api_key)
+
+    def delete(self, path: str) -> Any:
+        return make_request_sync("DELETE", self.url(path), api_key=self.api_key)
+
     async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         return await make_request("GET", self.url(path, params), api_key=self.api_key)
 

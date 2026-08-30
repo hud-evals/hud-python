@@ -134,18 +134,22 @@ hud sync env                   # sync environment metadata
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).
 
-### Resource QA
-
-Use Platform QA agents with Environment, Taskset, or Task subjects:
+### Platform QA
 
 ```bash
-hud qa agents --subject-type environment
-hud qa run <agent-id> <resource-id>
-hud qa results environment <environment-id>
+hud qa scenarios
+hud qa create --name "Failure Analysis" --scenario <scenario-id> --model <model-id>
+hud qa agents
+hud qa run <agent-id> <trace-id>
+hud qa results <trace-id>
 ```
 
+`hud qa` authors and runs **trace** agents. Pass `--description`, `--max-steps`,
+`--args '{"threshold": 0.5}'`, or `--public` on create. `hud qa update` and
+`hud qa delete` take an agent id.
+
 `hud qa run` reuses matching evidence by default and waits for every requested
-subject. Pass `--overwrite` to create a fresh attempt, `--no-wait` to return
+trace. Pass `--overwrite` to create a fresh attempt, `--no-wait` to return
 after launch, or `--json` for machine-readable output. Exit code `1` means a
 completed QA result failed or the SDK could not complete the command.
 

@@ -1,38 +1,54 @@
-"""Discover, run, and inspect resource-scoped platform QA agents."""
+"""Author, run, and inspect trace-level platform QA agents."""
 
 from __future__ import annotations
 
 import json
 import time
-from enum import StrEnum
 from typing import Any, cast
 
 import typer
 
+from hud.cli.models import _resolve_model_id
 from hud.cli.utils.api import require_api_key
 from hud.utils.exceptions import HudTimeoutError
 from hud.utils.platform import PlatformClient
 
 _POLL_INTERVAL_SECONDS = 2.0
 _TERMINAL_STATUSES = {"completed", "error"}
-
-
-class ResourceSubjectType(StrEnum):
-    environment = "environment"
-    taskset = "taskset"
-    task = "task"
-
+_TRACE_SUBJECT = "trace"
 
 qa_app = typer.Typer(
     name="qa",
-    help="Discover, run, and inspect platform QA agents.",
+    help="Author, run, and inspect trace-level platform QA agents.",
     add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )
 
 
-def _render_results(results: list[dict[str, Any]]) -> None:
+def _platform() -> PlatformClient:
+    require_api_key("use platform QA agents")
+    return PlatformClient.from_settings()
+
+
+def _print_json(payload: Any) -> None:
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+
+
+def _print_agent(agent: dict[str, Any], *, json_output: bool = False) -> None:
+    if json_output:
+        _print_json(agent)
+        return
+    typer.echo(
+        f"{agent.get('id', '-')}\t{agent.get('name', '-')}\t"
+        f"{agent.get('subject_type', '-')}\t{agent.get('model_name') or '-'}"
+    )
+
+
+def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
+    if json_output:
+        _print_json(results)
+        return
     if not results:
         typer.echo("No QA results found.")
         return
@@ -40,28 +56,55 @@ def _render_results(results: list[dict[str, Any]]) -> None:
         output = result.get("canonical_result") or result.get("result") or {}
         verdict = output.get("verdict") or result.get("status", "unknown")
         summary = output.get("summary") or result.get("error")
-        subject_id = result.get("subject_id", "-")
+        subject_id = result.get("subject_trace_id") or "-"
         agent = result.get("agent_name") or result.get("qa_agent_id") or "-"
         stale = " stale" if result.get("stale") is True else ""
         line = f"{subject_id}\t{agent}\t{verdict}{stale}"
         typer.echo(f"{line}\t{summary}" if summary else line)
 
 
+def _parse_args(raw: str | None) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        typer.echo("--args must be a JSON object.", err=True)
+        raise typer.Exit(1)
+    return parsed
+
+
+def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
+    agent = cast("dict[str, Any]", platform.get(f"/qa-agents/{agent_id}"))
+    if agent.get("subject_type") != _TRACE_SUBJECT:
+        typer.echo(
+            f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
+            "The CLI currently supports trace agents only.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 def _wait_for_results(
     platform: PlatformClient,
-    result_ids: list[str],
     timeout: float,
+    *,
+    trace_ids: list[str],
+    agent_id: str,
 ) -> list[dict[str, Any]]:
     deadline = time.monotonic() + timeout
     while True:
-        results = cast(
-            "list[dict[str, Any]]",
-            platform.get(
-                "/qa-agents/results/resources",
-                params={"result_ids": result_ids},
-            ),
-        )
-        if len(results) == len(result_ids) and all(
+        results = [
+            result
+            for result in cast(
+                "list[dict[str, Any]]",
+                platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
+            )
+            if result.get("qa_agent_id") == agent_id
+        ]
+        if len(results) == len(trace_ids) and all(
             result["status"] in _TERMINAL_STATUSES for result in results
         ):
             return results
@@ -70,50 +113,168 @@ def _wait_for_results(
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
+@qa_app.command("scenarios")
+def list_scenarios(
+    json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
+    limit: int = typer.Option(500, "--limit", min=1, max=1000, help="Maximum scenarios to return."),
+) -> None:
+    """List scenarios that can be used to author a trace QA agent."""
+    scenarios = cast(
+        "list[dict[str, Any]]",
+        _platform().get(
+            "/qa-agents/scenarios",
+            params={"subject_type": _TRACE_SUBJECT, "limit": limit},
+        ),
+    )
+    if json_output:
+        _print_json(scenarios)
+        return
+    if not scenarios:
+        typer.echo("No trace QA scenarios found.")
+        return
+    for scenario in scenarios:
+        typer.echo(
+            f"{scenario.get('id', '-')}\t{scenario.get('name', '-')}\t"
+            f"{scenario.get('registry_display_name') or '-'}"
+        )
+
+
 @qa_app.command("agents")
 def list_agents(
-    subject_type: ResourceSubjectType = typer.Option(  # noqa: B008
-        ResourceSubjectType.environment,
-        "--subject-type",
-        help="Resource scope: environment, taskset, or task.",
-    ),
     json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
     limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
     offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
 ) -> None:
-    """List QA agents available for a resource type."""
-    require_api_key("use platform QA agents")
+    """List trace QA agents available to this team."""
     response = cast(
         "dict[str, Any]",
-        PlatformClient.from_settings().get(
+        _platform().get(
             "/qa-agents",
-            params={
-                "subject_type": subject_type.value,
-                "limit": limit,
-                "offset": offset,
-            },
+            params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
         ),
     )
     if json_output:
-        typer.echo(json.dumps(response, indent=2, sort_keys=True, default=str))
+        _print_json(response)
         return
     agents = response["items"]
     if not agents:
-        typer.echo(f"No {subject_type.value} QA agents found.")
+        typer.echo("No trace QA agents found.")
         return
     for agent in agents:
-        typer.echo(
-            f"{agent.get('id', '-')}\t{agent.get('name', '-')}\t"
-            f"{agent.get('subject_type', '-')}\t{agent.get('model_name') or '-'}"
-        )
+        _print_agent(agent)
+
+
+@qa_app.command("create")
+def create_agent(
+    name: str = typer.Option(..., "--name", help="Display name for the agent."),
+    scenario: str = typer.Option(
+        ...,
+        "--scenario",
+        help="Scenario UUID from `hud qa scenarios`.",
+    ),
+    model: str = typer.Option(
+        ...,
+        "--model",
+        help="Model UUID or slug from `hud models list`.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        help="Optional agent description.",
+    ),
+    max_steps: int | None = typer.Option(
+        None,
+        "--max-steps",
+        min=1,
+        help="Maximum analysis steps.",
+    ),
+    args: str | None = typer.Option(None, "--args", help="JSON object of scenario partial args."),
+    public: bool = typer.Option(False, "--public", help="Make the agent visible to other teams."),
+    json_output: bool = typer.Option(False, "--json", help="Output the created agent as JSON."),
+) -> None:
+    """Create a trace QA agent."""
+    body: dict[str, Any] = {
+        "name": name,
+        "scenario_id": scenario,
+        "model_id": _resolve_model_id(model),
+        "subject_type": _TRACE_SUBJECT,
+    }
+    if description is not None:
+        body["description"] = description
+    if max_steps is not None:
+        body["max_steps"] = max_steps
+    if args is not None:
+        body["partial_args"] = _parse_args(args)
+    if public:
+        body["public"] = True
+    _print_agent(
+        cast("dict[str, Any]", _platform().post("/qa-agents", json=body)),
+        json_output=json_output,
+    )
+
+
+@qa_app.command("update")
+def update_agent(
+    agent_id: str = typer.Argument(..., help="QA agent UUID."),
+    name: str | None = typer.Option(None, "--name", help="New display name."),
+    model: str | None = typer.Option(None, "--model", help="Model UUID or slug."),
+    description: str | None = typer.Option(None, "--description", help="New description."),
+    max_steps: int | None = typer.Option(
+        None,
+        "--max-steps",
+        min=1,
+        help="Maximum analysis steps.",
+    ),
+    args: str | None = typer.Option(None, "--args", help="JSON object of scenario partial args."),
+    public: bool | None = typer.Option(
+        None,
+        "--public/--private",
+        help="Whether this agent is visible to other teams.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output the updated agent as JSON."),
+) -> None:
+    """Update a trace QA agent's configuration."""
+    platform = _platform()
+    _require_trace_agent(platform, agent_id)
+    body: dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name
+    if model is not None:
+        body["model_id"] = _resolve_model_id(model)
+    if description is not None:
+        body["description"] = description
+    if max_steps is not None:
+        body["max_steps"] = max_steps
+    if args is not None:
+        body["partial_args"] = _parse_args(args)
+    if public is not None:
+        body["public"] = public
+    if not body:
+        typer.echo("Pass at least one field to update.", err=True)
+        raise typer.Exit(1)
+    _print_agent(
+        cast("dict[str, Any]", platform.patch(f"/qa-agents/{agent_id}", json=body)),
+        json_output=json_output,
+    )
+
+
+@qa_app.command("delete")
+def delete_agent(
+    agent_id: str = typer.Argument(..., help="QA agent UUID."),
+) -> None:
+    """Delete a trace QA agent."""
+    platform = _platform()
+    _require_trace_agent(platform, agent_id)
+    platform.delete(f"/qa-agents/{agent_id}")
+    typer.echo(f"Deleted {agent_id}.")
 
 
 @qa_app.command("run")
 def run_agent(
     agent_id: str = typer.Argument(..., help="QA agent UUID."),
-    subject_ids: list[str] = typer.Argument(  # noqa: B008
+    trace_ids: list[str] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more Environment, Taskset, or Task UUIDs.",
+        help="One or more trace UUIDs.",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -133,28 +294,22 @@ def run_agent(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
 ) -> None:
-    """Run one QA agent against resource subjects."""
-    require_api_key("use platform QA agents")
-    platform = PlatformClient.from_settings()
+    """Run one trace QA agent against the given traces."""
+    platform = _platform()
+    _require_trace_agent(platform, agent_id)
     runs = cast(
         "list[dict[str, Any]]",
         platform.post(
-            f"/qa-agents/{agent_id}/run-resources",
-            json={"subject_ids": subject_ids, "overwrite": overwrite},
+            f"/qa-agents/{agent_id}/run",
+            json={"trace_ids": trace_ids, "overwrite": overwrite},
         ),
     )
     if not wait:
-        if json_output:
-            typer.echo(json.dumps(runs, indent=2, sort_keys=True, default=str))
-        else:
-            _render_results(runs)
+        _print_results(runs, json_output=json_output)
         return
 
-    results = _wait_for_results(platform, [str(run["id"]) for run in runs], timeout)
-    if json_output:
-        typer.echo(json.dumps(results, indent=2, sort_keys=True, default=str))
-    else:
-        _render_results(results)
+    results = _wait_for_results(platform, timeout, trace_ids=trace_ids, agent_id=agent_id)
+    _print_results(results, json_output=json_output)
     if any(
         result["status"] == "error"
         or (result.get("canonical_result") or {}).get("verdict") != "passed"
@@ -165,29 +320,15 @@ def run_agent(
 
 @qa_app.command("results")
 def list_results(
-    subject_type: ResourceSubjectType = typer.Argument(  # noqa: B008
+    trace_ids: list[str] = typer.Argument(  # noqa: B008
         ...,
-        help="Resource scope: environment, taskset, or task.",
-    ),
-    subject_ids: list[str] = typer.Argument(  # noqa: B008
-        ...,
-        help="One or more Environment, Taskset, or Task UUIDs.",
+        help="One or more trace UUIDs.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
 ) -> None:
-    """Inspect QA results attached to resource subjects."""
-    require_api_key("use platform QA agents")
+    """Inspect QA results attached to the given traces."""
     results = cast(
         "list[dict[str, Any]]",
-        PlatformClient.from_settings().get(
-            "/qa-agents/results/resources",
-            params={
-                "subject_type": subject_type.value,
-                "subject_ids": subject_ids,
-            },
-        ),
+        _platform().get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
     )
-    if json_output:
-        typer.echo(json.dumps(results, indent=2, sort_keys=True, default=str))
-    else:
-        _render_results(results)
+    _print_results(results, json_output=json_output)

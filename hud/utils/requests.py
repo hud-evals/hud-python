@@ -70,6 +70,13 @@ def _create_default_sync_client() -> httpx.Client:
     )
 
 
+def _response_payload(response: httpx.Response) -> Any:
+    """Decode JSON, treating 204 / empty bodies as an empty object."""
+    if response.status_code == 204 or not response.content:
+        return {}
+    return response.json()
+
+
 async def make_request(
     method: str,
     url: str,
@@ -135,7 +142,7 @@ async def make_request(
                     continue
 
                 response.raise_for_status()
-                result = response.json()
+                result = _response_payload(response)
                 return result
             except httpx.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
@@ -236,7 +243,7 @@ def make_request_sync(
                     continue
 
                 response.raise_for_status()
-                result = response.json()
+                result = _response_payload(response)
                 return result
             except httpx.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
