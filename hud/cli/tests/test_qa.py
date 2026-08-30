@@ -245,6 +245,35 @@ def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
     )
 
 
+def test_qa_run_wait_scores_launched_ids_not_older_rows() -> None:
+    older = {**_result("failed"), "id": "00000000-0000-4000-a000-000000000099"}
+    launched = _run()
+    completed = _result("passed")
+    platform = MagicMock()
+    platform.post.return_value = [launched]
+    platform.get.side_effect = [_agent(), [older], [older, completed]]
+
+    with patch("hud.cli.qa.time.sleep"):
+        result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "passed" in result.output
+    assert "failed" not in result.output
+
+
+def test_qa_run_wait_reuses_latest_when_launch_returns_empty() -> None:
+    older = {**_result("failed"), "id": "00000000-0000-4000-a000-000000000099"}
+    newer = _result("passed")
+    platform = MagicMock()
+    platform.post.return_value = []
+    platform.get.side_effect = [_agent(), [older, newer]]
+
+    result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "passed" in result.output
+
+
 def test_qa_run_waits_for_trace_results_and_ignores_other_agents() -> None:
     platform = MagicMock()
     platform.post.return_value = []

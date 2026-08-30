@@ -87,27 +87,53 @@ def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
         raise typer.Exit(1)
 
 
+def _latest_agent_result(
+    results: list[dict[str, Any]],
+    *,
+    agent_id: str,
+    trace_id: str,
+) -> dict[str, Any] | None:
+    latest: dict[str, Any] | None = None
+    for result in results:
+        if (
+            result.get("qa_agent_id") == agent_id
+            and str(result.get("subject_trace_id")) == trace_id
+        ):
+            latest = result
+    return latest
+
+
 def _wait_for_results(
     platform: PlatformClient,
     timeout: float,
     *,
     trace_ids: list[str],
     agent_id: str,
+    launched: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    launched_id_by_trace = {str(run["subject_trace_id"]): str(run["id"]) for run in launched}
     deadline = time.monotonic() + timeout
     while True:
-        results = [
-            result
-            for result in cast(
-                "list[dict[str, Any]]",
-                platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
+        listed = cast(
+            "list[dict[str, Any]]",
+            platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
+        )
+        by_id = {str(result["id"]): result for result in listed}
+        selected: list[dict[str, Any]] = []
+        ready = True
+        for trace_id in trace_ids:
+            result_id = launched_id_by_trace.get(trace_id)
+            result = (
+                by_id.get(result_id)
+                if result_id is not None
+                else _latest_agent_result(listed, agent_id=agent_id, trace_id=trace_id)
             )
-            if result.get("qa_agent_id") == agent_id
-        ]
-        if len(results) == len(trace_ids) and all(
-            result["status"] in _TERMINAL_STATUSES for result in results
-        ):
-            return results
+            if result is None or result["status"] not in _TERMINAL_STATUSES:
+                ready = False
+                break
+            selected.append(result)
+        if ready:
+            return selected
         if time.monotonic() >= deadline:
             raise HudTimeoutError(f"Timed out after {timeout:g}s waiting for QA runs.")
         time.sleep(_POLL_INTERVAL_SECONDS)
@@ -308,7 +334,13 @@ def run_agent(
         _print_results(runs, json_output=json_output)
         return
 
-    results = _wait_for_results(platform, timeout, trace_ids=trace_ids, agent_id=agent_id)
+    results = _wait_for_results(
+        platform,
+        timeout,
+        trace_ids=trace_ids,
+        agent_id=agent_id,
+        launched=runs,
+    )
     _print_results(results, json_output=json_output)
     if any(
         result["status"] == "error"
