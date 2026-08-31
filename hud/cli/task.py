@@ -200,8 +200,7 @@ def list_command(
         hud task list --quiet[/not dim]
     """
     items = [
-        {"slug": slug, "id": task.id, "args": task.args}
-        for slug, task in _collect(source).items()
+        {"slug": slug, "id": task.id, "args": task.args} for slug, task in _collect(source).items()
     ]
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     if mode == "json":

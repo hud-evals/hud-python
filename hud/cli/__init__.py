@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from hud.cli.utils.output import CliError
+from hud.cli.utils.output import CliError, json_option
 from hud.utils.exceptions import HudException
 
 app = typer.Typer(
@@ -70,9 +70,7 @@ def set_command(
     assignments: list[str] = typer.Argument(  # noqa: B008
         ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write structured JSON to stdout."
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Persist API keys or other variables for HUD to use by default.
 
@@ -102,7 +100,8 @@ def set_command(
                     input={"assignment": item},
                     suggestion="Pass one or more KEY=VALUE pairs.",
                     exit_code=ExitCode.USAGE,
-                )
+                ),
+                json_output=json_output,
             )
         key, value = parsed
         updates[key] = value
@@ -117,9 +116,7 @@ def set_command(
 
 @app.command()
 def version(
-    json_output: bool = typer.Option(
-        False, "--json", help="Write structured JSON to stdout."
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Show HUD CLI version.
 
@@ -128,7 +125,6 @@ def version(
         hud version --json[/not dim]
     """
     from hud import __version__  # lazy: keeps CLI startup off the full package import
-
     from hud.cli.utils.output import emit_json, wants_json
 
     if wants_json(json_output):
@@ -186,7 +182,6 @@ def main() -> None:
 
     if "--version" in sys.argv:
         from hud import __version__  # lazy: keeps CLI startup off the full package import
-
         from hud.cli.utils.output import emit_json, wants_json
 
         if wants_json():

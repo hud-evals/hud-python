@@ -26,6 +26,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def _reset_json_flag() -> None:
+    from hud.cli.utils.output import _JSON_REQUESTED
+
+    _JSON_REQUESTED.set(False)
+
+
 def test_wants_json_from_flag_and_output() -> None:
     assert wants_json(True) is True
     assert wants_json(False, "json") is True
@@ -108,14 +115,11 @@ def test_confirm_or_abort_yes_skips_prompt(monkeypatch: pytest.MonkeyPatch) -> N
     confirm_or_abort("Proceed?", yes=True)
 
 
-def test_read_text_arg_stdin_and_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_read_text_arg_stdin_and_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "answer.txt"
     target.write_text("hello", encoding="utf-8")
     assert read_text_arg(str(target)) == "hello"
 
-    monkeypatch.setattr("sys.stdin")
     monkeypatch.setattr("hud.cli.utils.output.sys.stdin.read", lambda: "from-stdin")
     assert read_text_arg("-") == "from-stdin"
 

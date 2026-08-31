@@ -62,10 +62,14 @@ def list_models(
     try:
         models_list = list_gateway_models()
     except Exception as exc:
-        abort(map_exception(exc) if isinstance(exc, HudException) else CliError(
-            error="failure",
-            message=f"Failed to fetch models: {exc}",
-        ))
+        abort(
+            map_exception(exc)
+            if isinstance(exc, HudException)
+            else CliError(
+                error="failure",
+                message=f"Failed to fetch models: {exc}",
+            )
+        )
 
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     if mode == "json":

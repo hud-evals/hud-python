@@ -17,6 +17,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 from hud.cli.utils.output import (
+    UnknownTokenAsGetGroup,
     emit_json,
     json_option,
     output_option,
@@ -28,6 +29,7 @@ console = Console()
 
 trace_app = typer.Typer(
     name="trace",
+    cls=UnknownTokenAsGetGroup,
     help="Inspect a rollout trace.",
     add_completion=False,
     rich_markup_mode="rich",
@@ -105,18 +107,10 @@ def get_command(
 
 
 @trace_app.callback(invoke_without_command=True)
-def trace_command(
-    ctx: typer.Context,
-    trace_id: str | None = typer.Argument(None, help="Trace ID (UUID or 32-hex OTel id)"),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    local_dir: str | None = typer.Option(
-        None, "--local-dir", help="Override HUD_TELEMETRY_LOCAL_DIR"
-    ),
-) -> None:
-    """Render the turns and tool calls for one rollout.
+def trace_command(ctx: typer.Context) -> None:
+    """Inspect a rollout trace.
 
-    Prefer ``hud trace get <id>`` in scripts; ``hud trace <id>`` is kept as an alias.
+    Prefer ``hud trace get <id>`` in scripts; ``hud trace <id>`` is rewritten to get.
 
     [not dim]Examples:
         hud trace get <trace-id>
@@ -124,9 +118,6 @@ def trace_command(
     """
     if ctx.invoked_subcommand is not None:
         return
-    if not trace_id:
-        raise typer.BadParameter("Missing argument 'TRACE_ID'.")
-    _show_trace(trace_id, json_output=json_output, output=output, local_dir=local_dir)
 
 
 # ── local JSONL ────────────────────────────────────────────────────────────────

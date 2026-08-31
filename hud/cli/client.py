@@ -12,7 +12,6 @@ import json
 
 import typer
 
-from hud.eval.runtime import Runtime
 from hud.cli.utils.output import (
     CliError,
     abort,
@@ -21,6 +20,7 @@ from hud.cli.utils.output import (
     output_option,
     wants_json,
 )
+from hud.eval.runtime import Runtime
 from hud.utils.hud_console import HUDConsole
 
 hud_console = HUDConsole()

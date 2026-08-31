@@ -16,6 +16,13 @@ from hud.utils.exceptions import HudRequestError
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _reset_json_flag() -> None:
+    from hud.cli.utils.output import _JSON_REQUESTED
+
+    _JSON_REQUESTED.set(False)
+
+
 def _stdout(result: Any) -> str:
     return result.stdout if getattr(result, "stdout", None) is not None else result.output
 

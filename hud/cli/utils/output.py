@@ -14,11 +14,18 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextvars
 import json
 import sys
 from typing import Any, NoReturn
 
+import click
 import typer
+from typer.core import TyperGroup
+
+_JSON_REQUESTED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "hud_cli_json_requested", default=False
+)
 
 # ── exit codes ───────────────────────────────────────────────────────────────
 
@@ -139,12 +146,35 @@ def abort(error: CliError, *, json_output: bool | None = None) -> NoReturn:
 # ── argv / flag helpers ──────────────────────────────────────────────────────
 
 
+def _mark_json(value: bool) -> bool:
+    """Option callback: remember ``--json`` for later ``abort()`` / ``emit_*``."""
+    _JSON_REQUESTED.set(value is True)
+    return value
+
+
+def _mark_output(value: str | None) -> str | None:
+    if isinstance(value, str) and value.strip().lower() == "json":
+        _JSON_REQUESTED.set(True)
+    return value
+
+
 def wants_json(json_output: bool | None = None, output: str | None = None) -> bool:
-    """True when the invocation asked for JSON (flag, --output, or argv)."""
+    """True when the invocation asked for JSON (flag, --output, context, or argv)."""
     if json_output is True:
         return True
     if isinstance(output, str) and output.strip().lower() == "json":
         return True
+    if _JSON_REQUESTED.get():
+        return True
+    ctx = click.get_current_context(silent=True)
+    while ctx is not None:
+        params = ctx.params
+        if params.get("json_output") is True:
+            return True
+        out = params.get("output")
+        if isinstance(out, str) and out.strip().lower() == "json":
+            return True
+        ctx = ctx.parent
     argv = sys.argv
     if "--json" in argv:
         return True
@@ -188,6 +218,7 @@ def json_option() -> Any:
         False,
         "--json",
         help="Write structured JSON to stdout. Progress and warnings go to stderr.",
+        callback=_mark_json,
     )
 
 
@@ -196,6 +227,7 @@ def output_option() -> Any:
         None,
         "--output",
         help="Output format: json or table. --output json is equivalent to --json.",
+        callback=_mark_output,
     )
 
 
@@ -419,9 +451,19 @@ def platform_call(
         abort(CliError(error="failure", message=str(exc), input=input))
 
 
+class UnknownTokenAsGetGroup(TyperGroup):
+    """Dispatch an unknown first token to ``get`` so ``hud jobs <id>`` stays valid."""
+
+    def resolve_command(self, ctx: Any, args: list[str]) -> Any:
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
+            args.insert(0, "get")
+        return super().resolve_command(ctx, args)
+
+
 __all__ = [
     "CliError",
     "ExitCode",
+    "UnknownTokenAsGetGroup",
     "abort",
     "confirm_or_abort",
     "dry_run_option",

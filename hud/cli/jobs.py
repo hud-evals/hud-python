@@ -19,6 +19,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from hud.cli.utils.output import (
+    UnknownTokenAsGetGroup,
     dry_run_option,
     emit_json,
     emit_quiet,
@@ -34,6 +35,7 @@ console = Console()
 
 jobs_app = typer.Typer(
     name="jobs",
+    cls=UnknownTokenAsGetGroup,
     help="List jobs, inspect their traces, and cancel rollouts.",
     add_completion=False,
     rich_markup_mode="rich",
@@ -236,7 +238,6 @@ def cancel_job_command(
 @jobs_app.callback(invoke_without_command=True)
 def jobs_command(
     ctx: typer.Context,
-    job_id: str | None = typer.Argument(None, help="Job ID — omit to list recent jobs"),
     json_output: bool = json_option(),
     output: str | None = output_option(),
     quiet: bool = quiet_option(),
@@ -244,10 +245,8 @@ def jobs_command(
 ) -> None:
     """List recent jobs, or show traces for a specific job.
 
-    Without an argument, lists the most recent jobs.
-    With a job id, lists all traces for that job.
-
-    Prefer the explicit verbs ``list`` / ``get`` / ``cancel`` in scripts.
+    Without a verb, lists the most recent jobs.
+    ``hud jobs <id>`` is rewritten to ``hud jobs get <id>``.
 
     [not dim]Examples:
         hud jobs
@@ -258,8 +257,4 @@ def jobs_command(
     """
     if ctx.invoked_subcommand is not None:
         return
-
-    if job_id:
-        _show_job_traces(job_id, json_output=json_output, output=output, quiet=quiet, limit=limit)
-    else:
-        _list_jobs(json_output=json_output, output=output, quiet=quiet, limit=limit)
+    _list_jobs(json_output=json_output, output=output, quiet=quiet, limit=limit)

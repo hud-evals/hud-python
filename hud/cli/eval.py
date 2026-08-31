@@ -25,6 +25,7 @@ from rich.table import Table
 
 from hud.cli.utils.api import require_api_key
 from hud.cli.utils.config import parse_key_value
+from hud.cli.utils.output import json_option
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
@@ -895,9 +896,7 @@ def eval_command(
         help="Comma-separated task slugs (or 0-based indices) to run",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write structured JSON results to stdout."
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the resolved eval plan without running."
     ),
