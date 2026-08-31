@@ -461,8 +461,14 @@ def deploy_environment(
     *,
     json_output: bool = False,
     dry_run: bool = False,
+    emit_result: bool = True,
 ) -> dict[str, Any] | None:
-    """Deploy one HUD environment to the platform."""
+    """Deploy one HUD environment to the platform.
+
+    ``emit_result`` controls whether this call writes its own JSON document.
+    ``deploy_all`` sets it False so ``--all --json`` emits one summary only;
+    ``wants_json`` stays true for the parent ``--json`` flag.
+    """""
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
 
@@ -515,7 +521,7 @@ def deploy_environment(
             "env_var_keys": sorted(plan.env_vars),
             "build_arg_keys": sorted(plan.build_args),
         }
-        if wants_json(json_output):
+        if emit_result and wants_json(json_output):
             emit_json(payload)
         else:
             hud_console.info(f"--dry-run: would deploy {plan.name}")
@@ -548,7 +554,7 @@ def deploy_environment(
         "status": result.status,
         "name": plan.name,
     }
-    if wants_json(json_output):
+    if emit_result and wants_json(json_output):
         emit_json(payload)
     if not result.success:
         raise typer.Exit(1)
@@ -788,7 +794,6 @@ def deploy_all(
         hud_console.section_title(f"[{i}/{len(envs)}] Deploying {env_dir.name}")
 
         try:
-            # Do not forward json_output: --all --json emits one summary document.
             result = deploy_environment(
                 directory=str(env_dir),
                 env=env,
@@ -803,6 +808,7 @@ def deploy_all(
                 runtime_config=runtime_config,
                 json_output=False,
                 dry_run=dry_run,
+                emit_result=False,
             )
             succeeded.append(env_dir.name)
             entry: dict[str, Any] = {"directory": env_dir.name}
