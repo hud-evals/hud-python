@@ -476,8 +476,10 @@ def deploy_environment(
     env_dir = Path(directory).resolve()
     env_source = EnvironmentSource.open(env_dir)
 
-    key_error = missing_api_key_error("deploy environments")
-    if key_error is not None:
+    from hud.settings import settings
+
+    if not settings.api_key:
+        key_error = missing_api_key_error("deploy environments")
         if emit_result:
             abort(key_error)
         emit_error_text(key_error)
