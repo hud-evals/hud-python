@@ -30,7 +30,7 @@ import pytest
 from hud.capabilities import SSHClient
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
-from hud.environment.egress import Peer, _field, _UnixServer, _Unrelayable
+from hud.environment.egress import Peer, _field, _Unrelayable
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessGroup, ProcessResult
 
@@ -657,6 +657,8 @@ async def test_run_uses_a_disposable_writable_hosts_file(
 
 
 def test_peer_forwarders_use_the_substrate_listen_backlog() -> None:
+    from hud.environment.egress import _UnixServer  # unix-only, as this module is
+
     assert _UnixServer.request_queue_size == socket.SOMAXCONN
 
 
