@@ -119,6 +119,7 @@ class AgentPreset:
 _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
     AgentPreset("Claude Opus 4.8", AgentType.CLAUDE, "claude-opus-4-8"),
+    AgentPreset("Claude CLI", AgentType.CLAUDE_CLI, "claude-sonnet-5"),
     AgentPreset("GPT-5.6", AgentType.OPENAI, "gpt-5.6"),
     AgentPreset("GPT-5.5", AgentType.OPENAI, "gpt-5.5"),
     AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3.1-pro-preview"),
@@ -176,6 +177,10 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_tokens = 16384
 # use_computer_beta = true
 
+[claude_cli]
+# model = "claude-sonnet-5"
+# permission_mode = "bypassPermissions"
+
 [openai]
 # model = "gpt-5.6"
 # temperature = 0.7
@@ -194,6 +199,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # Agent type -> (settings attr, env var name)
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
     AgentType.CLAUDE: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+    AgentType.CLAUDE_CLI: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
     AgentType.GEMINI: ("gemini_api_key", "GEMINI_API_KEY"),
     AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),
 }
@@ -387,7 +393,7 @@ class EvalConfig(BaseModel):
                 raise typer.Exit(1)
         elif self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(self.model):
             _require_bedrock_credentials()
-        elif self.agent_type in _API_KEY_REQUIREMENTS:
+        elif self.agent_type in _API_KEY_REQUIREMENTS and not self.agent_type.is_cli:
             attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
             if not getattr(settings, attr, None):
                 hud_console.error(f"{env_var} is required for {self.agent_type.value} agent")
@@ -672,18 +678,24 @@ def _build_agent(cfg: EvalConfig) -> Any:
     agent_kwargs = cfg.get_agent_kwargs()
     if cfg.auto_respond:
         agent_kwargs["auto_respond"] = True
+    if cfg.agent_type.is_cli:
+        if cfg.gateway or cfg.remote:
+            agent_kwargs["use_hud_gateway"] = True
+        else:
+            agent_kwargs.setdefault("use_hud_gateway", False)
 
     if cfg.gateway:
-        from hud.utils.gateway import build_gateway_client
+        if not cfg.agent_type.is_cli:
+            from hud.utils.gateway import build_gateway_client
 
-        agent_kwargs.setdefault(
-            "model_client", build_gateway_client(cfg.agent_type.gateway_provider)
-        )
+            agent_kwargs.setdefault(
+                "model_client", build_gateway_client(cfg.agent_type.gateway_provider)
+            )
         hud_console.info(f"Using HUD Gateway for {cfg.agent_type.gateway_provider} API")
 
     config = cfg.agent_type.config_cls(**agent_kwargs)
     # cls/config_cls are matched unions; the pairing is correct by construction.
-    return cast("Any", cfg.agent_type.cls)(config=config)
+    return cfg.agent_type.instantiate(config)
 
 
 def _python_defines_environment(path: Path) -> bool:
@@ -860,7 +872,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",  # noqa: E501
+        help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, claude_cli, openai, gemini, openai_compatible)",  # noqa: E501
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(

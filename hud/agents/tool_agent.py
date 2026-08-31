@@ -1,19 +1,4 @@
-"""ToolAgent: catalog-driven provider tool-call loop.
-
-Subclass contract::
-
-    class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
-        tool_catalog = (ClaudeBashTool, ClaudeTextEditorTool, ClaudeMCPProxyTool)
-
-        async def _initialize_state(self, *, prompt) -> RunState[BetaMessageParam]: ...
-        async def get_response(self, state, *, system_prompt, citations_enabled): ...
-        def _format_message(self, role, text) -> BetaMessageParam: ...
-        def _format_result(self, call, result) -> BetaMessageParam | None: ...
-
-``RunState`` carries the messages *and* the tools/params built for one run, so a
-single agent instance can drive many concurrent ``rollout`` calls with no shared
-mutable state.
-"""
+"""Catalog-driven provider tool-call agents."""
 
 from __future__ import annotations
 
@@ -34,11 +19,11 @@ from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient, RFBClient
 from hud.capabilities.ssh import SSHConnectionError
-from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
+from hud.types import MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.agents.types import AgentConfig
+    from hud.agents.types import ToolAgentConfig
     from hud.capabilities import CapabilityClient
     from hud.eval.run import Run
 
@@ -50,24 +35,17 @@ TRUNCATION_FINISH_REASONS = frozenset({"length", "max_output_tokens", "max_token
 MAX_CONSECUTIVE_SSH_FAILURES = 3
 
 MessageT = TypeVar("MessageT")
-ConfigT = TypeVar("ConfigT", bound="AgentConfig")
+ConfigT = TypeVar("ConfigT", bound="ToolAgentConfig")
 
 
 def _message_text(message: mcp_types.PromptMessage) -> str:
-    """Best-effort plain text for a prompt message (text content only for now)."""
     content = message.content
-    if isinstance(content, mcp_types.TextContent):
-        return content.text
-    return getattr(content, "text", "") or ""
+    return content.text if isinstance(content, mcp_types.TextContent) else ""
 
 
 @dataclass
 class RunState(Generic[MessageT]):
-    """Mutable per-run state: messages + the tools/params built for this run.
-
-    Created fresh per ``rollout`` (or ``run``) call, so one agent instance can
-    drive many concurrent rollouts without shared mutable state.
-    """
+    """Provider messages and tools for one run."""
 
     messages: list[MessageT] = field(default_factory=list[MessageT])
     tools: dict[str, AgentTool[Any]] = field(default_factory=dict[str, AgentTool[Any]])
@@ -78,77 +56,24 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     """Catalog-driven provider tool-call loop."""
 
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
-    #: Capability-client types this agent can drive (derived from the catalog).
-    clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
-
-    #: The agent's typed config; set by subclass __init__.
     config: ConfigT
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        if "tool_catalog" in cls.__dict__:
-            seen: dict[type[CapabilityClient], None] = {}
-            for t in cls.tool_catalog:
-                seen.setdefault(t.client_type, None)
-            cls.clients = tuple(seen.keys())
-
-    def hosted_spec(self) -> dict[str, Any]:
-        """HUD-hosted execution runs the agent remotely, so it is
-        reconstructed there from this identity (type, model, step budget, system
-        prompt, provider kwargs) with the model resolved through the HUD gateway.
-        """
-        if self.config.model_client is not None:
-            raise ValueError(
-                "hosted execution cannot serialize a custom model_client; "
-                "use create_agent(model, ...) so the hosted runner rebuilds the "
-                "gateway client, or run the agent loop locally with HUDRuntime() "
-                "/ LocalRuntime (recommended for TrainingClient workflows that "
-                "attach a BYOK client)"
-            )
-        agent_type = AgentType.of(self)
-        if agent_type is None:
-            raise ValueError(
-                f"hosted execution supports the gateway agent types "
-                f"({', '.join(at.value for at in AgentType)}); got {type(self).__name__}"
-            )
-        config = self.config.model_dump(
-            mode="json",
-            exclude={"model_client", "api_key", "base_url", "hosted_tools"},
-        )
-        return {"type": agent_type.value, "config": config}
-
     async def __call__(self, run: Run) -> None:
-        """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
-
-        Opens the capabilities this agent's catalog supports off the connection,
-        builds the tools into a fresh ``RunState``,
-        then runs the loop against ``run.prompt_messages``, accumulating the
-        trajectory onto ``run.trace``. Loop budget and prompting come from the agent's config
-        (``max_steps``, ``system_prompt``, ``citations_enabled``). No per-rollout
-        state is stored on ``self``, so one instance may drive many concurrent
-        rollouts.
-        """
         connections: dict[str, CapabilityClient] = {}
         opened_protocols: set[str] = set()
         manifest = run.client.manifest
-        if manifest is not None:
-            wanted = {cls.protocol for cls in type(self).clients}
-            for cap in manifest.bindings:
-                if cap.protocol not in wanted:
-                    continue
-                if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
-                    continue
-                connections[cap.name] = await run.client.open(cap.name)
-                opened_protocols.add(cap.protocol)
+        assert manifest is not None
+        wanted = {tool.client_type.protocol for tool in self.tool_catalog}
+        for cap in manifest.bindings:
+            if cap.protocol not in wanted:
+                continue
+            if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
+                continue
+            connections[cap.name] = await run.client.open(cap.name)
+            opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
-        await self._loop(
-            run,
-            state,
-            max_steps=self.config.max_steps,
-            system_prompt=self.config.system_prompt,
-            citations_enabled=self.config.citations_enabled,
-        )
+        await self._loop(run, state)
 
     async def _build_tools(
         self,
@@ -158,16 +83,15 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         tools: dict[str, AgentTool[Any]] = {}
         params: list[Any] = []
         model = self.config.model
-        hosted_tools = self.config.hosted_tools
 
         mcp_clients = [c for c in connections.values() if isinstance(c, MCPClient)]
         mcp_lists = await asyncio.gather(*(c.list_tools() for c in mcp_clients))
         mcp_by_client: dict[MCPClient, list[mcp_types.Tool]] = dict(
-            zip(mcp_clients, mcp_lists, strict=False),
+            zip(mcp_clients, mcp_lists, strict=True),
         )
         qualify_mcp_names = len(mcp_clients) > 1
 
-        for tool_cls in type(self).tool_catalog:
+        for tool_cls in self.tool_catalog:
             spec = tool_cls.default_spec(model)
             if spec is None:
                 continue
@@ -206,7 +130,11 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     tools[tool.provider_name] = tool
                     params.append(tool.to_params())
 
-        params.extend(hosted.to_params() for hosted in hosted_tools if hosted.supports_model(model))
+        params.extend(
+            hosted.to_params()
+            for hosted in self.config.hosted_tools
+            if hosted.supports_model(model)
+        )
 
         return tools, params
 
@@ -214,92 +142,72 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         self,
         run: Run,
         state: RunState[MessageT],
-        *,
-        max_steps: int = 10,
-        system_prompt: str | None = None,
-        citations_enabled: bool = False,
     ) -> None:
         trace = run.trace
-        try:
-            step: AgentStep | None = None
-            hit_max = False
-            stopped: StopCondition | None = None
-            consecutive_ssh_failures = 0
+        step: AgentStep | None = None
+        consecutive_ssh_failures = 0
 
-            for turn in range(1, max_steps + 1):
-                logger.info("step %d/%d", turn, max_steps)
-                started_at = now_iso()
-                step = await self.get_response(
-                    state,
-                    system_prompt=system_prompt,
-                    citations_enabled=citations_enabled,
+        for turn in range(1, self.config.max_steps + 1):
+            logger.info("step %d/%d", turn, self.config.max_steps)
+            started_at = now_iso()
+            step = await self.get_response(
+                state,
+                system_prompt=self.config.system_prompt,
+                citations_enabled=self.config.citations_enabled,
+            )
+            step.started_at = step.started_at or started_at
+            step.model = step.model or self.config.model
+            run.record(step)
+            if step.error:
+                raise RuntimeError(step.error)
+
+            if step.tool_calls:
+                logger.info("  → %s", ", ".join(c.name for c in step.tool_calls))
+
+            if step.done or not step.tool_calls:
+                follow_up = await auto_respond(step.content, enabled=self.config.auto_respond)
+                if follow_up is not None:
+                    text = (
+                        follow_up.content.text
+                        if isinstance(follow_up.content, mcp_types.TextContent)
+                        else ""
+                    )
+                    state.messages.append(self._format_message("user", text))
+                    run.record(Step(source="user", messages=[follow_up]))
+                    continue
+                trace.stop_reason = (
+                    "length" if step.finish_reason in TRUNCATION_FINISH_REASONS else "done"
                 )
-                step.started_at = step.started_at or started_at
-                step.model = step.model or self.config.model
-                run.record(step)
+                break
 
-                if step.tool_calls:
-                    logger.info("  → %s", ", ".join(c.name for c in step.tool_calls))
-
-                if step.done or not step.tool_calls:
-                    follow_up = await auto_respond(step.content, enabled=self.config.auto_respond)
-                    if follow_up is not None:
-                        text = (
-                            follow_up.content.text
-                            if isinstance(follow_up.content, mcp_types.TextContent)
-                            else ""
-                        )
-                        state.messages.append(self._format_user_text(text))
-                        run.record(Step(source="user", messages=[follow_up]))
-                        continue
-                    break
-
-                if (stopped := self._stop_condition(step)) is not None:
-                    break
-
-                for call in step.tool_calls:
-                    call_started_at = now_iso()
-                    result = await self._dispatch_call(call, state)
-                    run.record(ToolStep(call=call, result=result, started_at=call_started_at))
-                    msg = self._format_result(call, result, state)
-                    if isinstance(msg, list):
-                        state.messages.extend(msg)
-                    elif msg is not None:
-                        state.messages.append(cast("MessageT", msg))
-
-                    if isinstance(result, SSHInfrastructureErrorResult):
-                        consecutive_ssh_failures += 1
-                    else:
-                        consecutive_ssh_failures = 0
-                    if consecutive_ssh_failures >= MAX_CONSECUTIVE_SSH_FAILURES:
-                        error = (
-                            "SSH tool failure limit reached "
-                            f"after {MAX_CONSECUTIVE_SSH_FAILURES} consecutive errors"
-                        )
-                        trace.content = step.content
-                        trace.status = "error"
-                        run.record(Step(source="system", error=error))
-                        return
-
-                if turn == max_steps:
-                    hit_max = True
-
-            trace.content = step.content if step else None
-            trace.status = "error" if step is not None and step.error else "completed"
-            if stopped is not None:
+            if stopped := self._stop_condition(step):
                 trace.stop_reason = stopped
-            elif hit_max:
-                trace.stop_reason = "max_steps"
-            elif step is not None and step.finish_reason in TRUNCATION_FINISH_REASONS:
-                trace.stop_reason = "length"
-            else:
-                trace.stop_reason = "done"
-        except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
-            raise
-        except Exception as exc:
-            logger.exception("ToolAgent loop failed")
-            trace.status = "error"
-            run.record(Step(source="system", error=str(exc)))
+                break
+
+            for call in step.tool_calls:
+                call_started_at = now_iso()
+                result = await self._dispatch_call(call, state)
+                run.record(ToolStep(call=call, result=result, started_at=call_started_at))
+                msg = self._format_result(call, result, state)
+                if isinstance(msg, list):
+                    state.messages.extend(msg)
+                elif msg is not None:
+                    state.messages.append(cast("MessageT", msg))
+
+                if isinstance(result, SSHInfrastructureErrorResult):
+                    consecutive_ssh_failures += 1
+                else:
+                    consecutive_ssh_failures = 0
+                if consecutive_ssh_failures >= MAX_CONSECUTIVE_SSH_FAILURES:
+                    trace.content = step.content
+                    raise RuntimeError(
+                        "SSH tool failure limit reached "
+                        f"after {MAX_CONSECUTIVE_SSH_FAILURES} consecutive errors"
+                    )
+        else:
+            trace.stop_reason = "max_steps"
+
+        trace.content = step.content if step else None
 
     def _stop_condition(self, step: AgentStep) -> StopCondition | None:
         """The first configured stop condition this turn trips, if any."""
@@ -376,8 +284,6 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 isError=True,
             )
 
-    # ─── provider hooks ───────────────────────────────────────────────
-
     def _initial_messages(self, prompt: list[mcp_types.PromptMessage]) -> list[MessageT]:
         """Map normalized prompt turns onto provider messages."""
         return [self._format_message(message.role, _message_text(message)) for message in prompt]
@@ -398,13 +304,9 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     ) -> AgentStep:
         """Call the provider API and return the model's turn as an ``AgentStep``.
 
-        The loop stamps ``started_at``/``model`` fallbacks and records it;
-        a failed call is an ``AgentStep`` with ``error`` set and ``done=True``.
+        The loop stamps ``started_at``/``model`` fallbacks, records the step,
+        and raises its error if present.
         """
-
-    def _format_user_text(self, text: str) -> MessageT:
-        """Wrap a plain text string as a provider user message."""
-        return self._format_message("user", text)
 
     @abstractmethod
     def _format_message(self, role: str, text: str) -> MessageT:

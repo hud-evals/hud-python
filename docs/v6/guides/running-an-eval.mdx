@@ -38,9 +38,11 @@ and launch - no CLI required.
 
 ### Choosing an agent
 
-The agent name (`claude`, `openai`, `gemini`) selects a built-in harness and routes calls through the
-[HUD gateway](/v6/reference/agents), where one `HUD_API_KEY` covers every provider. Switching models is a
-single flag, and `hud models list` shows every model the gateway knows.
+The agent name (`claude`, `openai`, `gemini`) selects a provider harness and routes calls through the
+[HUD gateway](/v6/reference/agents), where one `HUD_API_KEY` covers every provider. The `claude_cli` and
+`codex_cli` harnesses instead run an installed CLI inside the environment; pass `--gateway` to route
+their model calls through HUD. Switching models is a single flag, and `hud models list` shows every
+model the gateway knows.
 
 ```bash
 hud eval "My Taskset" claude --model claude-haiku-4-5   # a cheaper model for fast iteration

@@ -19,12 +19,19 @@ from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
+from hud.agents.openai.tools.computer import OpenAIComputerTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
-from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
+from hud.agents.types import (
+    AgentStep,
+    ClaudeCLIConfig,
+    ClaudeConfig,
+    ToolAgentConfig,
+    ToolStep,
+)
 from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
 from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
 from hud.capabilities.ssh import SSHConnectionError
@@ -46,11 +53,11 @@ class _FakeRun:
         self.trace.record(step)
 
 
-class DictAgent(ToolAgent[_Msg, AgentConfig]):
+class DictAgent(ToolAgent[_Msg, ToolAgentConfig]):
     """Minimal concrete ToolAgent over plain-dict messages."""
 
     def __init__(self, turns: list[AgentStep], **config: Any) -> None:
-        self.config = AgentConfig(model="test-model", **config)
+        self.config = ToolAgentConfig(model="test-model", **config)
         self._turns = list(turns)
 
     async def _initialize_state(self, *, prompt: Any) -> RunState[_Msg]:
@@ -70,20 +77,10 @@ class DictAgent(ToolAgent[_Msg, AgentConfig]):
         return {"role": "tool", "name": call.name, "isError": result.isError}
 
 
-# ─── catalog → clients derivation ─────────────────────────────────────
-
-
-def test_init_subclass_derives_clients_from_catalog() -> None:
-    class WithCatalog(DictAgent):
-        tool_catalog = (OpenAIShellTool,)
-
-    assert WithCatalog.clients == (SSHClient,)
-
-
 def test_claude_defaults_to_configurable_webp_screenshots() -> None:
-    assert AgentConfig().screenshot_encoding == PngScreenshotEncoding()
+    assert ToolAgentConfig().screenshot_encoding == PngScreenshotEncoding()
     assert ClaudeConfig().screenshot_encoding == WebPScreenshotEncoding()
-    assert ClaudeSDKConfig().screenshot_encoding == WebPScreenshotEncoding()
+    assert ClaudeCLIConfig().screenshot_encoding == WebPScreenshotEncoding()
 
     configured = ClaudeConfig.model_validate(
         {"screenshot_encoding": {"mime_type": "image/webp", "quality": 42}},
@@ -102,8 +99,8 @@ def test_only_claude_provider_has_a_default_tool_timeout() -> None:
     assert config.timeout_seconds == 600
     assert config.tool_timeout_seconds == 120
     assert ClaudeConfig(tool_timeout_seconds=None).tool_timeout_seconds is None
-    assert AgentConfig().tool_timeout_seconds is None
-    assert ClaudeSDKConfig().tool_timeout_seconds is None
+    assert ToolAgentConfig().tool_timeout_seconds is None
+    assert "tool_timeout_seconds" not in ClaudeCLIConfig.model_fields
 
 
 async def test_agent_passes_screenshot_encoding_to_rfb_tools() -> None:
@@ -151,7 +148,7 @@ async def test_agent_opens_every_mcp_capability_by_name() -> None:
             return cast("CapabilityClient", object())
 
     class MultiMCPAgent(DictAgent):
-        clients = (MCPClient,)
+        tool_catalog = (OpenAIMCPProxyTool,)
 
     class LiveRun(_FakeRun):
         def __init__(self) -> None:
@@ -179,7 +176,7 @@ async def test_agent_opens_only_one_non_mcp_capability_per_protocol() -> None:
             return cast("CapabilityClient", object())
 
     class ComputerAgent(DictAgent):
-        clients = (RFBClient,)
+        tool_catalog = (OpenAIComputerTool,)
 
     class LiveRun(_FakeRun):
         def __init__(self) -> None:
@@ -207,7 +204,7 @@ async def test_mcp_capability_names_do_not_collide_with_protocol_keys() -> None:
             return cast("CapabilityClient", object())
 
     class MCPAndShellAgent(DictAgent):
-        clients = (MCPClient, SSHClient)
+        tool_catalog = (OpenAIMCPProxyTool, OpenAIShellTool)
 
     class LiveRun(_FakeRun):
         def __init__(self) -> None:
@@ -351,19 +348,12 @@ async def test_qualified_mcp_names_are_valid_provider_tool_names() -> None:
     )
 
 
-# ─── initial messages / user text formatting ──────────────────────────
-
-
 def test_initial_messages_formats_each_turn() -> None:
     agent = DictAgent([])
     turn = mcp_types.PromptMessage(
         role="user", content=mcp_types.TextContent(type="text", text="a")
     )
     assert agent._initial_messages([turn]) == [{"role": "user", "content": "a"}]
-    assert agent._format_user_text("hey") == {"role": "user", "content": "hey"}
-
-
-# ─── dispatch + loop ──────────────────────────────────────────────────
 
 
 async def test_dispatch_unknown_tool_returns_error_result() -> None:
@@ -442,6 +432,7 @@ async def test_claude_bash_timeout_terminates_process_and_continues_loop(
         ClaudeConfig(
             model="claude-test",
             model_client=cast("Any", object()),
+            max_steps=3,
             tool_timeout_seconds=0.01,
         )
     )
@@ -461,13 +452,14 @@ async def test_claude_bash_timeout_terminates_process_and_continues_loop(
     state = RunState(messages=[], tools={"bash": tool})
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, state, max_steps=3)
+    await agent._loop(run, state)
 
     assert started.is_set()
     process.terminate.assert_called_once_with()
     process.wait_closed.assert_awaited_once_with()
     assert responses.await_count == 2
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
+    assert run.trace.stop_reason == "done"
     assert run.trace.content == "recovered"
     tool_result = cast("list[Any]", state.messages[0]["content"])[0]
     error_block = cast("list[Any]", tool_result["content"])[0]
@@ -516,9 +508,9 @@ async def test_loop_finishes_on_done_response() -> None:
     agent = DictAgent([AgentStep(content="final answer", done=True)])
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    await agent._loop(run, RunState())
 
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
     assert run.trace.content == "final answer"
     assert run.trace.is_error is False
     assert run.trace.stop_reason == "done"
@@ -541,7 +533,7 @@ async def test_loop_dispatches_tool_calls_then_finishes() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    await agent._loop(run, RunState())
 
     assert run.trace.content == "done now"
     assert [step.source for step in run.trace.steps] == ["agent", "tool", "agent"]
@@ -575,12 +567,11 @@ async def test_loop_resets_infrastructure_error_count_after_other_result(
     monkeypatch.setattr(agent, "_dispatch_call", dispatch)
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=10)
+    with pytest.raises(RuntimeError, match="SSH tool failure limit reached"):
+        await agent._loop(run, RunState())
 
     assert dispatch.await_count == 5
-    assert run.trace.status == "error"
     assert run.trace.stop_reason is None
-    assert run.trace.error == ("SSH tool failure limit reached after 3 consecutive errors")
 
 
 async def test_loop_max_steps_is_normal_termination() -> None:
@@ -590,13 +581,13 @@ async def test_loop_max_steps_is_normal_termination() -> None:
     never_done = [
         AgentStep(content="", done=False, tool_calls=[MCPToolCall(name="ghost")]) for _ in range(5)
     ]
-    agent = DictAgent(never_done)
+    agent = DictAgent(never_done, max_steps=2)
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=2)
+    await agent._loop(run, RunState())
 
     assert run.trace.is_error is False
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
     assert run.trace.stop_reason == "max_steps"
     assert run.trace.is_truncated is True
     # No synthetic error step — the trajectory ends on the real agent/tool steps.
@@ -611,9 +602,9 @@ async def test_loop_marks_length_finish_as_truncated() -> None:
         agent = DictAgent([AgentStep(content="partial", done=True, finish_reason=finish_reason)])
         run = cast("Run", _FakeRun())
 
-        await agent._loop(run, RunState(), max_steps=3)
+        await agent._loop(run, RunState())
 
-        assert run.trace.status == "completed"
+        assert run.trace.status is None
         assert run.trace.stop_reason == "length"
         assert run.trace.is_truncated is True
 
@@ -632,7 +623,7 @@ async def test_loop_answers_malformed_call_by_default() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    await agent._loop(run, RunState())
 
     assert run.trace.content == "recovered"
     tool_step = run.trace.steps[1]
@@ -656,9 +647,9 @@ async def test_loop_stops_on_malformed_call_when_configured() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    await agent._loop(run, RunState())
 
-    assert run.trace.status == "completed"
+    assert run.trace.status is None
     assert run.trace.stop_reason == "malformed_tool_call"
     assert run.trace.is_truncated is True
     assert all(not isinstance(step, ToolStep) for step in run.trace.steps)
@@ -679,7 +670,7 @@ async def test_loop_stops_on_length_when_configured() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    await agent._loop(run, RunState())
 
     assert run.trace.stop_reason == "length"
     assert run.trace.is_truncated is True

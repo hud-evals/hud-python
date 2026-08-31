@@ -11,7 +11,15 @@ from typing import Any
 
 import pytest
 
-from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
+from hud.agents import (
+    ClaudeCLIAgent,
+    CodexCLIAgent,
+    OpenAIAgent,
+    OpenAIChatAgent,
+    create_agent,
+    dump_agent,
+    load_agent,
+)
 from hud.agents.base import Agent
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
@@ -20,9 +28,6 @@ from hud.utils.exceptions import HudAuthenticationError
 class _FillingAgent(Agent):
     async def __call__(self, run: Any) -> None:
         run.trace.content = "done"
-
-
-# ─── the ABC contract ─────────────────────────────────────────────────
 
 
 def test_agent_requires_call_implementation() -> None:
@@ -38,13 +43,46 @@ async def test_agent_call_fills_trace() -> None:
     assert run.trace.content == "done"
 
 
-# ─── AgentType resolution ─────────────────────────────────────────────
-
-
 def test_agent_type_maps_value_to_class_and_provider() -> None:
     assert AgentType("openai").cls is OpenAIAgent
     assert AgentType("openai_compatible").cls is OpenAIChatAgent
     assert isinstance(AgentType("openai").gateway_provider, str)
+
+
+def test_agent_type_registers_cli_agent() -> None:
+    assert AgentType("claude_cli").cls is ClaudeCLIAgent
+    assert AgentType.of(ClaudeCLIAgent()) == AgentType.CLAUDE_CLI
+    assert AgentType("codex_cli").cls is CodexCLIAgent
+    assert AgentType.of(CodexCLIAgent()) == AgentType.CODEX_CLI
+
+
+def test_cli_agent_round_trips_through_registered_wire_format() -> None:
+    agent = ClaudeCLIAgent()
+    spec = dump_agent(agent)
+
+    loaded = load_agent(spec)
+
+    assert spec["type"] == "claude_cli"
+    assert spec["config"]["model"] == "claude-sonnet-5"
+    assert isinstance(loaded, ClaudeCLIAgent)
+    assert loaded.config == agent.config
+
+
+def test_codex_cli_agent_round_trips_through_registry() -> None:
+    agent = CodexCLIAgent()
+    spec = dump_agent(agent)
+
+    loaded = load_agent(spec)
+
+    assert spec["type"] == "codex_cli"
+    assert spec["config"]["model"] == "gpt-5.6-sol"
+    assert isinstance(loaded, CodexCLIAgent)
+    assert loaded.config == agent.config
+
+
+def test_dump_agent_rejects_unregistered_agent() -> None:
+    with pytest.raises(ValueError, match="registered types"):
+        dump_agent(_FillingAgent())
 
 
 def test_missing_provider_dependency_points_at_agents_extra(
@@ -73,9 +111,6 @@ def test_missing_provider_dependency_points_at_agents_extra(
 
     with pytest.raises(ImportError, match=r"hud\[agents\]"):
         _ = AgentType.CLAUDE.cls
-
-
-# ─── create_agent routing ─────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)

@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 
+from hud.agents import dump_agent
+from hud.agents.claude import ClaudeCLIAgent, ClaudeCLIConfig
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval.job import Job
@@ -91,14 +93,14 @@ def test_runtime_constructor_timeout_is_a_deprecated_alias(runtime_type: type[An
     assert runtime.run_timeout == 90.0
 
 
-def test_hosted_spec_serializes_full_config() -> None:
+def test_dump_agent_serializes_full_config() -> None:
     agent = _agent()
     agent.config.system_prompt = "be brief"
     agent.config.max_steps = 7
     agent.config.timeout_seconds = 3600
     agent.config.tool_timeout_seconds = 1800
 
-    spec = agent.hosted_spec()
+    spec = dump_agent(agent)
 
     assert spec["type"] == "openai_compatible"
     config = spec["config"]
@@ -115,7 +117,7 @@ def test_hosted_spec_serializes_full_config() -> None:
     assert "hosted_tools" not in config
 
 
-def test_create_agent_hosted_spec_preserves_training_config(
+def test_dump_agent_preserves_training_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The constructor builds the runtime client without putting it in config."""
@@ -150,7 +152,7 @@ def test_create_agent_hosted_spec_preserves_training_config(
     assert agent.config.model_client is None
     assert agent.oai is client
 
-    spec = agent.hosted_spec()
+    spec = dump_agent(agent)
     config = spec["config"]
     assert spec["type"] == "openai_compatible"
     assert config["model"] == "arith-rl"
@@ -162,17 +164,15 @@ def test_create_agent_hosted_spec_preserves_training_config(
     assert "model_client" not in config
 
 
-def test_hosted_spec_rejects_custom_model_client() -> None:
+def test_dump_agent_rejects_custom_model_client() -> None:
     agent = _agent()
     agent.config = OpenAIChatConfig(model="m", model_client=object())
-    with pytest.raises(ValueError, match="custom model_client"):
-        agent.hosted_spec()
-    with pytest.raises(ValueError, match="HUDRuntime"):
-        agent.hosted_spec()
+    with pytest.raises(ValueError, match=r"custom model_client.*HUDRuntime"):
+        dump_agent(agent)
 
 
 @pytest.mark.asyncio
-async def test_run_rejects_non_gateway_agent() -> None:
+async def test_run_rejects_unregistered_agent() -> None:
     """An agent that can't serialize its identity yields a failed Run, not a crash."""
     run = await HostedRuntime(poll_interval=0.0).run(
         Task(env="e", id="x"),
@@ -180,7 +180,7 @@ async def test_run_rejects_non_gateway_agent() -> None:
         job_id="j",
     )
     assert run.trace.is_error
-    assert "gateway agent" in (run.trace.error or "")
+    assert "registered types" in (run.trace.error or "")
 
 
 @pytest.mark.asyncio
@@ -251,6 +251,35 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert payload["agent"]["type"] == "openai_compatible"
     assert payload["agent"]["config"]["model"] == "test-model"
     assert payload["agent"]["config"]["timeout_seconds"] == 45.0
+
+
+@pytest.mark.asyncio
+async def test_run_submits_registered_cli_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    agent = ClaudeCLIAgent(
+        ClaudeCLIConfig(
+            model="claude-sonnet-4-6",
+            max_steps=23,
+            use_hud_gateway=True,
+        )
+    )
+
+    run = await HostedRuntime(poll_interval=0.0).run(
+        Task(env="coding", id="solve"),
+        agent,
+        job_id=uuid.uuid4().hex,
+        trace_id=uuid.uuid4().hex,
+    )
+
+    assert run.reward == 1.0
+    submitted = platform.posts[0][1]["agent"]
+    assert submitted["type"] == "claude_cli"
+    assert submitted["config"]["model"] == "claude-sonnet-4-6"
+    assert submitted["config"]["max_steps"] == 23
+    assert submitted["config"]["use_hud_gateway"] is True
 
 
 @pytest.mark.asyncio

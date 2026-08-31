@@ -44,33 +44,39 @@ from hud.utils.time import now_iso
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.agents.claude import ClaudeAgent
-    from hud.agents.gemini import GeminiAgent
-    from hud.agents.openai import OpenAIAgent
-    from hud.agents.openai_compatible import OpenAIChatAgent
-    from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
-
-    AgentClass: TypeAlias = type[ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent]
-    AgentConfigClass: TypeAlias = type[
-        ClaudeConfig | GeminiConfig | OpenAIConfig | OpenAIChatConfig
-    ]
+    from hud.agents.base import Agent
+    from hud.agents.types import AgentConfig
 
 T = TypeVar("T")
 
 
 class AgentType(StrEnum):
     CLAUDE = "claude"
+    CLAUDE_CLI = "claude_cli"
+    CODEX_CLI = "codex_cli"
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENAI_COMPATIBLE = "openai_compatible"
 
     @property
-    def cls(self) -> AgentClass:
+    def is_cli(self) -> bool:
+        return self in (AgentType.CLAUDE_CLI, AgentType.CODEX_CLI)
+
+    @property
+    def cls(self) -> type[Agent]:
         match self:
             case AgentType.CLAUDE:
                 from hud.agents import ClaudeAgent
 
                 return ClaudeAgent
+            case AgentType.CLAUDE_CLI:
+                from hud.agents import ClaudeCLIAgent
+
+                return ClaudeCLIAgent
+            case AgentType.CODEX_CLI:
+                from hud.agents import CodexCLIAgent
+
+                return CodexCLIAgent
             case AgentType.OPENAI:
                 from hud.agents import OpenAIAgent
 
@@ -85,13 +91,24 @@ class AgentType(StrEnum):
                 return OpenAIChatAgent
 
     @property
-    def config_cls(self) -> AgentConfigClass:
+    def config_cls(self) -> type[AgentConfig]:
         """Get config class without importing agent (avoids SDK dependency)."""
-        from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+        from hud.agents.types import (
+            ClaudeCLIConfig,
+            ClaudeConfig,
+            CodexCLIConfig,
+            GeminiConfig,
+            OpenAIChatConfig,
+            OpenAIConfig,
+        )
 
         match self:
             case AgentType.CLAUDE:
                 return ClaudeConfig
+            case AgentType.CLAUDE_CLI:
+                return ClaudeCLIConfig
+            case AgentType.CODEX_CLI:
+                return CodexCLIConfig
             case AgentType.OPENAI:
                 return OpenAIConfig
             case AgentType.GEMINI:
@@ -99,12 +116,19 @@ class AgentType(StrEnum):
             case AgentType.OPENAI_COMPATIBLE:
                 return OpenAIChatConfig
 
+    def instantiate(self, config: AgentConfig) -> Agent:
+        return cast("Any", self.cls)(config)
+
     @property
     def gateway_provider(self) -> str:
         """Default provider client used when this agent type is a gateway shortcut."""
         match self:
             case AgentType.CLAUDE:
                 return "anthropic"
+            case AgentType.CLAUDE_CLI:
+                return "anthropic"
+            case AgentType.CODEX_CLI:
+                return "openai"
             case AgentType.OPENAI:
                 return "openai"
             case AgentType.GEMINI:
@@ -114,15 +138,15 @@ class AgentType(StrEnum):
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
-        """The gateway agent type *agent* is an instance of, or ``None``.
+        """The registered agent type *agent* is an instance of, or ``None``.
 
-        Reverse of :attr:`cls`. Provider extras (anthropic, google-genai, ...)
+        Reverse of :attr:`cls`. Agent extras (anthropic, google-genai, ...)
         may be uninstalled, so importing a type's agent class can fail; that
-        simply means *agent* is not that type. ``None`` for a custom ``Agent``
-        subclass that is not one of the gateway shortcuts.
+        simply means *agent* is not that type. ``None`` means the ``Agent``
+        implementation is not registered for reconstruction.
         """
         for agent_type in cls:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(ImportError):
                 if isinstance(agent, agent_type.cls):
                     return agent_type
         return None
@@ -302,7 +326,7 @@ TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 #: Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
 
-#: The configurable subset of stop reasons (``AgentConfig.stop_on``): policy
+#: The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 #: conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 

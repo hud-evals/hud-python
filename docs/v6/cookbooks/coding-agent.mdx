@@ -24,7 +24,7 @@ CHECKS = Path("checks").resolve()      # grader-only, outside the workspace
 TEST = "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n"
 
 env = Environment(name="coder")
-env.workspace(ROOT)
+env.workspace(ROOT, network=True)
 
 @env.initialize
 async def _seed():
@@ -60,16 +60,31 @@ Point a coding agent at the environment. `claude` opens the `ssh` capability, ed
 hud eval env.py claude
 ```
 
-For Claude Code (the `claude` CLI driving the shell over SSH), use the `ClaudeSDKAgent` in code:
+To run the `claude` CLI over SSH, select the `claude_cli` agent:
+
+```bash
+hud eval env.py claude_cli --gateway
+```
+
+Codex uses the same environment through the `codex_cli` agent:
+
+```bash
+hud eval env.py codex_cli --gateway
+```
+
+The SSH runtime must expose the selected executable, either as a managed runtime bundle or through
+the environment image. The agent validates the effective runtime OS against the live SSH target,
+prefers a compatible managed bundle, and otherwise resolves the executable from `PATH`. CLI agents
+do not download or update executables. The equivalent Claude Python API is:
 
 ```python run.py
 import asyncio
-from hud.agents import ClaudeSDKAgent
-from hud.agents.types import ClaudeSDKConfig
+from hud.agents import ClaudeCLIAgent
+from hud.agents.types import ClaudeCLIConfig
 from env import fix_add
 
 async def main():
-    agent = ClaudeSDKAgent(ClaudeSDKConfig(model="claude-sonnet-4-5"))
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-5"))
     job = await fix_add().run(agent)
     print("reward:", job.reward)
 
