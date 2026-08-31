@@ -475,9 +475,10 @@ def deploy_environment(
     env_dir = Path(directory).resolve()
     env_source = EnvironmentSource.open(env_dir)
 
-    from hud.cli.utils.api import require_api_key
+    if emit_result:
+        from hud.cli.utils.api import require_api_key
 
-    require_api_key("deploy environments")
+        require_api_key("deploy environments")
     recipe = _compose_recipe(env_dir)
     dockerfile = env_source.dockerfile
     if recipe is None and dockerfile is None:
@@ -556,6 +557,8 @@ def deploy_environment(
     }
     if emit_result and wants_json(json_output):
         emit_json(payload)
+    if not emit_result:
+        return payload
     if not result.success:
         raise typer.Exit(1)
     return payload
@@ -767,6 +770,10 @@ def deploy_all(
     dry_run: bool = False,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
+    from hud.cli.utils.api import require_api_key
+
+    require_api_key("deploy environments")
+
     hud_console = HUDConsole()
     parent = Path(directory).resolve()
 
