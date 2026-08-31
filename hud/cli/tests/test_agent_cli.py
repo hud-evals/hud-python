@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +16,11 @@ from hud.cli.utils.output import ExitCode
 from hud.utils.exceptions import HudRequestError
 
 runner = CliRunner()
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    return _ANSI.sub("", text)
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +41,7 @@ def _combined(result: Any) -> str:
 def test_root_help_lists_nouns_and_exit_codes() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    text = result.output
+    text = _plain(result.output)
     assert "jobs" in text
     assert "models" in text
     assert "task" in text
@@ -45,9 +52,10 @@ def test_root_help_lists_nouns_and_exit_codes() -> None:
 def test_jobs_list_help_documents_json_and_examples() -> None:
     result = runner.invoke(app, ["jobs", "list", "--help"])
     assert result.exit_code == 0
-    assert "--json" in result.output
-    assert "hud jobs list --json" in result.output
-    assert "--quiet" in result.output
+    text = _plain(result.output)
+    assert "--json" in text
+    assert "hud jobs list --json" in text
+    assert "--quiet" in text
 
 
 def test_jobs_list_json_and_quiet() -> None:
@@ -114,18 +122,32 @@ def test_cancel_usage_error_and_dry_run() -> None:
     assert payload["job_id"] == "job-1"
 
 
+def test_cancel_dry_run_json_skips_confirmation() -> None:
+    result = runner.invoke(app, ["cancel", "job-1", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(_stdout(result))
+    assert payload == {
+        "dry_run": True,
+        "action": "cancel_job",
+        "job_id": "job-1",
+        "trace_id": None,
+        "all": False,
+    }
+
+
 def test_cancel_alias_still_registered() -> None:
     result = runner.invoke(app, ["cancel", "--help"])
     assert result.exit_code == 0
-    assert "--json" in result.output
-    assert "--dry-run" in result.output
-    assert "--yes" in result.output
+    text = _plain(result.output)
+    assert "--json" in text
+    assert "--dry-run" in text
+    assert "--yes" in text
 
 
 def test_trace_get_help_and_alias() -> None:
     get_help = runner.invoke(app, ["trace", "get", "--help"])
     assert get_help.exit_code == 0
-    assert "--json" in get_help.output
+    assert "--json" in _plain(get_help.output)
 
     with (
         patch("hud.cli.trace._load_remote", return_value=[{"kind": "agent_message", "text": "hi"}]),
@@ -161,8 +183,9 @@ def test_auth_noun_group_is_registered() -> None:
 def test_models_list_help_has_examples() -> None:
     result = runner.invoke(app, ["models", "list", "--help"])
     assert result.exit_code == 0
-    assert "--json" in result.output
-    assert "hud models list --json" in result.output
+    text = _plain(result.output)
+    assert "--json" in text
+    assert "hud models list --json" in text
 
 
 def test_missing_api_key_is_permission(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,12 +231,56 @@ def test_task_list_json_and_quiet(tmp_path: Any) -> None:
     # if collection fails. The contract under test is flags + help.
     help_result = runner.invoke(app, ["task", "list", "--help"])
     assert help_result.exit_code == 0
-    assert "--json" in help_result.output
-    assert "--quiet" in help_result.output
+    text = _plain(help_result.output)
+    assert "--json" in text
+    assert "--quiet" in text
 
 
 def test_qa_help_documents_json() -> None:
     result = runner.invoke(app, ["qa", "run", "--help"])
     assert result.exit_code == 0
-    assert "--json" in result.output
-    assert "--dry-run" in result.output
+    text = _plain(result.output)
+    assert "--json" in text
+    assert "--dry-run" in text
+
+
+def test_deploy_all_json_is_single_document(tmp_path: Path) -> None:
+    from hud.cli.deploy import _DeployPlan
+
+    for name in ("alpha", "beta"):
+        env_dir = tmp_path / name
+        env_dir.mkdir()
+        (env_dir / "Dockerfile.hud").write_text("FROM python:3.12\n")
+        (env_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n')
+
+    def _plan(*_args: Any, env_dir: Path, **_kwargs: Any) -> _DeployPlan:
+        return _DeployPlan(
+            name=env_dir.name,
+            registry_id=None,
+            runtime=None,
+            runtime_config=None,
+            env_vars={},
+            build_args={},
+            build_secrets={},
+        )
+
+    with (
+        patch("hud.cli.utils.api.require_api_key", return_value="key"),
+        patch("hud.cli.deploy._validate_before_deploy"),
+        patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
+        patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
+    ):
+        result = runner.invoke(
+            app, ["deploy", str(tmp_path), "--all", "--dry-run", "--json"]
+        )
+
+    assert result.exit_code == 0
+    stdout = _stdout(result).strip()
+    payload = json.loads(stdout)
+    leftover = stdout[json.JSONDecoder().raw_decode(stdout)[1] :].strip()
+    assert leftover == ""
+    assert payload["dry_run"] is True
+    assert payload["succeeded"] == ["alpha", "beta"]
+    assert payload["failed"] == []
+    assert [item["directory"] for item in payload["environments"]] == ["alpha", "beta"]
+    assert [item["name"] for item in payload["environments"]] == ["alpha", "beta"]

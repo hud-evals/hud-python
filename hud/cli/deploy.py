@@ -461,7 +461,7 @@ def deploy_environment(
     *,
     json_output: bool = False,
     dry_run: bool = False,
-) -> None:
+) -> dict[str, Any] | None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
@@ -523,7 +523,7 @@ def deploy_environment(
                 hud_console.info(f"  registry_id: {plan.registry_id}")
             if plan.runtime:
                 hud_console.info(f"  runtime: {plan.runtime}")
-        return
+        return payload
     tarball_path = _create_tarball(env_dir, verbose=verbose, console=hud_console)
     try:
         result = asyncio.run(
@@ -541,18 +541,18 @@ def deploy_environment(
 
     from hud.cli.utils.output import emit_json, wants_json
 
+    payload = {
+        "success": result.success,
+        "build_id": result.build_id,
+        "registry_id": result.registry_id,
+        "status": result.status,
+        "name": plan.name,
+    }
     if wants_json(json_output):
-        emit_json(
-            {
-                "success": result.success,
-                "build_id": result.build_id,
-                "registry_id": result.registry_id,
-                "status": result.status,
-                "name": plan.name,
-            }
-        )
+        emit_json(payload)
     if not result.success:
         raise typer.Exit(1)
+    return payload
 
 
 @dataclass(frozen=True)
@@ -782,12 +782,14 @@ def deploy_all(
 
     succeeded: list[str] = []
     failed: list[str] = []
+    environments: list[dict[str, Any]] = []
 
     for i, env_dir in enumerate(envs, start=1):
         hud_console.section_title(f"[{i}/{len(envs)}] Deploying {env_dir.name}")
 
         try:
-            deploy_environment(
+            # Do not forward json_output: --all --json emits one summary document.
+            result = deploy_environment(
                 directory=str(env_dir),
                 env=env,
                 env_file=env_file,
@@ -803,12 +805,18 @@ def deploy_all(
                 dry_run=dry_run,
             )
             succeeded.append(env_dir.name)
+            entry: dict[str, Any] = {"directory": env_dir.name}
+            if result is not None:
+                entry.update(result)
+            environments.append(entry)
         except (typer.Exit, SystemExit):
             LOGGER.warning("Deploy failed for environment %s", env_dir.name)
             failed.append(env_dir.name)
+            environments.append({"directory": env_dir.name, "success": False})
         except Exception:
             LOGGER.exception("Unexpected error deploying %s", env_dir.name)
             failed.append(env_dir.name)
+            environments.append({"directory": env_dir.name, "success": False})
 
     # Summary
     hud_console.info("")
@@ -820,7 +828,14 @@ def deploy_all(
     if json_output:
         from hud.cli.utils.output import emit_json
 
-        emit_json({"succeeded": succeeded, "failed": failed, "dry_run": dry_run})
+        emit_json(
+            {
+                "succeeded": succeeded,
+                "failed": failed,
+                "dry_run": dry_run,
+                "environments": environments,
+            }
+        )
     if failed:
         hud_console.error(f"{len(failed)} environment(s) failed:")
         for name in failed:

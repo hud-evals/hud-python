@@ -21,7 +21,7 @@ List, get, create, and status commands accept `--json` (or `--output json`). JSO
 
 With `--json`, failures also print a structured object to stdout: `{"error": "not_found", "message": "...", "input": {...}, "suggestion": "..."}`.
 
-Mutating commands accept `--dry-run` where an action can be described without performing it, and `--yes` / `-y` to skip confirmation. In a non-interactive terminal the CLI does not prompt; pass `--yes` or it exits `2`.
+Mutating commands accept `--dry-run` where an action can be described without performing it, and `--yes` / `-y` to skip confirmation. `--dry-run` never prompts. In a non-interactive terminal a real mutating action does not prompt; pass `--yes` or it exits `2`.
 
 Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Older shortcuts stay registered: `hud jobs <id>`, `hud trace <id>`, `hud cancel`, `hud login`, `hud set`. Hidden alias: `hud job` → `hud jobs`. `hud auth login` / `hud auth set` are the noun forms of login and set.
 
@@ -78,7 +78,7 @@ hud deploy
 | `--all`, `-a` | Deploy all environments in the directory. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
 | `--env-file` | Path to a `.env` file. |
-| `--json` | Structured result on stdout. |
+| `--json` | Structured result on stdout. `--all --json` emits one summary document. |
 | `--dry-run` | Print the deploy plan without uploading. |
 
 ## Evaluate
