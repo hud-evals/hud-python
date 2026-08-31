@@ -139,6 +139,7 @@ class ModalRuntime:
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
         secrets: Sequence[modal.Secret] | None = None,
+        registry_secret: modal.Secret | None = None,
     ) -> None:
         if app is not None and app_name is not None:
             raise ValueError("ModalRuntime accepts either app or app_name, not both")
@@ -146,6 +147,7 @@ class ModalRuntime:
         self.port = port
         self.env_vars = dict(env_vars or {})
         self.secrets = tuple(secrets or ())
+        self.registry_secret = registry_secret
         self.workdir = workdir
         # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
         # workdir unset by default so Modal preserves the image WORKDIR.
@@ -208,7 +210,7 @@ class ModalRuntime:
             image = (
                 modal.Image.from_id(config.image.removeprefix("modal://"))
                 if config.image.startswith("modal://")
-                else modal.Image.from_registry(config.image)
+                else modal.Image.from_registry(config.image, secret=self.registry_secret)  # pull auth
             )
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)

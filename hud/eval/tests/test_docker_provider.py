@@ -266,8 +266,9 @@ def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             return _ModalImageRef("name", name)
 
         @staticmethod
-        def from_registry(name: str) -> _ModalImageRef:
+        def from_registry(name: str, secret: object = None) -> _ModalImageRef:
             calls["registry_image"] = name
+            calls["registry_secret"] = secret
             return _ModalImageRef("registry", name)
 
         @staticmethod
@@ -1370,6 +1371,24 @@ async def test_modal_runtime_attaches_secrets_to_sandbox(
     sandbox_kwargs = calls["sandbox_kwargs"]
     assert isinstance(sandbox_kwargs, dict)
     assert sandbox_kwargs["secrets"] == (secret,)
+    assert calls["registry_secret"] is None
+
+
+async def test_modal_runtime_passes_registry_secret_to_from_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    registry_secret = _ModalSecretRef("registry-creds")
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(image="ghcr.io/org/private:tag"),
+        registry_secret=cast("Any", registry_secret),
+    )
+
+    async with provider(_row()):
+        pass
+
+    assert calls["registry_image"] == "ghcr.io/org/private:tag"
+    assert calls["registry_secret"] is registry_secret
 
 
 async def test_modal_runtime_rejects_secrets_for_compose(
