@@ -63,14 +63,8 @@ def run_cancel(
 
     if all_jobs:
         action = "cancel_all"
-        confirm_or_abort(
-            "This will cancel ALL your active jobs. Continue?",
-            yes=yes,
-            default=False,
-        )
     elif job_id and not trace_id:
         action = "cancel_job"
-        confirm_or_abort(f"Cancel all tasks in job {job_id}?", yes=yes, default=False)
     else:
         action = "cancel_trace"
 
@@ -93,6 +87,15 @@ def run_cancel(
             if trace_id:
                 hud_console.info(f"  trace_id: {trace_id}")
         return
+
+    if all_jobs:
+        confirm_or_abort(
+            "This will cancel ALL your active jobs. Continue?",
+            yes=yes,
+            default=False,
+        )
+    elif job_id and not trace_id:
+        confirm_or_abort(f"Cancel all tasks in job {job_id}?", yes=yes, default=False)
 
     async def _cancel() -> dict[str, Any]:
         from hud.cli.utils.jobs import cancel_all_jobs, cancel_job, cancel_task

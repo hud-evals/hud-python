@@ -799,7 +799,7 @@ def deploy_all(
                 build_secrets=build_secrets,
                 runtime=runtime,
                 runtime_config=runtime_config,
-                json_output=json_output,
+                json_output=False,
                 dry_run=dry_run,
             )
             succeeded.append(env_dir.name)
