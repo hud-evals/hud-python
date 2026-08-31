@@ -18,6 +18,7 @@ from hud.cli.utils.output import (
     map_request_error,
     read_text_arg,
     resolve_output_mode,
+    suppress_json_stdout,
     wants_json,
 )
 from hud.utils.exceptions import HudRequestError
@@ -28,9 +29,10 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _reset_json_flag() -> None:
-    from hud.cli.utils.output import _JSON_REQUESTED
+    from hud.cli.utils.output import _JSON_REQUESTED, _JSON_SUPPRESSED
 
     _JSON_REQUESTED.set(False)
+    _JSON_SUPPRESSED.set(False)
 
 
 def test_wants_json_from_flag_and_output() -> None:
@@ -69,6 +71,18 @@ def test_emit_quiet_one_value_per_line(capsys: pytest.CaptureFixture[str]) -> No
     captured = capsys.readouterr()
     assert captured.out == "a\nb\n"
     assert captured.err == ""
+
+
+def test_suppress_json_stdout_blocks_abort_json(capsys: pytest.CaptureFixture[str]) -> None:
+    from hud.cli.utils.output import _JSON_REQUESTED
+
+    _JSON_REQUESTED.set(True)
+    with suppress_json_stdout(), pytest.raises(typer.Exit) as exc_info:
+        abort(CliError(error="permission_denied", message="No HUD API key found"))
+    assert exc_info.value.exit_code == ExitCode.PERMISSION
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: No HUD API key found" in captured.err
 
 
 def test_abort_writes_error_json_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:

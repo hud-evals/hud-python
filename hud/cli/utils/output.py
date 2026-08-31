@@ -17,7 +17,11 @@ from __future__ import annotations
 import contextvars
 import json
 import sys
-from typing import Any, NoReturn
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, NoReturn
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 import click
 import typer
@@ -25,6 +29,9 @@ from typer.core import TyperGroup
 
 _JSON_REQUESTED: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "hud_cli_json_requested", default=False
+)
+_JSON_SUPPRESSED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "hud_cli_json_suppressed", default=False
 )
 
 # ── exit codes ───────────────────────────────────────────────────────────────
@@ -106,6 +113,8 @@ def json_default(value: Any) -> Any:
 
 def emit_json(payload: Any) -> None:
     """Write one JSON document to stdout (the agent contract)."""
+    if _JSON_SUPPRESSED.get():
+        return
     sys.stdout.write(json.dumps(payload, indent=2, default=json_default) + "\n")
     sys.stdout.flush()
 
@@ -133,7 +142,7 @@ def emit_error_text(error: CliError) -> None:
 
 def emit_error(error: CliError, *, json_output: bool | None = None) -> None:
     emit_error_text(error)
-    if wants_json(json_output):
+    if not _JSON_SUPPRESSED.get() and wants_json(json_output):
         emit_json(error.to_payload())
 
 
@@ -158,8 +167,20 @@ def _mark_output(value: str | None) -> str | None:
     return value
 
 
+@contextmanager
+def suppress_json_stdout() -> Iterator[None]:
+    """Block JSON writes to stdout while a caller aggregates one document."""
+    token = _JSON_SUPPRESSED.set(True)
+    try:
+        yield
+    finally:
+        _JSON_SUPPRESSED.reset(token)
+
+
 def wants_json(json_output: bool | None = None, output: str | None = None) -> bool:
     """True when the invocation asked for JSON (flag, --output, context, or argv)."""
+    if _JSON_SUPPRESSED.get():
+        return False
     if json_output is True:
         return True
     if isinstance(output, str) and output.strip().lower() == "json":
@@ -483,6 +504,7 @@ __all__ = [
     "quiet_option",
     "read_text_arg",
     "resolve_output_mode",
+    "suppress_json_stdout",
     "wants_json",
     "yes_option",
 ]

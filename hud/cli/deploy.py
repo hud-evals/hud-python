@@ -15,11 +15,12 @@ import httpx
 import typer
 from pydantic import ValidationError
 
+from hud.cli.utils.api import missing_api_key_error
 from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
-from hud.cli.utils.output import json_option
+from hud.cli.utils.output import abort, json_option, suppress_json_stdout
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
 from hud.eval.runtime import ComposeProject, RuntimeConfig
@@ -465,9 +466,9 @@ def deploy_environment(
 ) -> dict[str, Any] | None:
     """Deploy one HUD environment to the platform.
 
-    ``emit_result`` controls whether this call writes its own JSON document.
-    ``deploy_all`` sets it False so ``--all --json`` emits one summary only;
-    ``wants_json`` stays true for the parent ``--json`` flag.
+    ``emit_result`` controls whether this call writes JSON or exits on failure.
+    ``deploy_all`` sets it False so failures return a payload and stdout stays
+    reserved for one summary document.
     """
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
@@ -475,10 +476,11 @@ def deploy_environment(
     env_dir = Path(directory).resolve()
     env_source = EnvironmentSource.open(env_dir)
 
-    if emit_result:
-        from hud.cli.utils.api import require_api_key
-
-        require_api_key("deploy environments")
+    key_error = missing_api_key_error("deploy environments")
+    if key_error is not None:
+        if emit_result:
+            abort(key_error)
+        return {"success": False, **key_error.to_payload()}
     recipe = _compose_recipe(env_dir)
     dockerfile = env_source.dockerfile
     if recipe is None and dockerfile is None:
@@ -486,30 +488,46 @@ def deploy_environment(
         hud_console.info(f"Directory: {env_dir}")
         hud_console.info("\nCreate a Compose or Dockerfile build recipe.")
         hud_console.info("Run 'hud init' to create a template.")
-        raise typer.Exit(1)
+        payload = {
+            "success": False,
+            "error": "failure",
+            "message": "No compose.yaml, compose.yml, docker-compose.*, or Dockerfile found",
+        }
+        if emit_result:
+            raise typer.Exit(1)
+        return payload
     if recipe is not None:
         hud_console.info(f"Using Compose recipe: {recipe.name}")
     else:
         assert dockerfile is not None
         hud_console.info(f"Using Dockerfile: {dockerfile.name}")
-    _validate_before_deploy(env_source, hud_console)
+    try:
+        _validate_before_deploy(env_source, hud_console)
 
-    platform = PlatformClient.from_settings()
-    plan = _prepare_deploy_plan(
-        env_source,
-        env_dir=env_dir,
-        env=env,
-        env_file=env_file,
-        no_env=no_env,
-        registry_id=registry_id,
-        build_args=build_args,
-        build_secrets=build_secrets,
-        runtime=runtime,
-        runtime_config=runtime_config,
-        verbose=verbose,
-        platform=platform,
-        console=hud_console,
-    )
+        platform = PlatformClient.from_settings()
+        plan = _prepare_deploy_plan(
+            env_source,
+            env_dir=env_dir,
+            env=env,
+            env_file=env_file,
+            no_env=no_env,
+            registry_id=registry_id,
+            build_args=build_args,
+            build_secrets=build_secrets,
+            runtime=runtime,
+            runtime_config=runtime_config,
+            verbose=verbose,
+            platform=platform,
+            console=hud_console,
+        )
+    except (typer.Exit, SystemExit):
+        if emit_result:
+            raise
+        return {
+            "success": False,
+            "error": "failure",
+            "message": f"Deploy failed for {env_dir.name}",
+        }
     if dry_run:
         from hud.cli.utils.output import emit_json, wants_json
 
@@ -557,9 +575,7 @@ def deploy_environment(
     }
     if emit_result and wants_json(json_output):
         emit_json(payload)
-    if not emit_result:
-        return payload
-    if not result.success:
+    if not result.success and emit_result:
         raise typer.Exit(1)
     return payload
 
@@ -770,10 +786,6 @@ def deploy_all(
     dry_run: bool = False,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
-    from hud.cli.utils.api import require_api_key
-
-    require_api_key("deploy environments")
-
     hud_console = HUDConsole()
     parent = Path(directory).resolve()
 
@@ -801,35 +813,38 @@ def deploy_all(
         hud_console.section_title(f"[{i}/{len(envs)}] Deploying {env_dir.name}")
 
         try:
-            result = deploy_environment(
-                directory=str(env_dir),
-                env=env,
-                env_file=env_file,
-                no_env=no_env,
-                no_cache=no_cache,
-                verbose=verbose,
-                registry_id=None,
-                build_args=build_args,
-                build_secrets=build_secrets,
-                runtime=runtime,
-                runtime_config=runtime_config,
-                json_output=False,
-                dry_run=dry_run,
-                emit_result=False,
-            )
-            succeeded.append(env_dir.name)
-            entry: dict[str, Any] = {"directory": env_dir.name}
-            if result is not None:
-                entry.update(result)
-            environments.append(entry)
+            with suppress_json_stdout():
+                result = deploy_environment(
+                    directory=str(env_dir),
+                    env=env,
+                    env_file=env_file,
+                    no_env=no_env,
+                    no_cache=no_cache,
+                    verbose=verbose,
+                    registry_id=None,
+                    build_args=build_args,
+                    build_secrets=build_secrets,
+                    runtime=runtime,
+                    runtime_config=runtime_config,
+                    json_output=False,
+                    dry_run=dry_run,
+                    emit_result=False,
+                )
         except (typer.Exit, SystemExit):
             LOGGER.warning("Deploy failed for environment %s", env_dir.name)
-            failed.append(env_dir.name)
-            environments.append({"directory": env_dir.name, "success": False})
+            result = {"success": False, "error": "failure"}
         except Exception:
             LOGGER.exception("Unexpected error deploying %s", env_dir.name)
+            result = {"success": False, "error": "failure"}
+
+        entry: dict[str, Any] = {"directory": env_dir.name}
+        if result is not None:
+            entry.update(result)
+        environments.append(entry)
+        if result is not None and result.get("success") is False:
             failed.append(env_dir.name)
-            environments.append({"directory": env_dir.name, "success": False})
+        else:
+            succeeded.append(env_dir.name)
 
     # Summary
     hud_console.info("")

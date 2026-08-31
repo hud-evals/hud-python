@@ -37,6 +37,22 @@ def _combined(result: Any) -> str:
     return f"{result.output}\n{getattr(result, 'stderr', '') or ''}"
 
 
+def _single_json(result: Any) -> dict[str, Any]:
+    stdout = _stdout(result).strip()
+    payload = json.loads(stdout)
+    leftover = stdout[json.JSONDecoder().raw_decode(stdout)[1] :].strip()
+    assert leftover == ""
+    return payload
+
+
+def _write_env_dirs(parent: Any, *names: str) -> None:
+    for name in names:
+        env_dir = parent / name
+        env_dir.mkdir()
+        (env_dir / "Dockerfile.hud").write_text("FROM python:3.12\n")
+        (env_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n')
+
+
 def test_root_help_lists_nouns_and_exit_codes() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
@@ -246,11 +262,7 @@ def test_qa_help_documents_json() -> None:
 def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
     from hud.cli.deploy import _DeployPlan
 
-    for name in ("alpha", "beta"):
-        env_dir = tmp_path / name
-        env_dir.mkdir()
-        (env_dir / "Dockerfile.hud").write_text("FROM python:3.12\n")
-        (env_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n')
+    _write_env_dirs(tmp_path, "alpha", "beta")
 
     def _plan(*_args: Any, env_dir: Any, **_kwargs: Any) -> _DeployPlan:
         return _DeployPlan(
@@ -264,20 +276,91 @@ def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
         )
 
     with (
-        patch("hud.cli.utils.api.require_api_key", return_value="key"),
+        patch("hud.settings.settings") as mock_settings,
         patch("hud.cli.deploy._validate_before_deploy"),
         patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
         patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
     ):
+        mock_settings.api_key = "key"
         result = runner.invoke(app, ["deploy", str(tmp_path), "--all", "--dry-run", "--json"])
 
     assert result.exit_code == 0
-    stdout = _stdout(result).strip()
-    payload = json.loads(stdout)
-    leftover = stdout[json.JSONDecoder().raw_decode(stdout)[1] :].strip()
-    assert leftover == ""
+    payload = _single_json(result)
     assert payload["dry_run"] is True
     assert payload["succeeded"] == ["alpha", "beta"]
     assert payload["failed"] == []
     assert [item["directory"] for item in payload["environments"]] == ["alpha", "beta"]
     assert [item["name"] for item in payload["environments"]] == ["alpha", "beta"]
+
+
+def test_deploy_all_json_includes_failed_env_details(tmp_path: Any) -> None:
+    from hud.cli.deploy import _DeployPlan, _DeployResult
+
+    _write_env_dirs(tmp_path, "alpha", "beta")
+
+    def _plan(*_args: Any, env_dir: Any, **_kwargs: Any) -> _DeployPlan:
+        return _DeployPlan(
+            name=env_dir.name,
+            registry_id=None,
+            runtime=None,
+            runtime_config=None,
+            env_vars={},
+            build_args={},
+            build_secrets={},
+        )
+
+    async def _deploy(*, plan: _DeployPlan, **_kwargs: Any) -> _DeployResult:
+        if plan.name == "alpha":
+            return _DeployResult(
+                success=True, build_id="b-ok", registry_id="r-ok", status="SUCCEEDED"
+            )
+        return _DeployResult(success=False, build_id="b-bad", registry_id="r-bad", status="FAILED")
+
+    def _tarball(env_dir: Any, **_kwargs: Any) -> Any:
+        path = env_dir / "context.tar.gz"
+        path.write_bytes(b"gz")
+        return path
+
+    with (
+        patch("hud.settings.settings") as mock_settings,
+        patch("hud.cli.deploy._validate_before_deploy"),
+        patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
+        patch("hud.cli.deploy._create_tarball", side_effect=_tarball),
+        patch("hud.cli.deploy._deploy_async", side_effect=_deploy),
+        patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
+    ):
+        mock_settings.api_key = "key"
+        result = runner.invoke(app, ["deploy", str(tmp_path), "--all", "--json"])
+
+    assert result.exit_code == 1
+    payload = _single_json(result)
+    assert payload["succeeded"] == ["alpha"]
+    assert payload["failed"] == ["beta"]
+    by_dir = {item["directory"]: item for item in payload["environments"]}
+    assert by_dir["alpha"]["success"] is True
+    assert by_dir["alpha"]["build_id"] == "b-ok"
+    assert by_dir["alpha"]["status"] == "SUCCEEDED"
+    assert by_dir["beta"]["success"] is False
+    assert by_dir["beta"]["build_id"] == "b-bad"
+    assert by_dir["beta"]["registry_id"] == "r-bad"
+    assert by_dir["beta"]["status"] == "FAILED"
+    assert by_dir["beta"]["name"] == "beta"
+
+
+def test_deploy_all_json_missing_api_key_is_single_document(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hud.settings import settings
+
+    _write_env_dirs(tmp_path, "alpha", "beta")
+    monkeypatch.setattr(settings, "api_key", "")
+    result = runner.invoke(app, ["deploy", str(tmp_path), "--all", "--json"])
+
+    assert result.exit_code == 1
+    payload = _single_json(result)
+    assert payload["succeeded"] == []
+    assert payload["failed"] == ["alpha", "beta"]
+    for item in payload["environments"]:
+        assert item["success"] is False
+        assert item["error"] == "permission_denied"
+        assert "message" in item
