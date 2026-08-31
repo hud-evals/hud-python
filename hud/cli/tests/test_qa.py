@@ -218,6 +218,9 @@ def test_qa_results_default_tui_hides_trajectory() -> None:
     result = _invoke(platform, ["qa", "results", _TRACE_ID])
 
     assert result.exit_code == 0
+    assert "verdict: failed" in result.output
+    assert "verdict: completed" not in result.output
+    assert "Agent failure" in result.output
     assert "The agent never wrote /app/regex.txt." in result.output
     assert "Required output file was never created" in result.output
     assert "The agent did not save any regex." in result.output
@@ -358,3 +361,114 @@ def test_qa_results_pages_sanitized_rollout() -> None:
     assert "verify_failure_claims" in result.output
     assert "The file was missing." in result.output
     assert platform.get.call_count == 3
+
+
+def test_qa_results_empty_problems_is_passed() -> None:
+    platform = MagicMock()
+    platform.get.return_value = [
+        {
+            **_run(status="completed"),
+            "agent_name": "Failure Analysis",
+            "result": {
+                "content": json.dumps(
+                    {
+                        "summary": "The agent completed the task.",
+                        "problems": [],
+                        "confidence": "high",
+                    }
+                ),
+            },
+        }
+    ]
+
+    result = _invoke(platform, ["qa", "results", _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "verdict: passed" in result.output
+    assert "No failure" in result.output
+    assert "1. " not in result.output
+
+
+def test_qa_results_boolean_agent_omits_findings() -> None:
+    platform = MagicMock()
+    platform.get.return_value = [
+        {
+            **_run(status="completed"),
+            "agent_name": "False Negative Analysis",
+            "result": {
+                "content": json.dumps(
+                    {
+                        "is_false_negative": False,
+                        "reasoning": "The zero reward matches the missing file.",
+                        "confidence": "high",
+                    }
+                ),
+                "reward": 1.0,
+            },
+        }
+    ]
+
+    result = _invoke(platform, ["qa", "results", _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "False Negative Analysis" in result.output
+    assert "verdict: passed" in result.output
+    assert "false negative no" in result.output.lower()
+    assert "verdict: completed" not in result.output
+    assert "1. " not in result.output
+    assert "fault:" not in result.output
+    assert "The zero reward matches the missing file." in result.output
+
+
+def test_qa_results_false_negative_yes_is_failed() -> None:
+    platform = MagicMock()
+    platform.get.return_value = [
+        {
+            **_run(status="completed"),
+            "agent_name": "False Negative Analysis",
+            "result": {
+                "is_false_negative": True,
+                "reasoning": "The grader rejected a valid answer.",
+            },
+        }
+    ]
+
+    result = _invoke(platform, ["qa", "results", _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "verdict: failed" in result.output
+    assert "false negative yes" in result.output.lower()
+    assert "1. " not in result.output
+    assert "The grader rejected a valid answer." in result.output
+
+
+def test_qa_results_rollout_skips_boolean_result_json() -> None:
+    blob = json.dumps(
+        {"is_false_negative": False, "reasoning": "The zero reward matches the missing file."}
+    )
+    platform = MagicMock()
+    platform.get.side_effect = [
+        [
+            {
+                **_run(status="completed"),
+                "agent_name": "False Negative Analysis",
+                "result": {"content": blob},
+            }
+        ],
+        {
+            "events": [
+                {"kind": "agent_message", "text": "Checking the grader."},
+                {"kind": "agent_message", "text": blob},
+            ],
+            "has_more": False,
+            "next_seq": 2,
+            "status": "completed",
+        },
+    ]
+
+    result = _invoke(platform, ["qa", "results", _TRACE_ID, "--rollout"])
+
+    assert result.exit_code == 0
+    assert "Checking the grader." in result.output
+    assert result.output.count("Turn 1") == 1
+    assert '"is_false_negative"' not in result.output

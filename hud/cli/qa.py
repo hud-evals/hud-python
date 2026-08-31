@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
 from hud.cli.utils.api import require_api_key
 from hud.settings import settings
 from hud.utils.exceptions import HudTimeoutError
@@ -55,73 +56,14 @@ def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
         typer.echo("No QA results found.")
         return
     for result in results:
-        output = result.get("canonical_result") or result.get("result") or {}
-        verdict = output.get("verdict") or result.get("status", "unknown")
-        summary = output.get("summary") or result.get("error")
+        view = presentation_for_result(result)
+        verdict = result.get("status", "unknown") if view.kind == "pending" else view.tag
+        summary = view.summary or result.get("error")
         subject_id = result.get("subject_trace_id") or "-"
         agent = result.get("agent_name") or result.get("qa_agent_id") or "-"
         stale = " stale" if result.get("stale") is True else ""
         line = f"{subject_id}\t{agent}\t{verdict}{stale}"
         typer.echo(f"{line}\t{summary}" if summary else line)
-
-
-def _as_problems(payload: dict[str, Any]) -> list[Any]:
-    problems = payload.get("problems")
-    if isinstance(problems, list):
-        return problems
-    findings = payload.get("findings")
-    return findings if isinstance(findings, list) else []
-
-
-def _parse_analysis_blob(
-    payload: dict[str, Any],
-    *,
-    fallback_verdict: str,
-) -> dict[str, Any] | None:
-    if (
-        payload.get("verdict")
-        or payload.get("summary")
-        or payload.get("problems")
-        or payload.get("findings")
-    ):
-        return {
-            "verdict": str(payload.get("verdict") or fallback_verdict),
-            "summary": payload.get("summary"),
-            "problems": _as_problems(payload),
-            "confidence": payload.get("confidence"),
-        }
-    content = payload.get("content")
-    if not isinstance(content, str):
-        return None
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return {
-        "verdict": str(parsed.get("verdict") or fallback_verdict),
-        "summary": parsed.get("summary"),
-        "problems": _as_problems(parsed),
-        "confidence": parsed.get("confidence"),
-    }
-
-
-def _analysis_view(result: dict[str, Any]) -> dict[str, Any]:
-    """Verdict, summary, and findings from a canonical row or a JSON content blob."""
-    fallback = str(result.get("status") or "unknown")
-    for payload in (result.get("canonical_result"), result.get("result")):
-        if isinstance(payload, dict):
-            parsed = _parse_analysis_blob(payload, fallback_verdict=fallback)
-            if parsed is not None:
-                return parsed
-    error = result.get("error")
-    return {
-        "verdict": fallback,
-        "summary": str(error) if error else None,
-        "problems": [],
-        "confidence": None,
-    }
 
 
 def _fetch_rollout(platform: PlatformClient, result_id: str) -> list[dict[str, Any]]:
@@ -148,14 +90,6 @@ def _fmt_args(args: Any) -> str:
     if isinstance(args, dict):
         return ", ".join(f"{k}={v!r}" for k, v in args.items())
     return str(args)
-
-
-def _is_analysis_json(text: str) -> bool:
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return False
-    return isinstance(parsed, dict) and "summary" in parsed
 
 
 def _tool_command(event: dict[str, Any]) -> str:
@@ -191,7 +125,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
         if kind == "agent_message":
             text = event.get("text")
             reasoning = event.get("reasoning")
-            if isinstance(text, str) and _is_analysis_json(text):
+            if isinstance(text, str) and is_standard_result_blob(text):
                 continue
             if not text and not reasoning:
                 continue
@@ -251,48 +185,54 @@ def _print_result_tui(
 ) -> None:
     agent = str(result.get("agent_name") or result.get("qa_agent_id") or "QA")
     subject_id = str(result.get("subject_trace_id") or "-")
-    analysis = _analysis_view(result)
-    verdict = str(analysis["verdict"])
-    if verdict == "passed":
-        status = "success"
-    elif verdict in {"failed", "error"}:
-        status = "error"
-    else:
-        status = "info"
+    view = presentation_for_result(result)
     hud_console.header(agent, icon="", stderr=False)
-    hud_console.status_item("verdict", verdict, status=status, stderr=False)
+    if view.kind == "pending":
+        hud_console.status_item(
+            "status",
+            str(result.get("status") or "unknown"),
+            status="info",
+            stderr=False,
+        )
+    else:
+        if view.tag == "passed":
+            status = "success"
+        elif view.tag == "failed":
+            status = "error"
+        else:
+            status = "info"
+        hud_console.status_item("verdict", view.tag, status=status, stderr=False)
+        if view.kind == "boolean" and view.answer:
+            hud_console.dim_info(view.label.lower(), view.answer, stderr=False)
+        elif view.answer:
+            hud_console.dim_info("cause", view.answer, stderr=False)
     hud_console.dim_info("trace", subject_id, stderr=False)
-    if analysis.get("confidence"):
-        hud_console.dim_info("confidence", str(analysis["confidence"]), stderr=False)
+    if view.confidence:
+        hud_console.dim_info("confidence", view.confidence, stderr=False)
     if result.get("stale") is True:
         hud_console.warning(
             "This result is stale relative to the current agent config.",
             stderr=False,
         )
-    summary = analysis.get("summary")
-    if summary:
+    if view.summary:
         _console.print(
             Panel(
-                Text(str(summary)),
+                Text(view.summary),
                 title=_bold_title("Summary"),
                 border_style=GOLD,
                 padding=(0, 1),
             )
         )
-    problems = analysis.get("problems") or []
-    for index, problem in enumerate(problems, start=1):
-        if not isinstance(problem, dict):
-            continue
-        title = str(problem.get("problem") or problem.get("title") or f"Finding {index}")
-        description = str(problem.get("description") or "")
-        fault = problem.get("fault")
-        body = Text(description)
-        if fault:
-            body.append(f"\n\nfault: {fault}", style=DIM)
+    for index, finding in enumerate(view.findings, start=1):
+        body = Text(finding.description)
+        if finding.fault:
+            if finding.description:
+                body.append("\n\n")
+            body.append(f"fault: {finding.fault}", style=DIM)
         _console.print(
             Panel(
                 body,
-                title=_bold_title(f"{index}. {title}"),
+                title=_bold_title(f"{index}. {finding.title}"),
                 border_style=GOLD,
                 padding=(0, 1),
             )
@@ -445,8 +385,7 @@ def run_agent(
     )
     _print_results(results, json_output=json_output)
     if any(
-        result["status"] == "error"
-        or (result.get("canonical_result") or {}).get("verdict") != "passed"
+        result["status"] == "error" or presentation_for_result(result).tag != "passed"
         for result in results
     ):
         raise typer.Exit(1)
