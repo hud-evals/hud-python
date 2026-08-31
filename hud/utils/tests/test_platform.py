@@ -35,7 +35,7 @@ def test_url_encodes_repeated_query_parameters() -> None:
     )
 
 
-def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_http_methods_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
     def fake_request(
@@ -49,9 +49,13 @@ def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPa
 
     assert platform.get("/x", params={"a": 1}) == {"ok": True}
     assert platform.post("/y", json={"b": 2}) == {"ok": True}
+    assert platform.patch("/z", json={"c": 3}) == {"ok": True}
+    assert platform.delete("/z") == {"ok": True}
     assert calls == [
         {"method": "GET", "url": "https://api.example/v2/x?a=1", "json": None, "api_key": "key"},
         {"method": "POST", "url": "https://api.example/v2/y", "json": {"b": 2}, "api_key": "key"},
+        {"method": "PATCH", "url": "https://api.example/v2/z", "json": {"c": 3}, "api_key": "key"},
+        {"method": "DELETE", "url": "https://api.example/v2/z", "json": None, "api_key": "key"},
     ]
 
 

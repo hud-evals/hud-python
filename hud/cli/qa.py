@@ -1,10 +1,9 @@
-"""Discover, run, and inspect resource-scoped platform QA agents."""
+"""List, run, and inspect trace-level platform QA agents."""
 
 from __future__ import annotations
 
 import json
 import time
-from enum import StrEnum
 from typing import Any, cast
 
 import typer
@@ -15,24 +14,34 @@ from hud.utils.platform import PlatformClient
 
 _POLL_INTERVAL_SECONDS = 2.0
 _TERMINAL_STATUSES = {"completed", "error"}
-
-
-class ResourceSubjectType(StrEnum):
-    environment = "environment"
-    taskset = "taskset"
-    task = "task"
-
+_TRACE_SUBJECT = "trace"
 
 qa_app = typer.Typer(
     name="qa",
-    help="Discover, run, and inspect platform QA agents.",
+    help="List, run, and inspect trace-level platform QA agents.",
     add_completion=False,
     rich_markup_mode="rich",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 
 
-def _render_results(results: list[dict[str, Any]]) -> None:
+def _platform() -> PlatformClient:
+    require_api_key("use platform QA agents")
+    return PlatformClient.from_settings()
+
+
+def _print_json(payload: Any) -> None:
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+
+
+def _print_agent(agent: dict[str, Any]) -> None:
+    typer.echo(f"{agent.get('name', '-')}\t{agent.get('id', '-')}")
+
+
+def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
+    if json_output:
+        _print_json(results)
+        return
     if not results:
         typer.echo("No QA results found.")
         return
@@ -40,80 +49,110 @@ def _render_results(results: list[dict[str, Any]]) -> None:
         output = result.get("canonical_result") or result.get("result") or {}
         verdict = output.get("verdict") or result.get("status", "unknown")
         summary = output.get("summary") or result.get("error")
-        subject_id = result.get("subject_id", "-")
+        subject_id = result.get("subject_trace_id") or "-"
         agent = result.get("agent_name") or result.get("qa_agent_id") or "-"
         stale = " stale" if result.get("stale") is True else ""
         line = f"{subject_id}\t{agent}\t{verdict}{stale}"
         typer.echo(f"{line}\t{summary}" if summary else line)
 
 
+def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
+    agent = cast("dict[str, Any]", platform.get(f"/qa-agents/{agent_id}"))
+    if agent.get("subject_type") != _TRACE_SUBJECT:
+        typer.echo(
+            f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
+            "The CLI currently supports trace agents only.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+def _latest_agent_result(
+    results: list[dict[str, Any]],
+    *,
+    agent_id: str,
+    trace_id: str,
+) -> dict[str, Any] | None:
+    latest: dict[str, Any] | None = None
+    for result in results:
+        if (
+            result.get("qa_agent_id") == agent_id
+            and str(result.get("subject_trace_id")) == trace_id
+        ):
+            latest = result
+    return latest
+
+
 def _wait_for_results(
     platform: PlatformClient,
-    result_ids: list[str],
     timeout: float,
+    *,
+    trace_ids: list[str],
+    agent_id: str,
+    launched: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    launched_id_by_trace = {str(run["subject_trace_id"]): str(run["id"]) for run in launched}
     deadline = time.monotonic() + timeout
     while True:
-        results = cast(
+        listed = cast(
             "list[dict[str, Any]]",
-            platform.get(
-                "/qa-agents/results/resources",
-                params={"result_ids": result_ids},
-            ),
+            platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
         )
-        if len(results) == len(result_ids) and all(
-            result["status"] in _TERMINAL_STATUSES for result in results
-        ):
-            return results
+        by_id = {str(result["id"]): result for result in listed}
+        selected: list[dict[str, Any]] = []
+        ready = True
+        for trace_id in trace_ids:
+            result_id = launched_id_by_trace.get(trace_id)
+            result = (
+                by_id.get(result_id)
+                if result_id is not None
+                else _latest_agent_result(listed, agent_id=agent_id, trace_id=trace_id)
+            )
+            if result is None or result["status"] not in _TERMINAL_STATUSES:
+                ready = False
+                break
+            selected.append(result)
+        if ready:
+            return selected
         if time.monotonic() >= deadline:
             raise HudTimeoutError(f"Timed out after {timeout:g}s waiting for QA runs.")
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-@qa_app.command("agents")
+@qa_app.callback(invoke_without_command=True)
 def list_agents(
-    subject_type: ResourceSubjectType = typer.Option(  # noqa: B008
-        ResourceSubjectType.environment,
-        "--subject-type",
-        help="Resource scope: environment, taskset, or task.",
-    ),
+    ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
     limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
     offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
 ) -> None:
-    """List QA agents available for a resource type."""
-    require_api_key("use platform QA agents")
+    """List trace QA agents available to this team."""
+    if ctx.invoked_subcommand is not None:
+        return
     response = cast(
         "dict[str, Any]",
-        PlatformClient.from_settings().get(
+        _platform().get(
             "/qa-agents",
-            params={
-                "subject_type": subject_type.value,
-                "limit": limit,
-                "offset": offset,
-            },
+            params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
         ),
     )
     if json_output:
-        typer.echo(json.dumps(response, indent=2, sort_keys=True, default=str))
+        _print_json(response)
         return
     agents = response["items"]
     if not agents:
-        typer.echo(f"No {subject_type.value} QA agents found.")
+        typer.echo("No trace QA agents found.")
         return
     for agent in agents:
-        typer.echo(
-            f"{agent.get('id', '-')}\t{agent.get('name', '-')}\t"
-            f"{agent.get('subject_type', '-')}\t{agent.get('model_name') or '-'}"
-        )
+        _print_agent(agent)
 
 
 @qa_app.command("run")
 def run_agent(
     agent_id: str = typer.Argument(..., help="QA agent UUID."),
-    subject_ids: list[str] = typer.Argument(  # noqa: B008
+    trace_ids: list[str] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more Environment, Taskset, or Task UUIDs.",
+        help="One or more trace UUIDs.",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -133,28 +172,28 @@ def run_agent(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
 ) -> None:
-    """Run one QA agent against resource subjects."""
-    require_api_key("use platform QA agents")
-    platform = PlatformClient.from_settings()
+    """Run one trace QA agent against the given traces."""
+    platform = _platform()
+    _require_trace_agent(platform, agent_id)
     runs = cast(
         "list[dict[str, Any]]",
         platform.post(
-            f"/qa-agents/{agent_id}/run-resources",
-            json={"subject_ids": subject_ids, "overwrite": overwrite},
+            f"/qa-agents/{agent_id}/run",
+            json={"trace_ids": trace_ids, "overwrite": overwrite},
         ),
     )
     if not wait:
-        if json_output:
-            typer.echo(json.dumps(runs, indent=2, sort_keys=True, default=str))
-        else:
-            _render_results(runs)
+        _print_results(runs, json_output=json_output)
         return
 
-    results = _wait_for_results(platform, [str(run["id"]) for run in runs], timeout)
-    if json_output:
-        typer.echo(json.dumps(results, indent=2, sort_keys=True, default=str))
-    else:
-        _render_results(results)
+    results = _wait_for_results(
+        platform,
+        timeout,
+        trace_ids=trace_ids,
+        agent_id=agent_id,
+        launched=runs,
+    )
+    _print_results(results, json_output=json_output)
     if any(
         result["status"] == "error"
         or (result.get("canonical_result") or {}).get("verdict") != "passed"
@@ -165,29 +204,15 @@ def run_agent(
 
 @qa_app.command("results")
 def list_results(
-    subject_type: ResourceSubjectType = typer.Argument(  # noqa: B008
+    trace_ids: list[str] = typer.Argument(  # noqa: B008
         ...,
-        help="Resource scope: environment, taskset, or task.",
-    ),
-    subject_ids: list[str] = typer.Argument(  # noqa: B008
-        ...,
-        help="One or more Environment, Taskset, or Task UUIDs.",
+        help="One or more trace UUIDs.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
 ) -> None:
-    """Inspect QA results attached to resource subjects."""
-    require_api_key("use platform QA agents")
+    """Inspect QA results attached to the given traces."""
     results = cast(
         "list[dict[str, Any]]",
-        PlatformClient.from_settings().get(
-            "/qa-agents/results/resources",
-            params={
-                "subject_type": subject_type.value,
-                "subject_ids": subject_ids,
-            },
-        ),
+        _platform().get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
     )
-    if json_output:
-        typer.echo(json.dumps(results, indent=2, sort_keys=True, default=str))
-    else:
-        _render_results(results)
+    _print_results(results, json_output=json_output)
