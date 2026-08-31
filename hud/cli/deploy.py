@@ -457,6 +457,9 @@ def deploy_environment(
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
     runtime_config: str | None = None,
+    *,
+    json_output: bool = False,
+    dry_run: bool = False,
 ) -> None:
     """Deploy one HUD environment to the platform."""
     hud_console = HUDConsole()
@@ -499,6 +502,27 @@ def deploy_environment(
         platform=platform,
         console=hud_console,
     )
+    if dry_run:
+        from hud.cli.utils.output import emit_json, wants_json
+
+        payload = {
+            "dry_run": True,
+            "action": "deploy",
+            "name": plan.name,
+            "registry_id": plan.registry_id,
+            "runtime": plan.runtime,
+            "env_var_keys": sorted(plan.env_vars),
+            "build_arg_keys": sorted(plan.build_args),
+        }
+        if wants_json(json_output):
+            emit_json(payload)
+        else:
+            hud_console.info(f"--dry-run: would deploy {plan.name}")
+            if plan.registry_id:
+                hud_console.info(f"  registry_id: {plan.registry_id}")
+            if plan.runtime:
+                hud_console.info(f"  runtime: {plan.runtime}")
+        return
     tarball_path = _create_tarball(env_dir, verbose=verbose, console=hud_console)
     try:
         result = asyncio.run(
@@ -514,6 +538,18 @@ def deploy_environment(
     finally:
         tarball_path.unlink(missing_ok=True)
 
+    from hud.cli.utils.output import emit_json, wants_json
+
+    if wants_json(json_output):
+        emit_json(
+            {
+                "success": result.success,
+                "build_id": result.build_id,
+                "registry_id": result.registry_id,
+                "status": result.status,
+                "name": plan.name,
+            }
+        )
     if not result.success:
         raise typer.Exit(1)
 
@@ -719,6 +755,9 @@ def deploy_all(
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
     runtime_config: str | None = None,
+    *,
+    json_output: bool = False,
+    dry_run: bool = False,
 ) -> None:
     """Deploy each HUD environment under a parent directory."""
     hud_console = HUDConsole()
@@ -759,6 +798,8 @@ def deploy_all(
                 build_secrets=build_secrets,
                 runtime=runtime,
                 runtime_config=runtime_config,
+                json_output=json_output,
+                dry_run=dry_run,
             )
             succeeded.append(env_dir.name)
         except (typer.Exit, SystemExit):
@@ -775,6 +816,10 @@ def deploy_all(
         hud_console.success(f"{len(succeeded)} environment(s) deployed successfully:")
         for name in succeeded:
             hud_console.info(f"  {name}")
+    if json_output:
+        from hud.cli.utils.output import emit_json
+
+        emit_json({"succeeded": succeeded, "failed": failed, "dry_run": dry_run})
     if failed:
         hud_console.error(f"{len(failed)} environment(s) failed:")
         for name in failed:
@@ -843,6 +888,12 @@ def deploy_command(
         "--runtime-config",
         help="Path to a JSON RuntimeConfig for hosted runs",
     ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write structured JSON to stdout."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the deploy plan without uploading."
+    ),
 ) -> None:
     """Deploy HUD environment to the platform.
 
@@ -850,6 +901,11 @@ def deploy_command(
     directory is used. The environment name comes from the ``Environment(...)``
     declaration in code. Builds from the local Dockerfile and streams remote
     build logs.
+
+    [not dim]Examples:
+        hud deploy
+        hud deploy --dry-run --json
+        hud deploy --all --json[/not dim]
     """
     if all_envs:
         deploy_all(
@@ -863,6 +919,8 @@ def deploy_command(
             build_secrets=secrets,
             runtime=runtime,
             runtime_config=runtime_config,
+            json_output=json_output,
+            dry_run=dry_run,
         )
         return
 
@@ -878,4 +936,6 @@ def deploy_command(
         build_secrets=secrets,
         runtime=runtime,
         runtime_config=runtime_config,
+        json_output=json_output,
+        dry_run=dry_run,
     )

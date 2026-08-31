@@ -11,6 +11,18 @@ from typing import Any
 import typer
 
 from hud.cli.utils.api import require_api_key
+from hud.cli.utils.output import (
+    CliError,
+    ExitCode,
+    abort,
+    confirm_or_abort,
+    emit_json,
+    is_interactive,
+    json_option,
+    map_exception,
+    output_option,
+    wants_json,
+)
 from hud.cli.utils.registry import (
     RegistryEnvironment,
     get_registry_environment,
@@ -199,8 +211,14 @@ def _fetch_remote_taskset(
         console.info(f"Taskset '{display}' not found; it will be created")
         return Taskset(display, [])
 
-    console.error(f"Taskset not found: {target_ref}")
-    raise typer.Exit(1)
+    abort(
+        CliError(
+            error="not_found",
+            message=f"Taskset not found: {target_ref}",
+            input={"taskset": target_ref},
+            suggestion="Pass a taskset name to create it, or use an existing id.",
+        )
+    )
 
 
 def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
@@ -278,6 +296,8 @@ def sync_tasks_command(
         "--export",
         help="Export remote tasks to a file instead of syncing. Supports .json, .jsonl, and .csv",
     ),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
 ) -> None:
     """Sync local task definitions to a platform taskset.
 
@@ -292,7 +312,8 @@ def sync_tasks_command(
         hud sync tasks my-taskset --dry-run    # preview without uploading
         hud sync tasks my-taskset --yes        # skip confirmation (CI)
         hud sync tasks my-taskset --export tasks.csv   # export to CSV
-        hud sync tasks my-taskset --export tasks.json  # export to JSON[/not dim]
+        hud sync tasks my-taskset --export tasks.json  # export to JSON
+        hud sync tasks my-taskset --dry-run --json     # machine-readable plan[/not dim]
     """
     hud_console = HUDConsole()
     hud_console.header("Sync Tasks", icon="")
@@ -335,22 +356,35 @@ def sync_tasks_command(
         hud_console.error(f"Failed to fetch taskset: {e}")
         raise typer.Exit(1) from e
 
+    plan_payload = {
+        "taskset": plan.taskset_name,
+        "create_count": len(plan.to_create),
+        "update_count": len(plan.to_update),
+        "unchanged_count": len(plan.unchanged),
+        "remote_only_count": len(plan.remote_only),
+        "to_apply": [task.id for task in plan.to_apply],
+    }
+
     if force:
         hud_console.info(f"\n  --force: uploading all {len(plan.to_apply)} task(s)")
     else:
         hud_console.info("\n" + plan.summary())
 
     if not plan.to_apply:
+        if wants_json(json_output, output):
+            emit_json({**plan_payload, "status": "up_to_date"})
+            return
         hud_console.success("All tasks up to date")
         return
 
     if dry_run:
-        hud_console.info("\n  --dry-run: no changes made")
+        if wants_json(json_output, output):
+            emit_json({**plan_payload, "dry_run": True, "action": "sync_tasks"})
+        else:
+            hud_console.info("\n  --dry-run: no changes made")
         return
 
-    if not yes and not hud_console.confirm("Proceed?", default=False):
-        hud_console.info("Aborted.")
-        return
+    confirm_or_abort("Proceed?", yes=yes, default=False)
 
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
@@ -358,13 +392,24 @@ def sync_tasks_command(
         result = upload_taskset(platform, plan.taskset_name, plan.to_apply)
     except HudRequestError as e:
         _show_upload_error(e, hud_console)
-        return
+        abort(map_exception(e, input={"taskset": plan.taskset_name}))
 
     created = int(result.get("tasks_created", 0))
     updated = int(result.get("tasks_updated", 0))
 
-    hud_console.success("Sync complete")
-    hud_console.info(f"  + {created} created, ~ {updated} updated")
+    if wants_json(json_output, output):
+        emit_json(
+            {
+                **plan_payload,
+                "status": "synced",
+                "tasks_created": created,
+                "tasks_updated": updated,
+                "taskset_id": result.get("taskset_id"),
+            }
+        )
+    else:
+        hud_console.success("Sync complete")
+        hud_console.info(f"  + {created} created, ~ {updated} updated")
     _save_taskset_id(result, hud_console)
 
 
@@ -384,6 +429,8 @@ def sync_env_command(
         "-y",
         help="Skip confirmation prompt",
     ),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
 ) -> None:
     """Link local directory to a platform environment.
 
@@ -409,6 +456,15 @@ def sync_env_command(
     selected_env: RegistryEnvironment | None = None
 
     if not name:
+        if not is_interactive():
+            abort(
+                CliError(
+                    error="confirmation_required",
+                    message="No environment name given in a non-interactive terminal.",
+                    suggestion="Pass the environment name: hud sync env <name>",
+                    exit_code=ExitCode.USAGE,
+                )
+            )
         # Interactive: list environments and let user pick
         hud_console.info("Fetching your environments...")
         try:
@@ -459,8 +515,14 @@ def sync_env_command(
             raise typer.Exit(1) from e
 
         if not matching:
-            hud_console.error(f"No environment found matching '{name}'")
-            raise typer.Exit(1) from None
+            abort(
+                CliError(
+                    error="not_found",
+                    message=f"No environment found matching '{name}'",
+                    input={"name": name},
+                    suggestion="Run 'hud deploy' first, or pass an exact environment name.",
+                )
+            )
 
         if len(matching) > 1:
             hud_console.warning(f"Multiple environments match '{name}':")
@@ -473,13 +535,20 @@ def sync_env_command(
 
     if existing_registry_id and existing_registry_id != selected_env.id:
         hud_console.warning(f"Currently linked to: {existing_registry_id[:8]}...")
-        if not yes and not hud_console.confirm("Switch to new environment?", default=False):
-            hud_console.info("Aborted.")
-            return
+        confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
     changed = env_source.save_config(
         {"registryId": selected_env.id, "registryName": selected_env.name},
     )
+    if wants_json(json_output, output):
+        emit_json(
+            {
+                "name": selected_env.name,
+                "id": selected_env.id,
+                "changed": changed,
+            }
+        )
+        return
     hud_console.success(f"Linked to: {selected_env.name} ({selected_env.short_id}...)")
     if changed:
         hud_console.dim_info("Config saved to:", ".hud/config.json")

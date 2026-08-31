@@ -6,6 +6,25 @@ icon: "terminal"
 
 Install the CLI with `uv tool install hud --python 3.12`. Authenticate once with `hud set HUD_API_KEY=...`.
 
+## Agent-friendly flags
+
+List, get, create, and status commands accept `--json` (or `--output json`). JSON is written to **stdout**; progress, warnings, and human error text go to **stderr**. List commands also accept `--quiet` / `-q` for one identifier per line.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Success |
+| `1` | General failure |
+| `2` | Usage error (bad arguments, or a prompt needed in a non-interactive terminal) |
+| `3` | Resource not found |
+| `4` | Permission denied (including a missing API key) |
+| `5` | Conflict (resource already exists) |
+
+With `--json`, failures also print a structured object to stdout: `{"error": "not_found", "message": "...", "input": {...}, "suggestion": "..."}`.
+
+Mutating commands accept `--dry-run` where an action can be described without performing it, and `--yes` / `-y` to skip confirmation. In a non-interactive terminal the CLI does not prompt; pass `--yes` or it exits `2`.
+
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Older shortcuts stay registered: `hud jobs <id>`, `hud trace <id>`, `hud cancel`, `hud login`, `hud set`. Hidden alias: `hud job` → `hud jobs`. `hud auth login` / `hud auth set` are the noun forms of login and set.
+
 ## Build & iterate
 
 ### `hud init`
@@ -25,6 +44,8 @@ hud init my-env --dir envs        # create ./envs/my-env
 | `--preset`, `-p` | Starter to use: `blank` (minimal local scaffold), `browser`, `cua`, `deepresearch`, `coding`, `ml`, `ml-triage`, `verilog`, `autonomous-businesses`, `gdpval`, `worldsim`, `videogamebench` (all downloaded from GitHub). Omit for the interactive picker (TTY); with a `NAME` in a non-interactive shell, omitting it writes the blank local scaffold. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
+| `--json` | Structured result on stdout. |
+| `--dry-run` | Print the planned scaffold without writing files. |
 
 ### `hud serve`
 
@@ -57,6 +78,8 @@ hud deploy
 | `--all`, `-a` | Deploy all environments in the directory. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
 | `--env-file` | Path to a `.env` file. |
+| `--json` | Structured result on stdout. |
+| `--dry-run` | Print the deploy plan without uploading. |
 
 ## Evaluate
 
@@ -106,7 +129,9 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--very-verbose`, `-vv` | Debug-level logs. |
 | `--runtime` | Placement: `local` (a child process per rollout, serving the env source — `SubprocessRuntime`), `hud` (HUD runtime tunnel), or `tcp://host:port`. Defaults to `local` for a tasks file; platform tasksets default to remote hosted execution. |
 | `--remote` | Run the whole rollout remotely on the HUD platform. |
-| `--yes`, `-y` | Skip confirmation prompt. |
+| `--yes`, `-y` | Skip confirmation prompt (required when stdin is not a TTY). |
+| `--json` | Structured results on stdout. |
+| `--dry-run` | Print the resolved eval plan without running. |
 
 ## Run a packaged image
 
@@ -120,9 +145,9 @@ hud task grade fix_bug --answer "..."  # -> the reward (stdout)
 
 | Command | Key options |
 |---------|-------------|
-| `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o` |
-| `hud task grade <task>` | `--answer`, `--answer-file`, `--source`, `--args`, `--url`, `--out` |
-| `hud task list` | `--source`/`-s` |
+| `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--out`/`-o`, `--json` |
+| `hud task grade <task>` | `--answer`, `--answer-file` (`-` reads stdin), `--source`, `--args`, `--url`, `--out`, `--json` |
+| `hud task list` | `--source`/`-s`, `--json`, `--quiet` |
 
 ## Platform
 
@@ -151,25 +176,36 @@ complete the command.
 
 ## Inspect
 
-### `hud jobs [<id>]`
-
-Without an id, lists your most recent jobs. With an id, lists every trace in that job.
+### `hud jobs`
 
 ```bash
-hud jobs               # recent jobs - id, name, taskset, status, created
-hud jobs <job-id>      # traces for one job - trace id, status, reward, error
-hud jobs --json        # raw JSON
-hud jobs -n 50         # show up to 50 rows (default 20)
+hud jobs list                 # recent jobs
+hud jobs list --json          # raw JSON array on stdout
+hud jobs list --quiet         # job ids, one per line
+hud jobs get <job-id>         # traces for one job
+hud jobs cancel <job-id> --yes
+hud jobs                      # alias for list
+hud jobs <job-id>             # alias for get
+hud cancel <job-id>           # alias for jobs cancel
 ```
 
-### `hud trace <trace_id>`
+| Option | Description |
+|--------|-------------|
+| `--json` / `--output json` | Structured stdout. |
+| `--quiet`, `-q` | Bare ids, one per line. |
+| `--limit`, `-n` | Max rows (default 20). |
+| `--yes`, `-y` | Skip cancel confirmation. |
+| `--dry-run` | Print the cancel plan without calling the API. |
+
+### `hud trace`
 
 Inspect a single rollout. Reads from the local telemetry JSONL file first
 (`HUD_TELEMETRY_LOCAL_DIR/<trace_id>.jsonl`) and falls back to the platform API.
 
 ```bash
-hud trace <trace-id>          # rendered view: agent turns, tool calls, tool results
-hud trace <trace-id> --json   # raw event list
+hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results
+hud trace get <trace-id> --json   # raw event list
+hud trace <trace-id>              # alias for get
 ```
 
 Set `HUD_TELEMETRY_LOCAL_DIR` in your environment to write spans to disk during a
@@ -179,14 +215,14 @@ rollout so `hud trace` can read them offline without an API call.
 
 | Command | Description |
 |---------|-------------|
-| `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
-| `hud login` | Authenticate with HUD. |
-| `hud models list` | List gateway models. |
-| `hud models fork <model> --name <slug>` | Fork a trainable model from an existing one. |
+| `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. Also `hud auth set`. |
+| `hud login` | Authenticate with HUD. Also `hud auth login`. |
+| `hud models list` | List gateway models (`--json`, `--quiet`). |
+| `hud models fork <model> --name <slug>` | Fork a trainable model (`--json`, `--dry-run`, `--if-not-exists`). |
 | `hud models checkpoints <model>` | List a model's checkpoint tree. |
-| `hud models head <model> [--set <checkpoint-id>]` | Show - or set (rollback/select) - a model's active checkpoint. |
-| `hud cancel` | Cancel a running job. |
-| `hud version` | Show the CLI version. |
+| `hud models head <model> [--set <checkpoint-id>]` | Show - or set - a model's active checkpoint. |
+| `hud jobs cancel` / `hud cancel` | Cancel a running job (`--yes`, `--dry-run`, `--json`). |
+| `hud version` | Show the CLI version (`--json`). |
 
 ## See also
 

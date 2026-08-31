@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,7 +9,6 @@ import typer
 
 import hud.cli.sync as sync_module
 from hud.cli.sync import _write_csv
-from hud.cli.utils.registry import RegistryEnvironment
 from hud.eval import Task
 
 if TYPE_CHECKING:
@@ -33,26 +31,15 @@ def test_write_csv_flattens_args(tmp_path: Path) -> None:
     assert 'two,solve,e,"{""x"": 2}"' in csv_text
 
 
-def test_sync_env_closed_stdin_aborts_cleanly(
+def test_sync_env_noninteractive_requires_name(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(sync_module, "require_api_key", lambda _: None)
     monkeypatch.setattr(sync_module.PlatformClient, "from_settings", lambda: object())
-    monkeypatch.setattr(
-        sync_module,
-        "list_registry_environments",
-        lambda _: [RegistryEnvironment(id="env-1", name="example")],
-    )
-
-    def closed_input(_: str) -> str:
-        raise OSError("stdin is closed")
-
-    monkeypatch.setattr(builtins, "input", closed_input)
+    monkeypatch.setattr(sync_module, "is_interactive", lambda: False)
 
     with pytest.raises(typer.Exit) as exc_info:
         sync_module.sync_env_command(name=None, directory=str(tmp_path), yes=False)
 
-    assert exc_info.value.exit_code == 0
-    assert "Aborted." in capsys.readouterr().err
+    assert exc_info.value.exit_code == 2
