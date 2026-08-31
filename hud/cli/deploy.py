@@ -468,7 +468,7 @@ def deploy_environment(
     ``emit_result`` controls whether this call writes its own JSON document.
     ``deploy_all`` sets it False so ``--all --json`` emits one summary only;
     ``wants_json`` stays true for the parent ``--json`` flag.
-    """""
+    """
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
 

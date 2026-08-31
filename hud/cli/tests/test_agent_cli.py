@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -244,7 +243,7 @@ def test_qa_help_documents_json() -> None:
     assert "--dry-run" in text
 
 
-def test_deploy_all_json_is_single_document(tmp_path: Path) -> None:
+def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
     from hud.cli.deploy import _DeployPlan
 
     for name in ("alpha", "beta"):
@@ -253,7 +252,7 @@ def test_deploy_all_json_is_single_document(tmp_path: Path) -> None:
         (env_dir / "Dockerfile.hud").write_text("FROM python:3.12\n")
         (env_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n')
 
-    def _plan(*_args: Any, env_dir: Path, **_kwargs: Any) -> _DeployPlan:
+    def _plan(*_args: Any, env_dir: Any, **_kwargs: Any) -> _DeployPlan:
         return _DeployPlan(
             name=env_dir.name,
             registry_id=None,
@@ -270,9 +269,7 @@ def test_deploy_all_json_is_single_document(tmp_path: Path) -> None:
         patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
         patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
     ):
-        result = runner.invoke(
-            app, ["deploy", str(tmp_path), "--all", "--dry-run", "--json"]
-        )
+        result = runner.invoke(app, ["deploy", str(tmp_path), "--all", "--dry-run", "--json"])
 
     assert result.exit_code == 0
     stdout = _stdout(result).strip()
