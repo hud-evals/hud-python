@@ -210,7 +210,9 @@ class ModalRuntime:
             image = (
                 modal.Image.from_id(config.image.removeprefix("modal://"))
                 if config.image.startswith("modal://")
-                else modal.Image.from_registry(config.image, secret=self.registry_secret)  # pull auth
+                else modal.Image.from_registry(
+                    config.image, secret=self.registry_secret
+                )  # pull auth
             )
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
