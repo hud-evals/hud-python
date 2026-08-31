@@ -20,7 +20,7 @@ from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
-from hud.cli.utils.output import abort, json_option, suppress_json_stdout
+from hud.cli.utils.output import abort, emit_error_text, json_option, suppress_json_stdout
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
 from hud.eval.runtime import ComposeProject, RuntimeConfig
@@ -480,6 +480,7 @@ def deploy_environment(
     if key_error is not None:
         if emit_result:
             abort(key_error)
+        emit_error_text(key_error)
         return {"success": False, **key_error.to_payload()}
     recipe = _compose_recipe(env_dir)
     dockerfile = env_source.dockerfile

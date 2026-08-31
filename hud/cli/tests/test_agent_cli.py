@@ -364,3 +364,4 @@ def test_deploy_all_json_missing_api_key_is_single_document(
         assert item["success"] is False
         assert item["error"] == "permission_denied"
         assert "message" in item
+    assert "No HUD API key found" in (result.stderr or result.output)
