@@ -231,6 +231,56 @@ def test_qa_results_default_tui_hides_trajectory() -> None:
     )
 
 
+def test_qa_results_tui_preserves_bracketed_titles() -> None:
+    platform = MagicMock()
+    platform.get.side_effect = [
+        [
+            {
+                **_run(status="completed"),
+                "agent_name": "Failure Analysis",
+                "result": {
+                    "content": json.dumps(
+                        {
+                            "summary": "The agent never wrote /app/regex.txt.",
+                            "problems": [
+                                {
+                                    "problem": "Required [/output] file was never created",
+                                    "description": "Save the regex at /app/[regex].txt.",
+                                }
+                            ],
+                        }
+                    ),
+                },
+            }
+        ],
+        {
+            "events": [
+                {
+                    "kind": "tool_call",
+                    "tool_name": "shell[cmd]",
+                    "arguments": {"commands": ["ls /workspace"]},
+                },
+                {
+                    "kind": "subagent",
+                    "agent_name": "checker[v1]",
+                    "arguments": {},
+                },
+            ],
+            "has_more": False,
+            "next_seq": 2,
+            "status": "completed",
+        },
+    ]
+
+    result = _invoke(platform, ["qa", "results", _TRACE_ID, "--rollout"])
+
+    assert result.exit_code == 0
+    assert "Required [/output] file was never created" in result.output
+    assert "Save the regex at /app/[regex].txt." in result.output
+    assert "shell[cmd]" in result.output
+    assert "checker[v1]" in result.output
+
+
 def test_qa_results_renders_sanitized_rollout() -> None:
     platform = MagicMock()
     platform.get.side_effect = [

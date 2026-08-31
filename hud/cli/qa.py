@@ -180,6 +180,10 @@ def _capped_text(value: str, *, max_lines: int) -> Text:
     return text
 
 
+def _bold_title(label: str) -> Text:
+    return Text(label, style="bold")
+
+
 def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
     turn = 0
     for event in events:
@@ -202,7 +206,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
             _console.print(
                 Panel(
                     body,
-                    title=f"[bold]Turn {turn} · agent[/bold]",
+                    title=_bold_title(f"Turn {turn} · agent"),
                     border_style=SECONDARY,
                     padding=(0, 1),
                 )
@@ -223,7 +227,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
             _console.print(
                 Panel(
                     body,
-                    title=f"[bold]{name}[/bold]",
+                    title=_bold_title(name),
                     border_style=border,
                     padding=(0, 1),
                 )
@@ -234,7 +238,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
             _console.print(
                 Panel(
                     Text(_fmt_args(args) if args else name, style=DIM),
-                    title=f"[bold]{name}[/bold]",
+                    title=_bold_title(name),
                     border_style=GOLD,
                     padding=(0, 1),
                 )
@@ -270,7 +274,7 @@ def _print_result_tui(
         _console.print(
             Panel(
                 Text(str(summary)),
-                title="[bold]Summary[/bold]",
+                title=_bold_title("Summary"),
                 border_style=GOLD,
                 padding=(0, 1),
             )
@@ -288,7 +292,7 @@ def _print_result_tui(
         _console.print(
             Panel(
                 body,
-                title=f"[bold]{index}. {title}[/bold]",
+                title=_bold_title(f"{index}. {title}"),
                 border_style=GOLD,
                 padding=(0, 1),
             )
