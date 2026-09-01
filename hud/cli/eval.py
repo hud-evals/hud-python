@@ -28,6 +28,7 @@ from hud.cli.utils.config import parse_key_value
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import canonical_record_id
 
 _BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
 
@@ -851,7 +852,7 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
         max_concurrent=cfg.max_concurrent,
     )
     if job.runs and settings.telemetry_enabled and settings.api_key:
-        hud_console.info(f"{settings.hud_web_url}/jobs/{job.id}")
+        hud_console.info(f"{settings.hud_web_url}/jobs/{canonical_record_id(job.id)}")
 
     return job
 

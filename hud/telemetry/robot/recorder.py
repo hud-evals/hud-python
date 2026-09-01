@@ -24,7 +24,7 @@ import numpy as np
 from hud.agents.types import InferenceStep, ObservationStep, StateFeature
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, canonical_record_id
 
 from .video import VideoStreamer
 
@@ -209,7 +209,7 @@ class JobRecorder:
     def job_url(self) -> str:
         from hud.settings import settings
 
-        return f"{settings.hud_web_url}/jobs/{self.job_id}"
+        return f"{settings.hud_web_url}/jobs/{canonical_record_id(self.job_id)}"
 
     def _open(self, i: int) -> TraceRecorder:
         # Deterministic trace ids (reproducible, idempotent re-uploads) when seeded.

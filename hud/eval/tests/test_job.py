@@ -5,6 +5,7 @@ No network: the platform client is replaced with a recorder.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -66,6 +67,24 @@ async def test_trace_enter_reports_task_and_group_identity(recorder: _Recorder) 
             },
         )
     ]
+
+
+async def test_job_enter_logs_canonical_web_uuid(
+    recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from hud.settings import settings
+
+    compact_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
+    canonical_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+    monkeypatch.setattr(settings, "hud_web_url", "https://hud.test")
+    caplog.set_level(logging.INFO, logger="hud.eval.job")
+
+    await job_mod.job_enter(compact_id, name="test", group=1)
+
+    assert recorder.calls[0][0] == f"/trace/job/{compact_id}/enter"
+    assert f"job: https://hud.test/jobs/{canonical_id}" in caplog.text
 
 
 async def test_trace_exit_propagates_stop_reason(recorder: _Recorder) -> None:

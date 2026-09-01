@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import uuid
 from typing import Any
 
 import typer
@@ -44,6 +43,7 @@ def trace_command(
     from hud.cli.utils.api import require_api_key
     from hud.settings import settings
     from hud.telemetry.span import normalize_trace_id
+    from hud.utils.platform import canonical_record_id
 
     dir_to_use = local_dir or settings.telemetry_local_dir
     otel_id = normalize_trace_id(trace_id)
@@ -78,7 +78,7 @@ def trace_command(
     _render_events(events)
 
     web = settings.hud_web_url.rstrip("/")
-    console.print(f"\n[dim]View: {web}/trace/{uuid.UUID(otel_id)}[/dim]")
+    console.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
 
 
 # ── local JSONL ────────────────────────────────────────────────────────────────
