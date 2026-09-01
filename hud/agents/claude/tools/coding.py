@@ -10,12 +10,13 @@ from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
 from hud.types import MCPToolResult
 
-from .base import ClaudeToolSpec
+from .base import ClaudeToolSpec, is_anthropic_model
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
         BetaToolBash20250124Param,
         BetaToolTextEditor20250728Param,
+        BetaToolUnionParam,
     )
 
 
@@ -24,10 +25,63 @@ CLAUDE_BASH_SPEC = ClaudeToolSpec(
     api_name="bash",
 )
 
+GENERIC_BASH_SPEC = ClaudeToolSpec(
+    api_type="function",
+    api_name="bash",
+)
+
 CLAUDE_TEXT_EDITOR_SPEC = ClaudeToolSpec(
     api_type="text_editor_20250728",
     api_name="str_replace_based_edit_tool",
 )
+
+GENERIC_TEXT_EDITOR_SPEC = ClaudeToolSpec(
+    api_type="function",
+    api_name="str_replace_based_edit_tool",
+)
+
+_BASH_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "command": {
+            "type": "string",
+            "description": "The bash command to run.",
+        },
+    },
+    "required": ["command"],
+}
+
+_TEXT_EDITOR_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "command": {
+            "type": "string",
+            "enum": ["view", "create", "str_replace", "insert"],
+            "description": "The editor operation to run.",
+        },
+        "path": {
+            "type": "string",
+            "description": "Absolute path to the file.",
+        },
+        "file_text": {
+            "type": "string",
+            "description": "Full file contents for `create`.",
+        },
+        "old_str": {
+            "type": "string",
+            "description": "Exact existing text to replace for `str_replace`; must be unique.",
+        },
+        "new_str": {
+            "type": "string",
+            "description": "Replacement text for `str_replace`, or text to insert for `insert`.",
+        },
+        "insert_line": {
+            "type": "integer",
+            "description": "Line number after which to insert for `insert` (0 = top of file).",
+        },
+    },
+    "required": ["command", "path"],
+}
 
 
 class ClaudeBashTool(SSHTool):
@@ -37,10 +91,18 @@ class ClaudeBashTool(SSHTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec:
-        del model
-        return CLAUDE_BASH_SPEC
+        return CLAUDE_BASH_SPEC if is_anthropic_model(model) else GENERIC_BASH_SPEC
 
-    def to_params(self) -> BetaToolBash20250124Param:
+    def to_params(self) -> BetaToolUnionParam:
+        if self.spec.api_type == "function":
+            return cast(
+                "BetaToolUnionParam",
+                {
+                    "name": self.name,
+                    "description": "Run a command in a bash shell on the remote machine.",
+                    "input_schema": _BASH_INPUT_SCHEMA,
+                },
+            )
         return cast(
             "BetaToolBash20250124Param",
             {"type": self.spec.api_type, "name": self.name},
@@ -77,14 +139,25 @@ class ClaudeTextEditorTool(SSHTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec:
-        del model
-        return CLAUDE_TEXT_EDITOR_SPEC
+        return CLAUDE_TEXT_EDITOR_SPEC if is_anthropic_model(model) else GENERIC_TEXT_EDITOR_SPEC
 
     @property
     def provider_name(self) -> str:
         return self.spec.api_name
 
-    def to_params(self) -> BetaToolTextEditor20250728Param:
+    def to_params(self) -> BetaToolUnionParam:
+        if self.spec.api_type == "function":
+            return cast(
+                "BetaToolUnionParam",
+                {
+                    "name": self.provider_name,
+                    "description": (
+                        "View, create, and edit files on the remote machine "
+                        "(view/create/str_replace/insert)."
+                    ),
+                    "input_schema": _TEXT_EDITOR_INPUT_SCHEMA,
+                },
+            )
         return cast(
             "BetaToolTextEditor20250728Param",
             {"type": self.spec.api_type, "name": self.provider_name},
@@ -142,4 +215,11 @@ class ClaudeTextEditorTool(SSHTool):
         return await self.file_write(path, "".join(lines))
 
 
-__all__ = ["CLAUDE_BASH_SPEC", "CLAUDE_TEXT_EDITOR_SPEC", "ClaudeBashTool", "ClaudeTextEditorTool"]
+__all__ = [
+    "CLAUDE_BASH_SPEC",
+    "CLAUDE_TEXT_EDITOR_SPEC",
+    "GENERIC_BASH_SPEC",
+    "GENERIC_TEXT_EDITOR_SPEC",
+    "ClaudeBashTool",
+    "ClaudeTextEditorTool",
+]
