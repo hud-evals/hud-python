@@ -8,6 +8,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Literal, cast
 
+import httpx
 import mcp.types as mcp_types
 from anthropic import (
     APIConnectionError,
@@ -215,7 +216,12 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     async for _ in stream:
                         pass
                     return await stream.get_final_message()
-            except (APIConnectionError, APIStatusError, APITimeoutError) as exc:
+            except (
+                APIConnectionError,
+                APIStatusError,
+                APITimeoutError,
+                httpx.TransportError,
+            ) as exc:
                 inline_error = (
                     isinstance(exc, APIStatusError)
                     and exc.status_code == 200
@@ -223,7 +229,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                 )
                 interrupted_stream = stream_opened and isinstance(
                     exc,
-                    APIConnectionError | APITimeoutError,
+                    APIConnectionError | APITimeoutError | httpx.TransportError,
                 )
                 if retries or not (inline_error or interrupted_stream):
                     raise

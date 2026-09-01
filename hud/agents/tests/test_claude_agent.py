@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from anthropic import APIConnectionError, APIStatusError
+from anthropic import APIStatusError
 
 from hud.agents.claude.agent import ClaudeAgent
 
@@ -175,13 +175,17 @@ async def test_get_response_raises_after_transient_stream_retry_is_exhausted(
     assert len(state.messages) == 1
 
 
-async def test_get_response_retries_interrupted_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("error_type", [httpx.ReadError, httpx.ReadTimeout])
+async def test_get_response_retries_interrupted_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[httpx.TransportError],
+) -> None:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     final = _final(
         SimpleNamespace(type="text", text="recovered", citations=None),
         stop_reason="end_turn",
     )
-    agent = _agent(APIConnectionError(request=request), final)
+    agent = _agent(error_type("stream interrupted", request=request), final)
     state = _state(agent)
     monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", AsyncMock())
 
