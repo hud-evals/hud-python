@@ -19,12 +19,13 @@ from hud.agents.tools.base import tool_err, tool_ok
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import MCPToolResult
 
-from .base import ClaudeToolSpec
+from .base import ClaudeToolSpec, is_anthropic_model
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
+        BetaToolUnionParam,
     )
 
     from hud.agents.tools.rfb import Button
@@ -110,8 +111,88 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ),
 )
 
-# Fallback for unknown models — use the latest version.
+# Fallback for unknown Claude models — use the latest version.
 _DEFAULT_COMPUTER_SPEC = CLAUDE_COMPUTER_SPECS[0]
+
+GENERIC_COMPUTER_SPEC = ClaudeToolSpec(
+    api_type="function",
+    api_name="computer",
+)
+
+_COMPUTER_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": [
+                "screenshot",
+                "zoom",
+                "left_click",
+                "right_click",
+                "middle_click",
+                "double_click",
+                "triple_click",
+                "mouse_move",
+                "left_mouse_down",
+                "left_mouse_up",
+                "type",
+                "key",
+                "hold_key",
+                "scroll",
+                "left_click_drag",
+                "wait",
+                "cursor_position",
+            ],
+            "description": "The action to perform on the screen.",
+        },
+        "coordinate": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[x, y] pixel coordinate for click/move/scroll, or drag end point.",
+        },
+        "start_coordinate": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[x, y] drag start point for `left_click_drag`.",
+        },
+        "text": {
+            "type": "string",
+            "description": (
+                "Text to type for `type`; key chord (xdotool syntax, e.g. `ctrl+s`) for "
+                "`key`/`hold_key`; optional modifier keys held during clicks and scrolls."
+            ),
+        },
+        "duration": {
+            "type": "number",
+            "description": "Seconds to hold for `hold_key` or pause for `wait`.",
+        },
+        "scroll_direction": {
+            "type": "string",
+            "enum": ["up", "down", "left", "right"],
+            "description": "Direction for `scroll`.",
+        },
+        "scroll_amount": {
+            "type": "integer",
+            "description": "Number of scroll clicks for `scroll`.",
+        },
+        "repeat": {
+            "type": "integer",
+            "description": "Times to repeat the key chord for `key`.",
+        },
+        "region": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[x0, y0, x1, y1] region to magnify for `zoom`.",
+        },
+    },
+    "required": ["action"],
+}
 
 
 class ClaudeComputerTool(RFBTool):
@@ -121,12 +202,29 @@ class ClaudeComputerTool(RFBTool):
 
     @classmethod
     def default_spec(cls, model: str) -> ClaudeToolSpec | None:
+        if not is_anthropic_model(model):
+            return GENERIC_COMPUTER_SPEC
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
         return _DEFAULT_COMPUTER_SPEC
 
-    def to_params(self) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
+    def to_params(
+        self,
+    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param | BetaToolUnionParam:
+        if self.spec.api_type == "function":
+            return cast(
+                "BetaToolUnionParam",
+                {
+                    "name": self.name,
+                    "description": (
+                        "Control the remote computer's screen, mouse, and keyboard. "
+                        f"The display is {self.display_width}x{self.display_height} pixels. "
+                        "Most actions return a screenshot of the result."
+                    ),
+                    "input_schema": _COMPUTER_INPUT_SCHEMA,
+                },
+            )
         if self.spec.api_type == "computer_20251124":
             return cast(
                 "BetaToolComputerUse20251124Param",
@@ -375,4 +473,4 @@ def _crop_png(
     return buf.getvalue(), encoding.mime_type
 
 
-__all__ = ["CLAUDE_COMPUTER_SPECS", "ClaudeComputerTool"]
+__all__ = ["CLAUDE_COMPUTER_SPECS", "GENERIC_COMPUTER_SPEC", "ClaudeComputerTool"]
