@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
@@ -194,6 +195,19 @@ def test_job_recorder_canonicalizes_shared_job_id(monkeypatch: pytest.MonkeyPatc
 
     assert recorder.job_id == canonical_id
     assert recorder.job_url == f"https://hud.test/jobs/{canonical_id}"
+
+
+def test_seeded_trace_id_uses_stable_compact_job_namespace() -> None:
+    compact_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
+    canonical_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+    expected_id = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"hud.vec:{compact_id}:0:0:7",
+    ).hex
+
+    for job_id in (compact_id, canonical_id):
+        recorder = JobRecorder("test", 1, record_indices=[0], seed=7, job_id=job_id)
+        assert recorder._open(0).trace_id == expected_id
 
 
 def test_job_recorder_rejects_non_uuid_job_id() -> None:
