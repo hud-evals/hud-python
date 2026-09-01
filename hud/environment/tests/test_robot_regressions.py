@@ -188,12 +188,18 @@ def test_job_recorder_canonicalizes_shared_job_id(monkeypatch: pytest.MonkeyPatc
 
     compact_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
     canonical_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+    reports: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr(settings, "hud_web_url", "https://hud.test")
+    monkeypatch.setattr(
+        "hud.telemetry.robot.recorder._report_sync",
+        lambda path, payload: reports.append((path, payload)),
+    )
 
     recorder = JobRecorder("test", 1, record_indices=[], job_id=compact_id)
 
     assert recorder.job_id == canonical_id
     assert recorder.job_url == f"https://hud.test/jobs/{canonical_id}"
+    assert reports == [(f"/trace/job/{canonical_id}/enter", {"name": "test", "group": 1})]
 
 
 def test_seeded_recording_preserves_trace_id_for_each_job_id_spelling(
