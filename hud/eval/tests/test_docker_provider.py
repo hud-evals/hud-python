@@ -1355,14 +1355,14 @@ async def test_modal_runtime_bounds_output_teardown(
     assert calls["terminated"] is True
 
 
-async def test_modal_runtime_attaches_secrets_to_sandbox(
+async def test_modal_runtime_attaches_sandbox_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_modal(monkeypatch)
     secret = _ModalSecretRef("datacuration-cpu50-grader-auth")
     provider = ModalRuntime(
         runtime_config=RuntimeConfig(image="img:tag"),
-        secrets=[cast("Any", secret)],
+        sandbox_secrets=[cast("Any", secret)],
     )
 
     async with provider(_row()):
@@ -1391,17 +1391,17 @@ async def test_modal_runtime_passes_registry_secret_to_from_registry(
     assert calls["registry_secret"] is registry_secret
 
 
-async def test_modal_runtime_rejects_secrets_for_compose(
+async def test_modal_runtime_rejects_sandbox_secrets_for_compose(
     tmp_path: Path,
 ) -> None:
     compose = tmp_path / "compose.yaml"
     compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
     provider = ModalRuntime(
         runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
-        secrets=[cast("Any", _ModalSecretRef("grader-auth"))],
+        sandbox_secrets=[cast("Any", _ModalSecretRef("grader-auth"))],
     )
 
-    with pytest.raises(ValueError, match="secrets require an image runtime"):
+    with pytest.raises(ValueError, match="sandbox secrets require an image runtime"):
         async with provider(_row()):
             pass
 
