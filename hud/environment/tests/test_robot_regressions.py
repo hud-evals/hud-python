@@ -197,17 +197,29 @@ def test_job_recorder_canonicalizes_shared_job_id(monkeypatch: pytest.MonkeyPatc
     assert recorder.job_url == f"https://hud.test/jobs/{canonical_id}"
 
 
-def test_seeded_trace_id_uses_stable_compact_job_namespace() -> None:
+def test_seeded_recording_reports_stable_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
     compact_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
     canonical_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
     expected_id = uuid.uuid5(
         uuid.NAMESPACE_URL,
         f"hud.vec:{compact_id}:0:0:7",
     ).hex
+    reports: list[tuple[str, dict[str, Any]]] = []
+
+    def capture_report(path: str, payload: dict[str, Any]) -> None:
+        reports.append((path, payload))
+
+    monkeypatch.setattr("hud.telemetry.robot.recorder._report_sync", capture_report)
 
     for job_id in (compact_id, canonical_id):
+        reports.clear()
         recorder = JobRecorder("test", 1, record_indices=[0], seed=7, job_id=job_id)
-        assert recorder._open(0).trace_id == expected_id
+        recorder.record(done=np.array([True]))
+
+        assert (
+            f"/trace/{expected_id}/enter",
+            {"job_id": canonical_id, "group_id": None, "model": None},
+        ) in reports
 
 
 def test_job_recorder_rejects_non_uuid_job_id() -> None:
