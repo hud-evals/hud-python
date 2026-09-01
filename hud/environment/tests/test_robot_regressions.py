@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
@@ -197,13 +196,15 @@ def test_job_recorder_canonicalizes_shared_job_id(monkeypatch: pytest.MonkeyPatc
     assert recorder.job_url == f"https://hud.test/jobs/{canonical_id}"
 
 
-def test_seeded_recording_reports_stable_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_seeded_recording_preserves_trace_id_for_each_job_id_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     compact_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
     canonical_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
-    expected_id = uuid.uuid5(
-        uuid.NAMESPACE_URL,
-        f"hud.vec:{compact_id}:0:0:7",
-    ).hex
+    legacy_trace_ids = {
+        compact_id: "e9266339c6fa58b08102ce7f41c4f372",
+        canonical_id: "7b3269f689b65c5887542a9bc1ffb5c8",
+    }
     reports: list[tuple[str, dict[str, Any]]] = []
 
     def capture_report(path: str, payload: dict[str, Any]) -> None:
@@ -211,7 +212,7 @@ def test_seeded_recording_reports_stable_trace_id(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("hud.telemetry.robot.recorder._report_sync", capture_report)
 
-    for job_id in (compact_id, canonical_id):
+    for job_id, expected_id in legacy_trace_ids.items():
         reports.clear()
         recorder = JobRecorder("test", 1, record_indices=[0], seed=7, job_id=job_id)
         recorder.record(done=np.array([True]))

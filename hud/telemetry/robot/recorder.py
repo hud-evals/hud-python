@@ -190,12 +190,13 @@ class JobRecorder:
         self.seed = seed
         self.group_id = group_id
         self.model = model
+        seed_job_id = job_id or uuid.uuid4().hex
         try:
-            self.job_id = canonical_record_id(job_id or uuid.uuid4().hex)
+            self.job_id = canonical_record_id(seed_job_id)
         except ValueError as exc:
             raise ValueError("job_id must be a UUID") from exc
-        # Seeded trace IDs use the compact UUID namespace so accepted spellings stay idempotent.
-        self._trace_namespace = uuid.UUID(self.job_id).hex
+        # The input spelling is part of the shipped deterministic trace-ID contract.
+        self._seed_job_id = seed_job_id
         self._prompt = prompt
         self._action_names = action_names
         self._state_names = state_names
@@ -221,7 +222,7 @@ class JobRecorder:
     def _open(self, i: int) -> TraceRecorder:
         # Deterministic trace ids (reproducible, idempotent re-uploads) when seeded.
         if self.seed is not None:
-            key = f"hud.vec:{self._trace_namespace}:{i}:{self._episode[i]}:{self.seed}"
+            key = f"hud.vec:{self._seed_job_id}:{i}:{self._episode[i]}:{self.seed}"
             trace_id = uuid.uuid5(uuid.NAMESPACE_URL, key).hex
         else:
             trace_id = uuid.uuid4().hex
