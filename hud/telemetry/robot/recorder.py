@@ -165,6 +165,8 @@ class JobRecorder:
     slots (``record_indices``) gets rich traces; each ``done[i]`` closes that
     slot's trace (reporting reward — env-reported ``success`` outranks
     accumulated shaped reward) and opens a fresh one, all under one Job.
+
+    ``job_id`` is an existing HUD Job UUID to share; omit it to mint one.
     """
 
     def __init__(
@@ -188,7 +190,10 @@ class JobRecorder:
         self.seed = seed
         self.group_id = group_id
         self.model = model
-        self.job_id = job_id or uuid.uuid4().hex
+        try:
+            self.job_id = canonical_record_id(job_id or uuid.uuid4().hex)
+        except ValueError as exc:
+            raise ValueError("job_id must be a UUID") from exc
         self._prompt = prompt
         self._action_names = action_names
         self._state_names = state_names
@@ -209,7 +214,7 @@ class JobRecorder:
     def job_url(self) -> str:
         from hud.settings import settings
 
-        return f"{settings.hud_web_url}/jobs/{canonical_record_id(self.job_id)}"
+        return f"{settings.hud_web_url}/jobs/{self.job_id}"
 
     def _open(self, i: int) -> TraceRecorder:
         # Deterministic trace ids (reproducible, idempotent re-uploads) when seeded.

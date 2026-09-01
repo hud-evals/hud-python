@@ -15,6 +15,7 @@ from hud.environment.env import current_session_id
 from hud.environment.robot.bridge import _HUD_STATE, RobotBridge, _apply_declaration_state
 from hud.environment.robot.endpoint import RobotEndpoint, _bridge_init_kwargs
 from hud.environment.robot.gym import GymBridge, action_dim_of
+from hud.telemetry.robot.recorder import JobRecorder
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -180,6 +181,24 @@ def test_plain_env_observation_always_gets_batch_axis() -> None:
     assert data["reward"].shape == (1,)
     assert data["reward"][0] == pytest.approx(0.5)
     assert terminated.shape == (1,)
+
+
+def test_job_recorder_canonicalizes_shared_job_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hud.settings import settings
+
+    compact_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
+    canonical_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+    monkeypatch.setattr(settings, "hud_web_url", "https://hud.test")
+
+    recorder = JobRecorder("test", 1, record_indices=[], job_id=compact_id)
+
+    assert recorder.job_id == canonical_id
+    assert recorder.job_url == f"https://hud.test/jobs/{canonical_id}"
+
+
+def test_job_recorder_rejects_non_uuid_job_id() -> None:
+    with pytest.raises(ValueError, match="job_id must be a UUID"):
+        JobRecorder("test", 1, record_indices=[], job_id="shared-suite")
 
 
 # --- endpoint session claims -----------------------------------------------------------
