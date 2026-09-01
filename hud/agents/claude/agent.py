@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
 from typing import TYPE_CHECKING, Literal, cast
 
 import mcp.types as mcp_types
-from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
+from anthropic import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncAnthropic,
+    AsyncAnthropicBedrock,
+    Omit,
+)
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -41,6 +49,18 @@ logger = logging.getLogger(__name__)
 
 ClaudeImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
 ClaudeToolResultContent = BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
+
+_RETRYABLE_STREAM_ERROR_TYPES = frozenset(
+    {
+        "api_error",
+        "gateway_error",
+        "gateway_timeout",
+        "overloaded_error",
+        "rate_limit_error",
+        "upstream_error",
+    }
+)
+_STREAM_RETRY_DELAY_SECONDS = 1.0
 
 
 class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
@@ -168,6 +188,51 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
 
     # ─── Anthropic call ───────────────────────────────────────────────
 
+    async def _stream_response(
+        self,
+        client: AsyncAnthropic,
+        *,
+        messages: list[BetaMessageParam],
+        system: str | Omit,
+        tools: list[BetaToolUnionParam],
+        tool_choice: BetaToolChoiceAutoParam,
+        betas: list[str] | Omit,
+    ) -> BetaMessage:
+        retries = 0
+        while True:
+            stream_opened = False
+            try:
+                async with client.beta.messages.stream(
+                    model=self.config.model,
+                    system=system,
+                    max_tokens=self.config.max_tokens,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    betas=betas,
+                ) as stream:
+                    stream_opened = True
+                    async for _ in stream:
+                        pass
+                    return await stream.get_final_message()
+            except (APIConnectionError, APIStatusError, APITimeoutError) as exc:
+                inline_error = (
+                    isinstance(exc, APIStatusError)
+                    and exc.status_code == 200
+                    and exc.type in _RETRYABLE_STREAM_ERROR_TYPES
+                )
+                interrupted_stream = stream_opened and isinstance(
+                    exc,
+                    APIConnectionError | APITimeoutError,
+                )
+                if retries or not (inline_error or interrupted_stream):
+                    raise
+
+                retries += 1
+                error_type = exc.type if isinstance(exc, APIStatusError) else type(exc).__name__
+                logger.warning("Claude stream failed with %s; retrying once", error_type)
+                await asyncio.sleep(_STREAM_RETRY_DELAY_SECONDS)
+
     async def get_response(
         self,
         state: RunState[BetaMessageParam],
@@ -202,18 +267,14 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     )
                 else:
                     client = cast("AsyncAnthropic", self.anthropic_client)
-                    async with client.beta.messages.stream(
-                        model=self.config.model,
-                        system=system,
-                        max_tokens=self.config.max_tokens,
+                    response = await self._stream_response(
+                        client,
                         messages=messages_cached,
+                        system=system,
                         tools=tools,
                         tool_choice=tool_choice,
                         betas=betas,
-                    ) as stream:
-                        async for _ in stream:
-                            pass
-                        response = await stream.get_final_message()
+                    )
 
                 state.messages.append(
                     BetaMessageParam(role="assistant", content=response.content),

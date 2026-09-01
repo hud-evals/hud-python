@@ -6,13 +6,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+from anthropic import APIConnectionError, APIStatusError
 
 from hud.agents.claude.agent import ClaudeAgent
 
 
 class FakeStream:
-    def __init__(self, final: Any) -> None:
-        self._final = final
+    def __init__(self, outcome: Any) -> None:
+        self._outcome = outcome
 
     async def __aenter__(self) -> FakeStream:
         return self
@@ -24,23 +29,28 @@ class FakeStream:
         return self
 
     async def __anext__(self) -> Any:
+        if isinstance(self._outcome, BaseException):
+            raise self._outcome
         raise StopAsyncIteration
 
     async def get_final_message(self) -> Any:
-        return self._final
+        return self._outcome
 
 
 class FakeMessages:
-    def __init__(self, final: Any) -> None:
-        self._final = final
+    def __init__(self, *outcomes: Any) -> None:
+        self._outcomes = list(outcomes)
+        self.calls = 0
 
     def stream(self, **_kwargs: Any) -> FakeStream:
-        return FakeStream(self._final)
+        outcome = self._outcomes[self.calls]
+        self.calls += 1
+        return FakeStream(outcome)
 
 
 class FakeAnthropic:
-    def __init__(self, final: Any) -> None:
-        self.beta = SimpleNamespace(messages=FakeMessages(final))
+    def __init__(self, *outcomes: Any) -> None:
+        self.beta = SimpleNamespace(messages=FakeMessages(*outcomes))
 
 
 def _final(*content: Any, stop_reason: str) -> Any:
@@ -53,11 +63,11 @@ def _final(*content: Any, stop_reason: str) -> Any:
     )
 
 
-def _agent(final: Any) -> ClaudeAgent:
+def _agent(*outcomes: Any) -> ClaudeAgent:
     from hud.agents.types import ClaudeConfig
 
     return ClaudeAgent(
-        ClaudeConfig(model="claude-test", max_tokens=1024, model_client=FakeAnthropic(final))
+        ClaudeConfig(model="claude-test", max_tokens=1024, model_client=FakeAnthropic(*outcomes))
     )
 
 
@@ -65,6 +75,15 @@ def _state(agent: ClaudeAgent) -> Any:
     from hud.agents.tool_agent import RunState
 
     return RunState(messages=[agent._format_message("user", "go")])
+
+
+def _inline_error(type_: str) -> APIStatusError:
+    body = {"type": "error", "error": {"type": type_, "message": "stream failed"}}
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    return APIStatusError(str(body), response=response, body=body)
 
 
 def test_format_message_shape() -> None:
@@ -118,6 +137,77 @@ async def test_get_response_collects_thinking() -> None:
     agent = _agent(final)
     result = await agent.get_response(_state(agent))
     assert result.reasoning == "pondering"
+
+
+async def test_get_response_retries_transient_inline_stream_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    final = _final(
+        SimpleNamespace(type="text", text="recovered", citations=None),
+        stop_reason="end_turn",
+    )
+    agent = _agent(_inline_error("upstream_error"), final)
+    state = _state(agent)
+    sleep = AsyncMock()
+    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", sleep)
+
+    result = await agent.get_response(state)
+
+    messages = cast("FakeMessages", cast("Any", agent.anthropic_client).beta.messages)
+    assert messages.calls == 2
+    assert result.content == "recovered"
+    assert len(state.messages) == 2
+    sleep.assert_awaited_once_with(1.0)
+
+
+async def test_get_response_raises_after_transient_stream_retry_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _agent(_inline_error("gateway_timeout"), _inline_error("gateway_timeout"))
+    state = _state(agent)
+    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", AsyncMock())
+
+    with pytest.raises(APIStatusError, match="gateway_timeout"):
+        await agent.get_response(state)
+
+    messages = cast("FakeMessages", cast("Any", agent.anthropic_client).beta.messages)
+    assert messages.calls == 2
+    assert len(state.messages) == 1
+
+
+async def test_get_response_retries_interrupted_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    final = _final(
+        SimpleNamespace(type="text", text="recovered", citations=None),
+        stop_reason="end_turn",
+    )
+    agent = _agent(APIConnectionError(request=request), final)
+    state = _state(agent)
+    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", AsyncMock())
+
+    result = await agent.get_response(state)
+
+    messages = cast("FakeMessages", cast("Any", agent.anthropic_client).beta.messages)
+    assert messages.calls == 2
+    assert result.content == "recovered"
+    assert len(state.messages) == 2
+
+
+async def test_get_response_does_not_retry_non_transient_inline_stream_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _agent(_inline_error("invalid_request_error"))
+    state = _state(agent)
+    sleep = AsyncMock()
+    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", sleep)
+
+    with pytest.raises(APIStatusError, match="invalid_request_error"):
+        await agent.get_response(state)
+
+    messages = cast("FakeMessages", cast("Any", agent.anthropic_client).beta.messages)
+    assert messages.calls == 1
+    assert len(state.messages) == 1
+    sleep.assert_not_awaited()
 
 
 def test_citation_char_location() -> None:
