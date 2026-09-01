@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any, cast
 
 import typer
 
 from hud.cli.utils.api import require_api_key
-from hud.utils.exceptions import HudTimeoutError
+from hud.cli.utils.output import (
+    CliError,
+    abort,
+    dry_run_option,
+    emit_json,
+    emit_quiet,
+    json_option,
+    map_exception,
+    output_option,
+    quiet_option,
+    resolve_output_mode,
+    wants_json,
+)
+from hud.utils.exceptions import HudException, HudTimeoutError
 from hud.utils.platform import PlatformClient
 
 _POLL_INTERVAL_SECONDS = 2.0
@@ -31,7 +43,7 @@ def _platform() -> PlatformClient:
 
 
 def _print_json(payload: Any) -> None:
-    typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    emit_json(payload)
 
 
 def _print_agent(agent: dict[str, Any]) -> None:
@@ -59,12 +71,17 @@ def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
 def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
     agent = cast("dict[str, Any]", platform.get(f"/qa-agents/{agent_id}"))
     if agent.get("subject_type") != _TRACE_SUBJECT:
-        typer.echo(
-            f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
-            "The CLI currently supports trace agents only.",
-            err=True,
+        abort(
+            CliError(
+                error="usage",
+                message=(
+                    f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
+                    "The CLI currently supports trace agents only."
+                ),
+                input={"agent_id": agent_id, "subject_type": agent.get("subject_type")},
+                suggestion="Use a trace QA agent id from `hud qa --json`.",
+            )
         )
-        raise typer.Exit(1)
 
 
 def _latest_agent_result(
@@ -122,24 +139,39 @@ def _wait_for_results(
 @qa_app.callback(invoke_without_command=True)
 def list_agents(
     ctx: typer.Context,
-    json_output: bool = typer.Option(False, "--json", help="Output the machine-readable response."),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
+    quiet: bool = quiet_option(),
     limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
     offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
 ) -> None:
-    """List trace QA agents available to this team."""
+    """List trace QA agents available to this team.
+
+    [not dim]Examples:
+        hud qa
+        hud qa --json
+        hud qa --quiet[/not dim]
+    """
     if ctx.invoked_subcommand is not None:
         return
-    response = cast(
-        "dict[str, Any]",
-        _platform().get(
-            "/qa-agents",
-            params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
-        ),
-    )
-    if json_output:
+    try:
+        response = cast(
+            "dict[str, Any]",
+            _platform().get(
+                "/qa-agents",
+                params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
+            ),
+        )
+    except HudException as exc:
+        abort(map_exception(exc))
+    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
+    if mode == "json":
         _print_json(response)
         return
     agents = response["items"]
+    if mode == "quiet":
+        emit_quiet([str(agent.get("id") or "") for agent in agents if agent.get("id")])
+        return
     if not agents:
         typer.echo("No trace QA agents found.")
         return
@@ -170,20 +202,46 @@ def run_agent(
         min=1,
         help="Maximum seconds to wait for QA execution.",
     ),
-    json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
+    dry_run: bool = dry_run_option(),
 ) -> None:
-    """Run one trace QA agent against the given traces."""
+    """Run one trace QA agent against the given traces.
+
+    [not dim]Examples:
+        hud qa run <agent-id> <trace-id>
+        hud qa run <agent-id> <trace-id> --json --no-wait
+        hud qa run <agent-id> <trace-id> --dry-run --json[/not dim]
+    """
+    if dry_run:
+        plan = {
+            "dry_run": True,
+            "action": "qa_run",
+            "agent_id": agent_id,
+            "trace_ids": trace_ids,
+            "overwrite": overwrite,
+            "wait": wait,
+        }
+        if wants_json(json_output, output):
+            emit_json(plan)
+        else:
+            typer.echo(f"--dry-run: would run agent {agent_id} on {len(trace_ids)} trace(s)")
+        return
     platform = _platform()
     _require_trace_agent(platform, agent_id)
-    runs = cast(
-        "list[dict[str, Any]]",
-        platform.post(
-            f"/qa-agents/{agent_id}/run",
-            json={"trace_ids": trace_ids, "overwrite": overwrite},
-        ),
-    )
+    try:
+        runs = cast(
+            "list[dict[str, Any]]",
+            platform.post(
+                f"/qa-agents/{agent_id}/run",
+                json={"trace_ids": trace_ids, "overwrite": overwrite},
+            ),
+        )
+    except HudException as exc:
+        abort(map_exception(exc, input={"agent_id": agent_id, "trace_ids": trace_ids}))
+    as_json = wants_json(json_output, output)
     if not wait:
-        _print_results(runs, json_output=json_output)
+        _print_results(runs, json_output=as_json)
         return
 
     results = _wait_for_results(
@@ -193,7 +251,7 @@ def run_agent(
         agent_id=agent_id,
         launched=runs,
     )
-    _print_results(results, json_output=json_output)
+    _print_results(results, json_output=as_json)
     if any(
         result["status"] == "error"
         or (result.get("canonical_result") or {}).get("verdict") != "passed"
@@ -208,11 +266,20 @@ def list_results(
         ...,
         help="One or more trace UUIDs.",
     ),
-    json_output: bool = typer.Option(False, "--json", help="Output machine-readable results."),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
 ) -> None:
-    """Inspect QA results attached to the given traces."""
-    results = cast(
-        "list[dict[str, Any]]",
-        _platform().get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
-    )
-    _print_results(results, json_output=json_output)
+    """Inspect QA results attached to the given traces.
+
+    [not dim]Examples:
+        hud qa results <trace-id>
+        hud qa results <trace-id> --json[/not dim]
+    """
+    try:
+        results = cast(
+            "list[dict[str, Any]]",
+            _platform().get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
+        )
+    except HudException as exc:
+        abort(map_exception(exc, input={"trace_ids": trace_ids}))
+    _print_results(results, json_output=wants_json(json_output, output))

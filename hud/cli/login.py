@@ -22,6 +22,7 @@ import typer
 from rich.panel import Panel
 from rich.text import Text
 
+from hud.cli.utils.output import emit_json, json_option, wants_json
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
@@ -179,6 +180,7 @@ def login_command(
         "-q",
         help="Don't try to open a browser; print the verification URL instead.",
     ),
+    json_output: bool = json_option(),
 ) -> None:
     """Authenticate with the HUD platform.
 
@@ -187,7 +189,9 @@ def login_command(
 
     Examples:
         hud login
-        hud login --quiet[/not dim]
+        hud login --quiet
+        hud login --json
+        hud auth login --quiet[/not dim]
     """
     hud_console = HUDConsole()
 
@@ -231,8 +235,20 @@ def login_command(
 
     _persist_api_key(hud_console, api_key)
 
-    if email := (token.get("user") or {}).get("email"):
+    email = (token.get("user") or {}).get("email")
+    team = (token.get("team") or {}).get("name")
+    if wants_json(json_output):
+        emit_json(
+            {
+                "logged_in": True,
+                "email": email,
+                "team": team,
+                "path": str(get_user_env_path()),
+            }
+        )
+        return
+    if email:
         hud_console.info(f"Logged in as {email}")
-    if team := (token.get("team") or {}).get("name"):
+    if team:
         hud_console.info(f"Team: {team}")
     hud_console.info("You're all set, try 'hud eval --help'.")

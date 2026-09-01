@@ -359,7 +359,7 @@ class TestDeployEnvironment:
 
             deploy_environment(directory=str(tmp_path))
 
-        assert exc_info.value.exit_code == 1
+        assert exc_info.value.exit_code == 4
 
     def test_compose_recipe_does_not_require_a_dockerfile(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _compose_recipe

@@ -25,6 +25,7 @@ from rich.table import Table
 
 from hud.cli.utils.api import require_api_key
 from hud.cli.utils.config import parse_key_value
+from hud.cli.utils.output import json_option
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
@@ -894,7 +895,11 @@ def eval_command(
         "--task-ids",
         help="Comma-separated task slugs (or 0-based indices) to run",
     ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
+    json_output: bool = json_option(),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the resolved eval plan without running."
+    ),
     gateway: bool = typer.Option(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
@@ -920,12 +925,16 @@ def eval_command(
         hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
         hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use HUD runtime tunnel
         hud eval tasks.json claude-sonnet-4-6 --remote       # Execute rollout remotely
+        hud eval tasks.json claude --yes --json
+        hud eval tasks.json claude --dry-run --json
     """
     hud_console.info("Initializing evaluation...")
 
     if from_json is not None:
+        from hud.cli.utils.output import read_text_arg
+
         try:
-            cfg = EvalConfig.model_validate_json(from_json.read_text(encoding="utf-8"))
+            cfg = EvalConfig.model_validate_json(read_text_arg(str(from_json)))
         except Exception as e:
             hud_console.error(f"Failed to load JSON config from {from_json}: {e}")
             raise typer.Exit(1) from None
@@ -983,9 +992,30 @@ def eval_command(
 
     cfg.display()
 
-    if not yes and not hud_console.confirm("Proceed?"):
-        hud_console.info("Cancelled.")
-        raise typer.Exit(1)
+    from hud.cli.utils.output import confirm_or_abort, emit_json, wants_json
+
+    if dry_run:
+        plan = {
+            "dry_run": True,
+            "action": "eval",
+            "source": cfg.source,
+            "agent": cfg.agent_type.value if cfg.agent_type else None,
+            "model": cfg.model,
+            "runtime": cfg.runtime,
+            "remote": cfg.remote,
+            "all": cfg.all,
+            "max_steps": cfg.max_steps,
+            "max_concurrent": cfg.max_concurrent,
+            "group_size": cfg.group_size,
+            "task_ids": cfg.task_ids,
+        }
+        if wants_json(json_output):
+            emit_json(plan)
+        else:
+            hud_console.info("--dry-run: no evaluation started")
+        return
+
+    confirm_or_abort("Proceed?", yes=yes, default=True)
 
     start_time = time.time()
     try:
@@ -996,6 +1026,28 @@ def eval_command(
     elapsed = time.time() - start_time
 
     runs = job.runs
+    if wants_json(json_output):
+        emit_json(
+            {
+                "job_id": job.id,
+                "source": cfg.source,
+                "run_count": len(runs),
+                "mean_reward": job.reward,
+                "error_count": len(job.errors),
+                "elapsed_seconds": elapsed,
+                "runs": [
+                    {
+                        "task_id": run.task_id,
+                        "slug": run.slug,
+                        "reward": run.reward,
+                        "is_error": run.trace.is_error,
+                        "trace_id": run.trace_id,
+                    }
+                    for run in runs
+                ],
+            }
+        )
+        return
     if runs:
         from hud.cli.utils.display import display_runs
 

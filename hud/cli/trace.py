@@ -1,4 +1,7 @@
-"""``hud trace <trace_id>`` — render a rollout's conversation turns."""
+"""``hud trace`` — render a rollout's conversation turns.
+
+Noun-verb surface: ``hud trace get <id>``. ``hud trace <id>`` remains as an alias.
+"""
 
 from __future__ import annotations
 
@@ -13,34 +16,34 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
+from hud.cli.utils.output import (
+    UnknownTokenAsGetGroup,
+    emit_json,
+    json_option,
+    output_option,
+    platform_call,
+    wants_json,
+)
+
 console = Console()
 
 trace_app = typer.Typer(
     name="trace",
-    help="Inspect a rollout trace",
+    cls=UnknownTokenAsGetGroup,
+    help="Inspect a rollout trace.",
     add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=True,
 )
 
 
-@trace_app.callback(invoke_without_command=True)
-def trace_command(
-    ctx: typer.Context,
-    trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
-    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
-    local_dir: str | None = typer.Option(
-        None, "--local-dir", help="Override HUD_TELEMETRY_LOCAL_DIR"
-    ),
+def _show_trace(
+    trace_id: str,
+    *,
+    json_output: bool,
+    output: str | None,
+    local_dir: str | None,
 ) -> None:
-    """Render the turns and tool calls for one rollout.
-
-    Checks ``HUD_TELEMETRY_LOCAL_DIR`` first (fast, no API needed), then
-    falls back to ``GET /v2/trace/{id}/events`` on the platform.
-    """
-    if ctx.invoked_subcommand is not None:
-        return
-
     from hud.cli.utils.api import require_api_key
     from hud.settings import settings
     from hud.telemetry.span import normalize_trace_id
@@ -63,8 +66,8 @@ def trace_command(
         require_api_key("fetch trace")
         events = _load_remote(trace_id)
 
-    if json_output:
-        console.print_json(json.dumps(events, indent=2, default=str))
+    if wants_json(json_output, output):
+        emit_json(events)
         return
 
     if not events:
@@ -79,6 +82,42 @@ def trace_command(
 
     web = settings.hud_web_url.rstrip("/")
     console.print(f"\n[dim]View: {web}/trace/{uuid.UUID(otel_id)}[/dim]")
+
+
+@trace_app.command("get")
+def get_command(
+    trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
+    local_dir: str | None = typer.Option(
+        None, "--local-dir", help="Override HUD_TELEMETRY_LOCAL_DIR"
+    ),
+) -> None:
+    """Render the turns and tool calls for one rollout.
+
+    Checks ``HUD_TELEMETRY_LOCAL_DIR`` first (fast, no API needed), then
+    falls back to ``GET /v2/trace/{id}/events`` on the platform.
+
+    [not dim]Examples:
+        hud trace get <trace-id>
+        hud trace get <trace-id> --json
+        hud trace <trace-id> --json[/not dim]
+    """
+    _show_trace(trace_id, json_output=json_output, output=output, local_dir=local_dir)
+
+
+@trace_app.callback(invoke_without_command=True)
+def trace_command(ctx: typer.Context) -> None:
+    """Inspect a rollout trace.
+
+    Prefer ``hud trace get <id>`` in scripts; ``hud trace <id>`` is rewritten to get.
+
+    [not dim]Examples:
+        hud trace get <trace-id>
+        hud trace <trace-id> --json[/not dim]
+    """
+    if ctx.invoked_subcommand is not None:
+        return
 
 
 # ── local JSONL ────────────────────────────────────────────────────────────────
@@ -147,11 +186,11 @@ def _load_remote(trace_id: str) -> list[dict[str, Any]]:
     from hud.utils.platform import PlatformClient
 
     client = PlatformClient.from_settings()
-    try:
-        data = client.get(f"/trace/{trace_id}/events")
-    except Exception as e:
-        console.print(f"[red]Failed to fetch trace: {e}[/red]")
-        raise typer.Exit(1) from e
+    data = platform_call(
+        lambda: client.get(f"/trace/{trace_id}/events"),
+        resource="Trace",
+        input={"trace_id": trace_id},
+    )
 
     if isinstance(data, dict):
         return data.get("events", [])

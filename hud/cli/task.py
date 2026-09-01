@@ -20,6 +20,19 @@ from urllib.parse import urlsplit
 
 import typer
 
+from hud.cli.utils.output import (
+    CliError,
+    ExitCode,
+    abort,
+    emit_json,
+    emit_quiet,
+    json_option,
+    output_option,
+    quiet_option,
+    read_text_arg,
+    resolve_output_mode,
+    wants_json,
+)
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -39,11 +52,24 @@ def _parse_args(args: str) -> dict[str, Any]:
     try:
         parsed = json.loads(args or "{}")
     except json.JSONDecodeError as exc:
-        hud_console.error(f"--args must be valid JSON: {exc}")
-        raise typer.Exit(1) from None
+        abort(
+            CliError(
+                error="usage",
+                message=f"--args must be valid JSON: {exc}",
+                input={"args": args},
+                suggestion='Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
+                exit_code=ExitCode.USAGE,
+            )
+        )
     if not isinstance(parsed, dict):
-        hud_console.error("--args must be a JSON object")
-        raise typer.Exit(1)
+        abort(
+            CliError(
+                error="usage",
+                message="--args must be a JSON object",
+                input={"args": args},
+                exit_code=ExitCode.USAGE,
+            )
+        )
     return parsed
 
 
@@ -54,8 +80,14 @@ def _collect(source: str) -> Any:
     try:
         return Taskset.from_file(source)
     except FileNotFoundError as exc:
-        hud_console.error(str(exc))
-        raise typer.Exit(1) from None
+        abort(
+            CliError(
+                error="not_found",
+                message=str(exc),
+                input={"source": source},
+                suggestion="Pass --source to a tasks file or directory.",
+            )
+        )
 
 
 def _local_env_url(port: int = 8765) -> str | None:
@@ -106,8 +138,13 @@ def _resolve(
 
     taskset = _collect(source or ".")
     if not taskset:
-        hud_console.error(f"No tasks found in {source or '.'}")
-        raise typer.Exit(1)
+        abort(
+            CliError(
+                error="not_found",
+                message=f"No tasks found in {source or '.'}",
+                input={"source": source or "."},
+            )
+        )
     matches = [
         candidate
         for index, (slug, candidate) in enumerate(taskset.items())
@@ -115,18 +152,34 @@ def _resolve(
     ]
     if not matches:
         available = ", ".join(sorted({t.id for t in taskset}))
-        hud_console.error(f"No task matching {task!r} (available: {available})")
-        raise typer.Exit(1)
+        abort(
+            CliError(
+                error="not_found",
+                message=f"No task matching {task!r} (available: {available})",
+                input={"task": task, "source": source or "."},
+                suggestion="Run 'hud task list' to see available slugs.",
+            )
+        )
     selected = matches[0]
     placement = SubprocessRuntime(_spawn_target(source or "."))(selected)
     return selected.id, args or selected.args, placement
 
 
-def _emit(result: dict[str, Any], headline: str, out: Path | None) -> None:
-    """Thin output: the full protocol frame to ``--out``, else the headline value to stdout."""
+def _emit(
+    result: dict[str, Any],
+    headline: str,
+    out: Path | None,
+    *,
+    json_output: bool = False,
+    output: str | None = None,
+) -> None:
+    """Thin output: JSON/file for the full frame, else the headline value to stdout."""
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+        return
+    if wants_json(json_output, output):
+        emit_json(result)
         return
     value = result.get(headline, result)
     typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
@@ -135,11 +188,30 @@ def _emit(result: dict[str, Any], headline: str, out: Path | None) -> None:
 @task_app.command("list")
 def list_command(
     source: str = typer.Option(".", "--source", "-s", help="Env source (.py/dir/JSON)."),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
+    quiet: bool = quiet_option(),
 ) -> None:
-    """List the tasks (slug + task id + args) exposed by a source."""
-    for slug, task in _collect(source).items():
-        args = f" {json.dumps(task.args)}" if task.args else ""
-        typer.echo(f"{slug}\t{task.id}{args}")
+    """List the tasks (slug + task id + args) exposed by a source.
+
+    [not dim]Examples:
+        hud task list
+        hud task list --json
+        hud task list --quiet[/not dim]
+    """
+    items = [
+        {"slug": slug, "id": task.id, "args": task.args} for slug, task in _collect(source).items()
+    ]
+    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
+    if mode == "json":
+        emit_json(items)
+        return
+    if mode == "quiet":
+        emit_quiet([item["slug"] for item in items])
+        return
+    for item in items:
+        args = f" {json.dumps(item['args'])}" if item["args"] else ""
+        typer.echo(f"{item['slug']}\t{item['id']}{args}")
 
 
 @task_app.command("start")
@@ -155,8 +227,16 @@ def start_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the prompt here instead of stdout."
     ),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
 ) -> None:
-    """Start a task and return its prompt (the env's first yield)."""
+    """Start a task and return its prompt (the env's first yield).
+
+    [not dim]Examples:
+        hud task start fix_bug
+        hud task start fix_bug --json
+        hud task start fix_bug --source . --args '{}'[/not dim]
+    """
     task_id, task_args, placement = _resolve(task, source, url, _parse_args(args))
 
     async def _run() -> dict[str, Any]:
@@ -167,15 +247,17 @@ def start_command(
         async with placement as runtime, connect(runtime) as client:
             return await client.start_task(task_id, task_args)
 
-    _emit(asyncio.run(_run()), "prompt", out)
+    _emit(asyncio.run(_run()), "prompt", out, json_output=json_output, output=output)
 
 
 @task_app.command("grade")
 def grade_command(
     task: str = typer.Argument(..., help="Task id or slug."),
     answer: str = typer.Option("", "--answer", help="Answer to grade."),
-    answer_file: Path | None = typer.Option(  # noqa: B008
-        None, "--answer-file", help="Read the answer from a file instead of --answer."
+    answer_file: str | None = typer.Option(
+        None,
+        "--answer-file",
+        help="Read the answer from a file instead of --answer. Pass - to read stdin.",
     ),
     source: str | None = typer.Option(
         None, "--source", "-s", help="Spawn this env source (.py/dir/JSON) instead of attaching."
@@ -187,9 +269,17 @@ def grade_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the full JSON result here (else print the reward)."
     ),
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
 ) -> None:
-    """Grade an answer for a task and return its reward."""
-    answer_text = answer_file.read_text(encoding="utf-8") if answer_file is not None else answer
+    """Grade an answer for a task and return its reward.
+
+    [not dim]Examples:
+        hud task grade fix_bug --answer "done"
+        hud task grade fix_bug --answer-file - --json
+        hud task grade fix_bug --answer-file answer.txt[/not dim]
+    """
+    answer_text = read_text_arg(answer_file) if answer_file is not None else answer
     task_id, task_args, placement = _resolve(task, source, url, _parse_args(args))
 
     async def _run() -> dict[str, Any]:
@@ -204,7 +294,7 @@ def grade_command(
                 await client.start_task(task_id, task_args)
                 return await client.grade({"answer": answer_text})
 
-    _emit(asyncio.run(_run()), "score", out)
+    _emit(asyncio.run(_run()), "score", out, json_output=json_output, output=output)
 
 
 __all__ = ["task_app"]

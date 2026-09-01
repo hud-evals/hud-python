@@ -20,6 +20,15 @@ from typing import Any
 import httpx
 import typer
 
+from hud.cli.utils.output import (
+    CliError,
+    ExitCode,
+    abort,
+    dry_run_option,
+    emit_json,
+    json_option,
+    wants_json,
+)
 from hud.utils.hud_console import HUDConsole
 
 from .presets import ENVIRONMENT_PRESETS, PRESETS_BY_ID, EnvironmentPreset, materialize_preset
@@ -44,8 +53,15 @@ def _resolve_preset(preset: str | None, hud_console: HUDConsole) -> EnvironmentP
         chosen = PRESETS_BY_ID.get(preset)
         if chosen is None:
             available = ", ".join(PRESETS_BY_ID)
-            hud_console.error(f"Unknown preset {preset!r}. Available: {available}")
-            raise typer.Exit(1)
+            abort(
+                CliError(
+                    error="usage",
+                    message=f"Unknown preset {preset!r}. Available: {available}",
+                    input={"preset": preset},
+                    suggestion="Pass --preset blank or one of the listed templates.",
+                    exit_code=ExitCode.USAGE,
+                )
+            )
         return chosen
 
     # No flag: pick interactively when we have a TTY, else fall back to the caller's
@@ -64,8 +80,15 @@ def _resolve_preset(preset: str | None, hud_console: HUDConsole) -> EnvironmentP
 def _ensure_writable(target: Path, force: bool, hud_console: HUDConsole) -> None:
     """Refuse to scaffold into a non-empty directory unless ``--force``."""
     if target.exists() and any(target.iterdir()) and not force:
-        hud_console.error(f"{target} already exists and is not empty (use --force)")
-        raise typer.Exit(1)
+        abort(
+            CliError(
+                error="conflict",
+                message=f"{target} already exists and is not empty (use --force)",
+                input={"path": str(target)},
+                existing_id=str(target),
+                suggestion="Pass --force to overwrite, or choose a new name.",
+            )
+        )
 
 
 def _write_local_scaffold(target: Path, env_name: str, hud_console: HUDConsole) -> None:
@@ -90,6 +113,8 @@ def init_command(
     ),
     directory: str = typer.Option(".", "--dir", "-d", help="Parent directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
+    json_output: bool = json_option(),
+    dry_run: bool = dry_run_option(),
     preset: str | None = typer.Option(
         None,
         "--preset",
@@ -113,7 +138,9 @@ def init_command(
         hud init my-env                   # pick a template → ./my-env
         hud init my-env --preset blank    # minimal local scaffold → ./my-env
         hud init my-env --preset browser  # clone the browser template → ./my-env
-        hud init --preset cua             # clone the cua template → ./cua-template[/not dim]
+        hud init --preset cua             # clone the cua template → ./cua-template
+        hud init my-env --preset blank --json
+        hud init my-env --dry-run --json[/not dim]
     """
     hud_console = HUDConsole()
 
@@ -135,11 +162,31 @@ def init_command(
         target = Path(directory) / chosen.repo
         _ensure_writable(target, force, hud_console)
     else:
-        hud_console.error(
-            "Nothing to create. Pass a name (hud init my-env), a --preset, "
-            "or run in an interactive terminal to pick a template."
+        abort(
+            CliError(
+                error="usage",
+                message=(
+                    "Nothing to create. Pass a name (hud init my-env), a --preset, "
+                    "or run in an interactive terminal to pick a template."
+                ),
+                suggestion="hud init my-env --preset blank",
+                exit_code=ExitCode.USAGE,
+            )
         )
-        raise typer.Exit(1)
+
+    if dry_run is True:
+        payload = {
+            "dry_run": True,
+            "action": "init",
+            "path": str(target),
+            "preset": chosen.id if chosen is not None else "blank",
+            "download": is_download,
+        }
+        if wants_json(json_output):
+            emit_json(payload)
+        else:
+            hud_console.info(f"--dry-run: would create {target}")
+        return
 
     hud_console.header(f"HUD Init: {target.name}")
     if is_download and chosen is not None:
@@ -158,6 +205,17 @@ def init_command(
         hud_console.status_item(f"{chosen.owner}/{chosen.repo}", "✓")
     else:
         _write_local_scaffold(target, _python_name(target.name), hud_console)
+
+    if wants_json(json_output):
+        emit_json(
+            {
+                "path": str(target),
+                "preset": chosen.id if chosen is not None else "blank",
+                "download": is_download,
+                "created": True,
+            }
+        )
+        return
 
     hud_console.section_title("Next Steps")
     hud_console.info("")
