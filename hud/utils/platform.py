@@ -10,8 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
+from uuid import UUID
 
 from hud.utils.requests import make_request, make_request_sync
+
+
+def canonical_record_id(record_id: str) -> str:
+    """Return the canonical UUID representation of a HUD record id."""
+    return str(UUID(record_id))
 
 
 @dataclass(frozen=True)

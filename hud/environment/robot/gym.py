@@ -486,7 +486,7 @@ class TracedEnv:
     trace per episode per slot (``done[i]`` closes slot ``i``'s trace and opens the next).
 
     - ``job`` - job name on the platform (default: the env's spec id / class name).
-    - ``job_id`` - share one job across several wrapped envs (multi-task suites).
+    - ``job_id`` - existing HUD Job UUID shared across wrapped envs; omitted to mint one.
     - ``task`` - optional instruction/label shown on each trace's timeline.
     - ``fps`` - control rate override (default: detected from the env).
     - ``contract`` - path for the derived contract round-trip; ``None`` disables it.
