@@ -86,22 +86,17 @@ def _fetch_rollout(platform: PlatformClient, result_id: str) -> list[dict[str, A
         since_seq = next_seq
 
 
-def _fmt_args(args: Any) -> str:
-    if isinstance(args, dict):
-        return ", ".join(f"{k}={v!r}" for k, v in args.items())
-    return str(args)
-
-
 def _tool_command(event: dict[str, Any]) -> str:
     args = event.get("arguments") or {}
-    if isinstance(args, dict):
-        commands = args.get("commands")
-        if isinstance(commands, list):
-            return "\n".join(str(item) for item in commands)
-        claims = args.get("claims")
-        if claims:
-            return str(claims)
-    return _fmt_args(args)
+    if not isinstance(args, dict):
+        return str(args)
+    commands = args.get("commands")
+    if isinstance(commands, list):
+        return "\n".join(str(item) for item in commands)
+    claims = args.get("claims")
+    if claims:
+        return str(claims)
+    return ", ".join(f"{k}={v!r}" for k, v in args.items())
 
 
 def _capped_text(value: str, *, max_lines: int) -> Text:
@@ -171,7 +166,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
             args = event.get("arguments") or {}
             _console.print(
                 Panel(
-                    Text(_fmt_args(args) if args else name, style=DIM),
+                    Text(_tool_command(event) if args else name, style=DIM),
                     title=_bold_title(name),
                     border_style=GOLD,
                     padding=(0, 1),
