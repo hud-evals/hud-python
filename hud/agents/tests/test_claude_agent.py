@@ -9,6 +9,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
 from anthropic import APIStatusError
 
@@ -175,17 +176,37 @@ async def test_get_response_raises_after_transient_stream_retry_is_exhausted(
     assert len(state.messages) == 1
 
 
-@pytest.mark.parametrize("error_type", [httpx.ReadError, httpx.ReadTimeout])
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ReadError(
+            "stream interrupted",
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        ),
+        httpx.ReadTimeout(
+            "stream interrupted",
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        ),
+        httpx2.ReadError(
+            "stream interrupted",
+            request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"),
+        ),
+        httpx2.ReadTimeout(
+            "stream interrupted",
+            request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"),
+        ),
+    ],
+    ids=["httpx-read-error", "httpx-read-timeout", "httpx2-read-error", "httpx2-read-timeout"],
+)
 async def test_get_response_retries_interrupted_stream(
     monkeypatch: pytest.MonkeyPatch,
-    error_type: type[httpx.TransportError],
+    error: httpx.TransportError | httpx2.TransportError,
 ) -> None:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     final = _final(
         SimpleNamespace(type="text", text="recovered", citations=None),
         stop_reason="end_turn",
     )
-    agent = _agent(error_type("stream interrupted", request=request), final)
+    agent = _agent(error, final)
     state = _state(agent)
     monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", AsyncMock())
 
