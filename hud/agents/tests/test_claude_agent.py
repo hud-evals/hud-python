@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
 
 import httpx
 import httpx2
@@ -78,10 +78,11 @@ def _state(agent: ClaudeAgent) -> Any:
     return RunState(messages=[agent._format_message("user", "go")])
 
 
-def _inline_error(type_: str) -> APIStatusError:
+def _inline_error(type_: str, *, headers: dict[str, str] | None = None) -> APIStatusError:
     body = {"type": "error", "error": {"type": type_, "message": "stream failed"}}
     response = httpx.Response(
         200,
+        headers=headers,
         request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
     return APIStatusError(str(body), response=response, body=body)
@@ -149,33 +150,74 @@ async def test_get_response_retries_transient_inline_stream_error(
         SimpleNamespace(type="text", text="recovered", citations=None),
         stop_reason="end_turn",
     )
-    agent = _agent(_inline_error(error_type), final)
+    agent = _agent(_inline_error(error_type), _inline_error(error_type), final)
     state = _state(agent)
     sleep = AsyncMock()
+    jitter = Mock(side_effect=[0.25, 1.5])
     monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", sleep)
+    monkeypatch.setattr("hud.agents.claude.agent._STREAM_JITTER.uniform", jitter)
 
     result = await agent.get_response(state)
 
     messages = cast("FakeMessages", cast("Any", agent.anthropic_client).beta.messages)
-    assert messages.calls == 2
+    assert messages.calls == 3
     assert result.content == "recovered"
     assert len(state.messages) == 2
-    sleep.assert_awaited_once_with(1.0)
+    assert sleep.await_args_list == [call(0.25), call(1.5)]
+    assert jitter.call_args_list == [call(0.0, 1.0), call(0.0, 2.0)]
 
 
 async def test_get_response_raises_after_transient_stream_retry_is_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    agent = _agent(_inline_error("gateway_timeout"), _inline_error("gateway_timeout"))
+    agent = _agent(
+        _inline_error("gateway_timeout"),
+        _inline_error("gateway_timeout"),
+        _inline_error("gateway_timeout"),
+    )
     state = _state(agent)
-    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", AsyncMock())
+    sleep = AsyncMock()
+    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", sleep)
+    monkeypatch.setattr("hud.agents.claude.agent._STREAM_JITTER.uniform", Mock(return_value=0.0))
 
     with pytest.raises(APIStatusError, match="gateway_timeout"):
         await agent.get_response(state)
 
     messages = cast("FakeMessages", cast("Any", agent.anthropic_client).beta.messages)
-    assert messages.calls == 2
+    assert messages.calls == 3
     assert len(state.messages) == 1
+    assert sleep.await_count == 2
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_delay"),
+    [
+        ({"retry-after": "1.75"}, 1.75),
+        ({"retry-after-ms": "1750"}, 1.75),
+        ({"retry-after": "60"}, 5.0),
+    ],
+    ids=["seconds", "milliseconds", "capped"],
+)
+async def test_get_response_honors_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
+    expected_delay: float,
+) -> None:
+    final = _final(
+        SimpleNamespace(type="text", text="recovered", citations=None),
+        stop_reason="end_turn",
+    )
+    agent = _agent(_inline_error("overloaded_error", headers=headers), final)
+    sleep = AsyncMock()
+    jitter = Mock()
+    monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", sleep)
+    monkeypatch.setattr("hud.agents.claude.agent._STREAM_JITTER.uniform", jitter)
+
+    result = await agent.get_response(_state(agent))
+
+    assert result.content == "recovered"
+    sleep.assert_awaited_once_with(expected_delay)
+    jitter.assert_not_called()
 
 
 @pytest.mark.parametrize(

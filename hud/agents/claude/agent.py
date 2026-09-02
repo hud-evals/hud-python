@@ -6,6 +6,8 @@ import asyncio
 import copy
 import json
 import logging
+import math
+from random import SystemRandom
 from typing import TYPE_CHECKING, Literal, cast
 
 import httpx
@@ -63,7 +65,30 @@ _RETRYABLE_STREAM_ERROR_TYPES = frozenset(
         "upstream_error",
     }
 )
-_STREAM_RETRY_DELAY_SECONDS = 1.0
+_STREAM_MAX_ATTEMPTS = 3
+_STREAM_RETRY_BASE_DELAY_SECONDS = 1.0
+_STREAM_RETRY_MAX_DELAY_SECONDS = 5.0
+_STREAM_JITTER = SystemRandom()
+
+
+def _stream_retry_delay(attempt: int, error: Exception) -> float:
+    if isinstance(error, APIStatusError):
+        for header, divisor in (("retry-after-ms", 1000.0), ("retry-after", 1.0)):
+            value = error.response.headers.get(header)
+            if value is None:
+                continue
+            try:
+                retry_after = float(value) / divisor
+            except ValueError:
+                continue
+            if math.isfinite(retry_after):
+                return min(max(retry_after, 0.0), _STREAM_RETRY_MAX_DELAY_SECONDS)
+
+    backoff_limit = min(
+        _STREAM_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
+        _STREAM_RETRY_MAX_DELAY_SECONDS,
+    )
+    return _STREAM_JITTER.uniform(0.0, backoff_limit)
 
 
 class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
@@ -201,7 +226,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         tool_choice: BetaToolChoiceAutoParam,
         betas: list[str] | Omit,
     ) -> BetaMessage:
-        retries = 0
+        attempt = 1
         while True:
             stream_opened = False
             try:
@@ -237,13 +262,20 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     | httpx.TransportError
                     | httpx2.TransportError,
                 )
-                if retries or not (inline_error or interrupted_stream):
+                if attempt >= _STREAM_MAX_ATTEMPTS or not (inline_error or interrupted_stream):
                     raise
 
-                retries += 1
+                retry_delay = _stream_retry_delay(attempt, exc)
                 error_type = exc.type if isinstance(exc, APIStatusError) else type(exc).__name__
-                logger.warning("Claude stream failed with %s; retrying once", error_type)
-                await asyncio.sleep(_STREAM_RETRY_DELAY_SECONDS)
+                logger.warning(
+                    "Claude stream failed with %s; retrying in %.2fs (attempt %d/%d)",
+                    error_type,
+                    retry_delay,
+                    attempt + 1,
+                    _STREAM_MAX_ATTEMPTS,
+                )
+                attempt += 1
+                await asyncio.sleep(retry_delay)
 
     async def get_response(
         self,
