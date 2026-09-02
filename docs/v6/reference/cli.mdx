@@ -140,6 +140,7 @@ experimental [Harbor integration](/v6/experimental/harbor).
 hud qa
 hud qa run <agent-id> <trace-id>
 hud qa results <trace-id>
+hud qa results <trace-id> --rollout
 ```
 
 `hud qa` lists **trace** agents (name and UUID), including public ones.
@@ -148,6 +149,13 @@ for every requested trace. Pass `--overwrite` to create a fresh attempt,
 `--no-wait` to return after launch, or `--json` for machine-readable output.
 Exit code `1` means a completed QA result failed or the SDK could not
 complete the command.
+
+`hud qa results` prints the analysis verdict (`passed` or `failed`), not the
+job status. Failure Analysis shows a cause and numbered findings when present.
+Boolean agents (false negative, false positive, reward hacking, prompt
+alignment) show yes/no and a summary, without a findings list. Pass `--rollout`
+for the sanitized analysis trajectory. `--json` still prints the raw result
+list and does not fetch the trajectory.
 
 ## Inspect
 
