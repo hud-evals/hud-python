@@ -8,9 +8,12 @@ import uuid
 import warnings
 from typing import TYPE_CHECKING, Any
 
+from hud.capabilities.mcp import get_mcp_trace_id
 from hud.eval.run import Grade, Run, validate_rollout_timeouts
+from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.span import normalize_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
@@ -70,6 +73,16 @@ class HostedRuntime:
         local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex
+        parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
+        if parent_trace_id is not None and normalize_trace_id(
+            parent_trace_id
+        ) == normalize_trace_id(trace_id):
+            parent_trace_id = None
+        if parent_trace_id is not None:
+            try:
+                parent_trace_id = canonical_record_id(parent_trace_id)
+            except ValueError:
+                parent_trace_id = None
         timeout = self.run_timeout if rollout_timeout is None else rollout_timeout
         validate_rollout_timeouts(
             task,
@@ -83,12 +96,22 @@ class HostedRuntime:
         try:
             if timeout is None:
                 state = await self._submit_and_await(
-                    task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
+                    task,
+                    agent,
+                    job_id=job_id,
+                    group_id=group_id,
+                    trace_id=trace_id,
+                    parent_trace_id=parent_trace_id,
                 )
             else:
                 async with asyncio.timeout(timeout):
                     state = await self._submit_and_await(
-                        task, agent, job_id=job_id, group_id=group_id, trace_id=trace_id
+                        task,
+                        agent,
+                        job_id=job_id,
+                        group_id=group_id,
+                        trace_id=trace_id,
+                        parent_trace_id=parent_trace_id,
                     )
         except asyncio.CancelledError:
             self._cancel_later(trace_id)
@@ -118,6 +141,7 @@ class HostedRuntime:
         job_id: str,
         group_id: str | None,
         trace_id: str,
+        parent_trace_id: str | None,
     ) -> dict[str, Any]:
         from hud.agents.tool_agent import ToolAgent
 
@@ -147,6 +171,8 @@ class HostedRuntime:
         }
         if group_id is not None:
             payload["group_id"] = group_id
+        if parent_trace_id is not None:
+            payload["parent_trace_id"] = parent_trace_id
         if task.runtime_config is not None:
             runtime_config = task.runtime_config.model_dump(mode="json", exclude_unset=True)
             if runtime_config:

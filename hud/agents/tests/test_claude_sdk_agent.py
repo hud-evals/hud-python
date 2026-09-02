@@ -26,6 +26,8 @@ from hud.agents.claude.sdk.agent import ClaudeSDKAgent, build_remote_invocation
 from hud.agents.types import ClaudeSDKConfig
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
+from hud.settings import settings
+from hud.telemetry.context import set_trace_context
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,6 +52,20 @@ def test_posix_shell_runs_inline_with_install_check() -> None:
     assert inv.script_body is None
     assert "install.sh" in inv.command  # one-shot bootstrap prefix
     assert inv.command.endswith(" && claude --print -- hi")
+
+
+def test_gateway_trace_headers_are_forwarded_to_claude_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "api_key", "test-key")
+    agent = ClaudeSDKAgent()
+
+    with set_trace_context("child-trace", parent_trace_id="parent-trace"):
+        env = agent._build_env_vars()
+
+    assert env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "Trace-Id: child-trace\nX-HUD-Parent-Trace-Id: parent-trace"
+    )
 
 
 # ─── _exec end-to-end over a fake SSH workspace ────────────────────────
@@ -246,17 +262,22 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
     execute = AsyncMock()
     monkeypatch.setattr(agent, "_exec", execute)
 
-    await agent(
-        cast(
-            "Any",
-            SimpleNamespace(client=Client(), prompt_text="call the tool"),
+    with set_trace_context("child-trace"):
+        await agent(
+            cast(
+                "Any",
+                SimpleNamespace(client=Client(), prompt_text="call the tool"),
+            )
         )
-    )
 
     await_args = execute.await_args
     assert await_args is not None
     assert await_args.kwargs["mcp_servers"] == {
-        "database": {"type": claude_type, "url": "http://database:8000/mcp"}
+        "database": {
+            "type": claude_type,
+            "url": "http://database:8000/mcp",
+            "headers": {"Trace-Id": "child-trace"},
+        }
     }
     execute.assert_awaited_once()
 

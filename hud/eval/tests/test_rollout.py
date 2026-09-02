@@ -28,12 +28,14 @@ import mcp.types as mcp_types
 import pytest
 from pydantic import BaseModel
 
+import hud.eval.run as run_module
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.environment import Answer, Environment
 from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
+from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -1277,6 +1279,62 @@ async def test_rollout_threads_job_and_group_ids(env_file: Path) -> None:
     assert run.reward == 1.0
     assert run.job_id == "j1"
     assert run.group_id == "g1"
+
+
+@pytest.mark.parametrize(
+    ("ambient_trace_id", "trace_id", "expected_parent_trace_id"),
+    [
+        ("parent-trace", "child-trace", "parent-trace"),
+        (
+            "00000000-0000-0000-0000-000000000001",
+            "00000000000000000000000000000001",
+            None,
+        ),
+    ],
+)
+async def test_nested_rollout_binds_child_and_parent_trace_context(
+    monkeypatch: pytest.MonkeyPatch,
+    ambient_trace_id: str,
+    trace_id: str,
+    expected_parent_trace_id: str | None,
+) -> None:
+    entered: dict[str, Any] = {}
+    active: dict[str, str | None] = {}
+    env = Environment("nested")
+
+    @env.template(id="add")
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    async def capture_enter(trace_id: str, **kwargs: Any) -> None:
+        entered["trace_id"] = trace_id
+        entered.update(kwargs)
+
+    class ContextAgent(Agent):
+        async def __call__(self, run: Run) -> None:
+            active["trace_id"] = get_current_trace_id()
+            active["parent_trace_id"] = get_trace_headers().get("X-HUD-Parent-Trace-Id")
+            run.trace.content = "2"
+
+    monkeypatch.setattr(run_module, "trace_enter", capture_enter)
+
+    with set_trace_context(ambient_trace_id):
+        run = await rollout(
+            Task(env="nested", id="add", args={"a": 1, "b": 1}),
+            ContextAgent(),
+            runtime=LocalRuntime(env),
+            job_id="job-1",
+            trace_id=trace_id,
+        )
+
+    assert run.trace_id == trace_id
+    assert active == {
+        "trace_id": trace_id,
+        "parent_trace_id": expected_parent_trace_id,
+    }
+    assert entered["trace_id"] == trace_id
+    assert entered["parent_trace_id"] == expected_parent_trace_id
 
 
 # ─── Run prompt views (what agents consume) ───────────────────────────

@@ -30,9 +30,11 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import mcp.types as mcp_types
 
+from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients import HudProtocolError, connect
 from hud.graders.results import SubScore
-from hud.telemetry.context import set_trace_context
+from hud.telemetry.context import get_current_trace_id, set_trace_context
+from hud.telemetry.span import normalize_trace_id
 from hud.types import Step, TaskCall, Trace
 from hud.utils.time import now_iso
 
@@ -488,6 +490,11 @@ async def rollout(
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
+    parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
+    if parent_trace_id is not None and normalize_trace_id(parent_trace_id) == normalize_trace_id(
+        trace_id
+    ):
+        parent_trace_id = None
     # Report the model the agent will sample so the platform attributes the
     # trace to it on enter. Only LLM tool agents carry an inference-model slug
     # (``config.model``); robot/other agents have none. Local import avoids an
@@ -495,13 +502,14 @@ async def rollout(
     from hud.agents.tool_agent import ToolAgent
 
     agent_model = agent.config.model if isinstance(agent, ToolAgent) else None
-    with set_trace_context(trace_id):
+    with set_trace_context(trace_id, parent_trace_id=parent_trace_id):
         await trace_enter(
             trace_id,
             job_id=job_id,
             group_id=group_id,
             task_slug=task.slug,
             model=agent_model,
+            parent_trace_id=parent_trace_id,
         )
         run: Run | None = None
         _phase = "provisioning"

@@ -14,12 +14,35 @@ import fastmcp
 from fastmcp.client.auth import BearerAuth
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
+from hud.telemetry.context import get_current_trace_id
+
 from .base import Capability, CapabilityClient
 
 if TYPE_CHECKING:
     import mcp.types as mcp_types
 
     from hud.types import MCPToolResult
+
+_TRACE_ID_META_KEY = "hud/trace-id"
+
+
+def get_mcp_trace_id() -> str | None:
+    """Get the trace ID propagated with the active inbound MCP request."""
+    from fastmcp.server.dependencies import get_context, get_http_headers
+
+    try:
+        context = get_context()
+    except RuntimeError:
+        return None
+    request_context = context.request_context
+    meta = request_context.meta if request_context else None
+    extra = (meta.model_extra or {}) if meta else {}
+    trace_id = extra.get(_TRACE_ID_META_KEY)
+    if trace_id is None:
+        trace_id = get_http_headers().get("trace-id")
+    if trace_id is not None and not isinstance(trace_id, str):
+        raise TypeError(f"{_TRACE_ID_META_KEY} must be a string")
+    return trace_id
 
 
 class MCPClient(CapabilityClient):
@@ -65,7 +88,9 @@ class MCPClient(CapabilityClient):
         """
         from hud.types import MCPToolResult as _Result
 
-        raw = await self._client.call_tool_mcp(name=name, arguments=arguments)
+        trace_id = get_current_trace_id()
+        meta = {_TRACE_ID_META_KEY: trace_id} if trace_id is not None else None
+        raw = await self._client.call_tool_mcp(name=name, arguments=arguments, meta=meta)
         data = raw.model_dump()
         if "isError" not in data and "is_error" in data:
             data["isError"] = data.pop("is_error")
@@ -78,4 +103,4 @@ class MCPClient(CapabilityClient):
         await self._exit_stack.aclose()
 
 
-__all__ = ["MCPClient"]
+__all__ = ["MCPClient", "get_mcp_trace_id"]

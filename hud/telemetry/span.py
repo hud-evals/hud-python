@@ -69,15 +69,10 @@ def new_span_id() -> str:
 
 def normalize_trace_id(trace_id: str) -> str:
     """Map an arbitrary run identifier onto a 32-hex OTel trace id."""
-    clean = trace_id.replace("-", "")
-    if len(clean) == 32:
-        try:
-            int(clean, 16)
-        except ValueError:
-            pass
-        else:
-            return clean.lower()
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"hud.task_run:{trace_id}").hex
+    try:
+        return uuid.UUID(trace_id).hex
+    except ValueError:
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"hud.task_run:{trace_id}").hex
 
 
 __all__ = [

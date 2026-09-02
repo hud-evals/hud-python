@@ -130,6 +130,7 @@ async def trace_enter(
     group_id: str | None,
     task_slug: str,
     model: str | None = None,
+    parent_trace_id: str | None = None,
 ) -> None:
     """Report that one rollout started.
 
@@ -147,6 +148,7 @@ async def trace_enter(
             "group_id": group_id,
             "task_slug": task_slug,
             "model": model,
+            "parent_trace_id": parent_trace_id,
         },
     )
 

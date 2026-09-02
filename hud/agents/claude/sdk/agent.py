@@ -10,6 +10,7 @@ Inspired by harbor-framework/harbor's ClaudeCode agent.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import shlex
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, ClaudeSDKConfig, Usage
 from hud.settings import settings
+from hud.telemetry.context import get_current_trace_id, get_trace_headers
 from hud.types import Step
 
 if TYPE_CHECKING:
@@ -83,6 +85,7 @@ class ClaudeSDKAgent(Agent):
 
     async def __call__(self, run: Run) -> None:
         mcp_servers: dict[str, dict[str, Any]] = {}
+        trace_id = get_current_trace_id()
         manifest = run.client.manifest
         bindings = manifest.bindings if manifest is not None else []
         families = {c.protocol.split("/", 1)[0] for c in bindings}
@@ -100,8 +103,11 @@ class ClaudeSDKAgent(Agent):
                     token = cap.params.get("auth_token")
                     transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
                     server_config: dict[str, Any] = {"type": transport, "url": cap.url}
+                    headers = {"Trace-Id": trace_id} if trace_id is not None else {}
                     if token:
-                        server_config["headers"] = {"Authorization": f"Bearer {token}"}
+                        headers["Authorization"] = f"Bearer {token}"
+                    if headers:
+                        server_config["headers"] = headers
                     if cap.name in mcp_servers:
                         raise RuntimeError(f"duplicate MCP server name {cap.name!r}")
                     mcp_servers[cap.name] = server_config
@@ -188,6 +194,11 @@ class ClaudeSDKAgent(Agent):
         if settings.api_key:
             env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
             env["ANTHROPIC_API_KEY"] = settings.api_key
+            trace_headers = get_trace_headers()
+            if trace_headers:
+                env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
+                    f"{name}: {value}" for name, value in trace_headers.items()
+                )
         elif settings.anthropic_api_key:
             env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
 
@@ -259,16 +270,18 @@ class ClaudeSDKAgent(Agent):
             # Solution: use `cmd /c claude [args]` (no inline prompt) and feed the
             # prompt via stdin from .hud_prompt.txt. claude --print reads stdin as
             # the initial message when no -- argument is provided.
-            set_parts = [f"set {k}={v}" for k, v in env_vars.items()]
             cmd_args = ["cmd", "/c", "claude"] + base_args[1:]  # noqa: RUF005
             py_args_repr = "[" + ",".join(f"'{a}'" for a in cmd_args) + "]"
+            encoded_env = base64.b64encode(json.dumps(env_vars).encode()).decode()
             python_launcher = (
                 'python -c "'
-                "import subprocess,sys;"
-                f"r=subprocess.run({py_args_repr},stdin=open('.hud_prompt.txt','rb'));"
+                "import base64,json,os,subprocess,sys;"
+                "env=os.environ.copy();"
+                f"env.update(json.loads(base64.b64decode('{encoded_env}')));"
+                f"r=subprocess.run({py_args_repr},stdin=open('.hud_prompt.txt','rb'),env=env);"
                 'sys.exit(r.returncode)"'
             )
-            return " && ".join([*set_parts, python_launcher])
+            return python_launcher
 
         # POSIX path: shell-quote everything and embed prompt inline.
         cli_parts = [shlex.quote(a) for a in base_args]

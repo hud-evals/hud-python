@@ -15,7 +15,7 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, Field
 
 from hud.settings import settings
-from hud.telemetry.context import get_current_trace_id
+from hud.telemetry.context import get_trace_headers
 from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.platform import PlatformClient
 
@@ -61,9 +61,7 @@ _MODEL_ALIASES: dict[str, str] = {
 
 
 def _inject_trace_id(request: httpx.Request) -> None:
-    trace_id = get_current_trace_id()
-    if trace_id is not None:
-        request.headers["Trace-Id"] = trace_id
+    request.headers.update(get_trace_headers())
 
 
 async def _inject_trace_id_async(request: httpx.Request) -> None:
