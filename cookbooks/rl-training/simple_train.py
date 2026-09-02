@@ -93,6 +93,7 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
             f"| optim {result.step} datums {fb.num_datums}",
             flush=True,
         )
+    await session.finish(failed=bool(session.errors))
 
 
 if __name__ == "__main__":

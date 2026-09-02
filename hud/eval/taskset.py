@@ -246,8 +246,9 @@ class Taskset:
         trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
         instead, so a longer arc (a training session) spans many calls under
-        one id. Returned ``job.runs`` preserves expansion order (task-major,
-        then group).
+        one id. Use the started job as an async context manager or call
+        :meth:`Job.finish` after the final batch. Returned ``job.runs``
+        preserves expansion order (task-major, then group).
 
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
         task's repeats), whatever the placement — a placement that pools a

@@ -124,6 +124,7 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
             f"optim_step={result.step} -> {result.sampler_path}",
             flush=True,
         )
+    await session.finish(failed=bool(session.errors))
 
 
 if __name__ == "__main__":

@@ -106,6 +106,7 @@ async def main(
             f"| optim {result.step} datums {fb.num_datums} failed {failed}/{len(batch)}",
             flush=True,
         )
+    await session.finish(failed=bool(session.errors))
 
 
 if __name__ == "__main__":

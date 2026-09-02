@@ -21,11 +21,13 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from .run import Run
 
 logger = logging.getLogger("hud.eval.job")
@@ -52,8 +54,29 @@ class Job:
         longer arc — a training session, a chat conversation — under one id.
         """
         job = cls(id=uuid.uuid4().hex, name=name, group=group, taskset_id=taskset_id)
-        await job_enter(job.id, name=name, group=group, taskset_id=taskset_id)
+        await job_enter(
+            job.id,
+            name=name,
+            group=group,
+            taskset_id=taskset_id,
+            is_open=True,
+        )
         return job
+
+    async def finish(self, *, failed: bool = False) -> None:
+        """Close this job after its final scheduler call."""
+        await job_exit(self.id, failed=failed)
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _exc: BaseException | None,
+        _tb: TracebackType | None,
+    ) -> None:
+        await self.finish(failed=exc_type is not None)
 
     @property
     def reward(self) -> float:

@@ -189,6 +189,7 @@ async def main(
                 )
             history.append(row)
             out.write_text(json.dumps(history, indent=1))
+        await session.finish(failed=bool(session.errors))
     finally:
         await pool.drop(SNAPSHOT)
         out.write_text(json.dumps(history, indent=1))
