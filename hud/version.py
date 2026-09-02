@@ -4,4 +4,4 @@ Version information for the HUD SDK.
 
 from __future__ import annotations
 
-__version__ = "0.6.16.dev2"
+__version__ = "0.6.16.dev3"
