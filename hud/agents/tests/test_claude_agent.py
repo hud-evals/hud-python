@@ -140,14 +140,16 @@ async def test_get_response_collects_thinking() -> None:
     assert result.reasoning == "pondering"
 
 
+@pytest.mark.parametrize("error_type", ["upstream_error", "timeout_error"])
 async def test_get_response_retries_transient_inline_stream_error(
     monkeypatch: pytest.MonkeyPatch,
+    error_type: str,
 ) -> None:
     final = _final(
         SimpleNamespace(type="text", text="recovered", citations=None),
         stop_reason="end_turn",
     )
-    agent = _agent(_inline_error("upstream_error"), final)
+    agent = _agent(_inline_error(error_type), final)
     state = _state(agent)
     sleep = AsyncMock()
     monkeypatch.setattr("hud.agents.claude.agent.asyncio.sleep", sleep)

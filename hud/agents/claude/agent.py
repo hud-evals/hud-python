@@ -59,6 +59,7 @@ _RETRYABLE_STREAM_ERROR_TYPES = frozenset(
         "gateway_timeout",
         "overloaded_error",
         "rate_limit_error",
+        "timeout_error",
         "upstream_error",
     }
 )
