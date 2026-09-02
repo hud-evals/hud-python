@@ -157,7 +157,7 @@ security override are documented in
 ### `ModalRuntime`
 
 ```python
-ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None, secrets=None)
+ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=None, workdir=None, port=8765, runtime_config=None, env_vars=None, sandbox_secrets=None, registry_secret=None)
 ```
 
 - **`image_name`** - published Modal image name (the preferred durable handle), e.g. `ModalRuntime("hud-libero-env")`.
@@ -167,7 +167,24 @@ ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=No
 - **`app`** - an already-running, caller-owned Modal app. `ModalRuntime` does not manage its lifecycle.
 - **`app_name`** - a Modal app to look up. Defaults to `hud-envs` when `app` is not supplied; `app` and `app_name` are mutually exclusive.
 - **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables.
-- **`secrets`** - Modal `Secret` objects to attach to the sandbox. Resolve named secrets with `modal.Secret.from_name(...)`; their values never pass through the local process. Secrets require an image runtime and are rejected for Docker-in-Docker Compose because attaching them to the outer sandbox would not expose them to `main`.
+- **`sandbox_secrets`** - Modal `Secret` objects to attach to the sandbox. Resolve named secrets with `modal.Secret.from_name(...)`; their values never pass through the local process. Sandbox secrets require an image runtime and are rejected for Docker-in-Docker Compose because attaching them to the outer sandbox would not expose them to `main`.
+- **`registry_secret`** - optional Modal `Secret` for pulling a private registry image (`REGISTRY_USERNAME` / `REGISTRY_PASSWORD`). Unused for `modal://` images and Compose.
+
+<Accordion title="Running a private Docker image">
+
+```python
+import modal
+from hud.eval import ModalRuntime
+from hud.eval.runtime import RuntimeConfig
+
+ModalRuntime(
+    runtime_config=RuntimeConfig(image="ghcr.io/org/private:tag"),
+    registry_secret=modal.Secret.from_name("registry-creds"),
+    sandbox_secrets=[modal.Secret.from_name("hf-token")],
+)
+```
+
+</Accordion>
 
 For Compose input, `ModalRuntime` runs the project in a Docker-in-Docker
 sandbox in your Modal account and merges `env_vars` into `main` at acquisition

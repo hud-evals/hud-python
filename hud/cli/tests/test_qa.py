@@ -1,10 +1,11 @@
-"""CLI behavior for resource-scoped platform QA agents."""
+"""CLI behavior for trace-level platform QA agents."""
 
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from hud.cli import app
@@ -12,16 +13,27 @@ from hud.cli import app
 runner = CliRunner()
 
 _AGENT_ID = "00000000-0000-4000-a000-000000000001"
-_SUBJECT_ID = "00000000-0000-4000-a000-000000000002"
+_TRACE_ID = "00000000-0000-4000-a000-000000000002"
 _RESULT_ID = "00000000-0000-4000-a000-000000000003"
+_OTHER_AGENT_ID = "00000000-0000-4000-a000-000000000004"
+
+
+def _agent(*, subject_type: str = "trace") -> dict[str, object]:
+    return {
+        "id": _AGENT_ID,
+        "name": "Failure Analysis",
+        "subject_type": subject_type,
+        "model_name": "claude-sonnet",
+    }
 
 
 def _run(status: str = "queued") -> dict[str, object]:
     return {
         "id": _RESULT_ID,
         "qa_agent_id": _AGENT_ID,
-        "subject_type": "task",
-        "subject_id": _SUBJECT_ID,
+        "subject_type": "trace",
+        "subject_id": _TRACE_ID,
+        "subject_trace_id": _TRACE_ID,
         "status": status,
     }
 
@@ -29,7 +41,7 @@ def _run(status: str = "queued") -> dict[str, object]:
 def _result(verdict: str = "passed") -> dict[str, object]:
     return {
         **_run(status="completed"),
-        "agent_name": "Task Contract Auditor",
+        "agent_name": "Failure Analysis",
         "canonical_result": {
             "schema_version": "qa_agent_result.v1",
             "verdict": verdict,
@@ -42,48 +54,47 @@ def _result(verdict: str = "passed") -> dict[str, object]:
     }
 
 
-def test_qa_agents_lists_requested_resource_scope() -> None:
+def _invoke(platform: MagicMock, args: list[str]):
+    with (
+        patch("hud.cli.qa.require_api_key", return_value="api-key"),
+        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
+    ):
+        return runner.invoke(app, args)
+
+
+def test_qa_lists_agent_name_and_uuid() -> None:
     platform = MagicMock()
     platform.get.return_value = {
-        "items": [
-            {
-                "id": _AGENT_ID,
-                "name": "Task Contract Auditor",
-                "subject_type": "task",
-                "model_name": "claude-sonnet",
-            },
-        ],
+        "items": [_agent()],
         "total": 1,
         "limit": 50,
         "offset": 0,
     }
 
-    with (
-        patch("hud.cli.qa.require_api_key", return_value="api-key"),
-        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
-    ):
-        result = runner.invoke(app, ["qa", "agents", "--subject-type", "task"])
+    result = _invoke(platform, ["qa"])
 
     assert result.exit_code == 0
-    assert _AGENT_ID in result.output
-    assert "Task Contract Auditor" in result.output
+    assert result.output.strip() == f"Failure Analysis\t{_AGENT_ID}"
     platform.get.assert_called_once_with(
         "/qa-agents",
-        params={"subject_type": "task", "limit": 50, "offset": 0},
+        params={"subject_type": "trace", "limit": 50, "offset": 0},
     )
 
 
-def test_qa_subject_type_uses_typer_validation() -> None:
-    with patch("hud.cli.qa.require_api_key") as require_api_key:
-        result = runner.invoke(app, ["qa", "agents", "--subject-type", "trace"])
-
-    assert result.exit_code == 2
-    assert "Invalid value" in result.output
-    require_api_key.assert_not_called()
-
-
-def test_qa_run_no_wait_returns_the_launch_response_without_scoring_it() -> None:
+def test_qa_run_rejects_resource_agents() -> None:
     platform = MagicMock()
+    platform.get.return_value = _agent(subject_type="environment")
+
+    result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID, "--no-wait"])
+
+    assert result.exit_code == 1
+    assert "trace agents only" in result.output
+    platform.post.assert_not_called()
+
+
+def test_qa_run_no_wait_uses_trace_endpoint() -> None:
+    platform = MagicMock()
+    platform.get.return_value = _agent()
     platform.post.return_value = [
         {
             **_run(status="completed"),
@@ -95,77 +106,85 @@ def test_qa_run_no_wait_returns_the_launch_response_without_scoring_it() -> None
         },
     ]
 
-    with (
-        patch("hud.cli.qa.require_api_key", return_value="api-key"),
-        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
-    ):
-        result = runner.invoke(
-            app,
-            ["qa", "run", _AGENT_ID, _SUBJECT_ID, "--no-wait", "--json"],
-        )
+    result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID, "--no-wait", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output)[0]["result"]["verdict"] == "failed"
     platform.post.assert_called_once_with(
-        f"/qa-agents/{_AGENT_ID}/run-resources",
-        json={"subject_ids": [_SUBJECT_ID], "overwrite": False},
+        f"/qa-agents/{_AGENT_ID}/run",
+        json={"trace_ids": [_TRACE_ID], "overwrite": False},
     )
-    platform.get.assert_not_called()
 
 
-def test_qa_run_waits_for_exact_result_ids_and_returns_quality_exit() -> None:
+@pytest.mark.parametrize(("verdict", "exit_code"), [("failed", 1), ("passed", 0)])
+def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
     platform = MagicMock()
     platform.post.return_value = [_run()]
-    platform.get.side_effect = [[], [_result("failed")]]
+    platform.get.side_effect = [_agent(), [], [_result(verdict)]]
 
-    with (
-        patch("hud.cli.qa.require_api_key", return_value="api-key"),
-        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
-        patch("hud.cli.qa.time.sleep"),
-    ):
-        result = runner.invoke(app, ["qa", "run", _AGENT_ID, _SUBJECT_ID])
+    with patch("hud.cli.qa.time.sleep"):
+        result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID])
 
-    assert result.exit_code == 1
-    assert "failed" in result.output
-    assert "A gap was found." in result.output
-    assert platform.get.call_count == 2
+    assert result.exit_code == exit_code
+    assert verdict in result.output
     platform.get.assert_called_with(
-        "/qa-agents/results/resources",
-        params={"result_ids": [_RESULT_ID]},
+        "/qa-agents/results",
+        params={"subject_trace_ids": [_TRACE_ID]},
     )
 
 
-def test_qa_run_returns_zero_for_passed_results() -> None:
+def test_qa_run_wait_scores_launched_ids_not_older_rows() -> None:
+    older = {**_result("failed"), "id": "00000000-0000-4000-a000-000000000099"}
+    launched = _run()
+    completed = _result("passed")
     platform = MagicMock()
-    platform.post.return_value = [_run()]
-    platform.get.return_value = [_result()]
+    platform.post.return_value = [launched]
+    platform.get.side_effect = [_agent(), [older], [older, completed]]
 
-    with (
-        patch("hud.cli.qa.require_api_key", return_value="api-key"),
-        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
-    ):
-        result = runner.invoke(app, ["qa", "run", _AGENT_ID, _SUBJECT_ID])
+    with patch("hud.cli.qa.time.sleep"):
+        result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "passed" in result.output
+    assert "failed" not in result.output
+
+
+def test_qa_run_wait_reuses_latest_when_launch_returns_empty() -> None:
+    older = {**_result("failed"), "id": "00000000-0000-4000-a000-000000000099"}
+    newer = _result("passed")
+    platform = MagicMock()
+    platform.post.return_value = []
+    platform.get.side_effect = [_agent(), [older, newer]]
+
+    result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID])
 
     assert result.exit_code == 0
     assert "passed" in result.output
 
 
-def test_qa_results_queries_resource_subjects() -> None:
+def test_qa_run_waits_for_trace_results_and_ignores_other_agents() -> None:
+    platform = MagicMock()
+    platform.post.return_value = []
+    platform.get.side_effect = [
+        _agent(),
+        [{**_result("failed"), "qa_agent_id": _OTHER_AGENT_ID}, _result("passed")],
+    ]
+
+    result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID])
+
+    assert result.exit_code == 0
+    assert "passed" in result.output
+
+
+def test_qa_results_queries_traces() -> None:
     platform = MagicMock()
     platform.get.return_value = [_result()]
 
-    with (
-        patch("hud.cli.qa.require_api_key", return_value="api-key"),
-        patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
-    ):
-        result = runner.invoke(
-            app,
-            ["qa", "results", "task", _SUBJECT_ID, "--json"],
-        )
+    result = _invoke(platform, ["qa", "results", _TRACE_ID, "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output)[0]["canonical_result"]["verdict"] == "passed"
     platform.get.assert_called_once_with(
-        "/qa-agents/results/resources",
-        params={"subject_type": "task", "subject_ids": [_SUBJECT_ID]},
+        "/qa-agents/results",
+        params={"subject_trace_ids": [_TRACE_ID]},
     )

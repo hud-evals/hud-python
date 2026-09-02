@@ -10,8 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
+from uuid import UUID
 
 from hud.utils.requests import make_request, make_request_sync
+
+
+def canonical_record_id(record_id: str) -> str:
+    """Return the canonical UUID representation of a HUD record id."""
+    return str(UUID(record_id))
 
 
 @dataclass(frozen=True)
@@ -54,6 +60,12 @@ class PlatformClient:
 
     def post(self, path: str, *, json: Any | None = None) -> Any:
         return make_request_sync("POST", self.url(path), json=json, api_key=self.api_key)
+
+    def patch(self, path: str, *, json: Any | None = None) -> Any:
+        return make_request_sync("PATCH", self.url(path), json=json, api_key=self.api_key)
+
+    def delete(self, path: str) -> Any:
+        return make_request_sync("DELETE", self.url(path), api_key=self.api_key)
 
     async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         return await make_request("GET", self.url(path, params), api_key=self.api_key)

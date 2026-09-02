@@ -7,7 +7,19 @@ from typing import Any
 import pytest
 
 from hud.utils.exceptions import HudAuthenticationError
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, canonical_record_id
+
+
+def test_canonical_record_id_accepts_uuid_and_compact_hex() -> None:
+    canonical = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+
+    assert canonical_record_id(canonical) == canonical
+    assert canonical_record_id(canonical.replace("-", "")) == canonical
+
+
+def test_canonical_record_id_rejects_non_uuid() -> None:
+    with pytest.raises(ValueError):
+        canonical_record_id("not-a-uuid")
 
 
 def test_url_prefixes_version_segment_and_joins_params() -> None:
@@ -35,7 +47,7 @@ def test_url_encodes_repeated_query_parameters() -> None:
     )
 
 
-def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_http_methods_route_through_shared_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
     def fake_request(
@@ -49,9 +61,13 @@ def test_get_and_post_route_through_shared_requests(monkeypatch: pytest.MonkeyPa
 
     assert platform.get("/x", params={"a": 1}) == {"ok": True}
     assert platform.post("/y", json={"b": 2}) == {"ok": True}
+    assert platform.patch("/z", json={"c": 3}) == {"ok": True}
+    assert platform.delete("/z") == {"ok": True}
     assert calls == [
         {"method": "GET", "url": "https://api.example/v2/x?a=1", "json": None, "api_key": "key"},
         {"method": "POST", "url": "https://api.example/v2/y", "json": {"b": 2}, "api_key": "key"},
+        {"method": "PATCH", "url": "https://api.example/v2/z", "json": {"c": 3}, "api_key": "key"},
+        {"method": "DELETE", "url": "https://api.example/v2/z", "json": None, "api_key": "key"},
     ]
 
 

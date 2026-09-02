@@ -99,10 +99,11 @@ def _list_jobs(*, json_output: bool, limit: int) -> None:
 
 def _show_job_traces(job_id: str, *, json_output: bool, limit: int) -> None:
     from hud.settings import settings
-    from hud.utils.platform import PlatformClient
+    from hud.utils.platform import PlatformClient, canonical_record_id
 
     client = PlatformClient.from_settings()
     try:
+        job_id = canonical_record_id(job_id)
         data = client.get(f"/jobs/{job_id}/traces", params={"limit": limit})
     except Exception as e:
         console.print(f"[red]Failed to fetch traces: {e}[/red]")

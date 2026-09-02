@@ -273,3 +273,19 @@ def test_make_request_sync_auto_client_creation():
 
         assert result == {"result": "success"}
         mock_client.close.assert_called_once()
+
+
+def test_make_request_sync_empty_204() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(204, request=request)
+
+    sync_client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert (
+        make_request_sync(
+            "DELETE",
+            "https://api.test.com/data",
+            api_key="test-key",
+            client=sync_client,
+        )
+        == {}
+    )

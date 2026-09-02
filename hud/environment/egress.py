@@ -526,14 +526,16 @@ class _Forward(socketserver.BaseRequestHandler):
             _relay(self.request, upstream)
 
 
-class _UnixServer(socketserver.ThreadingUnixStreamServer):
-    daemon_threads = True
-    request_queue_size = socket.SOMAXCONN
+if sys.platform != "win32":  # the sockets this serves on have no Windows analogue
 
-    def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
-        # A unix peer has no address; the handler wants one to log.
-        request, _ = super().get_request()
-        return request, ("workspace", 0)
+    class _UnixServer(socketserver.ThreadingUnixStreamServer):
+        daemon_threads = True
+        request_queue_size = socket.SOMAXCONN
+
+        def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
+            # A unix peer has no address; the handler wants one to log.
+            request, _ = super().get_request()
+            return request, ("workspace", 0)
 
 
 class Egress:

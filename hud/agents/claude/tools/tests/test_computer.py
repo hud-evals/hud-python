@@ -14,6 +14,7 @@ from PIL import Image
 
 from hud.agents.claude.tools.computer import (
     CLAUDE_COMPUTER_SPECS,
+    GENERIC_COMPUTER_SPEC,
     ClaudeComputerTool,
     _crop_png,
     _hold_keys,
@@ -120,18 +121,31 @@ def test_default_spec_per_model() -> None:
     spec_45 = ClaudeComputerTool.default_spec("claude-sonnet-4-5-20250101")
     assert spec_45 is not None
     assert spec_45.api_type == "computer_20250124"
-    # Unknown model falls back to the latest spec.
-    spec_unknown = ClaudeComputerTool.default_spec("totally-unknown")
+    # Unknown Claude model falls back to the latest spec.
+    spec_unknown = ClaudeComputerTool.default_spec("claude-totally-unknown")
     assert spec_unknown is not None
     assert spec_unknown.api_type == "computer_20251124"
+    # Non-Anthropic models get the generic input_schema spec.
+    assert ClaudeComputerTool.default_spec("qwen/qwen3.8-max") is GENERIC_COMPUTER_SPEC
 
 
 def test_to_params_reflects_spec_version() -> None:
     tool = RecordingComputer()
     tool.spec = CLAUDE_COMPUTER_SPECS[0]
-    assert tool.to_params()["type"] == "computer_20251124"
+    assert tool.to_params().get("type") == "computer_20251124"
     tool.spec = CLAUDE_COMPUTER_SPECS[1]
-    assert tool.to_params()["type"] == "computer_20250124"
+    assert tool.to_params().get("type") == "computer_20250124"
+
+
+def test_to_params_generic_spec_uses_input_schema() -> None:
+    tool = RecordingComputer()
+    tool.spec = GENERIC_COMPUTER_SPEC
+    params: Any = tool.to_params()
+    assert "type" not in params
+    assert params["name"] == "computer"
+    assert "200x100" in params["description"]
+    assert params["input_schema"]["required"] == ["action"]
+    assert "left_click" in params["input_schema"]["properties"]["action"]["enum"]
 
 
 # ─── action dispatch ──────────────────────────────────────────────────

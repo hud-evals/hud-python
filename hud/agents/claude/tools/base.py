@@ -14,4 +14,13 @@ class ClaudeToolSpec(AgentToolSpec):
     beta: str | None = None
 
 
-__all__ = ["ClaudeToolSpec"]
+def is_anthropic_model(model: str | None) -> bool:
+    """Whether the model accepts Anthropic server-tool shorthands (``bash_20250124`` etc.).
+
+    Non-Anthropic models served over Anthropic-compatible endpoints (e.g. OpenRouter)
+    reject those shorthands, so tools fall back to plain ``input_schema`` definitions.
+    """
+    return bool(model) and "claude" in model.lower()
+
+
+__all__ = ["ClaudeToolSpec", "is_anthropic_model"]

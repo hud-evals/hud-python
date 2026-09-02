@@ -138,14 +138,16 @@ class ModalRuntime:
         port: int = 8765,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
-        secrets: Sequence[modal.Secret] | None = None,
+        sandbox_secrets: Sequence[modal.Secret] | None = None,
+        registry_secret: modal.Secret | None = None,
     ) -> None:
         if app is not None and app_name is not None:
             raise ValueError("ModalRuntime accepts either app or app_name, not both")
         self.image_name = image_name
         self.port = port
         self.env_vars = dict(env_vars or {})
-        self.secrets = tuple(secrets or ())
+        self.sandbox_secrets = tuple(sandbox_secrets or ())
+        self.registry_secret = registry_secret
         self.workdir = workdir
         # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
         # workdir unset by default so Modal preserves the image WORKDIR.
@@ -196,9 +198,9 @@ class ModalRuntime:
                 "ModalRuntime cannot attach GPUs to services inside Docker-in-Docker; "
                 "use a materialized image or omit runtime_config.compose"
             )
-        if compose is not None and self.secrets:
+        if compose is not None and self.sandbox_secrets:
             raise ValueError(
-                "ModalRuntime secrets require an image runtime; attaching them to "
+                "ModalRuntime sandbox secrets require an image runtime; attaching them to "
                 "the outer Docker-in-Docker sandbox would not expose them to main"
             )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
@@ -208,7 +210,9 @@ class ModalRuntime:
             image = (
                 modal.Image.from_id(config.image.removeprefix("modal://"))
                 if config.image.startswith("modal://")
-                else modal.Image.from_registry(config.image)
+                else modal.Image.from_registry(
+                    config.image, secret=self.registry_secret
+                )  # pull auth
             )
         elif self.image_name is not None:
             image = modal.Image.from_name(self.image_name)
@@ -253,8 +257,8 @@ class ModalRuntime:
                 sandbox_kwargs["memory"] = resources.memory_mb
             if self.env_vars:
                 sandbox_kwargs["env"] = self.env_vars
-            if self.secrets:
-                sandbox_kwargs["secrets"] = self.secrets
+            if self.sandbox_secrets:
+                sandbox_kwargs["secrets"] = self.sandbox_secrets
         if resources is not None and resources.gpu is not None:
             gpu_types = resources.gpu.acceptable_types
             gpu_type = gpu_types[0] if gpu_types else "any"

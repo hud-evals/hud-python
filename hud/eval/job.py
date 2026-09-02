@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
     from .run import Run
@@ -133,7 +133,7 @@ async def job_enter(
     )
     from hud.settings import settings
 
-    logger.info("job: %s/jobs/%s", settings.hud_web_url, job_id)
+    logger.info("job: %s/jobs/%s", settings.hud_web_url, canonical_record_id(job_id))
 
 
 async def job_exit(job_id: str, *, failed: bool = False) -> None:

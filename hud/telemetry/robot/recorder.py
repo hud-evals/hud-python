@@ -24,7 +24,7 @@ import numpy as np
 from hud.agents.types import InferenceStep, ObservationStep, StateFeature
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient
+from hud.utils.platform import PlatformClient, canonical_record_id
 
 from .video import VideoStreamer
 
@@ -165,6 +165,8 @@ class JobRecorder:
     slots (``record_indices``) gets rich traces; each ``done[i]`` closes that
     slot's trace (reporting reward — env-reported ``success`` outranks
     accumulated shaped reward) and opens a fresh one, all under one Job.
+
+    ``job_id`` is an existing HUD Job UUID to share; omit it to mint one.
     """
 
     def __init__(
@@ -188,7 +190,13 @@ class JobRecorder:
         self.seed = seed
         self.group_id = group_id
         self.model = model
-        self.job_id = job_id or uuid.uuid4().hex
+        seed_job_id = job_id or uuid.uuid4().hex
+        try:
+            self.job_id = canonical_record_id(seed_job_id)
+        except ValueError as exc:
+            raise ValueError("job_id must be a UUID") from exc
+        # The input spelling is part of the shipped deterministic trace-ID contract.
+        self._seed_job_id = seed_job_id
         self._prompt = prompt
         self._action_names = action_names
         self._state_names = state_names
@@ -214,7 +222,7 @@ class JobRecorder:
     def _open(self, i: int) -> TraceRecorder:
         # Deterministic trace ids (reproducible, idempotent re-uploads) when seeded.
         if self.seed is not None:
-            key = f"hud.vec:{self.job_id}:{i}:{self._episode[i]}:{self.seed}"
+            key = f"hud.vec:{self._seed_job_id}:{i}:{self._episode[i]}:{self.seed}"
             trace_id = uuid.uuid5(uuid.NAMESPACE_URL, key).hex
         else:
             trace_id = uuid.uuid4().hex

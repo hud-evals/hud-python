@@ -562,6 +562,25 @@ def test_claude_bash_to_params_carries_native_schema() -> None:
     assert params == {"type": "bash_20250124", "name": "bash"}
 
 
+def test_claude_bash_generic_spec_for_non_anthropic_model() -> None:
+    tool = ClaudeBashTool(spec=ClaudeBashTool.default_spec("qwen/qwen3.8-max"), client=_ssh())
+    params: Any = tool.to_params()
+    assert "type" not in params
+    assert params["name"] == "bash"
+    assert params["input_schema"]["required"] == ["command"]
+
+
+def test_claude_editor_generic_spec_for_non_anthropic_model() -> None:
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("qwen/qwen3.8-max"),
+        client=_ssh(),
+    )
+    params: Any = tool.to_params()
+    assert "type" not in params
+    assert params["name"] == "str_replace_based_edit_tool"
+    assert params["input_schema"]["required"] == ["command", "path"]
+
+
 # ─── editor tools over SSH exec ───────────────────────────────────────
 
 
