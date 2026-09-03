@@ -54,6 +54,7 @@ async def test_trace_enter_reports_task_and_group_identity(recorder: _Recorder) 
         group_id="group-1",
         task_slug="fix-bug-3",
         model="test-model",
+        parent_trace_id="parent-1",
     )
 
     assert recorder.calls == [
@@ -64,6 +65,7 @@ async def test_trace_enter_reports_task_and_group_identity(recorder: _Recorder) 
                 "group_id": "group-1",
                 "task_slug": "fix-bug-3",
                 "model": "test-model",
+                "parent_trace_id": "parent-1",
             },
         )
     ]

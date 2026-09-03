@@ -14,27 +14,37 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-# Current trace headers (for span attribution via @instrument).
 _current_trace_headers: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
     "current_trace_headers", default=None
 )
 
 
 def get_current_trace_id() -> str | None:
-    """Get the current trace ID (task_run_id) from context, or None.
-
-    Used by ``@instrument`` to know where to send telemetry.
-    """
+    """Get the current trace ID (task_run_id) from context, or None."""
     headers = _current_trace_headers.get()
-    if headers:
-        return headers.get("Trace-Id")
-    return None
+    return headers.get("Trace-Id") if headers else None
+
+
+def get_trace_headers() -> dict[str, str]:
+    """Get the active trace headers."""
+    headers = _current_trace_headers.get()
+    if headers is not None:
+        return dict(headers)
+    trace_id = get_current_trace_id()
+    return {"Trace-Id": trace_id} if trace_id is not None else {}
 
 
 @contextmanager
-def set_trace_context(trace_id: str) -> Generator[None, None, None]:
-    """Temporarily bind ``trace_id`` as the active trace (for span attribution)."""
-    token = _current_trace_headers.set({"Trace-Id": trace_id})
+def set_trace_context(
+    trace_id: str,
+    *,
+    parent_trace_id: str | None = None,
+) -> Generator[None, None, None]:
+    """Temporarily bind an active trace and its immediate parent."""
+    headers = {"Trace-Id": trace_id}
+    if parent_trace_id is not None:
+        headers["X-HUD-Parent-Trace-Id"] = parent_trace_id
+    token = _current_trace_headers.set(headers)
     try:
         yield
     finally:
@@ -43,5 +53,6 @@ def set_trace_context(trace_id: str) -> Generator[None, None, None]:
 
 __all__ = [
     "get_current_trace_id",
+    "get_trace_headers",
     "set_trace_context",
 ]

@@ -199,6 +199,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     hosted = HostedRuntime(poll_interval=0.0)
     trace_id = uuid.uuid4().hex
     job_id = uuid.uuid4().hex
+    parent_trace_id = uuid.uuid4().hex
     task = Task(
         env="sums",
         id="add",
@@ -218,7 +219,8 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         ),
     )
 
-    run = await hosted.run(task, _agent(), job_id=job_id, group_id="g1", trace_id=trace_id)
+    with set_trace_context(parent_trace_id):
+        run = await hosted.run(task, _agent(), job_id=job_id, group_id="g1", trace_id=trace_id)
 
     assert run.reward == 0.5
     assert run.trace.status == "completed"
@@ -231,6 +233,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     # Hex ids travel as canonical UUID strings.
     assert payload["trace_id"] == str(uuid.UUID(trace_id))
     assert payload["job_id"] == str(uuid.UUID(job_id))
+    assert payload["parent_trace_id"] == str(uuid.UUID(parent_trace_id))
     assert payload["env"] == "sums"
     assert payload["task"] == "add"
     assert payload["slug"] == "sums-add"
@@ -270,6 +273,47 @@ async def test_run_preserves_runtime_config_null_override(
     )
 
     assert platform.posts[0][1]["runtime_config"] == {"resources": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parent_trace_id", "trace_id"),
+    [
+        ("external-run-id", "00000000000000000000000000000001"),
+        (
+            "00000000-0000-0000-0000-000000000001",
+            "00000000000000000000000000000001",
+        ),
+        (
+            "{00000000-0000-0000-0000-000000000001}",
+            "00000000000000000000000000000001",
+        ),
+        (
+            "urn:uuid:00000000-0000-0000-0000-000000000001",
+            "00000000000000000000000000000001",
+        ),
+    ],
+)
+async def test_run_omits_unusable_parent_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+    parent_trace_id: str,
+    trace_id: str,
+) -> None:
+    platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+
+    with set_trace_context(parent_trace_id):
+        run = await HostedRuntime(poll_interval=0.0).run(
+            Task(env="sums", id="add"),
+            _agent(),
+            job_id=uuid.uuid4().hex,
+            trace_id=trace_id,
+        )
+
+    assert run.trace.status == "completed"
+    assert "parent_trace_id" not in platform.posts[0][1]
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 from unittest.mock import AsyncMock, Mock
@@ -25,9 +26,17 @@ from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
 from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
-from hud.capabilities import Capability, CapabilityClient, MCPClient, RFBClient, SSHClient
+from hud.capabilities import (
+    Capability,
+    CapabilityClient,
+    MCPClient,
+    RFBClient,
+    SSHClient,
+)
+from hud.capabilities.mcp import get_mcp_trace_id
 from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
 from hud.capabilities.ssh import SSHConnectionError
+from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 if TYPE_CHECKING:
@@ -251,6 +260,57 @@ async def test_mcp_client_uses_the_declared_http_transport(
     await client.close()
 
     assert isinstance(transports[0], expected_type)
+
+
+async def test_mcp_client_propagates_active_trace_context() -> None:
+    calls: list[dict[str, Any]] = []
+
+    class Client:
+        async def call_tool_mcp(self, **kwargs: Any) -> mcp_types.CallToolResult:
+            calls.append(kwargs)
+            return mcp_types.CallToolResult(content=[])
+
+    capability = Capability.mcp(url="https://tools.example/mcp")
+    client = MCPClient(capability, cast("Any", Client()), AsyncExitStack())
+
+    with set_trace_context("child-trace"):
+        await client.call_tool("verify", {})
+
+    assert calls == [
+        {
+            "name": "verify",
+            "arguments": {},
+            "meta": {"hud/trace-id": "child-trace"},
+        }
+    ]
+
+
+def test_mcp_server_reads_propagated_trace_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    request_context = SimpleNamespace(
+        meta=SimpleNamespace(model_extra={"hud/trace-id": "child-trace"})
+    )
+    monkeypatch.setattr(
+        "fastmcp.server.dependencies.get_context",
+        lambda: SimpleNamespace(request_context=request_context),
+    )
+
+    assert get_mcp_trace_id() == "child-trace"
+
+
+def test_mcp_server_reads_propagated_trace_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    request_context = SimpleNamespace(meta=SimpleNamespace(model_extra={}))
+    monkeypatch.setattr(
+        "fastmcp.server.dependencies.get_context",
+        lambda: SimpleNamespace(request_context=request_context),
+    )
+    monkeypatch.setattr(
+        "fastmcp.server.dependencies.get_http_headers",
+        lambda: {
+            "trace-id": "child-trace",
+        },
+    )
+
+    assert get_mcp_trace_id() == "child-trace"
 
 
 async def test_multiple_mcp_capabilities_qualify_tool_names() -> None:

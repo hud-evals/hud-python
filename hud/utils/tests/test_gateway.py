@@ -97,6 +97,38 @@ async def test_openai_client_trace_context_overrides_empty_header(
 
 
 @pytest.mark.asyncio
+async def test_openai_client_sends_child_and_parent_trace_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_headers: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers["Trace-Id"] = request.headers["Trace-Id"]
+        seen_headers["X-HUD-Parent-Trace-Id"] = request.headers["X-HUD-Parent-Trace-Id"]
+        return httpx.Response(200, json={"object": "list", "data": []})
+
+    transport = httpx.MockTransport(handler)
+    real_client_factory = gateway.DefaultAsyncHttpxClient
+    monkeypatch.setattr(
+        gateway,
+        "DefaultAsyncHttpxClient",
+        partial(real_client_factory, transport=transport),
+    )
+    client = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))
+
+    try:
+        with set_trace_context("child", parent_trace_id="parent"):
+            await client.get("/models/nested", cast_to=object)
+    finally:
+        await client.close()
+
+    assert seen_headers == {
+        "Trace-Id": "child",
+        "X-HUD-Parent-Trace-Id": "parent",
+    }
+
+
+@pytest.mark.asyncio
 async def test_anthropic_client_receives_trace_aware_http_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
