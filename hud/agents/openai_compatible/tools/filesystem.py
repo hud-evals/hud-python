@@ -7,10 +7,8 @@ import posixpath
 import shlex
 from typing import Any, ClassVar
 
-import mcp.types as mcp_types
-
 from hud.agents.tools import SSHTool
-from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
+from hud.agents.tools.base import AgentToolSpec, result_text, tool_err, tool_ok
 from hud.types import MCPToolResult
 
 DEFAULT_READ_LIMIT = 2000
@@ -68,9 +66,10 @@ class ReadTool(_FilesystemTool):
             raise ValueError("filePath is required")
         offset = _read_offset(arguments.get("offset"))
         limit = _positive_int(arguments.get("limit"), default=DEFAULT_READ_LIMIT, name="limit")
-        if not (await self.bash(f"test -d {shlex.quote(path)}")).isError:
+        is_directory = await self.client.run(f"test -d {shlex.quote(path)}", check=False)
+        if is_directory.returncode == 0:
             return await self._read_directory(path, offset=offset, limit=limit)
-        result = await self.file_read(path)
+        result = await self.raw_file_read(path)
         if result.isError:
             return result
         text = result_text(result)
@@ -95,10 +94,10 @@ class ReadTool(_FilesystemTool):
         else:
             body.append(f"\n(End of file - total {len(lines)} lines)")
         body.append("</content>")
-        return MCPToolResult(content=[mcp_types.TextContent(type="text", text="\n".join(body))])
+        return tool_ok(await self.bound_text("\n".join(body)))
 
     async def _read_directory(self, path: str, *, offset: int, limit: int) -> MCPToolResult:
-        result = await self.file_list(path)
+        result = await self.raw_file_list(path)
         if result.isError:
             return result
         entries = result_text(result).splitlines()
@@ -121,7 +120,7 @@ class ReadTool(_FilesystemTool):
         else:
             body.append(f"\n({len(entries)} entries)")
         body.append("</entries>")
-        return MCPToolResult(content=[mcp_types.TextContent(type="text", text="\n".join(body))])
+        return tool_ok(await self.bound_text("\n".join(body)))
 
 
 class BashTool(_FilesystemTool):
@@ -213,7 +212,7 @@ class EditTool(_FilesystemTool):
                 return mkdir
             return await self.file_write(path, new)
 
-        existing = await self.file_read(path)
+        existing = await self.raw_file_read(path)
         if existing.isError:
             return existing
         text = result_text(existing)

@@ -16,6 +16,9 @@ from .base import Capability, CapabilityClient
 SSH_RECONNECT_ATTEMPTS = 3
 SSH_RECONNECT_BASE_DELAY_S = 0.25
 SSH_SESSION_CLOSE_TIMEOUT_S = 5.0
+TOOL_MAX_OUTPUT_CHARS_PARAM = "tool_max_output_chars"
+TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM = "tool_max_total_output_chars"
+TOOL_OUTPUT_BUDGET_MARKER_PARAM = "tool_output_budget_marker_path"
 
 
 class SSHConnectionError(ConnectionError):
@@ -37,6 +40,9 @@ class SSHClient(CapabilityClient):
         self.capability = capability
         self._conn = conn
         self._reconnect_lock = asyncio.Lock()
+        self._output_budget_lock = asyncio.Lock()
+        self._output_chars_claimed = 0
+        self._output_budget_exhausted = False
         self._closing = False
 
     @classmethod
@@ -74,6 +80,43 @@ class SSHClient(CapabilityClient):
     def conn(self) -> asyncssh.SSHClientConnection:
         """Raw asyncssh connection for commands and port forwarding."""
         return self._conn
+
+    async def claim_output_chars(
+        self,
+        desired: int,
+        *,
+        exhaustion_notice_chars: int = 0,
+    ) -> tuple[int, bool, bool]:
+        """Reserve provider-visible evidence against the optional tool budget."""
+        if isinstance(desired, bool) or not isinstance(desired, int) or desired < 0:
+            raise ValueError("desired output chars must be a non-negative integer")
+        if (
+            isinstance(exhaustion_notice_chars, bool)
+            or not isinstance(exhaustion_notice_chars, int)
+            or exhaustion_notice_chars < 0
+        ):
+            raise ValueError("exhaustion notice chars must be a non-negative integer")
+        total = self.capability.params.get(TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM)
+        if total is None:
+            return desired, False, False
+        if isinstance(total, bool) or not isinstance(total, int) or total <= 0:
+            raise ValueError(f"{TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM} must be a positive integer")
+        if total < exhaustion_notice_chars:
+            raise ValueError(
+                f"{TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM} must fit the exhaustion notice"
+            )
+        async with self._output_budget_lock:
+            if self._output_budget_exhausted:
+                return 0, True, False
+            remaining = total - self._output_chars_claimed
+            if desired < max(0, remaining - exhaustion_notice_chars):
+                self._output_chars_claimed += desired
+                return desired, False, False
+
+            allowed = max(0, remaining - exhaustion_notice_chars)
+            self._output_chars_claimed = total
+            self._output_budget_exhausted = True
+            return allowed, True, True
 
     async def create_process(self, command: str) -> asyncssh.SSHClientProcess[bytes]:
         """Open a binary exec channel after restoring a dropped SSH transport."""

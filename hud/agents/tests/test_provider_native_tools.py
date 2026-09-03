@@ -17,6 +17,7 @@ import pytest
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
+from hud.agents.gemini.tools.filesystem import GeminiReadTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
@@ -25,6 +26,11 @@ from hud.agents.tools.base import result_text
 from hud.agents.tools.ssh import bound_shell_output
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, SSHClient
+from hud.capabilities.ssh import (
+    TOOL_MAX_OUTPUT_CHARS_PARAM,
+    TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM,
+    TOOL_OUTPUT_BUDGET_MARKER_PARAM,
+)
 from hud.types import MCPToolCall
 
 
@@ -144,9 +150,18 @@ class _FakeSSH(SSHClient):
         exit_status: int = 0,
         files: dict[str, bytes] | None = None,
         cwd: str | None = None,
+        max_output_chars: int | None = None,
+        max_total_output_chars: int | None = None,
+        output_budget_exhausted_path: str | None = None,
     ) -> None:
         self.files: dict[str, bytes] = files or {}
         params = {"cwd": cwd} if cwd else {}
+        if max_output_chars is not None:
+            params[TOOL_MAX_OUTPUT_CHARS_PARAM] = max_output_chars
+        if max_total_output_chars is not None:
+            params[TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM] = max_total_output_chars
+        if output_budget_exhausted_path is not None:
+            params[TOOL_OUTPUT_BUDGET_MARKER_PARAM] = output_budget_exhausted_path
         super().__init__(
             Capability(name="shell", protocol="ssh/2", url="ssh://localhost:22", params=params),
             cast(
@@ -300,6 +315,49 @@ async def test_openai_shell_uses_safe_effective_limit(max_output_length: int | N
     assert result.structuredContent["max_output_length"] == 10 * 1024 * 1024
 
 
+async def test_openai_shell_honors_capability_output_limit() -> None:
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=_ssh(stdout="x" * 200, max_output_chars=64),
+    )
+
+    result = await tool.execute({"commands": ["noisy"], "max_output_length": 20 * 1024 * 1024})
+
+    assert result.structuredContent is not None
+    assert result.structuredContent["max_output_length"] == 64
+    [output] = result.structuredContent["output"]
+    assert len(output["stdout"]) + len(output["stderr"]) == 64
+    assert "[truncated]" in output["stdout"]
+
+
+async def test_openai_shell_marks_run_wide_output_budget_exhaustion() -> None:
+    marker_path = "/workspace/.qa-output-budget-exhausted"
+    fake_client = _FakeSSH(
+        stdout="x" * 80,
+        max_output_chars=80,
+        max_total_output_chars=200,
+        output_budget_exhausted_path=marker_path,
+    )
+    client = cast("SSHClient", fake_client)
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-5.5"),
+        client=client,
+    )
+
+    result = await tool.execute({"commands": ["first", "second"]})
+
+    assert result.structuredContent is not None
+    first, second = result.structuredContent["output"]
+    assert len(first["stdout"]) + len(first["stderr"]) == 80
+    assert "[tool output budget exhausted" in second["stderr"]
+    assert len(second["stdout"]) + len(second["stderr"]) <= 80
+    assert marker_path in fake_client.files
+
+    del fake_client.files[marker_path]
+    await tool.execute({"commands": ["third"]})
+    assert marker_path in fake_client.files
+
+
 async def test_openai_shell_rejects_non_list_commands_without_running() -> None:
     tool = OpenAIShellTool(spec=OpenAIShellTool.default_spec("gpt-5.5"), client=_ssh())
 
@@ -401,12 +459,88 @@ async def test_shared_ssh_tool_bounds_combined_output(
     result = await tool.execute({"command": "noisy"})
 
     text = result_text(result)
-    output = text.split("\n", 1)[1].rsplit("\n(exit 0)", 1)[0]
-    stdout, stderr = output.split("\nstderr:\n", 1)
-    assert len(stdout) + len(stderr) == 80
-    assert stdout.startswith("stdout-start-")
-    assert stderr.endswith("-stderr-end")
-    assert "[truncated]" in output
+    assert len(text) == 80
+    assert text.startswith("$ noisy\nstdout-start-")
+    assert text.endswith("-stderr-end\n(exit 0)")
+    assert "[truncated]" in text
+
+
+async def test_shared_file_read_honors_capability_output_limit() -> None:
+    tool = ReadTool(
+        spec=ReadTool.default_spec("qwen"),
+        client=_ssh(
+            files={"/workspace/large.txt": b"x" * 200},
+            max_output_chars=64,
+        ),
+    )
+
+    result = await tool.execute({"filePath": "/workspace/large.txt"})
+
+    text = result_text(result)
+    assert "[truncated]" in text
+    assert "x" * 65 not in text
+
+
+async def test_paginated_reads_slice_before_bounding_output() -> None:
+    content = "".join(f"line-{line:03d}\n" for line in range(1, 101)).encode()
+    openai = ReadTool(
+        spec=ReadTool.default_spec("qwen"),
+        client=_ssh(files={"/workspace/large.txt": content}, max_output_chars=256),
+    )
+    gemini = GeminiReadTool(
+        spec=GeminiReadTool.default_spec("gemini"),
+        client=_ssh(files={"/workspace/large.txt": content}, max_output_chars=256),
+    )
+
+    openai_result = await openai.execute(
+        {"filePath": "/workspace/large.txt", "offset": 80, "limit": 1}
+    )
+    gemini_result = await gemini.execute(
+        {"file_path": "/workspace/large.txt", "start_line": 80, "end_line": 80}
+    )
+
+    assert "line-080" in result_text(openai_result)
+    assert result_text(gemini_result) == "line-080\n"
+
+
+async def test_editors_do_not_write_truncated_source() -> None:
+    original = ("x" * 100 + "TARGET" + "y" * 100).encode()
+    cases = [
+        (
+            EditTool,
+            "qwen",
+            {"filePath": "/workspace/large.txt", "oldString": "TARGET", "newString": "DONE"},
+        ),
+        (
+            GeminiEditTool,
+            "gemini",
+            {"file_path": "/workspace/large.txt", "old_string": "TARGET", "new_string": "DONE"},
+        ),
+        (
+            ClaudeTextEditorTool,
+            "claude",
+            {
+                "command": "str_replace",
+                "path": "/workspace/large.txt",
+                "old_str": "TARGET",
+                "new_str": "DONE",
+            },
+        ),
+    ]
+
+    for tool_type, model, arguments in cases:
+        client = _FakeSSH(
+            files={"/workspace/large.txt": original},
+            max_output_chars=64,
+        )
+        spec = tool_type.default_spec(model)
+        assert spec is not None
+        tool = tool_type(spec=spec, client=cast("SSHClient", client))
+
+        result = await tool.execute(arguments)
+
+        assert result.isError is False
+        assert client.files["/workspace/large.txt"] == original.replace(b"TARGET", b"DONE")
 
 
 async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:

@@ -8,7 +8,11 @@ import asyncssh
 import pytest
 
 from hud.capabilities.base import Capability
-from hud.capabilities.ssh import SSHClient, SSHConnectionError
+from hud.capabilities.ssh import (
+    TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM,
+    SSHClient,
+    SSHConnectionError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -125,6 +129,35 @@ def _capability() -> Capability:
 
 def _client(connection: object) -> SSHClient:
     return SSHClient(_capability(), cast("asyncssh.SSHClientConnection", connection))
+
+
+async def test_output_budget_claims_are_atomic() -> None:
+    capability = _capability()
+    capability.params[TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM] = 10
+    client = SSHClient(capability, cast("asyncssh.SSHClientConnection", object()))
+
+    claims = await asyncio.gather(
+        client.claim_output_chars(8),
+        client.claim_output_chars(8),
+    )
+
+    assert sum(allowed for allowed, _, _ in claims) == 10
+    assert sum(exhausted for _, exhausted, _ in claims) == 1
+
+
+async def test_output_budget_exhaustion_is_sticky() -> None:
+    capability = _capability()
+    capability.params[TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM] = 10
+    client = SSHClient(capability, cast("asyncssh.SSHClientConnection", object()))
+
+    assert await client.claim_output_chars(10) == (10, True, True)
+    assert await client.claim_output_chars(0) == (0, True, False)
+
+
+@pytest.mark.parametrize("desired", [-1, True])
+async def test_output_budget_rejects_invalid_claim(desired: int) -> None:
+    with pytest.raises(ValueError, match="non-negative integer"):
+        await _client(object()).claim_output_chars(desired)
 
 
 async def test_connect_keeps_tunneled_connection_active(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,7 +8,6 @@ from typing import Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH, bound_shell_output
 from hud.types import MCPToolResult
 
 from .base import OpenAIToolSpec
@@ -35,7 +34,7 @@ class OpenAIShellTool(SSHTool):
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         requested_limit = arguments.get("max_output_length")
         if requested_limit is None:
-            max_output_length = MAX_SHELL_OUTPUT_LENGTH
+            max_output_length = self.output_limit()
         elif (
             isinstance(requested_limit, bool)
             or not isinstance(requested_limit, int)
@@ -48,7 +47,7 @@ class OpenAIShellTool(SSHTool):
                 structured={"output": [shell_output("", text, 1)]},
             )
         else:
-            max_output_length = min(requested_limit, MAX_SHELL_OUTPUT_LENGTH)
+            max_output_length = min(requested_limit, self.output_limit())
 
         def invalid_commands_result() -> MCPToolResult:
             text = "commands must be a list of strings"
@@ -90,7 +89,11 @@ class OpenAIShellTool(SSHTool):
             stderr = completed.stderr if isinstance(completed.stderr, str) else ""
             exit_code = completed.returncode
             assert exit_code is not None
-            stdout, stderr = bound_shell_output(stdout, stderr, max_output_length)
+            stdout, stderr = await self.bound_output(
+                stdout,
+                stderr,
+                limit=max_output_length,
+            )
             outputs.append(shell_output(stdout, stderr, exit_code))
             display_outputs.append(stdout + stderr)
             is_error = is_error or bool(exit_code)

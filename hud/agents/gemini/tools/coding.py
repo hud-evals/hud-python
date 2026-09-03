@@ -97,7 +97,7 @@ class GeminiEditTool(SSHTool):
         new_string = arguments.get("new_string", "")
         if old_string == "":
             return await self.file_write(file_path, str(new_string))
-        existing = await self.file_read(file_path)
+        existing = await self.raw_file_read(file_path)
         if existing.isError:
             return existing
         text = result_text(existing)

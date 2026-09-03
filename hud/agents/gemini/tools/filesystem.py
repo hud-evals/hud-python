@@ -5,13 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools import SSHTool
-from hud.types import MCPToolResult
+from hud.agents.tools.base import result_text, tool_ok
 
 from .base import GeminiToolSpec
 from .coding import required_str, tool_decl
 
 if TYPE_CHECKING:
     from google.genai import types as genai_types
+
+    from hud.types import MCPToolResult
 
 GEMINI_READ_SPEC = GeminiToolSpec(api_type="read_file", api_name="read_file")
 GEMINI_SEARCH_SPEC = GeminiToolSpec(api_type="grep_search", api_name="grep_search")
@@ -42,24 +44,18 @@ class GeminiReadTool(SSHTool):
 
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         path = required_str(arguments, "file_path")
-        result = await self.file_read(path)
+        result = await self.raw_file_read(path)
         if result.isError:
             return result
+        text = result_text(result)
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         if isinstance(start, int) and start > 0:
-            import mcp.types as mcp_types
-
-            from hud.agents.tools.base import result_text
-
-            lines = result_text(result).splitlines(keepends=True)
+            lines = text.splitlines(keepends=True)
             offset = start - 1
             limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
-            sliced = lines[offset : offset + limit]
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text="".join(sliced))],
-            )
-        return result
+            text = "".join(lines[offset : offset + limit])
+        return tool_ok(await self.bound_text(text))
 
 
 class GeminiSearchTool(SSHTool):

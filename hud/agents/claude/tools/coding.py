@@ -191,7 +191,7 @@ class ClaudeTextEditorTool(SSHTool):
                 return tool_err(f"unknown editor command: {command!r}")
 
     async def _str_replace(self, path: str, old: str, new: str) -> MCPToolResult:
-        existing = await self.file_read(path)
+        existing = await self.raw_file_read(path)
         if existing.isError:
             return existing
         text = result_text(existing)
@@ -203,7 +203,7 @@ class ClaudeTextEditorTool(SSHTool):
         return await self.file_write(path, text.replace(old, new, 1))
 
     async def _insert(self, path: str, line: int, text: str) -> MCPToolResult:
-        existing = await self.file_read(path)
+        existing = await self.raw_file_read(path)
         if existing.isError:
             return existing
         lines = result_text(existing).splitlines(keepends=True)
