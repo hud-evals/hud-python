@@ -93,8 +93,10 @@ def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
 def _present_v1(parsed: dict[str, Any]) -> QaPresentation:
     metadata = parsed.get("metadata")
     extra = metadata if isinstance(metadata, dict) else {}
-    kind = extra.get("kind") if isinstance(extra.get("kind"), str) else "qa_result"
-    label = extra.get("label") if isinstance(extra.get("label"), str) else "QA Result"
+    raw_kind = extra.get("kind")
+    raw_label = extra.get("label")
+    kind = raw_kind if isinstance(raw_kind, str) else "qa_result"
+    label = raw_label if isinstance(raw_label, str) else "QA Result"
     answer = extra.get("answer") if isinstance(extra.get("answer"), str) else None
     confidence = extra.get("confidence") if isinstance(extra.get("confidence"), str) else None
     verdict = parsed.get("verdict")
