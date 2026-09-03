@@ -33,6 +33,16 @@ class _FilesystemTool(SSHTool):
             },
         }
 
+    async def _ensure_parent(self, path: str) -> MCPToolResult:
+        parent = posixpath.dirname(path)
+        if not parent or parent in {".", "/"}:
+            return MCPToolResult(content=[])
+        completed = await self.client.run(f"mkdir -p {shlex.quote(parent)}", check=False)
+        if completed.returncode == 0:
+            return MCPToolResult(content=[])
+        message = completed.stderr or completed.stdout or f"could not create {parent}"
+        return tool_err(await self.bound_text(message))
+
 
 class ReadTool(_FilesystemTool):
     name = "read"
@@ -201,8 +211,8 @@ class EditTool(_FilesystemTool):
         if old == new:
             return tool_err("No changes to apply: oldString and newString are identical.")
         if old == "":
-            exists = not (await self.bash(f"test -e {shlex.quote(path)}")).isError
-            if exists:
+            probe = await self.client.run(f"test -e {shlex.quote(path)}", check=False)
+            if probe.returncode == 0:
                 return tool_err(
                     "oldString cannot be empty when editing an existing file. "
                     "Provide exact text to replace, or use write for full-file replacement."
@@ -224,12 +234,6 @@ class EditTool(_FilesystemTool):
             return tool_err(f"oldString matches {count} times in {path}; set replaceAll to true")
         next_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
         return await self.file_write(path, next_text)
-
-    async def _ensure_parent(self, path: str) -> MCPToolResult:
-        parent = posixpath.dirname(path)
-        if not parent or parent in {".", "/"}:
-            return MCPToolResult(content=[])
-        return await self.bash(f"mkdir -p {shlex.quote(parent)}")
 
 
 class WriteTool(_FilesystemTool):
@@ -258,12 +262,6 @@ class WriteTool(_FilesystemTool):
         if mkdir.isError:
             return mkdir
         return await self.file_write(path, content)
-
-    async def _ensure_parent(self, path: str) -> MCPToolResult:
-        parent = posixpath.dirname(path)
-        if not parent or parent in {".", "/"}:
-            return MCPToolResult(content=[])
-        return await self.bash(f"mkdir -p {shlex.quote(parent)}")
 
 
 class GrepTool(_FilesystemTool):

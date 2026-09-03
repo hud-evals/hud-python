@@ -23,7 +23,7 @@ from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
 from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
-from hud.agents.tools.ssh import bound_shell_output
+from hud.agents.tools.ssh import OUTPUT_BUDGET_EXHAUSTED, bound_shell_output
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.ssh import (
@@ -551,6 +551,38 @@ async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:
 
     assert result.isError is False
     assert ssh.files["/REPORT.md"] == b"done"
+
+
+@pytest.mark.parametrize(
+    ("tool_type", "arguments"),
+    [
+        (WriteTool, {"filePath": "/nested/report.md", "content": "done"}),
+        (
+            EditTool,
+            {
+                "filePath": "/nested/report.md",
+                "oldString": "",
+                "newString": "done",
+            },
+        ),
+    ],
+)
+async def test_internal_file_probes_do_not_consume_provider_output_budget(
+    tool_type: type[EditTool] | type[WriteTool],
+    arguments: dict[str, Any],
+) -> None:
+    expected = "wrote 4 bytes to /nested/report.md"
+    ssh = _FakeSSH(
+        max_output_chars=256,
+        max_total_output_chars=len(expected) + len(OUTPUT_BUDGET_EXHAUSTED) + 2,
+    )
+    tool = tool_type(spec=tool_type.default_spec("qwen"), client=cast("SSHClient", ssh))
+
+    result = await tool.execute(arguments)
+
+    assert result.isError is False
+    assert result_text(result) == expected
+    assert ssh.files["/nested/report.md"] == b"done"
 
 
 async def test_paths_reach_the_session_verbatim() -> None:
