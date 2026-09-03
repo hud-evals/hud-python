@@ -546,9 +546,7 @@ async def test_composite_editor_uses_one_tool_deadline(
             url="ssh://workspace",
             host_pubkey="ssh-ed25519 key",
         ),
-        claim_output_chars=AsyncMock(
-            side_effect=lambda desired, **_: (desired, False, False)
-        ),
+        claim_output_chars=AsyncMock(side_effect=lambda desired, **_: (desired, False, False)),
         read_text=AsyncMock(return_value="old"),
         write_text=AsyncMock(),
     )

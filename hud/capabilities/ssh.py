@@ -102,9 +102,7 @@ class SSHClient(CapabilityClient):
         if isinstance(total, bool) or not isinstance(total, int) or total <= 0:
             raise ValueError(f"{TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM} must be a positive integer")
         if total < exhaustion_notice_chars:
-            raise ValueError(
-                f"{TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM} must fit the exhaustion notice"
-            )
+            raise ValueError(f"{TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM} must fit the exhaustion notice")
         async with self._output_budget_lock:
             if self._output_budget_exhausted:
                 return 0, True, False

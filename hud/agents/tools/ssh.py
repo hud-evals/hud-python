@@ -68,13 +68,10 @@ class SSHTool(AgentTool[SSHClient]):
         desired = min(len(stdout) + len(stderr), per_result_limit)
         notice_chars = len(OUTPUT_BUDGET_EXHAUSTED) + 1
         if (
-            self.client.capability.params.get(TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM)
-            is not None
+            self.client.capability.params.get(TOOL_MAX_TOTAL_OUTPUT_CHARS_PARAM) is not None
             and per_result_limit < notice_chars
         ):
-            raise ValueError(
-                f"{TOOL_MAX_OUTPUT_CHARS_PARAM} must fit the output budget notice"
-            )
+            raise ValueError(f"{TOOL_MAX_OUTPUT_CHARS_PARAM} must fit the output budget notice")
         allowed, exhausted, notify = await self.client.claim_output_chars(
             desired,
             exhaustion_notice_chars=notice_chars,

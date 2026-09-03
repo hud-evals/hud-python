@@ -40,7 +40,9 @@ class _FilesystemTool(SSHTool):
         completed = await self.client.run(f"mkdir -p {shlex.quote(parent)}", check=False)
         if completed.returncode == 0:
             return MCPToolResult(content=[])
-        message = completed.stderr or completed.stdout or f"could not create {parent}"
+        stderr = completed.stderr if isinstance(completed.stderr, str) else ""
+        stdout = completed.stdout if isinstance(completed.stdout, str) else ""
+        message = stderr or stdout or f"could not create {parent}"
         return tool_err(await self.bound_text(message))
 
 
