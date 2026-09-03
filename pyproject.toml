@@ -62,6 +62,8 @@ path = "hud/version.py"
 exclude = [
     "docs/",
     "cookbooks/",
+    "environments/",
+    "hud-python/",
     "hud/integrations/harbor/tests/",
     "**/checkpoints/",
     "**/*.safetensors",
