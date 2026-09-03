@@ -33,7 +33,7 @@ from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.environment import Answer, Environment
-from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
+from hud.eval import HostedRuntime, Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 
@@ -1200,6 +1200,96 @@ async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
     assert job.reward == 1.0
     assert run.trace.content == "5"
     assert run.job_id == job.id  # the run's trace reports under the job
+
+
+async def test_task_run_reports_its_submission_lifecycle(
+    env_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import job as job_mod
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def record(path: str, payload: dict[str, Any]) -> None:
+        calls.append((path, payload))
+
+    monkeypatch.setattr(job_mod, "_reporting_enabled", lambda: True)
+    monkeypatch.setattr(job_mod, "_report", record)
+
+    job = await _add_task(2, 3).run(
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        group=2,
+    )
+
+    assert calls[0] == (
+        f"/trace/job/{job.id}/enter",
+        {
+            "name": "add (2 times)",
+            "group": 2,
+            "taskset_id": None,
+            "is_open": True,
+        },
+    )
+    assert calls[-1] == (f"/trace/job/{job.id}/exit", {"failed": False})
+
+
+async def test_task_run_closes_after_hosted_launch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import job as job_mod
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    runtime = HostedRuntime()
+
+    async def fail_launch(*args: Any, **kwargs: Any) -> Run:
+        return Run.failed("submit rejected")
+
+    async def record(path: str, payload: dict[str, Any]) -> None:
+        calls.append((path, payload))
+
+    monkeypatch.setattr(runtime, "run", fail_launch)
+    monkeypatch.setattr(job_mod, "_reporting_enabled", lambda: True)
+    monkeypatch.setattr(job_mod, "_report", record)
+
+    job = await _add_task(2, 3).run(_FnAgent(_solve_add), runtime=runtime)
+
+    assert job.errors
+    assert calls[-1] == (f"/trace/job/{job.id}/exit", {"failed": True})
+
+
+async def test_task_run_closes_as_failed_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hud.eval import job as job_mod
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    launch_started = asyncio.Event()
+    runtime = HostedRuntime()
+
+    async def hang_launch(*args: Any, **kwargs: Any) -> Run:
+        launch_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def record(path: str, payload: dict[str, Any]) -> None:
+        calls.append((path, payload))
+
+    monkeypatch.setattr(runtime, "run", hang_launch)
+    monkeypatch.setattr(job_mod, "_reporting_enabled", lambda: True)
+    monkeypatch.setattr(job_mod, "_report", record)
+
+    run_task = asyncio.create_task(
+        _add_task(2, 3).run(_FnAgent(_solve_add), runtime=runtime),
+    )
+    await launch_started.wait()
+    run_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+
+    job_id = calls[0][0].split("/")[-2]
+    assert calls[-1] == (f"/trace/job/{job_id}/exit", {"failed": True})
 
 
 async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None:

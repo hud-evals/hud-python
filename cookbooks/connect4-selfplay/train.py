@@ -153,6 +153,7 @@ async def main(
         print("\nvalidation curve:")
         for s, r in val_curve:
             print(f"  step {s:3d}: {r:.3f}  {'#' * int(r * 20)}")
+    await session.finish(failed=bool(session.errors))
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
-from .job import Job, job_enter
+from .job import Job, job_enter, job_exit
 from .run import rollout, validate_rollout_timeouts
 from .runtime import (
     HostedRuntime,
@@ -246,8 +246,9 @@ class Taskset:
         trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
         instead, so a longer arc (a training session) spans many calls under
-        one id. Returned ``job.runs`` preserves expansion order (task-major,
-        then group).
+        one id. Use the started job as an async context manager or call
+        :meth:`Job.finish` after the final batch. Returned ``job.runs``
+        preserves expansion order (task-major, then group).
 
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
         task's repeats), whatever the placement — a placement that pools a
@@ -300,14 +301,16 @@ class Taskset:
             group_id = uuid.uuid4().hex
             expanded.extend((task, group_id) for _ in range(group))
 
-        if job is None:
+        owns_job = job is None
+        submission_failed = False
+        if owns_job:
             job = Job(
                 id=uuid.uuid4().hex,
                 name=_job_name(self.name, task_list, group),
                 group=group,
                 taskset_id=self.taskset_id,
             )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
+        assert job is not None
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
@@ -347,14 +350,33 @@ class Taskset:
             group,
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        async with contextlib.AsyncExitStack() as stack:
-            # A placement may own pooled resources across rollouts (e.g.
-            # Shared's one substrate for many leases); a context-manager
-            # placement is scoped to this call unless already open.
-            if isinstance(placement, contextlib.AbstractAsyncContextManager):
-                await stack.enter_async_context(placement)
-            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.runs.extend(run for part in parts for run in part)
+        try:
+            if owns_job:
+                await job_enter(
+                    job.id,
+                    name=job.name,
+                    group=group,
+                    taskset_id=self.taskset_id,
+                    is_open=True,
+                )
+            async with contextlib.AsyncExitStack() as stack:
+                # A placement may own pooled resources across rollouts (e.g.
+                # Shared's one substrate for many leases); a context-manager
+                # placement is scoped to this call unless already open.
+                if isinstance(placement, contextlib.AbstractAsyncContextManager):
+                    await stack.enter_async_context(placement)
+                parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
+            job.runs.extend(run for part in parts for run in part)
+            submission_failed = bool(job.errors)
+        except asyncio.CancelledError:
+            submission_failed = True
+            raise
+        except Exception:
+            submission_failed = True
+            raise
+        finally:
+            if owns_job:
+                await job_exit(job_id, failed=submission_failed)
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed
         # sleep), so the timeout is only a safety cap for a wedged network.

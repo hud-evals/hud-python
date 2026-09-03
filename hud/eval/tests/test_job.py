@@ -47,6 +47,50 @@ def _run_with(trace_id: str, *, extra: dict[str, Any]) -> Run:
     return run
 
 
+async def test_open_job_reports_submission_lifecycle(
+    recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated_id = job_mod.uuid.UUID("00000000-0000-4000-a000-000000000001")
+    job_id = generated_id.hex
+    monkeypatch.setattr(job_mod.uuid, "uuid4", lambda: generated_id)
+
+    async with await job_mod.Job.start(
+        "benchmark",
+        group=2,
+        taskset_id="taskset-1",
+    ) as job:
+        assert job.id == job_id
+
+    assert recorder.calls == [
+        (
+            f"/trace/job/{job_id}/enter",
+            {
+                "name": "benchmark",
+                "group": 2,
+                "taskset_id": "taskset-1",
+                "is_open": True,
+            },
+        ),
+        (f"/trace/job/{job_id}/exit", {"failed": False}),
+    ]
+
+
+async def test_open_job_reports_failed_context_exit(
+    recorder: _Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated_id = job_mod.uuid.UUID("00000000-0000-4000-a000-000000000002")
+    job_id = generated_id.hex
+    monkeypatch.setattr(job_mod.uuid, "uuid4", lambda: generated_id)
+
+    with pytest.raises(RuntimeError, match="submission failed"):
+        async with await job_mod.Job.start("benchmark"):
+            raise RuntimeError("submission failed")
+
+    assert recorder.calls[-1] == (f"/trace/job/{job_id}/exit", {"failed": True})
+
+
 async def test_trace_enter_reports_task_and_group_identity(recorder: _Recorder) -> None:
     await job_mod.trace_enter(
         "abc",

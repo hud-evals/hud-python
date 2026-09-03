@@ -14,6 +14,7 @@ Example::
     chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
+    await chat.close()
 
 ``Chat`` is protocol-agnostic: a web app, notebook, or wire protocol (A2A,
 etc.) is just a frontend calling ``await chat.send(...)``. The conversation
@@ -156,3 +157,8 @@ class Chat:
             ]
         self.messages.append(assistant_msg)
         return result
+
+    async def close(self, *, failed: bool = False) -> None:
+        """Close the platform job after the final conversation turn."""
+        if self.job is not None:
+            await self.job.finish(failed=failed)

@@ -39,10 +39,13 @@ async def main(*, variants: int, group: int, max_concurrent: int, start: int, mo
     print(
         f"model={model} variants={variant_ids} group={group} rollouts={len(variant_ids) * group} tests={bugs.test_count()}"
     )
-    session = await Job.start(f"calc-baseline-{start}-{start + variants - 1}", group=group)
-    t0 = time.perf_counter()
-    await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
-    wall = time.perf_counter() - t0
+    async with await Job.start(
+        f"calc-baseline-{start}-{start + variants - 1}",
+        group=group,
+    ) as session:
+        t0 = time.perf_counter()
+        await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
+        wall = time.perf_counter() - t0
 
     runs = session.runs
     rewards = [r.reward for r in runs]

@@ -7,10 +7,11 @@ registers when called bare.
 
 Backend reporting contract:
 - ``POST /trace/job/{job_id}/enter`` — register the batch job.
+- ``POST /trace/job/{job_id}/exit``  — close incremental submission.
 - ``POST /trace/{trace_id}/enter``   — a rollout started.
 - ``POST /trace/{trace_id}/exit``    — a rollout finished (reward / success).
 
-All three are best-effort no-ops without telemetry + an API key, so local runs
+All four are best-effort no-ops without telemetry + an API key, so local runs
 never depend on the platform.
 """
 
@@ -20,11 +21,13 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from .run import Run
 
 logger = logging.getLogger("hud.eval.job")
@@ -51,8 +54,29 @@ class Job:
         longer arc — a training session, a chat conversation — under one id.
         """
         job = cls(id=uuid.uuid4().hex, name=name, group=group, taskset_id=taskset_id)
-        await job_enter(job.id, name=name, group=group, taskset_id=taskset_id)
+        await job_enter(
+            job.id,
+            name=name,
+            group=group,
+            taskset_id=taskset_id,
+            is_open=True,
+        )
         return job
+
+    async def finish(self, *, failed: bool = False) -> None:
+        """Close this job after its final scheduler call."""
+        await job_exit(self.id, failed=failed)
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _exc: BaseException | None,
+        _tb: TracebackType | None,
+    ) -> None:
+        await self.finish(failed=exc_type is not None)
 
     @property
     def reward(self) -> float:
@@ -105,7 +129,14 @@ def _reporting_enabled() -> bool:
     return bool(settings.telemetry_enabled and settings.api_key)
 
 
-async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | None = None) -> None:
+async def job_enter(
+    job_id: str,
+    *,
+    name: str,
+    group: int,
+    taskset_id: str | None = None,
+    is_open: bool = False,
+) -> None:
     """Register a batch job with the platform.
 
     ``taskset_id`` links the job to a synced taskset (set when running
@@ -116,11 +147,23 @@ async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | Non
         return
     await _report(
         f"/trace/job/{job_id}/enter",
-        {"name": name, "group": group, "taskset_id": taskset_id},
+        {
+            "name": name,
+            "group": group,
+            "taskset_id": taskset_id,
+            "is_open": is_open,
+        },
     )
     from hud.settings import settings
 
     logger.info("job: %s/jobs/%s", settings.hud_web_url, canonical_record_id(job_id))
+
+
+async def job_exit(job_id: str, *, failed: bool = False) -> None:
+    """Report that an incrementally submitted job will receive no more traces."""
+    if not _reporting_enabled():
+        return
+    await _report(f"/trace/job/{job_id}/exit", {"failed": failed})
 
 
 async def trace_enter(
