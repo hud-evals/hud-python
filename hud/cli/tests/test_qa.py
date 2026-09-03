@@ -420,6 +420,38 @@ def test_qa_results_boolean_agent_omits_findings() -> None:
     assert "The zero reward matches the missing file." in result.output
 
 
+def test_qa_results_json_normalizes_boolean_blob_to_v1() -> None:
+    platform = MagicMock()
+    platform.get.return_value = [
+        {
+            **_run(status="completed"),
+            "agent_name": "False Negative Analysis",
+            "result": {
+                "is_false_negative": True,
+                "reasoning": "The grader rejected a valid answer.",
+            },
+        }
+    ]
+
+    result = _invoke(platform, ["qa", "results", _TRACE_ID, "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)[0]
+    assert payload["result"]["is_false_negative"] is True
+    assert payload["canonical_result"] == {
+        "schema_version": "qa_agent_result.v1",
+        "verdict": "failed",
+        "summary": "The grader rejected a valid answer.",
+        "findings": [],
+        "metadata": {
+            "kind": "boolean",
+            "label": "False Negative",
+            "is_false_negative": True,
+            "answer": "yes",
+        },
+    }
+
+
 def test_qa_results_false_negative_yes_is_failed() -> None:
     platform = MagicMock()
     platform.get.return_value = [

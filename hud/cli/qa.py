@@ -11,7 +11,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
+from hud.cli.qa_analysis import (
+    is_standard_result_blob,
+    presentation_for_result,
+    to_qa_agent_result_v1,
+)
 from hud.cli.utils.api import require_api_key
 from hud.settings import settings
 from hud.utils.exceptions import HudTimeoutError
@@ -48,9 +52,16 @@ def _print_agent(agent: dict[str, Any]) -> None:
     typer.echo(f"{agent.get('name', '-')}\t{agent.get('id', '-')}")
 
 
+def _with_canonical_v1(result: dict[str, Any]) -> dict[str, Any]:
+    canonical = to_qa_agent_result_v1(result)
+    if canonical is None:
+        return result
+    return {**result, "canonical_result": canonical}
+
+
 def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
     if json_output:
-        _print_json(results)
+        _print_json([_with_canonical_v1(result) for result in results])
         return
     if not results:
         typer.echo("No QA results found.")

@@ -1,10 +1,13 @@
-"""Turn a QA result row into pass/fail review chrome for the CLI TUI."""
+"""Normalize QA-agent blobs to ``qa_agent_result.v1`` and render review chrome."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, cast
+
+QA_AGENT_RESULT_V1 = "qa_agent_result.v1"
+QaVerdict = Literal["passed", "failed", "unknown"]
 
 _QA_V1 = frozenset({"passed", "failed", "unknown"})
 _BOOLEAN_KEYS = (
@@ -13,6 +16,10 @@ _BOOLEAN_KEYS = (
     ("is_reward_hacking", "Reward Hacking"),
     ("is_prompt_misaligned", "Prompt Misaligned"),
 )
+_BOOLEAN_EXTRAS = {
+    "is_reward_hacking": ("hacking_strategy",),
+    "is_prompt_misaligned": ("grader_check", "prompt_quote", "misalignment_proof"),
+}
 _CAUSE = {
     "agent": "Agent failure",
     "eval": "Evaluation failure",
@@ -40,26 +47,80 @@ class QaPresentation:
 
 def is_standard_result_blob(text: str) -> bool:
     parsed = _loads(text)
-    return parsed is not None and _from_blob(parsed).kind != "unknown"
+    if parsed is None:
+        return False
+    return str(_blob_to_v1(parsed)["metadata"].get("kind") or "unknown") != "unknown"
 
 
-def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
+def to_qa_agent_result_v1(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a ``qa_agent_result.v1`` object for a platform QA result row.
+
+    Pending rows (queued, running, …) return ``None``. Completed analysis blobs
+    — v1, boolean judges, and Failure Analysis ``problems`` — are rewritten to
+    the same schema. Error rows become ``verdict=failed``. Unrecognized
+    completed payloads become ``verdict=unknown``.
+    """
     status = str(row.get("status") or "")
     error = row.get("error")
     if status == "error":
-        return _view("unknown", "failed", summary=str(error) if error else "QA run failed.")
+        return _v1(
+            "failed",
+            summary=str(error) if error else "QA run failed.",
+            metadata={"kind": "unknown"},
+        )
     if status and status != "completed":
-        return _view("pending", "unknown", label=status, summary=str(error) if error else None)
+        return None
     payload = row.get("canonical_result")
     if not isinstance(payload, dict):
         payload = row.get("result")
     blob = _unwrap(payload) if isinstance(payload, dict | str) else None
     if blob is None:
+        return _v1("unknown", summary=str(error) if error else None)
+    return _blob_to_v1(blob)
+
+
+def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
+    status = str(row.get("status") or "")
+    error = row.get("error")
+    if status and status not in {"completed", "error"}:
+        return _view("pending", "unknown", label=status, summary=str(error) if error else None)
+    canonical = to_qa_agent_result_v1(row)
+    if canonical is None:
         return _view("unknown", "unknown", summary=str(error) if error else None)
-    return _from_blob(blob)
+    return _present_v1(canonical)
 
 
-def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
+def _present_v1(parsed: dict[str, Any]) -> QaPresentation:
+    metadata = parsed.get("metadata")
+    extra = metadata if isinstance(metadata, dict) else {}
+    kind = extra.get("kind") if isinstance(extra.get("kind"), str) else "qa_result"
+    label = extra.get("label") if isinstance(extra.get("label"), str) else "QA Result"
+    answer = extra.get("answer") if isinstance(extra.get("answer"), str) else None
+    confidence = extra.get("confidence") if isinstance(extra.get("confidence"), str) else None
+    verdict = parsed.get("verdict")
+    tag = verdict if isinstance(verdict, str) and verdict in _QA_V1 else "unknown"
+    findings = tuple(
+        QaFinding(
+            title=str(item["summary"]),
+            description=str(item.get("description") or ""),
+            fault=item.get("fault") if isinstance(item.get("fault"), str) else None,
+        )
+        for item in parsed.get("findings") or []
+        if isinstance(item, dict) and isinstance(item.get("summary"), str) and item["summary"]
+    )
+    summary = parsed.get("summary")
+    return _view(
+        kind,
+        tag,
+        label=label,
+        answer=answer,
+        summary=summary if isinstance(summary, str) else None,
+        confidence=confidence,
+        findings=findings,
+    )
+
+
+def _blob_to_v1(parsed: dict[str, Any]) -> dict[str, Any]:
     summary = _text(parsed.get("summary"), parsed.get("reasoning"))
     confidence = _confidence(parsed.get("confidence"))
 
@@ -68,35 +129,39 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
     if (
         isinstance(verdict, str)
         and verdict in _QA_V1
-        and (parsed.get("schema_version") == "qa_agent_result.v1" or isinstance(findings_raw, list))
+        and (parsed.get("schema_version") == QA_AGENT_RESULT_V1 or isinstance(findings_raw, list))
     ):
-        findings = _findings(findings_raw if isinstance(findings_raw, list) else [], "summary")
-        return _view(
-            "qa_result",
-            verdict,
+        metadata = dict(parsed["metadata"]) if isinstance(parsed.get("metadata"), dict) else {}
+        metadata.setdefault("kind", "qa_result")
+        if confidence and "confidence" not in metadata:
+            metadata["confidence"] = confidence
+        raw_findings = findings_raw if isinstance(findings_raw, list) else []
+        return _v1(
+            cast("QaVerdict", verdict),
             summary=summary,
-            confidence=confidence,
-            findings=findings,
+            findings=_finding_dicts(raw_findings, "summary"),
+            metadata=metadata,
         )
 
     for key, label in _BOOLEAN_KEYS:
         if key not in parsed:
             continue
         value = parsed[key]
+        metadata: dict[str, Any] = {"kind": "boolean", "label": label, key: value}
+        if confidence:
+            metadata["confidence"] = confidence
+        for extra in _BOOLEAN_EXTRAS.get(key, ()):
+            extra_value = parsed.get(extra)
+            if isinstance(extra_value, str) and extra_value.strip():
+                metadata[extra] = extra_value.strip()
         if not isinstance(value, bool):
-            return _view("unknown", "unknown", label=label, summary=summary, confidence=confidence)
-        return _view(
-            "boolean",
-            "failed" if value else "passed",
-            label=label,
-            answer="yes" if value else "no",
-            summary=summary,
-            confidence=confidence,
-        )
+            return _v1("unknown", summary=summary, metadata=metadata)
+        metadata["answer"] = "yes" if value else "no"
+        return _v1("failed" if value else "passed", summary=summary, metadata=metadata)
 
     if isinstance(parsed.get("problems"), list):
-        findings = _findings(parsed["problems"], "problem", "title")
-        owners = {_finding_owner(item.fault) for item in findings}
+        findings = _finding_dicts(parsed["problems"], "problem", "title")
+        owners = {_finding_owner(item.get("fault")) for item in findings}
         if not findings:
             cause, tag = "No failure", "passed"
         elif len(owners) != 1:
@@ -105,17 +170,31 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
             cause, tag = "Unclear", "failed"
         else:
             cause, tag = _CAUSE[next(iter(owners))], "failed"
-        return _view(
-            "problems",
-            tag,
-            label="Failure Analysis",
-            answer=cause,
-            summary=summary,
-            confidence=confidence,
-            findings=findings,
-        )
+        metadata = {"kind": "problems", "label": "Failure Analysis", "answer": cause}
+        if confidence:
+            metadata["confidence"] = confidence
+        return _v1(cast("QaVerdict", tag), summary=summary, findings=findings, metadata=metadata)
 
-    return _view("unknown", "unknown", summary=summary, confidence=confidence)
+    metadata = {"kind": "unknown"}
+    if confidence:
+        metadata["confidence"] = confidence
+    return _v1("unknown", summary=summary, metadata=metadata)
+
+
+def _v1(
+    verdict: QaVerdict,
+    *,
+    summary: str | None = None,
+    findings: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": QA_AGENT_RESULT_V1,
+        "verdict": verdict,
+        "summary": summary,
+        "findings": findings or [],
+        "metadata": metadata or {},
+    }
 
 
 def _view(
@@ -171,8 +250,8 @@ def _confidence(raw: Any) -> str | None:
     return None
 
 
-def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
-    findings: list[QaFinding] = []
+def _finding_dicts(items: list[Any], *title_keys: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -186,20 +265,19 @@ def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
         )
         if not title:
             continue
+        finding: dict[str, Any] = {"summary": title}
         description = item.get("description")
+        if isinstance(description, str) and description.strip():
+            finding["description"] = description.strip()
         fault = item.get("fault") if isinstance(item.get("fault"), str) else None
-        findings.append(
-            QaFinding(
-                title=title,
-                description=description.strip() if isinstance(description, str) else "",
-                fault=fault,
-            )
-        )
-    return tuple(findings)
+        if fault:
+            finding["fault"] = fault
+        findings.append(finding)
+    return findings
 
 
-def _finding_owner(fault: str | None) -> str:
-    if fault is None:
+def _finding_owner(fault: Any) -> str:
+    if not isinstance(fault, str):
         return "unclear"
     owner = fault.strip().lower()
     if owner in _CAUSE:
