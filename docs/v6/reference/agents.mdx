@@ -68,6 +68,9 @@ workspaces; computer use over an `rfb` capability currently requires a POSIX wor
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 
+`OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
+request. Pass your own key when multiple agent instances should share the same cached prompt prefix.
+
 `timeout_seconds` bounds the complete agent phase. For provider tool agents, `tool_timeout_seconds` bounds each complete SSH-backed tool call, including multi-operation editor calls. It is unset by default except on `ClaudeConfig`, where it defaults to 120 seconds. A timeout is returned to the model as a tool error so the agent can continue. `ClaudeSDKAgent` does not apply this setting because its SSH process is the complete Claude Code agent, not one tool call.
 
 ```python

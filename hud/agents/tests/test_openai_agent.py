@@ -139,6 +139,19 @@ async def test_get_response_done_when_no_tool_calls() -> None:
     assert result.finish_reason is None
 
 
+async def test_get_response_reuses_prompt_cache_key() -> None:
+    agent = _agent(_api_response("resp_cache", []))
+    state = OpenAIRunState(messages=[agent._format_message("user", "first")])
+
+    await agent.get_response(state)
+    state.messages.append(agent._format_message("user", "second"))
+    await agent.get_response(state)
+
+    calls = cast("Any", agent.openai_client.responses).calls
+    assert calls[0]["prompt_cache_key"] == agent.config.prompt_cache_key
+    assert calls[1]["prompt_cache_key"] == agent.config.prompt_cache_key
+
+
 async def test_get_response_surfaces_token_cap_truncation() -> None:
     # Responses has no finish_reason; incomplete_details.reason carries the cap.
     response = _api_response(
