@@ -40,6 +40,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The model can emit a shell_call whose ``commands`` array is empty. OpenAI
+# stores that turn but then returns 500 for every request continuing from it
+# via ``previous_response_id``, so accepting it would poison the rest of the
+# run. Resample instead: the prior response id stays continuable because the
+# degenerate turn is never referenced.
+_MAX_EMPTY_SHELL_CALL_RESAMPLES = 2
+
+
+def _empty_shell_call_ids(output: list[Any]) -> list[str]:
+    """Call ids of model-emitted shell calls with an empty ``commands`` array."""
+    return [
+        item.call_id
+        for item in output
+        if item.type == "shell_call" and item.action.to_dict().get("commands") == []
+    ]
+
 
 @dataclass
 class OpenAIRunState(RunState[ResponseInputItemParam]):
@@ -209,23 +225,40 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                     ],
                 )
 
-        response = await self.openai_client.responses.create(
-            model=self._model,
-            input=new_items,
-            instructions=system_prompt,
-            max_output_tokens=self.max_output_tokens,
-            temperature=self.temperature,
-            text=self.text if self.text is not None else Omit(),
-            tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
-            parallel_tool_calls=self.parallel_tool_calls,
-            reasoning=self.reasoning if self.reasoning is not None else Omit(),
-            tools=effective_tools if effective_tools else Omit(),
-            previous_response_id=(
-                oai_state.last_response_id if oai_state.last_response_id is not None else Omit()
-            ),
-            truncation=self.truncation if self.truncation is not None else Omit(),
-            include=include_param,
-        )
+        for resample in range(_MAX_EMPTY_SHELL_CALL_RESAMPLES + 1):
+            response = await self.openai_client.responses.create(
+                model=self._model,
+                input=new_items,
+                instructions=system_prompt,
+                max_output_tokens=self.max_output_tokens,
+                temperature=self.temperature,
+                text=self.text if self.text is not None else Omit(),
+                tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
+                parallel_tool_calls=self.parallel_tool_calls,
+                reasoning=self.reasoning if self.reasoning is not None else Omit(),
+                tools=effective_tools if effective_tools else Omit(),
+                previous_response_id=(
+                    oai_state.last_response_id if oai_state.last_response_id is not None else Omit()
+                ),
+                truncation=self.truncation if self.truncation is not None else Omit(),
+                include=include_param,
+            )
+            degenerate = _empty_shell_call_ids(response.output)
+            if not degenerate:
+                break
+            logger.warning(
+                "Model emitted shell_call(s) with no commands (%s); resampling turn (%d/%d)",
+                ", ".join(degenerate),
+                resample + 1,
+                _MAX_EMPTY_SHELL_CALL_RESAMPLES,
+            )
+        else:
+            raise RuntimeError(
+                "Model emitted a shell_call with an empty commands array in "
+                f"{_MAX_EMPTY_SHELL_CALL_RESAMPLES + 1} consecutive samples. Continuing "
+                "from such a response poisons the previous_response_id chain (OpenAI "
+                "returns 500 for every follow-up request), so the run was aborted."
+            )
 
         oai_state.last_response_id = response.id
         oai_state.message_cursor = len(messages)

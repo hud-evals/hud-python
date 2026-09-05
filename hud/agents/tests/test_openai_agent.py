@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import mcp.types as mcp_types
+import pytest
 from openai.types.responses import ResponseOutputText
 
 from hud.agents.openai.agent import OpenAIAgent, OpenAIRunState
@@ -181,3 +182,71 @@ async def test_get_response_parses_shell_call() -> None:
 
     result = await agent.get_response(state)
     assert [tc.name for tc in result.tool_calls] == ["shell"]
+
+
+class FakeSequencedResponses:
+    """Fake ``responses`` endpoint returning queued payloads, repeating the last."""
+
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = list(responses)
+        self.calls: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if len(self._responses) > 1:
+            return self._responses.pop(0)
+        return self._responses[0]
+
+
+def _sequenced_agent(responses: list[Any]) -> OpenAIAgent:
+    client = SimpleNamespace(responses=FakeSequencedResponses(responses))
+    return OpenAIAgent(OpenAIConfig(model="gpt-test", model_client=cast("Any", client)))
+
+
+def _empty_shell_call_response(id: str) -> Any:
+    return _api_response(
+        id,
+        [
+            SimpleNamespace(
+                type="shell_call",
+                action=SimpleNamespace(to_dict=lambda: {"commands": [], "timeout_ms": 10000}),
+                call_id="call_empty",
+            ),
+        ],
+    )
+
+
+async def test_get_response_resamples_empty_shell_call() -> None:
+    # A shell_call with an empty commands array poisons the stored response
+    # chain (OpenAI 500s every continuation), so the turn must be resampled
+    # and the degenerate response id never committed.
+    healthy = _api_response(
+        "resp_good",
+        [
+            SimpleNamespace(
+                type="shell_call",
+                action=SimpleNamespace(to_dict=lambda: {"commands": ["pwd"]}),
+                call_id="call_ok",
+            ),
+        ],
+    )
+    agent = _sequenced_agent([_empty_shell_call_response("resp_poisoned"), healthy])
+    state = OpenAIRunState(messages=[agent._format_message("user", "run")])
+
+    result = await agent.get_response(state)
+
+    assert len(cast("Any", agent.openai_client).responses.calls) == 2
+    assert state.last_response_id == "resp_good"
+    assert [tc.id for tc in result.tool_calls] == ["call_ok"]
+
+
+async def test_get_response_raises_after_repeated_empty_shell_calls() -> None:
+    agent = _sequenced_agent([_empty_shell_call_response("resp_poisoned")])
+    state = OpenAIRunState(messages=[agent._format_message("user", "run")])
+
+    with pytest.raises(RuntimeError, match="empty commands array"):
+        await agent.get_response(state)
+
+    # 1 initial sample + 2 resamples, and the poisoned id was never committed.
+    assert len(cast("Any", agent.openai_client).responses.calls) == 3
+    assert state.last_response_id is None
