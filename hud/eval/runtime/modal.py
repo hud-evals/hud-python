@@ -203,6 +203,11 @@ class ModalRuntime:
                 "ModalRuntime sandbox secrets require an image runtime; attaching them to "
                 "the outer Docker-in-Docker sandbox would not expose them to main"
             )
+        if compose is not None and config.mounts:
+            raise ValueError(
+                "ModalRuntime mounts require runtime_config.image; Compose sandboxes "
+                "run Docker-in-Docker and cannot pass mounts to main"
+            )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
         if compose is not None:
             image = modal.Image.from_registry("docker:28.3.3-dind")
@@ -259,6 +264,16 @@ class ModalRuntime:
                 sandbox_kwargs["env"] = self.env_vars
             if self.sandbox_secrets:
                 sandbox_kwargs["secrets"] = self.sandbox_secrets
+        if config.mounts:
+            sandbox_kwargs["volumes"] = {
+                mount.path: modal.CloudBucketMount(
+                    mount.bucket,
+                    key_prefix=mount.prefix,
+                    secret=modal.Secret.from_name(mount.secret) if mount.secret else None,
+                    read_only=True,
+                )
+                for mount in config.mounts
+            }
         if resources is not None and resources.gpu is not None:
             gpu_types = resources.gpu.acceptable_types
             gpu_type = gpu_types[0] if gpu_types else "any"

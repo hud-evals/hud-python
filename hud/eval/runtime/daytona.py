@@ -126,6 +126,8 @@ class DaytonaRuntime:
 
         async with AsyncDaytona() as daytona:
             config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+            if config.mounts:
+                raise ValueError("DaytonaRuntime does not support runtime_config.mounts")
             if config.compose is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.compose")
             if config.limits is not None and config.limits.run_timeout_s is not None:
