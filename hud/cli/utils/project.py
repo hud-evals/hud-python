@@ -167,17 +167,35 @@ def resolve_writable_placement(
     console: HUDConsole,
 ) -> Placement:
     """Resolve and announce a Project that accepts new resources."""
+    placement = resolve_placement_or_exit(platform, env_source, flag=flag, console=console)
+    require_writable_placement(placement, console)
+    return placement
+
+
+def resolve_placement_or_exit(
+    platform: PlatformClient,
+    env_source: EnvironmentSource,
+    *,
+    flag: str | None,
+    console: HUDConsole,
+) -> Placement:
+    """Resolve and announce a Project without requiring create access."""
     from hud.utils.exceptions import HudRequestError
 
     try:
         placement = resolve_placement(platform, env_source, flag=flag)
-        if placement.project is not None and not placement.project.can_create:
-            raise ProjectNotWritable(placement.project)
-    except (ProjectNotFound, ProjectNotWritable, HudRequestError) as e:
+    except (ProjectNotFound, HudRequestError) as e:
         raise report_project_error(console, e) from e
 
     console.info(f"Project: {placement.label}")
     return placement
+
+
+def require_writable_placement(placement: Placement, console: HUDConsole) -> None:
+    """Exit when an operation would write to a read-only Project."""
+    if placement.project is not None and not placement.project.can_create:
+        error = ProjectNotWritable(placement.project)
+        raise report_project_error(console, error) from error
 
 
 __all__ = [
@@ -188,7 +206,9 @@ __all__ = [
     "ProjectSource",
     "list_projects",
     "report_project_error",
+    "require_writable_placement",
     "resolve_placement",
+    "resolve_placement_or_exit",
     "resolve_project",
     "resolve_writable_placement",
 ]

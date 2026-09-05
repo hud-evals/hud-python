@@ -11,7 +11,11 @@ from typing import Any
 import typer
 
 from hud.cli.utils.api import require_api_key
-from hud.cli.utils.project import Placement, resolve_writable_placement
+from hud.cli.utils.project import (
+    Placement,
+    require_writable_placement,
+    resolve_placement_or_exit,
+)
 from hud.cli.utils.registry import (
     RegistryEnvironment,
     get_registry_environment,
@@ -328,7 +332,7 @@ def sync_tasks_command(
     # Creating a new taskset is only allowed when targeting an explicit name
     # (not an --id or a stored id, which must already exist).
     allow_create = taskset is not None and taskset_id is None
-    placement = resolve_writable_placement(
+    placement = resolve_placement_or_exit(
         platform,
         EnvironmentSource.open(),
         flag=project,
@@ -363,6 +367,8 @@ def sync_tasks_command(
     if dry_run:
         hud_console.info("\n  --dry-run: no changes made")
         return
+
+    require_writable_placement(placement, hud_console)
 
     if not yes and not hud_console.confirm("Proceed?", default=False):
         hud_console.info("Aborted.")
