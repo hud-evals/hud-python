@@ -8,9 +8,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import mcp.types as mcp_types
+import pytest
 from openai.types.responses import ResponseOutputText
 
-from hud.agents.openai.agent import OpenAIAgent, OpenAIRunState
+from hud.agents.openai.agent import EmptyShellCallError, OpenAIAgent, OpenAIRunState
 from hud.agents.openai.tools.base import format_openai_result
 from hud.agents.openai.tools.computer import OPENAI_COMPUTER_SPEC, OpenAIComputerTool
 from hud.agents.types import OpenAIConfig
@@ -181,3 +182,26 @@ async def test_get_response_parses_shell_call() -> None:
 
     result = await agent.get_response(state)
     assert [tc.name for tc in result.tool_calls] == ["shell"]
+
+
+async def test_get_response_rejects_empty_shell_call() -> None:
+    # A shell_call with an empty commands array poisons the stored response
+    # chain (OpenAI 500s every continuation via previous_response_id), so the
+    # turn must fail fast and its response id must never be committed.
+    response = _api_response(
+        "resp_poisoned",
+        [
+            SimpleNamespace(
+                type="shell_call",
+                action=SimpleNamespace(to_dict=lambda: {"commands": [], "timeout_ms": 10000}),
+                call_id="call_empty",
+            ),
+        ],
+    )
+    agent = _agent(response)
+    state = OpenAIRunState(messages=[agent._format_message("user", "run")])
+
+    with pytest.raises(EmptyShellCallError, match="empty commands array"):
+        await agent.get_response(state)
+
+    assert state.last_response_id is None

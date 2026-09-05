@@ -24,7 +24,7 @@ from openai.types.responses.response_input_param import (
 )
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
-from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
 from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
@@ -39,6 +39,16 @@ if TYPE_CHECKING:
     import mcp.types as mcp_types
 
 logger = logging.getLogger(__name__)
+
+
+class EmptyShellCallError(DegenerateTurnError):
+    """The model emitted a shell_call with an empty ``commands`` array.
+
+    OpenAI stores such a turn but returns 500 for every request that continues
+    from it via ``previous_response_id``. The turn is rejected before its
+    response id is committed, so the run state still points at the last
+    healthy response and the next sample continues from there.
+    """
 
 
 @dataclass
@@ -227,6 +237,18 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             include=include_param,
         )
 
+        empty_shell_calls = [
+            item.call_id
+            for item in response.output
+            if item.type == "shell_call" and item.action.to_dict().get("commands") == []
+        ]
+        if empty_shell_calls:
+            raise EmptyShellCallError(
+                f"Model emitted shell_call(s) with an empty commands array "
+                f"({', '.join(empty_shell_calls)}); continuing from response {response.id} "
+                "would fail with OpenAI 500s, so it was not committed to the run state."
+            )
+
         oai_state.last_response_id = response.id
         oai_state.message_cursor = len(messages)
 
@@ -335,4 +357,4 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         )
 
 
-__all__ = ["OpenAIAgent"]
+__all__ = ["EmptyShellCallError", "OpenAIAgent"]
