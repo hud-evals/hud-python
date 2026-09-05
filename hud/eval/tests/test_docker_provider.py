@@ -31,6 +31,7 @@ from hud.eval.runtime import (
     RuntimeConfig,
     RuntimeGPU,
     RuntimeLimits,
+    RuntimeMount,
     RuntimeResources,
     Shared,
 )
@@ -160,6 +161,14 @@ class _ModalImageRef:
 @dataclass(frozen=True)
 class _ModalSecretRef:
     name: str
+
+
+@dataclass(frozen=True)
+class _ModalBucketMount:
+    bucket_name: str
+    key_prefix: str | None = None
+    secret: object = None
+    read_only: bool = False
 
 
 class _FakeModalStream:
@@ -293,6 +302,8 @@ def _install_fake_modal(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     setattr(modal, "App", SimpleNamespace(lookup=SimpleNamespace(aio=lookup)))
     setattr(modal, "Probe", SimpleNamespace(with_tcp=lambda port: ("tcp", port)))
     setattr(modal, "Sandbox", SimpleNamespace(create=SimpleNamespace(aio=create)))
+    setattr(modal, "CloudBucketMount", _ModalBucketMount)
+    setattr(modal, "Secret", SimpleNamespace(from_name=lambda name: _ModalSecretRef(name)))
     monkeypatch.setitem(sys.modules, "modal", modal)
     return calls
 
@@ -1353,6 +1364,58 @@ async def test_modal_runtime_bounds_output_teardown(
 
     await asyncio.wait_for(run(), timeout=1)
     assert calls["terminated"] is True
+
+
+async def test_modal_runtime_attaches_read_only_bucket_mounts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    mounts = [
+        RuntimeMount(
+            path="/pack",
+            bucket="vendor-uploads",
+            prefix="listings/123/",
+            secret="hud-vendor-uploads",
+        )
+    ]
+    config = RuntimeConfig(image="img:tag", mounts=mounts)
+
+    async with ModalRuntime(runtime_config=config)(_row()):
+        pass
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["volumes"] == {
+        "/pack": _ModalBucketMount(
+            bucket_name="vendor-uploads",
+            key_prefix="listings/123/",
+            secret=_ModalSecretRef("hud-vendor-uploads"),
+            read_only=True,
+        )
+    }
+    assert config.with_overrides(RuntimeConfig(mounts=None)).mounts is None
+    with pytest.raises(ValueError):
+        RuntimeMount(path="pack", bucket="vendor-uploads")
+    with pytest.raises(ValueError):
+        RuntimeMount(path="/pack", bucket="vendor-uploads", prefix="listings/123")
+
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"mounts require runtime_config\.image"):
+        async with ModalRuntime(
+            runtime_config=RuntimeConfig(
+                compose=ComposeProject(document=compose),
+                mounts=mounts,
+            )
+        )(_row()):
+            pass
+
+    with pytest.raises(ValueError, match=r"does not support runtime_config\.mounts"):
+        async with DockerRuntime(runtime_config=RuntimeConfig(image="img:tag", mounts=mounts))(
+            _row()
+        ):
+            pass
 
 
 async def test_modal_runtime_attaches_sandbox_secrets(
