@@ -186,6 +186,19 @@ uploads a taskset and only what changed, a workflow covered in
 [creating an environment](/v6/guides/creating-an-environment#deploying-to-the-platform). In code,
 `diff(local, remote)` returns a `SyncPlan` describing the comparison:
 
+To create the taskset outside the team default Project, select a directory Project first or pass an
+explicit destination:
+
+```bash
+hud project use browser-evals
+hud sync tasks my-taskset
+
+# Or select it on the sync command
+hud sync tasks my-taskset --project browser-evals
+```
+
+See [Projects](/v6/reference/projects) for placement precedence and existing-resource behavior.
+
 ```python
 from hud.eval.sync import diff
 

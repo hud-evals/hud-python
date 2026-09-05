@@ -210,6 +210,12 @@ class EnvironmentSource:
         value = self.load_config().get("tasksetId")
         return value if isinstance(value, str) else None
 
+    @property
+    def project_id(self) -> str | None:
+        """The Project this directory's environment and taskset belong to."""
+        value = self.load_config().get("projectId")
+        return value if isinstance(value, str) else None
+
     def iter_source_files(self) -> Iterator[Path]:
         for name in self.SOURCE_INCLUDE_FILES:
             path = self.root / name

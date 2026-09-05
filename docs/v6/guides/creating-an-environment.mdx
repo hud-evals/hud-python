@@ -288,10 +288,23 @@ hud set HUD_API_KEY=your-key   # get one at hud.ai
 hud deploy
 ```
 
+The environment is created in the directory's resolved [HUD Project](/v6/reference/projects), or in
+the team default Project when none is configured. Select another Project persistently or on this
+deploy:
+
+```bash
+hud project use browser-evals
+hud deploy
+
+# Or select it directly; a successful deploy saves the resolved Project
+hud deploy --project browser-evals
+```
+
 To run a taskset from the platform, publish it too. `hud sync` uploads a taskset and only what changed:
 
 ```bash
 hud sync tasks my-tasks   # publish tasks.py as a named taskset
+hud sync tasks my-tasks --project browser-evals
 hud sync env              # sync environment metadata
 ```
 

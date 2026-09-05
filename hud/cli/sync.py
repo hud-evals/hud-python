@@ -11,6 +11,11 @@ from typing import Any
 import typer
 
 from hud.cli.utils.api import require_api_key
+from hud.cli.utils.project import (
+    Placement,
+    require_writable_placement,
+    resolve_placement_or_exit,
+)
 from hud.cli.utils.registry import (
     RegistryEnvironment,
     get_registry_environment,
@@ -220,11 +225,14 @@ def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
     console.error(f"Upload failed ({error.status_code}): {detail or error}")
 
 
-def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
+def _save_taskset_id(result: dict[str, object], placement: Placement, console: HUDConsole) -> None:
     returned_id = result.get("taskset_id")
     if not isinstance(returned_id, str) or not returned_id:
         return
-    changed = EnvironmentSource.open().save_config({"tasksetId": returned_id})
+    config: dict[str, object] = {"tasksetId": returned_id}
+    if placement.project is not None:
+        config["projectId"] = placement.project.id
+    changed = EnvironmentSource.open().save_config(config)
     if changed:
         console.dim_info("Taskset ID saved to:", ".hud/config.json")
     from hud.settings import settings
@@ -246,6 +254,12 @@ def sync_tasks_command(
         None,
         "--id",
         help="Taskset ID directly (skip name resolution)",
+    ),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help="Project to create this taskset in (name or ID). Defaults to the "
+        "directory's saved project, then HUD_PROJECT, then your team default.",
     ),
     task_filter: str | None = typer.Option(
         None,
@@ -318,6 +332,12 @@ def sync_tasks_command(
     # Creating a new taskset is only allowed when targeting an explicit name
     # (not an --id or a stored id, which must already exist).
     allow_create = taskset is not None and taskset_id is None
+    placement = resolve_placement_or_exit(
+        platform,
+        EnvironmentSource.open(),
+        flag=project,
+        console=hud_console,
+    )
 
     try:
         remote_taskset = _fetch_remote_taskset(
@@ -348,6 +368,8 @@ def sync_tasks_command(
         hud_console.info("\n  --dry-run: no changes made")
         return
 
+    require_writable_placement(placement, hud_console)
+
     if not yes and not hud_console.confirm("Proceed?", default=False):
         hud_console.info("Aborted.")
         return
@@ -355,7 +377,12 @@ def sync_tasks_command(
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = upload_taskset(platform, plan.taskset_name, plan.to_apply)
+        result = upload_taskset(
+            platform,
+            plan.taskset_name,
+            plan.to_apply,
+            project_id=placement.project_id,
+        )
     except HudRequestError as e:
         _show_upload_error(e, hud_console)
         return
@@ -365,7 +392,7 @@ def sync_tasks_command(
 
     hud_console.success("Sync complete")
     hud_console.info(f"  + {created} created, ~ {updated} updated")
-    _save_taskset_id(result, hud_console)
+    _save_taskset_id(result, placement, hud_console)
 
 
 @sync_app.command("env")
