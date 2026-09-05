@@ -1,0 +1,37 @@
+---
+title: "Projects"
+description: "Understand how HUD Projects organize environments and tasksets."
+icon: "folder-tree"
+---
+
+A HUD **Project** is the workspace boundary for a related set of environments and tasksets. Projects
+also control who can see those resources and who can create new ones.
+
+## Default Project
+
+Every team has a default Project. If you deploy an environment or publish a taskset without choosing
+another Project, HUD places it in the team default. This keeps the normal workflow zero-configuration.
+
+## Project selection
+
+A local environment directory can be associated with a Project. Deploys and task syncs from that
+directory then use the same destination, keeping an environment and its tasksets together.
+
+For automation or exceptional cases, a command can select a different destination explicitly. HUD
+also supports a machine-wide fallback for directories without an association.
+
+Project selection only controls where a **new** resource is created. It does not move resources
+between Projects.
+
+## Resource ownership
+
+Each deployed environment or taskset belongs to one Project. If you need the same resource in another
+Project, create it there under a separate name rather than changing the Project of the existing
+resource.
+
+Projects may be writable or read-only for a given user. Only team admins can create Projects.
+
+<CardGroup cols={2}>
+  <Card title="Projects CLI" icon="terminal" href="/v6/reference/cli#hud-project" />
+  <Card title="Tasks & tasksets" icon="list-check" href="/v6/reference/tasks" />
+</CardGroup>

@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for the hud command-line interface: init, dev, run, eval, models, and other commands that span the HUD environment and agent lifecycle."
+description: "Reference for the hud command-line interface: init, deploy, projects, sync, eval, and other commands across the HUD lifecycle."
 icon: "terminal"
 ---
 
@@ -50,6 +50,7 @@ rebuilds that environment.
 
 ```bash
 hud deploy
+hud deploy --project browser-evals
 ```
 
 | Option | Description |
@@ -57,6 +58,7 @@ hud deploy
 | `--all`, `-a` | Deploy all environments in the directory. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
 | `--env-file` | Path to a `.env` file. |
+| `--project` | Project name or ID for placement. Falls back to the directory Project, `HUD_PROJECT`, then the team default. |
 
 ## Evaluate
 
@@ -126,10 +128,61 @@ hud task grade fix_bug --answer "..."  # -> the reward (stdout)
 
 ## Platform
 
+### `hud project`
+
+Show and choose the [HUD Project](/v6/reference/projects) where new environments and tasksets are
+created.
+
 ```bash
-hud sync tasks my-taskset      # publish tasks as a named taskset
-hud sync env                   # sync environment metadata
+hud project                              # resolved Project for the current directory
+hud project list                         # visible Projects and access
+hud project create browser-evals         # create and use a Project (team admins)
+hud project create browser-evals --no-use
+hud project use browser-evals            # save projectId to .hud/config.json
+hud project use browser-evals -C ./my-env
 ```
+
+| Command or option | Description |
+|-------------------|-------------|
+| `hud project [--directory PATH]` | Show where new resources from a directory will be created. `-C` is an alias. |
+| `hud project list` | List visible Projects, marking the team default and read-only entries. |
+| `hud project create <name>` | Create and pin a Project. Accepts `--description`, `--directory`/`-C`, and `--no-use`. |
+| `hud project use <name-or-id>` | Pin a directory to an existing writable Project. Accepts `--directory`/`-C`. |
+
+#### Project selection
+
+`hud deploy` and `hud sync tasks` resolve their destination in this order:
+
+| Priority | Source | Scope |
+|----------|--------|-------|
+| 1 | `--project <name-or-id>` | Current command |
+| 2 | `.hud/config.json` → `projectId` | Current directory |
+| 3 | `HUD_PROJECT` | Machine or process |
+| 4 | Team default Project | Zero-configuration fallback |
+
+Set the machine-wide fallback with `hud set HUD_PROJECT=<name-or-id>`. When a named Project is
+resolved, a successful deploy or task sync saves its ID to the directory's `.hud/config.json`.
+
+`hud project list` marks the team default and read-only Projects. Pinning a directory, deploying, or
+syncing to a Project requires create access. Only team admins can create Projects.
+
+An existing environment or taskset stays in its original Project. Selecting a different Project for
+an existing resource fails rather than moving it; use its current Project or create a separately named
+resource in the new one.
+
+### `hud sync`
+
+Publish task definitions or link a local directory to a deployed environment:
+
+```bash
+hud sync tasks my-taskset                          # publish using resolved Project
+hud sync tasks my-taskset --project browser-evals # override by Project name or ID
+hud sync env                                       # link environment metadata
+```
+
+`hud sync tasks --project` follows the same resolution and persistence rules as
+`hud deploy --project`. Existing resources remain in their original Project. See
+[Projects](/v6/reference/projects) for the conceptual overview.
 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).

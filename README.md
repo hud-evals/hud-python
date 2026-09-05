@@ -166,7 +166,7 @@ hud project                        # where does a deploy here land?
 
 Both commands also take `--project <name-or-id>` to override the resolved Project. A successful deploy or sync pins that Project to the directory; `hud set HUD_PROJECT=<name-or-id>` instead sets a machine-wide default for directories you have not pinned. Precedence is the flag, then the directory's `.hud/config.json`, then `HUD_PROJECT`, then your team default. An environment or taskset that already exists stays where it is; naming a different project fails rather than moving it.
 
-→ [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
+→ [Projects](https://docs.hud.ai/v6/reference/projects) · [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
 ## Train on rewards
 
