@@ -53,6 +53,16 @@ MessageT = TypeVar("MessageT")
 ConfigT = TypeVar("ConfigT", bound="AgentConfig")
 
 
+class DegenerateTurnError(Exception):
+    """A model sample was unusable and was not committed to the run state.
+
+    Raised by ``get_response`` implementations that reject a degenerate
+    response before recording it. The loop discards the turn and samples a
+    fresh one; each discarded turn still consumes a step from ``max_steps``,
+    and a degenerate final step fails the run.
+    """
+
+
 def _message_text(message: mcp_types.PromptMessage) -> str:
     """Best-effort plain text for a prompt message (text content only for now)."""
     content = message.content
@@ -229,11 +239,17 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             for turn in range(1, max_steps + 1):
                 logger.info("step %d/%d", turn, max_steps)
                 started_at = now_iso()
-                step = await self.get_response(
-                    state,
-                    system_prompt=system_prompt,
-                    citations_enabled=citations_enabled,
-                )
+                try:
+                    step = await self.get_response(
+                        state,
+                        system_prompt=system_prompt,
+                        citations_enabled=citations_enabled,
+                    )
+                except DegenerateTurnError as exc:
+                    if turn == max_steps:
+                        raise
+                    logger.warning("Discarded degenerate turn: %s", exc)
+                    continue
                 step.started_at = step.started_at or started_at
                 step.model = step.model or self.config.model
                 run.record(step)

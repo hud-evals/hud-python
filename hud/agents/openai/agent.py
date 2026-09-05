@@ -24,7 +24,7 @@ from openai.types.responses.response_input_param import (
 )
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
-from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
 from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
@@ -41,13 +41,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class EmptyShellCallError(RuntimeError):
+class EmptyShellCallError(DegenerateTurnError):
     """The model emitted a shell_call with an empty ``commands`` array.
 
     OpenAI stores such a turn but returns 500 for every request that continues
     from it via ``previous_response_id``. The turn is rejected before its
     response id is committed, so the run state still points at the last
-    healthy response and a caller-level retry samples a fresh turn.
+    healthy response and the next sample continues from there.
     """
 
 
