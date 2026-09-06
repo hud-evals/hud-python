@@ -244,6 +244,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert run.job_id == job_id
     assert run.group_id == "g1"
     assert run.grade.info == {"summary": {"passed": 3}}
+    assert Job(id="job", name="test", runs=[run]).results == {"sums-add": [run]}
     assert platform.polled == 3
     (path, payload) = platform.posts[0]
     assert path == "/rollouts/submit"

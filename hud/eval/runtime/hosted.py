@@ -131,6 +131,7 @@ class HostedRuntime:
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id
+        run.slug = task.slug
         return run
 
     async def _submit_and_await(
