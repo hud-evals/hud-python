@@ -202,12 +202,16 @@ class HostedRuntime:
                 if run.trace.status == "cancelled"
                 else "rollout failed before grading"
             )
-        run.grade = Grade(
-            reward=float(reward) if reward is not None else 0.0,
-            is_error=ungraded_failure,
-            content=grade_error,
-            raw={"score": float(reward)} if reward is not None else {},
-        )
+        evaluation_result = state.get("evaluation_result")
+        if isinstance(evaluation_result, dict):
+            run.grade = Grade.from_dict(evaluation_result)
+        else:
+            run.grade = Grade(
+                reward=float(reward) if reward is not None else 0.0,
+                is_error=ungraded_failure,
+                content=grade_error,
+                raw={"score": float(reward)} if reward is not None else {},
+            )
         run._runtime = f"hud://trace/{trace_id}"
         return run
 
@@ -215,7 +219,8 @@ class HostedRuntime:
         while True:
             state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
             if state.get("status") in _TERMINAL_TRACE_STATUSES:
-                return state
+                trace_info = await platform.aget(f"/trace/{trace_id}/info")
+                return {**state, "evaluation_result": trace_info.get("evaluation_result")}
             await asyncio.sleep(self.poll_interval)
 
     async def _cancel(self, platform: PlatformClient, trace_id: str) -> None:

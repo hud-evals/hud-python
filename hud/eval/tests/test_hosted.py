@@ -51,8 +51,14 @@ class _FakePlatform:
 
     api_key = "test-key"
 
-    def __init__(self, states: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        states: list[dict[str, Any]],
+        *,
+        trace_info: dict[str, Any] | None = None,
+    ) -> None:
         self.states = states
+        self.trace_info = trace_info
         self.posts: list[tuple[str, dict[str, Any]]] = []
         self.polled = 0
 
@@ -61,6 +67,8 @@ class _FakePlatform:
         return {"status": "queued"}
 
     async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        if path.endswith("/info"):
+            return self.trace_info if self.trace_info is not None else self.states[-1]
         state = self.states[min(self.polled, len(self.states) - 1)]
         self.polled += 1
         return state
@@ -190,7 +198,15 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
             {"status": "pending"},
             {"status": "running"},
             {"status": "completed", "reward": 0.5},
-        ]
+        ],
+        trace_info={
+            "status": "completed",
+            "reward": 0.5,
+            "evaluation_result": {
+                "score": 0.5,
+                "info": {"summary": {"passed": 3}},
+            },
+        },
     )
     monkeypatch.setattr(
         "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
@@ -227,6 +243,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert run.trace.trace_id == trace_id
     assert run.job_id == job_id
     assert run.group_id == "g1"
+    assert run.grade.info == {"summary": {"passed": 3}}
     assert platform.polled == 3
     (path, payload) = platform.posts[0]
     assert path == "/rollouts/submit"
