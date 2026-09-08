@@ -61,4 +61,10 @@ tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]
 hud eval tasks.py claude
 ```
 
-`hud eval` spawns the environment locally, runs the `claude` agent, and grades it. Every rollout generates a replayable trace on [hud.ai](https://hud.ai). 
+`hud eval` spawns the environment locally, runs the `claude` agent, and grades it. Every rollout generates a replayable trace on [hud.ai](https://hud.ai).
+
+## 5. View your traces
+
+`hud eval` prints a job link. Open it on [hud.ai](https://hud.ai) to replay each trace step by
+step - every prompt, action, and the reward the grader returned. From the
+[platform](/platform/evaluations) you can run whole tasksets across models and compare the results.
