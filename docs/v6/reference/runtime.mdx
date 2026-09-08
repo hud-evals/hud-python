@@ -228,10 +228,6 @@ The SDK leases your deployed env by name and tunnels to its control channel; the
 
 ### `HostedRuntime`
 
-Hosted runs preserve the structured evaluation result returned by the platform, including
-`run.grade.info`, subscores, and grading errors. Runs retain their task slug for
-`Job.results`. Traces without a structured result use the recorded reward.
-
 ```python
 HostedRuntime(*, poll_interval=5.0, run_timeout=None)
 ```
