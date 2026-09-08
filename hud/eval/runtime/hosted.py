@@ -113,6 +113,7 @@ class HostedRuntime:
                         trace_id=trace_id,
                         parent_trace_id=parent_trace_id,
                     )
+            run = self._fold(state, trace_id)
         except asyncio.CancelledError:
             self._cancel_later(trace_id)
             raise
@@ -124,13 +125,12 @@ class HostedRuntime:
             run = Run.failed(detail)
             run.trace.stop_reason = "timeout"
         except Exception as exc:
-            logger.warning("hosted rollout failed to launch: %s", exc)
+            logger.warning("hosted rollout failed: %s", exc)
             run = Run.failed(str(exc))
-        else:
-            run = self._fold(state, trace_id)
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id
+        run.slug = task.slug
         return run
 
     async def _submit_and_await(
@@ -202,11 +202,16 @@ class HostedRuntime:
                 if run.trace.status == "cancelled"
                 else "rollout failed before grading"
             )
-        run.grade = Grade(
-            reward=float(reward) if reward is not None else 0.0,
-            is_error=ungraded_failure,
-            content=grade_error,
-            raw={"score": float(reward)} if reward is not None else {},
+        evaluation_result = state.get("evaluation_result")
+        run.grade = (
+            Grade.from_dict(evaluation_result)
+            if evaluation_result is not None
+            else Grade(
+                reward=float(reward) if reward is not None else 0.0,
+                is_error=ungraded_failure,
+                content=grade_error,
+                raw={"score": float(reward)} if reward is not None else {},
+            )
         )
         run._runtime = f"hud://trace/{trace_id}"
         return run
