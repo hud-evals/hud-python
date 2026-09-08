@@ -21,7 +21,7 @@ from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
-from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
@@ -590,6 +590,50 @@ async def test_loop_finishes_on_done_response() -> None:
     assert step.content == "final answer"
     assert step.model == "test-model"
     assert step.started_at is not None
+
+
+class _DegenerateDictAgent(DictAgent):
+    """DictAgent whose scripted turns may be ``DegenerateTurnError`` instances."""
+
+    def __init__(self, turns: list[AgentStep | DegenerateTurnError], **config: Any) -> None:
+        super().__init__(cast("list[AgentStep]", turns), **config)
+
+    async def get_response(
+        self, state: RunState[_Msg], *, system_prompt: Any = None, citations_enabled: bool = False
+    ) -> AgentStep:
+        turn = await super().get_response(
+            state, system_prompt=system_prompt, citations_enabled=citations_enabled
+        )
+        if isinstance(turn, DegenerateTurnError):
+            raise turn
+        return turn
+
+
+async def test_loop_discards_degenerate_turn_and_resamples() -> None:
+    agent = _DegenerateDictAgent(
+        [
+            DegenerateTurnError("empty shell_call"),
+            AgentStep(content="recovered", done=True),
+        ]
+    )
+    run = cast("Run", _FakeRun())
+
+    await agent._loop(run, RunState(), max_steps=3)
+
+    # The degenerate turn is discarded (consuming a step) and never recorded.
+    assert run.trace.status == "completed"
+    assert run.trace.content == "recovered"
+    assert [step.source for step in run.trace.steps] == ["agent"]
+
+
+async def test_loop_fails_when_degenerate_turn_exhausts_steps() -> None:
+    agent = _DegenerateDictAgent([DegenerateTurnError("empty shell_call")] * 2)
+    run = cast("Run", _FakeRun())
+
+    await agent._loop(run, RunState(), max_steps=2)
+
+    assert run.trace.status == "error"
+    assert run.trace.error == "empty shell_call"
 
 
 async def test_loop_dispatches_tool_calls_then_finishes() -> None:
