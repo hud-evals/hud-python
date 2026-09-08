@@ -87,7 +87,7 @@ You need:
 - Python 3.11 or 3.12
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
 - A Fireworks API key with Serverless Training access
-- Access to `accounts/fireworks/models/qwen3p5-9b`, the serverless-enabled default model
+- Access to `accounts/fireworks/models/qwen3p8-27b`, the serverless-enabled default model
 
 Clone the HUD SDK, enter the cookbook directory, and install its dependencies:
 
@@ -100,6 +100,10 @@ export FIREWORKS_API_KEY="fw_..."
 
 Run all commands below from `hud-python/cookbooks/fireworks-rl-training`.
 
+The default configuration uses Qwen 3.8 27B (`accounts/fireworks/models/qwen3p8-27b`)
+with tokenizer `Qwen/Qwen3.8-27B`. Fireworks deprecated the Qwen 3.5 9B and Qwen 3.6 27B
+Serverless Training pools; see the
+[Fireworks changelog](https://docs.fireworks.ai/updates/changelog).
 If you choose another base model, pass a matching Fireworks model, Hugging Face tokenizer, and
 renderer together:
 
@@ -112,8 +116,9 @@ uv run train.py \
 ```
 
 Prompt rendering happens on the client. A mismatched model, tokenizer, or renderer can train on the
-wrong tokenization. The default renderer disables thinking mode so the model reaches the final
-answer within the generation limit.
+wrong tokenization. The default renderer, `qwen3_8_disable_thinking` from
+`tinker-cookbook>=0.5.7`, disables thinking mode. This leaves enough of the generation budget
+for the model to emit the final answer that the grader reads.
 
 The example runs its HUD environment locally, so a HUD account is not required. A deployed HUD
 taskset requires `HUD_API_KEY` as described in [Use a hosted taskset](#use-a-hosted-taskset).
@@ -127,8 +132,8 @@ initial adapter before paying for a longer run:
 uv run train.py \
   --calibrate \
   --tasks-per-step 6 \
-  --group-size 6 \
-  --max-tokens 512 \
+  --group-size 4 \
+  --max-tokens 2048 \
   --debug-samples 4
 ```
 
@@ -140,6 +145,10 @@ match better answers.
 If every rollout is correct, make the arithmetic harder with `--min-a`, `--max-a`, `--min-b`, and
 `--max-b`. If every rollout is incorrect, reduce the operand range or increase `--max-tokens`.
 
+The default uses four-digit operands and a 2,048-token budget. Three-digit tasks were nearly
+saturated on Qwen 3.8 27B, while smaller budgets cut off many answers. Inspect the full
+`--debug-samples` responses and token counts so truncation is not mistaken for arithmetic difficulty.
+
 ## Run the example
 
 After calibration shows useful reward spread, run one bounded training step:
@@ -149,7 +158,7 @@ uv run train.py \
   --steps 1 \
   --tasks-per-step 2 \
   --group-size 4 \
-  --max-tokens 512 \
+  --max-tokens 2048 \
   --eval-tasks 4 \
   --require-update
 ```
@@ -157,7 +166,8 @@ uv run train.py \
 `--require-update` makes the command fail if both task groups receive flat rewards. A successful run
 therefore verifies Fireworks authentication, sampling, HUD execution and grading, one optimizer
 update, checkpoint creation, and held-out evaluation. The step log and `metrics.jsonl` also record
-`kept_groups` and `updated`.
+`kept_groups` and `updated`. Sampling or grading errors fail the command in every phase,
+including calibration and evaluation.
 
 Only then consider the full recipe:
 
@@ -166,7 +176,7 @@ uv run train.py
 ```
 
 The defaults request 30 steps × 8 task groups × 8 attempts, or 1,920 training rollouts, followed by
-16 evaluation rollouts. Each rollout can generate up to 1,024 tokens and incurs Fireworks usage.
+16 evaluation rollouts. Each rollout can generate up to 2,048 tokens and incurs Fireworks usage.
 Charges include prompt prefill, sampled output, and training tokens at the selected model's
 [serverless rates](https://docs.fireworks.ai/fine-tuning/training-api/serverless#pricing). Metrics
 are written to `runs/fireworks-serverless/metrics.jsonl`.
@@ -192,14 +202,18 @@ async def multiply(a: int, b: int):
         "on its own line at the end of your answer."
     )
 
-    text = answer if isinstance(answer, str) else str(answer)
-    integers = re.findall(r"-?\d+", text)
-    got = int(integers[-1]) if integers else None
+    text = (answer if isinstance(answer, str) else str(answer)).strip()
+    final = text.splitlines()[-1].strip() if text else ""
+    got = (
+        int(final.replace(",", ""))
+        if re.fullmatch(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)", final)
+        else None
+    )
     expected = a * b
 
     yield EvaluationResult(
         reward=1.0 if got == expected else 0.0,
-        content=text.strip(),
+        content=text,
         info={"expected": expected, "got": got},
     )
 ```
@@ -286,6 +300,10 @@ Resume from a fully qualified training checkpoint:
 ```bash
 uv run train.py --resume-from "<account>/<run-id>/state-0005"
 ```
+
+Resume restores the checkpoint's original base model. Start a new run to migrate from an older
+Qwen model to Qwen 3.8; resuming does not convert the adapter. A supported non-default checkpoint
+requires its matching tokenizer and renderer.
 
 The script prints `Sampler checkpoint: ...` for the final adapter. Sampler checkpoints are tied to
 the active serverless session. Use that path to identify and
