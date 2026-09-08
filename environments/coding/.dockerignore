@@ -1,0 +1,8 @@
+*
+!Dockerfile.hud
+!pyproject.toml
+!uv.lock
+!env.py
+!grader.py
+!flask.bundle
+**/__pycache__

@@ -1,0 +1,8 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+WORKDIR /hud
+COPY . .
+RUN uv sync
+
+EXPOSE 8765
+CMD ["uv", "run", "hud", "serve", "env.py", "--host", "0.0.0.0", "--port", "8765"]

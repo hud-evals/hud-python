@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# HUD generated files
+.hud/
+hud.lock.yaml
+.hud_eval.toml
+remote_tasks.json
+
+# Ruff cache
+.ruff_cache/
+
+# Log files
+*.log
+
+# Editor directories
+.vscode/
+.idea/
+*.sw?
+.claude/
+
+# OS generated files
+.DS_Store
+
+# Build artifacts
+/build/
+/dist/
+
+# The SDK repo ignores uv.lock at its root; this template pins its own so the
+# example resolves reproducibly.
+!uv.lock
+
+# Database
+*.sqlite
+
+# Node (if applicable)
+node_modules/

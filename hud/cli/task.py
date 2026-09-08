@@ -1,8 +1,8 @@
 """``hud task`` — start a task (get its prompt) or grade an answer.
 
-Placement-explicit: the source flow spawns the env source on a local substrate
-(the same ``spawn`` provider ``hud eval`` uses) and speaks the protocol to it;
-``--url`` attaches to an already-served control channel instead.
+The task source resolves an authored slug to its template id and bound args.
+Without ``--url`` that source is also spawned locally; with ``--url`` the task
+runs against the already-served control channel instead.
 
     hud task list                          # what tasks this source exposes
     hud task start fix_config              # -> the task's prompt (stdout)
@@ -79,18 +79,14 @@ def _spawn_target(source: str) -> Path:
 def _resolve(
     task: str, source: str | None, url: str | None, args: dict[str, Any]
 ) -> tuple[str, dict[str, Any], AbstractAsyncContextManager[Runtime]]:
-    """Resolve ``(task_id, args, placement)``, choosing a substrate in priority order:
+    """Resolve ``(task_id, args, placement)``.
 
-    1. ``--url`` — attach to that control channel;
-    2. no ``--source`` and a local env already serving on :8765 — attach to it
-       (e.g. inside a built image, or alongside ``hud serve``);
-    3. otherwise — introspect local source for the task id/slug, and spawn that
-       source as the substrate.
+    ``--source`` resolves an authored task id/slug and its bound args. ``--url``
+    selects an existing substrate; otherwise an explicit source is spawned. With
+    neither option, a local env on :8765 is used when present, or ``.`` is resolved
+    and spawned.
 
-    The placement decision is made *here*, so this returns the acquisition
-    itself (one substrate, ready to enter), not a provider. ``--args`` (when
-    given) overrides the authored args so any explicit parameterization is
-    runnable.
+    ``--args`` overrides authored args when supplied.
     """
     from contextlib import nullcontext
 
@@ -99,9 +95,12 @@ def _resolve(
     attach = url
     if attach is None and source is None:
         attach = _local_env_url()
+    endpoint = None
     if attach is not None:
         parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
         endpoint = f"tcp://{parts.hostname or '127.0.0.1'}:{parts.port or 8765}"
+
+    if endpoint is not None and source is None:
         return task, args, nullcontext(Runtime(endpoint))
 
     taskset = _collect(source or ".")
@@ -118,7 +117,10 @@ def _resolve(
         hud_console.error(f"No task matching {task!r} (available: {available})")
         raise typer.Exit(1)
     selected = matches[0]
-    placement = SubprocessRuntime(_spawn_target(source or "."))(selected)
+    if endpoint is not None:
+        placement = nullcontext(Runtime(endpoint))
+    else:
+        placement = SubprocessRuntime(_spawn_target(source or "."))(selected)
     return selected.id, args or selected.args, placement
 
 
@@ -146,11 +148,17 @@ def list_command(
 def start_command(
     task: str = typer.Argument(..., help="Task id or slug."),
     source: str | None = typer.Option(
-        None, "--source", "-s", help="Spawn this env source (.py/dir/JSON) instead of attaching."
+        None,
+        "--source",
+        "-s",
+        help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
     args: str = typer.Option("{}", "--args", "-a", help="JSON object of task args."),
     url: str | None = typer.Option(
-        None, "--url", "-u", help="Attach to a served control channel instead of loading source."
+        None,
+        "--url",
+        "-u",
+        help="Run against this served control channel; --source may still resolve the task.",
     ),
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the prompt here instead of stdout."
@@ -178,11 +186,17 @@ def grade_command(
         None, "--answer-file", help="Read the answer from a file instead of --answer."
     ),
     source: str | None = typer.Option(
-        None, "--source", "-s", help="Spawn this env source (.py/dir/JSON) instead of attaching."
+        None,
+        "--source",
+        "-s",
+        help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
     args: str = typer.Option("{}", "--args", "-a", help="JSON object of task args."),
     url: str | None = typer.Option(
-        None, "--url", "-u", help="Attach to a served control channel instead of loading source."
+        None,
+        "--url",
+        "-u",
+        help="Run against this served control channel; --source may still resolve the task.",
     ),
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the full JSON result here (else print the reward)."

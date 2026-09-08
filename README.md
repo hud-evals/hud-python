@@ -37,10 +37,12 @@ hud set HUD_API_KEY=your-key-here
 # or: export HUD_API_KEY=your-key-here
 ```
 
-Then scaffold your first environment:
+Then start from the coding environment, or choose another example environment:
 
 ```bash
 hud init my-env
+hud init my-desktop-env --template cua
+hud init my-custom-env --template blank
 ```
 
 ![Agent running on SheetBench](docs/src/images/trace_sheet.gif)
@@ -78,16 +80,6 @@ A built image is the **end product for your tasks**: one build packs every task 
 hud deploy
 hud sync tasks my-taskset
 hud eval my-taskset --remote
-```
-
-For local iteration, the same protocol works against a container on your laptop:
-
-```bash
-docker build -f Dockerfile.hud -t my-env .
-docker run -d --name run1 -p 8765:8765 my-env
-hud task start fix_bug --url tcp://127.0.0.1:8765
-hud task grade fix_bug --url tcp://127.0.0.1:8765 --answer "..."
-docker rm -f run1
 ```
 
 → [Run & deploy](https://docs.hud.ai/v6/reference/runtime)

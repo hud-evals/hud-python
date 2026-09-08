@@ -4,19 +4,18 @@ description: "Complete, runnable cookbook examples you can copy and adapt: codin
 icon: "book-open"
 ---
 
-Cookbooks are complete, runnable projects you can copy and adapt. Each one shows
-an environment, an agent, and a grader working end to end, so you can see a whole
-evaluation rather than one concept at a time. They all live in the
-[`cookbooks/`](https://github.com/hud-evals/hud-python/tree/main/cookbooks)
-directory of the SDK repo. The examples below with a **walkthrough** have a full
-guide on this site; the rest are best read straight from their source.
+The walkthroughs connect complete projects from the SDK repo to the concepts they demonstrate.
+Environment projects live in [`environments/`](https://github.com/hud-evals/hud-python/tree/main/environments)
+and can be copied with `hud init`; specialized agents, protocols, and training loops live in
+[`cookbooks/`](https://github.com/hud-evals/hud-python/tree/main/cookbooks). Entries without a
+walkthrough are best read from their source.
 
 ## Walkthroughs
 
 <CardGroup cols={2}>
-  <Card title="Coding agent" icon="code" href="/v6/cookbooks/coding-agent">
-    Run a coding agent against a shell + files environment, graded by tests.
-    Source: [`cookbooks/codex-coding`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/codex-coding).
+  <Card title="Coding environment" icon="code" href="/v6/cookbooks/coding-agent">
+    Run a real SWE-bench task in an isolated repository workspace with hidden-test grading.
+    Source: [`environments/coding`](https://github.com/hud-evals/hud-python/tree/main/environments/coding).
   </Card>
   <Card title="A2A chat" icon="plug" href="/v6/cookbooks/a2a-chat">
     Serve a chat task over the A2A protocol and talk to it from any client.

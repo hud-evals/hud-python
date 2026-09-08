@@ -1,0 +1,43 @@
+[project]
+name = "cua-env"
+version = "0.1.0"
+description = "CUA environment: a virtual desktop served over an rfb capability for computer-use agents (HUD v6)"
+# v6 SDK caps Python at <3.13; pin the upper bound so uv does not pick 3.13 and fail to resolve.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud>=0.6.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff==0.11.2"]
+
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.hud]
+image = "hud-cua:dev"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "C4", "UP"]
+ignore = ["E501"]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.hatch.build]
+# Flat top-level modules, not a package dir.
+only-packages = false
+include = ["env.py", "tasks.py"]

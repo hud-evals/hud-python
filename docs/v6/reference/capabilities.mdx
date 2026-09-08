@@ -218,6 +218,12 @@ async def _down():
 ```
 </Accordion>
 
+<Note>
+For a complete desktop image with Xvfb, XFCE, Chromium, x11vnc, supervisor, tasks, and graders, run
+`hud init my-desktop-env --template cua`. The reference implementation lives in
+[`environments/cua`](https://github.com/hud-evals/hud-python/tree/main/environments/cua).
+</Note>
+
 ### `robot` - an observation/action loop
 
 ```text
@@ -291,6 +297,7 @@ async def _down():
 
 <Note>
 Use a relative path (`"workspace"`, created next to `env.py`). Sandbox isolation (`bwrap`) is Linux-only - unisolated elsewhere, isolated in a built image.
+For a complete repository workspace with hidden-test grading, run `hud init my-coding-env --template coding`.
 </Note>
 
 | Parameter | Type | Description |

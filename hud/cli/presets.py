@@ -1,217 +1,115 @@
-"""Starter presets for ``hud init`` — the same set offered by the platform's
-*environments/new* flow.
-
-Each preset is a standalone public GitHub repo under ``hud-evals``. ``hud init``
-downloads the repo tarball (no ``git`` required) and extracts it into the target
-directory. Keep this list in sync with the frontend's ``ENVIRONMENT_TEMPLATES``
-(``app/(auth)/environments/components/EnvironmentTemplates.tsx``).
-"""
+"""Example environments used by ``hud init``."""
 
 from __future__ import annotations
 
 import io
 import os
+import shutil
 import tarfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path, PurePosixPath
 
 import httpx
+from packaging.version import Version
 
-if TYPE_CHECKING:
-    from pathlib import Path
+from hud.version import __version__
 
 
 @dataclass(frozen=True, slots=True)
 class EnvironmentPreset:
-    """A starter environment.
-
-    Most presets are sourced from a public GitHub repo. When ``local`` is set the
-    starter is the bundled minimal scaffold instead (see :mod:`hud.cli.templates`);
-    ``owner``/``repo`` are then only used to name the target directory.
-    """
-
-    id: str
-    emoji: str
     name: str
     description: str
-    owner: str
-    repo: str
-    local: bool = False
 
 
-ENVIRONMENT_PRESETS: tuple[EnvironmentPreset, ...] = (
-    EnvironmentPreset(
-        "blank",
-        "🧱",
-        "Blank",
-        "Minimal local scaffold (no download): a single letter-counting task.",
-        "hud-evals",
-        "hud-blank",
-        local=True,
-    ),
-    EnvironmentPreset(
-        "browser",
-        "🌐",
-        "Browser",
-        "Browser agents: a 2048 game and a todo app in real Chromium (cdp + rfb).",
-        "hud-evals",
-        "hud-browser",
-    ),
-    EnvironmentPreset(
-        "cua",
-        "🖥️",
-        "Computer Use",
-        "Computer-use agents: a virtual Linux desktop (XFCE + Chromium) over rfb/VNC.",
-        "hud-evals",
-        "cua-template",
-    ),
-    EnvironmentPreset(
-        "deepresearch",
-        "🔬",
-        "Deep Research",
-        "Live deep research: web search (Exa) and People/Company search (SixtyFour).",
-        "hud-evals",
-        "hud-deepresearch",
-    ),
-    EnvironmentPreset(
-        "coding",
-        "🐛",
+ENVIRONMENT_PRESETS: dict[str, EnvironmentPreset] = {
+    "coding": EnvironmentPreset(
         "Coding",
-        "Fix a bug in a Python web app, graded by a hidden pytest suite.",
-        "hud-evals",
-        "coding-template",
+        "A repository workspace with a SWE-bench task and hidden-test grading.",
     ),
-    EnvironmentPreset(
-        "ml",
-        "🧠",
-        "ML Research/Training",
-        "ML research and training tasks (GPU).",
-        "hud-evals",
-        "ml-template",
+    "cua": EnvironmentPreset(
+        "Computer Use",
+        "A virtual Linux desktop with deterministic and model-judged grading.",
     ),
-    EnvironmentPreset(
-        "ml-triage",
-        "🩺",
-        "ML Triage/Productivity",
-        "ML triage and productivity tasks.",
-        "hud-evals",
-        "ml-triage-tasks",
+    "argument-hints": EnvironmentPreset(
+        "Argument Hints",
+        "A prompt, data-file attachments, and rubric grading via console form hints.",
     ),
-    EnvironmentPreset(
-        "verilog",
-        "🔌",
-        "Verilog",
-        "Chip design: one Verilog/SystemVerilog task over ssh, graded by hidden EDA flows.",
-        "hud-evals",
-        "verilog-template",
+    "blank": EnvironmentPreset(
+        "Blank",
+        "A minimal letter-counting task for building an environment from scratch.",
     ),
-    EnvironmentPreset(
-        "autonomous-businesses",
-        "💼",
-        "Autonomous Businesses",
-        "Autonomous business loop: support-ticket triage for a small clinic.",
-        "hud-evals",
-        "autonomous-businesses-template",
-    ),
-    EnvironmentPreset(
-        "gdpval",
-        "📈",
-        "GDPVal",
-        "GDPVal benchmark tasks.",
-        "hud-evals",
-        "gdpval-template",
-    ),
-    EnvironmentPreset(
-        "worldsim",
-        "🦾",
-        "Worldsim",
-        "Robotics: a Newton physics scene driven by an LLM agent or VLA policy (AntimLabs).",
-        "hud-evals",
-        "worldsim-template",
-    ),
-    EnvironmentPreset(
-        "robot",
-        "🤖",
-        "Robot",
-        "Robotics: run a VLA policy against a containerized robot sim, graded by task success.",
-        "hud-evals",
-        "robot-template",
-    ),
-    EnvironmentPreset(
-        "videogamebench",
-        "🎮",
-        "VideoGameBench",
-        "Evaluate agents on classic Game Boy games (AntimLabs).",
-        "hud-evals",
-        "videogamebench-template",
-    ),
-    EnvironmentPreset(
-        "arc-agi-3",
-        "🧩",
-        "ARC-AGI-3",
-        "Interactive reasoning benchmark: agents play ARC-AGI-3 games.",
-        "hud-evals",
-        "ARC-AGI-3",
-    ),
-)
-
-PRESETS_BY_ID: dict[str, EnvironmentPreset] = {p.id: p for p in ENVIRONMENT_PRESETS}
-
-_TARBALL_TIMEOUT = 60.0
+}
+DEFAULT_PRESET_ID = "coding"
 
 
-def _is_within(root: Path, path: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
+def materialize_preset(
+    preset_id: str,
+    target: Path,
+) -> None:
+    """Copy an example environment from this checkout or the installed SDK's release tag."""
+    if target.is_symlink():
+        raise ValueError(f"cannot copy an example environment over symlink {target}")
 
+    repository = Path(__file__).resolve().parents[2]
+    local_source = repository / "environments" / preset_id
+    if local_source.is_dir():
+        if any(path.is_symlink() for path in target.rglob("*")):
+            raise ValueError(f"cannot copy an example environment over symlinks in {target}")
+        shutil.copytree(
+            local_source,
+            target,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(
+                ".venv",
+                ".pytest_cache",
+                ".ruff_cache",
+                "__pycache__",
+                "*.pyc",
+                "*.pyo",
+            ),
+        )
+        return
 
-def _download_tarball(preset: EnvironmentPreset) -> bytes:
-    """Fetch the repo's ``main`` archive from codeload (no API rate limit)."""
-    headers: dict[str, str] = {}
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
+    parsed_version = Version(__version__)
+    if parsed_version.is_devrelease:
+        raise ValueError(
+            f"HUD SDK development version {__version__!r} has no matching example archive; "
+            "run hud init from a source checkout"
+        )
+
+    headers = {}
+    if token := os.environ.get("GITHUB_TOKEN"):
         headers["Authorization"] = f"Bearer {token}"
-
-    url = f"https://codeload.github.com/{preset.owner}/{preset.repo}/tar.gz/refs/heads/main"
-    with httpx.Client(follow_redirects=True, timeout=_TARBALL_TIMEOUT) as client:
-        resp = client.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp.content
-
-
-def materialize_preset(preset: EnvironmentPreset, target: Path) -> None:
-    """Download ``preset``'s repo archive and extract it into ``target``.
-
-    Uses ``codeload.github.com`` (not the rate-limited API) for the repo's
-    ``main`` branch — no ``git`` required. Strips the archive's top-level
-    ``<repo>-main/`` component and refuses any entry that would escape ``target``
-    (path-traversal guard). Honors ``GITHUB_TOKEN`` if set.
-    """
-    payload = _download_tarball(preset)
+    ref = f"v{parsed_version.public}"
+    url = f"https://codeload.github.com/hud-evals/hud-python/tar.gz/refs/tags/{ref}"
+    response = httpx.get(url, headers=headers, follow_redirects=True, timeout=60.0)
+    response.raise_for_status()
 
     target.mkdir(parents=True, exist_ok=True)
     target_root = target.resolve()
-    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tar:
-        for member in tar.getmembers():
-            # GitHub wraps everything in a "<repo>-<sha>/" top-level dir; drop it.
-            parts = member.name.split("/", 1)
-            if len(parts) < 2 or not parts[1]:
+    source_parts = ("environments", preset_id)
+
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+        for member in archive.getmembers():
+            archive_parts = PurePosixPath(member.name).parts[1:]
+            if archive_parts[: len(source_parts)] != source_parts:
                 continue
-            dest = (target_root / parts[1]).resolve()
-            if not _is_within(target_root, dest):
-                raise ValueError(f"unsafe path in archive: {member.name!r}")
+            relative_parts = archive_parts[len(source_parts) :]
+            if not relative_parts:
+                continue
+
+            destination = (target_root / Path(*relative_parts)).resolve()
+            try:
+                destination.relative_to(target_root)
+            except ValueError as exc:
+                raise ValueError(f"unsafe path in SDK archive: {member.name!r}") from exc
+
             if member.isdir():
-                dest.mkdir(parents=True, exist_ok=True)
+                destination.mkdir(parents=True, exist_ok=True)
             elif member.isfile():
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                source = tar.extractfile(member)
-                if source is not None:
-                    dest.write_bytes(source.read())
-                    # Preserve the archive's executable bits so entrypoints and
-                    # scripts stay runnable (no-op on Windows).
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                source_file = archive.extractfile(member)
+                if source_file is not None:
+                    destination.write_bytes(source_file.read())
                     if member.mode & 0o111:
-                        dest.chmod(dest.stat().st_mode | (member.mode & 0o111))
-            # Symlinks and other special members are intentionally skipped.
+                        destination.chmod(destination.stat().st_mode | (member.mode & 0o111))

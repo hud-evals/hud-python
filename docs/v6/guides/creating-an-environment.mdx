@@ -13,10 +13,11 @@ On this page: [Start](#start) · [The `env.py` file](#the-envpy-file) · [Capabi
 
 ## Start
 
-Run `hud init` in your terminal. This lets you select a template to start with, the default is a blank template.
+Run `hud init` in your terminal. A named non-interactive run starts from the coding environment; an
+interactive run lets you choose. This guide uses `blank` because it builds each part from scratch.
 
 ```bash
-hud init my-env
+hud init my-env --template blank
 cd my-env
 ```
 
@@ -306,5 +307,11 @@ A HUD environment isn't locked to HUD: its tasks export through the experimental
 
 ## See environment examples
 
-For more to build on, pick a different starting point with `hud init`, or read the
-[cookbooks](/v6/cookbooks/index) for worked environments like a coding agent and an ops diagnostics task.
+Choose the example closest to the environment you are building:
+
+- `hud init my-env --template blank` - the minimal prompt-and-reward structure used in the quickstart.
+- `hud init my-env --template coding` - an isolated repository workspace with hidden-test grading.
+- `hud init my-env --template cua` - a supervised Linux desktop with deterministic and model-judged grading.
+
+The [cookbooks](/v6/cookbooks/index) build on these patterns for agents, training loops, protocols,
+and domain-specific benchmarks.

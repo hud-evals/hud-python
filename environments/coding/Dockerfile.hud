@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends bubblewrap git util-linux \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /hud
+COPY pyproject.toml uv.lock env.py grader.py flask.bundle ./
+
+RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
+  && mkdir /app \
+  && chown 1000:1000 /app \
+  && chmod -R a+rX /usr/local/venv \
+  && chmod -R go-rwx /hud
+
+ENV PATH="/usr/local/venv/bin:${PATH}" REPO_DIR=/app
+EXPOSE 8765
+CMD ["hud", "serve", "/hud/env.py", "--host", "0.0.0.0", "--port", "8765"]
