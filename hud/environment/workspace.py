@@ -1528,7 +1528,12 @@ class Workspace:
         peer_names = {peer.name for peer in self.peers}
         if collision := local_aliases & peer_names:
             raise ValueError(f"workspace local alias conflicts with peer {sorted(collision)[0]!r}")
-        path = self._configured_hosts_path or self._credentials_dir() / "hosts"
+        if self._configured_hosts_path is not None:
+            path = self._configured_hosts_path
+        else:
+            # Bubblewrap opens bind sources after dropping to the shell uid.
+            with tempfile.NamedTemporaryFile(prefix="hud-hosts-", delete=False) as hosts_file:
+                path = Path(hosts_file.name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             hosts_text(

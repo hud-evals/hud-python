@@ -165,6 +165,29 @@ async def test_credentials_live_outside_the_served_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_hosts_mount_does_not_require_access_to_private_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "hud.environment.workspace.usable_bwrap", lambda: Bubblewrap("/usr/bin/bwrap")
+    )
+    ws = Workspace(tmp_path / "root", network=False, track_files=False)
+    await ws.start()
+    try:
+        argv = ws.shell_argv("cat /etc/hosts")
+        hosts = Path(argv[argv.index("/etc/hosts") - 1])
+        key = ws.ssh_client_key_path
+        assert key is not None
+        assert not hosts.is_relative_to(key.parent)
+        assert (await asyncio.to_thread(key.parent.stat)).st_mode & 0o777 == 0o700
+        assert (await asyncio.to_thread(hosts.stat)).st_mode & 0o777 == 0o644
+        assert "localhost" in await asyncio.to_thread(hosts.read_text)
+    finally:
+        await ws.stop()
+    assert not await asyncio.to_thread(hosts.exists)
+
+
+@pytest.mark.asyncio
 async def test_sftp_subsystem_is_not_served(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "root")
     await ws.start()
