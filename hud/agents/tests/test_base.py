@@ -105,6 +105,7 @@ def test_create_agent_value_shortcut_leaves_client_out_of_config(
     assert isinstance(agent, OpenAIAgent)
     assert agent.config.model_client is None
     assert agent.openai_client is sentinel
+    assert agent.hosted_spec()["config"]["prompt_cache_key"] == agent.config.prompt_cache_key
 
 
 def test_create_agent_resolves_gateway_model_metadata(

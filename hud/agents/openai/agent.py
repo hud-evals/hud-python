@@ -223,6 +223,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             previous_response_id=(
                 oai_state.last_response_id if oai_state.last_response_id is not None else Omit()
             ),
+            prompt_cache_key=self.config.prompt_cache_key,
             truncation=self.truncation if self.truncation is not None else Omit(),
             include=include_param,
         )

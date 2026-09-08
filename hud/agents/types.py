@@ -17,6 +17,7 @@ schema understands this family's payload.
 from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, cast
+from uuid import uuid4
 
 from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import (
@@ -121,6 +122,11 @@ class OpenAIConfig(AgentConfig):
     text: Any = None  # {"verbosity": "low"|"medium"|"high"}
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
+    prompt_cache_key: str = Field(
+        default_factory=lambda: uuid4().hex,
+        min_length=1,
+        max_length=64,
+    )
 
 
 class OpenAIChatConfig(AgentConfig):
