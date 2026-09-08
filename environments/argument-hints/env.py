@@ -193,4 +193,10 @@ async def review_files(
         "data_files": declared,
     }
 
-    yield await _grade(str(answer or ""), prompt, rows)
+    previous_key = settings.api_key
+    try:
+        settings.api_key = hud_api_key or previous_key
+        result = await _grade(str(answer or ""), prompt, rows)
+    finally:
+        settings.api_key = previous_key
+    yield result
