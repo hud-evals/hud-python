@@ -61,6 +61,7 @@ class _FakePlatform:
         return {"status": "queued"}
 
     async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        assert path.startswith("/trace/") and path.count("/") == 2
         state = self.states[min(self.polled, len(self.states) - 1)]
         self.polled += 1
         return state
@@ -227,6 +228,8 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert run.trace.trace_id == trace_id
     assert run.job_id == job_id
     assert run.group_id == "g1"
+    assert run.slug == task.slug
+    assert Job(id="job", name="test", runs=[run]).results == {"sums-add": [run]}
     assert platform.polled == 3
     (path, payload) = platform.posts[0]
     assert path == "/rollouts/submit"
@@ -623,6 +626,54 @@ async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> N
     # The platform owns the trace lifecycle: no local client ever existed.
     with pytest.raises(RuntimeError, match="no live client"):
         _ = run.client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_run_preserves_structured_grade(
+    monkeypatch: pytest.MonkeyPatch, is_error: bool
+) -> None:
+    result = {
+        "score": 0.5,
+        "info": {"passed": 3},
+        "content": "verifier failed" if is_error else "partial credit",
+        "isError": is_error,
+        "subscores": [{"name": "accuracy", "weight": 1.0, "value": 0.5}],
+    }
+    platform = _FakePlatform(
+        [
+            {
+                "status": "error" if is_error else "completed",
+                "reward": 0.5,
+                "evaluation_result": result,
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    run = await HostedRuntime(poll_interval=0.0).run(
+        Task(env="sums", id="add"), _agent(), job_id=uuid.uuid4().hex
+    )
+    assert run.reward == 0.5
+    assert run.grade.raw == result
+    assert run.grade.info == {"passed": 3}
+    assert run.grade.is_error is is_error
+    assert run.grade.content == result["content"]
+    assert platform.polled == 1
+
+
+@pytest.mark.asyncio
+async def test_run_reports_malformed_grade_as_a_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakePlatform([{"status": "completed", "evaluation_result": {"score": "bad"}}])
+    monkeypatch.setattr(
+        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    )
+    task = Task(env="sums", id="add")
+    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
+    assert run.trace.is_error
+    assert "numeric 'score'" in (run.trace.error or "")
+    assert run.slug == task.slug
 
 
 @pytest.mark.asyncio
