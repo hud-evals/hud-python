@@ -4,7 +4,17 @@ description: "Reference for the hud command-line interface: init, dev, run, eval
 icon: "terminal"
 ---
 
-Install the CLI with `uv tool install hud --python 3.12`. Authenticate once with `hud set HUD_API_KEY=...`.
+Install the CLI with `uv tool install hud --python 3.12`.
+
+## Authentication
+
+Get your API key from [HUD settings](https://hud.ai/settings), then save it locally:
+
+```bash
+hud set HUD_API_KEY=your-key-here
+```
+
+This stores the key in `~/.hud/.env`. For CI, set `HUD_API_KEY` in the process environment.
 
 ## Build & iterate
 
@@ -192,7 +202,6 @@ rollout so `hud trace` can read them offline without an API call.
 | Command | Description |
 |---------|-------------|
 | `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
-| `hud login` | Authenticate with HUD. |
 | `hud models list` | List gateway models. |
 | `hud models fork <model> --name <slug>` | Fork a trainable model from an existing one. |
 | `hud models checkpoints <model>` | List a model's checkpoint tree. |
