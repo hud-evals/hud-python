@@ -202,12 +202,17 @@ class HostedRuntime:
                 if run.trace.status == "cancelled"
                 else "rollout failed before grading"
             )
-        run.grade = Grade(
-            reward=float(reward) if reward is not None else 0.0,
-            is_error=ungraded_failure,
-            content=grade_error,
-            raw={"score": float(reward)} if reward is not None else {},
-        )
+        # Same grade frame local runs get from tasks.grade; scalar reward is ungraded-only.
+        evaluation_result = state.get("evaluation_result")
+        if isinstance(evaluation_result, dict):
+            run.grade = Grade.from_dict(evaluation_result)
+        else:
+            run.grade = Grade(
+                reward=float(reward) if reward is not None else 0.0,
+                is_error=ungraded_failure,
+                content=grade_error,
+                raw={"score": float(reward)} if reward is not None else {},
+            )
         run._runtime = f"hud://trace/{trace_id}"
         return run
 

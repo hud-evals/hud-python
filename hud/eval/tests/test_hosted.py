@@ -189,7 +189,14 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
         [
             {"status": "pending"},
             {"status": "running"},
-            {"status": "completed", "reward": 0.5},
+            {
+                "status": "completed",
+                "reward": 0.5,
+                "evaluation_result": {
+                    "score": 0.5,
+                    "info": {"summary": {"passed": 3}},
+                },
+            },
         ]
     )
     monkeypatch.setattr(
@@ -227,6 +234,7 @@ async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch
     assert run.trace.trace_id == trace_id
     assert run.job_id == job_id
     assert run.group_id == "g1"
+    assert run.grade.info == {"summary": {"passed": 3}}
     assert platform.polled == 3
     (path, payload) = platform.posts[0]
     assert path == "/rollouts/submit"
@@ -608,7 +616,20 @@ async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.Monke
 
 @pytest.mark.asyncio
 async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0, "error": None}])
+    platform = _FakePlatform(
+        [
+            {
+                "status": "completed",
+                "reward": 1.0,
+                "error": None,
+                "evaluation_result": {
+                    "score": 1.0,
+                    "info": {"episodes": 4},
+                    "content": "ok",
+                },
+            }
+        ]
+    )
     monkeypatch.setattr(
         "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
     )
@@ -617,6 +638,8 @@ async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> N
     run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
 
     assert run.reward == 1.0
+    assert run.grade.info == {"episodes": 4}
+    assert run.grade.content == "ok"
     assert run.trace.status == "completed"
     assert not run.trace.is_error
     assert run.runtime == f"hud://trace/{run.trace.trace_id}"
