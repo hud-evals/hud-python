@@ -11,7 +11,9 @@ from hud.cli.utils.project import (
     ProjectNotFound,
     ProjectNotWritable,
     list_projects,
+    projects_not_enabled,
     report_project_error,
+    require_projects_enabled,
     resolve_placement,
     resolve_project,
 )
@@ -93,6 +95,8 @@ def create_command(
     try:
         created = Project.from_record(platform.post("/projects", json=payload))
     except HudRequestError as e:
+        if projects_not_enabled(e):
+            raise report_project_error(console, e) from e
         if e.status_code == httpx.codes.CONFLICT:
             console.error(f"A project named '{name}' already exists")
             console.hint(f"Pin this directory to it with: hud project use {name}")
@@ -158,9 +162,11 @@ def project_callback(
 
     console = HUDConsole()
     require_api_key("resolve the current project")
+    platform = PlatformClient.from_settings()
     try:
+        require_projects_enabled(platform)
         placement = resolve_placement(
-            PlatformClient.from_settings(),
+            platform,
             EnvironmentSource.open(directory),
             flag=None,
         )

@@ -33,6 +33,9 @@ PROJECT_OPTION_HELP = (
     "directory configuration."
 )
 
+_PROJECTS_DISABLED_DETAIL = "projects are not enabled"
+_PROJECTS_DISABLED_ERROR = "projects_not_enabled"
+
 
 @dataclass(frozen=True)
 class Project:
@@ -103,6 +106,11 @@ def list_projects(platform: PlatformClient) -> list[Project]:
     return _projects_from_page(data)
 
 
+def require_projects_enabled(platform: PlatformClient) -> None:
+    """Check access to the feature-gated Projects API."""
+    platform.get("/projects", params={"limit": 1})
+
+
 def _projects_from_page(data: Any) -> list[Project]:
     """Parse the platform's paginated Project response."""
     records = data.get("items") if isinstance(data, dict) else None
@@ -159,7 +167,10 @@ def resolve_placement(
 
 def report_project_error(console: HUDConsole, error: Exception) -> typer.Exit:
     """Explain why a Project could not be used, and return the exit to raise."""
-    if isinstance(error, ProjectNotFound):
+    if isinstance(error, HudRequestError) and projects_not_enabled(error):
+        console.error("Projects are not enabled for your team")
+        console.hint("Contact HUD to enable the Projects beta for your team")
+    elif isinstance(error, ProjectNotFound):
         console.error(str(error))
         if error.available:
             console.info("Projects you can see:")
@@ -173,6 +184,16 @@ def report_project_error(console: HUDConsole, error: Exception) -> typer.Exit:
     else:
         console.error(f"Failed to reach the HUD platform: {error}")
     return typer.Exit(1)
+
+
+def projects_not_enabled(error: HudRequestError) -> bool:
+    """Whether the Projects API rejected a caller at its feature gate."""
+    if error.status_code != 403 or not isinstance(error.response_json, dict):
+        return False
+    if error.response_json.get("error") == _PROJECTS_DISABLED_ERROR:
+        return True
+    detail = error.response_json.get("detail")
+    return isinstance(detail, str) and detail.casefold() == _PROJECTS_DISABLED_DETAIL
 
 
 def resolve_writable_placement(
@@ -220,7 +241,9 @@ __all__ = [
     "ProjectNotWritable",
     "ProjectSource",
     "list_projects",
+    "projects_not_enabled",
     "report_project_error",
+    "require_projects_enabled",
     "require_writable_placement",
     "resolve_placement",
     "resolve_placement_or_exit",

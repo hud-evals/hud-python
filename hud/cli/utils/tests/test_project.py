@@ -12,11 +12,13 @@ from hud.cli.utils.project import (
     ProjectNotFound,
     ProjectSource,
     list_projects,
+    projects_not_enabled,
     resolve_placement,
     resolve_project,
     resolve_writable_placement,
 )
 from hud.cli.utils.source import EnvironmentSource
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -78,6 +80,30 @@ def test_list_reads_paginated_items(platform: PlatformClient) -> None:
         "browser-evals",
         "locked-down",
     ]
+
+
+def test_projects_not_enabled_matches_only_the_feature_gate() -> None:
+    assert projects_not_enabled(
+        HudRequestError(
+            "forbidden",
+            status_code=403,
+            response_json={"error": "projects_not_enabled", "detail": "Projects disabled"},
+        )
+    )
+    assert projects_not_enabled(
+        HudRequestError(
+            "forbidden",
+            status_code=403,
+            response_json={"error": "forbidden", "detail": "Projects are not enabled"},
+        )
+    )
+    assert not projects_not_enabled(
+        HudRequestError(
+            "forbidden",
+            status_code=403,
+            response_json={"error": "forbidden", "detail": "Missing create scope"},
+        )
+    )
 
 
 def test_resolve_matches_a_normalized_name(platform: PlatformClient) -> None:

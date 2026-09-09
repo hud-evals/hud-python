@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from hud.cli import project
 from hud.cli.utils.project import Project
+from hud.utils.exceptions import HudRequestError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,6 +24,43 @@ def project_record() -> Project:
         is_default=False,
         can_create=True,
     )
+
+
+def _projects_disabled() -> HudRequestError:
+    return HudRequestError(
+        "Request failed: Projects are not enabled",
+        status_code=403,
+        response_json={"error": "forbidden", "detail": "Projects are not enabled"},
+    )
+
+
+def test_bare_project_reports_disabled_feature(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = MagicMock()
+    platform.get.side_effect = _projects_disabled()
+    monkeypatch.setattr(project, "require_api_key", lambda _: None)
+    monkeypatch.setattr(project.PlatformClient, "from_settings", lambda: platform)
+
+    result = CliRunner().invoke(project.project_app)
+
+    assert result.exit_code == 1
+    assert "Projects are not enabled for your team" in result.output
+    assert "Failed to reach" not in result.output
+    platform.get.assert_called_once_with("/projects", params={"limit": 1})
+
+
+def test_create_distinguishes_disabled_feature_from_admin_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = MagicMock()
+    platform.post.side_effect = _projects_disabled()
+    monkeypatch.setattr(project, "require_api_key", lambda _: None)
+    monkeypatch.setattr(project.PlatformClient, "from_settings", lambda: platform)
+
+    result = CliRunner().invoke(project.project_app, ["create", "browser-evals"])
+
+    assert result.exit_code == 1
+    assert "Projects are not enabled for your team" in result.output
+    assert "Only team admins" not in result.output
 
 
 def test_group_directory_is_inherited_by_use(
