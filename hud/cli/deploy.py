@@ -189,12 +189,13 @@ async def deploy_command(
 ) -> Any:
     """Deploy HUD environment to the platform.
 
-    Accepts a directory or an env.py file — if a file is given, its parent
-    directory is used. The environment name comes from the ``Environment(...)``
-    declaration in code; pass ``--name`` when the tree declares more than one.
-    Uploads the tree and streams the remote build. Compose and other run
-    settings belong in ``--runtime-config`` or on the task, not inferred from
-    filenames.
+    Accepts a directory or an env.py file. The environment name comes from the
+    ``Environment(...)`` declaration in code; pass ``--name`` when the tree
+    declares more than one. A file supplies the declaration by itself while its
+    parent directory is still the uploaded tree, so a nested source tree with
+    its own declaration cannot make the name ambiguous. Streams the remote
+    build. Compose and other run settings belong in ``--runtime-config`` or on
+    the task, not inferred from filenames.
 
     [not dim]Examples:
         hud deploy
@@ -202,49 +203,54 @@ async def deploy_command(
         hud deploy --dry-run --json[/not dim]
     """
     platform = PlatformClient.from_settings()
-    env_dir = Path(directory).expanduser().resolve()  # noqa: ASYNC240
-    if env_dir.is_file():
-        env_dir = env_dir.parent
+    source = Path(directory).expanduser().resolve()  # noqa: ASYNC240
+    if source.is_file():
+        env_dir = source.parent
+        modules = [source]
+    else:
+        env_dir = source
+        modules = []
+        for dirpath, dirnames, filenames in os.walk(env_dir):
+            dirnames[:] = [d for d in dirnames if d not in _UNSEARCHED_DIRS]
+            modules.extend(Path(dirpath) / f for f in filenames if f.endswith(".py"))
     names: set[str] = set()
-    for dirpath, dirnames, filenames in os.walk(env_dir):
-        dirnames[:] = [d for d in dirnames if d not in _UNSEARCHED_DIRS]
-        for path in (Path(dirpath) / f for f in filenames if f.endswith(".py")):
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (OSError, SyntaxError):
+    for path in modules:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
                 continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                callee = (
-                    func.id
-                    if isinstance(func, ast.Name)
-                    else func.attr
-                    if isinstance(func, ast.Attribute)
-                    else None
-                )
-                if callee != "Environment":
-                    continue
-                name_node = (
-                    node.args[0]
-                    if node.args
-                    else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-                )
-                if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
-                    names.add(name_node.value)
+            func = node.func
+            callee = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if callee != "Environment":
+                continue
+            name_node = (
+                node.args[0]
+                if node.args
+                else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+            )
+            if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
+                names.add(name_node.value)
     found = ", ".join(sorted(names))
     if not names:
         raise CliError(
             "usage",
-            f"No environment found in {env_dir}.",
+            f"No environment found in {source}.",
             suggestion="Declare the environment with Environment(name=...) in a .py file.",
         )
     if name is not None:
         if name not in names:
-            raise ValueError(f"No environment named {name!r} in {env_dir}. Found: {found}.")
+            raise ValueError(f"No environment named {name!r} in {source}. Found: {found}.")
     elif len(names) > 1:
-        raise ValueError(f"Multiple environments in {env_dir}: {found}. Pass --name to choose one.")
+        raise ValueError(f"Multiple environments in {source}: {found}. Pass --name to choose one.")
     else:
         name = names.pop()
     if registry_id is not None:
