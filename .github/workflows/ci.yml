@@ -36,7 +36,7 @@ jobs:
     environment: pre-release
     timeout-minutes: 45
     env:
-      EXAMPLE_DIR: ${{ runner.temp }}/ci-${{ matrix.template }}-${{ github.run_id }}-${{ github.run_attempt }}
+      EXAMPLE_NAME: ci-${{ matrix.template }}-${{ github.run_id }}-${{ github.run_attempt }}
     strategy:
       fail-fast: false
       matrix:
@@ -50,10 +50,10 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Create example environment
-        run: uv run hud init "$EXAMPLE_DIR" --template "${{ matrix.template }}"
+        run: uv run hud init "$RUNNER_TEMP/$EXAMPLE_NAME" --template "${{ matrix.template }}"
 
       - name: Install example with the SDK from this checkout
-        working-directory: ${{ env.EXAMPLE_DIR }}
+        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         run: |
           uv build --wheel --no-create-gitignore --out-dir .hud-sdk "$GITHUB_WORKSPACE"
           uv add --no-sync .hud-sdk/hud-*.whl
@@ -63,7 +63,7 @@ jobs:
           echo '!.hud-sdk/**' >> .dockerignore
 
       - name: Run example checks
-        working-directory: ${{ env.EXAMPLE_DIR }}
+        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         run: |
           uv run --no-sync hud task list --source .
           if [ -d tests ]; then
@@ -74,13 +74,13 @@ jobs:
 
       - name: Deploy example environment
         id: deploy
-        working-directory: ${{ env.EXAMPLE_DIR }}
+        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
         run: uv run --no-sync hud deploy --no-env
 
       - name: Run hosted task lifecycle
-        working-directory: ${{ env.EXAMPLE_DIR }}
+        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
           HUD_TELEMETRY_LOCAL_DIR: ${{ runner.temp }}/traces-${{ matrix.template }}
@@ -92,7 +92,7 @@ jobs:
 
       - name: Remove CI environment and attachment
         if: always() && steps.deploy.outcome != 'skipped'
-        working-directory: ${{ env.EXAMPLE_DIR }}
+        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
         run: uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" cleanup
