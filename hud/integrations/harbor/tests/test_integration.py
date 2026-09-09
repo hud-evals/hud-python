@@ -799,3 +799,37 @@ timeout_sec = 10
     runs = asyncio.run(_grade_every_task(dataset, wheel))
 
     test_harbor_phase_behavior(runs, "main-ports")
+
+
+def test_adapter_install_ignores_vendor_uv_configuration(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    """The private HUD install does not consume or rewrite the task's uv settings."""
+    dataset = tmp_path_factory.mktemp("harbor-vendor-uv") / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "vendor-uv",
+        dockerfile="FROM python:3.11-slim\nWORKDIR /workspace\nCOPY pyproject.toml .\n",
+    )
+    config = '[tool.uv]\nrequired-version = "==0.0.0"\n[tool.uv.pip]\nno-index = true\n'
+    config_path = task / "environment/pyproject.toml"
+    config_path.write_text(config, encoding="utf-8")
+    (adapted,) = _adapt(dataset, hud_requirement=str(wheel))
+    assert adapted.runtime_config is not None
+    assert adapted.runtime_config.compose is not None
+    context = adapted.runtime_config.compose.root
+    assert isinstance(context, Path)
+
+    build = subprocess.run(
+        ["sh", str(context / "build.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert build.returncode == 0, build.stdout[-4000:] + build.stderr[-4000:]
+    assert config_path.read_text(encoding="utf-8") == config
+    copied_config = context / "compose-project/environment/pyproject.toml"
+    assert copied_config.read_text(encoding="utf-8") == config
