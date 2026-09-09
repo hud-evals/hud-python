@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 
+from hud.utils.exceptions import HudRequestError
 from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:
@@ -99,7 +100,12 @@ class ProjectNotWritable(PermissionError):
 def list_projects(platform: PlatformClient) -> list[Project]:
     """Every Project visible to the caller."""
     data = platform.get("/projects")
-    records = data.get("projects") if isinstance(data, dict) else None
+    return _projects_from_page(data)
+
+
+def _projects_from_page(data: Any) -> list[Project]:
+    """Parse the platform's paginated Project response."""
+    records = data.get("items") if isinstance(data, dict) else None
     if not isinstance(records, list):
         return []
     return [Project.from_record(item) for item in records if isinstance(item, dict)]
@@ -111,19 +117,22 @@ def resolve_project(platform: PlatformClient, ref: str) -> Project:
     Names are normalized the same way the platform normalizes them on create,
     so `My Project` and `my-project` resolve to the same row.
     """
-    projects = list_projects(platform)
     try:
         project_id = str(uuid.UUID(ref))
     except ValueError:
-        project_id = None
-
-    match = next((p for p in projects if p.id == project_id), None)
-    if match is None:
         name = normalize_environment_name(ref, default="")
+        projects = _projects_from_page(platform.get("/projects", params={"search": name}))
         match = next((p for p in projects if p.name == name), None)
+    else:
+        try:
+            return Project.from_record(platform.get(f"/projects/{project_id}"))
+        except HudRequestError as e:
+            if e.status_code != 404:
+                raise
+            match = None
 
     if match is None:
-        raise ProjectNotFound(ref, projects)
+        raise ProjectNotFound(ref, list_projects(platform))
     return match
 
 
@@ -187,8 +196,6 @@ def resolve_placement_or_exit(
     console: HUDConsole,
 ) -> Placement:
     """Resolve and announce a Project without requiring create access."""
-    from hud.utils.exceptions import HudRequestError
-
     try:
         placement = resolve_placement(platform, env_source, flag=flag)
     except (ProjectNotFound, HudRequestError) as e:

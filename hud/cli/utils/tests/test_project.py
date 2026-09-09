@@ -11,6 +11,7 @@ from hud.cli.utils.project import (
     Project,
     ProjectNotFound,
     ProjectSource,
+    list_projects,
     resolve_placement,
     resolve_project,
     resolve_writable_placement,
@@ -50,13 +51,18 @@ def platform(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> PlatformClien
 
     def fake_request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         calls.append(url)
-        return {
-            "projects": [
-                _record(_DEFAULT_ID, "default", is_default=True),
-                _record(_BROWSER_ID, "browser-evals"),
-                _record(_READONLY_ID, "locked-down", create=False),
-            ]
-        }
+        records = [
+            _record(_DEFAULT_ID, "default", is_default=True),
+            _record(_BROWSER_ID, "browser-evals"),
+            _record(_READONLY_ID, "locked-down", create=False),
+        ]
+        project_id = url.rsplit("/", 1)[-1]
+        if project_id in {_DEFAULT_ID, _BROWSER_ID, _READONLY_ID}:
+            return next(record for record in records if record["id"] == project_id)
+        search = (kwargs.get("params") or {}).get("search")
+        if search:
+            records = [record for record in records if search in record["name"]]
+        return {"items": records, "total": len(records), "limit": 50, "offset": 0}
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
     return PlatformClient("https://api.example", "key")
@@ -64,6 +70,14 @@ def platform(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> PlatformClien
 
 def _no_global_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hud.settings.settings.default_project", None)
+
+
+def test_list_reads_paginated_items(platform: PlatformClient) -> None:
+    assert [project.name for project in list_projects(platform)] == [
+        "default",
+        "browser-evals",
+        "locked-down",
+    ]
 
 
 def test_resolve_matches_a_normalized_name(platform: PlatformClient) -> None:

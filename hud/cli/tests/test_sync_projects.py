@@ -15,10 +15,10 @@ if TYPE_CHECKING:
 
 
 class _ReadOnlyPlatform:
-    def get(self, url: str) -> dict[str, Any]:
+    def get(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
         assert url == "/projects"
         return {
-            "projects": [
+            "items": [
                 {
                     "id": "33333333-3333-4333-8333-333333333333",
                     "name": "locked-down",
@@ -29,10 +29,10 @@ class _ReadOnlyPlatform:
 
 
 class _WritablePlatform:
-    def get(self, url: str) -> dict[str, Any]:
+    def get(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
         assert url == "/projects"
         return {
-            "projects": [
+            "items": [
                 {
                     "id": "22222222-2222-4222-8222-222222222222",
                     "name": "browser-evals",
