@@ -70,13 +70,18 @@ if CONFIG["workdir"] is None:
     CONFIG["workdir"] = IMAGE_CONFIG.get("WorkingDir") or "/"
 if CONFIG["entrypoint"] is None:
     CONFIG["entrypoint"] = IMAGE_CONFIG.get("Entrypoint") or []
+reserved_ports = {BRIDGE_PORT, VISITOR_PORT, 8765}
 exposed = IMAGE_CONFIG.get("ExposedPorts") or {}
 if not isinstance(exposed, dict):
     raise ValueError("OCI image ExposedPorts must be an object")
 CONFIG["ports"] = sorted(
     {
         *CONFIG["ports"],
-        *(int(port) for value in exposed if (port := str(value).partition("/")[0]).isdigit()),
+        *(
+            int(port)
+            for value in exposed
+            if (port := str(value).partition("/")[0]).isdigit() and int(port) not in reserved_ports
+        ),
     }
 )
 for service, config_path in CONFIG["peer_image_configs"].items():
@@ -97,7 +102,7 @@ for service, config_path in CONFIG["peer_image_configs"].items():
             f"Compose service {service!r} declares no TCP ports in Compose or its image"
         )
     CONFIG["peers"].extend({"name": service, "port": port} for port in peer_ports)
-if conflict := set(CONFIG["ports"]) & {BRIDGE_PORT, VISITOR_PORT, 8765}:
+if conflict := set(CONFIG["ports"]) & reserved_ports:
     raise ValueError(f"Harbor main service port {min(conflict)} conflicts with a HUD reserved port")
 verifier_image = CONFIG["verifier_image"]
 if verifier_image["user"] is None:
@@ -130,7 +135,7 @@ def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
     return resolved
 
 
-for policy in (CONFIG["environment"], CONFIG["agent"], CONFIG["verifier"]):
+for policy in (CONFIG["environment"], CONFIG["agent"]):
     policy["env"] = resolve_env_templates(policy["env"])
 os.environ.update(CONFIG["environment"]["env"])
 WORKDIR = Path(CONFIG["workdir"])
@@ -670,7 +675,7 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
     verifier = CONFIG["verifier"]
     verifier_identity = identity(verifier, image_user=CONFIG["image_user"])
     verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-    verifier_env = {**CONFIG["environment"]["env"], **verifier["env"]}
+    verifier_env = {**CONFIG["environment"]["env"], **resolve_env_templates(verifier["env"])}
     if verifier_uid is not None:
         assert verifier_identity is not None
         for root in (TESTS, VERIFIER_LOGS):
@@ -849,7 +854,7 @@ async def grade_separate(
                 verifier_env = {
                     **CONFIG["environment"]["env"],
                     **image["env"],
-                    **verifier["env"],
+                    **resolve_env_templates(verifier["env"]),
                 }
                 if verifier_home := home(verifier_uid, root=verifier_root):
                     verifier_env["HOME"] = verifier_home

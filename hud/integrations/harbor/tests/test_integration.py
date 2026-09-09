@@ -679,3 +679,123 @@ timeout_sec = 120
         )
     assert serve.returncode != 0
     assert "HARBOR_MISSING_KEY" in serve.stdout + serve.stderr
+
+
+@pytest.mark.parametrize("mode", ["shared", "separate"])
+@pytest.mark.parametrize("credential", ["missing", "provided", "default"])
+def test_verifier_credentials_are_required_only_for_grading(
+    tmp_path: Path, wheel: Path, mode: str, credential: str
+) -> None:
+    dataset = tmp_path / "harbor-harness"
+    template = (
+        "${HARBOR_VERIFIER_KEY:-judge-value}"
+        if credential == "default"
+        else "${HARBOR_VERIFIER_KEY}"
+    )
+    task = make_harbor_task(
+        dataset,
+        "verifier-credentials",
+        task_toml=f"""[verifier]
+environment_mode = "{mode}"
+timeout_sec = 30
+
+[verifier.env]
+JUDGE_KEY = "{template}"
+""",
+        dockerfile="FROM python:3.11-slim\nWORKDIR /workspace\n",
+    )
+    (task / "tests/test.sh").write_text(
+        '#!/bin/sh\nset -eu\n[ "$JUDGE_KEY" = "judge-value" ]\n'
+        "echo 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+    if mode == "separate":
+        (task / "tests/Dockerfile").write_text(
+            "FROM python:3.11-slim\nCOPY . /tests\n", encoding="utf-8"
+        )
+
+    async def grade() -> Run:
+        taskset = _adapt(dataset, hud_requirement=str(wheel))
+        job = await taskset.run(
+            Oracle({"verifier-credentials": '[ "${JUDGE_KEY-unset}" = unset ]'}),
+            runtime=DockerRuntime(
+                env_vars={"HARBOR_VERIFIER_KEY": "judge-value"} if credential == "provided" else {}
+            ),
+            max_concurrent=1,
+        )
+        (run,) = job.runs
+        return run
+
+    run = asyncio.run(grade())
+
+    assert run.trace.content == "solution completed"
+    if credential == "missing":
+        assert run.reward != 1.0
+        assert "HARBOR_VERIFIER_KEY" in (run.trace.error or str(run.evaluation))
+    else:
+        assert run.reward == 1.0, run.trace.error or run.evaluation
+
+
+def test_main_image_ports_preserve_the_outer_control_channel(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-main-ports") / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "main-ports",
+        dockerfile="""\
+FROM debian:bookworm-slim
+WORKDIR /app
+COPY entrypoint.sh /usr/local/bin/start-environment
+RUN chmod +x /usr/local/bin/start-environment && printf nested > /app/marker
+EXPOSE 3128 3129 8765 8080
+ENTRYPOINT ["/usr/local/bin/start-environment"]
+""",
+        task_toml="""\
+[environment.healthcheck]
+command = "curl -fsS http://127.0.0.1:8765/marker && curl -fsS http://127.0.0.1:8080/marker"
+interval_sec = 0.1
+timeout_sec = 5
+retries = 50
+
+[verifier]
+timeout_sec = 30
+
+[[verifier.collect]]
+service = "observer"
+command = '''
+python - <<'PY'
+from urllib.request import urlopen
+assert urlopen('http://main:8080/marker').read() == b'nested'
+PY
+'''
+timeout_sec = 10
+""",
+    )
+    (task / "environment/entrypoint.sh").write_text(
+        "#!/bin/sh\nset -eu\n"
+        "python3 -m http.server 8765 --directory /app >/tmp/inner.log 2>&1 &\n"
+        "python3 -m http.server 8080 --directory /app >/tmp/app.log 2>&1 &\n"
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    (task / "environment/docker-compose.yaml").write_text(
+        "services:\n  main: {}\n  observer:\n    image: python:3.11-alpine\n"
+        '    command: ["python", "-m", "http.server", "9000"]\n    expose: [9000]\n',
+        encoding="utf-8",
+    )
+    (task / "solution").mkdir()
+    (task / "solution/solve.sh").write_text(
+        "curl -fsS http://127.0.0.1:8765/marker > /app/result\n",
+        encoding="utf-8",
+    )
+    (task / "tests/test.sh").write_text(
+        '#!/bin/sh\nset -eu\ntest "$(cat /app/result)" = nested\n'
+        "echo 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+
+    runs = asyncio.run(_grade_every_task(dataset, wheel))
+
+    test_harbor_phase_behavior(runs, "main-ports")

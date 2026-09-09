@@ -87,10 +87,12 @@ Save the Compose configuration as `runtime.json` in the generated project root:
 {"compose": {"document": "compose.yaml", "root": "."}}
 ```
 
-Each generated environment is deployed separately, followed by its task rows:
+Each generated environment is deployed separately, followed by its task rows.
+Select the generated `env.py` so nested task source files do not make the
+environment identity ambiguous:
 
 ```bash
-hud deploy .hud-adapt/<environment> --runtime-config .hud-adapt/<environment>/runtime.json
+hud deploy .hud-adapt/<environment>/env.py --runtime-config .hud-adapt/<environment>/runtime.json
 hud sync tasks my-harbor-tasks .hud-adapt/<environment>/tasks.json
 ```
 
@@ -123,10 +125,20 @@ The adapter handles:
 - verifier collect hooks and declared artifact paths from `main` or a sidecar,
   including directory exclusions and host-side destinations.
 
+Main-image exposed ports are forwarded except ports owned by HUD: 3128, 3129,
+and 8765. Image metadata does not publish those ports outside the task
+namespace. Explicit Compose declarations using them are rejected.
+
 Placement requirements are copied to the task that declares them: the main
 environment configures the actor task, and a separate verifier environment can
 configure its verifier task independently. The selected runtime decides whether
 it can provision those requirements.
+
+Environment and agent env templates resolve from runtime environment variables
+at startup. Verifier env templates resolve when grading starts, for both shared
+and separate verifiers. A missing required verifier variable fails grading; it
+does not prevent environment startup or manifest discovery. `${VAR:-default}`
+provides a default when the runtime variable is absent or empty.
 
 Unsupported declarations fail during adaptation. These include stdio MCP
 servers, skills directories, multi-step tasks, Compose variables not bound by

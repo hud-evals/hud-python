@@ -77,11 +77,14 @@ hud serve env.py -p 9000
 Build **and** publish to HUD infra in one step. The environment's name comes
 from the `Environment(...)` declaration in code; deploying the same name again
 rebuilds that environment. Use `--name` to select the registry identity.
-Separately configure the image's entrypoint to serve that environment.
+Pass a file (`hud deploy env.py`) to take the declaration from that file alone;
+its parent directory is still the uploaded tree. Separately configure the
+image's entrypoint to serve that environment.
 
 ```bash
 hud deploy
 hud deploy --name judge
+hud deploy env.py
 hud deploy --project <name-or-id>
 ```
 
