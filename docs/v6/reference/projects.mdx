@@ -17,8 +17,9 @@ another Project, HUD places it in the team default. This keeps the normal workfl
 A local environment directory can be associated with a Project. Deploys and task syncs from that
 directory then use the same destination, keeping an environment and its tasksets together.
 
-For automation or exceptional cases, a command can select a different destination explicitly. HUD
-also supports a machine-wide fallback for directories without an association.
+For automation or exceptional cases, a command can select a different destination explicitly without
+changing the directory association. A machine-wide preference can provide a fallback for directories
+without an association.
 
 Project selection only controls where a **new** resource is created. It does not move resources
 between Projects.

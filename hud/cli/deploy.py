@@ -19,7 +19,7 @@ from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
-from hud.cli.utils.project import Placement, resolve_writable_placement
+from hud.cli.utils.project import PROJECT_OPTION_HELP, Placement, resolve_writable_placement
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
 from hud.eval.runtime import ComposeProject, RuntimeConfig
@@ -642,7 +642,7 @@ async def _deploy_async(
 
     # Save immediately after trigger so rebuilds work even if streaming crashes.
     if env_dir and registry_id:
-        _save_deploy_link(env_dir, registry_id, console, env_name=plan.name, plan=plan)
+        _save_deploy_link(env_dir, registry_id, console, env_name=plan.name)
 
     console.success(f"Build triggered [{time.time() - step_start:.1f}s]")
     console.info(f"Build ID: {build_id}")
@@ -690,15 +690,12 @@ def _save_deploy_link(
     registry_id: str,
     console: HUDConsole,
     env_name: str | None = None,
-    plan: _DeployPlan | None = None,
 ) -> None:
     """Save deploy linking info to .hud/config.json."""
     try:
         config_data: dict[str, Any] = {"registryId": registry_id}
         if env_name:
             config_data["registryName"] = env_name
-        if plan is not None and plan.placement.project is not None:
-            config_data["projectId"] = plan.placement.project.id
         changed = EnvironmentSource.open(env_dir).save_config(config_data)
         console.success(f"Linked to environment: {registry_id[:8]}...")
         if changed:
@@ -849,8 +846,7 @@ def deploy_command(
     project: str | None = typer.Option(
         None,
         "--project",
-        help="Project to create this environment in (name or ID). Defaults to the "
-        "directory's saved project, then HUD_PROJECT, then your team default.",
+        help=PROJECT_OPTION_HELP,
     ),
     runtime: str | None = typer.Option(
         None,

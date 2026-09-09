@@ -92,11 +92,10 @@ class Settings(BaseSettings):
         validation_alias="HUD_API_KEY",
     )
 
-    project: str | None = Field(
+    default_project: str | None = Field(
         default=None,
-        description="Default HUD Project (name or id) for environments and tasksets this "
-        "machine creates. A directory's .hud/config.json takes precedence.",
-        validation_alias="HUD_PROJECT",
+        description="Default HUD Project name or ID for directories without a saved Project",
+        validation_alias="HUD_DEFAULT_PROJECT",
     )
 
     anthropic_api_key: str | None = Field(

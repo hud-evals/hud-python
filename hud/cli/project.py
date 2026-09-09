@@ -106,9 +106,9 @@ def use_command(
 ) -> None:
     """Pin a directory to a Project.
 
-    [not dim]Writes projectId to .hud/config.json, so teammates deploying this
-    environment place it in the same project. Set a machine-wide fallback for
-    unpinned directories with: hud set HUD_PROJECT=<name>
+    [not dim]Writes projectId to .hud/config.json, so later deploys and task
+    syncs from this directory use the same project. Set a machine-wide fallback
+    with: hud set HUD_DEFAULT_PROJECT=<name-or-id>
 
     Examples:
         hud project use browser-evals

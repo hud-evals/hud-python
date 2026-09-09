@@ -62,8 +62,8 @@ def platform(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> PlatformClien
     return PlatformClient("https://api.example", "key")
 
 
-def _no_settings_project(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("hud.settings.settings.project", None)
+def _no_global_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hud.settings.settings.default_project", None)
 
 
 def test_resolve_matches_a_normalized_name(platform: PlatformClient) -> None:
@@ -93,7 +93,7 @@ def test_flag_outranks_directory_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _no_settings_project(monkeypatch)
+    monkeypatch.setattr("hud.settings.settings.default_project", "locked-down")
     source = EnvironmentSource.open(tmp_path)
     source.save_config({"projectId": _DEFAULT_ID})
 
@@ -104,13 +104,13 @@ def test_flag_outranks_directory_config(
     assert placement.source is ProjectSource.FLAG
 
 
-def test_directory_config_outranks_the_machine_default(
+def test_directory_config_applies_without_a_flag(
     platform: PlatformClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Placement is a property of the environment, not of who deploys it."""
-    monkeypatch.setattr("hud.settings.settings.project", "default")
+    monkeypatch.setattr("hud.settings.settings.default_project", "default")
     source = EnvironmentSource.open(tmp_path)
     source.save_config({"projectId": _BROWSER_ID})
 
@@ -121,18 +121,18 @@ def test_directory_config_outranks_the_machine_default(
     assert placement.source is ProjectSource.CONFIG
 
 
-def test_machine_default_applies_to_an_unpinned_directory(
+def test_global_default_applies_to_an_unpinned_directory(
     platform: PlatformClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("hud.settings.settings.project", "browser-evals")
+    monkeypatch.setattr("hud.settings.settings.default_project", "browser-evals")
 
     placement = resolve_placement(platform, EnvironmentSource.open(tmp_path), flag=None)
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
-    assert placement.source is ProjectSource.SETTINGS
+    assert placement.source is ProjectSource.GLOBAL_DEFAULT
 
 
 def test_unconfigured_placement_sends_no_project_and_makes_no_call(
@@ -142,8 +142,7 @@ def test_unconfigured_placement_sends_no_project_and_makes_no_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The zero-config path stays free: no project on the wire, no lookup."""
-    _no_settings_project(monkeypatch)
-
+    _no_global_default(monkeypatch)
     placement = resolve_placement(platform, EnvironmentSource.open(tmp_path), flag=None)
 
     assert placement.project_id is None
@@ -157,8 +156,7 @@ def test_placement_resolves_a_project_the_caller_cannot_create_in(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _no_settings_project(monkeypatch)
-
+    _no_global_default(monkeypatch)
     source = EnvironmentSource.open(tmp_path)
     placement = resolve_placement(platform, source, flag="locked-down")
     assert placement.project is not None

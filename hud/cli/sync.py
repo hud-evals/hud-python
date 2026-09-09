@@ -12,7 +12,7 @@ import typer
 
 from hud.cli.utils.api import require_api_key
 from hud.cli.utils.project import (
-    Placement,
+    PROJECT_OPTION_HELP,
     require_writable_placement,
     resolve_placement_or_exit,
 )
@@ -225,14 +225,11 @@ def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
     console.error(f"Upload failed ({error.status_code}): {detail or error}")
 
 
-def _save_taskset_id(result: dict[str, object], placement: Placement, console: HUDConsole) -> None:
+def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
     returned_id = result.get("taskset_id")
     if not isinstance(returned_id, str) or not returned_id:
         return
-    config: dict[str, object] = {"tasksetId": returned_id}
-    if placement.project is not None:
-        config["projectId"] = placement.project.id
-    changed = EnvironmentSource.open().save_config(config)
+    changed = EnvironmentSource.open().save_config({"tasksetId": returned_id})
     if changed:
         console.dim_info("Taskset ID saved to:", ".hud/config.json")
     from hud.settings import settings
@@ -258,8 +255,7 @@ def sync_tasks_command(
     project: str | None = typer.Option(
         None,
         "--project",
-        help="Project to create this taskset in (name or ID). Defaults to the "
-        "directory's saved project, then HUD_PROJECT, then your team default.",
+        help=PROJECT_OPTION_HELP,
     ),
     task_filter: str | None = typer.Option(
         None,
@@ -392,7 +388,7 @@ def sync_tasks_command(
 
     hud_console.success("Sync complete")
     hud_console.info(f"  + {created} created, ~ {updated} updated")
-    _save_taskset_id(result, placement, hud_console)
+    _save_taskset_id(result, hud_console)
 
 
 @sync_app.command("env")

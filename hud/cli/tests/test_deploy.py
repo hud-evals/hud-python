@@ -605,6 +605,7 @@ class TestSaveDeployLink:
             saved = json.load(f)
 
         assert saved["registryId"] == "test-registry-id-12345"
+        assert "projectId" not in saved
 
     def test_creates_hud_directory(self, tmp_path: Path) -> None:
         """Test that .hud directory is created if missing."""

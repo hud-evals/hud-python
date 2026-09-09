@@ -36,6 +36,12 @@ def test_file_tracking_can_be_disabled_by_env(monkeypatch):
     assert Settings().file_tracking_enabled is False
 
 
+def test_default_project_accepts_a_name_or_id(monkeypatch):
+    monkeypatch.setenv("HUD_DEFAULT_PROJECT", "browser-evals")
+
+    assert Settings().default_project == "browser-evals"
+
+
 def test_cli_analytics_is_independent_of_trace_telemetry(monkeypatch):
     monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "true")
     monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "false")

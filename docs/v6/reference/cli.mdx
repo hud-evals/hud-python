@@ -72,7 +72,7 @@ hud deploy --project browser-evals
 | `--all`, `-a` | Deploy all environments in the directory. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
 | `--env-file` | Path to a `.env` file. |
-| `--project` | Project name or ID for placement. Falls back to the directory Project, `HUD_PROJECT`, then the team default. |
+| `--project` | One-command Project override by name or ID. Falls back to the directory Project, `HUD_DEFAULT_PROJECT`, then the team default. |
 
 ## Evaluate
 
@@ -171,11 +171,12 @@ hud project use browser-evals -C ./my-env
 |----------|--------|-------|
 | 1 | `--project <name-or-id>` | Current command |
 | 2 | `.hud/config.json` → `projectId` | Current directory |
-| 3 | `HUD_PROJECT` | Machine or process |
+| 3 | `HUD_DEFAULT_PROJECT` | Machine-wide fallback |
 | 4 | Team default Project | Zero-configuration fallback |
 
-Set the machine-wide fallback with `hud set HUD_PROJECT=<name-or-id>`. When a named Project is
-resolved, a successful deploy or task sync saves its ID to the directory's `.hud/config.json`.
+`--project` does not change `.hud/config.json`. Use `hud project use <name-or-id>` when later deploys
+and task syncs from the directory should use that Project. Set a fallback for unconfigured
+directories with `hud set HUD_DEFAULT_PROJECT=<name-or-id>`.
 
 `hud project list` marks the team default and read-only Projects. Pinning a directory, deploying, or
 syncing to a Project requires create access. Only team admins can create Projects.
@@ -194,8 +195,8 @@ hud sync tasks my-taskset --project browser-evals # override by Project name or 
 hud sync env                                       # link environment metadata
 ```
 
-`hud sync tasks --project` follows the same resolution and persistence rules as
-`hud deploy --project`. Existing resources remain in their original Project. See
+`hud sync tasks --project` is a one-command override, like `hud deploy --project`. Existing resources
+remain in their original Project. See
 [Projects](/v6/reference/projects) for the conceptual overview.
 
 External benchmark formats can be adapted into runnable `Taskset`s through the

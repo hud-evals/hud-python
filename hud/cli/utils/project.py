@@ -22,8 +22,15 @@ class ProjectSource(Enum):
 
     FLAG = "--project"
     CONFIG = ".hud/config.json"
-    SETTINGS = "HUD_PROJECT"
+    GLOBAL_DEFAULT = "HUD_DEFAULT_PROJECT"
     TEAM_DEFAULT = "team default"
+
+
+PROJECT_OPTION_HELP = (
+    "Project for this command (name or ID). Defaults to the directory's saved "
+    "project, HUD_DEFAULT_PROJECT, then your team default. Does not change "
+    "directory configuration."
+)
 
 
 @dataclass(frozen=True)
@@ -132,7 +139,7 @@ def resolve_placement(
     for ref, source in (
         (flag, ProjectSource.FLAG),
         (env_source.project_id, ProjectSource.CONFIG),
-        (settings.project, ProjectSource.SETTINGS),
+        (settings.default_project, ProjectSource.GLOBAL_DEFAULT),
     ):
         if ref:
             project = resolve_project(platform, ref)
@@ -199,6 +206,7 @@ def require_writable_placement(placement: Placement, console: HUDConsole) -> Non
 
 
 __all__ = [
+    "PROJECT_OPTION_HELP",
     "Placement",
     "Project",
     "ProjectNotFound",
