@@ -27,6 +27,8 @@ project_app = typer.Typer(
     rich_markup_mode="rich",
 )
 
+_DIRECTORY_META_KEY = "hud_project_directory"
+
 
 @project_app.command("list")
 def list_command() -> None:
@@ -61,9 +63,15 @@ def list_command() -> None:
 
 @project_app.command("create")
 def create_command(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Name for the new project"),
     description: str | None = typer.Option(None, "--description", help="What the project holds"),
-    directory: str = typer.Option(".", "--directory", "-C", help="Directory to pin it to"),
+    directory: str | None = typer.Option(
+        None,
+        "--directory",
+        "-C",
+        help="Directory to pin it to (defaults to the group -C or current directory)",
+    ),
     no_use: bool = typer.Option(False, "--no-use", help="Create without pinning this directory"),
 ) -> None:
     """Create a Project and pin this directory to it.
@@ -96,13 +104,19 @@ def create_command(
 
     console.success(f"Created project: {created.name} ({created.short_id}...)")
     if not no_use:
-        _pin(created, directory, console)
+        _pin(created, _command_directory(ctx, directory), console)
 
 
 @project_app.command("use")
 def use_command(
+    ctx: typer.Context,
     ref: str = typer.Argument(..., help="Project name or ID"),
-    directory: str = typer.Option(".", "--directory", "-C", help="Directory to pin"),
+    directory: str | None = typer.Option(
+        None,
+        "--directory",
+        "-C",
+        help="Directory to pin (defaults to the group -C or current directory)",
+    ),
 ) -> None:
     """Pin a directory to a Project.
 
@@ -123,7 +137,7 @@ def use_command(
         raise report_project_error(console, e) from e
     if not project.can_create:
         raise report_project_error(console, ProjectNotWritable(project))
-    _pin(project, directory, console)
+    _pin(project, _command_directory(ctx, directory), console)
 
 
 @project_app.callback(invoke_without_command=True)
@@ -138,6 +152,7 @@ def project_callback(
         hud project list                 # projects you can see
         hud project use browser-evals    # pin this directory[/not dim]
     """
+    ctx.meta[_DIRECTORY_META_KEY] = directory
     if ctx.invoked_subcommand is not None:
         return
 
@@ -157,6 +172,14 @@ def project_callback(
         console.hint("Pin a different one with: hud project use <name>")
     elif not placement.project.can_create:
         console.warning("You do not have create access to this Project")
+
+
+def _command_directory(ctx: typer.Context, directory: str | None) -> str:
+    """Let subcommand -C override the group-level project -C option."""
+    if directory is not None:
+        return directory
+    inherited = ctx.meta.get(_DIRECTORY_META_KEY)
+    return inherited if isinstance(inherited, str) else "."
 
 
 def _pin(project: Project, directory: str, console: HUDConsole) -> None:
