@@ -80,3 +80,22 @@ async def test_diff_snapshot_setup_roundtrip(tmp_path: Path) -> None:
         await writer.wait_closed()
         server.close()
         await server.wait_closed()
+
+
+async def test_file_transfer_larger_than_default_stream_limit(tmp_path: Path) -> None:
+    tracker = FileTracker(tmp_path)
+    tracker.take_baseline()
+    content = b"x" * 70000
+    (tmp_path / "large.xlsx").write_bytes(content)
+    server = await serve_file_tracking(tracker)
+    host, port = server.sockets[0].getsockname()[:2]
+    reader, writer = await asyncio.open_connection(host, port, limit=1024 * 1024)
+    try:
+        result = await _call(reader, writer, "flush")
+        captured = result["capture"]["files"][0]
+        assert base64.b64decode(captured["file"]["data"]) == content
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        server.close()
+        await server.wait_closed()

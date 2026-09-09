@@ -27,7 +27,7 @@ from hud.capabilities import (
     RFBClient,
     SSHClient,
 )
-from hud.environment.utils import read_frame, send_frame, splice
+from hud.environment.utils import CONTROL_FRAME_LIMIT_BYTES, read_frame, send_frame, splice
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -189,7 +189,9 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await asyncio.open_connection(host, port)
+                        up_reader, up_writer = await asyncio.open_connection(
+                            host, port, limit=CONTROL_FRAME_LIMIT_BYTES
+                        )
                     except OSError as exc:
                         LOGGER.warning(
                             "tunnel peer %s:%d connection failed: %s",
@@ -207,6 +209,7 @@ class HudClient:
                             "method": "tunnel.open",
                             "params": {"capability": capability.name},
                         },
+                        max_bytes=CONTROL_FRAME_LIMIT_BYTES,
                     )
                     opened = await read_frame(up_reader)
                     if opened is None or "error" in opened:
@@ -338,6 +341,7 @@ class HudClient:
                     await send_frame(
                         self._writer,
                         {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
+                        max_bytes=CONTROL_FRAME_LIMIT_BYTES,
                     )
                     reply = await read_frame(self._reader)
                     if reply is None:
@@ -387,7 +391,9 @@ async def _connect_ready(
     deadline = loop.time() + ready_timeout
     while True:
         try:
-            reader, writer = await asyncio.open_connection(host, port)
+            reader, writer = await asyncio.open_connection(
+                host, port, limit=CONTROL_FRAME_LIMIT_BYTES
+            )
         except OSError:
             if loop.time() >= deadline:
                 raise

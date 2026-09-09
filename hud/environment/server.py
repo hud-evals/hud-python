@@ -29,7 +29,15 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from hud.graders.results import EvaluationResult
 
 from .env import Answer, current_session_id
-from .utils import error, read_frame, reply, send_frame, splice
+from .utils import (
+    CONTROL_FRAME_LIMIT_BYTES,
+    FrameTooLargeError,
+    error,
+    read_frame,
+    reply,
+    send_frame,
+    splice,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -299,11 +307,16 @@ class _ControlChannel:
 
         async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
-                await send_frame(writer, reply(msg_id, result))
+                await send_frame(writer, reply(msg_id, result), max_bytes=CONTROL_FRAME_LIMIT_BYTES)
 
         async def error_to(msg_id: int | None, code: int, message: str) -> None:
             if msg_id is not None:
-                await send_frame(writer, error(msg_id, code, message))
+                try:
+                    await send_frame(
+                        writer, error(msg_id, code, message), max_bytes=CONTROL_FRAME_LIMIT_BYTES
+                    )
+                except FrameTooLargeError as exc:
+                    await send_frame(writer, error(msg_id, -32000, str(exc)))
 
         try:
             async for msg in _frames(first, reader):
@@ -469,7 +482,9 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 writer.close()
                 await writer.wait_closed()
 
-    server = await asyncio.start_server(accept, host=host, port=port)
+    server = await asyncio.start_server(
+        accept, host=host, port=port, limit=CONTROL_FRAME_LIMIT_BYTES
+    )
     _SERVER_STATES[server] = _ServerState(handlers=active, channel=channel)
     sock = server.sockets[0].getsockname()
     LOGGER.info("env %r bound on %s:%s", env.name, sock[0], sock[1])

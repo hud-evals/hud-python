@@ -73,6 +73,19 @@ Each request and response is one newline-delimited JSON frame. Calls on a
 `HudClient` are serialized, and reply ids must match the corresponding request.
 A malformed or unknown call receives a JSON-RPC error frame.
 
+Control requests and responses are limited to **16,777,216 bytes (16 MiB)** of
+encoded JSON, excluding the trailing newline. This includes the JSON-RPC
+wrapper and escaped strings, not just task arguments. Oversized outgoing
+requests fail before sending with the encoded size and limit; oversized
+responses become JSON-RPC errors. Hosted runs report these through the trace
+error. Both the driver and environment need the updated SDK to use the larger limit;
+older readers still impose the previous 64 KiB limit.
+
+Keep bulk task data in files and pass file IDs in the arguments, then load those
+files inside the environment. Large inline rubrics, prompts, and grading results
+also count toward the limit. Raw capability streams and file-tracking transfers
+have separate limits.
+
 ## One port, two connection types
 
 The TCP listener accepts many connections but publishes only one address. The

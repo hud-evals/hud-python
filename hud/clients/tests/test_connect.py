@@ -149,7 +149,7 @@ async def test_tunnel_connection_failure_warns_with_peer(
     port = server.sockets[0].getsockname()[1]
     open_connection = asyncio.open_connection
 
-    async def fail_tunnel_connection(host: str, peer_port: int):
+    async def fail_tunnel_connection(host: str, peer_port: int, *, limit: int):
         assert (host, peer_port) == ("127.0.0.1", port)
         raise OSError("peer unavailable")
 

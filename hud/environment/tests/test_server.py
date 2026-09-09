@@ -7,6 +7,7 @@ object, nor a ``{"score": ...}`` dict) instead of silently grading 0.0.
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 import pytest
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 
 from hud.clients import HudProtocolError
 from hud.environment import Answer, Environment
+from hud.environment.utils import FrameTooLargeError
 from hud.eval import Run
 from hud.graders import EvaluationResult, SubScore
 
@@ -167,3 +169,70 @@ async def test_start_coerces_postponed_rich_annotations() -> None:
         ) as run:
             run.trace.content = "x"
         assert run.prompt == "HELLO!!!"
+
+
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+async def test_task_request_frame_size_boundary(extra_bytes: int) -> None:
+    env = Environment("frame-limit")
+    received: list[str] = []
+
+    @env.template()
+    async def task(data: str):
+        received.append(data)
+        yield "ready"
+        yield 1.0
+
+    frame = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tasks.start",
+        "params": {"id": "task", "args": {"data": ""}},
+    }
+    overhead = len(json.dumps(frame, separators=(",", ":")).encode())
+    data = "x" * (16 * 1024 * 1024 - overhead + extra_bytes)
+    async with served(env) as client:
+        if extra_bytes:
+            with pytest.raises(FrameTooLargeError, match="16777217 bytes; limit is 16777216 bytes"):
+                await client.start_task("task", {"data": data})
+            assert received == []
+        else:
+            await client.start_task("task", {"data": data})
+            assert received == [data]
+            await client.cancel()
+
+
+@pytest.mark.parametrize("result_kind", ["prompt", "grade", "error"])
+async def test_oversized_task_response_returns_protocol_error(result_kind: str) -> None:
+    env = Environment("large-response")
+
+    @env.template()
+    async def task():
+        if result_kind == "error":
+            raise ValueError("x" * (16 * 1024 * 1024))
+        yield "x" * (16 * 1024 * 1024) if result_kind == "prompt" else "ready"
+        yield {"score": 1.0, "detail": "x" * (16 * 1024 * 1024)}
+
+    async with served(env) as client:
+        with pytest.raises(HudProtocolError, match=r"response is .*limit is 16777216 bytes"):
+            await client.start_task("task")
+            await client.grade({"answer": "done"})
+        await client.cancel()
+        assert (await client.list_tasks())[0]["id"] == "task"
+
+
+@pytest.mark.parametrize("size", [72400, 1024 * 1024])
+async def test_large_task_arguments_prompt_and_grade_roundtrip(size: int) -> None:
+    env = Environment("large-task")
+    data = "x" * size
+
+    @env.template()
+    async def task(criteria: str):
+        yield criteria
+        yield {"score": 1.0, "detail": criteria}
+
+    async with served(env) as client:
+        async with Run(client, "task", {"criteria": data}) as run:
+            assert run.prompt == data
+            run.trace.content = "done"
+        assert run.reward == 1.0
+        assert run.evaluation["detail"] == data

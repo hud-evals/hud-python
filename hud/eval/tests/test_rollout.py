@@ -1381,3 +1381,31 @@ def test_prompt_text_flattens_text_turns_and_drops_non_text() -> None:
     )
     run = _run_with_prompt([{"role": "user", "content": "first"}, image, "second"])
     assert run.prompt_text == "first\n\nsecond"
+
+
+@pytest.mark.parametrize("character", ["x", "é"])
+async def test_oversized_task_args_become_trace_error_before_setup(character: str) -> None:
+    encoded_character_bytes = len(json.dumps(character)) - 2
+    data = character * (16 * 1024 * 1024 // encoded_character_bytes + 1)
+    env = Environment("large-task")
+    started = False
+
+    @env.template()
+    async def task(criteria: str):
+        nonlocal started
+        started = True
+        yield "ready"
+        yield 1.0
+
+    run = await rollout(
+        Task(env=env.name, id="task", args={"criteria": data}),
+        _FnAgent(lambda _: pytest.fail("agent must not launch")),
+        runtime=LocalRuntime(env),
+    )
+    assert not started
+    assert run.trace.is_error
+    assert "[starting task]" in (run.trace.error or "")
+    assert "'tasks.start' request" in (run.trace.error or "")
+    assert "limit is 16777216 bytes" in (run.trace.error or "")
+    assert "file ID" in (run.trace.error or "")
+    assert "EOFError" not in (run.trace.error or "")

@@ -7,12 +7,32 @@ import contextlib
 import json
 from typing import Any
 
+CONTROL_FRAME_LIMIT_BYTES = 16 * 1024 * 1024
+
+
+class FrameTooLargeError(ValueError):
+    """An encoded JSON-RPC frame exceeds its channel's byte limit."""
+
+
 # ─── JSON-RPC 2.0 framing ───
 
 
-async def send_frame(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
+async def send_frame(
+    writer: asyncio.StreamWriter,
+    msg: dict[str, Any],
+    *,
+    max_bytes: int | None = None,
+) -> None:
     """Write one newline-delimited JSON frame and flush."""
-    writer.write(json.dumps(msg, separators=(",", ":")).encode("utf-8") + b"\n")
+    data = json.dumps(msg, separators=(",", ":")).encode("utf-8")
+    if max_bytes is not None and len(data) > max_bytes:
+        frame = f"{msg['method']!r} request" if "method" in msg else "response"
+        raise FrameTooLargeError(
+            f"Control-channel {frame} is {len(data)} bytes; limit is {max_bytes} bytes "
+            "(excluding the newline). Reduce inline JSON; pass large task data by file ID "
+            "and load it inside the environment."
+        )
+    writer.write(data + b"\n")
     await writer.drain()
 
 
