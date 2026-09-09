@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
+from functools import partial
 from pathlib import Path
 
+import httpx
 import pytest
+from hud import LocalRuntime, connect
+from hud.clients import HudProtocolError
 from hud.graders import SubScore
+from hud.utils import gateway
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -72,7 +79,7 @@ async def test_staging_directory_is_cleared_between_tasks(
     async def fake_compute_score(**kwargs: object):
         return SubScore(name="LLMJudgeGrader", value=1.0)
 
-    async def fake_stage(refs, root: Path, hud_api_key=None):
+    async def fake_stage(refs, root: Path):
         return []
 
     monkeypatch.setattr(env_module.LLMJudgeGrader, "compute_score", fake_compute_score)
@@ -106,7 +113,6 @@ async def test_arguments_arrive_as_plain_json(
     async def fake_stage(
         refs: list[env_module.DataFileRef],
         root: Path,
-        hud_api_key: str | None = None,
     ):
         staged.extend(refs)
         return [{"path": "files/resume.pdf", "file_id": refs[0].file_id}]
@@ -134,3 +140,114 @@ async def test_arguments_arrive_as_plain_json(
 
     assert seen["criteria"] == [("Recommends an interview.", 2.0)]
     assert result.reward == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("fail_second", [False, True])
+async def test_concurrent_sessions_use_the_runtime_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fail_second: bool
+):
+    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(env_module.settings, "api_key", "process-key")
+    monkeypatch.setattr(env_module.settings, "hud_gateway_url", "https://gateway.test")
+    arrived = asyncio.Event()
+    seen = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["messages"][-1]["content"]
+        answer = prompt.split("<response>\n", 1)[1].split("\n</response>", 1)[0]
+        seen[answer] = request.headers["Authorization"]
+        if len(seen) == 2:
+            arrived.set()
+        await asyncio.wait_for(arrived.wait(), timeout=5)
+        assert env_module.settings.api_key == "process-key"
+        if fail_second and answer == "second":
+            return httpx.Response(400, json={"error": {"message": "judge rejected request"}})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"criterion_status":"MET","explanation":"fixture"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        gateway,
+        "DefaultAsyncHttpxClient",
+        partial(
+            gateway.DefaultAsyncHttpxClient,
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    first_task = env_module.review_files(
+        prompt="Give an answer.",
+        attachments=[],
+        criteria=[{"requirement": "An answer is present.", "weight": 1}],
+        hud_api_key="first-key",
+    )
+    second_task = first_task.model_copy(update={"args": {**first_task.args, "hud_api_key": "second-key"}})
+    async with (
+        LocalRuntime(env_module.env)(first_task) as runtime,
+        connect(runtime) as first,
+        connect(runtime) as second,
+    ):
+        await first.start_task(first_task.id, first_task.args)
+        await second.start_task(second_task.id, second_task.args)
+        results = await asyncio.gather(
+            first.grade({"answer": "first"}),
+            second.grade({"answer": "second"}),
+            return_exceptions=True,
+        )
+
+    assert seen == {"first": "Bearer process-key", "second": "Bearer process-key"}
+    assert env_module.settings.api_key == "process-key"
+    for index, result in enumerate(results):
+        if fail_second and index == 1:
+            assert isinstance(result, HudProtocolError)
+            assert "judge rejected request" in str(result)
+            continue
+        assert isinstance(result, dict)
+        assert result["score"] == 1.0
+        assert "first-key" not in json.dumps(result)
+        assert "second-key" not in json.dumps(result)
+
+
+async def test_file_staging_uses_the_runtime_credential(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(env_module.settings, "api_key", "runtime-key")
+    monkeypatch.setattr(env_module.settings, "hud_api_url", "https://api.test")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "storage.test":
+            assert "Authorization" not in request.headers
+            return httpx.Response(200, content=b"notes")
+        assert request.headers["Authorization"] == "Bearer runtime-key"
+        if request.url.path.endswith("/download"):
+            return httpx.Response(200, json={"url": "https://storage.test/notes.txt"})
+        return httpx.Response(200, json={"filename": "notes.txt"})
+
+    monkeypatch.setattr(
+        env_module.httpx,
+        "AsyncClient",
+        partial(
+            httpx.AsyncClient,
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    task = env_module.review_files.func(
+        prompt="Read the file.",
+        attachments=[{"file_id": "notes"}],
+        criteria=[],
+        hud_api_key="task-key",
+    )
+    try:
+        frame = await anext(task)
+        assert frame["data_files"] == [{"path": "files/notes.txt", "file_id": "notes"}]
+        assert (tmp_path / "files/notes.txt").read_text() == "notes"
+        assert env_module.settings.api_key == "runtime-key"
+    finally:
+        await task.aclose()

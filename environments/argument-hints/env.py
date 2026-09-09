@@ -98,12 +98,11 @@ def _destination(root: Path, relative: str) -> Path:
 async def _stage(
     refs: list[DataFileRef],
     root: Path,
-    hud_api_key: str | None = None,
 ) -> list[dict[str, str]]:
     """Pull each referenced file into ``root``; returns the start-frame declarations."""
     if not refs:
         return []
-    api_key = (hud_api_key or settings.api_key or "").strip()
+    api_key = (settings.api_key or "").strip()
     if not api_key:
         raise DataFileError("HUD_API_KEY is unset; the environment cannot read data files")
 
@@ -169,7 +168,10 @@ async def review_files(
     criteria: Criteria,
     hud_api_key: str | None = None,
 ):
-    """Answer a prompt about uploaded files, graded by weighted criteria."""
+    """Answer a prompt about uploaded files, graded by weighted criteria.
+
+    Declaring ``hud_api_key`` opts hosted rollouts into container-level HUD_API_KEY injection.
+    """
     refs = _ATTACHMENTS.validate_python(attachments)
     rows = _CRITERIA.validate_python(criteria)
 
@@ -177,7 +179,7 @@ async def review_files(
     # Clear prior tasks' leftovers so staging never writes through a stale symlink.
     shutil.rmtree(files_dir, ignore_errors=True)
     files_dir.mkdir(parents=True)
-    declared = await _stage(refs, files_dir, hud_api_key)
+    declared = await _stage(refs, files_dir)
 
     listing = "\n".join(f"- {entry['path']}" for entry in declared) or "- (none)"
     # A template that declares no `returns` is sent the agent's final text.
@@ -193,10 +195,4 @@ async def review_files(
         "data_files": declared,
     }
 
-    previous_key = settings.api_key
-    try:
-        settings.api_key = hud_api_key or previous_key
-        result = await _grade(str(answer or ""), prompt, rows)
-    finally:
-        settings.api_key = previous_key
-    yield result
+    yield await _grade(str(answer or ""), prompt, rows)

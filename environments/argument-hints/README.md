@@ -14,4 +14,6 @@ hud eval tasks.py claude --runtime local -y
 files into `/workspace/files`, hands the agent a shell and the prompt, and
 passes the criteria straight to `LLMJudgeGrader`. It also declares a
 `hud_api_key` argument (hidden in the console) — that declaration is what
-makes hosted rollouts inject the runner's key for staging and grading.
+makes hosted rollouts inject `HUD_API_KEY` into the container. Staging and
+grading use that runtime credential, not the argument's value. For local runs,
+configure `HUD_API_KEY` before starting the environment.

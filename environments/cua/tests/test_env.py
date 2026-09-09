@@ -41,9 +41,10 @@ class TestGrading:
         with pytest.raises(ValueError, match="nonnegative"):
             await gen.asend(None)
 
-    async def test_no_key_judge_fails_before_prompt(self, monkeypatch):
+    @pytest.mark.parametrize("hud_api_key", [None, "task-key"])
+    async def test_no_runtime_key_judge_fails_before_prompt(self, monkeypatch, hud_api_key):
         monkeypatch.setattr(M.settings, "api_key", "", raising=False)
-        gen = GEN(prompt="p", grading_criteria=["anything"])
+        gen = GEN(prompt="p", grading_criteria=["anything"], hud_api_key=hud_api_key)
         with pytest.raises(RuntimeError, match="HUD_API_KEY"):
             await gen.asend(None)
 

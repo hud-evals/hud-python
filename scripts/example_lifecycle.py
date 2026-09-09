@@ -109,7 +109,7 @@ async def check(example: str, solved: bool) -> None:
         "--env",
         f"HUD_GATEWAY_URL={SERVICE}",
         "--env",
-        "HUD_API_KEY=",
+        f"HUD_API_KEY={KEY}",
         "--env",
         "HUD_TELEMETRY_ENABLED=false",
         f"hud-example:{example}",
@@ -119,7 +119,6 @@ async def check(example: str, solved: bool) -> None:
         task = tasks[0]
         args = dict(task.args)
         if example == "cua":
-            args["hud_api_key"] = KEY
             args["bash_checks"] = [
                 {
                     **check,
@@ -134,7 +133,6 @@ async def check(example: str, solved: bool) -> None:
                 prompt="Read notes.txt and report the answer.",
                 attachments=[{"file_id": "notes"}],
                 criteria=[{"requirement": "Answers violet.", "weight": 1.0}],
-                hud_api_key=KEY,
             )
 
         async with connect(Runtime("tcp://127.0.0.1:8765"), ready_timeout=60) as client:
