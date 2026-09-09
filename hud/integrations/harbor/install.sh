@@ -8,6 +8,7 @@ python_version=3.12
 export UV_PYTHON_INSTALL_DIR="$root/python"
 export UV_PYTHON_BIN_DIR="$root/bin"
 export UV_NO_CACHE=1
+export UV_NO_CONFIG=1
 export XDG_CONFIG_HOME="$root/config"
 export PATH="$root/bin:$PATH"
 
