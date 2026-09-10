@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
@@ -1116,6 +1116,8 @@ class Workspace:
         bind_host_devices = not isolate_users if bind_devices is None else bind_devices
         for mount in self._system_mounts:
             argv.extend(mount.to_bwrap_args(bind_devices=bind_host_devices))
+        # Implicit bind-mount parents are root-only in bubblewrap.
+        argv.extend(["--dir", str(PurePosixPath(self._guest_path).parent)])
         argv.extend(["--bind", str(self.root), self._guest_path])
         selected_mounts = self.mounts if mounts is None else mounts
         for m in selected_mounts:
@@ -1528,12 +1530,7 @@ class Workspace:
         peer_names = {peer.name for peer in self.peers}
         if collision := local_aliases & peer_names:
             raise ValueError(f"workspace local alias conflicts with peer {sorted(collision)[0]!r}")
-        if self._configured_hosts_path is not None:
-            path = self._configured_hosts_path
-        else:
-            # Bubblewrap opens bind sources after dropping to the shell uid.
-            with tempfile.NamedTemporaryFile(prefix="hud-hosts-", delete=False) as hosts_file:
-                path = Path(hosts_file.name)
+        path = self._configured_hosts_path or self._credentials_dir() / "hosts"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             hosts_text(

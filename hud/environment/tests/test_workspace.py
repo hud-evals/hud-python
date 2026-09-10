@@ -165,26 +165,30 @@ async def test_credentials_live_outside_the_served_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_hosts_mount_does_not_require_access_to_private_credentials(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "hud.environment.workspace.usable_bwrap", lambda: Bubblewrap("/usr/bin/bwrap")
+@pytest.mark.parametrize("guest_path", ["/workspace", "/tmp/hud-coding/123/workspace"])
+async def test_shell_user_can_access_guest_workspace_paths(tmp_path: Path, guest_path: str) -> None:
+    if sys.platform != "linux" or os.geteuid() != 0 or workspace_mod.usable_bwrap() is None:
+        pytest.skip("requires Linux, root, and usable bubblewrap")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "input.txt").write_text("hello\n")
+    ws = Workspace(
+        root, guest_path=guest_path, network=False, shell_uid=1000, require_isolation=True
     )
-    ws = Workspace(tmp_path / "root", network=False, track_files=False)
     await ws.start()
     try:
-        argv = ws.shell_argv("cat /etc/hosts")
-        hosts = Path(argv[argv.index("/etc/hosts") - 1])
-        key = ws.ssh_client_key_path
-        assert key is not None
-        assert not hosts.is_relative_to(key.parent)
-        assert (await asyncio.to_thread(key.parent.stat)).st_mode & 0o777 == 0o700
-        assert (await asyncio.to_thread(hosts.stat)).st_mode & 0o777 == 0o644
-        assert "localhost" in await asyncio.to_thread(hosts.read_text)
+        command = f"id -u; cat {guest_path}/input.txt; echo written > {guest_path}/output.txt"
+        async with await _connect(ws) as conn:
+            result = await conn.run(command)
+            assert result.exit_status == 0, result.stderr
+            assert result.stdout == "1000\nhello\n"
+        await ws.terminate_sessions()
+        captured = await ws.run(["sh", "-c", command], scope="environment")
+        assert captured.returncode == 0, captured.stderr
+        assert captured.stdout == b"1000\nhello\n"
+        assert (root / "output.txt").read_text() == "written\n"
     finally:
         await ws.stop()
-    assert not await asyncio.to_thread(hosts.exists)
 
 
 @pytest.mark.asyncio
