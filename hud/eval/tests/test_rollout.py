@@ -32,6 +32,7 @@ import hud.eval.run as run_module
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
+from hud.clients.client import HudClient
 from hud.environment import Answer, Environment
 from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
 from hud.eval.run import Run, rollout
@@ -980,44 +981,58 @@ async def test_timeout_includes_grading() -> None:
 
 
 async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
-    from hud.clients.client import HudClient
-
     env = Environment("sums")
+    agent_started = asyncio.Event()
+    cancel_started = asyncio.Event()
 
     @env.template()
     async def add(a: int, b: int):
         yield f"add:{a}:{b}"
         await asyncio.Event().wait()
 
+    class WaitingAgent(Agent):
+        async def __call__(self, run: Run) -> None:
+            agent_started.set()
+            await asyncio.Event().wait()
+
     aborted: list[bool] = []
 
     async def hang_cancel(self: HudClient) -> None:
+        cancel_started.set()
         await asyncio.Event().wait()
 
     real_abort = HudClient.abort
+    real_wait = asyncio.wait
 
     def track_abort(self: HudClient) -> None:
         aborted.append(True)
         real_abort(self)
 
+    async def wait_after_agent_starts(
+        tasks: set[asyncio.Task[None]], **kwargs: Any
+    ) -> tuple[set[asyncio.Task[None]], set[asyncio.Task[None]]]:
+        # Exercise cancel/abort after connection setup, independent of startup speed.
+        await asyncio.wait_for(agent_started.wait(), timeout=5.0)
+        return await real_wait(tasks, **kwargs)
+
     monkeypatch.setattr(HudClient, "cancel", hang_cancel)
     monkeypatch.setattr(HudClient, "abort", track_abort)
+    monkeypatch.setattr(run_module.asyncio, "wait", wait_after_agent_starts)
 
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-    run = await rollout(
-        _add_task(2, 3),
-        _SlowAgent(_solve_add),
-        runtime=LocalRuntime(env),
-        rollout_timeout=0.2,
+    run = await asyncio.wait_for(
+        rollout(
+            _add_task(2, 3),
+            WaitingAgent(),
+            runtime=LocalRuntime(env),
+            rollout_timeout=0.2,
+        ),
+        timeout=10.0,
     )
-    elapsed = loop.time() - started
 
     assert run.trace.status == "error"
     assert run.trace.stop_reason == "timeout"
+    assert cancel_started.is_set()
     assert aborted
-    # rollout_timeout (0.2) + cancel grace (2.0); must not hang forever on read_frame.
-    assert elapsed < 5.0
 
 
 async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
@@ -1381,3 +1396,31 @@ def test_prompt_text_flattens_text_turns_and_drops_non_text() -> None:
     )
     run = _run_with_prompt([{"role": "user", "content": "first"}, image, "second"])
     assert run.prompt_text == "first\n\nsecond"
+
+
+@pytest.mark.parametrize("character", ["x", "é"])
+async def test_oversized_task_args_become_trace_error_before_setup(character: str) -> None:
+    encoded_character_bytes = len(json.dumps(character)) - 2
+    data = character * (16 * 1024 * 1024 // encoded_character_bytes + 1)
+    env = Environment("large-task")
+    started = False
+
+    @env.template()
+    async def task(criteria: str):
+        nonlocal started
+        started = True
+        yield "ready"
+        yield 1.0
+
+    run = await rollout(
+        Task(env=env.name, id="task", args={"criteria": data}),
+        _FnAgent(lambda _: pytest.fail("agent must not launch")),
+        runtime=LocalRuntime(env),
+    )
+    assert not started
+    assert run.trace.is_error
+    assert "[starting task]" in (run.trace.error or "")
+    assert "'tasks.start' request" in (run.trace.error or "")
+    assert "limit is 16777216 bytes" in (run.trace.error or "")
+    assert "file ID" in (run.trace.error or "")
+    assert "EOFError" not in (run.trace.error or "")

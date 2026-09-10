@@ -73,6 +73,11 @@ Each request and response is one newline-delimited JSON frame. Calls on a
 `HudClient` are serialized, and reply ids must match the corresponding request.
 A malformed or unknown call receives a JSON-RPC error frame.
 
+Control requests and responses support up to **16 MiB (16,777,216 bytes)** of
+encoded JSON, including the JSON-RPC wrapper and escaped strings, excluding the
+trailing newline. Oversized frames produce a size-limit error. For larger task
+data, pass file IDs and load the files in the environment.
+
 ## One port, two connection types
 
 The TCP listener accepts many connections but publishes only one address. The

@@ -29,7 +29,16 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from hud.graders.results import EvaluationResult
 
 from .env import Answer, current_session_id
-from .utils import error, read_frame, reply, send_frame, splice
+from .utils import (
+    CONTROL_FRAME_LIMIT_BYTES,
+    FrameTooLargeError,
+    encode_frame,
+    error,
+    read_frame,
+    reply,
+    send_frame,
+    splice,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -210,7 +219,7 @@ async def _frames(
     msg: dict[str, Any] | None = first
     while msg is not None:
         yield msg
-        msg = await read_frame(reader)
+        msg = await read_frame(reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
 
 
 class _ControlChannel:
@@ -297,13 +306,13 @@ class _ControlChannel:
         self._live.add(session_id)
         session_token = current_session_id.set(session_id)
 
-        async def reply_to(msg_id: int | None, result: dict[str, Any]) -> None:
+        async def reply_to(msg_id: int | str | None, result: dict[str, Any]) -> None:
             if msg_id is not None:
-                await send_frame(writer, reply(msg_id, result))
+                await send_frame(writer, reply(msg_id, result), max_bytes=CONTROL_FRAME_LIMIT_BYTES)
 
-        async def error_to(msg_id: int | None, code: int, message: str) -> None:
+        async def error_to(msg_id: int | str | None, code: int, message: str) -> None:
             if msg_id is not None:
-                await send_frame(writer, error(msg_id, code, message))
+                await _send_control_error(writer, msg_id, code, message)
 
         try:
             async for msg in _frames(first, reader):
@@ -367,7 +376,11 @@ class _ControlChannel:
                         except KeyError:
                             await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
                             continue
-                        await reply_to(msg_id, prompt)
+                        try:
+                            await reply_to(msg_id, prompt)
+                        except FrameTooLargeError:
+                            await self.cancel(session_id)
+                            raise
 
                     elif method == "tasks.grade":
                         try:
@@ -399,6 +412,22 @@ class _ControlChannel:
             current_session_id.reset(session_token)
 
 
+async def _send_control_error(
+    writer: asyncio.StreamWriter, msg_id: int | str | None, code: int, message: str
+) -> None:
+    try:
+        frame = encode_frame(error(msg_id, code, message), max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+    except FrameTooLargeError as exc:
+        try:
+            frame = encode_frame(
+                error(msg_id, -32000, str(exc)), max_bytes=CONTROL_FRAME_LIMIT_BYTES
+            )
+        except FrameTooLargeError:
+            frame = encode_frame(error(None, -32000, str(exc)), max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+    writer.write(frame)
+    await writer.drain()
+
+
 async def _stream(
     env: Environment,
     msg: dict[str, Any],
@@ -419,16 +448,27 @@ async def _stream(
         parts = urlsplit(cap.url)
         if parts.hostname is None or parts.port is None:
             raise ValueError(f"capability {name!r} has no host:port to tunnel to")
+        response = (
+            encode_frame(reply(msg_id, {"capability": name}), max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+            if msg_id is not None
+            else None
+        )
         backend = await asyncio.open_connection(parts.hostname, parts.port)
     except Exception as exc:
         LOGGER.warning("refusing capability stream: %s", exc)
         if msg_id is not None:
             code = -32602 if isinstance(exc, ValueError) else -32000
-            await send_frame(writer, error(msg_id, code, str(exc)))
+            await _send_control_error(writer, msg_id, code, str(exc))
         return
-    if msg_id is not None:
-        await send_frame(writer, reply(msg_id, {"capability": name}))
-    await splice((reader, writer), backend)
+    try:
+        if response is not None:
+            writer.write(response)
+            await writer.drain()
+        await splice((reader, writer), backend)
+    finally:
+        backend[1].close()
+        with contextlib.suppress(Exception):
+            await backend[1].wait_closed()
 
 
 async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
@@ -457,13 +497,15 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
             active.add(task)
             task.add_done_callback(active.discard)
         try:
-            first = await read_frame(reader)
+            first = await read_frame(reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
             if first is None:
                 return
             if first.get("method") == "tunnel.open":
                 await _stream(env, first, reader, writer)
             else:
                 await channel.session(first, reader, writer)
+        except FrameTooLargeError as exc:
+            await _send_control_error(writer, None, -32000, str(exc))
         finally:
             with contextlib.suppress(Exception):
                 writer.close()

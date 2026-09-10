@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import pytest
 
 from hud.capabilities import Capability
 from hud.environment import Environment
-from hud.environment.utils import read_frame, send_frame
+from hud.environment.utils import encode_frame, read_frame, send_frame
 
 from .conftest import served
 
@@ -136,3 +137,19 @@ async def test_closing_the_client_tears_down_its_forwarders(echo_port: int) -> N
     with pytest.raises(OSError):
         _, writer = await asyncio.open_connection(parts.hostname, parts.port)
         writer.close()
+
+
+@pytest.mark.parametrize("frame_size", [70000, 16 * 1024 * 1024])
+async def test_buffered_frame_preserves_newline_boundary_and_backpressure(frame_size: int) -> None:
+    reader = asyncio.StreamReader()
+    transport = Mock(spec=asyncio.Transport)
+    reader.set_transport(transport)
+    frame = {"padding": ""}
+    frame["padding"] = "x" * (frame_size - (len(encode_frame(frame)) - 1))
+    reader.feed_data(encode_frame(frame) + b"raw bytes")
+    assert await asyncio.wait_for(read_frame(reader, max_bytes=16 * 1024 * 1024), 1) == frame
+    assert await reader.readexactly(9) == b"raw bytes"
+
+    transport.pause_reading.reset_mock()
+    reader.feed_data(b"x" * (128 * 1024 + 1))
+    transport.pause_reading.assert_called_once()

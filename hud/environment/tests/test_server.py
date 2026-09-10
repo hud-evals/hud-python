@@ -7,14 +7,18 @@ object, nor a ``{"score": ...}`` dict) instead of silently grading 0.0.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import Literal
+from urllib.parse import urlsplit
 
 import pytest
 from pydantic import BaseModel
 
-from hud.clients import HudProtocolError
+from hud.clients import HudProtocolError, connect
 from hud.environment import Answer, Environment
-from hud.eval import Run
+from hud.environment.utils import FrameTooLargeError, encode_frame, read_frame, send_frame
+from hud.eval import LocalRuntime, Run, Task
 from hud.graders import EvaluationResult, SubScore
 
 from .conftest import served
@@ -167,3 +171,78 @@ async def test_start_coerces_postponed_rich_annotations() -> None:
         ) as run:
             run.trace.content = "x"
         assert run.prompt == "HELLO!!!"
+
+
+@pytest.mark.parametrize("frame_size", [72483, 1024 * 1024, 16777216, 16777217])
+async def test_task_frame_limit_and_retry(frame_size: int) -> None:
+    env = Environment("frame-limit")
+
+    @env.template()
+    async def task(data: str):
+        yield data
+        yield {"score": 1.0, "detail": data}
+
+    frame = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tasks.start",
+        "params": {"id": "task", "args": {"data": ""}},
+    }
+    data = "x" * (frame_size - (len(encode_frame(frame)) - 1))
+    async with served(env) as client:
+        if frame_size > 16777216:
+            with pytest.raises(FrameTooLargeError, match="16777217 bytes; limit is 16777216 bytes"):
+                await client.start_task("task", {"data": data})
+            data = "small retry"
+        assert (await client.start_task("task", {"data": data}))["prompt"] == data
+        assert (await client.grade({"answer": "done"}))["detail"] == data
+
+
+@pytest.mark.parametrize("result_kind", ["prompt", "grade", "error"])
+async def test_oversized_response_releases_task_and_reports_error(result_kind: str) -> None:
+    env = Environment("large-response")
+    released = asyncio.Event()
+
+    @env.template()
+    async def task():
+        try:
+            if result_kind == "error":
+                raise ValueError("x" * (16 * 1024 * 1024))
+            yield "x" * (16 * 1024 * 1024) if result_kind == "prompt" else "ready"
+            yield {"score": 1.0, "detail": "x" * (16 * 1024 * 1024)}
+        finally:
+            released.set()
+
+    async with LocalRuntime(env)(Task(env=env.name, id="task")) as runtime:
+        async with connect(runtime) as client:
+            with pytest.raises(HudProtocolError, match=r"response is .*limit is 16777216 bytes"):
+                await client.start_task("task")
+                await client.grade({"answer": "done"})
+            assert released.is_set()
+            assert (await client.list_tasks())[0]["id"] == "task"
+        async with connect(runtime) as resumed:
+            with pytest.raises(HudProtocolError, match="no task in progress"):
+                await resumed.grade({"answer": "done"})
+
+
+@pytest.mark.parametrize("hello_first,large_id", [(False, False), (True, False), (False, True)])
+async def test_wire_size_errors_are_bounded(hello_first: bool, large_id: bool) -> None:
+    frame = {"jsonrpc": "2.0", "id": "", "method": "nope"}
+    field = "id" if large_id else "padding"
+    frame[field] = "x" * (16777216 - (len(encode_frame(frame)) - 1) if large_id else 16777216)
+    env = Environment("wire-limit")
+    async with LocalRuntime(env)(Task(env=env.name, id="unused")) as runtime:
+        address = urlsplit(runtime.url)
+        reader, writer = await asyncio.open_connection(address.hostname, address.port)
+        try:
+            if hello_first:
+                await send_frame(writer, {"jsonrpc": "2.0", "id": 1, "method": "hello"})
+                assert await read_frame(reader) is not None
+            writer.write(encode_frame(frame))
+            response = await asyncio.wait_for(read_frame(reader), timeout=5.0)
+            assert response is not None and response["id"] is None
+            assert "16777216 bytes" in response["error"]["message"]
+        finally:
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
