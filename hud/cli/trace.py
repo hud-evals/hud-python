@@ -14,18 +14,8 @@ from rich.text import Text
 
 console = Console()
 
-trace_app = typer.Typer(
-    name="trace",
-    help="Inspect a rollout trace",
-    add_completion=False,
-    rich_markup_mode="rich",
-    no_args_is_help=True,
-)
 
-
-@trace_app.callback(invoke_without_command=True)
 def trace_command(
-    ctx: typer.Context,
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
     local_dir: str | None = typer.Option(
@@ -37,9 +27,6 @@ def trace_command(
     Checks ``HUD_TELEMETRY_LOCAL_DIR`` first (fast, no API needed), then
     falls back to ``GET /v2/trace/{id}/events`` on the platform.
     """
-    if ctx.invoked_subcommand is not None:
-        return
-
     from hud.cli.utils.api import require_api_key
     from hud.settings import settings
     from hud.telemetry.span import normalize_trace_id

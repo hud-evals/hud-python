@@ -35,8 +35,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: pre-release
     timeout-minutes: 45
+    concurrency:
+      group: ci-example-${{ matrix.template }}
+      cancel-in-progress: false
     env:
-      EXAMPLE_NAME: ci-${{ matrix.template }}-${{ github.run_id }}-${{ github.run_attempt }}
+      EXAMPLE_NAME: ci-${{ matrix.template }}
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +76,6 @@ jobs:
           fi
 
       - name: Deploy example environment
-        id: deploy
         working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
@@ -89,13 +91,6 @@ jobs:
           timeout --signal=INT --kill-after=30s 15m uv run --no-sync hud eval .hud/ci-tasks.json claude \
             --model claude-sonnet-4-6 --gateway --runtime hud --max-steps 10 --config max_tokens=2048 -y
           uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" check
-
-      - name: Remove CI environment and attachment
-        if: always() && steps.deploy.outcome != 'skipped'
-        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
-        env:
-          HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
-        run: uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" cleanup
 
       - name: Save traces
         if: always()

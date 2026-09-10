@@ -41,7 +41,7 @@ from .qa import qa_app  # noqa: E402
 from .serve import serve_command  # noqa: E402
 from .sync import sync_app  # noqa: E402
 from .task import task_app  # noqa: E402
-from .trace import trace_app  # noqa: E402
+from .trace import trace_command  # noqa: E402
 
 app.command(name="serve")(serve_command)
 app.command(name="deploy")(deploy_command)
@@ -50,7 +50,7 @@ app.command(name="init")(init_command)
 app.command(name="cancel")(cancel_command)
 app.add_typer(models_app, name="models")
 app.add_typer(jobs_app, name="jobs")
-app.add_typer(trace_app, name="trace")
+app.command(name="trace")(trace_command)
 app.add_typer(qa_app, name="qa")
 
 

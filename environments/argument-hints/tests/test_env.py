@@ -6,14 +6,15 @@ import asyncio
 import json
 import sys
 from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Barrier, Thread
 
 import httpx
 import pytest
 from hud import LocalRuntime, connect
 from hud.clients import HudProtocolError
 from hud.graders import SubScore
-from hud.utils import gateway
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -148,41 +149,37 @@ async def test_concurrent_sessions_use_the_runtime_credential(
 ):
     monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(env_module.settings, "api_key", "process-key")
-    monkeypatch.setattr(env_module.settings, "hud_gateway_url", "https://gateway.test")
-    arrived = asyncio.Event()
+    arrived = Barrier(2, timeout=5)
     seen = {}
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        prompt = json.loads(request.content)["messages"][-1]["content"]
-        answer = prompt.split("<response>\n", 1)[1].split("\n</response>", 1)[0]
-        seen[answer] = request.headers["Authorization"]
-        if len(seen) == 2:
-            arrived.set()
-        await asyncio.wait_for(arrived.wait(), timeout=5)
-        assert env_module.settings.api_key == "process-key"
-        if fail_second and answer == "second":
-            return httpx.Response(400, json={"error": {"message": "judge rejected request"}})
-        return httpx.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": {
-                            "content": '{"criterion_status":"MET","explanation":"fixture"}',
+    class Gateway(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            prompt = body["messages"][-1]["content"]
+            answer = prompt.split("<response>\n", 1)[1].split("\n</response>", 1)[0]
+            seen[answer] = self.headers["Authorization"]
+            arrived.wait()
+            assert env_module.settings.api_key == "process-key"
+            rejected = fail_second and answer == "second"
+            payload = json.dumps(
+                {"error": {"message": "judge rejected request"}}
+                if rejected
+                else {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"criterion_status":"MET","explanation":"fixture"}',
+                            }
                         }
-                    }
-                ]
-            },
-        )
+                    ]
+                }
+            ).encode()
+            self.send_response(400 if rejected else 200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
 
-    monkeypatch.setattr(
-        gateway,
-        "DefaultAsyncHttpxClient",
-        partial(
-            gateway.DefaultAsyncHttpxClient,
-            transport=httpx.MockTransport(handler),
-        ),
-    )
     first_task = env_module.review_files(
         prompt="Give an answer.",
         attachments=[],
@@ -190,18 +187,26 @@ async def test_concurrent_sessions_use_the_runtime_credential(
         hud_api_key="first-key",
     )
     second_task = first_task.model_copy(update={"args": {**first_task.args, "hud_api_key": "second-key"}})
-    async with (
-        LocalRuntime(env_module.env)(first_task) as runtime,
-        connect(runtime) as first,
-        connect(runtime) as second,
-    ):
-        await first.start_task(first_task.id, first_task.args)
-        await second.start_task(second_task.id, second_task.args)
-        results = await asyncio.gather(
-            first.grade({"answer": "first"}),
-            second.grade({"answer": "second"}),
-            return_exceptions=True,
-        )
+    with ThreadingHTTPServer(("127.0.0.1", 0), Gateway) as server:
+        monkeypatch.setattr(env_module.settings, "hud_gateway_url", f"http://127.0.0.1:{server.server_port}")
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            async with (
+                LocalRuntime(env_module.env)(first_task) as runtime,
+                connect(runtime) as first,
+                connect(runtime) as second,
+            ):
+                await first.start_task(first_task.id, first_task.args)
+                await second.start_task(second_task.id, second_task.args)
+                results = await asyncio.gather(
+                    first.grade({"answer": "first"}),
+                    second.grade({"answer": "second"}),
+                    return_exceptions=True,
+                )
+        finally:
+            server.shutdown()
+            thread.join()
 
     assert seen == {"first": "Bearer process-key", "second": "Bearer process-key"}
     assert env_module.settings.api_key == "process-key"

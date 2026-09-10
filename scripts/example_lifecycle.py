@@ -1,4 +1,4 @@
-"""Prepare live example tasks, check their traces, and remove CI resources."""
+"""Prepare live example tasks and check their traces."""
 
 from __future__ import annotations
 
@@ -31,7 +31,6 @@ def prepare(example: str) -> None:
             },
         )
         file_id = upload["file"]["id"]
-        Path(".hud/ci-data-file.json").write_text(json.dumps({"id": file_id}))
         response = httpx.put(
             upload["upload_url"],
             content=content,
@@ -95,28 +94,13 @@ def check() -> None:
     )
 
 
-def cleanup() -> None:
-    platform = PlatformClient.from_settings()
-    try:
-        if (config := Path(".hud/config.json")).exists():
-            registry_id = json.loads(config.read_text())["registryId"]
-            platform.delete(f"/registry/{registry_id}")
-    finally:
-        if (data_file := Path(".hud/ci-data-file.json")).exists():
-            file_id = json.loads(data_file.read_text())["id"]
-            platform.delete(f"/data/{file_id}")
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("prepare").add_argument("example")
     commands.add_parser("check")
-    commands.add_parser("cleanup")
     args = parser.parse_args()
     if args.command == "prepare":
         prepare(args.example)
     elif args.command == "check":
         check()
-    else:
-        cleanup()
