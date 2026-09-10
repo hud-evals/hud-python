@@ -18,7 +18,7 @@ import pytest
 
 import hud.clients.client as client_module
 from hud.capabilities import Capability, CapabilityClient
-from hud.clients import connect
+from hud.clients import HudProtocolError, connect
 from hud.environment.utils import read_frame, send_frame
 from hud.eval.runtime import Runtime
 
@@ -149,7 +149,7 @@ async def test_tunnel_connection_failure_warns_with_peer(
     port = server.sockets[0].getsockname()[1]
     open_connection = asyncio.open_connection
 
-    async def fail_tunnel_connection(host: str, peer_port: int, *, limit: int):
+    async def fail_tunnel_connection(host: str, peer_port: int):
         assert (host, peer_port) == ("127.0.0.1", port)
         raise OSError("peer unavailable")
 
@@ -326,6 +326,34 @@ async def test_connect_gives_up_at_the_deadline_when_the_env_never_serves() -> N
         with pytest.raises(EOFError, match="closed connection during 'hello'"):
             async with connect(Runtime(f"tcp://127.0.0.1:{port}"), ready_timeout=1.2):
                 pass
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def test_connection_level_error_is_reported_without_request_id() -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await read_frame(reader)
+            await send_frame(writer, {"jsonrpc": "2.0", "id": 1, "result": HELLO_RESULT})
+            await read_frame(reader)
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32000, "message": "frame exceeds size limit"},
+                },
+            )
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            with pytest.raises(HudProtocolError, match="frame exceeds size limit"):
+                await client.list_tasks()
     finally:
         server.close()
         await server.wait_closed()

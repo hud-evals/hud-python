@@ -7,16 +7,19 @@ object, nor a ``{"score": ...}`` dict) instead of silently grading 0.0.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from typing import Literal
+from urllib.parse import urlsplit
 
 import pytest
 from pydantic import BaseModel
 
-from hud.clients import HudProtocolError
+from hud.clients import HudProtocolError, connect
 from hud.environment import Answer, Environment
-from hud.environment.utils import FrameTooLargeError
-from hud.eval import Run
+from hud.environment.utils import FrameTooLargeError, encode_frame, read_frame, send_frame
+from hud.eval import LocalRuntime, Run, Task
 from hud.graders import EvaluationResult, SubScore
 
 from .conftest import served
@@ -195,6 +198,10 @@ async def test_task_request_frame_size_boundary(extra_bytes: int) -> None:
             with pytest.raises(FrameTooLargeError, match="16777217 bytes; limit is 16777216 bytes"):
                 await client.start_task("task", {"data": data})
             assert received == []
+            assert (await client.list_tasks())[0]["id"] == "task"
+            await client.start_task("task", {"data": "small"})
+            assert received == ["small"]
+            await client.cancel()
         else:
             await client.start_task("task", {"data": data})
             assert received == [data]
@@ -236,3 +243,74 @@ async def test_large_task_arguments_prompt_and_grade_roundtrip(size: int) -> Non
             run.trace.content = "done"
         assert run.reward == 1.0
         assert run.evaluation["detail"] == data
+
+
+async def test_rejected_start_response_tears_down_task_before_disconnect() -> None:
+    env = Environment("failed-start")
+    released = asyncio.Event()
+
+    @env.template()
+    async def task():
+        try:
+            yield "x" * (16 * 1024 * 1024)
+            yield 1.0
+        finally:
+            released.set()
+
+    async with LocalRuntime(env)(Task(env=env.name, id="task")) as runtime:
+        async with connect(runtime) as client:
+            with pytest.raises(HudProtocolError, match="limit is 16777216 bytes"):
+                await client.start_task("task")
+            assert released.is_set()
+        async with connect(runtime) as resumed:
+            with pytest.raises(HudProtocolError, match="no task in progress"):
+                await resumed.grade({"answer": "done"})
+
+
+@pytest.mark.parametrize("hello_first", [False, True])
+async def test_wire_request_over_limit_receives_error_before_disconnect(hello_first: bool) -> None:
+    env = Environment("wire-limit")
+    async with LocalRuntime(env)(Task(env=env.name, id="unused")) as runtime:
+        address = urlsplit(runtime.url)
+        reader, writer = await asyncio.open_connection(address.hostname, address.port)
+        try:
+            if hello_first:
+                await send_frame(writer, {"jsonrpc": "2.0", "id": 1, "method": "hello"})
+                assert await read_frame(reader) is not None
+            writer.write(
+                encode_frame(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tasks.start",
+                        "params": {"id": "unused", "args": {"data": "x" * (16 * 1024 * 1024)}},
+                    }
+                )
+            )
+            response = await asyncio.wait_for(read_frame(reader), timeout=5.0)
+            assert response is not None
+            assert response["id"] is None
+            assert "16777216 bytes" in response["error"]["message"]
+        finally:
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+
+
+async def test_large_request_id_cannot_make_fallback_error_exceed_limit() -> None:
+    env = Environment("large-id")
+    frame = {"jsonrpc": "2.0", "id": "", "method": "nope"}
+    overhead = len(encode_frame(frame)) - 1
+    frame["id"] = "x" * (16 * 1024 * 1024 - overhead)
+    async with LocalRuntime(env)(Task(env=env.name, id="unused")) as runtime:
+        address = urlsplit(runtime.url)
+        reader, writer = await asyncio.open_connection(address.hostname, address.port)
+        try:
+            await send_frame(writer, frame)
+            response = await asyncio.wait_for(read_frame(reader), timeout=5.0)
+            assert response is not None
+            assert response["id"] is None
+            assert "limit is 16777216 bytes" in response["error"]["message"]
+        finally:
+            writer.close()
+            await writer.wait_closed()

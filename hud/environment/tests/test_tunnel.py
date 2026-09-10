@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import pytest
 
 from hud.capabilities import Capability
 from hud.environment import Environment
-from hud.environment.utils import read_frame, send_frame
+from hud.environment.utils import encode_frame, read_frame, send_frame
 
 from .conftest import served
 
@@ -136,3 +137,43 @@ async def test_closing_the_client_tears_down_its_forwarders(echo_port: int) -> N
     with pytest.raises(OSError):
         _, writer = await asyncio.open_connection(parts.hostname, parts.port)
         writer.close()
+
+
+async def test_frame_assembly_preserves_raw_bytes_and_stream_backpressure() -> None:
+    reader = asyncio.StreamReader()
+    transport = Mock(spec=asyncio.Transport)
+    reader.set_transport(transport)
+    frame = {"padding": "x" * (192 * 1024)}
+    reader.feed_data(encode_frame(frame) + b"raw bytes")
+    assert await read_frame(reader, max_bytes=16 * 1024 * 1024) == frame
+    assert await reader.readexactly(9) == b"raw bytes"
+
+    transport.pause_reading.reset_mock()
+    reader.feed_data(b"x" * (128 * 1024 + 1))
+    transport.pause_reading.assert_called_once()
+
+
+async def test_large_tunnel_preface_preserves_coalesced_raw_bytes(echo_port: int) -> None:
+    async with served(_echo_env(echo_port)) as client:
+        assert client._endpoint is not None
+        reader, writer = await asyncio.open_connection(*client._endpoint)
+        try:
+            writer.write(
+                encode_frame(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tunnel.open",
+                        "params": {"capability": "echo"},
+                        "padding": "x" * 70000,
+                    }
+                )
+                + b"raw bytes"
+            )
+            await writer.drain()
+            response = await read_frame(reader)
+            assert response is not None and "result" in response
+            assert await reader.readexactly(9) == b"raw bytes"
+        finally:
+            writer.close()
+            await writer.wait_closed()

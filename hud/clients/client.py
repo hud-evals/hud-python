@@ -27,7 +27,13 @@ from hud.capabilities import (
     RFBClient,
     SSHClient,
 )
-from hud.environment.utils import CONTROL_FRAME_LIMIT_BYTES, read_frame, send_frame, splice
+from hud.environment.utils import (
+    CONTROL_FRAME_LIMIT_BYTES,
+    encode_frame,
+    read_frame,
+    send_frame,
+    splice,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -189,9 +195,7 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await asyncio.open_connection(
-                            host, port, limit=CONTROL_FRAME_LIMIT_BYTES
-                        )
+                        up_reader, up_writer = await asyncio.open_connection(host, port)
                     except OSError as exc:
                         LOGGER.warning(
                             "tunnel peer %s:%d connection failed: %s",
@@ -211,7 +215,7 @@ class HudClient:
                         },
                         max_bytes=CONTROL_FRAME_LIMIT_BYTES,
                     )
-                    opened = await read_frame(up_reader)
+                    opened = await read_frame(up_reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
                     if opened is None or "error" in opened:
                         LOGGER.warning("tunnel.open %r refused: %s", capability.name, opened)
                         up_writer.close()
@@ -335,23 +339,25 @@ class HudClient:
         reply_timeout: float | None = None,
     ) -> dict[str, Any]:
         async with self._call_lock:
+            msg_id = next(self._ids)
+            frame = encode_frame(
+                {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
+                max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+            )
             try:
                 async with asyncio.timeout(reply_timeout):
-                    msg_id = next(self._ids)
-                    await send_frame(
-                        self._writer,
-                        {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
-                        max_bytes=CONTROL_FRAME_LIMIT_BYTES,
-                    )
-                    reply = await read_frame(self._reader)
+                    self._writer.write(frame)
+                    await self._writer.drain()
+                    reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
                     if reply is None:
                         raise EOFError(f"env closed connection during {method!r}")
                     if reply.get("id") != msg_id:
                         self.abort()
-                        raise HudProtocolError(
-                            -32603,
-                            f"{method!r}: reply id did not match request",
-                        )
+                        if reply.get("id") is not None or "error" not in reply:
+                            raise HudProtocolError(
+                                -32603,
+                                f"{method!r}: reply id did not match request",
+                            )
                     if "error" in reply:
                         err = reply["error"]
                         raise HudProtocolError(
@@ -391,9 +397,7 @@ async def _connect_ready(
     deadline = loop.time() + ready_timeout
     while True:
         try:
-            reader, writer = await asyncio.open_connection(
-                host, port, limit=CONTROL_FRAME_LIMIT_BYTES
-            )
+            reader, writer = await asyncio.open_connection(host, port)
         except OSError:
             if loop.time() >= deadline:
                 raise
