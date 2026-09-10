@@ -85,6 +85,7 @@ jobs:
         working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
+          HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
           HUD_TELEMETRY_LOCAL_DIR: ${{ runner.temp }}/traces-${{ matrix.template }}
         run: |
           uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" prepare "${{ matrix.template }}"

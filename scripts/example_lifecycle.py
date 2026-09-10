@@ -10,36 +10,17 @@ import sys
 import time
 from pathlib import Path
 
-import httpx
-
 from hud.eval import Taskset
-from hud.utils.platform import PlatformClient
 
 
 def prepare(example: str) -> None:
     task = next(iter(Taskset.from_file("tasks.py")))
     Path(".hud").mkdir(exist_ok=True)
     if example == "argument-hints":
-        platform = PlatformClient.from_settings()
-        content = b"Examples of primes under 20: 2, 3, 5, 7, 11, 13, 17, 19.\n"
-        upload = platform.post(
-            "/data",
-            json={
-                "filename": "notes.txt",
-                "size_bytes": len(content),
-                "content_type": "text/plain",
-            },
-        )
-        file_id = upload["file"]["id"]
-        response = httpx.put(
-            upload["upload_url"],
-            content=content,
-            headers={"Content-Type": "text/plain"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        platform.post(f"/data/{file_id}/complete")
-        task.args["attachments"] = [{"file_id": file_id}]
+        file_id = os.environ["HUD_CI_DATA_FILE_ID"]
+        if not file_id:
+            raise ValueError("HUD_CI_DATA_FILE_ID must reference the shared CI attachment")
+        task.args["attachments"] = [{"file_id": file_id, "path": "notes.txt"}]
         task.args["prompt"] = "Read files/notes.txt first. " + task.args["prompt"]
     Taskset(tasks=[task]).to_file(".hud/ci-tasks.json")
 
