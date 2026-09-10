@@ -403,6 +403,12 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         if thinking_parts:
             result.reasoning = "\n".join(thinking_parts)
         result.finish_reason = response.stop_reason
+        if response.stop_reason == "refusal" and response.stop_details is not None:
+            explanation = response.stop_details.explanation
+            if explanation:
+                result.refusal = explanation
+            elif response.stop_details.category is not None:
+                result.refusal = f"This request was refused ({response.stop_details.category})."
         return result
 
     @staticmethod

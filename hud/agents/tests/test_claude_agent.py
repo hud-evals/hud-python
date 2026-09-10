@@ -54,11 +54,12 @@ class FakeAnthropic:
         self.beta = SimpleNamespace(messages=FakeMessages(*outcomes))
 
 
-def _final(*content: Any, stop_reason: str) -> Any:
+def _final(*content: Any, stop_reason: str, stop_details: Any = None) -> Any:
     """A fake ``BetaMessage``: content blocks plus the always-present envelope."""
     return SimpleNamespace(
         content=list(content),
         stop_reason=stop_reason,
+        stop_details=stop_details,
         model="claude-test-v9",
         usage=SimpleNamespace(input_tokens=11, output_tokens=7, cache_read_input_tokens=3),
     )
@@ -127,6 +128,48 @@ async def test_get_response_done_on_text_only() -> None:
     result = await agent.get_response(_state(agent))
     assert result.done is True
     assert result.content == "done"
+    assert result.tool_calls == []
+    assert result.refusal is None
+
+
+async def test_get_response_surfaces_refusal_explanation() -> None:
+    explanation = (
+        "This request triggered restrictions on violative cyber content and was "
+        "blocked under Anthropic's Usage Policy."
+    )
+    final = _final(
+        stop_reason="refusal",
+        stop_details=SimpleNamespace(
+            type="refusal",
+            category="cyber",
+            explanation=explanation,
+        ),
+    )
+    agent = _agent(final)
+    result = await agent.get_response(_state(agent))
+
+    assert result.finish_reason == "refusal"
+    assert result.refusal == explanation
+    assert result.done is True
+    assert result.tool_calls == []
+
+
+async def test_get_response_surfaces_refusal_category_when_explanation_missing() -> None:
+    final = _final(
+        stop_reason="refusal",
+        stop_details=SimpleNamespace(
+            type="refusal",
+            category="cyber",
+            explanation=None,
+        ),
+    )
+    agent = _agent(final)
+    result = await agent.get_response(_state(agent))
+
+    assert result.finish_reason == "refusal"
+    assert result.refusal is not None
+    assert "cyber" in result.refusal
+    assert result.done is True
     assert result.tool_calls == []
 
 
