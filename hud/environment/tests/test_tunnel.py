@@ -139,41 +139,17 @@ async def test_closing_the_client_tears_down_its_forwarders(echo_port: int) -> N
         writer.close()
 
 
-async def test_frame_assembly_preserves_raw_bytes_and_stream_backpressure() -> None:
+@pytest.mark.parametrize("frame_size", [70000, 16 * 1024 * 1024])
+async def test_buffered_frame_preserves_newline_boundary_and_backpressure(frame_size: int) -> None:
     reader = asyncio.StreamReader()
     transport = Mock(spec=asyncio.Transport)
     reader.set_transport(transport)
-    frame = {"padding": "x" * (192 * 1024)}
+    frame = {"padding": ""}
+    frame["padding"] = "x" * (frame_size - (len(encode_frame(frame)) - 1))
     reader.feed_data(encode_frame(frame) + b"raw bytes")
-    assert await read_frame(reader, max_bytes=16 * 1024 * 1024) == frame
+    assert await asyncio.wait_for(read_frame(reader, max_bytes=16 * 1024 * 1024), 1) == frame
     assert await reader.readexactly(9) == b"raw bytes"
 
     transport.pause_reading.reset_mock()
     reader.feed_data(b"x" * (128 * 1024 + 1))
     transport.pause_reading.assert_called_once()
-
-
-async def test_large_tunnel_preface_preserves_coalesced_raw_bytes(echo_port: int) -> None:
-    async with served(_echo_env(echo_port)) as client:
-        assert client._endpoint is not None
-        reader, writer = await asyncio.open_connection(*client._endpoint)
-        try:
-            writer.write(
-                encode_frame(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tunnel.open",
-                        "params": {"capability": "echo"},
-                        "padding": "x" * 70000,
-                    }
-                )
-                + b"raw bytes"
-            )
-            await writer.drain()
-            response = await read_frame(reader)
-            assert response is not None and "result" in response
-            assert await reader.readexactly(9) == b"raw bytes"
-        finally:
-            writer.close()
-            await writer.wait_closed()

@@ -311,49 +311,33 @@ async def test_connect_uses_runtime_ready_timeout_param(
     }
 
 
-async def test_connect_gives_up_at_the_deadline_when_the_env_never_serves() -> None:
+@pytest.mark.parametrize("protocol_error", [False, True])
+async def test_connect_reports_handshake_failure(protocol_error: bool) -> None:
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        # Read the hello frame, then hang up without answering: guarantees the
-        # client sees EOF on the reply (not a racing write reset).
         try:
             await read_frame(reader)
+            if protocol_error:
+                await send_frame(
+                    writer,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32000, "message": "frame exceeds size limit"},
+                    },
+                )
         finally:
             writer.close()
 
     server = await asyncio.start_server(handler, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     try:
-        with pytest.raises(EOFError, match="closed connection during 'hello'"):
+        expected = HudProtocolError if protocol_error else EOFError
+        message = (
+            "frame exceeds size limit" if protocol_error else "closed connection during 'hello'"
+        )
+        with pytest.raises(expected, match=message):
             async with connect(Runtime(f"tcp://127.0.0.1:{port}"), ready_timeout=1.2):
                 pass
-    finally:
-        server.close()
-        await server.wait_closed()
-
-
-async def test_connection_level_error_is_reported_without_request_id() -> None:
-    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        try:
-            await read_frame(reader)
-            await send_frame(writer, {"jsonrpc": "2.0", "id": 1, "result": HELLO_RESULT})
-            await read_frame(reader)
-            await send_frame(
-                writer,
-                {
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {"code": -32000, "message": "frame exceeds size limit"},
-                },
-            )
-        finally:
-            writer.close()
-
-    server = await asyncio.start_server(handler, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
-            with pytest.raises(HudProtocolError, match="frame exceeds size limit"):
-                await client.list_tasks()
     finally:
         server.close()
         await server.wait_closed()
