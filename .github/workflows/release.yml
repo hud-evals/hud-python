@@ -5,14 +5,36 @@ on:
     types: [published]
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Require pre-release validation for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          validated_run=$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/pre-release.yml/runs" \
+            -f head_sha="$GITHUB_SHA" -f branch=main \
+            -f event=workflow_dispatch -f status=success \
+            --jq '.workflow_runs[0].html_url // empty')
+          if [ -z "$validated_run" ]; then
+            echo "::error::Run Pre-release on main for commit $GITHUB_SHA before publishing."
+            exit 1
+          fi
+          echo "Validated by $validated_run"
+
   deploy:
-    if: ${{ github.event_name == 'release' }}
+    needs: validate
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

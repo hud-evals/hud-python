@@ -62,6 +62,15 @@ uv run --extra dev --extra train ty check  # Type checking
 3. **Tests**: All CI checks must pass (ruff, ty, pytest)
 4. **Review**: Address feedback promptly
 
+## Releases
+
+1. Set the intended package version on `main`, then manually run the **Pre-release** workflow on `main`.
+2. After it succeeds, tag that exact commit and publish the GitHub release.
+
+The Release workflow requires successful pre-release validation of the tagged commit before
+publishing to PyPI or updating docs. Any commit change, including a version bump, requires a new
+validation run. Publishing the GitHub release itself does not bypass this check.
+
 ## Need Help?
 
 - Check existing issues and PRs

@@ -5,7 +5,6 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "*" ]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,77 +28,6 @@ jobs:
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --all-extras pytest --cov --cov-report=''
-
-  templates:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    environment: pre-release
-    timeout-minutes: 45
-    concurrency:
-      group: ci-example-${{ matrix.template }}
-      cancel-in-progress: false
-    env:
-      EXAMPLE_NAME: ci-${{ matrix.template }}
-    strategy:
-      fail-fast: false
-      matrix:
-        template: [blank, coding, cua, argument-hints]
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Create example environment
-        run: uv run hud init "$RUNNER_TEMP/$EXAMPLE_NAME" --template "${{ matrix.template }}"
-
-      - name: Install example with the SDK from this checkout
-        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
-        run: |
-          uv build --wheel --no-create-gitignore --out-dir .hud-sdk "$GITHUB_WORKSPACE"
-          uv add --no-sync .hud-sdk/hud-*.whl
-          uv sync --all-extras
-          sed -i '/^RUN .*uv sync/i COPY .hud-sdk .hud-sdk' Dockerfile.hud
-          echo '!.hud-sdk/' >> .dockerignore
-          echo '!.hud-sdk/**' >> .dockerignore
-
-      - name: Run example checks
-        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
-        run: |
-          uv run --no-sync hud task list --source .
-          if [ -d tests ]; then
-            uv run --no-sync ruff format . --check
-            uv run --no-sync ruff check .
-            uv run --no-sync pytest -q
-          fi
-
-      - name: Deploy example environment
-        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
-        env:
-          HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
-        run: uv run --no-sync hud deploy --no-env
-
-      - name: Run hosted task lifecycle
-        working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
-        env:
-          HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
-          HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
-          HUD_TELEMETRY_LOCAL_DIR: ${{ runner.temp }}/traces-${{ matrix.template }}
-        run: |
-          uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" prepare "${{ matrix.template }}"
-          timeout --signal=INT --kill-after=30s 15m uv run --no-sync hud eval .hud/ci-tasks.json claude \
-            --model claude-sonnet-4-6 --gateway --runtime hud --max-steps 10 --config max_tokens=2048 -y
-          uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" check
-
-      - name: Save traces
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: example-traces-${{ matrix.template }}
-          path: ${{ runner.temp }}/traces-${{ matrix.template }}
-          retention-days: 7
 
   lint-ruff:
     runs-on: ubuntu-latest
