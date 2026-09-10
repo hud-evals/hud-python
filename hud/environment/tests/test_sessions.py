@@ -9,6 +9,8 @@ split ``hud task start`` / ``hud task grade`` flow).
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from hud.clients import HudProtocolError, connect
@@ -54,11 +56,30 @@ async def test_restart_replaces_only_the_sessions_own_task() -> None:
         assert (await b.grade({"answer": "x"}))["tag"] == "b"
 
 
-async def test_disconnect_parks_the_task_for_a_later_connection() -> None:
+@pytest.mark.parametrize("write_error", [None, ConnectionError, asyncio.CancelledError])
+async def test_disconnect_parks_the_task_for_a_later_connection(
+    monkeypatch: pytest.MonkeyPatch, write_error: type[BaseException] | None
+) -> None:
+    real_write = asyncio.StreamWriter.write
+
+    def write(writer: asyncio.StreamWriter, data: bytes) -> None:
+        if write_error is not None and b'"prompt":' in data:
+            writer.close()
+            raise write_error()
+        real_write(writer, data)
+
+    monkeypatch.setattr(asyncio.StreamWriter, "write", write)
     async with LocalRuntime(_env())(_SESSION) as runtime:
         async with connect(runtime) as first:
-            await first.start_task("echo", {"tag": "parked"})
+            assert first.manifest is not None
+            session_id = first.manifest.session_id
+            if write_error is None:
+                await first.start_task("echo", {"tag": "parked"})
+            else:
+                with pytest.raises(EOFError):
+                    await first.start_task("echo", {"tag": "parked"})
         async with connect(runtime) as later:
+            await later.hello(session_id=session_id)
             assert (await later.grade({"answer": "x"}))["tag"] == "parked"
 
 

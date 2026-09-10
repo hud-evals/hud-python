@@ -378,7 +378,7 @@ class _ControlChannel:
                             continue
                         try:
                             await reply_to(msg_id, prompt)
-                        except BaseException:
+                        except FrameTooLargeError:
                             await self.cancel(session_id)
                             raise
 
