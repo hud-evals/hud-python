@@ -5,14 +5,17 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hud import LocalRuntime, Run, connect
 from hud.environment import workspace as workspace_lib
 
+import tasks
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PYTEST_COMMAND = f"{shlex.quote(sys.executable)} -m pytest -q test_widget.py --junitxml={{junit_path}}"
+PYTEST_COMMAND = (
+    f"{shlex.quote(sys.executable)} -m pytest -q -c /dev/null --rootdir=. test_widget.py --junitxml={{junit_path}}"
+)
 TEST_PATCH = """diff --git a/test_widget.py b/test_widget.py
 new file mode 100644
 --- /dev/null
@@ -35,31 +38,11 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        ["git", "-c", f"safe.directory={cwd}", "-c", "user.name=t", "-c", "user.email=t@t", *args],
         cwd=cwd,
         check=True,
         capture_output=True,
     )
-
-
-@pytest.fixture
-def isolated_workspace(monkeypatch):
-    monkeypatch.setattr(workspace_lib, "usable_bwrap", lambda: "/usr/bin/true")
-    monkeypatch.setattr(
-        workspace_lib.Workspace,
-        "shell_argv",
-        lambda _self, command, **_kwargs: ["bash", "-lc", command],
-    )
-
-
-@pytest.fixture
-def grading_workspace(monkeypatch):
-    import env as coding_env
-
-    workspace = AsyncMock()
-    workspace.shell_argv = Mock(side_effect=lambda command, **_: ["bash", "-lc", command])
-    monkeypatch.setattr(coding_env, "workspace", workspace)
-    return workspace
 
 
 @pytest.fixture(scope="session")
@@ -92,19 +75,22 @@ def _coding_task():
     )
 
 
-async def _run_task(fixture_repo: Path, task) -> float:
-    os.environ["REPO_URL"] = str(fixture_repo)
+async def _run_task(fixture_repo: Path, task, monkeypatch) -> float:
+    monkeypatch.setenv("REPO_URL", str(fixture_repo))
+    monkeypatch.delenv("REPO_DIR", raising=False)
+    monkeypatch.delenv("BASELINE_DIR", raising=False)
     runtime = LocalRuntime(str(PROJECT_ROOT / "env.py"))
     async with runtime(task) as addr, connect(addr) as client:
         async with Run(client, task.id, task.args) as run:
             pass
+    assert not run.evaluation.get("isError"), run.evaluation
     return run.reward
 
 
 async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading_workspace):
     import env as coding_env
 
-    repo = tmp_path / "repo"
+    repo = grading_workspace.root
     subprocess.run(["git", "clone", "-q", str(fixture_repo), str(repo)], check=True)
     monkeypatch.setattr(coding_env, "REPO_DIR", repo)
     monkeypatch.setattr(coding_env, "BASELINE_DIR", tmp_path / "baseline")
@@ -116,11 +102,8 @@ async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading
     (repo / "widget.py").write_text("from fix import BROKEN\n")
     result = await task.asend("done")
 
-    assert result.reward == 1.0
+    assert result.reward == 1.0, result
     assert (repo / "fix.py").exists()
-    grading_workspace.terminate_sessions.assert_awaited_once_with()
-    grading_workspace.shell_argv.assert_called_once()
-    grading_workspace.discard_sandbox.assert_awaited_once_with()
 
 
 async def test_missing_junit_report_is_grading_error(
@@ -131,7 +114,7 @@ async def test_missing_junit_report_is_grading_error(
 ):
     import env as coding_env
 
-    repo = tmp_path / "repo"
+    repo = grading_workspace.root
     subprocess.run(["git", "clone", "-q", str(fixture_repo), str(repo)], check=True)
     monkeypatch.setattr(coding_env, "REPO_DIR", repo)
     monkeypatch.setattr(coding_env, "BASELINE_DIR", tmp_path / "baseline")
@@ -151,11 +134,22 @@ async def test_missing_junit_report_is_grading_error(
     assert result.isError is True
     assert result.content == "test command did not write JUnit XML"
     assert result.info["exit_code"] == 0
-    grading_workspace.discard_sandbox.assert_awaited_once_with()
 
 
-async def test_untouched_baseline_gets_regression_credit(fixture_repo, isolated_workspace):
-    assert await _run_task(fixture_repo, _coding_task()) == 0.5
+async def test_untouched_baseline_gets_regression_credit(fixture_repo, isolated_workspace, monkeypatch):
+    assert await _run_task(fixture_repo, _coding_task(), monkeypatch) == 0.5
+
+
+@pytest.mark.parametrize("task", tasks.tasks, ids=lambda task: task.slug)
+@pytest.mark.parametrize("fixed", [False, True], ids=["baseline", "reference-fix"])
+async def test_bundled_tasks_grade_in_workspace(task, fixed, isolated_workspace, tmp_path, monkeypatch):
+    bundle = tmp_path / "flask.bundle"
+    bundle.write_bytes((PROJECT_ROOT / "flask.bundle").read_bytes())
+    if fixed:
+        task = task.model_copy(
+            update={"args": {**task.args, "base_ref": f"origin/{task.slug.replace('-', '_')}_golden"}}
+        )
+    assert await _run_task(bundle, task, monkeypatch) == float(fixed)
 
 
 async def test_local_runtime_refuses_unisolated_non_root_workspace(
@@ -180,7 +174,7 @@ async def test_grading_discards_agent_git_config_and_test_changes(
 ):
     import env as coding_env
 
-    repo = tmp_path / "repo"
+    repo = grading_workspace.root
     subprocess.run(["git", "clone", "-q", str(fixture_repo), str(repo)], check=True)
     monkeypatch.setattr(coding_env, "REPO_DIR", repo)
     monkeypatch.setattr(coding_env, "BASELINE_DIR", tmp_path / "baseline")
@@ -203,9 +197,9 @@ async def test_grading_discards_agent_git_config_and_test_changes(
 
     result = await task.asend("done")
 
-    assert result.reward == 0.5
+    assert result.reward == 0.5, result
     config = subprocess.run(
-        ["git", "config", "--get", "filter.agent.clean"],
+        ["git", "-c", f"safe.directory={repo}", "config", "--get", "filter.agent.clean"],
         cwd=repo,
         capture_output=True,
         check=False,

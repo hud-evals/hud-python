@@ -165,6 +165,33 @@ async def test_credentials_live_outside_the_served_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("guest_path", ["/workspace", "/tmp/hud-coding/123/workspace"])
+async def test_shell_user_can_access_guest_workspace_paths(tmp_path: Path, guest_path: str) -> None:
+    if sys.platform != "linux" or os.geteuid() != 0 or workspace_mod.usable_bwrap() is None:
+        pytest.skip("requires Linux, root, and usable bubblewrap")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "input.txt").write_text("hello\n")
+    ws = Workspace(
+        root, guest_path=guest_path, network=False, shell_uid=1000, require_isolation=True
+    )
+    await ws.start()
+    try:
+        command = f"id -u; cat {guest_path}/input.txt; echo written > {guest_path}/output.txt"
+        async with await _connect(ws) as conn:
+            result = await conn.run(command)
+            assert result.exit_status == 0, result.stderr
+            assert result.stdout == "1000\nhello\n"
+        await ws.terminate_sessions()
+        captured = await ws.run(["sh", "-c", command], scope="environment")
+        assert captured.returncode == 0, captured.stderr
+        assert captured.stdout == b"1000\nhello\n"
+        assert (root / "output.txt").read_text() == "written\n"
+    finally:
+        await ws.stop()
+
+
+@pytest.mark.asyncio
 async def test_sftp_subsystem_is_not_served(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "root")
     await ws.start()

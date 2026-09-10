@@ -6,10 +6,10 @@ import shlex
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
 from xml.etree import ElementTree
 
-from hud.graders import BashGrader, SubScore
+from hud.environment import Workspace
+from hud.graders import SubScore
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,50 +121,41 @@ def score_tests(
     return SubScore(name="tests", value=value, children=children, info=info)
 
 
-class JUnitGrader(BashGrader):
-    """Run a command and score selected JUnit test cases."""
+async def grade_tests(
+    workspace: Workspace,
+    command: str,
+    *,
+    timeout_seconds: float = 600,
+    fail_to_pass: list[str] | None = None,
+    pass_to_pass: list[str] | None = None,
+    binary: bool = False,
+) -> SubScore:
+    if "{junit_path}" not in command:
+        raise ValueError("test command must contain {junit_path}")
 
-    name = "JUnitGrader"
-
-    @classmethod
-    async def compute_score(
-        cls,
-        command: str | None = None,
-        cwd: str | None = None,
-        timeout_seconds: float | None = None,
-        fail_to_pass: list[str] | None = None,
-        pass_to_pass: list[str] | None = None,
-        binary: bool = False,
-        **kwargs: Any,
-    ) -> SubScore:
-        if command is None or "{junit_path}" not in command:
-            raise ValueError("JUnitGrader command must contain {junit_path}")
-
-        with tempfile.TemporaryDirectory(prefix=".hud-junit-", dir=cwd) as directory:
-            Path(directory).chmod(0o733)
-            report = Path(directory) / "report.xml"
-            bash = await super().compute_score(
-                command=command.replace("{junit_path}", shlex.quote(str(report))),
-                cwd=cwd,
-                timeout_seconds=timeout_seconds,
-                **kwargs,
-            )
-            if not report.is_file():
-                return bash.model_copy(
-                    update={
-                        "value": 0.0,
-                        "info": {**(bash.info or {}), "error": "test command did not write JUnit XML"},
-                    }
-                )
-            if binary and bash.value != 1.0:
-                return bash
-            try:
-                result = score_tests(parse_junit(report), fail_to_pass, pass_to_pass, binary)
-            except (OSError, ValueError) as exc:
-                return bash.model_copy(
-                    update={
-                        "value": 0.0,
-                        "info": {**(bash.info or {}), "error": str(exc)},
-                    }
-                )
-            return result.model_copy(update={"info": {**(result.info or {}), **(bash.info or {})}})
+    with tempfile.TemporaryDirectory(prefix=".hud-junit-", dir=workspace.root) as directory:
+        Path(directory).chmod(0o733)
+        report = Path(directory) / "report.xml"
+        process = await workspace.run(
+            ["/bin/bash", "-lc", command.replace("{junit_path}", shlex.quote(str(report)))],
+            cwd=str(workspace.root),
+            env={"HOME": "/tmp", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+            max_wait=timeout_seconds,
+            scope="environment",
+        )
+        info = {
+            "exit_code": process.returncode,
+            "stdout": process.stdout.decode(errors="replace"),
+            "stderr": process.stderr.decode(errors="replace"),
+            "timed_out": process.timed_out,
+        }
+        failed = SubScore(name="tests", value=0.0, info=info)
+        if not report.is_file():
+            return failed.model_copy(update={"info": {**info, "error": "test command did not write JUnit XML"}})
+        if process.timed_out or (binary and process.returncode != 0):
+            return failed
+        try:
+            result = score_tests(parse_junit(report), fail_to_pass, pass_to_pass, binary)
+        except (OSError, ValueError) as exc:
+            return failed.model_copy(update={"info": {**info, "error": str(exc)}})
+        return result.model_copy(update={"info": {**(result.info or {}), **info}})

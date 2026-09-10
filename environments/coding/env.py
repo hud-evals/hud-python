@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -17,7 +16,7 @@ from hud.graders import EvaluationResult, combine
 from hud.settings import settings
 from pydantic import Field
 
-from grader import JUnitGrader
+from grader import grade_tests
 
 logger = logging.getLogger(__name__)
 
@@ -166,21 +165,9 @@ async def _grade(
             isError=True,
         )
 
-    grader_command = shlex.join(
-        workspace.shell_argv(
-            test_command,
-            cwd=str(REPO_DIR),
-            env={
-                "HOME": "/tmp",
-                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-            },
-        )
-    )
-    test_result = await JUnitGrader.grade(
-        weight=1.0,
-        name="tests",
-        command=grader_command,
-        cwd=str(REPO_DIR),
+    test_result = await grade_tests(
+        workspace,
+        test_command,
         timeout_seconds=TEST_TIMEOUT,
         fail_to_pass=fail_to_pass,
         pass_to_pass=pass_to_pass,
