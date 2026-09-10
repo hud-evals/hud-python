@@ -396,6 +396,65 @@ async def run_rollouts(
         sampler.close()
 
 
+async def evaluate_policy(
+    *,
+    service: FiretitanServiceClient,
+    training_client: Any,
+    tokenizer: Any,
+    renderer: Any,
+    snapshot_name: str,
+    taskset: Taskset,
+    runtime: Provider | HUDRuntime,
+    args: argparse.Namespace,
+    output_path: Path,
+) -> tuple[float, str]:
+    print(f"Evaluating {snapshot_name}: {len(taskset)} held-out tasks", flush=True)
+    runs, snapshot = await run_rollouts(
+        service=service,
+        training_client=training_client,
+        tokenizer=tokenizer,
+        renderer=renderer,
+        snapshot_name=snapshot_name,
+        taskset=taskset,
+        runtime=runtime,
+        group_size=1,
+        max_concurrent=args.max_concurrent,
+        max_tokens=args.max_tokens,
+        temperature=0.0,
+        timeout=args.sampling_timeout,
+        max_seq_len=args.max_seq_len,
+    )
+    samples = []
+    for run in runs:
+        sample = _sample(run)
+        assert sample is not None
+        output_tokens = len(sample.output_token_ids)
+        samples.append(
+            {
+                "prompt": run.prompt_text,
+                "reward": run.reward,
+                "info": run.grade.info,
+                "answer": run.trace.content,
+                "output_tokens": output_tokens,
+                "at_token_limit": output_tokens == args.max_tokens,
+            }
+        )
+    output_path.write_text(
+        json.dumps(
+            {
+                "snapshot": snapshot,
+                "temperature": 0.0,
+                "max_tokens": args.max_tokens,
+                "samples": samples,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return sum(run.reward for run in runs) / len(runs), snapshot
+
+
 def validate_args(args: argparse.Namespace) -> None:
     positive = {
         "--steps": args.steps,
@@ -418,6 +477,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--tasks-file requires --env-path")
     if args.env_path and not args.tasks_file:
         raise SystemExit("--env-path requires --tasks-file")
+    if args.eval_before and args.calibrate:
+        raise SystemExit("--eval-before cannot be used with --calibrate")
 
 
 async def train(args: argparse.Namespace) -> None:
@@ -435,8 +496,14 @@ async def train(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / "metrics.jsonl"
-    if not args.resume_from and not args.calibrate:
-        metrics_path.write_text("", encoding="utf-8")
+    if not args.calibrate:
+        for name in ("eval-before.json", "eval-after.json"):
+            (output_dir / name).unlink(missing_ok=True)
+        (output_dir / "config.json").write_text(
+            json.dumps(vars(args), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        if not args.resume_from:
+            metrics_path.write_text("", encoding="utf-8")
 
     tokenizer = get_tokenizer(args.tokenizer_model)
     renderer = get_renderer(args.renderer, tokenizer)
@@ -481,6 +548,23 @@ async def train(args: argparse.Namespace) -> None:
             )
             report_calibration(runs, debug_samples=args.debug_samples)
             return
+
+        if args.eval_before:
+            baseline_reward, _ = await evaluate_policy(
+                service=service,
+                training_client=training_client,
+                tokenizer=tokenizer,
+                renderer=renderer,
+                snapshot_name="initial",
+                taskset=eval_taskset,
+                runtime=runtime,
+                args=args,
+                output_path=output_dir / "eval-before.json",
+            )
+            print(
+                f"Baseline reward={baseline_reward:.3f} on {len(eval_taskset)} held-out tasks",
+                flush=True,
+            )
 
         for step in range(1, args.steps + 1):
             started = time.perf_counter()
@@ -552,7 +636,7 @@ async def train(args: argparse.Namespace) -> None:
             )
 
         final_state = training_client.save_state("final-state").result()
-        eval_runs, final_snapshot = await run_rollouts(
+        eval_reward, final_snapshot = await evaluate_policy(
             service=service,
             training_client=training_client,
             tokenizer=tokenizer,
@@ -560,16 +644,11 @@ async def train(args: argparse.Namespace) -> None:
             snapshot_name="final",
             taskset=eval_taskset,
             runtime=runtime,
-            group_size=1,
-            max_concurrent=args.max_concurrent,
-            max_tokens=args.max_tokens,
-            temperature=0.0,
-            timeout=args.sampling_timeout,
-            max_seq_len=args.max_seq_len,
+            args=args,
+            output_path=output_dir / "eval-after.json",
         )
-        eval_reward = sum(run.reward for run in eval_runs) / len(eval_runs)
         print(
-            f"Evaluation reward={eval_reward:.3f} on {len(eval_runs)} held-out tasks\n"
+            f"Evaluation reward={eval_reward:.3f} on {len(eval_taskset)} held-out tasks\n"
             f"Sampler checkpoint: {final_snapshot}\n"
             f"Training checkpoint: {getattr(final_state, 'path', 'final-state')}\n"
             f"Metrics: {metrics_path}",
@@ -660,6 +739,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-concurrent", type=int, default=4, help="simultaneous rollouts")
     parser.add_argument(
         "--eval-tasks", type=int, default=16, help="held-out tasks for the final eval"
+    )
+    parser.add_argument(
+        "--eval-before",
+        action="store_true",
+        help="also evaluate the same held-out tasks before training for a matched comparison",
     )
     parser.add_argument(
         "--loss-fn",

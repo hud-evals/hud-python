@@ -109,8 +109,8 @@ uv run train.py \
 
 Prompt rendering happens on the client, so the base model, tokenizer, and renderer must agree. The
 default renderer, `qwen3_8_disable_thinking` from `tinker-cookbook>=0.5.7`, disables thinking mode.
-This leaves enough of the generation budget for the model to emit the final answer that the
-grader reads.
+`--max-tokens` still limits the entire generated response; a response that reaches the limit may
+not include a final answer.
 
 ## Define the task and reward
 
@@ -257,6 +257,51 @@ generated tokens, and sampling logprobs on each `Run`. `make_training_batch` the
 Metrics are written to `runs/fireworks-serverless/metrics.jsonl`. Each row includes mean reward,
 within-group reward spread, valid rollout count, retained groups, training datums, whether an update
 was applied, loss, snapshot, and step duration.
+
+## Compare before and after training
+
+Add `--eval-before` to evaluate the initial and final adapters on the same held-out tasks,
+at temperature 0 with the same generation budget:
+
+```bash
+uv run train.py \
+  --eval-before \
+  --steps 8 \
+  --tasks-per-step 16 \
+  --group-size 4 \
+  --eval-tasks 128 \
+  --seed 42 \
+  --max-tokens 2048 \
+  --max-concurrent 8 \
+  --output-dir runs/before-after
+```
+
+This requests 512 training rollouts and 256 evaluation rollouts. Training repeats 16 task pairs;
+the 128 evaluation tasks are held out. `--seed` controls the task split, not model sampling randomness.
+
+The script saves `config.json`, `eval-before.json`, and `eval-after.json`. Each evaluation contains
+the checkpoint, prompts, responses, rewards, grader info, output-token counts, and an
+`at_token_limit` flag. Match results by prompt and inspect both improvements and regressions.
+Report format failures and responses at the token limit alongside accuracy; they can explain a
+change in reward.
+
+Use a separate output directory per experiment. Without `--eval-before`, only the final
+evaluation runs.
+
+One run with this configuration applied all eight updates and produced:
+
+| Held-out metric | Before | After |
+| --- | ---: | ---: |
+| Correct answers | 100/128 (78.1%) | 126/128 (98.4%) |
+| Invalid final line | 19 | 0 |
+| Incorrect valid integer | 9 | 2 |
+| Responses at the token limit | 20 | 0 |
+| Mean output tokens | 1,085 | 704 |
+
+Accuracy increased by 20.3 percentage points: 27 tasks improved and one regressed. Twenty
+improvements came from responses previously at the token limit. This measures exact-answer success
+within the fixed budget, with shorter completed responses contributing to the gain. It is one run
+on the multiplication task distribution; repeat across training runs to assess reproducibility.
 
 ## Save and resume
 

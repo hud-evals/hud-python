@@ -250,6 +250,7 @@ def test_training_lifecycle_with_mocked_fireworks(
     if calibrate:
         client.forward_backward.assert_not_called()
         client.optim_step.assert_not_called()
+        assert not (tmp_path / "eval-after.json").exists()
     else:
         datums, loss_fn = client.forward_backward.call_args.args
         assert loss_fn == "importance_sampling"
@@ -262,7 +263,140 @@ def test_training_lifecycle_with_mocked_fireworks(
         assert metric["updated"] is True
         assert metric["valid_rollouts"] == 2
         assert metric["reward_std_within_group"] > 0
+        assert (tmp_path / "eval-after.json").exists()
+    assert not (tmp_path / "eval-before.json").exists()
+    assert fireworks_service.create_sampling_client.return_value.sample.call_count == (
+        2 if calibrate else 3
+    )
     fireworks_service.close.assert_called_once()
+
+
+def test_evaluates_same_held_out_tasks_before_and_after_training(
+    monkeypatch, tmp_path, tokenizer, fireworks_service
+) -> None:
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+    monkeypatch.setattr(training, "get_tokenizer", lambda model: tokenizer)
+    monkeypatch.setattr(training, "FiretitanServiceClient", lambda **kwargs: fireworks_service)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "train.py",
+            "--steps",
+            "1",
+            "--tasks-per-step",
+            "2",
+            "--group-size",
+            "2",
+            "--eval-tasks",
+            "3",
+            "--max-concurrent",
+            "1",
+            "--max-tokens",
+            "9",
+            "--eval-before",
+            "--require-update",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    args = training.parse_args()
+
+    asyncio.run(training.train(args))
+
+    requests = fireworks_service.create_sampling_client.return_value.sample.call_args_list
+    assert len(requests) == 10
+    before_requests, training_requests, after_requests = requests[:3], requests[3:7], requests[7:]
+    before_prompts = [call.kwargs["prompt"].to_ints() for call in before_requests]
+    assert before_prompts == [call.kwargs["prompt"].to_ints() for call in after_requests]
+    train_prompts = [call.kwargs["prompt"].to_ints() for call in training_requests]
+    assert set(map(tuple, before_prompts)).isdisjoint(map(tuple, train_prompts))
+    for before, after in zip(before_requests, after_requests, strict=True):
+        assert before.kwargs["sampling_params"] == after.kwargs["sampling_params"]
+        assert before.kwargs["sampling_params"].temperature == 0.0
+        assert before.kwargs["sampling_params"].max_tokens == args.max_tokens
+    assert all(call.kwargs["sampling_params"].temperature == 1.0 for call in training_requests)
+
+    events = [
+        name.rsplit(".", 1)[-1]
+        for name, _, _ in fireworks_service.mock_calls
+        if name.endswith(".sample") or name.endswith(".optim_step")
+    ]
+    assert events == ["sample"] * 7 + ["optim_step"] + ["sample"] * 3
+    client = fireworks_service.create_lora_training_client.return_value
+    datums, _ = client.forward_backward.call_args.args
+    assert len(datums) == 4
+    for datum, request in zip(datums, training_requests, strict=True):
+        prompt = request.kwargs["prompt"].to_ints()
+        assert datum.model_input.to_ints()[: len(prompt)] == prompt
+
+    before = json.loads((tmp_path / "eval-before.json").read_text())
+    after = json.loads((tmp_path / "eval-after.json").read_text())
+    assert before["snapshot"] == "test/run/initial"
+    assert after["snapshot"] == "test/run/final"
+    assert [sample["prompt"] for sample in before["samples"]] == [
+        sample["prompt"] for sample in after["samples"]
+    ]
+    for evaluation in (before, after):
+        assert evaluation["temperature"] == 0.0
+        assert evaluation["max_tokens"] == args.max_tokens
+        assert len(evaluation["samples"]) == 3
+        for sample in evaluation["samples"]:
+            operands = re.search(r"What is (\d+) \* (\d+)", sample["prompt"])
+            assert operands is not None
+            expected = int(operands[1]) * int(operands[2])
+            assert sample["info"]["expected"] == expected
+            assert sample["info"]["got"] == int(sample["answer"])
+            assert sample["reward"] == float(int(sample["answer"]) == expected)
+            tokens = tokenizer.encode(sample["answer"] + "<|im_end|>", add_special_tokens=False)
+            assert sample["output_tokens"] == len(tokens)
+            assert sample["at_token_limit"] is (len(tokens) == args.max_tokens)
+    assert all(sample["reward"] == 1.0 for sample in before["samples"])
+    assert all(sample["reward"] == 0.0 for sample in after["samples"])
+    config_text = (tmp_path / "config.json").read_text()
+    assert json.loads(config_text) == vars(args)
+    assert "test-key" not in config_text
+    metrics = [json.loads(line) for line in (tmp_path / "metrics.jsonl").read_text().splitlines()]
+    assert len(metrics) == 1
+    assert metrics[0]["training_datums"] == 4
+    assert metrics[0]["rollouts"] == 4
+
+
+def test_reusing_output_directory_replaces_evaluations_only_when_training(
+    monkeypatch, tmp_path, tokenizer, fireworks_service
+) -> None:
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+    monkeypatch.setattr(training, "get_tokenizer", lambda model: tokenizer)
+    monkeypatch.setattr(training, "FiretitanServiceClient", lambda **kwargs: fireworks_service)
+    argv = [
+        "train.py",
+        "--steps",
+        "1",
+        "--tasks-per-step",
+        "1",
+        "--group-size",
+        "2",
+        "--eval-tasks",
+        "2",
+        "--max-concurrent",
+        "1",
+        "--output-dir",
+        str(tmp_path),
+    ]
+    monkeypatch.setattr("sys.argv", argv + ["--eval-before"])
+    asyncio.run(training.train(training.parse_args()))
+    files = ["config.json", "eval-before.json", "eval-after.json", "metrics.jsonl"]
+    saved = {name: (tmp_path / name).read_text() for name in files}
+
+    monkeypatch.setattr("sys.argv", argv + ["--calibrate"])
+    asyncio.run(training.train(training.parse_args()))
+    assert {name: (tmp_path / name).read_text() for name in files} == saved
+
+    monkeypatch.setattr("sys.argv", argv)
+    asyncio.run(training.train(training.parse_args()))
+    assert not (tmp_path / "eval-before.json").exists()
+    assert (tmp_path / "eval-after.json").read_text() != saved["eval-after.json"]
+    assert json.loads((tmp_path / "config.json").read_text())["eval_before"] is False
+    assert fireworks_service.create_sampling_client.return_value.sample.call_count == 12
 
 
 @pytest.mark.parametrize("failure", ["sampling", "grading"])

@@ -138,6 +138,54 @@ were nearly saturated on Qwen 3.8 27B, while smaller generation budgets cut
 off many answers. Inspect both correctness and output-token counts when
 calibrating; a clipped response does not establish arithmetic difficulty.
 
+## Compare before and after training
+
+Use `--eval-before` to evaluate the initial and final adapters on the same
+held-out taskset. Both evaluations use temperature 0 and the same token budget:
+
+```bash
+uv run train.py \
+  --eval-before \
+  --steps 8 \
+  --tasks-per-step 16 \
+  --group-size 4 \
+  --eval-tasks 128 \
+  --seed 42 \
+  --max-tokens 2048 \
+  --max-concurrent 8 \
+  --output-dir runs/before-after
+```
+
+This requests 512 training rollouts and 256 evaluation rollouts. The 16
+training tasks repeat across steps; all 128 evaluation tasks are held out.
+`--seed` controls task generation and splitting, not model sampling randomness.
+
+The output directory contains `config.json`, `eval-before.json`, and
+`eval-after.json`. Each evaluation records the checkpoint, prompts, full
+responses, rewards, grader info, output-token counts, and whether the response
+reached the token limit. Compare answers by prompt, including tasks that changed
+from correct to incorrect. Report token-limit and format failures alongside
+accuracy.
+
+Without `--eval-before`, the script performs only the final evaluation. Use a
+separate output directory for each experiment to preserve its artifacts.
+
+One run with the configuration above applied all eight updates:
+
+| Held-out metric | Before | After |
+| --- | ---: | ---: |
+| Correct answers | 100/128 (78.1%) | 126/128 (98.4%) |
+| Invalid final line | 19 | 0 |
+| Incorrect valid integer | 9 | 2 |
+| Responses at the token limit | 20 | 0 |
+| Mean output tokens | 1,085 | 704 |
+
+Accuracy increased by 20.3 percentage points: 27 tasks improved and one
+regressed. Twenty improvements came from responses previously at the token
+limit. This measures exact-answer success within the fixed budget, with shorter
+completed responses contributing to the gain. It is one run on this arithmetic
+distribution; repeat across training runs to assess reproducibility.
+
 ## Training flow
 
 Each training step uses a sampler snapshot of the current adapter:
