@@ -53,7 +53,7 @@ Compose project, hardware, and timeouts. Set it on the runtime (`runtime_config=
 supports.
 
 ```python
-from hud.eval import ComposeProject, RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU
+from hud.eval import ComposeProject, RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeMount, RuntimeResources, RuntimeTPU
 
 RuntimeConfig(
     image="my-env",
@@ -68,6 +68,7 @@ RuntimeConfig(
 
 RuntimeConfig(compose=ComposeProject(document="./compose.yaml"))
 RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2")))
+RuntimeConfig(mounts=[RuntimeMount(path="/pack", bucket="vendor-uploads", prefix="listings/123/")])
 ```
 
 | Field | Description |
@@ -76,12 +77,13 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
 | `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
+| `mounts` | `RuntimeMount(path, bucket, prefix, secret)` list. Modal attaches each as a read-only CloudBucketMount. `secret` is a Modal Secret name. Other runtimes reject `mounts`. |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
 is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
 enough whole GiB, while providers without disk sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
-or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
+or storage requirements; it rejects GPU, OS, TPU, `limits`, and `mounts`. Daytona accepts a list of GPU
 alternatives; Modal accepts one GPU type. Docker ignores `limits`; Daytona rejects `run_timeout_s`
 and resource overrides when booting from an already-built snapshot. `LocalRuntime` rejects a
 per-task `runtime_config`.

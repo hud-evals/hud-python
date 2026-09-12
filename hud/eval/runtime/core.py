@@ -80,6 +80,17 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+class RuntimeMount(BaseModel):
+    """Read-only S3 prefix attached at ``path`` (Modal CloudBucketMount)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, pattern=r"^/")
+    bucket: str = Field(min_length=1)
+    prefix: str | None = Field(default=None, pattern=r".*/$")
+    secret: str | None = Field(default=None, min_length=1)
+
+
 class RuntimeConfig(BaseModel):
     """Typed task-environment launch requirements.
 
@@ -96,6 +107,7 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+    mounts: list[RuntimeMount] | None = None
 
     @field_serializer("resources", "limits", when_used="json")
     def _serialize_options(

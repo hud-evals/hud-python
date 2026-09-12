@@ -31,6 +31,7 @@ class TestInitModule:
             "RuntimeConfig",
             "RuntimeGPU",
             "RuntimeLimits",
+            "RuntimeMount",
             "RuntimeResources",
             "RuntimeTPU",
             "LocalRuntime",

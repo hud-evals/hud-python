@@ -90,15 +90,19 @@ class HUDRuntime:
             # different environment than declared.
             resources = task.runtime_config.resources
             if (
-                resources is not None
-                and (
-                    resources.gpu is not None
-                    or resources.os is not None
-                    or resources.tpu is not None
+                (
+                    resources is not None
+                    and (
+                        resources.gpu is not None
+                        or resources.os is not None
+                        or resources.tpu is not None
+                    )
                 )
-            ) or (
-                task.runtime_config.limits is not None
-                and task.runtime_config.limits.model_dump(exclude_none=True)
+                or (
+                    task.runtime_config.limits is not None
+                    and task.runtime_config.limits.model_dump(exclude_none=True)
+                )
+                or task.runtime_config.mounts
             ):
                 raise ValueError(
                     "HUDRuntime cannot honor this task's declared placement requirements or "

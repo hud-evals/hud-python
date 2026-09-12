@@ -31,6 +31,7 @@ class TestHudInit:
             "RuntimeConfig",
             "RuntimeGPU",
             "RuntimeLimits",
+            "RuntimeMount",
             "RuntimeResources",
             "RuntimeTPU",
             "LocalRuntime",
