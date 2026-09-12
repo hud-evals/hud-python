@@ -92,6 +92,12 @@ class Settings(BaseSettings):
         validation_alias="HUD_API_KEY",
     )
 
+    default_project: str | None = Field(
+        default=None,
+        description="Default HUD Project name or ID for directories without a saved Project",
+        validation_alias="HUD_DEFAULT_PROJECT",
+    )
+
     anthropic_api_key: str | None = Field(
         default=None,
         description="API key for Anthropic models",

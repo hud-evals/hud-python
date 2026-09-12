@@ -19,6 +19,7 @@ from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file, parse_key_value
 from hud.cli.utils.context import create_build_context_tarball, format_size
+from hud.cli.utils.project import PROJECT_OPTION_HELP, Placement, resolve_writable_placement
 from hud.cli.utils.registry import get_registry_environment
 from hud.cli.utils.source import EnvironmentSource
 from hud.eval.runtime import ComposeProject, RuntimeConfig
@@ -41,6 +42,7 @@ _COMPOSE_RECIPE_NAMES = (
 class _DeployPlan:
     name: str
     registry_id: str | None
+    placement: Placement
     runtime: str | None
     runtime_config: RuntimeConfig | None
     env_vars: dict[str, str]
@@ -375,6 +377,7 @@ def _prepare_deploy_plan(
     env_file: str | None,
     no_env: bool,
     registry_id: str | None,
+    project: str | None,
     build_args: list[str] | None,
     build_secrets: list[str] | None,
     runtime: str | None,
@@ -390,6 +393,7 @@ def _prepare_deploy_plan(
         platform,
         console,
     )
+    placement = resolve_writable_placement(platform, env_source, flag=project, console=console)
     skip_dotenv = _skip_dotenv(
         env_source,
         env_dir,
@@ -437,6 +441,7 @@ def _prepare_deploy_plan(
     return _DeployPlan(
         name=resolved_name,
         registry_id=registry_id,
+        placement=placement,
         runtime=normalized_runtime,
         runtime_config=loaded_runtime_config,
         env_vars=env_vars,
@@ -453,6 +458,7 @@ def deploy_environment(
     no_cache: bool = False,
     verbose: bool = False,
     registry_id: str | None = None,
+    project: str | None = None,
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
@@ -491,6 +497,7 @@ def deploy_environment(
         env_file=env_file,
         no_env=no_env,
         registry_id=registry_id,
+        project=project,
         build_args=build_args,
         build_secrets=build_secrets,
         runtime=runtime,
@@ -555,6 +562,7 @@ async def _trigger_build(
             key: value
             for key, value in (
                 ("registry_id", plan.registry_id),
+                ("project_id", plan.placement.project_id),
                 ("runtime_provider", plan.runtime),
                 (
                     "runtime_config",
@@ -715,6 +723,7 @@ def deploy_all(
     no_env: bool = False,
     no_cache: bool = False,
     verbose: bool = False,
+    project: str | None = None,
     build_args: list[str] | None = None,
     build_secrets: list[str] | None = None,
     runtime: str | None = None,
@@ -755,6 +764,7 @@ def deploy_all(
                 no_cache=no_cache,
                 verbose=verbose,
                 registry_id=None,
+                project=project,
                 build_args=build_args,
                 build_secrets=build_secrets,
                 runtime=runtime,
@@ -833,6 +843,11 @@ def deploy_command(
         help="Existing registry ID for rebuilds (advanced)",
         hidden=True,
     ),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help=PROJECT_OPTION_HELP,
+    ),
     runtime: str | None = typer.Option(
         None,
         "--runtime",
@@ -859,6 +874,7 @@ def deploy_command(
             no_env=no_env,
             no_cache=no_cache,
             verbose=verbose,
+            project=project,
             build_args=build_args,
             build_secrets=secrets,
             runtime=runtime,
@@ -874,6 +890,7 @@ def deploy_command(
         no_cache=no_cache,
         verbose=verbose,
         registry_id=registry_id,
+        project=project,
         build_args=build_args,
         build_secrets=secrets,
         runtime=runtime,

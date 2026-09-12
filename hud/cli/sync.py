@@ -11,6 +11,11 @@ from typing import Any
 import typer
 
 from hud.cli.utils.api import require_api_key
+from hud.cli.utils.project import (
+    PROJECT_OPTION_HELP,
+    require_writable_placement,
+    resolve_placement_or_exit,
+)
 from hud.cli.utils.registry import (
     RegistryEnvironment,
     get_registry_environment,
@@ -247,6 +252,11 @@ def sync_tasks_command(
         "--id",
         help="Taskset ID directly (skip name resolution)",
     ),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help=PROJECT_OPTION_HELP,
+    ),
     task_filter: str | None = typer.Option(
         None,
         "--task",
@@ -318,6 +328,12 @@ def sync_tasks_command(
     # Creating a new taskset is only allowed when targeting an explicit name
     # (not an --id or a stored id, which must already exist).
     allow_create = taskset is not None and taskset_id is None
+    placement = resolve_placement_or_exit(
+        platform,
+        EnvironmentSource.open(),
+        flag=project,
+        console=hud_console,
+    )
 
     try:
         remote_taskset = _fetch_remote_taskset(
@@ -348,6 +364,8 @@ def sync_tasks_command(
         hud_console.info("\n  --dry-run: no changes made")
         return
 
+    require_writable_placement(placement, hud_console)
+
     if not yes and not hud_console.confirm("Proceed?", default=False):
         hud_console.info("Aborted.")
         return
@@ -355,7 +373,12 @@ def sync_tasks_command(
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
     try:
-        result = upload_taskset(platform, plan.taskset_name, plan.to_apply)
+        result = upload_taskset(
+            platform,
+            plan.taskset_name,
+            plan.to_apply,
+            project_id=placement.project_id,
+        )
     except HudRequestError as e:
         _show_upload_error(e, hud_console)
         return
