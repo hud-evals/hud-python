@@ -18,15 +18,11 @@ hud_console = HUDConsole()
 
 
 def _load_environment(module: str | None, factory_args: dict[str, str]) -> Any:
-    """Resolve the serve target (``target[:name]``), printing failures."""
+    """Resolve the serve target (``target[:name]``)."""
     from hud.environment import load_environment
 
     target, _, name = (module or "env").partition(":")
-    try:
-        return load_environment(target, name=name or None, args=factory_args or None)
-    except Exception as exc:
-        hud_console.error(str(exc))
-        return None
+    return load_environment(target, name=name or None, args=factory_args or None)
 
 
 def _serve_environment(env: Any, host: str, port: int) -> None:
@@ -91,15 +87,4 @@ def serve_command(
         key, _, value = pair.partition("=")
         factory_args[key] = value
     env = _load_environment(module, factory_args)
-    if env is None:
-        hud_console.error(
-            f"No HUD Environment found for {module or 'env.py'}.",
-        )
-        hud_console.info(
-            "In v6, `hud serve` serves a `hud.environment.Environment` "
-            "(e.g. `env = Environment(name=...)` in env.py). "
-            "MCP-server hot-reload mode is no longer supported.",
-        )
-        raise typer.Exit(1)
-
     _serve_environment(env, host, port)

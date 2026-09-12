@@ -656,8 +656,9 @@ def authenticated_scope(monkeypatch: pytest.MonkeyPatch) -> None:
         ["--project", "44444444-4444-4444-8444-444444444444"],
     ],
 )
+@pytest.mark.parametrize("stream_status", ["SUCCEEDED", "UNKNOWN", None])
 def test_deploy_lifecycle_preserves_links_and_consent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: list[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: list[str], stream_status: str | None
 ) -> None:
     from typer.testing import CliRunner
 
@@ -690,21 +691,32 @@ def test_deploy_lifecycle_preserves_links_and_consent(
             }
         raise AssertionError(url)
 
+    status_reads = 0
+
     async def request(method: str, url: str, **kwargs):
+        nonlocal status_reads
         if url.endswith("/upload-url"):
             return {"upload_url": "https://upload.example", "build_id": "build-1"}
         if url.endswith("/trigger"):
             requests.append(kwargs["json"])
             return {"id": "build-1", "registry_id": kwargs["json"].get("registry_id", registry_id)}
         if url.endswith("/status"):
-            return {"status": "SUCCEEDED"}
+            status_reads += 1
+            return {"status": "IN_PROGRESS" if status_reads % 2 else "SUCCEEDED"}
         raise AssertionError(url)
 
     monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
     monkeypatch.setattr("hud.utils.platform.make_request_sync", get)
     monkeypatch.setattr("hud.utils.platform.make_request", request)
     monkeypatch.setattr("hud.cli.deploy._upload_context", AsyncMock())
-    monkeypatch.setattr("hud.cli.deploy.stream_build_logs", AsyncMock(return_value="SUCCEEDED"))
+    websocket = MagicMock()
+    websocket.__aiter__.return_value = (
+        [json.dumps({"type": "complete", "final_status": stream_status})] if stream_status else []
+    )
+    connection = MagicMock()
+    connection.__aenter__.return_value = websocket
+    monkeypatch.setattr("hud.cli.utils.build_logs.websockets.connect", lambda *a, **k: connection)
+    monkeypatch.setattr("hud.cli.utils.build_logs.asyncio.sleep", AsyncMock())
     monkeypatch.setattr("hud.cli.deploy.is_interactive", lambda: True)
     prompts = MagicMock(return_value=True)
     monkeypatch.setattr(HUDConsole, "confirm", prompts)
@@ -716,6 +728,7 @@ def test_deploy_lifecycle_preserves_links_and_consent(
     second = CliRunner().invoke(app, ["deploy", str(env), "--json", *override])
     assert second.exit_code == 0, second.output
     assert load_config() == before
+    assert status_reads == 4
     assert requests[0]["environment_variables"] == {"SECRET": "test-secret-value"}
     assert not (env / ".hud").exists()
     if not override:

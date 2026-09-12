@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp.types as mcp_types
-from google import genai
 from google.genai import types as genai_types
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, GeminiConfig, Usage
-from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
+
+if TYPE_CHECKING:
+    from google import genai
 
 from .settings import gemini_agent_settings
 from .tools import (
@@ -54,14 +55,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
         model_client = config.model_client
         if model_client is None:
-            if settings.api_key:
-                model_client = gateway.build_gateway_client("gemini")
-            elif settings.gemini_api_key:
-                model_client = genai.Client(api_key=settings.gemini_api_key)
-            else:
-                raise ValueError(
-                    "No API key for Gemini. Set HUD_API_KEY or GEMINI_API_KEY.",
-                )
+            model_client = gateway.build_model_client("gemini")
 
         self.gemini_client: genai.Client = cast("genai.Client", model_client)
         self.temperature = config.temperature

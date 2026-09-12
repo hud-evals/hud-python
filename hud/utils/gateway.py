@@ -78,6 +78,31 @@ def gateway_model_aliases() -> tuple[str, ...]:
     return tuple(_MODEL_ALIASES)
 
 
+def build_model_client(provider: str, *, prefer_provider: bool = False) -> GatewayClient:
+    """Resolve configured credentials; explicit client overrides belong to the caller."""
+    keys = {
+        "anthropic": settings.anthropic_api_key,
+        "gemini": settings.gemini_api_key,
+        "openai": settings.openai_api_key,
+    }
+    key = keys[provider]
+    if settings.api_key and not (prefer_provider and key):
+        return build_gateway_client(provider)
+    if not key:
+        raise HudAuthenticationError(
+            f"No API key for {provider}. Set its provider key or HUD_API_KEY."
+        )
+    if provider == "anthropic":
+        from anthropic import AsyncAnthropic
+
+        return AsyncAnthropic(api_key=key)
+    if provider == "gemini":
+        from google import genai
+
+        return genai.Client(api_key=key)
+    return AsyncOpenAI(api_key=key)
+
+
 def build_gateway_client(provider: str) -> GatewayClient:
     """Build a client configured for HUD gateway routing.
 

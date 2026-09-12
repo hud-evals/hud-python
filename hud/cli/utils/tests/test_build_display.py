@@ -11,7 +11,6 @@ from typing import Any
 from hud.cli.utils.build_display import (
     _format_duration,
     display_build_summary,
-    display_upload_progress,
 )
 
 
@@ -42,8 +41,3 @@ def test_display_build_summary_failed() -> None:
 
 def test_display_build_summary_unknown_status() -> None:
     display_build_summary({"status": "BUILDING", "image_name": "img"}, "org/img")
-
-
-def test_display_upload_progress() -> None:
-    display_upload_progress(500, 1000)
-    display_upload_progress(0, 0)  # avoid div-by-zero branch

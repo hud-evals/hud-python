@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-import typer
 
 from hud.cli import eval as eval_mod
 from hud.cli.eval import EvalConfig, _is_bedrock_arn
@@ -76,20 +75,19 @@ def test_validate_api_keys_noop_without_agent() -> None:
 
 def test_validate_api_keys_openai_compatible_requires_model() -> None:
     cfg = EvalConfig(agent_type="openai_compatible")
-    with pytest.raises(typer.Exit):
+    with pytest.raises(ValueError):
         cfg.validate_api_keys()
 
 
 def test_validate_api_keys_remote_needs_only_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hosted placement: no provider key required, and --gateway is dropped
-    (a local gateway model_client could not travel with the submission)."""
+    """Hosted placement needs no local provider credentials."""
     from hud.settings import settings
 
     monkeypatch.setattr(settings, "api_key", "sk-hud-test")
     monkeypatch.setattr(settings, "gemini_api_key", None)
     cfg = EvalConfig(agent_type="gemini", remote=True, gateway=True)
     cfg.validate_api_keys()
-    assert cfg.gateway is False
+    assert cfg.gateway is True
 
 
 def test_validate_api_keys_remote_requires_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,7 +108,7 @@ def test_validate_api_keys_hud_runtime_requires_hud_key(monkeypatch: pytest.Monk
         cfg.validate_api_keys()
 
 
-def test_validate_api_keys_hud_runtime_keeps_local_gateway(
+def test_validate_api_keys_preserves_explicit_routing_choice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from hud.settings import settings
@@ -119,7 +117,7 @@ def test_validate_api_keys_hud_runtime_keeps_local_gateway(
     monkeypatch.setattr(settings, "gemini_api_key", None)
     cfg = EvalConfig(agent_type="gemini", runtime="hud")
     cfg.validate_api_keys()
-    assert cfg.gateway is True
+    assert cfg.gateway is False
 
 
 def test_resolve_placement_runtime_hud_uses_tunnel(
@@ -237,7 +235,7 @@ def test_merge_cli_resolves_gateway_model_alias(monkeypatch: pytest.MonkeyPatch)
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
 
     merged = EvalConfig().merge_cli(agent="glm-5.2")
 
@@ -286,7 +284,7 @@ async def test_python_task_source_loads_on_main_thread(
         encoding="utf-8",
     )
 
-    with pytest.raises(typer.Exit):
+    with pytest.raises(ValueError):
         await eval_mod._run_evaluation(EvalConfig(source=str(source), agent_type="openai"))
 
     assert marker.read_text(encoding="utf-8") == "True"
@@ -307,7 +305,7 @@ def test_resolve_runtime_explicit_runtime_is_honored() -> None:
 
 def test_resolve_runtime_local_against_slug_errors() -> None:
     cfg = EvalConfig(source="My Tasks", runtime="local")
-    with pytest.raises(typer.Exit):
+    with pytest.raises(ValueError):
         cfg.resolve_runtime()
 
 
@@ -332,7 +330,7 @@ def test_spawn_target_serves_single_file_env(tmp_path: Path) -> None:
         'from hud import Environment\nenv = Environment(name="demo")\n',
         encoding="utf-8",
     )
-    assert eval_mod._spawn_target(env_py) == env_py.resolve()
+    assert eval_mod.EnvironmentSource.local_source(env_py) == env_py.resolve()
 
 
 def test_spawn_target_resolves_split_tasks_layout(tmp_path: Path) -> None:
@@ -342,17 +340,17 @@ def test_spawn_target_resolves_split_tasks_layout(tmp_path: Path) -> None:
     )
     tasks_py = tmp_path / "tasks.py"
     tasks_py.write_text("from env import env\n\ntasks = []\n", encoding="utf-8")
-    assert eval_mod._spawn_target(tasks_py) == (tmp_path / "env.py").resolve()
+    assert eval_mod.EnvironmentSource.local_source(tasks_py) == (tmp_path / "env.py").resolve()
 
 
 def test_spawn_target_json_uses_parent_directory(tmp_path: Path) -> None:
     tasks_json = tmp_path / "tasks.json"
     tasks_json.write_text("[]", encoding="utf-8")
-    assert eval_mod._spawn_target(tasks_json) == tmp_path.resolve()
+    assert eval_mod.EnvironmentSource.local_source(tasks_json) == tmp_path.resolve()
 
 
 def test_spawn_target_directory_is_served_as_is(tmp_path: Path) -> None:
-    assert eval_mod._spawn_target(tmp_path) == tmp_path.resolve()
+    assert eval_mod.EnvironmentSource.local_source(tmp_path) == tmp_path.resolve()
 
 
 @pytest.mark.parametrize("args", [[], ["tasks.json", "claude"]])
@@ -378,3 +376,89 @@ def test_eval_dry_run_does_not_prompt_or_write(
     else:
         assert payload["error"] == "usage"
     assert not (tmp_path / ".hud_eval.toml").exists()
+
+
+@pytest.mark.parametrize(
+    "agent_type, key_attr, factory, client_attr",
+    [
+        ("openai", "openai_api_key", "hud.utils.gateway.AsyncOpenAI", "openai_client"),
+        ("claude", "anthropic_api_key", "anthropic.AsyncAnthropic", "anthropic_client"),
+        ("gemini", "gemini_api_key", "google.genai.Client", "gemini_client"),
+    ],
+)
+@pytest.mark.parametrize(
+    "force_gateway, provider_key", [(False, "provider-key"), (False, None), (True, "provider-key")]
+)
+def test_eval_provider_preference_and_explicit_gateway(
+    monkeypatch, agent_type, key_attr, factory, client_attr, force_gateway, provider_key
+):
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr("hud.settings.settings.api_key", "hud-key")
+    monkeypatch.setattr(f"hud.settings.settings.{key_attr}", provider_key)
+    direct = MagicMock(return_value=object())
+    gateway = MagicMock(return_value=object())
+    monkeypatch.setattr(factory, direct)
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", gateway)
+    cfg = EvalConfig(agent_type=agent_type, gateway=force_gateway)
+    assert cfg.agent_type is not None
+    cfg.validate_api_keys()
+    agent = eval_mod._build_agent(cfg)
+    if provider_key and not force_gateway:
+        direct.assert_called_once_with(api_key=provider_key)
+        gateway.assert_not_called()
+        assert getattr(agent, client_attr) is direct.return_value
+    else:
+        gateway.assert_called_once_with(cfg.agent_type.gateway_provider)
+        direct.assert_not_called()
+        assert getattr(agent, client_attr) is gateway.return_value
+
+
+def test_eval_hosted_agent_keeps_client_out_of_serialized_config(monkeypatch):
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr("hud.settings.settings.api_key", "hud-key")
+    monkeypatch.setattr("hud.settings.settings.openai_api_key", "provider-key")
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", MagicMock(return_value=object()))
+    cfg = EvalConfig(agent_type="openai", remote=True, gateway=True)
+    cfg.validate_api_keys()
+    agent = eval_mod._build_agent(cfg)
+    assert agent.config.model_client is None
+    assert "model_client" not in agent.hosted_spec()["config"]
+
+
+@pytest.mark.parametrize("contents", ["[eval", '[eval]\nagent="invalid"\n'])
+def test_eval_invalid_configuration_is_a_structured_error(tmp_path, monkeypatch, contents):
+    import json
+
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / ".hud_eval.toml"
+    config.write_text(contents)
+    result = CliRunner().invoke(app, ["eval", "tasks.json", "openai", "--dry-run", "--json"])
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["error"] == "usage"
+    assert config.read_text() == contents
+
+
+def test_eval_custom_endpoint_overrides_gateway_selection(monkeypatch):
+    from unittest.mock import MagicMock
+
+    client = MagicMock(return_value=object())
+    monkeypatch.setattr("hud.settings.settings.api_key", "hud-key")
+    monkeypatch.setattr("hud.agents.openai_compatible.agent.AsyncOpenAI", client)
+    cfg = EvalConfig(
+        agent_type="openai_compatible",
+        model="custom",
+        gateway=True,
+        agent_config={
+            "openai_compatible": {"api_key": "custom-key", "base_url": "https://custom.example"}
+        },
+    )
+    cfg.validate_api_keys()
+    agent = eval_mod._build_agent(cfg)
+    client.assert_called_once_with(api_key="custom-key", base_url="https://custom.example")
+    assert agent.oai is client.return_value

@@ -38,7 +38,6 @@ from anthropic.types.beta import (
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
-from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
@@ -108,13 +107,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
     def _resolve_client(self) -> AsyncAnthropic | AsyncAnthropicBedrock:
         if self.config.model_client is not None:
             return cast("AsyncAnthropic | AsyncAnthropicBedrock", self.config.model_client)
-        if settings.api_key:
-            return cast("AsyncAnthropic", gateway.build_gateway_client("anthropic"))
-        if settings.anthropic_api_key:
-            return AsyncAnthropic(api_key=settings.anthropic_api_key)
-        raise ValueError(
-            "No API key found for Claude. Set HUD_API_KEY (gateway) or ANTHROPIC_API_KEY.",
-        )
+        return cast("AsyncAnthropic", gateway.build_model_client("anthropic"))
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 

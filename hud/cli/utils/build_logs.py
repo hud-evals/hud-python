@@ -17,12 +17,20 @@ if TYPE_CHECKING:
     from hud.utils.platform import PlatformClient
 
 
-async def stream_build_logs(
+async def wait_for_build(
+    platform: PlatformClient, build_id: str, console: HUDConsole
+) -> dict[str, Any]:
+    """Stream progress, then confirm the terminal result through the status API."""
+    await _stream_build_logs(platform, build_id, console=console)
+    return await _poll_build_status(platform, build_id, console=console)
+
+
+async def _stream_build_logs(
     platform: PlatformClient,
     build_id: str,
     console: HUDConsole | None = None,
     max_reconnects: int = 3,
-) -> str:
+) -> None:
     """Stream build logs from the HUD backend via WebSocket."""
     if console is None:
         console = HUDConsole()
@@ -30,11 +38,7 @@ async def stream_build_logs(
     ws_base = platform.base_url.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = f"{ws_base.rstrip('/')}/builds/{build_id}/logs?api_key={platform.api_key}"
 
-    final_status = "UNKNOWN"
-    reconnect_count = 0
-    last_log_count = 0
-
-    while reconnect_count <= max_reconnects:
+    for attempt in range(max_reconnects + 1):
         try:
             console.info("Connecting to build logs stream...")
             async with websockets.connect(
@@ -42,8 +46,6 @@ async def stream_build_logs(
                 ping_interval=30,
                 ping_timeout=10,
             ) as websocket:
-                reconnect_count = 0  # Reset on successful connect
-
                 async for message in websocket:
                     try:
                         data = json.loads(message)
@@ -68,20 +70,19 @@ async def stream_build_logs(
                             timestamp = data.get("timestamp")
                             if log_message:
                                 _print_log_line(console, log_message, timestamp)
-                            last_log_count += 1
 
                         elif msg_type == "complete":
                             # Build completed
                             final_status = data.get("final_status", "UNKNOWN")
                             completion_msg = data.get("message", f"Build {final_status}")
                             console.info(completion_msg)
-                            return final_status
+                            return
 
                         elif msg_type == "error":
                             # Error from server
                             error_msg = data.get("error", "Unknown error")
                             console.error(f"Build error: {error_msg}")
-                            return "FAILED"
+                            return
 
                     except json.JSONDecodeError:
                         # Non-JSON message, print as-is
@@ -91,34 +92,14 @@ async def stream_build_logs(
             if e.code == 4003:
                 # Authentication or access error
                 console.error(f"Access denied: {e.reason}")
-                return "FAILED"
+                return
 
-            reconnect_count += 1
-            if reconnect_count <= max_reconnects:
-                wait_time = min(2**reconnect_count, 30)
-                console.warning(
-                    f"Connection closed, reconnecting in {wait_time}s... "
-                    f"(attempt {reconnect_count}/{max_reconnects})"
-                )
-                await asyncio.sleep(wait_time)
-            else:
-                console.error("Max reconnection attempts reached")
-                return "UNKNOWN"
-
+            console.warning(f"Log stream closed: {e.reason}")
         except Exception as e:
-            reconnect_count += 1
-            if reconnect_count <= max_reconnects:
-                wait_time = min(2**reconnect_count, 30)
-                console.warning(
-                    f"Connection error: {e}. Reconnecting in {wait_time}s... "
-                    f"(attempt {reconnect_count}/{max_reconnects})"
-                )
-                await asyncio.sleep(wait_time)
-            else:
-                console.error(f"Failed to stream logs: {e}")
-                return "UNKNOWN"
+            console.warning(f"Log stream unavailable: {e}")
 
-    return final_status
+        if attempt < max_reconnects:
+            await asyncio.sleep(min(2 ** (attempt + 1), 30))
 
 
 def _print_log_line(
@@ -191,7 +172,7 @@ def _print_log_line(
         console.info(f"{prefix}{message}")
 
 
-async def poll_build_status(
+async def _poll_build_status(
     platform: PlatformClient,
     build_id: str,
     console: HUDConsole | None = None,
@@ -223,8 +204,8 @@ async def poll_build_status(
                 return data
 
         except HudRequestError as e:
+            if e.status_code is not None and 400 <= e.status_code < 500 and e.status_code != 429:
+                raise
             console.warning(f"Status check failed: {e.status_code or e}")
-        except Exception as e:
-            console.warning(f"Status check error: {e}")
 
         await asyncio.sleep(poll_interval)

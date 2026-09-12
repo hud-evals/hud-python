@@ -209,7 +209,7 @@ Links in `~/.hud/config.json` are scoped to the canonical directory path, API or
 
 Old directory-local `.hud/config.json` and `.hud/deploy.json` files are left untouched and are not imported. Relink with `hud project use <project-id>`, `hud sync env <environment-id>`, or `hud sync tasks <taskset-id> --link --yes`. The first successful task upload records its canonical ID; later explicit targets only replace it with `--link`.
 
-Credentials remain in `~/.hud/.env`, cache in `~/.hud/.cache`, and authored source and `.hud_eval.toml` remain in the project. Loading missing evaluation configuration returns defaults without creating a file.
+Credentials remain in `~/.hud/.env`, cache in `~/.hud/.cache`, and authored source and `.hud_eval.toml` remain in the project. Missing evaluation configuration uses defaults without creating a file; malformed or invalid configuration fails instead of falling back to defaults.
 
 ### `hud sync`
 

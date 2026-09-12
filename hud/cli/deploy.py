@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from hud.cli.utils.api import missing_api_key_error
 from hud.cli.utils.build_display import display_build_summary
-from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
+from hud.cli.utils.build_logs import wait_for_build
 from hud.cli.utils.config import (
     AuthScope,
     DirectoryLink,
@@ -605,19 +605,8 @@ async def _deploy_async(
     console.info("")
 
     console.section_title("Build Logs")
-    try:
-        final_status = await stream_build_logs(platform, build_id, console=console)
-    except Exception as e:
-        console.warning(f"WebSocket streaming failed: {e}")
-        console.info("Falling back to polling...")
-        status_response = await poll_build_status(platform, build_id, console=console)
-        final_status = status_response.get("status", "UNKNOWN")
-
-    try:
-        status_data = await platform.aget(f"/builds/{build_id}/status")
-    except Exception as e:
-        console.warning(f"Failed to get final status: {e}")
-        status_data = {"status": final_status}
+    status_data = await wait_for_build(platform, build_id, console)
+    final_status = status_data["status"]
 
     return _DeployResult(
         success=final_status == "SUCCEEDED",

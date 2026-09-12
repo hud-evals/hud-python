@@ -57,48 +57,6 @@ def test_prefers_dockerfile_hud(tmp_path: Path) -> None:
     assert EnvironmentSource.open(d).dockerfile == d / "Dockerfile.hud"
 
 
-# ─── dockerfile parsing ────────────────────────────────────────────────
-
-
-def test_base_image_strips_stage(tmp_path: Path) -> None:
-    _write(tmp_path / "Dockerfile", "# comment\nFROM python:3.11 AS build\nRUN echo hi\n")
-    assert EnvironmentSource.open(tmp_path).base_image() == "python:3.11"
-
-
-def test_base_image_without_dockerfile_is_none(tmp_path: Path) -> None:
-    assert EnvironmentSource.open(tmp_path).base_image() is None
-
-
-# ─── source files / hash ───────────────────────────────────────────────
-
-
-def test_source_hash_changes_with_content(tmp_path: Path) -> None:
-    env = tmp_path / "env"
-    env.mkdir()
-    (env / "Dockerfile").write_text("FROM python:3.11")
-    (env / "pyproject.toml").write_text("[tool.hud]\n")
-    (env / "server").mkdir()
-    (env / "server" / "main.py").write_text("print('hi')\n")
-
-    source = EnvironmentSource.open(env)
-    h1 = source.source_hash()
-    (env / "server" / "main.py").write_text("print('bye')\n")
-    h2 = source.source_hash()
-    assert h1 != h2
-
-
-def test_source_files_sorted(tmp_path: Path) -> None:
-    env = tmp_path / "env"
-    env.mkdir()
-    (env / "Dockerfile").write_text("FROM python:3.11")
-    (env / "environment").mkdir()
-    (env / "environment" / "a.py").write_text("a")
-    (env / "environment" / "b.py").write_text("b")
-
-    source = EnvironmentSource.open(env)
-    assert source.source_file_refs() == ["Dockerfile", "environment/a.py", "environment/b.py"]
-
-
 # ─── Environment("name") references ────────────────────────────────────
 
 

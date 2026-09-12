@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import os
 import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from typing import Any, ClassVar, Self
 
 
 @dataclass(frozen=True)
@@ -44,8 +40,6 @@ class EnvironmentSource:
 
     root: Path
 
-    SOURCE_INCLUDE_FILES: ClassVar[set[str]] = {"Dockerfile", "Dockerfile.hud", "pyproject.toml"}
-    SOURCE_INCLUDE_DIRS: ClassVar[set[str]] = {"server", "mcp", "controller", "environment"}
     SOURCE_EXCLUDE_DIRS: ClassVar[set[str]] = {
         ".git",
         ".venv",
@@ -57,8 +51,6 @@ class EnvironmentSource:
         ".pytest_cache",
         ".ruff_cache",
     }
-    SOURCE_EXCLUDE_FILES: ClassVar[set[str]] = {"hud.lock.yaml"}
-    SOURCE_EXCLUDE_SUFFIXES: ClassVar[set[str]] = {".pyc", ".log"}
 
     @classmethod
     def open(cls, directory: str | Path = ".") -> Self:
@@ -157,49 +149,29 @@ class EnvironmentSource:
         }
         return next(iter(names)) if len(names) == 1 else None
 
-    def iter_source_files(self) -> Iterator[Path]:
-        for name in self.SOURCE_INCLUDE_FILES:
-            path = self.root / name
-            if path.is_file():
-                yield path
-
-        for directory in self.SOURCE_INCLUDE_DIRS:
-            source_dir = self.root / directory
-            if not source_dir.exists():
-                continue
-            for dirpath, dirnames, filenames in os.walk(source_dir):
-                dirnames[:] = [name for name in dirnames if name not in self.SOURCE_EXCLUDE_DIRS]
-                for filename in filenames:
-                    if filename in self.SOURCE_EXCLUDE_FILES:
-                        continue
-                    if any(filename.endswith(suffix) for suffix in self.SOURCE_EXCLUDE_SUFFIXES):
-                        continue
-                    yield Path(dirpath) / filename
-
-    def source_files(self) -> list[Path]:
-        files = list(self.iter_source_files())
-        files.sort(key=self.relative_path)
-        return files
-
-    def source_file_refs(self) -> list[str]:
-        return [self.relative_path(path) for path in self.source_files()]
-
-    def source_hash(self) -> str:
-        hasher = hashlib.sha256()
-        for path in self.source_files():
-            hasher.update(self.relative_path(path).encode("utf-8"))
-            with path.open("rb") as file:
-                for chunk in iter(lambda: file.read(8192), b""):
-                    hasher.update(chunk)
-        return hasher.hexdigest()
+    @staticmethod
+    def local_source(source: str | Path) -> Path:
+        """Locate environment code beside an authored task source without importing it."""
+        path = Path(source).resolve()
+        if path.is_dir():
+            return path
+        if path.suffix != ".py":
+            return path.parent
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.Call)
+            and (
+                (isinstance(node.func, ast.Name) and node.func.id == "Environment")
+                or (isinstance(node.func, ast.Attribute) and node.func.attr == "Environment")
+            )
+            for node in ast.walk(tree)
+        ):
+            return path
+        sibling = path.parent / "env.py"
+        return sibling if sibling.is_file() else path.parent
 
     def relative_path(self, path: Path) -> str:
-        return str(path.resolve().relative_to(self.root)).replace("\\", "/")
-
-    def base_image(self) -> str | None:
-        """The Dockerfile's first ``FROM`` image, stage name stripped."""
-        dockerfile = self.dockerfile
-        return _parse_base_image(dockerfile) if dockerfile is not None else None
+        return path.resolve().relative_to(self.root).as_posix()
 
     def validate(self) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
@@ -470,25 +442,6 @@ def _environment_call_name(node: ast.Call) -> str | None:
             if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
                 return keyword.value.value
             return None
-    return None
-
-
-def _parse_base_image(dockerfile_path: Path) -> str | None:
-    try:
-        if not dockerfile_path.exists():
-            return None
-        for raw_line in dockerfile_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.upper().startswith("FROM "):
-                rest = line[5:].strip()
-                lower = rest.lower()
-                if " as " in lower:
-                    rest = rest[: lower.index(" as ")]
-                return rest.strip()
-    except OSError:
-        return None
     return None
 
 

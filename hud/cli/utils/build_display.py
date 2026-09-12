@@ -253,27 +253,3 @@ def _format_duration(seconds: float) -> str:
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         return f"{hours}h {minutes}m"
-
-
-def display_upload_progress(
-    uploaded_bytes: int,
-    total_bytes: int,
-    console: HUDConsole | None = None,
-) -> None:
-    """Display upload progress.
-
-    Args:
-        uploaded_bytes: Bytes uploaded so far
-        total_bytes: Total bytes to upload
-        console: Optional HUDConsole for output
-    """
-    if console is None:
-        console = HUDConsole()
-
-    from hud.cli.utils.context import format_size
-
-    uploaded_str = format_size(uploaded_bytes)
-    total_str = format_size(total_bytes)
-    percent = (uploaded_bytes / total_bytes * 100) if total_bytes > 0 else 0
-
-    console.progress_message(f"Uploading: {uploaded_str} / {total_str} ({percent:.1f}%)")

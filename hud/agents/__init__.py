@@ -49,6 +49,15 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required to create a gateway agent")
 
+    agent_type, model_id = resolve_agent_model(model)
+    kwargs.setdefault("model", model_id)
+    # cls/config_cls are matched unions; the pairing is correct by construction.
+    config = agent_type.config_cls(**kwargs)
+    return agent_type.cls(cast("Any", config))
+
+
+def resolve_agent_model(model: str) -> tuple[AgentType, str]:
+    """Resolve a model alias, catalog ID/name, or agent type without constructing a client."""
     requested_model = model
     model = normalize_gateway_model_id(model)
     agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
@@ -109,10 +118,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
             )
             raise ValueError(f"Model {requested_model!r} not found in {source}.{hint}")
 
-    kwargs.setdefault("model", model_id)
-    # cls/config_cls are matched unions; the pairing is correct by construction.
-    config = agent_type.config_cls(**kwargs)
-    return agent_type.cls(cast("Any", config))
+    return agent_type, model_id
 
 
 _LAZY_EXPORTS = {
@@ -134,6 +140,7 @@ __all__ = [
     "OpenAIAgent",
     "OpenAIChatAgent",
     "create_agent",
+    "resolve_agent_model",
 ]
 
 

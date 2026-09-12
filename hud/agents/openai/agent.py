@@ -26,7 +26,6 @@ from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
-from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
@@ -72,14 +71,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
         model_client = config.model_client
         if model_client is None:
-            if settings.api_key:
-                model_client = gateway.build_gateway_client("openai")
-            elif settings.openai_api_key:
-                model_client = AsyncOpenAI(api_key=settings.openai_api_key)
-            else:
-                raise ValueError(
-                    "No API key for OpenAI. Set HUD_API_KEY or OPENAI_API_KEY.",
-                )
+            model_client = gateway.build_model_client("openai")
 
         self.openai_client: AsyncOpenAI = cast("AsyncOpenAI", model_client)
         self._model = config.model

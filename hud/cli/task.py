@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - Typer resolves command annotations at runtime.
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -32,6 +32,7 @@ from hud.cli.utils.output import (
     resolve_output_mode,
     wants_json,
 )
+from hud.cli.utils.source import EnvironmentSource
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -93,14 +94,6 @@ def _local_env_url(port: int = 8765) -> str | None:
         return None
 
 
-def _spawn_target(source: str) -> Path:
-    """The path ``spawn`` serves: ``.py``/dir as-is, JSON/JSONL's parent directory."""
-    resolved = Path(source).resolve()
-    if resolved.is_dir() or resolved.suffix == ".py":
-        return resolved
-    return resolved.parent
-
-
 def _resolve(
     task: str, source: str | None, url: str | None, args: dict[str, Any]
 ) -> tuple[str, dict[str, Any], AbstractAsyncContextManager[Runtime]]:
@@ -152,7 +145,7 @@ def _resolve(
     if endpoint is not None:
         placement = nullcontext(Runtime(endpoint))
     else:
-        placement = SubprocessRuntime(_spawn_target(source or "."))(selected)
+        placement = SubprocessRuntime(EnvironmentSource.local_source(source or "."))(selected)
     return selected.id, args or selected.args, placement
 
 
