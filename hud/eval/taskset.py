@@ -265,7 +265,7 @@ class Taskset:
 
         task_list = list(self)
         placement = runtime if runtime is not None or not task_list else self._resolve_placement()
-        group = group or (job.group if job else 1)
+        group = (job.group if job else 1) if group is None else group
         if group < 1:
             raise ValueError("group must be >= 1")
         timeout = rollout_timeout

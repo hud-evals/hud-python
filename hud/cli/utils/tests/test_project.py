@@ -45,41 +45,23 @@ def calls() -> list[str]:
 
 
 @pytest.fixture
-def records() -> list[dict[str, Any]]:
-    return [
-        _record(_DEFAULT_ID, "default", is_default=True),
-        _record(_BROWSER_ID, "browser-evals"),
-        _record(_READONLY_ID, "locked-down", create=False),
-    ]
-
-
-@pytest.fixture
-def platform(
-    monkeypatch: pytest.MonkeyPatch, calls: list[str], records: list[dict[str, Any]]
-) -> PlatformClient:
-    """A client backed by a paginated, searchable Projects API."""
+def platform(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> PlatformClient:
+    """A client whose ``GET /projects`` returns a fixed three-project team."""
 
     def fake_request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         calls.append(url)
-        parsed = urlsplit(url)
-        params = parse_qs(parsed.query)
-        project_id = parsed.path.rsplit("/", 1)[-1]
+        records = [
+            _record(_DEFAULT_ID, "default", is_default=True),
+            _record(_BROWSER_ID, "browser-evals"),
+            _record(_READONLY_ID, "locked-down", create=False),
+        ]
+        project_id = url.rsplit("/", 1)[-1]
         if project_id in {_DEFAULT_ID, _BROWSER_ID, _READONLY_ID}:
             return next(record for record in records if record["id"] == project_id)
-        search = params.get("search", [""])[0]
-        matches = [
-            record
-            for record in records
-            if search in record["name"] or search in (record.get("description") or "")
-        ]
-        limit = int(params.get("limit", ["50"])[0])
-        offset = int(params.get("offset", ["0"])[0])
-        return {
-            "items": matches[offset : offset + limit],
-            "total": len(matches),
-            "limit": limit,
-            "offset": offset,
-        }
+        search = (kwargs.get("params") or {}).get("search")
+        if search:
+            records = [record for record in records if search in record["name"]]
+        return {"items": records, "total": len(records), "limit": 50, "offset": 0}
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
     return PlatformClient("https://api.example", "key")

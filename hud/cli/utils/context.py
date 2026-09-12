@@ -25,16 +25,10 @@ def parse_ignore_file(ignore_path: Path) -> list[str]:
     if not ignore_path.exists():
         return patterns
 
-    try:
-        with open(ignore_path) as f:
-            for line in f:
-                # Strip whitespace and skip comments/empty lines
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                patterns.append(line)
-    except Exception:  # noqa: S110
-        pass  # Best effort - ignore parse errors
+    for line in ignore_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            patterns.append(line)
 
     return patterns
 
@@ -131,17 +125,13 @@ def should_ignore(
     return ignored
 
 
-# Default patterns that are always excluded for security and efficiency
+SENSITIVE_EXCLUDES = [".git", ".git/*", ".env", ".env.*", "*.env"]
+
 DEFAULT_EXCLUDES = [
-    ".git",
-    ".git/*",
     "__pycache__",
     "__pycache__/*",
     "*.pyc",
     "*.pyo",
-    ".env",  # Never include secrets!
-    ".env.*",
-    "*.env",
     ".venv",
     ".venv/*",
     "venv",
@@ -206,6 +196,9 @@ def create_build_context_tarball(
         dockerignore_patterns = parse_ignore_file(dockerignore_path)
         ignore_patterns.extend(dockerignore_patterns)
         loaded_sources.append(f".dockerignore ({len(dockerignore_patterns)} patterns)")
+
+    # User negations can override cache exclusions, never secret exclusions.
+    ignore_patterns.extend(SENSITIVE_EXCLUDES)
 
     if verbose and loaded_sources:
         hud_console.info(f"Loaded ignore patterns from: {', '.join(loaded_sources)}")

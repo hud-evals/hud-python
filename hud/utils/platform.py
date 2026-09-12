@@ -61,6 +61,9 @@ class PlatformClient:
     def post(self, path: str, *, json: Any | None = None) -> Any:
         return make_request_sync("POST", self.url(path), json=json, api_key=self.api_key)
 
+    def put(self, path: str, *, json: Any | None = None) -> Any:
+        return make_request_sync("PUT", self.url(path), json=json, api_key=self.api_key)
+
     def patch(self, path: str, *, json: Any | None = None) -> Any:
         return make_request_sync("PATCH", self.url(path), json=json, api_key=self.api_key)
 

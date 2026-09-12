@@ -22,6 +22,44 @@ runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
+def test_model_commands_share_platform_transport(monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    from hud.settings import settings
+
+    model_id = "00000000-0000-4000-a000-000000000001"
+    requests = []
+
+    def request(method, url, **kwargs):
+        requests.append((method, url, kwargs))
+        assert url.startswith("https://api.example/v2/")
+        assert kwargs["api_key"] == "test-key"
+        if urlsplit(url).path == "/v2/models/resolve":
+            assert parse_qs(urlsplit(url).query) == {"model": ["owner/model + version"]}
+            return {"id": model_id}
+        return [] if method == "GET" else {"id": model_id, "model_name": "forked"}
+
+    monkeypatch.setattr(settings, "api_key", "test-key")
+    monkeypatch.setattr(settings, "hud_api_url", "https://api.example/")
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
+    for command, extra, method, endpoint in [
+        ("checkpoints", [], "GET", f"/models/{model_id}/checkpoints"),
+        ("head", ["--set", "checkpoint"], "PUT", f"/models/{model_id}/head"),
+        ("fork", ["--name", "forked"], "POST", "/models/fork"),
+    ]:
+        requests.clear()
+        result = runner.invoke(app, ["models", command, "owner/model + version", *extra, "--json"])
+        assert result.exit_code == 0, result.output
+        assert len(requests) == 2
+        assert requests[-1][:2] == (method, f"https://api.example/v2{endpoint}")
+
+
+def test_client_rejects_non_object_args_before_connecting():
+    result = runner.invoke(app, ["client", "run", "solve", "--args", "[]", "--json"])
+    assert result.exit_code == ExitCode.USAGE
+    assert json.loads(result.stdout)["message"] == "--args must be a JSON object"
+
+
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
 
@@ -100,12 +138,14 @@ def test_jobs_get_not_found_exit_code() -> None:
         patch("hud.cli.utils.api.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
-        result = runner.invoke(app, ["jobs", "get", "missing-id", "--json"])
+        result = runner.invoke(
+            app, ["jobs", "get", "00000000-0000-0000-0000-000000000001", "--json"]
+        )
 
     assert result.exit_code == ExitCode.NOT_FOUND
     payload = json.loads(_stdout(result))
     assert payload["error"] == "not_found"
-    assert payload["input"]["job_id"] == "missing-id"
+    assert payload["input"]["job_id"] == "00000000-0000-0000-0000-000000000001"
 
 
 def test_legacy_jobs_id_still_lists_traces() -> None:
@@ -115,7 +155,7 @@ def test_legacy_jobs_id_still_lists_traces() -> None:
         patch("hud.cli.utils.api.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
-        result = runner.invoke(app, ["jobs", "job-99", "--json"])
+        result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-000000000099", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(_stdout(result))[0]["id"] == "tr-1"
@@ -188,7 +228,6 @@ def test_set_invalid_assignment_is_usage() -> None:
 def test_auth_noun_group_is_registered() -> None:
     result = runner.invoke(app, ["auth", "--help"])
     assert result.exit_code == 0
-    assert "login" in result.output
     assert "set" in result.output
 
 
@@ -265,6 +304,7 @@ def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
         return _DeployPlan(
             name=env_dir.name,
             registry_id=None,
+            placement=Placement(None, ProjectSource.TEAM_DEFAULT),
             runtime=None,
             runtime_config=None,
             env_vars={},
@@ -306,6 +346,7 @@ def test_deploy_all_json_includes_failed_env_details(tmp_path: Any) -> None:
         return _DeployPlan(
             name=env_dir.name,
             registry_id=None,
+            placement=Placement(None, ProjectSource.TEAM_DEFAULT),
             runtime=None,
             runtime_config=None,
             env_vars={},

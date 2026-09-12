@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 import tempfile
 from contextlib import contextmanager
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 if os.name == "nt":
@@ -155,16 +157,20 @@ class DirectoryState:
                 return False
             entry.link = updated
             path = get_config_dir() / "config.json"
-            descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-")
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                    stream.write(config.model_dump_json(indent=2) + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, path)
-            finally:
-                Path(temporary).unlink(missing_ok=True)
+            _write_config_file(path, config.model_dump_json(indent=2) + "\n")
             return True
+
+
+def _write_config_file(path: Path, contents: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def get_config_dir() -> Path:
@@ -201,41 +207,12 @@ def parse_key_value(item: str) -> tuple[str, str] | None:
 
 
 def parse_env_file(contents: str) -> dict[str, str]:
-    """Parse simple KEY=VALUE lines into a dict.
-
-    - Ignores blank lines and lines starting with '#'.
-    - Strips inline comments (# and everything after) from unquoted values.
-    - Respects single and double quoted values (comments inside quotes are preserved).
-    - Does not perform variable substitution.
-    """
-    data: dict[str, str] = {}
-    for raw_line in contents.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-
-        # Handle quoted values - preserve everything inside quotes
-        if value and value[0] in ('"', "'"):
-            quote_char = value[0]
-            # Find the closing quote
-            end_quote = value.find(quote_char, 1)
-            # Extract value without quotes (or strip opening quote if no closing quote)
-            value = value[1:end_quote] if end_quote != -1 else value[1:]
-        else:
-            # Unquoted value - strip inline comments
-            # Find # that's not escaped and treat as comment start
-            comment_idx = value.find("#")
-            if comment_idx != -1:
-                value = value[:comment_idx].rstrip()
-
-        if key:
-            data[key] = value
-    return data
+    """Read dotenv syntax without expanding variable references."""
+    return {
+        key: value
+        for key, value in dotenv_values(stream=StringIO(contents), interpolate=False).items()
+        if value is not None
+    }
 
 
 def render_env_file(env: dict[str, str]) -> str:
@@ -247,7 +224,10 @@ def render_env_file(env: dict[str, str]) -> str:
         "# so project overrides take precedence over these defaults.",
         "",
     ]
-    body = [f"{key}={env[key]}" for key in sorted(env.keys())]
+    body = []
+    for key, value in sorted(env.items()):
+        quoted = value.replace("\\", "\\\\").replace("'", "\\'")
+        body.append(f"{key}='{quoted}'")
     return "\n".join([*header, *body, ""])
 
 
@@ -256,10 +236,7 @@ def load_env_file(path: Path | None = None) -> dict[str, str]:
     env_path = path or get_user_env_path()
     if not env_path.exists():
         return {}
-    try:
-        contents = env_path.read_text(encoding="utf-8")
-    except Exception:
-        return {}
+    contents = env_path.read_text(encoding="utf-8")
     return parse_env_file(contents)
 
 
@@ -268,12 +245,13 @@ def save_env_file(env: dict[str, str], path: Path | None = None) -> Path:
     ensure_config_dir()
     env_path = path or get_user_env_path()
     rendered = render_env_file(env)
-    env_path.write_text(rendered, encoding="utf-8")
+    _write_config_file(env_path, rendered)
     return env_path
 
 
 def set_env_values(values: dict[str, str]) -> Path:
     """Persist provided KEY=VALUE pairs into ~/.hud/.env and return the path."""
-    current = load_env_file()
-    current.update(values)
-    return save_env_file(current)
+    with _config_lock():
+        current = load_env_file()
+        current.update(values)
+        return save_env_file(current)

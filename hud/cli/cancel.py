@@ -16,7 +16,6 @@ from hud.cli.utils.output import (
     json_option,
     map_exception,
     output_option,
-    resolve_output_mode,
     wants_json,
     yes_option,
 )
@@ -69,9 +68,7 @@ def run_cancel(
         "all": all_jobs,
     }
     if dry_run:
-        if resolve_output_mode(json_output=json_output, output=output) == "json" or wants_json(
-            json_output, output
-        ):
+        if wants_json(json_output, output):
             emit_json(plan)
         else:
             hud_console.info(f"--dry-run: would {action.replace('_', ' ')}")
@@ -108,12 +105,6 @@ def run_cancel(
         result = asyncio.run(_cancel())
     except HudException as exc:
         raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
-    except Exception as exc:
-        raise CliError(
-            error="failure",
-            message=f"Failed to cancel: {exc}",
-            input={"job_id": job_id, "trace_id": trace_id},
-        ) from exc
 
     payload: dict[str, Any] = {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
     if wants_json(json_output, output):

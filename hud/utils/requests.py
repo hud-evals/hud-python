@@ -18,11 +18,6 @@ from hud.utils.exceptions import (
     HudRequestError,
     HudTimeoutError,
 )
-from hud.utils.hints import (
-    CREDITS_EXHAUSTED,
-    HUD_API_KEY_MISSING,
-    RATE_LIMIT_HIT,
-)
 
 # Set up logger
 logger = logging.getLogger("hud.http")
@@ -38,10 +33,10 @@ _DEFAULT_LIMITS = httpx.Limits(
 )
 
 
-async def _handle_retry(
+def _retry_delay(
     attempt: int, max_retries: int, retry_delay: float, url: str, error_msg: str
-) -> None:
-    """Helper function to handle retry logic and logging."""
+) -> float:
+    """Calculate and log the shared retry backoff."""
     retry_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
     logger.debug(
         "%s from %s, retrying in %.2f seconds (attempt %d/%d)",
@@ -51,7 +46,7 @@ async def _handle_retry(
         attempt,
         max_retries,
     )
-    await asyncio.sleep(retry_time)
+    return retry_time
 
 
 def _create_default_async_client() -> httpx.AsyncClient:
@@ -109,10 +104,7 @@ async def make_request(
         HudTimeoutError: If the request times out.
     """
     if not api_key:
-        raise HudAuthenticationError(
-            "API key is required but not provided",
-            hints=[HUD_API_KEY_MISSING],
-        )
+        raise HudAuthenticationError("API key is required but not provided")
 
     headers = {"Authorization": f"Bearer {api_key}"}
     retry_status_codes = [502, 503, 504]
@@ -132,12 +124,14 @@ async def make_request(
 
                 # Check if we got a retriable status code
                 if response.status_code in retry_status_codes and attempt <= max_retries:
-                    await _handle_retry(
-                        attempt,
-                        max_retries,
-                        retry_delay,
-                        url,
-                        f"Received status {response.status_code}",
+                    await asyncio.sleep(
+                        _retry_delay(
+                            attempt,
+                            max_retries,
+                            retry_delay,
+                            url,
+                            f"Received status {response.status_code}",
+                        )
                     )
                     continue
 
@@ -147,29 +141,14 @@ async def make_request(
             except httpx.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
             except httpx.HTTPStatusError as e:
-                err = HudRequestError.from_httpx_error(e)
-                code = getattr(err, "status_code", None)
-                if code == 429 and RATE_LIMIT_HIT not in err.hints:
-                    logger.debug("Attaching RATE_LIMIT hint to 429 error")
-                    err.hints.append(RATE_LIMIT_HIT)
-                elif code == 402 and CREDITS_EXHAUSTED not in err.hints:
-                    logger.debug("Attaching CREDITS_EXHAUSTED hint to 402 error")
-                    err.hints.append(CREDITS_EXHAUSTED)
-                raise err from None
-            except httpx.RequestError as e:
-                if attempt <= max_retries:
-                    await _handle_retry(
-                        attempt, max_retries, retry_delay, url, f"Network error: {e}"
-                    )
-                    continue
-                else:
-                    raise HudNetworkError(f"Network error: {e!s}") from None
-            except ssl.SSLError as e:
-                if attempt <= max_retries:
-                    await _handle_retry(attempt, max_retries, retry_delay, url, f"SSL error: {e}")
-                    continue
-                else:
-                    raise HudNetworkError(f"SSL error: {e!s}") from None
+                raise HudRequestError.from_httpx_error(e) from None
+            except (httpx.RequestError, ssl.SSLError) as e:
+                kind = "SSL error" if isinstance(e, ssl.SSLError) else "Network error"
+                if attempt > max_retries:
+                    raise HudNetworkError(f"{kind}: {e}") from None
+                await asyncio.sleep(
+                    _retry_delay(attempt, max_retries, retry_delay, url, f"{kind}: {e}")
+                )
             except Exception as e:
                 raise HudRequestError(f"Unexpected error: {e!s}") from None
         raise HudRequestError(f"Request failed after {max_retries} retries with unknown error")
@@ -230,16 +209,15 @@ def make_request_sync(
 
                 # Check if we got a retriable status code
                 if response.status_code in retry_status_codes and attempt <= max_retries:
-                    retry_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
-                    logger.debug(
-                        "Received status %d from %s, retrying in %.2f seconds (attempt %d/%d)",
-                        response.status_code,
-                        url,
-                        retry_time,
-                        attempt,
-                        max_retries,
+                    time.sleep(
+                        _retry_delay(
+                            attempt,
+                            max_retries,
+                            retry_delay,
+                            url,
+                            f"Received status {response.status_code}",
+                        )
                     )
-                    time.sleep(retry_time)
                     continue
 
                 response.raise_for_status()
@@ -248,45 +226,12 @@ def make_request_sync(
             except httpx.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
             except httpx.HTTPStatusError as e:
-                err = HudRequestError.from_httpx_error(e)
-                code = getattr(err, "status_code", None)
-                if code == 429 and RATE_LIMIT_HIT not in err.hints:
-                    logger.debug("Attaching RATE_LIMIT hint to 429 error")
-                    err.hints.append(RATE_LIMIT_HIT)
-                elif code == 402 and CREDITS_EXHAUSTED not in err.hints:
-                    logger.debug("Attaching CREDITS_EXHAUSTED hint to 402 error")
-                    err.hints.append(CREDITS_EXHAUSTED)
-                raise err from None
-            except httpx.RequestError as e:
-                if attempt <= max_retries:
-                    retry_time = retry_delay * (2 ** (attempt - 1))
-                    logger.debug(
-                        "Network error %s from %s, retrying in %.2f seconds (attempt %d/%d)",
-                        str(e),
-                        url,
-                        retry_time,
-                        attempt,
-                        max_retries,
-                    )
-                    time.sleep(retry_time)
-                    continue
-                else:
-                    raise HudNetworkError(f"Network error: {e!s}") from None
-            except ssl.SSLError as e:
-                if attempt <= max_retries:
-                    retry_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
-                    logger.debug(
-                        "SSL error %s from %s, retrying in %.2f seconds (attempt %d/%d)",
-                        str(e),
-                        url,
-                        retry_time,
-                        attempt,
-                        max_retries,
-                    )
-                    time.sleep(retry_time)
-                    continue
-                else:
-                    raise HudNetworkError(f"SSL error: {e!s}") from None
+                raise HudRequestError.from_httpx_error(e) from None
+            except (httpx.RequestError, ssl.SSLError) as e:
+                kind = "SSL error" if isinstance(e, ssl.SSLError) else "Network error"
+                if attempt > max_retries:
+                    raise HudNetworkError(f"{kind}: {e}") from None
+                time.sleep(_retry_delay(attempt, max_retries, retry_delay, url, f"{kind}: {e}"))
             except Exception as e:
                 raise HudRequestError(f"Unexpected error: {e!s}") from None
         raise HudRequestError(f"Request failed after {max_retries} retries with unknown error")

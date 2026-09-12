@@ -363,6 +363,18 @@ def test_qa_results_pages_sanitized_rollout() -> None:
     assert platform.get.call_count == 3
 
 
+def test_qa_rollout_rejects_stalled_pagination():
+    platform = MagicMock()
+    platform.get.side_effect = [
+        [_result()],
+        {"events": [], "has_more": True, "next_seq": -1},
+    ]
+    result = _invoke(platform, ["qa", "results", _TRACE_ID, "--rollout"])
+    assert result.exit_code != 0
+    assert "pagination did not advance" in result.output
+    assert platform.get.call_count == 2
+
+
 def test_qa_results_empty_problems_is_passed() -> None:
     platform = MagicMock()
     platform.get.return_value = [

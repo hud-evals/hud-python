@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
+from hud.cli.utils.output import CliError, ExitCode
 from hud.utils.hud_console import hud_console
 
 
@@ -27,3 +30,24 @@ def find_tasks_file(tasks_file: str | None, msg: str = "Select a tasks file") ->
     else:
         # Prompt user to select a file
         return hud_console.select(msg, choices=all_files)
+
+
+def parse_task_args(args: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(args or "{}")
+    except json.JSONDecodeError as exc:
+        raise CliError(
+            error="usage",
+            message=f"--args must be valid JSON: {exc}",
+            input={"args": args},
+            suggestion='Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
+            exit_code=ExitCode.USAGE,
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise CliError(
+            error="usage",
+            message="--args must be a JSON object",
+            input={"args": args},
+            exit_code=ExitCode.USAGE,
+        )
+    return parsed

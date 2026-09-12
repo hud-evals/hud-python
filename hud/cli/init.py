@@ -38,8 +38,11 @@ def _resolve_preset(
     if preset is not None:
         if preset not in ENVIRONMENT_PRESETS:
             available = ", ".join(ENVIRONMENT_PRESETS)
-            hud_console.error(f"Unknown example environment {preset!r}. Available: {available}")
-            raise typer.Exit(1)
+            raise CliError(
+                error="usage",
+                message=f"Unknown example environment {preset!r}. Available: {available}",
+                exit_code=ExitCode.USAGE,
+            )
         return preset
 
     if sys.stdin.isatty() and sys.stdout.isatty():
@@ -51,11 +54,12 @@ def _resolve_preset(
 
     if name is not None:
         return DEFAULT_PRESET_ID
-    hud_console.error(
-        "Nothing to create. Pass a name (hud init my-env), a --template, "
-        "or run in an interactive terminal to choose an example environment."
+    raise CliError(
+        error="usage",
+        message="Nothing to create. Pass a name (hud init my-env), a --template, "
+        "or run in an interactive terminal to choose an example environment.",
+        exit_code=ExitCode.USAGE,
     )
-    raise typer.Exit(1)
 
 
 def init_command(
@@ -136,8 +140,10 @@ def init_command(
         # this run created (never a dir the user already had).
         if created and target.exists():
             shutil.rmtree(target, ignore_errors=True)
-        hud_console.error(f"Failed to prepare example environment {preset_id!r}: {exc}")
-        raise typer.Exit(1) from exc
+        raise CliError(
+            error="failure",
+            message=f"Failed to prepare example environment {preset_id!r}: {exc}",
+        ) from exc
     hud_console.status_item(f"environments/{preset_id}", "✓")
 
     if wants_json(json_output):

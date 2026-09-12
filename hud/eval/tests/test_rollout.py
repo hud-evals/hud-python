@@ -38,6 +38,12 @@ from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskse
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 
+
+async def test_taskset_rejects_zero_group_before_execution():
+    with pytest.raises(ValueError, match="group must be >= 1"):
+        await Taskset("empty", []).run(_FnAgent(lambda _: "answer"), group=0)
+
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path

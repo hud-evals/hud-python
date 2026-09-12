@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-import typer
 
 from hud.cli import init as init_module
 from hud.cli import presets as presets_module
@@ -131,13 +130,32 @@ def test_init_name_overrides_example_source_directory(
 
 
 def test_init_without_name_or_example_errors_when_noninteractive(tmp_path: Path) -> None:
-    with pytest.raises(typer.Exit):
+    with pytest.raises(CliError):
         init_command(name=None, directory=str(tmp_path), force=False, preset=None)
 
 
 def test_init_rejects_unknown_example(tmp_path: Path) -> None:
-    with pytest.raises(typer.Exit):
+    with pytest.raises(CliError):
         init_command(name=None, directory=str(tmp_path), force=False, preset="does-not-exist")
+
+
+def test_init_failure_uses_json_error_and_removes_partial_directory(tmp_path, monkeypatch):
+    import json
+
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+
+    def fail(preset, target):
+        target.mkdir()
+        (target / "partial").touch()
+        raise OSError("copy failed")
+
+    monkeypatch.setattr(init_module, "materialize_preset", fail)
+    result = CliRunner().invoke(app, ["init", "example", "--dir", str(tmp_path), "--json"])
+    assert result.exit_code != 0
+    assert "copy failed" in json.loads(result.stdout)["message"]
+    assert not (tmp_path / "example").exists()
 
 
 def test_materialize_preset_copies_local_source(

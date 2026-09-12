@@ -51,17 +51,13 @@ def _platform() -> PlatformClient:
     return PlatformClient.from_settings()
 
 
-def _print_json(payload: Any) -> None:
-    emit_json(payload)
-
-
 def _print_agent(agent: dict[str, Any]) -> None:
     typer.echo(f"{agent.get('name', '-')}\t{agent.get('id', '-')}")
 
 
 def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
     if json_output:
-        _print_json(results)
+        emit_json(results)
         return
     if not results:
         typer.echo("No QA results found.")
@@ -92,8 +88,8 @@ def _fetch_rollout(platform: PlatformClient, result_id: str) -> list[dict[str, A
         if not page.get("has_more"):
             return events
         next_seq = int(page["next_seq"])
-        if next_seq == since_seq:
-            return events
+        if next_seq <= since_seq:
+            raise ValueError("QA rollout pagination did not advance")
         since_seq = next_seq
 
 
@@ -336,19 +332,16 @@ def list_agents(
     """
     if ctx.invoked_subcommand is not None:
         return
-    try:
-        response = cast(
-            "dict[str, Any]",
-            _platform().get(
-                "/qa-agents",
-                params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
-            ),
-        )
-    except HudException as exc:
-        raise map_exception(exc) from exc
+    response = cast(
+        "dict[str, Any]",
+        _platform().get(
+            "/qa-agents",
+            params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
+        ),
+    )
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     if mode == "json":
-        _print_json(response)
+        emit_json(response)
         return
     agents = response["items"]
     if mode == "quiet":

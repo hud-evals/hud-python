@@ -145,18 +145,14 @@ def _load_runtime_config(path: str | None, console: HUDConsole) -> RuntimeConfig
     return config
 
 
-def _load_env_vars(path: Path, console: HUDConsole, *, warn_missing: bool) -> dict[str, str]:
+def _load_env_vars(path: Path, console: HUDConsole, *, required: bool) -> dict[str, str]:
     if not path.exists():
-        if warn_missing:
-            console.warning(f"Env file not found: {path}")
+        if required:
+            raise FileNotFoundError(f"Env file not found: {path}")
         return {}
 
     console.info(f"Loading environment variables from {path}")
-    try:
-        return parse_env_file(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        console.warning(f"Failed to parse env file: {e}")
-        return {}
+    return parse_env_file(path.read_text(encoding="utf-8"))
 
 
 def collect_environment_variables(
@@ -169,9 +165,9 @@ def collect_environment_variables(
 ) -> dict[str, str]:
     """Collect deploy environment variables from .env/--env-file plus --env overrides."""
     if env_file:
-        env_vars = _load_env_vars(Path(env_file), console, warn_missing=True)
+        env_vars = _load_env_vars(Path(env_file), console, required=True)
     elif not skip_dotenv:
-        env_vars = _load_env_vars(directory / ".env", console, warn_missing=False)
+        env_vars = _load_env_vars(directory / ".env", console, required=False)
     else:
         env_vars = {}
 

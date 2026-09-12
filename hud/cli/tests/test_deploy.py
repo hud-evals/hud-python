@@ -177,6 +177,13 @@ class TestCollectEnvironmentVariables:
 
         assert result["CUSTOM_KEY"] == "custom_value"
 
+    def test_explicit_missing_env_file_fails(self, tmp_path: Path) -> None:
+        from hud.cli.deploy import collect_environment_variables
+        from hud.utils.hud_console import HUDConsole
+
+        with pytest.raises(FileNotFoundError, match="Env file not found"):
+            collect_environment_variables(tmp_path, None, str(tmp_path / "missing"), HUDConsole())
+
     def test_env_flags_override(self, tmp_path: Path) -> None:
         """Test --env flags override file values."""
         from hud.cli.deploy import collect_environment_variables

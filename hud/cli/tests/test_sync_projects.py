@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from typer.testing import CliRunner
 
 import hud.cli.sync as sync_module
+from hud.cli import app
 from hud.eval import Task, Taskset
 from hud.utils.exceptions import HudRequestError
 
@@ -220,3 +222,64 @@ def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
         alias = CliRunner().invoke(app, ["--json", "sync"])
         assert alias.exit_code == 0, alias.output
         assert json.loads(alias.stdout)["taskset_id"] == other
+
+
+@pytest.mark.parametrize(
+    ("status_code", "exit_code", "error"),
+    [
+        (400, 1, "failure"),
+        (403, 4, "permission_denied"),
+        (500, 1, "server_error"),
+    ],
+)
+def test_rejected_upload_exits_with_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status_code: int,
+    exit_code: int,
+    error: str,
+) -> None:
+    project_id = "22222222-2222-4222-8222-222222222222"
+    detail = "Taskset belongs to another Project" if status_code == 400 else "Upload rejected"
+    source = tmp_path / "tasks.json"
+    source.write_text(json.dumps([{"env": "example", "id": "solve", "slug": "one"}]))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    monkeypatch.setattr("hud.settings.settings.default_project", None)
+
+    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        if url.endswith("/auth/me"):
+            return {
+                "user_id": "11111111-1111-4111-8111-111111111111",
+                "team_id": "22222222-2222-4222-8222-222222222222",
+            }
+        if url.endswith(f"/projects/{project_id}"):
+            return {"id": project_id, "name": "browser-evals", "capabilities": {"create": True}}
+        if "/by-name/" in url:
+            raise HudRequestError("missing", status_code=404)
+        if url.endswith("/tasks/upload"):
+            raise HudRequestError(detail, status_code=status_code, response_json={"detail": detail})
+        raise AssertionError(url)
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
+    result = CliRunner().invoke(
+        app,
+        [
+            "sync",
+            "tasks",
+            "demo",
+            str(source),
+            "--project",
+            project_id,
+            "--force",
+            "--yes",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == exit_code, result.output
+    payload = json.loads(result.stdout)
+    assert payload["error"] == error
+    assert detail in payload["message"]
+    assert "Sync complete" not in result.output
+    assert not (tmp_path / ".hud" / "config.json").exists()

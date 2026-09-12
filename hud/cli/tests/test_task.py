@@ -1,25 +1,33 @@
+import asyncio
+import json
+
+import pytest
+from typer.testing import CliRunner
+
+from hud.cli import app
 from hud.cli import task as task_module
 from hud.eval import Task, Taskset
 
 
-async def test_source_resolves_authored_task_for_existing_runtime(monkeypatch):
+@pytest.mark.parametrize("override", [None, {}])
+async def test_source_resolves_authored_task_for_existing_runtime(tmp_path, override):
     authored = Task(
         env="coding",
         id="coding-task",
         slug="flask-4992",
         args={"description": "Fix Flask", "test_script": "pytest"},
     )
-    monkeypatch.setattr(task_module, "_collect", lambda source: Taskset(source, [authored]))
+    source = Taskset("authored", [authored]).to_file(tmp_path / "tasks.json")
 
     task_id, args, placement = task_module._resolve(
         "flask-4992",
-        "tasks.py",
+        str(source),
         "127.0.0.1:9000",
-        {},
+        override,
     )
 
     assert task_id == "coding-task"
-    assert args == authored.args
+    assert args == (authored.args if override is None else override)
     async with placement as runtime:
         assert runtime.url == "tcp://127.0.0.1:9000"
 
@@ -59,3 +67,56 @@ async def test_task_source_uses_sibling_environment_for_start_and_grade(tmp_path
         await client.start_task(task_id, args)
         result = await client.grade({"answer": "answer"})
     assert result["score"] == 1.0
+
+
+@pytest.mark.parametrize("mode", ["empty", "parked", "failed_grade", "ambiguous"])
+async def test_grade_only_starts_when_no_task_is_in_progress(mode):
+    from hud.clients import connect
+    from hud.environment import Environment
+    from hud.eval import LocalRuntime
+
+    env = Environment("grading")
+    starts = 0
+
+    @env.template()
+    async def solve():
+        nonlocal starts
+        starts += 1
+        yield "question"
+        if mode == "failed_grade":
+            raise ValueError("grader failed")
+        yield 1.0
+
+    async with LocalRuntime(env)(Task(env="grading", id="solve")) as runtime:
+        for _ in range(2 if mode == "ambiguous" else int(mode != "empty")):
+            async with connect(runtime) as client:
+                await client.start_task("solve", {})
+        result = await asyncio.to_thread(
+            CliRunner().invoke,
+            app,
+            ["task", "grade", "solve", "--url", runtime.url, "--json"],
+        )
+    assert starts == (2 if mode == "ambiguous" else 1)
+    if mode in {"empty", "parked"}:
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["score"] == 1.0
+    else:
+        assert result.exit_code != 0
+        assert (
+            "grader failed" in result.output
+            if mode == "failed_grade"
+            else "2 parked sessions" in result.output
+        )
+
+
+def test_task_id_matching_multiple_rows_requires_unique_slug(tmp_path):
+    source = Taskset(
+        "authored",
+        [
+            Task(env="example", id="solve", slug="first"),
+            Task(env="example", id="solve", slug="second"),
+        ],
+    ).to_file(tmp_path / "tasks.json")
+    result = CliRunner().invoke(app, ["task", "start", "solve", "--source", str(source), "--json"])
+    assert result.exit_code == 2
+    assert "Ambiguous task" in json.loads(result.stdout)["message"]

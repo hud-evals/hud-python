@@ -22,7 +22,6 @@ import typer
 
 from hud.cli.utils.output import (
     CliError,
-    ExitCode,
     emit_json,
     emit_quiet,
     json_option,
@@ -33,6 +32,7 @@ from hud.cli.utils.output import (
     wants_json,
 )
 from hud.cli.utils.source import EnvironmentSource
+from hud.cli.utils.tasks import parse_task_args
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -46,27 +46,6 @@ task_app = typer.Typer(
     help="Start a task or grade an answer (attaches to a running env, or spawns from source).",
     rich_markup_mode="rich",
 )
-
-
-def _parse_args(args: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(args or "{}")
-    except json.JSONDecodeError as exc:
-        raise CliError(
-            error="usage",
-            message=f"--args must be valid JSON: {exc}",
-            input={"args": args},
-            suggestion='Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
-            exit_code=ExitCode.USAGE,
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise CliError(
-            error="usage",
-            message="--args must be a JSON object",
-            input={"args": args},
-            exit_code=ExitCode.USAGE,
-        )
-    return parsed
 
 
 def _collect(source: str) -> Any:
@@ -95,7 +74,7 @@ def _local_env_url(port: int = 8765) -> str | None:
 
 
 def _resolve(
-    task: str, source: str | None, url: str | None, args: dict[str, Any]
+    task: str, source: str | None, url: str | None, args: dict[str, Any] | None
 ) -> tuple[str, dict[str, Any], AbstractAsyncContextManager[Runtime]]:
     """Resolve ``(task_id, args, placement)``.
 
@@ -116,10 +95,14 @@ def _resolve(
     endpoint = None
     if attach is not None:
         parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
-        endpoint = f"tcp://{parts.hostname or '127.0.0.1'}:{parts.port or 8765}"
+        if parts.scheme != "tcp":
+            raise CliError(error="usage", message="Task control channels require a tcp:// URL")
+        host = parts.hostname or "127.0.0.1"
+        host = f"[{host}]" if ":" in host else host
+        endpoint = f"tcp://{host}:{parts.port or 8765}"
 
     if endpoint is not None and source is None:
-        return task, args, nullcontext(Runtime(endpoint))
+        return task, args or {}, nullcontext(Runtime(endpoint))
 
     taskset = _collect(source or ".")
     if not taskset:
@@ -141,12 +124,17 @@ def _resolve(
             input={"task": task, "source": source or "."},
             suggestion="Run 'hud task list' to see available slugs.",
         )
+    if len(matches) > 1:
+        raise CliError(
+            error="usage",
+            message=f"Ambiguous task {task!r}; use a unique slug shown by hud task list.",
+        )
     selected = matches[0]
     if endpoint is not None:
         placement = nullcontext(Runtime(endpoint))
     else:
         placement = SubprocessRuntime(EnvironmentSource.local_source(source or "."))(selected)
-    return selected.id, args or selected.args, placement
+    return selected.id, selected.args if args is None else args, placement
 
 
 def _emit(
@@ -207,7 +195,7 @@ def start_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: str = typer.Option("{}", "--args", "-a", help="JSON object of task args."),
+    args: str | None = typer.Option(None, "--args", "-a", help="JSON object of task args."),
     url: str | None = typer.Option(
         None,
         "--url",
@@ -227,7 +215,9 @@ def start_command(
         hud task start fix_bug --json
         hud task start fix_bug --source . --args '{}'[/not dim]
     """
-    task_id, task_args, placement = _resolve(task, source, url, _parse_args(args))
+    task_id, task_args, placement = _resolve(
+        task, source, url, parse_task_args(args) if args is not None else None
+    )
 
     async def _run() -> dict[str, Any]:
         from hud.clients import connect
@@ -255,7 +245,7 @@ def grade_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: str = typer.Option("{}", "--args", "-a", help="JSON object of task args."),
+    args: str | None = typer.Option(None, "--args", "-a", help="JSON object of task args."),
     url: str | None = typer.Option(
         None,
         "--url",
@@ -276,7 +266,9 @@ def grade_command(
         hud task grade fix_bug --answer-file answer.txt[/not dim]
     """
     answer_text = read_text_arg(answer_file) if answer_file is not None else answer
-    task_id, task_args, placement = _resolve(task, source, url, _parse_args(args))
+    task_id, task_args, placement = _resolve(
+        task, source, url, parse_task_args(args) if args is not None else None
+    )
 
     async def _run() -> dict[str, Any]:
         from hud.clients import connect
@@ -285,7 +277,9 @@ def grade_command(
         async with placement as runtime, connect(runtime) as client:
             try:
                 return await client.grade({"answer": answer_text})  # resume a prior start
-            except HudProtocolError:
+            except HudProtocolError as exc:
+                if exc.code != -32600 or exc.message != "no task in progress":
+                    raise
                 # No held session: run the whole lifecycle here (start then grade).
                 await client.start_task(task_id, task_args)
                 return await client.grade({"answer": answer_text})

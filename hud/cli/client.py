@@ -8,11 +8,17 @@ answer. The Harbor ``test.sh`` uses ``hud client run`` to grade.
 from __future__ import annotations
 
 import asyncio
-import json
 
 import typer
 
-from hud.cli.utils.output import CliError, emit_json, json_option, output_option, wants_json
+from hud.cli.utils.output import (
+    CliError,
+    emit_json,
+    json_option,
+    output_option,
+    wants_json,
+)
+from hud.cli.utils.tasks import parse_task_args
 from hud.eval.runtime import Runtime
 from hud.utils.hud_console import HUDConsole
 
@@ -100,13 +106,15 @@ def run_command(
         hud client run fix_bug --answer "done" --json[/not dim]
     """
 
+    task_args = parse_task_args(args)
+
     async def _run() -> float:
         from hud.clients import connect
         from hud.eval.run import Run
 
         async with (
             connect(_runtime(url), ready_timeout=10.0) as client,
-            Run(client, task, json.loads(args)) as run,
+            Run(client, task, task_args) as run,
         ):
             run.trace.content = answer
         return run.reward

@@ -90,3 +90,19 @@ def test_create_build_context_tarball_preserves_empty_directories(tmp_path: Path
         assert count == 1
     finally:
         tarball.unlink(missing_ok=True)
+
+
+def test_build_context_negations_cannot_reinclude_secrets(tmp_path: Path) -> None:
+    for name in [".env", ".env.prod", "service.env", ".git/config", "nested/.env"]:
+        path = tmp_path / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("secret")
+    (tmp_path / "keep.pyc").write_text("cache")
+    (tmp_path / ".dockerignore").write_text("!*\n")
+    tarball, *_ = create_build_context_tarball(tmp_path)
+    try:
+        with tarfile.open(tarball) as archive:
+            names = archive.getnames()
+        assert set(names) == {"nested", "keep.pyc", ".dockerignore"}
+    finally:
+        tarball.unlink()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 import typer
@@ -11,18 +11,17 @@ from rich.panel import Panel
 from rich.table import Table
 
 from hud.cli.utils.output import (
-    CliError,
     dry_run_option,
     emit_json,
     emit_quiet,
     json_option,
-    map_exception,
     map_request_error,
     output_option,
     quiet_option,
     resolve_output_mode,
     wants_json,
 )
+from hud.utils.platform import PlatformClient
 
 console = Console()
 
@@ -53,22 +52,11 @@ def list_models(
     """
     from hud.cli.utils.api import require_api_key
     from hud.settings import settings
-    from hud.utils.exceptions import HudException
     from hud.utils.gateway import list_gateway_models
 
     require_api_key("list models")
 
-    try:
-        models_list = list_gateway_models()
-    except Exception as exc:
-        raise (
-            map_exception(exc)
-            if isinstance(exc, HudException)
-            else CliError(
-                error="failure",
-                message=f"Failed to fetch models: {exc}",
-            )
-        ) from exc
+    models_list = list_gateway_models()
 
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     if mode == "json":
@@ -133,9 +121,7 @@ def fork_model(
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
     from hud.cli.utils.api import require_api_key
-    from hud.settings import settings
     from hud.utils.exceptions import HudRequestError
-    from hud.utils.requests import make_request_sync
 
     require_api_key("fork a model")
 
@@ -155,11 +141,8 @@ def fork_model(
 
     source_id = _resolve_model_id(source)
     try:
-        model = make_request_sync(
-            "POST",
-            f"{settings.hud_api_url}/v2/models/fork",
-            json={"source_model_id": source_id, "name": name},
-            api_key=settings.api_key,
+        model = PlatformClient.from_settings().post(
+            "/models/fork", json={"source_model_id": source_id, "name": name}
         )
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
@@ -174,12 +157,6 @@ def fork_model(
         raise map_request_error(
             exc,
             resource="Model",
-            input={"source": source, "name": name},
-        ) from exc
-    except Exception as exc:
-        raise CliError(
-            error="failure",
-            message=f"Fork failed: {exc}",
             input={"source": source, "name": name},
         ) from exc
 
@@ -332,21 +309,13 @@ def _model_url(model_id: str, *, tab: str | None = None) -> str:
 
 def _resolve_model_id(model: str) -> str:
     """Map a model slug to its id (an id passes straight through)."""
-    from hud.settings import settings
     from hud.utils.exceptions import HudRequestError
-    from hud.utils.requests import make_request_sync
 
     try:
         return str(UUID(model))
     except ValueError:
-        from urllib.parse import quote
-
         try:
-            data = make_request_sync(
-                "GET",
-                f"{settings.hud_api_url}/v2/models/resolve?model={quote(model, safe='')}",
-                api_key=settings.api_key,
-            )
+            data = PlatformClient.from_settings().get("/models/resolve", params={"model": model})
         except HudRequestError as exc:
             raise map_request_error(exc, resource="Model", input={"model": model}) from exc
         return str(data["id"])
@@ -358,45 +327,25 @@ def _existing_model(name: str) -> dict[str, Any]:
     return {"id": model_id, "model_name": name}
 
 
-def _get_checkpoints(model: str) -> list[dict[str, Any]]:
-    from hud.settings import settings
+def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
     from hud.utils.exceptions import HudRequestError
-    from hud.utils.requests import make_request_sync
 
-    model_id = _resolve_model_id(model)
     try:
-        return cast(
-            "list[dict[str, Any]]",
-            make_request_sync(
-                "GET",
-                f"{settings.hud_api_url}/v2/models/{model_id}/checkpoints",
-                api_key=settings.api_key,
-            ),
-        )
+        return PlatformClient.from_settings().get(f"/models/{model_id}/checkpoints")
     except HudRequestError as exc:
-        raise map_request_error(exc, resource="Checkpoints", input={"model": model}) from exc
-    except Exception as exc:
-        raise CliError(error="failure", message=f"Failed to fetch checkpoints: {exc}") from exc
+        raise map_request_error(exc, resource="Checkpoints", input={"model": model_id}) from exc
 
 
-def _set_head(model: str, checkpoint_id: str) -> None:
-    from hud.settings import settings
+def _set_head(model_id: str, checkpoint_id: str) -> None:
     from hud.utils.exceptions import HudRequestError
-    from hud.utils.requests import make_request_sync
 
-    model_id = _resolve_model_id(model)
     try:
-        make_request_sync(
-            "PUT",
-            f"{settings.hud_api_url}/v2/models/{model_id}/head",
-            json={"checkpoint_id": checkpoint_id},
-            api_key=settings.api_key,
+        PlatformClient.from_settings().put(
+            f"/models/{model_id}/head", json={"checkpoint_id": checkpoint_id}
         )
     except HudRequestError as exc:
         raise map_request_error(
             exc,
             resource="Checkpoint",
-            input={"model": model, "checkpoint_id": checkpoint_id},
+            input={"model": model_id, "checkpoint_id": checkpoint_id},
         ) from exc
-    except Exception as exc:
-        raise CliError(error="failure", message=f"Failed to set head: {exc}") from exc

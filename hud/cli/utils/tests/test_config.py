@@ -33,12 +33,25 @@ NOEQ
 
 
 def test_render_and_load_roundtrip(tmp_path: Path):
-    env = {"A": "1", "B": "2"}
+    env = {"A": "1", "B": "a # secret's \\ value\nnext line", "C": '"quoted"'}
     file_path = tmp_path / ".env"
     rendered = render_env_file(env)
     file_path.write_text(rendered, encoding="utf-8")
     loaded = load_env_file(file_path)
     assert loaded == env
+
+
+def test_set_preserves_credentials_when_another_setting_changes(monkeypatch, tmp_path):
+    from dotenv import dotenv_values
+
+    from hud.cli.utils.config import set_env_values
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    secret = "key # with 'quotes' and \\slashes\nsecond line"
+    path = set_env_values({"HUD_API_KEY": secret})
+    set_env_values({"HUD_DEFAULT_PROJECT": "example"})
+    assert dotenv_values(path)["HUD_API_KEY"] == secret
+    assert load_env_file(path)["HUD_DEFAULT_PROJECT"] == "example"
 
 
 def test_get_paths(monkeypatch, tmp_path: Path):
