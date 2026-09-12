@@ -11,28 +11,18 @@ import typer
 from hud.cli.utils.output import (
     CliError,
     ExitCode,
-    abort,
     confirm_or_abort,
     emit_json,
     emit_quiet,
     map_request_error,
     read_text_arg,
     resolve_output_mode,
-    suppress_json_stdout,
     wants_json,
 )
 from hud.utils.exceptions import HudRequestError
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.fixture(autouse=True)
-def _reset_json_flag() -> None:
-    from hud.cli.utils.output import _JSON_REQUESTED, _JSON_SUPPRESSED
-
-    _JSON_REQUESTED.set(False)
-    _JSON_SUPPRESSED.set(False)
 
 
 def test_wants_json_from_flag_and_output() -> None:
@@ -54,7 +44,7 @@ def test_resolve_output_mode_prefers_json_over_quiet() -> None:
 
 
 def test_resolve_output_mode_rejects_unknown_format() -> None:
-    with pytest.raises(typer.Exit) as exc_info:
+    with pytest.raises(CliError) as exc_info:
         resolve_output_mode(output="yaml")
     assert exc_info.value.exit_code == ExitCode.USAGE
 
@@ -73,37 +63,18 @@ def test_emit_quiet_one_value_per_line(capsys: pytest.CaptureFixture[str]) -> No
     assert captured.err == ""
 
 
-def test_suppress_json_stdout_blocks_abort_json(capsys: pytest.CaptureFixture[str]) -> None:
-    from hud.cli.utils.output import _JSON_REQUESTED
+def test_output_mode_does_not_leak_between_invocations() -> None:
+    from typer.testing import CliRunner
 
-    _JSON_REQUESTED.set(True)
-    with suppress_json_stdout(), pytest.raises(typer.Exit) as exc_info:
-        abort(CliError(error="permission_denied", message="No HUD API key found"))
-    assert exc_info.value.exit_code == ExitCode.PERMISSION
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "Error: No HUD API key found" in captured.err
+    from hud.cli import app
 
-
-def test_abort_writes_error_json_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(typer.Exit) as exc_info:
-        abort(
-            CliError(
-                error="not_found",
-                message="Job missing",
-                input={"job_id": "abc"},
-                suggestion="hud jobs list",
-            ),
-            json_output=True,
-        )
-    assert exc_info.value.exit_code == ExitCode.NOT_FOUND
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert payload["error"] == "not_found"
-    assert payload["input"] == {"job_id": "abc"}
-    assert payload["suggestion"] == "hud jobs list"
-    assert "Error: Job missing" in captured.err
-    assert "Hint: hud jobs list" in captured.err
+    runner = CliRunner()
+    first = runner.invoke(app, ["version", "--json"])
+    second = runner.invoke(app, ["version"])
+    alias = runner.invoke(app, ["--version", "--json"])
+    assert json.loads(first.stdout)["name"] == "hud"
+    assert second.stdout.startswith("HUD CLI version:")
+    assert json.loads(alias.stdout) == json.loads(first.stdout)
 
 
 def test_map_request_error_status_codes() -> None:
@@ -119,7 +90,7 @@ def test_confirm_or_abort_noninteractive_requires_yes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("hud.cli.utils.output.is_interactive", lambda: False)
-    with pytest.raises(typer.Exit) as exc_info:
+    with pytest.raises(CliError) as exc_info:
         confirm_or_abort("Proceed?")
     assert exc_info.value.exit_code == ExitCode.USAGE
 
@@ -139,6 +110,6 @@ def test_read_text_arg_stdin_and_file(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 def test_read_text_arg_missing_file_is_not_found() -> None:
-    with pytest.raises(typer.Exit) as exc_info:
+    with pytest.raises(CliError) as exc_info:
         read_text_arg("/definitely/missing/hud-cli-file.txt")
     assert exc_info.value.exit_code == ExitCode.NOT_FOUND

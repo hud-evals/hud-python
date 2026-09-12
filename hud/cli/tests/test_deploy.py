@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import typer
 
 from hud.cli.deploy import _resolve_environment_name
+from hud.cli.utils.config import AuthScope, DirectoryState
+from hud.cli.utils.output import CliError
 from hud.cli.utils.project import Placement, Project, ProjectSource
 from hud.cli.utils.registry import RegistryEnvironment
 from hud.cli.utils.source import EnvironmentSource
@@ -30,7 +32,7 @@ def test_normalize_runtime_uses_public_runtime_names(value: str, expected: str) 
 def test_normalize_runtime_rejects_internal_provider_name() -> None:
     from hud.cli.deploy import _normalize_runtime
 
-    with pytest.raises(typer.Exit):
+    with pytest.raises(ValueError):
         _normalize_runtime("ec2", HUDConsole())
 
 
@@ -61,7 +63,7 @@ class TestResolveEnvironmentName:
         (tmp_path / "a.py").write_text('a = Environment("one")\n', encoding="utf-8")
         (tmp_path / "b.py").write_text('b = Environment("two")\n', encoding="utf-8")
 
-        with pytest.raises(typer.Exit):
+        with pytest.raises(ValueError):
             self._resolve(tmp_path)
 
     def test_entrypoint_disambiguates_subagent(self, tmp_path: Path) -> None:
@@ -93,13 +95,13 @@ class TestResolveEnvironmentName:
     def test_unnamed_environment_exit(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text("env = Environment()\n", encoding="utf-8")
 
-        with pytest.raises(typer.Exit):
+        with pytest.raises(ValueError):
             self._resolve(tmp_path)
 
     def test_no_environment_declaration_exits(self, tmp_path: Path) -> None:
         (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
 
-        with pytest.raises(typer.Exit):
+        with pytest.raises(ValueError):
             self._resolve(tmp_path)
 
     def test_registry_id_name_mismatch_exit(self, tmp_path: Path) -> None:
@@ -111,7 +113,7 @@ class TestResolveEnvironmentName:
                 "hud.cli.deploy.get_registry_environment",
                 return_value=registry_env,
             ),
-            pytest.raises(typer.Exit),
+            pytest.raises(ValueError),
         ):
             self._resolve(tmp_path, registry_id="r-1")
 
@@ -131,7 +133,7 @@ class TestResolveEnvironmentName:
 
         with (
             patch("hud.cli.deploy.get_registry_environment", return_value=registry_env),
-            pytest.raises(typer.Exit),
+            pytest.raises(ValueError),
         ):
             self._resolve(tmp_path, registry_id="r-1")
 
@@ -311,7 +313,7 @@ class TestRuntimeConfigFile:
         config_path = tmp_path / "runtime.json"
         config_path.write_text(json.dumps({"provider_config": {}}), encoding="utf-8")
 
-        with pytest.raises(typer.Exit):
+        with pytest.raises(ValueError):
             _load_runtime_config(str(config_path), HUDConsole())
 
     def test_prepare_deploy_rejects_image_config_for_compose_context(
@@ -328,7 +330,7 @@ class TestRuntimeConfigFile:
         runtime_config = tmp_path / "runtime.json"
         runtime_config.write_text('{"image":"other:latest"}', encoding="utf-8")
 
-        with pytest.raises(typer.Exit):
+        with pytest.raises(ValueError):
             _prepare_deploy_plan(
                 EnvironmentSource.open(tmp_path),
                 env_dir=tmp_path,
@@ -359,7 +361,7 @@ class TestDeployEnvironment:
 
         with (
             patch("hud.settings.settings") as mock_settings,
-            pytest.raises(typer.Exit) as exc_info,
+            pytest.raises(CliError) as exc_info,
         ):
             mock_settings.api_key = None
 
@@ -400,7 +402,7 @@ class TestDeployEnvironment:
 
         with (
             patch("hud.settings.settings") as mock_settings,
-            pytest.raises(typer.Exit) as exc_info,
+            pytest.raises(CliError) as exc_info,
         ):
             mock_settings.api_key = "test-key"
 
@@ -418,7 +420,7 @@ class TestDeployEnvironment:
         with (
             patch("hud.settings.settings") as mock_settings,
             patch("hud.cli.utils.source.EnvironmentSource.validate") as mock_validate,
-            pytest.raises(typer.Exit) as exc_info,
+            pytest.raises(ValueError) as exc_info,
         ):
             mock_settings.api_key = "test-key"
             mock_validate.return_value = [
@@ -432,7 +434,7 @@ class TestDeployEnvironment:
 
             deploy_environment(directory=str(tmp_path))
 
-        assert exc_info.value.exit_code == 1
+        assert "validation failed" in str(exc_info.value)
 
 
 class TestDeployAsync:
@@ -449,8 +451,11 @@ class TestDeployAsync:
         console = HUDConsole()
         error = HudRequestError("Unauthorized", status_code=401)
 
-        with patch("hud.utils.platform.make_request", AsyncMock(side_effect=error)):
-            result = await _deploy_async(
+        with (
+            patch("hud.utils.platform.make_request", AsyncMock(side_effect=error)),
+            pytest.raises(HudRequestError),
+        ):
+            await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
                 no_cache=False,
                 plan=_DeployPlan(
@@ -462,12 +467,17 @@ class TestDeployAsync:
                     env_vars={},
                     build_args={},
                     build_secrets={},
+                    state=DirectoryState(
+                        AuthScope(
+                            origin="https://api.example",
+                            user_id="11111111-1111-4111-8111-111111111111",
+                            team_id="22222222-2222-4222-8222-222222222222",
+                        )
+                    ),
                 ),
                 platform=PlatformClient("https://api.example", "key"),
                 console=console,
             )
-
-        assert result.success is False
 
     @pytest.mark.asyncio
     async def test_upload_url_network_error(self) -> None:
@@ -478,11 +488,14 @@ class TestDeployAsync:
 
         console = HUDConsole()
 
-        with patch(
-            "hud.utils.platform.make_request",
-            AsyncMock(side_effect=Exception("Network error")),
+        with (
+            patch(
+                "hud.utils.platform.make_request",
+                AsyncMock(side_effect=Exception("Network error")),
+            ),
+            pytest.raises(Exception, match="Network error"),
         ):
-            result = await _deploy_async(
+            await _deploy_async(
                 tarball_path=Path("test.tar.gz"),
                 no_cache=False,
                 plan=_DeployPlan(
@@ -494,12 +507,17 @@ class TestDeployAsync:
                     env_vars={},
                     build_args={},
                     build_secrets={},
+                    state=DirectoryState(
+                        AuthScope(
+                            origin="https://api.example",
+                            user_id="11111111-1111-4111-8111-111111111111",
+                            team_id="22222222-2222-4222-8222-222222222222",
+                        )
+                    ),
                 ),
                 platform=PlatformClient("https://api.example", "key"),
                 console=console,
             )
-
-        assert result.success is False
 
     @pytest.mark.asyncio
     async def test_trigger_build_sends_resolved_project(self) -> None:
@@ -540,6 +558,13 @@ class TestDeployAsync:
                 env_vars={},
                 build_args={},
                 build_secrets={},
+                state=DirectoryState(
+                    AuthScope(
+                        origin="https://api.example",
+                        user_id="11111111-1111-4111-8111-111111111111",
+                        team_id="22222222-2222-4222-8222-222222222222",
+                    )
+                ),
             ),
             no_cache=False,
         )
@@ -578,45 +603,19 @@ class TestDeployAsync:
                 env_vars={},
                 build_args={},
                 build_secrets={},
+                state=DirectoryState(
+                    AuthScope(
+                        origin="https://api.example",
+                        user_id="11111111-1111-4111-8111-111111111111",
+                        team_id="22222222-2222-4222-8222-222222222222",
+                    )
+                ),
             ),
             no_cache=False,
         )
 
         assert platform.payload is not None
         assert "project_id" not in platform.payload
-
-
-class TestSaveDeployLink:
-    """Tests for _save_deploy_link function."""
-
-    def test_saves_deploy_link(self, tmp_path: Path) -> None:
-        """Test saving deploy link creates correct config.json file."""
-        from hud.cli.deploy import _save_deploy_link
-        from hud.utils.hud_console import HUDConsole
-
-        console = HUDConsole()
-
-        _save_deploy_link(tmp_path, "test-registry-id-12345", console)
-
-        config_path = tmp_path / ".hud" / "config.json"
-        assert config_path.exists()
-
-        with open(config_path) as f:
-            saved = json.load(f)
-
-        assert saved["registryId"] == "test-registry-id-12345"
-        assert "projectId" not in saved
-
-    def test_creates_hud_directory(self, tmp_path: Path) -> None:
-        """Test that .hud directory is created if missing."""
-        from hud.cli.deploy import _save_deploy_link
-        from hud.utils.hud_console import HUDConsole
-
-        console = HUDConsole()
-
-        _save_deploy_link(tmp_path, "test-id", console)
-
-        assert (tmp_path / ".hud").is_dir()
 
 
 class TestDeployCommand:
@@ -634,3 +633,131 @@ class TestDeployCommand:
 
         assert deploy_command.__doc__ is not None
         assert "Deploy" in deploy_command.__doc__
+
+
+@pytest.fixture(autouse=True)
+def authenticated_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    def get_identity(method: str, url: str, **kwargs: object) -> dict[str, str]:
+        assert method == "GET" and url.endswith("/auth/me")
+        return {
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "team_id": "22222222-2222-4222-8222-222222222222",
+        }
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", get_identity)
+    monkeypatch.setattr("hud.settings.settings.default_project", None)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        [],
+        ["--registry-id", "33333333-3333-4333-8333-333333333333"],
+        ["--project", "44444444-4444-4444-8444-444444444444"],
+    ],
+)
+def test_deploy_lifecycle_preserves_links_and_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: list[str]
+) -> None:
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+    from hud.cli.utils.config import load_config
+
+    env = tmp_path / "environment"
+    env.mkdir()
+    (env / "env.py").write_text('env = Environment("example")')
+    (env / "Dockerfile").write_text("FROM python:3.12")
+    (env / "pyproject.toml").write_text('[project]\nname="example"\nversion="0"')
+    (env / ".env").write_text("SECRET=test-secret-value")
+    identity = {
+        "user_id": "11111111-1111-4111-8111-111111111111",
+        "team_id": "22222222-2222-4222-8222-222222222222",
+    }
+    registry_id = "55555555-5555-4555-8555-555555555555"
+    requests: list[dict[str, Any]] = []
+
+    def get(method: str, url: str, **kwargs):
+        if url.endswith("/auth/me"):
+            return identity
+        if "/registry/" in url:
+            return {"id": url.rsplit("/", 1)[-1], "name": "example"}
+        if "/projects/" in url:
+            return {
+                "id": url.rsplit("/", 1)[-1],
+                "name": "chosen",
+                "capabilities": {"create": True},
+            }
+        raise AssertionError(url)
+
+    async def request(method: str, url: str, **kwargs):
+        if url.endswith("/upload-url"):
+            return {"upload_url": "https://upload.example", "build_id": "build-1"}
+        if url.endswith("/trigger"):
+            requests.append(kwargs["json"])
+            return {"id": "build-1", "registry_id": kwargs["json"].get("registry_id", registry_id)}
+        if url.endswith("/status"):
+            return {"status": "SUCCEEDED"}
+        raise AssertionError(url)
+
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", get)
+    monkeypatch.setattr("hud.utils.platform.make_request", request)
+    monkeypatch.setattr("hud.cli.deploy._upload_context", AsyncMock())
+    monkeypatch.setattr("hud.cli.deploy.stream_build_logs", AsyncMock(return_value="SUCCEEDED"))
+    monkeypatch.setattr("hud.cli.deploy.is_interactive", lambda: True)
+    prompts = MagicMock(return_value=True)
+    monkeypatch.setattr(HUDConsole, "confirm", prompts)
+    first = CliRunner().invoke(app, ["deploy", str(env), "--json"])
+    assert first.exit_code == 0, first.output
+    assert json.loads(first.stdout)["registry_id"] == registry_id
+    assert "test-secret-value" not in first.stdout
+    before = load_config()
+    second = CliRunner().invoke(app, ["deploy", str(env), "--json", *override])
+    assert second.exit_code == 0, second.output
+    assert load_config() == before
+    assert requests[0]["environment_variables"] == {"SECRET": "test-secret-value"}
+    assert not (env / ".hud").exists()
+    if not override:
+        assert prompts.call_count == 1
+        assert "registry_id" not in requests[-1]
+
+
+def test_deploy_dry_run_has_no_prompt_or_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+
+    env = tmp_path / "environment"
+    env.mkdir()
+    (env / "env.py").write_text('env = Environment("example")')
+    (env / "Dockerfile").write_text("FROM python:3.12")
+    (env / ".env").write_text("SECRET=hidden")
+    legacy = env / ".hud" / "deploy.json"
+    legacy.parent.mkdir()
+    legacy.write_text('{"registryId":"old","syncEnv":true}')
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    monkeypatch.setattr(HUDConsole, "confirm", lambda *a, **k: pytest.fail("dry-run prompted"))
+    result = CliRunner().invoke(app, ["deploy", str(env), "--dry-run", "--json"])
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.stdout)
+    assert plan["dotenv_pending"] is True
+    assert plan["env_var_keys"] == []
+    assert legacy.read_text() == '{"registryId":"old","syncEnv":true}'
+    assert not (legacy.parent / "config.json").exists()
+    assert not (Path.home() / ".hud").exists()
+
+
+def test_missing_recipe_produces_one_json_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json"])
+    assert result.exit_code == 1
+    assert "Dockerfile" in json.loads(result.stdout)["message"]

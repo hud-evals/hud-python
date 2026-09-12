@@ -14,25 +14,12 @@ Exit codes:
 
 from __future__ import annotations
 
-import contextvars
 import json
 import sys
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import Any
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-import click
 import typer
 from typer.core import TyperGroup
-
-_JSON_REQUESTED: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "hud_cli_json_requested", default=False
-)
-_JSON_SUPPRESSED: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "hud_cli_json_suppressed", default=False
-)
 
 # ── exit codes ───────────────────────────────────────────────────────────────
 
@@ -113,8 +100,6 @@ def json_default(value: Any) -> Any:
 
 def emit_json(payload: Any) -> None:
     """Write one JSON document to stdout (the agent contract)."""
-    if _JSON_SUPPRESSED.get():
-        return
     sys.stdout.write(json.dumps(payload, indent=2, default=json_default) + "\n")
     sys.stdout.flush()
 
@@ -142,69 +127,43 @@ def emit_error_text(error: CliError) -> None:
 
 def emit_error(error: CliError, *, json_output: bool | None = None) -> None:
     emit_error_text(error)
-    if not _JSON_SUPPRESSED.get() and wants_json(json_output):
+    if wants_json(json_output):
         emit_json(error.to_payload())
 
 
-def abort(error: CliError, *, json_output: bool | None = None) -> NoReturn:
-    """Print a structured error and exit with the mapped code."""
-    emit_error(error, json_output=json_output)
-    raise typer.Exit(error.exit_code)
+class CLIGroup(TyperGroup):
+    """Render failures once at the root command boundary."""
+
+    def invoke(self, ctx: Any) -> Any:
+        try:
+            return super().invoke(ctx)
+        except (typer.Exit, SystemExit):
+            raise
+        except Exception as exc:
+            error = map_exception(exc)
+            if error.exit_code == ExitCode.USAGE and ctx.meta.get("hud_output") != "json":
+                sys.stderr.write(ctx.get_usage() + "\n")
+            emit_error(error, json_output=ctx.meta.get("hud_output") == "json")
+            raise typer.Exit(error.exit_code) from exc
 
 
-# ── argv / flag helpers ──────────────────────────────────────────────────────
+def _mark_json(ctx: typer.Context, value: bool) -> bool:
+    if value:
+        ctx.meta["hud_output"] = "json"
+    return value or ctx.meta.get("hud_output") == "json"
 
 
-def _mark_json(value: bool) -> bool:
-    """Option callback: remember ``--json`` for later ``abort()`` / ``emit_*``."""
-    _JSON_REQUESTED.set(value is True)
-    return value
-
-
-def _mark_output(value: str | None) -> str | None:
-    if isinstance(value, str) and value.strip().lower() == "json":
-        _JSON_REQUESTED.set(True)
-    return value
-
-
-@contextmanager
-def suppress_json_stdout() -> Iterator[None]:
-    """Block JSON writes to stdout while a caller aggregates one document."""
-    token = _JSON_SUPPRESSED.set(True)
-    try:
-        yield
-    finally:
-        _JSON_SUPPRESSED.reset(token)
+def _mark_output(ctx: typer.Context, value: str | None) -> str | None:
+    if value is not None:
+        mode = resolve_output_mode(output=value)
+        if mode == "json" or ctx.meta.get("hud_output") != "json":
+            ctx.meta["hud_output"] = mode
+        return mode
+    return None
 
 
 def wants_json(json_output: bool | None = None, output: str | None = None) -> bool:
-    """True when the invocation asked for JSON (flag, --output, context, or argv)."""
-    if _JSON_SUPPRESSED.get():
-        return False
-    if json_output is True:
-        return True
-    if isinstance(output, str) and output.strip().lower() == "json":
-        return True
-    if _JSON_REQUESTED.get():
-        return True
-    ctx = click.get_current_context(silent=True)
-    while ctx is not None:
-        params = ctx.params
-        if params.get("json_output") is True:
-            return True
-        out = params.get("output")
-        if isinstance(out, str) and out.strip().lower() == "json":
-            return True
-        ctx = ctx.parent
-    argv = sys.argv
-    if "--json" in argv:
-        return True
-    for index, arg in enumerate(argv):
-        if arg == "--output" and index + 1 < len(argv) and argv[index + 1] == "json":
-            return True
-        if arg.startswith("--output=") and arg.split("=", 1)[1] == "json":
-            return True
-    return False
+    return json_output is True or output == "json"
 
 
 def resolve_output_mode(
@@ -217,14 +176,12 @@ def resolve_output_mode(
     if output is not None:
         normalized = output.strip().lower()
         if normalized not in {"json", "table"}:
-            abort(
-                CliError(
-                    error="usage",
-                    message=f"Invalid --output {output!r}. Use json or table.",
-                    input={"output": output},
-                    suggestion="Pass --json or --output json.",
-                    exit_code=ExitCode.USAGE,
-                )
+            raise CliError(
+                error="usage",
+                message=f"Invalid --output {output!r}. Use json or table.",
+                input={"output": output},
+                suggestion="Pass --json or --output json.",
+                exit_code=ExitCode.USAGE,
             )
         json_output = json_output is True or normalized == "json"
     if json_output is True:
@@ -240,6 +197,7 @@ def json_option() -> Any:
         "--json",
         help="Write structured JSON to stdout. Progress and warnings go to stderr.",
         callback=_mark_json,
+        is_eager=True,
     )
 
 
@@ -300,13 +258,11 @@ def confirm_or_abort(
     if yes or force:
         return
     if not is_interactive():
-        abort(
-            CliError(
-                error="confirmation_required",
-                message="Confirmation required in a non-interactive terminal.",
-                suggestion="Re-run with --yes to continue.",
-                exit_code=ExitCode.USAGE,
-            )
+        raise CliError(
+            error="confirmation_required",
+            message="Confirmation required in a non-interactive terminal.",
+            suggestion="Re-run with --yes to continue.",
+            exit_code=ExitCode.USAGE,
         )
     from hud.utils.hud_console import HUDConsole
 
@@ -325,24 +281,18 @@ def read_text_arg(path: str) -> str:
     try:
         return target.read_text(encoding="utf-8")
     except FileNotFoundError:
-        abort(
-            CliError(
-                error="not_found",
-                message=f"File not found: {path}",
-                input={"path": path},
-                suggestion="Check the path, or pass - to read from stdin.",
-            )
-        )
-        raise  # pragma: no cover — abort never returns
+        raise CliError(
+            error="not_found",
+            message=f"File not found: {path}",
+            input={"path": path},
+            suggestion="Check the path, or pass - to read from stdin.",
+        ) from None
     except OSError as exc:
-        abort(
-            CliError(
-                error="failure",
-                message=f"Failed to read {path}: {exc}",
-                input={"path": path},
-            )
-        )
-        raise  # pragma: no cover
+        raise CliError(
+            error="failure",
+            message=f"Failed to read {path}: {exc}",
+            input={"path": path},
+        ) from exc
 
 
 # ── exception mapping ────────────────────────────────────────────────────────
@@ -372,7 +322,7 @@ def map_request_error(
             error="permission_denied",
             message=detail or "Permission denied",
             input=input,
-            suggestion="Run 'hud login' or check that this API key can access the resource.",
+            suggestion="Check that this API key can access the resource.",
             exit_code=ExitCode.PERMISSION,
         )
     if status == 409:
@@ -416,6 +366,14 @@ def map_exception(exc: BaseException, *, input: dict[str, Any] | None = None) ->
         HudTimeoutError,
     )
 
+    if getattr(exc, "exit_code", None) == ExitCode.USAGE:
+        return CliError(error="usage", message=str(exc), input=input)
+    if isinstance(exc, ValueError):
+        return CliError(error="usage", message=str(exc), input=input)
+    if isinstance(exc, PermissionError):
+        return CliError(error="permission_denied", message=str(exc), input=input)
+    if isinstance(exc, (LookupError, FileNotFoundError)):
+        return CliError(error="not_found", message=str(exc), input=input)
     if isinstance(exc, HudRequestError):
         return map_request_error(exc, input=input)
     if isinstance(exc, HudAuthenticationError):
@@ -423,7 +381,7 @@ def map_exception(exc: BaseException, *, input: dict[str, Any] | None = None) ->
             error="permission_denied",
             message=str(exc) or "Missing or invalid HUD API key",
             input=input,
-            suggestion="Run 'hud login' or 'hud set HUD_API_KEY=your-key-here'.",
+            suggestion="Run 'hud set HUD_API_KEY=your-key-here'.",
             exit_code=ExitCode.PERMISSION,
         )
     if isinstance(exc, HudTimeoutError):
@@ -465,11 +423,11 @@ def platform_call(
     try:
         return fn()
     except HudRequestError as exc:
-        abort(map_request_error(exc, resource=resource, input=input))
+        raise map_request_error(exc, resource=resource, input=input) from exc
     except HudException as exc:
-        abort(map_exception(exc, input=input))
+        raise map_exception(exc, input=input) from exc
     except Exception as exc:
-        abort(CliError(error="failure", message=str(exc), input=input))
+        raise CliError(error="failure", message=str(exc), input=input) from exc
 
 
 class UnknownTokenAsGetGroup(TyperGroup):
@@ -485,7 +443,6 @@ __all__ = [
     "CliError",
     "ExitCode",
     "UnknownTokenAsGetGroup",
-    "abort",
     "confirm_or_abort",
     "dry_run_option",
     "emit_error",
@@ -504,7 +461,6 @@ __all__ = [
     "quiet_option",
     "read_text_arg",
     "resolve_output_mode",
-    "suppress_json_stdout",
     "wants_json",
     "yes_option",
 ]

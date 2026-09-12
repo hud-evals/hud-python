@@ -155,43 +155,6 @@ _AGENT_PRESETS: list[AgentPreset] = [
     ),
 ]
 
-_DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
-# Command-line arguments override these settings
-
-[eval]
-# source = "hud-evals/SheetBench-50"
-# agent = "claude"
-# all = false  # Run all problems instead of just 1
-# max_concurrent = 30
-# max_steps = 10
-# group_size = 1
-# task_ids = ["checkout-smoke", "0"]  # slugs or 0-based indices
-# verbose = true
-# very_verbose = true
-# auto_respond = true
-# gateway = false  # Route LLM API calls through HUD Gateway
-# runtime = "local"  # local, hud, or tcp://host:port
-# remote = false  # Run the whole rollout remotely on HUD
-
-[claude]
-# model = "claude-sonnet-4-6"
-# max_tokens = 16384
-# use_computer_beta = true
-
-[openai]
-# model = "gpt-5.6"
-# temperature = 0.7
-# max_output_tokens = 4096
-
-[gemini]
-# model = "gemini-2.5-pro"
-# temperature = 1.0
-# top_p = 0.95
-
-[openai_compatible]
-# base_url = "http://localhost:8000/v1"
-# model = "my-model"
-"""
 
 # Agent type -> (settings attr, env var name)
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
@@ -454,8 +417,6 @@ class EvalConfig(BaseModel):
         """Load config from TOML file."""
         p = Path(path)
         if not p.exists():
-            p.write_text(_DEFAULT_CONFIG_TEMPLATE)
-            hud_console.info(f"Generated {_CONFIG_PATH}")
             return cls()
 
         try:
@@ -965,6 +926,34 @@ def eval_command(
         hud_console.error(str(e))
         raise typer.Exit(1) from None
 
+    from hud.cli.utils.output import CliError, emit_json, wants_json
+
+    if dry_run and (cfg.source is None or cfg.agent_type is None):
+        raise CliError(
+            "usage", "Dry-run requires an explicit task source and agent (or configured defaults)."
+        )
+    if dry_run:
+        cfg = cfg.resolve_runtime()
+        plan = {
+            "dry_run": True,
+            "action": "eval",
+            "source": cfg.source,
+            "agent": cfg.agent_type.value if cfg.agent_type else None,
+            "model": cfg.model,
+            "runtime": cfg.runtime,
+            "remote": cfg.remote,
+            "all": cfg.all,
+            "max_steps": cfg.max_steps,
+            "max_concurrent": cfg.max_concurrent,
+            "group_size": cfg.group_size,
+            "task_ids": cfg.task_ids,
+        }
+        if wants_json(json_output):
+            emit_json(plan)
+        else:
+            hud_console.info("--dry-run: no evaluation started")
+        return
+
     if cfg.source is None:
         try:
             from hud.cli.utils.tasks import find_tasks_file
@@ -993,28 +982,7 @@ def eval_command(
 
     cfg.display()
 
-    from hud.cli.utils.output import confirm_or_abort, emit_json, wants_json
-
-    if dry_run:
-        plan = {
-            "dry_run": True,
-            "action": "eval",
-            "source": cfg.source,
-            "agent": cfg.agent_type.value if cfg.agent_type else None,
-            "model": cfg.model,
-            "runtime": cfg.runtime,
-            "remote": cfg.remote,
-            "all": cfg.all,
-            "max_steps": cfg.max_steps,
-            "max_concurrent": cfg.max_concurrent,
-            "group_size": cfg.group_size,
-            "task_ids": cfg.task_ids,
-        }
-        if wants_json(json_output):
-            emit_json(plan)
-        else:
-            hud_console.info("--dry-run: no evaluation started")
-        return
+    from hud.cli.utils.output import confirm_or_abort
 
     confirm_or_abort("Proceed?", yes=yes, default=True)
 

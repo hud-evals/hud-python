@@ -7,14 +7,16 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import typer
+from typer.core import TyperGroup
 
 from hud.cli.utils.api import require_api_key
+from hud.cli.utils.config import AuthScope, DirectoryLink, DirectoryState
 from hud.cli.utils.output import (
     CliError,
     ExitCode,
-    abort,
     confirm_or_abort,
     emit_json,
     is_interactive,
@@ -26,7 +28,7 @@ from hud.cli.utils.output import (
 from hud.cli.utils.project import (
     PROJECT_OPTION_HELP,
     require_writable_placement,
-    resolve_placement_or_exit,
+    resolve_placement,
 )
 from hud.cli.utils.registry import (
     RegistryEnvironment,
@@ -34,7 +36,6 @@ from hud.cli.utils.registry import (
     list_registry_environments,
     resolve_registry_environments,
 )
-from hud.cli.utils.source import EnvironmentSource
 from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
 from hud.utils.exceptions import HudException, HudRequestError
@@ -55,17 +56,17 @@ def _taskset_target(
     taskset: str | None,
     taskset_id: str | None,
     console: HUDConsole,
+    link: DirectoryLink,
 ) -> str:
-    stored_taskset_id = EnvironmentSource.open().taskset_id
+    stored_taskset_id = str(link.taskset_id) if link.taskset_id else None
     target_ref = taskset_id or taskset or stored_taskset_id
     if not target_ref:
-        console.error(
+        raise ValueError(
             "No taskset specified. Pass a taskset name/ID or run "
             "'hud sync tasks <name>' first to store it."
         )
-        raise typer.Exit(1)
     if target_ref == stored_taskset_id and not taskset and not taskset_id:
-        console.info("Using taskset ID from .hud/config.json")
+        console.info("Using taskset ID from ~/.hud/config.json")
     return target_ref
 
 
@@ -159,30 +160,20 @@ def _warn_on_linked_environment_mismatch(
     taskset: Taskset,
     platform: PlatformClient,
     console: HUDConsole,
+    link: DirectoryLink,
 ) -> None:
-    env_source = EnvironmentSource.open()
-    config = env_source.load_config()
-    stored_registry_id = config.get("registryId")
+    stored_registry_id = str(link.registry_id) if link.registry_id else None
     if not isinstance(stored_registry_id, str) or not stored_registry_id:
         return
 
-    try:
-        registry_env = get_registry_environment(platform, stored_registry_id)
-    except HudException as e:
-        console.warning(f"Could not verify linked environment: {e}")
-        return
-
+    registry_env = get_registry_environment(platform, stored_registry_id)
     if registry_env is None:
-        console.warning(
-            f"Linked environment (registryId: {stored_registry_id[:8]}...) "
-            "no longer exists on platform"
+        raise CliError(
+            "not_found",
+            f"Linked environment {stored_registry_id} is inaccessible or deleted.",
+            suggestion="Run 'hud sync env <id>' to relink this directory.",
         )
-        console.hint("Run 'hud sync env' to re-link or 'hud deploy' to create a new one")
-        return
-
     platform_env_name = registry_env.name
-    if platform_env_name != config.get("registryName"):
-        env_source.save_config({"registryName": platform_env_name})
 
     mismatched_names = taskset.environment_names() - {platform_env_name}
     if mismatched_names:
@@ -206,23 +197,21 @@ def _fetch_remote_taskset(
     remote diffs as all-create when *allow_create* is set, and is an error
     otherwise.
     """
-    if force:
-        return Taskset(target_ref, [])
-
     taskset_uuid, display = resolve_taskset_id(platform, target_ref)
     if taskset_uuid:
+        record = platform.get(f"/tasksets/{taskset_uuid}")
+        if force:
+            return Taskset(str(record["name"]), [], taskset_id=taskset_uuid)
         return Taskset.from_api(taskset_uuid)
     if allow_create:
         console.info(f"Taskset '{display}' not found; it will be created")
         return Taskset(display, [])
 
-    abort(
-        CliError(
-            error="not_found",
-            message=f"Taskset not found: {target_ref}",
-            input={"taskset": target_ref},
-            suggestion="Pass a taskset name to create it, or use an existing id.",
-        )
+    raise CliError(
+        error="not_found",
+        message=f"Taskset not found: {target_ref}",
+        input={"taskset": target_ref},
+        suggestion="Pass a taskset name to create it, or use an existing id.",
     )
 
 
@@ -243,13 +232,13 @@ def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
     console.error(f"Upload failed ({error.status_code}): {detail or error}")
 
 
-def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
+def _save_taskset_id(result: dict[str, object], console: HUDConsole, state: DirectoryState) -> None:
     returned_id = result.get("taskset_id")
     if not isinstance(returned_id, str) or not returned_id:
         return
-    changed = EnvironmentSource.open().save_config({"tasksetId": returned_id})
+    changed = state.update(DirectoryLink(taskset_id=UUID(returned_id)))
     if changed:
-        console.dim_info("Taskset ID saved to:", ".hud/config.json")
+        console.dim_info("Taskset ID saved to:", "~/.hud/config.json")
     from hud.settings import settings
 
     console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
@@ -259,7 +248,7 @@ def _save_taskset_id(result: dict[str, object], console: HUDConsole) -> None:
 def sync_tasks_command(
     taskset: str | None = typer.Argument(
         None,
-        help="Taskset name or ID (reads from .hud/config.json if omitted)",
+        help="Taskset name or ID (reads from ~/.hud/config.json if omitted)",
     ),
     source: str = typer.Argument(
         ".",
@@ -269,6 +258,11 @@ def sync_tasks_command(
         None,
         "--id",
         help="Taskset ID directly (skip name resolution)",
+    ),
+    link_target: bool = typer.Option(
+        False,
+        "--link",
+        help="Save this taskset as the directory's default after syncing",
     ),
     project: str | None = typer.Option(
         None,
@@ -318,7 +312,7 @@ def sync_tasks_command(
         hud sync tasks my-taskset              # scan cwd, sync to 'my-taskset'
         hud sync tasks my-taskset tasks.py     # from specific file
         hud sync tasks my-taskset tasks/       # from directory
-        hud sync tasks                         # use stored taskset ID from .hud/config.json
+        hud sync tasks                         # use stored taskset ID from ~/.hud/config.json
         hud sync tasks my-taskset --dry-run    # preview without uploading
         hud sync tasks my-taskset --yes        # skip confirmation (CI)
         hud sync tasks my-taskset --export tasks.csv   # export to CSV
@@ -332,9 +326,13 @@ def sync_tasks_command(
 
     platform = PlatformClient.from_settings()
 
-    target_ref = _taskset_target(taskset, taskset_id, hud_console)
+    state = DirectoryState(AuthScope.resolve(platform))
+    link = state.load()
+    target_ref = _taskset_target(taskset, taskset_id, hud_console, link)
 
     if export:
+        if link_target is True:
+            raise ValueError("--link cannot be combined with --export")
         _export_taskset(target_ref, export, hud_console)
         return
 
@@ -344,33 +342,25 @@ def sync_tasks_command(
         exclude=exclude,
         console=hud_console,
     )
-    _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console)
+    _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console, link)
 
     # Creating a new taskset is only allowed when targeting an explicit name
     # (not an --id or a stored id, which must already exist).
     allow_create = taskset is not None and taskset_id is None
-    placement = resolve_placement_or_exit(
+    placement = resolve_placement(
         platform,
-        EnvironmentSource.open(),
+        link,
         flag=project,
-        console=hud_console,
     )
 
-    try:
-        remote_taskset = _fetch_remote_taskset(
-            platform,
-            target_ref,
-            force=force,
-            allow_create=allow_create,
-            console=hud_console,
-        )
-        plan = diff(local_taskset, remote_taskset)
-    except ValueError as e:
-        hud_console.error(str(e))
-        raise typer.Exit(1) from e
-    except HudException as e:
-        hud_console.error(f"Failed to fetch taskset: {e}")
-        raise typer.Exit(1) from e
+    remote_taskset = _fetch_remote_taskset(
+        platform,
+        target_ref,
+        force=force,
+        allow_create=allow_create,
+        console=hud_console,
+    )
+    plan = diff(local_taskset, remote_taskset)
 
     plan_payload = {
         "taskset": plan.taskset_name,
@@ -387,8 +377,12 @@ def sync_tasks_command(
         hud_console.info("\n" + plan.summary())
 
     if not plan.to_apply:
+        if link_target is True and not dry_run:
+            if remote_taskset.taskset_id is None:
+                raise CliError("not_found", "Cannot link a taskset that does not exist")
+            state.update(DirectoryLink(taskset_id=UUID(remote_taskset.taskset_id)))
         if wants_json(json_output, output):
-            emit_json({**plan_payload, "status": "up_to_date"})
+            emit_json({**plan_payload, "status": "up_to_date", "dry_run": dry_run})
             return
         hud_console.success("All tasks up to date")
         return
@@ -401,7 +395,7 @@ def sync_tasks_command(
         return
 
     confirm_or_abort("Proceed?", yes=yes, default=False)
-    require_writable_placement(placement, hud_console)
+    require_writable_placement(placement)
 
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")
@@ -411,10 +405,14 @@ def sync_tasks_command(
             plan.taskset_name,
             plan.to_apply,
             project_id=placement.project_id,
+            taskset_id=remote_taskset.taskset_id,
         )
     except HudRequestError as e:
         _show_upload_error(e, hud_console)
-        abort(map_exception(e, input={"taskset": plan.taskset_name}))
+        raise map_exception(e, input={"taskset": plan.taskset_name}) from e
+
+    if link_target is True or (link.taskset_id is None and taskset_id is None and project is None):
+        _save_taskset_id(result, hud_console, state)
 
     created = int(result.get("tasks_created", 0))
     updated = int(result.get("tasks_updated", 0))
@@ -432,14 +430,13 @@ def sync_tasks_command(
     else:
         hud_console.success("Sync complete")
         hud_console.info(f"  + {created} created, ~ {updated} updated")
-    _save_taskset_id(result, hud_console)
 
 
 @sync_app.command("env")
 def sync_env_command(
     name: str | None = typer.Argument(
         None,
-        help="Environment name or ID to link to (interactive if omitted)",
+        help="Environment ID to link to (interactive if omitted)",
     ),
     directory: str = typer.Argument(
         ".",
@@ -451,17 +448,18 @@ def sync_env_command(
         "-y",
         help="Skip confirmation prompt",
     ),
+    dry_run: bool = typer.Option(False, "--dry-run"),
     json_output: bool = json_option(),
     output: str | None = output_option(),
 ) -> None:
     """Link local directory to a platform environment.
 
-    [not dim]Resolves an environment by name, verifies it exists, and stores
-    the registry ID in .hud/config.json for future deploys and syncs.
+    [not dim]Validates an environment ID, verifies it exists, and stores
+    the registry ID in ~/.hud/config.json for task sync checks.
 
     Examples:
-        hud sync env coding-env           # link cwd to 'coding-env'
-        hud sync env coding-env ./my-env  # link specific directory
+        hud sync env <environment-id>           # link cwd to '<environment-id>'
+        hud sync env <environment-id> ./my-env  # link specific directory
         hud sync env                      # interactive: pick from your envs[/not dim]
     """
     hud_console = HUDConsole()
@@ -469,23 +467,26 @@ def sync_env_command(
 
     require_api_key("sync environments")
 
+    if name is None and (dry_run is True or not is_interactive()):
+        raise CliError(
+            "usage",
+            "Pass an environment ID for a dry run or noninteractive link.",
+        )
+
     platform = PlatformClient.from_settings()
     env_dir = Path(directory).resolve()
-    env_source = EnvironmentSource.open(env_dir)
-
-    existing_config = env_source.load_config()
-    existing_registry_id = existing_config.get("registryId")
+    state = DirectoryState(AuthScope.resolve(platform), env_dir)
+    link = state.load()
+    existing_registry_id = str(link.registry_id) if link.registry_id else None
     selected_env: RegistryEnvironment | None = None
 
     if not name:
-        if not is_interactive():
-            abort(
-                CliError(
-                    error="confirmation_required",
-                    message="No environment name given in a non-interactive terminal.",
-                    suggestion="Pass the environment name: hud sync env <name>",
-                    exit_code=ExitCode.USAGE,
-                )
+        if dry_run or not is_interactive():
+            raise CliError(
+                error="confirmation_required",
+                message="No environment name given in a non-interactive terminal.",
+                suggestion="Pass the environment name: hud sync env <name>",
+                exit_code=ExitCode.USAGE,
             )
         # Interactive: list environments and let user pick
         hud_console.info("Fetching your environments...")
@@ -501,7 +502,7 @@ def sync_env_command(
             raise typer.Exit(1)
 
         hud_console.info("\nYour environments:")
-        for i, env in enumerate(envs[:10], 1):
+        for i, env in enumerate(envs, 1):
             marker = " (currently linked)" if env.id == existing_registry_id else ""
             hud_console.info(f"  {i}. {env.name}{env.version_label} ({env.short_id}...){marker}")
 
@@ -512,7 +513,7 @@ def sync_env_command(
             hud_console.info("\nAborted.")
             raise typer.Exit(0) from None
 
-        displayed = envs[:10]
+        displayed = envs
         try:
             idx = int(selection) - 1
             if 0 <= idx < len(displayed):
@@ -537,13 +538,11 @@ def sync_env_command(
             raise typer.Exit(1) from e
 
         if not matching:
-            abort(
-                CliError(
-                    error="not_found",
-                    message=f"No environment found matching '{name}'",
-                    input={"name": name},
-                    suggestion="Run 'hud deploy' first, or pass an exact environment name.",
-                )
+            raise CliError(
+                error="not_found",
+                message=f"No environment found matching '{name}'",
+                input={"name": name},
+                suggestion="Run 'hud deploy' first, or pass an exact environment name.",
             )
 
         if len(matching) > 1:
@@ -555,13 +554,18 @@ def sync_env_command(
 
         selected_env = matching[0]
 
+    if dry_run:
+        if wants_json(json_output, output):
+            emit_json({"dry_run": True, "action": "link_environment", "id": selected_env.id})
+        else:
+            hud_console.info(f"Would link to {selected_env.name} ({selected_env.id})")
+        return
+
     if existing_registry_id and existing_registry_id != selected_env.id:
         hud_console.warning(f"Currently linked to: {existing_registry_id[:8]}...")
         confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
-    changed = env_source.save_config(
-        {"registryId": selected_env.id, "registryName": selected_env.name},
-    )
+    changed = state.update(DirectoryLink(registry_id=UUID(selected_env.id)))
     if wants_json(json_output, output):
         emit_json(
             {
@@ -573,7 +577,7 @@ def sync_env_command(
         return
     hud_console.success(f"Linked to: {selected_env.name} ({selected_env.short_id}...)")
     if changed:
-        hud_console.dim_info("Config saved to:", ".hud/config.json")
+        hud_console.dim_info("Config saved to:", "~/.hud/config.json")
 
 
 @sync_app.callback(invoke_without_command=True)
@@ -583,11 +587,15 @@ def sync_callback(ctx: typer.Context) -> None:
     [not dim]Without a subcommand, syncs tasks using stored config.
 
     Examples:
-        hud sync                         # sync tasks using .hud/config.json
+        hud sync                         # sync tasks using ~/.hud/config.json
         hud sync tasks my-taskset        # sync tasks to specific taskset
-        hud sync env coding-env          # link to environment[/not dim]
+        hud sync env <environment-id>    # link to environment[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return
 
-    ctx.invoke(sync_tasks_command, taskset=None, source=".")
+    assert isinstance(ctx.command, TyperGroup)
+    command = ctx.command.get_command(ctx, "tasks")
+    assert command is not None
+    with command.make_context("tasks", [], parent=ctx) as task_context:
+        command.invoke(task_context)

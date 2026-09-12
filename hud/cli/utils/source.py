@@ -1,11 +1,10 @@
-"""Filesystem-backed Environment source, config, and build identity."""
+"""Filesystem-backed Environment source and build identity."""
 
 from __future__ import annotations
 
 import ast
 import hashlib
 import json
-import logging
 import os
 import shlex
 import tomllib
@@ -15,8 +14,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,10 +44,6 @@ class EnvironmentSource:
 
     root: Path
 
-    HUD_DIR: ClassVar[str] = ".hud"
-    CONFIG_FILENAME: ClassVar[str] = "config.json"
-    LEGACY_CONFIG_FILENAME: ClassVar[str] = "deploy.json"
-
     SOURCE_INCLUDE_FILES: ClassVar[set[str]] = {"Dockerfile", "Dockerfile.hud", "pyproject.toml"}
     SOURCE_INCLUDE_DIRS: ClassVar[set[str]] = {"server", "mcp", "controller", "environment"}
     SOURCE_EXCLUDE_DIRS: ClassVar[set[str]] = {
@@ -73,18 +66,6 @@ class EnvironmentSource:
         if p.is_file():
             p = p.parent
         return cls(p)
-
-    @property
-    def hud_dir(self) -> Path:
-        return self.root / self.HUD_DIR
-
-    @property
-    def config_path(self) -> Path:
-        return self.hud_dir / self.CONFIG_FILENAME
-
-    @property
-    def legacy_config_path(self) -> Path:
-        return self.hud_dir / self.LEGACY_CONFIG_FILENAME
 
     @property
     def dockerfile(self) -> Path | None:
@@ -175,46 +156,6 @@ class EnvironmentSource:
             if ref.file.resolve() == served_file and ref.name is not None
         }
         return next(iter(names)) if len(names) == 1 else None
-
-    def load_config(self) -> dict[str, Any]:
-        if self.config_path.exists():
-            try:
-                return json.loads(self.config_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                LOGGER.warning("Failed to parse %s, returning empty config", self.config_path)
-                return {}
-
-        if self.legacy_config_path.exists():
-            try:
-                data = json.loads(self.legacy_config_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                return {}
-            self._migrate_legacy_config(data)
-            return data
-
-        return {}
-
-    def save_config(self, data: dict[str, Any]) -> Path | None:
-        existing = self.load_config()
-        merged = {**existing, **data}
-
-        if merged == existing and self.config_path.exists():
-            return None
-
-        self.hud_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
-        return self.config_path
-
-    @property
-    def taskset_id(self) -> str | None:
-        value = self.load_config().get("tasksetId")
-        return value if isinstance(value, str) else None
-
-    @property
-    def project_id(self) -> str | None:
-        """The Project this directory's environment and taskset belong to."""
-        value = self.load_config().get("projectId")
-        return value if isinstance(value, str) else None
 
     def iter_source_files(self) -> Iterator[Path]:
         for name in self.SOURCE_INCLUDE_FILES:
@@ -450,15 +391,6 @@ class EnvironmentSource:
             )
 
         return issues
-
-    def _migrate_legacy_config(self, data: dict[str, Any]) -> None:
-        try:
-            self.hud_dir.mkdir(parents=True, exist_ok=True)
-            self.config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            self.legacy_config_path.unlink()
-            LOGGER.info("Migrated .hud/deploy.json to .hud/config.json")
-        except OSError as exc:
-            LOGGER.warning("Failed to migrate deploy.json to config.json: %s", exc)
 
 
 def _dockerfile_instructions(content: str) -> list[str]:

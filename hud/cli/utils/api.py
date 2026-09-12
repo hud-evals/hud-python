@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hud.cli.utils.output import CliError, abort
+from hud.cli.utils.output import CliError
 
 
 def missing_api_key_error(action: str = "perform this action") -> CliError:
@@ -27,5 +27,5 @@ def require_api_key(action: str = "perform this action") -> str:
 
     api_key = settings.api_key
     if not api_key:
-        abort(missing_api_key_error(action))
+        raise missing_api_key_error(action)
     return api_key

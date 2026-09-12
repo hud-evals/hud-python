@@ -86,6 +86,7 @@ def _show_trace(
 
 @trace_app.command("get")
 def get_command(
+    ctx: typer.Context,
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
     json_output: bool = json_option(),
     output: str | None = output_option(),
@@ -103,11 +104,20 @@ def get_command(
         hud trace get <trace-id> --json
         hud trace <trace-id> --json[/not dim]
     """
-    _show_trace(trace_id, json_output=json_output, output=output, local_dir=local_dir)
+    _show_trace(
+        trace_id,
+        json_output=json_output or ctx.meta.get("hud_output") == "json",
+        output=output,
+        local_dir=local_dir,
+    )
 
 
 @trace_app.callback(invoke_without_command=True)
-def trace_command(ctx: typer.Context) -> None:
+def trace_command(
+    ctx: typer.Context,
+    json_output: bool = json_option(),
+    output: str | None = output_option(),
+) -> None:
     """Inspect a rollout trace.
 
     Prefer ``hud trace get <id>`` in scripts; ``hud trace <id>`` is rewritten to get.

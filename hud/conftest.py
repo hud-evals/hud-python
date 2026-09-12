@@ -9,6 +9,8 @@ no API key.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -30,3 +32,6 @@ def _isolate_hud_settings(request: pytest.FixtureRequest) -> None:
     mp.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
     mp.setattr(settings, "api_key", None)
     mp.setattr(settings, "telemetry_local_dir", None)
+    if "/cli/" in str(request.path):
+        home = request.getfixturevalue("tmp_path")
+        mp.setattr(Path, "home", lambda: home)

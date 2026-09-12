@@ -10,7 +10,6 @@ import typer
 from hud.cli.utils.output import (
     CliError,
     ExitCode,
-    abort,
     confirm_or_abort,
     dry_run_option,
     emit_json,
@@ -39,26 +38,20 @@ def run_cancel(
     hud_console = HUDConsole()
 
     if not job_id and not all_jobs:
-        abort(
-            CliError(
-                error="usage",
-                message="Provide a job_id or use --all to cancel all active jobs.",
-                suggestion="hud jobs cancel <job-id>   or   hud jobs cancel --all --yes",
-                exit_code=ExitCode.USAGE,
-            ),
-            json_output=json_output,
+        raise CliError(
+            error="usage",
+            message="Provide a job_id or use --all to cancel all active jobs.",
+            suggestion="hud jobs cancel <job-id>   or   hud jobs cancel --all --yes",
+            exit_code=ExitCode.USAGE,
         )
 
     if job_id and all_jobs:
-        abort(
-            CliError(
-                error="usage",
-                message="Cannot specify both job_id and --all.",
-                input={"job_id": job_id, "all": all_jobs},
-                suggestion="Pass either a job id or --all, not both.",
-                exit_code=ExitCode.USAGE,
-            ),
-            json_output=json_output,
+        raise CliError(
+            error="usage",
+            message="Cannot specify both job_id and --all.",
+            input={"job_id": job_id, "all": all_jobs},
+            suggestion="Pass either a job id or --all, not both.",
+            exit_code=ExitCode.USAGE,
         )
 
     if all_jobs:
@@ -114,15 +107,13 @@ def run_cancel(
     try:
         result = asyncio.run(_cancel())
     except HudException as exc:
-        abort(map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}))
+        raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
     except Exception as exc:
-        abort(
-            CliError(
-                error="failure",
-                message=f"Failed to cancel: {exc}",
-                input={"job_id": job_id, "trace_id": trace_id},
-            )
-        )
+        raise CliError(
+            error="failure",
+            message=f"Failed to cancel: {exc}",
+            input={"job_id": job_id, "trace_id": trace_id},
+        ) from exc
 
     payload: dict[str, Any] = {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
     if wants_json(json_output, output):

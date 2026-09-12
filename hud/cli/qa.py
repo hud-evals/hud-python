@@ -14,7 +14,6 @@ from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
 from hud.cli.utils.api import require_api_key
 from hud.cli.utils.output import (
     CliError,
-    abort,
     dry_run_option,
     emit_json,
     emit_quiet,
@@ -256,16 +255,14 @@ def _print_result_tui(
 def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
     agent = cast("dict[str, Any]", platform.get(f"/qa-agents/{agent_id}"))
     if agent.get("subject_type") != _TRACE_SUBJECT:
-        abort(
-            CliError(
-                error="usage",
-                message=(
-                    f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
-                    "The CLI currently supports trace agents only."
-                ),
-                input={"agent_id": agent_id, "subject_type": agent.get("subject_type")},
-                suggestion="Use a trace QA agent id from `hud qa --json`.",
-            )
+        raise CliError(
+            error="usage",
+            message=(
+                f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
+                "The CLI currently supports trace agents only."
+            ),
+            input={"agent_id": agent_id, "subject_type": agent.get("subject_type")},
+            suggestion="Use a trace QA agent id from `hud qa --json`.",
         )
 
 
@@ -348,7 +345,7 @@ def list_agents(
             ),
         )
     except HudException as exc:
-        abort(map_exception(exc))
+        raise map_exception(exc) from exc
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     if mode == "json":
         _print_json(response)
@@ -423,7 +420,7 @@ def run_agent(
             ),
         )
     except HudException as exc:
-        abort(map_exception(exc, input={"agent_id": agent_id, "trace_ids": trace_ids}))
+        raise map_exception(exc, input={"agent_id": agent_id, "trace_ids": trace_ids}) from exc
     as_json = wants_json(json_output, output)
     if not wait:
         _print_results(runs, json_output=as_json)

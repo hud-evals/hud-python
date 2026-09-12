@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 from hud.cli.utils.registry import (
     RegistryEnvironment,
@@ -11,9 +13,6 @@ from hud.cli.utils.registry import (
 )
 from hud.utils.exceptions import HudRequestError
 from hud.utils.platform import PlatformClient
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_from_record_maps_registry_detail_response() -> None:
@@ -27,7 +26,12 @@ def test_from_record_maps_registry_detail_response() -> None:
     assert env.version_label == " v2"
 
 
-def test_resolve_accepts_uuid_without_lookup() -> None:
+def test_resolve_verifies_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
+    def request(method: str, url: str, **kwargs: object) -> dict[str, str]:
+        assert url.endswith("/registry/12345678-1234-5678-1234-567812345678")
+        return {"id": "12345678-1234-5678-1234-567812345678", "name": "verified"}
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
     envs = resolve_registry_environments(
         PlatformClient("https://api.example", "key"),
         "12345678-1234-5678-1234-567812345678",
@@ -36,7 +40,7 @@ def test_resolve_accepts_uuid_without_lookup() -> None:
     assert envs == [
         RegistryEnvironment(
             id="12345678-1234-5678-1234-567812345678",
-            name="12345678...",
+            name="verified",
         )
     ]
 
@@ -52,25 +56,10 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
     assert env is None
 
 
-def test_search_filters_paginated_registry_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    requested: dict[str, str] = {}
+def test_name_resolution_requires_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected(*args: object, **kwargs: object) -> None:
+        pytest.fail("Names must not trigger substring search")
 
-    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, Any]:
-        requested.update(method=method, url=url)
-        return {
-            "items": [
-                {"id": "id-exact", "name": "browser"},
-                {"id": "id-sub", "name": "browser-use"},
-            ],
-            "total": 2,
-        }
-
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
-
-    envs = resolve_registry_environments(PlatformClient("https://api.example", "key"), "browser")
-
-    assert requested == {
-        "method": "GET",
-        "url": "https://api.example/v2/registry?search=browser&limit=5",
-    }
-    assert [env.id for env in envs] == ["id-exact"]
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", unexpected)
+    with pytest.raises(ValueError, match="environment ID"):
+        resolve_registry_environments(PlatformClient("https://api.example", "key"), "browser")

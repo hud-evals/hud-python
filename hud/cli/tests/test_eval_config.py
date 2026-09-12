@@ -12,6 +12,7 @@ import typer
 
 from hud.cli import eval as eval_mod
 from hud.cli.eval import EvalConfig, _is_bedrock_arn
+from hud.cli.utils.output import CliError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -96,7 +97,7 @@ def test_validate_api_keys_remote_requires_hud_key(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(settings, "api_key", None)
     cfg = EvalConfig(agent_type="gemini", remote=True)
-    with pytest.raises(typer.Exit):
+    with pytest.raises(CliError):
         cfg.validate_api_keys()
 
 
@@ -105,7 +106,7 @@ def test_validate_api_keys_hud_runtime_requires_hud_key(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(settings, "api_key", None)
     cfg = EvalConfig(agent_type="gemini", runtime="hud")
-    with pytest.raises(typer.Exit):
+    with pytest.raises(CliError):
         cfg.validate_api_keys()
 
 
@@ -188,10 +189,10 @@ def test_runtime_cli_rejects_remote_flag_conflict() -> None:
         EvalConfig().merge_cli(runtime="hud", remote=True)
 
 
-def test_load_missing_writes_template(tmp_path: Path) -> None:
+def test_load_missing_returns_defaults_without_writing(tmp_path: Path) -> None:
     path = tmp_path / ".hud_eval.toml"
     cfg = EvalConfig.load(str(path))
-    assert path.exists()  # template generated
+    assert not path.exists()
     assert isinstance(cfg, EvalConfig)
 
 
@@ -352,3 +353,28 @@ def test_spawn_target_json_uses_parent_directory(tmp_path: Path) -> None:
 
 def test_spawn_target_directory_is_served_as_is(tmp_path: Path) -> None:
     assert eval_mod._spawn_target(tmp_path) == tmp_path.resolve()
+
+
+@pytest.mark.parametrize("args", [[], ["tasks.json", "claude"]])
+def test_eval_dry_run_does_not_prompt_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    import json
+
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "tasks.json").write_text("[]")
+    from hud.utils.hud_console import HUDConsole
+
+    monkeypatch.setattr(HUDConsole, "select", lambda *a, **k: pytest.fail("dry-run prompted"))
+    result = CliRunner().invoke(app, ["eval", *args, "--dry-run", "--json"])
+    assert result.exit_code == (0 if args else 2), result.output
+    payload = json.loads(result.stdout)
+    if args:
+        assert payload["runtime"] == "local"
+    else:
+        assert payload["error"] == "usage"
+    assert not (tmp_path / ".hud_eval.toml").exists()

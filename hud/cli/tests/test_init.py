@@ -15,6 +15,7 @@ from hud.cli import init as init_module
 from hud.cli import presets as presets_module
 from hud.cli.init import init_command
 from hud.cli.presets import materialize_preset
+from hud.cli.utils.output import CliError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,7 +88,7 @@ def test_init_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
     target.mkdir()
     (target / "precious.txt").write_text("data")
 
-    with pytest.raises(typer.Exit):
+    with pytest.raises(CliError):
         init_command(name="taken", directory=str(tmp_path), force=False, preset="blank")
 
     assert (target / "precious.txt").read_text() == "data"

@@ -294,18 +294,18 @@ the team default Project when none is configured. Select another Project persist
 deploy:
 
 ```bash
-hud project use browser-evals
+hud project use <project-id>
 hud deploy
 
 # Or override this deploy without changing the directory Project
-hud deploy --project browser-evals
+hud deploy --project <project-id>
 ```
 
 To run a taskset from the platform, publish it too. `hud sync` uploads a taskset and only what changed:
 
 ```bash
 hud sync tasks my-tasks   # publish tasks.py as a named taskset
-hud sync tasks my-tasks --project browser-evals
+hud sync tasks my-tasks --project <project-id>
 hud sync env              # sync environment metadata
 ```
 

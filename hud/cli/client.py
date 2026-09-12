@@ -12,14 +12,7 @@ import json
 
 import typer
 
-from hud.cli.utils.output import (
-    CliError,
-    abort,
-    emit_json,
-    json_option,
-    output_option,
-    wants_json,
-)
+from hud.cli.utils.output import CliError, emit_json, json_option, output_option, wants_json
 from hud.eval.runtime import Runtime
 from hud.utils.hud_console import HUDConsole
 
@@ -54,13 +47,11 @@ def info_command(
         async with connect(_runtime(url), ready_timeout=10.0) as client:
             manifest = client.manifest
             if manifest is None:
-                abort(
-                    CliError(
-                        error="failure",
-                        message="No manifest returned by the env.",
-                        input={"url": url},
-                        suggestion="Is the env serving? Try `hud serve` first.",
-                    )
+                raise CliError(
+                    error="failure",
+                    message="No manifest returned by the env.",
+                    input={"url": url},
+                    suggestion="Is the env serving? Try `hud serve` first.",
                 )
             tasks = await client.list_tasks()
             if wants_json(json_output, output):

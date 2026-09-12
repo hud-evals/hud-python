@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-import typer
 
 import hud.cli.sync as sync_module
 from hud.cli.sync import _write_csv
+from hud.cli.utils.output import CliError
 from hud.eval import Task
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ def test_sync_env_noninteractive_requires_name(
     monkeypatch.setattr(sync_module.PlatformClient, "from_settings", lambda: object())
     monkeypatch.setattr(sync_module, "is_interactive", lambda: False)
 
-    with pytest.raises(typer.Exit) as exc_info:
+    with pytest.raises(CliError) as exc_info:
         sync_module.sync_env_command(name=None, directory=str(tmp_path), yes=False)
 
     assert exc_info.value.exit_code == 2

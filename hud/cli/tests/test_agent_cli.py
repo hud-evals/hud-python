@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from hud.cli import app
+from hud.cli.utils.config import AuthScope, DirectoryState
 from hud.cli.utils.output import ExitCode
+from hud.cli.utils.project import Placement, ProjectSource
 from hud.utils.exceptions import HudRequestError
+
+if TYPE_CHECKING:
+    import pytest
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -20,13 +24,6 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 def _plain(text: str) -> str:
     return _ANSI.sub("", text)
-
-
-@pytest.fixture(autouse=True)
-def _reset_json_flag() -> None:
-    from hud.cli.utils.output import _JSON_REQUESTED
-
-    _JSON_REQUESTED.set(False)
 
 
 def _stdout(result: Any) -> str:
@@ -273,6 +270,13 @@ def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
             env_vars={},
             build_args={},
             build_secrets={},
+            state=DirectoryState(
+                AuthScope(
+                    origin="https://api.example",
+                    user_id="11111111-1111-4111-8111-111111111111",
+                    team_id="22222222-2222-4222-8222-222222222222",
+                )
+            ),
         )
 
     with (
@@ -307,14 +311,27 @@ def test_deploy_all_json_includes_failed_env_details(tmp_path: Any) -> None:
             env_vars={},
             build_args={},
             build_secrets={},
+            state=DirectoryState(
+                AuthScope(
+                    origin="https://api.example",
+                    user_id="11111111-1111-4111-8111-111111111111",
+                    team_id="22222222-2222-4222-8222-222222222222",
+                )
+            ),
         )
 
     async def _deploy(*, plan: _DeployPlan, **_kwargs: Any) -> _DeployResult:
         if plan.name == "alpha":
             return _DeployResult(
-                success=True, build_id="b-ok", registry_id="r-ok", status="SUCCEEDED"
+                success=True,
+                name=plan.name,
+                build_id="b-ok",
+                registry_id="r-ok",
+                status="SUCCEEDED",
             )
-        return _DeployResult(success=False, build_id="b-bad", registry_id="r-bad", status="FAILED")
+        return _DeployResult(
+            success=False, name=plan.name, build_id="b-bad", registry_id="r-bad", status="FAILED"
+        )
 
     def _tarball(env_dir: Any, **_kwargs: Any) -> Any:
         path = env_dir / "context.tar.gz"

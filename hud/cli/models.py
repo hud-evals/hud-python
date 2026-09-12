@@ -12,7 +12,6 @@ from rich.table import Table
 
 from hud.cli.utils.output import (
     CliError,
-    abort,
     dry_run_option,
     emit_json,
     emit_quiet,
@@ -62,14 +61,14 @@ def list_models(
     try:
         models_list = list_gateway_models()
     except Exception as exc:
-        abort(
+        raise (
             map_exception(exc)
             if isinstance(exc, HudException)
             else CliError(
                 error="failure",
                 message=f"Failed to fetch models: {exc}",
             )
-        )
+        ) from exc
 
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     if mode == "json":
@@ -172,21 +171,17 @@ def fork_model(
                 console.print(f"[yellow]Model already exists[/yellow] [cyan]{slug}[/cyan]")
                 console.print(f"[dim]id: {existing.get('id')}[/dim]")
             return
-        abort(
-            map_request_error(
-                exc,
-                resource="Model",
-                input={"source": source, "name": name},
-            )
-        )
+        raise map_request_error(
+            exc,
+            resource="Model",
+            input={"source": source, "name": name},
+        ) from exc
     except Exception as exc:
-        abort(
-            CliError(
-                error="failure",
-                message=f"Fork failed: {exc}",
-                input={"source": source, "name": name},
-            )
-        )
+        raise CliError(
+            error="failure",
+            message=f"Fork failed: {exc}",
+            input={"source": source, "name": name},
+        ) from exc
 
     if wants_json(json_output, output):
         emit_json(model)
@@ -353,7 +348,7 @@ def _resolve_model_id(model: str) -> str:
                 api_key=settings.api_key,
             )
         except HudRequestError as exc:
-            abort(map_request_error(exc, resource="Model", input={"model": model}))
+            raise map_request_error(exc, resource="Model", input={"model": model}) from exc
         return str(data["id"])
 
 
@@ -379,9 +374,9 @@ def _get_checkpoints(model: str) -> list[dict[str, Any]]:
             ),
         )
     except HudRequestError as exc:
-        abort(map_request_error(exc, resource="Checkpoints", input={"model": model}))
+        raise map_request_error(exc, resource="Checkpoints", input={"model": model}) from exc
     except Exception as exc:
-        abort(CliError(error="failure", message=f"Failed to fetch checkpoints: {exc}"))
+        raise CliError(error="failure", message=f"Failed to fetch checkpoints: {exc}") from exc
 
 
 def _set_head(model: str, checkpoint_id: str) -> None:
@@ -398,12 +393,10 @@ def _set_head(model: str, checkpoint_id: str) -> None:
             api_key=settings.api_key,
         )
     except HudRequestError as exc:
-        abort(
-            map_request_error(
-                exc,
-                resource="Checkpoint",
-                input={"model": model, "checkpoint_id": checkpoint_id},
-            )
-        )
+        raise map_request_error(
+            exc,
+            resource="Checkpoint",
+            input={"model": model, "checkpoint_id": checkpoint_id},
+        ) from exc
     except Exception as exc:
-        abort(CliError(error="failure", message=f"Failed to set head: {exc}"))
+        raise CliError(error="failure", message=f"Failed to set head: {exc}") from exc

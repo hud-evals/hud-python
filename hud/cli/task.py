@@ -23,7 +23,6 @@ import typer
 from hud.cli.utils.output import (
     CliError,
     ExitCode,
-    abort,
     emit_json,
     emit_quiet,
     json_option,
@@ -52,23 +51,19 @@ def _parse_args(args: str) -> dict[str, Any]:
     try:
         parsed = json.loads(args or "{}")
     except json.JSONDecodeError as exc:
-        abort(
-            CliError(
-                error="usage",
-                message=f"--args must be valid JSON: {exc}",
-                input={"args": args},
-                suggestion='Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
-                exit_code=ExitCode.USAGE,
-            )
-        )
+        raise CliError(
+            error="usage",
+            message=f"--args must be valid JSON: {exc}",
+            input={"args": args},
+            suggestion='Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
+            exit_code=ExitCode.USAGE,
+        ) from exc
     if not isinstance(parsed, dict):
-        abort(
-            CliError(
-                error="usage",
-                message="--args must be a JSON object",
-                input={"args": args},
-                exit_code=ExitCode.USAGE,
-            )
+        raise CliError(
+            error="usage",
+            message="--args must be a JSON object",
+            input={"args": args},
+            exit_code=ExitCode.USAGE,
         )
     return parsed
 
@@ -80,14 +75,12 @@ def _collect(source: str) -> Any:
     try:
         return Taskset.from_file(source)
     except FileNotFoundError as exc:
-        abort(
-            CliError(
-                error="not_found",
-                message=str(exc),
-                input={"source": source},
-                suggestion="Pass --source to a tasks file or directory.",
-            )
-        )
+        raise CliError(
+            error="not_found",
+            message=str(exc),
+            input={"source": source},
+            suggestion="Pass --source to a tasks file or directory.",
+        ) from exc
 
 
 def _local_env_url(port: int = 8765) -> str | None:
@@ -137,12 +130,10 @@ def _resolve(
 
     taskset = _collect(source or ".")
     if not taskset:
-        abort(
-            CliError(
-                error="not_found",
-                message=f"No tasks found in {source or '.'}",
-                input={"source": source or "."},
-            )
+        raise CliError(
+            error="not_found",
+            message=f"No tasks found in {source or '.'}",
+            input={"source": source or "."},
         )
     matches = [
         candidate
@@ -151,13 +142,11 @@ def _resolve(
     ]
     if not matches:
         available = ", ".join(sorted({t.id for t in taskset}))
-        abort(
-            CliError(
-                error="not_found",
-                message=f"No task matching {task!r} (available: {available})",
-                input={"task": task, "source": source or "."},
-                suggestion="Run 'hud task list' to see available slugs.",
-            )
+        raise CliError(
+            error="not_found",
+            message=f"No task matching {task!r} (available: {available})",
+            input={"task": task, "source": source or "."},
+            suggestion="Run 'hud task list' to see available slugs.",
         )
     selected = matches[0]
     if endpoint is not None:

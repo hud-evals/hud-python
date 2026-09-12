@@ -7,16 +7,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import typer
-
 from hud.utils.exceptions import HudRequestError
-from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from hud.cli.utils.source import EnvironmentSource
-    from hud.utils.hud_console import HUDConsole
+    from hud.cli.utils.config import DirectoryLink
     from hud.utils.platform import PlatformClient
 
 
@@ -24,19 +18,16 @@ class ProjectSource(Enum):
     """Where a resolved Project came from, most specific first."""
 
     FLAG = "--project"
-    CONFIG = ".hud/config.json"
+    CONFIG = "~/.hud/config.json"
     GLOBAL_DEFAULT = "HUD_DEFAULT_PROJECT"
     TEAM_DEFAULT = "team default"
 
 
 PROJECT_OPTION_HELP = (
-    "Project for this command (name or ID). Defaults to the directory's saved "
+    "Project ID for this command. Defaults to the directory's saved "
     "project, HUD_DEFAULT_PROJECT, then your team default. Does not change "
     "directory configuration."
 )
-
-_PROJECTS_DISABLED_DETAIL = "projects are not enabled"
-_PROJECTS_DISABLED_ERROR = "projects_not_enabled"
 
 
 @dataclass(frozen=True)
@@ -104,29 +95,17 @@ class ProjectNotWritable(PermissionError):
 
 def list_projects(platform: PlatformClient) -> list[Project]:
     """Every Project visible to the caller."""
-    return list(_iter_projects(platform))
-
-
-def _iter_projects(platform: PlatformClient, *, search: str | None = None) -> Iterator[Project]:
-    params: dict[str, str | int] = {"limit": 50, "offset": 0}
-    if search is not None:
-        params["search"] = search
+    projects: list[Project] = []
     offset = 0
     while True:
-        params["offset"] = offset
-        data = platform.get("/projects", params=params)
-        projects = _projects_from_page(data)
-        yield from projects
-        if not projects:
-            return
-        offset += len(data["items"])
+        data = platform.get("/projects", params={"limit": 500, "offset": offset})
+        page = _projects_from_page(data)
+        projects.extend(page)
+        offset += len(page)
         if offset >= data["total"]:
-            return
-
-
-def require_projects_enabled(platform: PlatformClient) -> None:
-    """Check access to the feature-gated Projects API."""
-    platform.get("/projects", params={"limit": 1})
+            return projects
+        if not page:
+            raise ValueError("Projects API returned an empty page before the reported total")
 
 
 def _projects_from_page(data: Any) -> list[Project]:
@@ -138,33 +117,24 @@ def _projects_from_page(data: Any) -> list[Project]:
 
 
 def resolve_project(platform: PlatformClient, ref: str) -> Project:
-    """Map a Project name or id to the Project itself.
-
-    Names are normalized the same way the platform normalizes them on create,
-    so `My Project` and `my-project` resolve to the same row.
-    """
+    """Resolve a canonical Project ID within the authenticated scope."""
     try:
         project_id = str(uuid.UUID(ref))
-    except ValueError:
-        name = normalize_environment_name(ref, default="")
-        projects = _iter_projects(platform, search=name)
-        match = next((p for p in projects if p.name == name), None)
-    else:
-        try:
-            return Project.from_record(platform.get(f"/projects/{project_id}"))
-        except HudRequestError as e:
-            if e.status_code != 404:
-                raise
-            match = None
-
-    if match is None:
-        raise ProjectNotFound(ref, list_projects(platform))
-    return match
+    except ValueError as exc:
+        raise ValueError(
+            "Pass a Project ID from 'hud project list'; name lookup is not supported"
+        ) from exc
+    try:
+        return Project.from_record(platform.get(f"/projects/{project_id}"))
+    except HudRequestError as exc:
+        if exc.status_code != 404:
+            raise
+        raise ProjectNotFound(ref, []) from exc
 
 
 def resolve_placement(
     platform: PlatformClient,
-    env_source: EnvironmentSource,
+    link: DirectoryLink,
     *,
     flag: str | None,
 ) -> Placement:
@@ -173,7 +143,7 @@ def resolve_placement(
 
     for ref, source in (
         (flag, ProjectSource.FLAG),
-        (env_source.project_id, ProjectSource.CONFIG),
+        (str(link.project_id) if link.project_id else None, ProjectSource.CONFIG),
         (settings.default_project, ProjectSource.GLOBAL_DEFAULT),
     ):
         if ref:
@@ -183,88 +153,6 @@ def resolve_placement(
     return Placement(project=None, source=ProjectSource.TEAM_DEFAULT)
 
 
-def report_project_error(console: HUDConsole, error: Exception) -> typer.Exit:
-    """Explain why a Project could not be used, and return the exit to raise."""
-    if isinstance(error, HudRequestError) and projects_not_enabled(error):
-        console.error("Projects are not enabled for your team")
-        console.hint("Contact HUD to enable the Projects beta for your team")
-    elif isinstance(error, ProjectNotFound):
-        console.error(str(error))
-        if error.available:
-            console.info("Projects you can see:")
-            for candidate in error.available:
-                console.info(f"  {candidate.name} ({candidate.short_id}...)")
-        else:
-            console.hint("Create one with: hud project create <name>")
-    elif isinstance(error, ProjectNotWritable):
-        console.error(str(error))
-        console.hint("Ask a project manager for 'create' scope, or pick another project")
-    else:
-        console.error(f"Failed to reach the HUD platform: {error}")
-    return typer.Exit(1)
-
-
-def projects_not_enabled(error: HudRequestError) -> bool:
-    """Whether the Projects API rejected a caller at its feature gate."""
-    if error.status_code != 403 or not isinstance(error.response_json, dict):
-        return False
-    if error.response_json.get("error") == _PROJECTS_DISABLED_ERROR:
-        return True
-    detail = error.response_json.get("detail")
-    return isinstance(detail, str) and detail.casefold() == _PROJECTS_DISABLED_DETAIL
-
-
-def resolve_writable_placement(
-    platform: PlatformClient,
-    env_source: EnvironmentSource,
-    *,
-    flag: str | None,
-    console: HUDConsole,
-) -> Placement:
-    """Resolve and announce a Project that accepts new resources."""
-    placement = resolve_placement_or_exit(platform, env_source, flag=flag, console=console)
-    require_writable_placement(placement, console)
-    return placement
-
-
-def resolve_placement_or_exit(
-    platform: PlatformClient,
-    env_source: EnvironmentSource,
-    *,
-    flag: str | None,
-    console: HUDConsole,
-) -> Placement:
-    """Resolve and announce a Project without requiring create access."""
-    try:
-        placement = resolve_placement(platform, env_source, flag=flag)
-    except (ProjectNotFound, HudRequestError) as e:
-        raise report_project_error(console, e) from e
-
-    console.info(f"Project: {placement.label}")
-    return placement
-
-
-def require_writable_placement(placement: Placement, console: HUDConsole) -> None:
-    """Exit when an operation would write to a read-only Project."""
+def require_writable_placement(placement: Placement) -> None:
     if placement.project is not None and not placement.project.can_create:
-        error = ProjectNotWritable(placement.project)
-        raise report_project_error(console, error) from error
-
-
-__all__ = [
-    "PROJECT_OPTION_HELP",
-    "Placement",
-    "Project",
-    "ProjectNotFound",
-    "ProjectNotWritable",
-    "ProjectSource",
-    "list_projects",
-    "projects_not_enabled",
-    "report_project_error",
-    "require_projects_enabled",
-    "require_writable_placement",
-    "resolve_placement",
-    "resolve_placement_or_exit",
-    "resolve_project",
-    "resolve_writable_placement",
-]
+        raise ProjectNotWritable(placement.project)

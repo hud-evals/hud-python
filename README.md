@@ -152,11 +152,11 @@ A **project** holds the environments and tasksets a team creates and decides who
 
 ```bash
 hud project list                   # projects you can see
-hud project use browser-evals      # writes projectId to .hud/config.json
+hud project use <project-id>      # writes project_id to ~/.hud/config.json
 hud project                        # where does a deploy here land?
 ```
 
-`hud deploy` and `hud sync tasks` also take `--project <name-or-id>` as a one-command override; it does not change the directory configuration. Use `hud set HUD_DEFAULT_PROJECT=<name-or-id>` for a machine-wide fallback. Precedence is the flag, then the directory's `.hud/config.json`, then `HUD_DEFAULT_PROJECT`, then your team default. An environment or taskset that already exists stays where it is; naming a different project fails rather than moving it.
+Use `--project <project-id>` for a single command or `hud set HUD_DEFAULT_PROJECT=<project-id>` for unlinked directories. Directory links live in `~/.hud/config.json` and are scoped to the API origin, account, and team. See the [CLI reference](https://docs.hud.ai/v6/reference/cli#hud-project) for selection rules.
 
 → [Projects](https://docs.hud.ai/v6/reference/projects) · [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 

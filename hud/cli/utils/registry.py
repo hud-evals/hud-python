@@ -17,6 +17,7 @@ class RegistryEnvironment:
     id: str
     name: str
     version: str = ""
+    project_id: str | None = None
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> RegistryEnvironment:
@@ -30,6 +31,7 @@ class RegistryEnvironment:
             id=env_id,
             name=str(data.get("name") or "unnamed"),
             version=str(version) if version is not None else "",
+            project_id=str(data["project_id"]) if data.get("project_id") else None,
         )
 
     @property
@@ -56,45 +58,36 @@ def get_registry_environment(
     return RegistryEnvironment.from_record(data)
 
 
-def _list_records(platform: PlatformClient, params: dict[str, Any]) -> list[dict[str, Any]]:
-    data = platform.get("/registry", params=params)
-    items = data.get("items") if isinstance(data, dict) else None
-    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
-
-
 def list_registry_environments(
     platform: PlatformClient,
     *,
-    limit: int = 20,
+    limit: int = 500,
     sort_by: str | None = "date",
 ) -> list[RegistryEnvironment]:
-    params: dict[str, Any] = {"limit": limit}
-    if sort_by:
-        params["sort_by"] = sort_by
-    return [RegistryEnvironment.from_record(item) for item in _list_records(platform, params)]
-
-
-def search_registry_environments(
-    platform: PlatformClient,
-    name: str,
-    *,
-    limit: int = 5,
-) -> list[RegistryEnvironment]:
-    records = _list_records(platform, {"search": name, "limit": limit})
-    envs = [RegistryEnvironment.from_record(item) for item in records]
-    exact = [env for env in envs if env.name == name]
-    if exact:
-        return exact
-    lowered = name.lower()
-    return [env for env in envs if lowered in env.name.lower()]
+    environments: list[RegistryEnvironment] = []
+    offset = 0
+    while True:
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if sort_by:
+            params["sort_by"] = sort_by
+        data = platform.get("/registry", params=params)
+        page = [RegistryEnvironment.from_record(item) for item in data["items"]]
+        environments.extend(page)
+        offset += len(page)
+        if offset >= data["total"]:
+            return environments
+        if not page:
+            raise ValueError("Registry API returned an empty page before the reported total")
 
 
 def resolve_registry_environments(
     platform: PlatformClient,
     ref: str,
 ) -> list[RegistryEnvironment]:
+    """Validate a registry ID against the authenticated platform."""
     try:
-        uuid.UUID(ref)
-        return [RegistryEnvironment(id=ref, name=f"{ref[:8]}...")]
-    except ValueError:
-        return search_registry_environments(platform, ref)
+        registry_id = str(uuid.UUID(ref))
+    except ValueError as exc:
+        raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
+    environment = get_registry_environment(platform, registry_id)
+    return [environment] if environment is not None else []

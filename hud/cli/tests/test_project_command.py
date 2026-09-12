@@ -1,133 +1,103 @@
-"""CLI parsing for Project commands."""
+"""Project commands use scoped IDs and the shared output boundary."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+import json
+from pathlib import Path
+from typing import Any
+from uuid import UUID
 
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import project
-from hud.cli.utils.project import Project
+from hud.cli import app
+from hud.cli.utils.config import AuthScope, DirectoryState
 from hud.utils.exceptions import HudRequestError
 
-if TYPE_CHECKING:
-    from pathlib import Path
+PROJECT_ID = "22222222-2222-4222-8222-222222222222"
+SCOPE = AuthScope(
+    origin="https://api.example", user_id="11111111-1111-4111-8111-111111111111", team_id=PROJECT_ID
+)
+RECORD = {"id": PROJECT_ID, "name": "browser-evals", "capabilities": {"create": True}}
 
 
-@pytest.fixture
-def project_record() -> Project:
-    return Project(
-        id="22222222-2222-4222-8222-222222222222",
-        name="browser-evals",
-        is_default=False,
-        can_create=True,
-    )
+@pytest.fixture(autouse=True)
+def platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    monkeypatch.setattr("hud.settings.settings.hud_api_url", SCOPE.origin)
+    monkeypatch.setattr("hud.settings.settings.default_project", None)
+
+    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        if url.endswith("/auth/me"):
+            return SCOPE.model_dump(mode="json")
+        if url.endswith(f"/projects/{PROJECT_ID}") or method == "POST":
+            return RECORD
+        raise AssertionError((method, url))
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
 
 
-def _projects_disabled() -> HudRequestError:
-    return HudRequestError(
-        "Request failed: Projects are not enabled",
-        status_code=403,
-        response_json={"error": "forbidden", "detail": "Projects are not enabled"},
-    )
+@pytest.mark.parametrize("override", [False, True])
+def test_use_honors_directory_options(tmp_path: Path, override: bool) -> None:
+    group = tmp_path / "group"
+    target = tmp_path / "override" if override else group
+    args = ["project", "-C", str(group), "use", PROJECT_ID, "--json"]
+    if override:
+        args += ["-C", str(target)]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["id"] == PROJECT_ID
+    assert DirectoryState(SCOPE, target).load().project_id == UUID(PROJECT_ID)
+    assert not (target / ".hud").exists()
+    if override:
+        assert DirectoryState(SCOPE, group).load().project_id is None
 
 
-def test_bare_project_reports_disabled_feature(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = MagicMock()
-    platform.get.side_effect = _projects_disabled()
-    monkeypatch.setattr(project, "require_api_key", lambda _: None)
-    monkeypatch.setattr(project.PlatformClient, "from_settings", lambda: platform)
-
-    result = CliRunner().invoke(project.project_app)
-
-    assert result.exit_code == 1
-    assert "Projects are not enabled for your team" in result.output
-    assert "Failed to reach" not in result.output
-    platform.get.assert_called_once_with("/projects", params={"limit": 1})
-
-
-def test_create_distinguishes_disabled_feature_from_admin_access(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform = MagicMock()
-    platform.post.side_effect = _projects_disabled()
-    monkeypatch.setattr(project, "require_api_key", lambda _: None)
-    monkeypatch.setattr(project.PlatformClient, "from_settings", lambda: platform)
-
-    result = CliRunner().invoke(project.project_app, ["create", "browser-evals"])
-
-    assert result.exit_code == 1
-    assert "Projects are not enabled for your team" in result.output
-    assert "Only team admins" not in result.output
-
-
-def test_group_directory_is_inherited_by_use(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    project_record: Project,
-) -> None:
-    pinned: list[str] = []
-    monkeypatch.setattr(project, "require_api_key", lambda _: None)
-    monkeypatch.setattr(project, "resolve_project", lambda _platform, _ref: project_record)
-    monkeypatch.setattr(
-        project, "_pin", lambda _project, directory, _console: pinned.append(directory)
-    )
-
+def test_create_links_group_directory(tmp_path: Path) -> None:
     result = CliRunner().invoke(
-        project.project_app,
-        ["-C", str(tmp_path), "use", "browser-evals"],
+        app, ["project", "-C", str(tmp_path), "create", "browser-evals", "--json"]
     )
+    assert result.exit_code == 0, result.output
+    assert DirectoryState(SCOPE, tmp_path).load().project_id == UUID(PROJECT_ID)
 
-    assert result.exit_code == 0
-    assert pinned == [str(tmp_path)]
 
-
-def test_subcommand_directory_overrides_group_directory(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    project_record: Project,
-) -> None:
-    pinned: list[str] = []
-    override = tmp_path / "override"
-    monkeypatch.setattr(project, "require_api_key", lambda _: None)
-    monkeypatch.setattr(project, "resolve_project", lambda _platform, _ref: project_record)
-    monkeypatch.setattr(
-        project, "_pin", lambda _project, directory, _console: pinned.append(directory)
-    )
-
+def test_use_dry_run_does_not_persist(tmp_path: Path) -> None:
+    legacy = tmp_path / "env" / ".hud" / "deploy.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text('{"projectId":"old"}')
     result = CliRunner().invoke(
-        project.project_app,
-        ["-C", str(tmp_path), "use", "browser-evals", "-C", str(override)],
+        app, ["project", "use", PROJECT_ID, "-C", str(legacy.parent.parent), "--dry-run", "--json"]
     )
+    assert result.exit_code == 0, result.output
+    assert not (Path.home() / ".hud" / "config.json").exists()
+    assert legacy.read_text() == '{"projectId":"old"}'
 
-    assert result.exit_code == 0
-    assert pinned == [str(override)]
+
+def test_create_permission_error_is_one_json_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    def denied(*args: Any, **kwargs: Any) -> None:
+        raise HudRequestError("Projects are not enabled", status_code=403)
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", denied)
+    result = CliRunner().invoke(app, ["project", "create", "browser-evals", "--no-use", "--json"])
+    assert result.exit_code == 4
+    assert json.loads(result.stdout)["error"] == "permission_denied"
 
 
-def test_group_directory_is_inherited_by_create(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    project_record: Project,
-) -> None:
-    pinned: list[str] = []
-    platform = MagicMock()
-    platform.post.return_value = {
-        "id": project_record.id,
-        "name": project_record.name,
-        "capabilities": {"create": True},
-    }
-    monkeypatch.setattr(project, "require_api_key", lambda _: None)
-    monkeypatch.setattr(project.PlatformClient, "from_settings", lambda: platform)
-    monkeypatch.setattr(
-        project, "_pin", lambda _project, directory, _console: pinned.append(directory)
-    )
+def test_list_reads_every_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    offsets: list[int] = []
 
-    result = CliRunner().invoke(
-        project.project_app,
-        ["-C", str(tmp_path), "create", "browser-evals"],
-    )
+    def page(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        from urllib.parse import parse_qs, urlsplit
 
-    assert result.exit_code == 0
-    assert pinned == [str(tmp_path)]
+        offset = int(parse_qs(urlsplit(url).query)["offset"][0])
+        offsets.append(offset)
+        records = [
+            {**RECORD, "id": str(UUID(int=i + 1))} for i in range(offset, min(offset + 50, 51))
+        ]
+        return {"items": records, "total": 51}
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", page)
+    result = CliRunner().invoke(app, ["project", "list", "--json"])
+    assert result.exit_code == 0, result.output
+    assert len(json.loads(result.stdout)) == 51
+    assert offsets == [0, 50]

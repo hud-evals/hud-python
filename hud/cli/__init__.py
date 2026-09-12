@@ -8,11 +8,11 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from hud.cli.utils.output import CliError, json_option
-from hud.utils.exceptions import HudException
+from hud.cli.utils.output import CliError, CLIGroup, json_option
 
 app = typer.Typer(
     name="hud",
+    cls=CLIGroup,
     help=(
         "HUD CLI — environments, evaluations, and the HUD platform.\n\n"
         "Resource commands use noun-verb grammar "
@@ -27,11 +27,6 @@ app = typer.Typer(
 )
 
 console = Console()
-
-SUPPORT_HINT = (
-    "If this looks like an issue with the sdk, please make a github issue at "
-    "https://github.com/hud-evals/hud-python/issues"
-)
 
 # ---------------------------------------------------------------------------
 # Register commands (each module owns its Typer args, docstring, and logic)
@@ -82,7 +77,7 @@ def set_command(
     Values are stored in ~/.hud/.env and are loaded by hud.settings with
     the lowest precedence (overridden by process env and project .env).[/not dim]
     """
-    from hud.cli.utils.output import CliError, ExitCode, abort, emit_json, wants_json
+    from hud.cli.utils.output import ExitCode, emit_json, wants_json
     from hud.utils.hud_console import HUDConsole
 
     from .utils.config import parse_key_value, set_env_values
@@ -93,15 +88,12 @@ def set_command(
     for item in assignments:
         parsed = parse_key_value(item)
         if parsed is None:
-            abort(
-                CliError(
-                    error="usage",
-                    message=f"Invalid assignment (expected KEY=VALUE): {item}",
-                    input={"assignment": item},
-                    suggestion="Pass one or more KEY=VALUE pairs.",
-                    exit_code=ExitCode.USAGE,
-                ),
-                json_output=json_output,
+            raise CliError(
+                error="usage",
+                message=f"Invalid assignment (expected KEY=VALUE): {item}",
+                input={"assignment": item},
+                suggestion="Pass one or more KEY=VALUE pairs.",
+                exit_code=ExitCode.USAGE,
             )
         key, value = parsed
         updates[key] = value
@@ -131,6 +123,20 @@ def version(
         emit_json({"name": "hud", "version": __version__})
         return
     console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
+
+
+@app.callback(invoke_without_command=True)
+def root_command(
+    ctx: typer.Context,
+    show_version: bool = typer.Option(False, "--version", help="Show the CLI version"),
+    json_output: bool = json_option(),
+) -> None:
+    if show_version:
+        version(json_output=json_output)
+        raise typer.Exit
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(2)
 
 
 # Client subcommand group (drive a running env control channel from the shell)
@@ -179,50 +185,21 @@ def main() -> None:
 
         display_update_prompt()
 
-    if "--version" in sys.argv:
-        from hud import __version__  # lazy: keeps CLI startup off the full package import
-        from hud.cli.utils.output import emit_json, wants_json
-
-        if wants_json():
-            emit_json({"name": "hud", "version": __version__})
-        else:
-            console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
-        return
-
     from .utils.usage import recorded_invocation
 
     with recorded_invocation(sys.argv):
-        try:
-            if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
-                console.print(
-                    Panel.fit(
-                        "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
-                        border_style="cyan",
-                    )
+        if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
+            console.print(
+                Panel.fit(
+                    "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
+                    border_style="cyan",
                 )
-                console.print("\n[yellow]Quick Start:[/yellow]")
-                console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]")
-                console.print("  List platform jobs: [cyan]hud jobs list --json[/cyan]\n")
+            )
+            console.print("\n[yellow]Quick Start:[/yellow]")
+            console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]")
+            console.print("  List platform jobs: [cyan]hud jobs list --json[/cyan]\n")
 
-            app()
-        except typer.Exit as e:
-            try:
-                exit_code = getattr(e, "exit_code", 0)
-            except Exception:
-                exit_code = 1
-            if exit_code not in (0, 2):
-                from hud.utils.hud_console import hud_console
-
-                hud_console.info(SUPPORT_HINT)
-            raise
-        except CliError as e:
-            from hud.cli.utils.output import abort
-
-            abort(e)
-        except HudException as e:
-            from hud.cli.utils.output import abort, map_exception
-
-            abort(map_exception(e))
+        app()
 
 
 if __name__ == "__main__":

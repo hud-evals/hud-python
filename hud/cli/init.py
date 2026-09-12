@@ -14,7 +14,6 @@ import typer
 from hud.cli.utils.output import (
     CliError,
     ExitCode,
-    abort,
     dry_run_option,
     emit_json,
     json_option,
@@ -93,22 +92,18 @@ def init_command(
 
     if dry_run is True and preset is None:
         if name is None:
-            abort(
-                CliError(
-                    error="usage",
-                    message="Pass --template for a dry run without a name.",
-                    exit_code=ExitCode.USAGE,
-                )
+            raise CliError(
+                error="usage",
+                message="Pass --template for a dry run without a name.",
+                exit_code=ExitCode.USAGE,
             )
         preset = DEFAULT_PRESET_ID
     preset_id = _resolve_preset(preset, name, hud_console)
     chosen = ENVIRONMENT_PRESETS[preset_id]
     target = Path(directory) / (name if name is not None else preset_id)
     if target.exists() and any(target.iterdir()) and not force:
-        abort(
-            CliError(
-                error="conflict", message=f"{target} already exists and is not empty (use --force)"
-            )
+        raise CliError(
+            error="conflict", message=f"{target} already exists and is not empty (use --force)"
         )
 
     if dry_run is True:

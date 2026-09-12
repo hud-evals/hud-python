@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -17,30 +16,36 @@ if TYPE_CHECKING:
 
 
 class _ReadOnlyPlatform:
+    api_url = "https://api.example"
+
     def get(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        assert url == "/projects"
+        if url == "/auth/me":
+            return {
+                "user_id": "11111111-1111-4111-8111-111111111111",
+                "team_id": "22222222-2222-4222-8222-222222222222",
+            }
+        assert url.startswith("/projects/")
         return {
-            "items": [
-                {
-                    "id": "33333333-3333-4333-8333-333333333333",
-                    "name": "locked-down",
-                    "capabilities": {"create": False},
-                }
-            ]
+            "id": "33333333-3333-4333-8333-333333333333",
+            "name": "locked-down",
+            "capabilities": {"create": False},
         }
 
 
 class _WritablePlatform:
+    api_url = "https://api.example"
+
     def get(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        assert url == "/projects"
+        if url == "/auth/me":
+            return {
+                "user_id": "11111111-1111-4111-8111-111111111111",
+                "team_id": "22222222-2222-4222-8222-222222222222",
+            }
+        assert url.startswith("/projects/")
         return {
-            "items": [
-                {
-                    "id": "22222222-2222-4222-8222-222222222222",
-                    "name": "browser-evals",
-                    "capabilities": {"create": True},
-                }
-            ]
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "browser-evals",
+            "capabilities": {"create": True},
         }
 
 
@@ -73,7 +78,7 @@ def _run_sync(
         taskset="demo",
         source=".",
         taskset_id=None,
-        project="locked-down",
+        project="33333333-3333-4333-8333-333333333333",
         task_filter=None,
         exclude=None,
         yes=True,
@@ -129,7 +134,7 @@ def test_project_override_does_not_pin_directory(
         taskset="demo",
         source=".",
         taskset_id=None,
-        project="browser-evals",
+        project="22222222-2222-4222-8222-222222222222",
         task_filter=None,
         exclude=None,
         yes=True,
@@ -138,39 +143,80 @@ def test_project_override_does_not_pin_directory(
         export=None,
     )
 
-    config = json.loads((tmp_path / ".hud" / "config.json").read_text())
-    assert config == {"tasksetId": "taskset-1"}
+    assert not (tmp_path / ".hud" / "config.json").exists()
 
 
-@pytest.mark.parametrize("status_code", [400, 403, 500])
-def test_rejected_upload_exits_with_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status_code: int
+@pytest.mark.parametrize("stale", [False, True])
+def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stale: bool
 ) -> None:
-    project_id = "22222222-2222-4222-8222-222222222222"
-    detail = "Taskset belongs to another Project" if status_code == 400 else "Upload rejected"
+    import json
+
+    from typer.testing import CliRunner
+
+    from hud.cli import app
+    from hud.cli.utils.config import load_config
+    from hud.utils.exceptions import HudRequestError
+
+    source = tmp_path / "tasks.py"
+    source.write_text(
+        "from hud.eval import Task\ntasks = [Task(env='example', id='solve', slug='one')]\n"
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.settings.settings.hud_api_url", "https://api.example")
-    (tmp_path / "tasks.json").write_text(
-        json.dumps([{"env": "example", "id": "solve", "slug": "one"}])
-    )
+    monkeypatch.setattr("hud.settings.settings.default_project", None)
+    taskset_id = "55555555-5555-4555-8555-555555555555"
+    uploads: list[dict[str, Any]] = []
 
     def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        if method == "GET" and url == f"https://api.example/v2/projects/{project_id}":
-            return {"id": project_id, "name": "browser-evals", "capabilities": {"create": True}}
-        assert method == "POST" and url == "https://api.example/v2/tasks/upload"
-        assert kwargs["json"]["project_id"] == project_id
-        assert len(kwargs["json"]["tasks"]) == 1
-        raise HudRequestError(detail, status_code=status_code, response_json={"detail": detail})
+        if url.endswith("/auth/me"):
+            return {
+                "user_id": "11111111-1111-4111-8111-111111111111",
+                "team_id": "22222222-2222-4222-8222-222222222222",
+            }
+        if "/by-name/" in url:
+            raise HudRequestError("missing", status_code=404)
+        if url.endswith("/tasks/upload"):
+            uploads.append(kwargs["json"])
+            return {"taskset_id": kwargs["json"].get("taskset_id", taskset_id), "tasks_created": 1}
+        if "/tasksets/" in url:
+            if stale:
+                raise HudRequestError("deleted", status_code=404)
+            return {"id": taskset_id, "name": "renamed", "tasks": []}
+        raise AssertionError(url)
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
+    first = CliRunner().invoke(app, ["sync", "tasks", "demo", str(source), "--yes", "--json"])
+    assert first.exit_code == 0, first.output
+    before = load_config()
+    second = CliRunner().invoke(app, ["sync", "tasks", "--yes", "--json", "--force"])
+    assert load_config() == before
+    if stale:
+        assert second.exit_code == 3, second.output
+        assert json.loads(second.stdout)["error"] == "not_found"
+        assert len(uploads) == 1
+    else:
+        assert second.exit_code == 0, second.output
+        assert uploads[-1]["taskset_id"] == taskset_id
+        assert uploads[-1]["taskset_name"] == "renamed"
 
-    result = CliRunner().invoke(
-        sync_module.sync_app,
-        ["tasks", "demo", "tasks.json", "--project", project_id, "--force", "--yes"],
-    )
+        other = "66666666-6666-4666-8666-666666666666"
+        args = ["sync", "tasks", other, str(source), "--force", "--yes", "--json"]
+        override = CliRunner().invoke(app, args)
+        assert override.exit_code == 0, override.output
+        assert uploads[-1]["taskset_id"] == other
+        assert load_config() == before
+        planned_link = CliRunner().invoke(app, [*args, "--link", "--dry-run"])
+        assert planned_link.exit_code == 0, planned_link.output
+        assert load_config() == before
+        relinked = CliRunner().invoke(app, [*args, "--link"])
+        assert relinked.exit_code == 0, relinked.output
+        assert str(load_config().directories[0].link.taskset_id) == other
 
-    assert result.exit_code == 1
-    assert detail in result.output
-    assert "Sync complete" not in result.output
-    assert not (tmp_path / ".hud" / "config.json").exists()
+        from hud.utils.hud_console import HUDConsole
+
+        monkeypatch.setattr("hud.cli.utils.output.is_interactive", lambda: True)
+        monkeypatch.setattr(HUDConsole, "confirm", lambda *a, **k: True)
+        alias = CliRunner().invoke(app, ["--json", "sync"])
+        assert alias.exit_code == 0, alias.output
+        assert json.loads(alias.stdout)["taskset_id"] == other
