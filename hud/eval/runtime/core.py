@@ -91,7 +91,10 @@ class RuntimeDataFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     file_id: str = Field(min_length=1, description="HUD data-file id")
-    path: str | None = Field(default=None, description="Path under mount_path; defaults to the filename")
+    path: str | None = Field(
+        default=None,
+        description="Path under mount_path; defaults to the filename",
+    )
 
 
 class RuntimeData(BaseModel):

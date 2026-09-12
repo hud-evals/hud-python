@@ -29,6 +29,8 @@ class TestInitModule:
             "Run",
             "Runtime",
             "RuntimeConfig",
+            "RuntimeData",
+            "RuntimeDataFile",
             "RuntimeGPU",
             "RuntimeLimits",
             "RuntimeResources",
