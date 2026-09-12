@@ -243,8 +243,6 @@ def _resolve_environment_name(
 
     if registry_id:
         registry_env = get_registry_environment(platform, registry_id)
-        if registry_env is None:
-            raise CliError("not_found", f"Environment {registry_id} is inaccessible or deleted")
         if normalize_environment_name(name) != registry_env.name:
             raise ValueError(
                 f"Code declares Environment('{name}') but --registry-id targets "
@@ -337,12 +335,6 @@ def _prepare_deploy_plan(
     linked = None
     if link.registry_id and registry_id is None:
         linked = get_registry_environment(platform, str(link.registry_id))
-        if linked is None:
-            raise CliError(
-                "not_found",
-                f"Linked environment {link.registry_id} is inaccessible or deleted.",
-                suggestion="Run 'hud sync env <id>' to relink this directory.",
-            )
     resolved_name = _resolve_environment_name(
         env_source,
         registry_id,

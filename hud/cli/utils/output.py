@@ -411,25 +411,6 @@ def _request_detail(exc: Any) -> str:
     return str(exc)
 
 
-def platform_call(
-    fn: Any,
-    *,
-    resource: str | None = None,
-    input: dict[str, Any] | None = None,
-) -> Any:
-    """Run a platform call and abort with a mapped CLI error on failure."""
-    from hud.utils.exceptions import HudException, HudRequestError
-
-    try:
-        return fn()
-    except HudRequestError as exc:
-        raise map_request_error(exc, resource=resource, input=input) from exc
-    except HudException as exc:
-        raise map_exception(exc, input=input) from exc
-    except Exception as exc:
-        raise CliError(error="failure", message=str(exc), input=input) from exc
-
-
 class UnknownTokenAsGetGroup(TyperGroup):
     """Dispatch an unknown first token to ``get`` so ``hud jobs <id>`` stays valid."""
 
@@ -457,7 +438,6 @@ __all__ = [
     "map_exception",
     "map_request_error",
     "output_option",
-    "platform_call",
     "quiet_option",
     "read_text_arg",
     "resolve_output_mode",

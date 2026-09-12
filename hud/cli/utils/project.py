@@ -49,10 +49,6 @@ class Project:
             else False,
         )
 
-    @property
-    def short_id(self) -> str:
-        return self.id[:8]
-
 
 @dataclass(frozen=True)
 class Placement:
@@ -76,9 +72,8 @@ class Placement:
 class ProjectNotFound(LookupError):
     """No visible Project matches the given reference."""
 
-    def __init__(self, ref: str, available: list[Project]) -> None:
+    def __init__(self, ref: str) -> None:
         self.ref = ref
-        self.available = available
         super().__init__(f"No project found matching '{ref}'")
 
 
@@ -129,7 +124,7 @@ def resolve_project(platform: PlatformClient, ref: str) -> Project:
     except HudRequestError as exc:
         if exc.status_code != 404:
             raise
-        raise ProjectNotFound(ref, []) from exc
+        raise ProjectNotFound(ref) from exc
 
 
 def resolve_placement(

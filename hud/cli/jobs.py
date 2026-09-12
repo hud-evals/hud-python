@@ -24,12 +24,13 @@ from hud.cli.utils.output import (
     emit_json,
     emit_quiet,
     json_option,
+    map_request_error,
     output_option,
-    platform_call,
     quiet_option,
     resolve_output_mode,
     yes_option,
 )
+from hud.utils.exceptions import HudRequestError
 
 console = Console()
 
@@ -59,10 +60,7 @@ def _list_jobs(*, json_output: bool, output: str | None, quiet: bool, limit: int
 
     require_api_key("list jobs")
     client = PlatformClient.from_settings()
-    data = platform_call(
-        lambda: client.get("/jobs", params={"limit": limit}),
-        resource="Jobs",
-    )
+    data = client.get("/jobs", params={"limit": limit})
     items = _items(data)
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
 
@@ -117,11 +115,10 @@ def _show_job_traces(
     require_api_key("list job traces")
     client = PlatformClient.from_settings()
     job_id = canonical_record_id(job_id)
-    data = platform_call(
-        lambda: client.get(f"/jobs/{job_id}/traces", params={"limit": limit}),
-        resource="Job",
-        input={"job_id": job_id},
-    )
+    try:
+        data = client.get(f"/jobs/{job_id}/traces", params={"limit": limit})
+    except HudRequestError as exc:
+        raise map_request_error(exc, resource="Job", input={"job_id": job_id}) from exc
     items = _items(data)
     mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
 

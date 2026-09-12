@@ -16,12 +16,11 @@ from hud.cli.utils.api import require_api_key
 from hud.cli.utils.config import AuthScope, DirectoryLink, DirectoryState
 from hud.cli.utils.output import (
     CliError,
-    ExitCode,
     confirm_or_abort,
     emit_json,
     is_interactive,
     json_option,
-    map_exception,
+    map_request_error,
     output_option,
     wants_json,
 )
@@ -34,11 +33,10 @@ from hud.cli.utils.registry import (
     RegistryEnvironment,
     get_registry_environment,
     list_registry_environments,
-    resolve_registry_environments,
 )
 from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
-from hud.utils.exceptions import HudException, HudRequestError
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -104,23 +102,19 @@ def _export_taskset(
     console: HUDConsole,
 ) -> None:
     console.progress_message("Fetching remote taskset...")
-    try:
-        remote_taskset = Taskset.from_api(target_ref)
-        if not remote_taskset:
-            console.warning("No tasks found in taskset")
-            return
-        out = Path(output_path)
-        if out.suffix.lower() == ".csv":
-            out.parent.mkdir(parents=True, exist_ok=True)
-            _write_csv(
-                out,
-                [task.model_dump(mode="json", exclude_none=True) for task in remote_taskset],
-            )
-        else:
-            out = remote_taskset.to_file(out)
-    except (HudException, ValueError) as e:
-        console.error(str(e))
-        raise typer.Exit(1) from e
+    remote_taskset = Taskset.from_api(target_ref)
+    if not remote_taskset:
+        console.warning("No tasks found in taskset")
+        return
+    out = Path(output_path)
+    if out.suffix.lower() == ".csv":
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _write_csv(
+            out,
+            [task.model_dump(mode="json", exclude_none=True) for task in remote_taskset],
+        )
+    else:
+        out = remote_taskset.to_file(out)
     console.success(f"Exported {len(remote_taskset)} tasks to {out}")
 
 
@@ -132,27 +126,19 @@ def _load_local_taskset(
     console: HUDConsole,
 ) -> Taskset:
     console.progress_message(f"Collecting tasks from {source}...")
-    try:
-        taskset = Taskset.from_file(source)
-    except (ImportError, FileNotFoundError, ValueError) as e:
-        console.error(str(e))
-        raise typer.Exit(1) from e
-
+    taskset = Taskset.from_file(source)
     if not taskset:
-        console.error(f"No Task objects found in: {source}")
-        raise typer.Exit(1)
+        raise ValueError(f"No Task objects found in: {source}")
     console.success(f"Found {len(taskset)} task(s)")
 
     if task_filter:
         taskset = taskset.filter([task_filter])
         if not taskset:
-            console.error(f"No task found with slug '{task_filter}'")
-            raise typer.Exit(1)
+            raise ValueError(f"No task found with slug '{task_filter}'")
     if exclude:
         taskset = taskset.exclude(exclude)
         if not taskset:
-            console.error("No tasks left after exclusions")
-            raise typer.Exit(1)
+            raise ValueError("No tasks left after exclusions")
     return taskset
 
 
@@ -162,18 +148,9 @@ def _warn_on_linked_environment_mismatch(
     console: HUDConsole,
     link: DirectoryLink,
 ) -> None:
-    stored_registry_id = str(link.registry_id) if link.registry_id else None
-    if not isinstance(stored_registry_id, str) or not stored_registry_id:
+    if link.registry_id is None:
         return
-
-    registry_env = get_registry_environment(platform, stored_registry_id)
-    if registry_env is None:
-        raise CliError(
-            "not_found",
-            f"Linked environment {stored_registry_id} is inaccessible or deleted.",
-            suggestion="Run 'hud sync env <id>' to relink this directory.",
-        )
-    platform_env_name = registry_env.name
+    platform_env_name = get_registry_environment(platform, str(link.registry_id)).name
 
     mismatched_names = taskset.environment_names() - {platform_env_name}
     if mismatched_names:
@@ -213,23 +190,6 @@ def _fetch_remote_taskset(
         input={"taskset": target_ref},
         suggestion="Pass a taskset name to create it, or use an existing id.",
     )
-
-
-def _show_upload_error(error: HudRequestError, console: HUDConsole) -> None:
-    detail = (error.response_json or {}).get("detail", "")
-    if error.status_code == 400 and isinstance(detail, str) and detail:
-        console.error("Upload rejected by platform:")
-        for detail_line in detail.split("\n"):
-            stripped = detail_line.strip()
-            if stripped:
-                console.error(f"  {stripped}")
-        if "not found" in detail.lower():
-            console.hint(
-                "Check that the environment is deployed and the task id matches "
-                "the environment manifest."
-            )
-        return
-    console.error(f"Upload failed ({error.status_code}): {detail or error}")
 
 
 def _save_taskset_id(result: dict[str, object], console: HUDConsole, state: DirectoryState) -> None:
@@ -407,9 +367,8 @@ def sync_tasks_command(
             project_id=placement.project_id,
             taskset_id=remote_taskset.taskset_id,
         )
-    except HudRequestError as e:
-        _show_upload_error(e, hud_console)
-        raise map_exception(e, input={"taskset": plan.taskset_name}) from e
+    except HudRequestError as exc:
+        raise map_request_error(exc, input={"taskset": plan.taskset_name}) from exc
 
     if link_target is True or (link.taskset_id is None and taskset_id is None and project is None):
         _save_taskset_id(result, hud_console, state)
@@ -480,79 +439,29 @@ def sync_env_command(
     existing_registry_id = str(link.registry_id) if link.registry_id else None
     selected_env: RegistryEnvironment | None = None
 
-    if not name:
-        if dry_run or not is_interactive():
-            raise CliError(
-                error="confirmation_required",
-                message="No environment name given in a non-interactive terminal.",
-                suggestion="Pass the environment name: hud sync env <name>",
-                exit_code=ExitCode.USAGE,
-            )
-        # Interactive: list environments and let user pick
+    if name is None:
         hud_console.info("Fetching your environments...")
-        try:
-            envs = list_registry_environments(platform)
-        except HudRequestError as e:
-            hud_console.error(f"Failed to fetch environments: {e.status_code or e}")
-            raise typer.Exit(1) from e
-
+        envs = list_registry_environments(platform)
         if not envs:
-            hud_console.warning("No environments found")
-            hud_console.info("Deploy an environment first with: hud deploy")
-            raise typer.Exit(1)
+            raise CliError("not_found", "No environments found. Deploy one with 'hud deploy'.")
 
         hud_console.info("\nYour environments:")
         for i, env in enumerate(envs, 1):
             marker = " (currently linked)" if env.id == existing_registry_id else ""
-            hud_console.info(f"  {i}. {env.name}{env.version_label} ({env.short_id}...){marker}")
+            hud_console.info(f"  {i}. {env.name}{env.version_label} ({env.id}){marker}")
 
-        hud_console.info("")
         try:
-            selection = input("Select environment number (or paste full name): ").strip()
-        except (EOFError, KeyboardInterrupt, OSError):
-            hud_console.info("\nAborted.")
+            name = input("Select environment number (or paste full ID): ").strip()
+        except (EOFError, KeyboardInterrupt):
             raise typer.Exit(0) from None
-
-        displayed = envs
-        try:
-            idx = int(selection) - 1
-            if 0 <= idx < len(displayed):
-                selected_env = displayed[idx]
-            else:
-                hud_console.error("Invalid selection")
-                raise typer.Exit(1)
-        except ValueError:
-            name = selection
+        if name.isdecimal():
+            index = int(name) - 1
+            if not 0 <= index < len(envs):
+                raise ValueError("Invalid selection")
+            selected_env = envs[index]
 
     if selected_env is None:
-        if not name:
-            hud_console.error("No environment selected")
-            raise typer.Exit(1)
-        # Resolve name to registry ID
-        hud_console.progress_message(f"Looking up '{name}'...")
-
-        try:
-            matching = resolve_registry_environments(platform, name)
-        except HudRequestError as e:
-            hud_console.error(f"Failed to search environments: {e.status_code or e}")
-            raise typer.Exit(1) from e
-
-        if not matching:
-            raise CliError(
-                error="not_found",
-                message=f"No environment found matching '{name}'",
-                input={"name": name},
-                suggestion="Run 'hud deploy' first, or pass an exact environment name.",
-            )
-
-        if len(matching) > 1:
-            hud_console.warning(f"Multiple environments match '{name}':")
-            for env_item in matching:
-                hud_console.info(f"  {env_item.name} ({env_item.short_id}...)")
-            hud_console.info("Pass the full ID with --id to disambiguate")
-            raise typer.Exit(1) from None
-
-        selected_env = matching[0]
+        selected_env = get_registry_environment(platform, name)
 
     if dry_run:
         if wants_json(json_output, output):

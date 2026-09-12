@@ -75,7 +75,11 @@ def test_scoped_links_do_not_cross_origins_users_teams_or_directories(tmp_path: 
     directory = tmp_path / "environment"
     state = DirectoryState(scope, directory)
     registry = UUID(int=10)
-    state.update(DirectoryLink(registry_id=registry))
+    assert state.update(DirectoryLink(registry_id=registry)) is True
+    config_path = get_config_dir() / "config.json"
+    before = config_path.stat().st_mtime_ns
+    assert state.update(DirectoryLink(registry_id=registry)) is False
+    assert config_path.stat().st_mtime_ns == before
     assert state.load().registry_id == registry
     assert DirectoryState(scope, tmp_path / "worktree").load().registry_id is None
     for field, value in [

@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from hud.cli.utils.output import CliError
 from hud.utils.exceptions import HudRequestError
 
 if TYPE_CHECKING:
@@ -46,15 +47,21 @@ class RegistryEnvironment:
 def get_registry_environment(
     platform: PlatformClient,
     registry_id: str,
-) -> RegistryEnvironment | None:
+) -> RegistryEnvironment:
+    try:
+        registry_id = str(uuid.UUID(registry_id))
+    except ValueError as exc:
+        raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
     try:
         data = platform.get(f"/registry/{registry_id}")
     except HudRequestError as e:
         if e.status_code == 404:
-            return None
+            raise CliError(
+                "not_found",
+                f"Environment {registry_id} is inaccessible or deleted.",
+                suggestion="Run 'hud sync env <id>' to link an accessible environment.",
+            ) from e
         raise
-    if not isinstance(data, dict):
-        return None
     return RegistryEnvironment.from_record(data)
 
 
@@ -78,16 +85,3 @@ def list_registry_environments(
             return environments
         if not page:
             raise ValueError("Registry API returned an empty page before the reported total")
-
-
-def resolve_registry_environments(
-    platform: PlatformClient,
-    ref: str,
-) -> list[RegistryEnvironment]:
-    """Validate a registry ID against the authenticated platform."""
-    try:
-        registry_id = str(uuid.UUID(ref))
-    except ValueError as exc:
-        raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
-    environment = get_registry_environment(platform, registry_id)
-    return [environment] if environment is not None else []

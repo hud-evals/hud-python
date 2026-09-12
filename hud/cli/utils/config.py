@@ -130,7 +130,7 @@ class DirectoryState:
                 return entry.link
         return DirectoryLink()
 
-    def update(self, changes: DirectoryLink) -> Path:
+    def update(self, changes: DirectoryLink) -> bool:
         with _config_lock():
             config = load_config()
             entry = next(
@@ -150,7 +150,10 @@ class DirectoryState:
             updates = changes.model_dump(exclude_unset=True)
             if "sync_env" in updates:
                 updates["sync_env"] = {**entry.link.sync_env, **changes.sync_env}
-            entry.link = DirectoryLink.model_validate({**values, **updates})
+            updated = DirectoryLink.model_validate({**values, **updates})
+            if updated == entry.link:
+                return False
+            entry.link = updated
             path = get_config_dir() / "config.json"
             descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-")
             try:
@@ -161,7 +164,7 @@ class DirectoryState:
                 os.replace(temporary, path)
             finally:
                 Path(temporary).unlink(missing_ok=True)
-            return path
+            return True
 
 
 def get_config_dir() -> Path:

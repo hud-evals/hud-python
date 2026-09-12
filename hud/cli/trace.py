@@ -19,10 +19,11 @@ from hud.cli.utils.output import (
     UnknownTokenAsGetGroup,
     emit_json,
     json_option,
+    map_request_error,
     output_option,
-    platform_call,
     wants_json,
 )
+from hud.utils.exceptions import HudRequestError
 
 console = Console()
 
@@ -196,11 +197,10 @@ def _load_remote(trace_id: str) -> list[dict[str, Any]]:
     from hud.utils.platform import PlatformClient
 
     client = PlatformClient.from_settings()
-    data = platform_call(
-        lambda: client.get(f"/trace/{trace_id}/events"),
-        resource="Trace",
-        input={"trace_id": trace_id},
-    )
+    try:
+        data = client.get(f"/trace/{trace_id}/events")
+    except HudRequestError as exc:
+        raise map_request_error(exc, resource="Trace", input={"trace_id": trace_id}) from exc
 
     if isinstance(data, dict):
         return data.get("events", [])
