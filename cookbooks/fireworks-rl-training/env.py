@@ -14,6 +14,9 @@ def grade_final_integer(answer: object, expected: int) -> EvaluationResult:
     """Grade an integer on the last nonempty line, allowing thousands separators."""
     text = (answer if isinstance(answer, str) else str(answer)).strip()
     final = text.splitlines()[-1].strip() if text else ""
+    final = (
+        re.sub(r"\\boxed\{\s*([^{}]+?)\s*\}", r"\1", final.rstrip(".")).strip("$*` \t").rstrip(".")
+    )
     got = (
         int(final.replace(",", ""))
         if re.fullmatch(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)", final)
