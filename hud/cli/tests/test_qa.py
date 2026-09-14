@@ -87,8 +87,8 @@ def test_qa_run_rejects_resource_agents() -> None:
 
     result = _invoke(platform, ["qa", "run", _AGENT_ID, _TRACE_ID, "--no-wait"])
 
-    assert result.exit_code == 1
-    assert "trace agents only" in result.output
+    assert result.exit_code == 2
+    assert "trace agents only" in f"{result.output}{getattr(result, 'stderr', '') or ''}"
     platform.post.assert_not_called()
 
 

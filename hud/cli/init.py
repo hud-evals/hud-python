@@ -11,6 +11,15 @@ from typing import Any
 import httpx
 import typer
 
+from hud.cli.utils.output import (
+    CliError,
+    ExitCode,
+    abort,
+    dry_run_option,
+    emit_json,
+    json_option,
+    wants_json,
+)
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 
@@ -57,6 +66,8 @@ def init_command(
     ),
     directory: str = typer.Option(".", "--dir", "-d", help="Parent directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
+    json_output: bool = json_option(),
+    dry_run: bool = dry_run_option(),
     preset: str | None = typer.Option(
         None,
         "--template",
@@ -80,12 +91,32 @@ def init_command(
     """
     hud_console = HUDConsole()
 
+    if dry_run is True and preset is None:
+        if name is None:
+            abort(
+                CliError(
+                    error="usage",
+                    message="Pass --template for a dry run without a name.",
+                    exit_code=ExitCode.USAGE,
+                )
+            )
+        preset = DEFAULT_PRESET_ID
     preset_id = _resolve_preset(preset, name, hud_console)
     chosen = ENVIRONMENT_PRESETS[preset_id]
     target = Path(directory) / (name if name is not None else preset_id)
     if target.exists() and any(target.iterdir()) and not force:
-        hud_console.error(f"{target} already exists and is not empty (use --force)")
-        raise typer.Exit(1)
+        abort(
+            CliError(
+                error="conflict", message=f"{target} already exists and is not empty (use --force)"
+            )
+        )
+
+    if dry_run is True:
+        if wants_json(json_output):
+            emit_json({"dry_run": True, "action": "init", "path": str(target), "preset": preset_id})
+        else:
+            hud_console.info(f"--dry-run: would create {target}")
+        return
 
     hud_console.header(f"HUD Init: {target.name}")
     hud_console.info(f"Preparing the {chosen.name} example from the HUD SDK …")
@@ -113,6 +144,16 @@ def init_command(
         hud_console.error(f"Failed to prepare example environment {preset_id!r}: {exc}")
         raise typer.Exit(1) from exc
     hud_console.status_item(f"environments/{preset_id}", "✓")
+
+    if wants_json(json_output):
+        emit_json(
+            {
+                "path": str(target),
+                "preset": preset_id,
+                "created": True,
+            }
+        )
+        return
 
     hud_console.section_title("Next Steps")
     hud_console.info("")

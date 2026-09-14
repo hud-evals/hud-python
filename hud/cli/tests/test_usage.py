@@ -31,6 +31,11 @@ class TestCommandTokens:
         assert usage._command_tokens(["hud", "trace", "8b1f2c3d4e5f"]) == ("trace", None)
         assert usage._command_tokens(["hud", "jobs", "0f9e8d7c"]) == ("jobs", None)
 
+    def test_jobs_verbs_are_captured(self) -> None:
+        assert usage._command_tokens(["hud", "jobs", "list"]) == ("jobs", "list")
+        assert usage._command_tokens(["hud", "jobs", "cancel"]) == ("jobs", "cancel")
+        assert usage._command_tokens(["hud", "trace", "get"]) == ("trace", "get")
+
     def test_unregistered_command_is_other(self) -> None:
         """A token that is not a registered command is never sent verbatim."""
         assert usage._command_tokens(["hud", "secret-name"]) == ("other", None)
