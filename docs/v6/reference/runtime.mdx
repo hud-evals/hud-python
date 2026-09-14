@@ -76,6 +76,7 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `compose` | `ComposeProject(document, root, service_access)`. Mutually exclusive with `image`. |
 | `resources` | Placement requests: CPU, memory, disk, acceptable GPU types and count, OS, or TPU slice. |
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
+| `data` | `RuntimeData(files, mount_path, mode)`: platform data files provided to the environment. HUD-hosted EC2 rollouts only. |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
 is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
@@ -95,6 +96,39 @@ than `rollout_timeout`; an agent timeout must also be less than the actor enviro
 `run_timeout_s`. Contradictory values fail before execution. When `rollout_timeout` is omitted, the
 SDK adds no overall deadline; configured phase limits and limits imposed by the selected runtime
 still apply.
+
+### Data files
+
+`RuntimeData` names platform data files, the ones uploaded on the HUD Data page, by id, and where
+the environment sees them. The hosted rollout box mounts them from the platform's storage and binds
+each file into the environment container, read-only, so the environment reads them as ordinary
+files and never sees other files in the team's store. Bytes are fetched only when read; nothing is
+copied ahead of time.
+
+```python
+from hud.eval import RuntimeConfig, RuntimeData, RuntimeDataFile
+
+RuntimeConfig(
+    data=RuntimeData(
+        files=[RuntimeDataFile(file_id="e9032002-01bb-4511-af4f-d18477f75dda", path="case_room/resume.pdf")],
+        mount_path="/data",
+    ),
+)
+```
+
+| Field | Description |
+|-------|-------------|
+| `files` | One or more `RuntimeDataFile(file_id, path)`. `path` is relative to `mount_path` and defaults to the stored filename; it may not contain `..`, and two entries may not share a path or an id. |
+| `mount_path` | Absolute directory inside the container, default `/data`. |
+| `mode` | `readonly` or `overlay`. Files are read-only today; `overlay` is reserved for folder-backed data. |
+
+The same `file_id` values appear in task arguments typed with `DataFileArg` and `DataFilesArg`; the
+difference is who fetches the bytes. A task argument hands the environment an id to download
+itself; `RuntimeData` has the platform mount the file before the environment starts. Declare it on
+the deployed environment (`hud deploy`), on synced tasks, or on a single `Task.runtime_config`; a
+later layer replaces the block whole. Submission fails with a 400 naming the id when a file does
+not exist, is not `ready`, or is not readable by the submitter, and when the hosted environment does
+not run on EC2. Local, Docker, Modal, and Daytona runtimes do not support `data`.
 
 When the SDK owns the environment process, its output is part of the local eval:
 `SubprocessRuntime`, Docker image and Compose runtimes, Modal image and Compose sandboxes,

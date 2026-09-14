@@ -7,7 +7,7 @@ import contextlib
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -80,6 +80,40 @@ class RuntimeLimits(BaseModel):
     run_timeout_s: int | None = Field(default=None, gt=0)
 
 
+class RuntimeDataFile(BaseModel):
+    """A platform data file to provide to the environment.
+
+    Same wire shape as ``hud.environment.DataFileRef`` (``file_id`` plus an
+    optional destination ``path``), kept separate so the runtime module does
+    not import the environment package.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str = Field(min_length=1, description="HUD data-file id")
+    path: str | None = Field(
+        default=None,
+        description="Path under mount_path; defaults to the filename",
+    )
+
+
+class RuntimeData(BaseModel):
+    """Platform data files the hosted rollout box provides to the environment.
+
+    The files appear under ``mount_path`` read-only beneath a writable overlay
+    (``mode: overlay``) or read-only alone (``mode: readonly``). The platform
+    resolves ids to storage when it provisions the box; environments never
+    name buckets. Size the writable layer with ``resources.storage_mb``. EC2
+    rollouts only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[RuntimeDataFile] = Field(min_length=1)
+    mount_path: str = "/data"
+    mode: Literal["overlay", "readonly"] = "overlay"
+
+
 class RuntimeConfig(BaseModel):
     """Typed task-environment launch requirements.
 
@@ -96,11 +130,12 @@ class RuntimeConfig(BaseModel):
     compose: ComposeProject | None = None
     resources: RuntimeResources | None = None
     limits: RuntimeLimits | None = None
+    data: RuntimeData | None = None
 
-    @field_serializer("resources", "limits", when_used="json")
+    @field_serializer("resources", "limits", "data", when_used="json")
     def _serialize_options(
         self,
-        value: RuntimeResources | RuntimeLimits | None,
+        value: RuntimeResources | RuntimeLimits | RuntimeData | None,
         info: SerializationInfo,
     ) -> dict[str, Any] | None:
         if value is None:
