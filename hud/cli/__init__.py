@@ -8,25 +8,6 @@ import typer
 from rich.console import Console
 
 from hud.cli.io import CliError, CLIGroup, json_option, report
-from hud.settings import settings
-
-
-def require_api_key(action: str = "perform this action") -> str:
-    """Return the HUD API key, or raise if none is configured."""
-    api_key = settings.api_key
-    if not api_key:
-        raise CliError(
-            error="permission_denied",
-            message="No HUD API key found",
-            input={"action": action},
-            suggestion=(
-                f"A HUD API key is required to {action}. "
-                "Run 'hud set HUD_API_KEY=your-key-here'. "
-                f"Get a key at: {settings.hud_web_url}/settings"
-            ),
-        )
-    return api_key
-
 
 app = typer.Typer(
     name="hud",

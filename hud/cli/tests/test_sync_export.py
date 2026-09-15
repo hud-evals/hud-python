@@ -40,7 +40,6 @@ def test_sync_env_noninteractive_requires_name(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(sync_module, "require_api_key", lambda _: None)
     monkeypatch.setattr(sync_module.PlatformClient, "from_settings", lambda: object())
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 

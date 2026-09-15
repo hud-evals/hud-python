@@ -86,3 +86,15 @@ def test_from_settings_prepends_canonical_version(monkeypatch: pytest.MonkeyPatc
 
     platform = PlatformClient.from_settings()
     assert platform.url("/tasks/upload") == "https://api.example/v2/tasks/upload"
+
+
+@pytest.mark.parametrize("api_key", [None, ""])
+def test_from_settings_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch, api_key: str | None
+) -> None:
+    from hud import settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "api_key", api_key)
+
+    with pytest.raises(HudAuthenticationError, match="HUD_API_KEY is required"):
+        PlatformClient.from_settings()

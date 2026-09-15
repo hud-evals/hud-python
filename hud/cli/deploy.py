@@ -25,7 +25,6 @@ from rich.panel import Panel
 from rich.table import Table
 from websockets.exceptions import ConnectionClosed
 
-from hud.cli import require_api_key
 from hud.cli.config import (
     AuthScope,
     DirectoryLink,
@@ -1170,7 +1169,7 @@ def deploy_environment(
     console = HUDConsole()
     env_source = EnvironmentSource.open(directory)
     env_dir = env_source.root
-    require_api_key("deploy environments")
+    platform = PlatformClient.from_settings()
     if _compose_recipe(env_dir) is None and env_source.dockerfile is None:
         raise CliError(
             "failure",
@@ -1179,7 +1178,6 @@ def deploy_environment(
             suggestion="Run 'hud init' to create a template.",
         )
     _validate_before_deploy(env_source, console)
-    platform = PlatformClient.from_settings()
     plan = _prepare_deploy_plan(
         env_source,
         env_dir=env_dir,

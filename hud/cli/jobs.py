@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli import require_api_key
 from hud.cli.groups import ImplicitGetGroup
 from hud.cli.io import (
     json_option,
@@ -110,7 +109,6 @@ def _render_job_traces(job_id: str, items: list[Any], *, web: str) -> None:
 def _list_jobs(*, json_output: bool, quiet: bool, limit: int) -> None:
     from hud.utils.platform import PlatformClient
 
-    require_api_key("list jobs")
     client = PlatformClient.from_settings()
     data = client.get("/jobs", params={"limit": limit})
     items = _items(data)
@@ -133,7 +131,6 @@ def _show_job_traces(
     from hud.settings import settings
     from hud.utils.platform import PlatformClient, canonical_record_id
 
-    require_api_key("list job traces")
     client = PlatformClient.from_settings()
     job_id = canonical_record_id(job_id)
     try:

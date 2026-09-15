@@ -372,22 +372,17 @@ class TestRuntimeConfigFile:
 class TestDeployEnvironment:
     """Tests for deploy_environment function."""
 
-    def test_no_api_key_error(self, tmp_path: Path) -> None:
+    def test_no_api_key_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test error when no API key is set."""
         from hud.cli.deploy import deploy_environment
+        from hud.settings import settings
+        from hud.utils.exceptions import HudAuthenticationError
 
-        # Create a Dockerfile
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
+        monkeypatch.setattr(settings, "api_key", None)
 
-        with (
-            patch("hud.cli.settings") as mock_settings,
-            pytest.raises(CliError) as exc_info,
-        ):
-            mock_settings.api_key = None
-
+        with pytest.raises(HudAuthenticationError):
             deploy_environment(directory=str(tmp_path))
-
-        assert exc_info.value.exit_code == 1
 
     def test_compose_recipe_does_not_require_a_dockerfile(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _compose_recipe
@@ -421,7 +416,7 @@ class TestDeployEnvironment:
         from hud.cli.deploy import deploy_environment
 
         with (
-            patch("hud.cli.deploy.require_api_key", return_value="test-key"),
+            patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
             pytest.raises(CliError) as exc_info,
         ):
             deploy_environment(directory=str(tmp_path))
@@ -435,7 +430,7 @@ class TestDeployEnvironment:
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
 
         with (
-            patch("hud.cli.deploy.require_api_key", return_value="test-key"),
+            patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
             patch("hud.cli.deploy._validate_environment") as mock_validate,
             pytest.raises(ValueError) as exc_info,
         ):

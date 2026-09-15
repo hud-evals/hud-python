@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
-from hud.cli import require_api_key
 from hud.cli.config import parse_key_value
 from hud.cli.io import CliError, confirm_or_abort, json_option, read_text_arg, report
 from hud.cli.source import environment_file
@@ -31,7 +30,7 @@ from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.hud_console import HUDConsole
-from hud.utils.platform import canonical_record_id
+from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -279,7 +278,7 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         if self.remote or self.runtime == "hud" or self.gateway:
-            require_api_key("run evaluations through HUD")
+            PlatformClient.from_settings()
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             config_model = self.agent_config.get("openai_compatible", {}).get("model")
             if not self.model and not config_model:
@@ -588,7 +587,6 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
     from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime
 
     if cfg.remote:
-        require_api_key("run remote hosted evals")
         return HostedRuntime()
     if cfg.runtime == "local":
         if source_path is None:
@@ -605,7 +603,6 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
 
         return local
     if cfg.runtime == "hud":
-        require_api_key("run HUD runtime tunnel evals")
         return HUDRuntime()
     if cfg.runtime is not None and cfg.runtime.startswith("tcp://"):
         return Runtime(cfg.runtime)

@@ -141,7 +141,6 @@ def test_jobs_list_json_and_quiet() -> None:
         ]
     }
     with (
-        patch("hud.cli.jobs.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
         json_result = runner.invoke(app, ["jobs", "list", "--json"])
@@ -160,7 +159,6 @@ def test_jobs_get_not_found_exit_code() -> None:
     client = MagicMock()
     client.get.side_effect = HudRequestError("missing", status_code=404)
     with (
-        patch("hud.cli.jobs.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
         result = runner.invoke(
@@ -178,7 +176,6 @@ def test_legacy_jobs_id_still_lists_traces() -> None:
     client = MagicMock()
     client.get.return_value = {"items": [{"id": "tr-1", "status": "done", "reward": 1.0}]}
     with (
-        patch("hud.cli.jobs.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
         result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-000000000099", "--json"])
@@ -232,7 +229,6 @@ def test_trace_get_help_and_alias() -> None:
 
     with (
         patch("hud.cli.trace._load_remote", return_value=[{"kind": "agent_message", "text": "hi"}]),
-        patch("hud.cli.trace.require_api_key", return_value="key"),
         patch("hud.settings.settings.telemetry_local_dir", None),
     ):
         result = runner.invoke(app, ["trace", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"])
@@ -349,7 +345,6 @@ def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
         )
 
     with (
-        patch("hud.cli.deploy.require_api_key", return_value="key"),
         patch("hud.cli.deploy._validate_before_deploy"),
         patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
         patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
@@ -408,7 +403,6 @@ def test_deploy_all_json_includes_failed_env_details(tmp_path: Any) -> None:
         return path
 
     with (
-        patch("hud.cli.deploy.require_api_key", return_value="key"),
         patch("hud.cli.deploy._validate_before_deploy"),
         patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
         patch("hud.cli.deploy._create_tarball", side_effect=_tarball),
@@ -449,4 +443,4 @@ def test_deploy_all_json_missing_api_key_is_single_document(
         assert item["success"] is False
         assert item["error"] == "permission_denied"
         assert "message" in item
-    assert "No HUD API key found" in (result.stderr or result.output)
+    assert "HUD_API_KEY is required" in (result.stderr or result.output)

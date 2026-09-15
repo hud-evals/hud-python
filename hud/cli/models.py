@@ -10,7 +10,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli import require_api_key
 from hud.cli.io import (
     json_option,
     map_request_error,
@@ -103,8 +102,6 @@ def list_models(
     """
     from hud.utils.gateway import list_gateway_models
 
-    require_api_key("list models")
-
     rows = [
         model.model_dump()
         for model in sorted(list_gateway_models(), key=lambda m: (m.name or m.id or "").lower())
@@ -149,8 +146,6 @@ def fork_model(
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
     from hud.utils.exceptions import HudRequestError
-
-    require_api_key("fork a model")
 
     if dry_run:
         payload = {
@@ -227,7 +222,6 @@ def list_checkpoints(
         hud models checkpoints <model> --json
         hud models checkpoints <model> --quiet[/not dim]
     """
-    require_api_key("list checkpoints")
     model_id = _resolve_model_id(model)
     checkpoints = sorted(_get_checkpoints(model_id), key=lambda c: c.get("created_at") or "")
 
@@ -286,7 +280,6 @@ def show_head(
         hud models head <model> --json
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
-    require_api_key("manage head")
     model_id = _resolve_model_id(model)
 
     if set_to is not None:

@@ -9,7 +9,6 @@ from typing import Any
 
 import typer
 
-from hud.cli import require_api_key
 from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
 from hud.cli.io import (
     json_option,
@@ -173,7 +172,6 @@ def list_command(
     ),
 ) -> None:
     """List all visible Projects and their canonical IDs."""
-    require_api_key("list projects")
     rows = [asdict(project) for project in list_projects(PlatformClient.from_settings())]
 
     def _render(projects: list[dict[str, Any]]) -> None:
@@ -207,7 +205,6 @@ def create_command(
     ),
 ) -> None:
     """Create a Project and link this directory unless --no-use is passed."""
-    require_api_key("create a project")
     platform = PlatformClient.from_settings()
     payload = {"name": name}
     if description:
@@ -251,7 +248,6 @@ def use_command(
     ),
 ) -> None:
     """Link a directory to a Project in .hud/config.json for this account and team."""
-    require_api_key("select a project")
     platform = PlatformClient.from_settings()
     state = DirectoryState(
         AuthScope.resolve(platform), directory or ctx.meta["hud_project_directory"]
@@ -281,7 +277,6 @@ def project_callback(
     ctx.meta["hud_project_directory"] = directory
     if ctx.invoked_subcommand is not None:
         return
-    require_api_key("resolve the current project")
     platform = PlatformClient.from_settings()
     platform.get("/projects", params={"limit": 1})
     state = DirectoryState(AuthScope.resolve(platform), directory)

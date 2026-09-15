@@ -64,7 +64,6 @@ def _run_sync(
     local = Taskset("demo", [task])
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sync_module, "require_api_key", lambda _: None)
     monkeypatch.setattr(
         sync_module.PlatformClient,
         "from_settings",
@@ -115,7 +114,6 @@ def test_project_override_does_not_pin_directory(
     local = Taskset("demo", [task])
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sync_module, "require_api_key", lambda _: None)
     monkeypatch.setattr(
         sync_module.PlatformClient,
         "from_settings",

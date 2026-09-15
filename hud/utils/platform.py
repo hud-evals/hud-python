@@ -12,6 +12,8 @@ from typing import Any
 from urllib.parse import urlencode
 from uuid import UUID
 
+from hud.settings import settings
+from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.requests import make_request, make_request_sync
 
 
@@ -39,9 +41,10 @@ class PlatformClient:
 
     @classmethod
     def from_settings(cls) -> PlatformClient:
-        from hud.settings import settings
-
-        return cls(settings.hud_api_url, settings.api_key or "")
+        api_key = settings.api_key
+        if not api_key:
+            raise HudAuthenticationError("HUD_API_KEY is required")
+        return cls(settings.hud_api_url, api_key)
 
     @property
     def base_url(self) -> str:

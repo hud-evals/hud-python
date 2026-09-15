@@ -56,7 +56,6 @@ def _result(verdict: str = "passed") -> dict[str, object]:
 
 def _invoke(platform: MagicMock, args: list[str]):
     with (
-        patch("hud.cli.qa.require_api_key", return_value="api-key"),
         patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform),
     ):
         return runner.invoke(app, args)

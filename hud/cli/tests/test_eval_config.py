@@ -11,7 +11,7 @@ import pytest
 
 from hud.cli import eval as eval_mod
 from hud.cli.eval import EvalConfig, _is_bedrock_arn
-from hud.cli.io import CliError
+from hud.utils.exceptions import HudAuthenticationError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -95,7 +95,7 @@ def test_validate_api_keys_remote_requires_hud_key(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(settings, "api_key", None)
     cfg = EvalConfig(agent_type="gemini", remote=True)
-    with pytest.raises(CliError):
+    with pytest.raises(HudAuthenticationError):
         cfg.validate_api_keys()
 
 
@@ -104,7 +104,7 @@ def test_validate_api_keys_hud_runtime_requires_hud_key(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(settings, "api_key", None)
     cfg = EvalConfig(agent_type="gemini", runtime="hud")
-    with pytest.raises(CliError):
+    with pytest.raises(HudAuthenticationError):
         cfg.validate_api_keys()
 
 

@@ -10,7 +10,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from hud.cli import require_api_key
 from hud.cli.io import (
     CliError,
     json_option,
@@ -41,7 +40,6 @@ qa_app = typer.Typer(
 
 
 def _platform() -> PlatformClient:
-    require_api_key("use platform QA agents")
     return PlatformClient.from_settings()
 
 

@@ -14,7 +14,6 @@ from uuid import UUID
 import typer
 from typer.core import TyperGroup
 
-from hud.cli import require_api_key
 from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
 from hud.cli.io import (
     CliError,
@@ -347,8 +346,6 @@ def sync_tasks_command(
     hud_console = HUDConsole()
     hud_console.header("Sync Tasks", icon="")
 
-    require_api_key("sync tasks")
-
     platform = PlatformClient.from_settings()
 
     state = DirectoryState(AuthScope.resolve(platform))
@@ -493,8 +490,6 @@ def sync_env_command(
     """
     hud_console = HUDConsole()
     hud_console.header("Sync Environment", icon="")
-
-    require_api_key("sync environments")
 
     if name is None and (dry_run is True or not sys.stdin.isatty()):
         raise CliError(

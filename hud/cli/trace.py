@@ -15,7 +15,6 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
-from hud.cli import require_api_key
 from hud.cli.groups import ImplicitGetGroup
 from hud.cli.io import (
     json_option,
@@ -61,7 +60,6 @@ def _show_trace(
             source = f"local ({path})"
 
     if events is None:
-        require_api_key("fetch trace")
         events = _load_remote(trace_id)
 
     def _render(rows: list[dict[str, Any]]) -> None:
