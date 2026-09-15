@@ -563,51 +563,16 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
-def environment_file(env: Any) -> Path:
-    """The ``.py`` file that defined this live env's templates.
-
-    ``Taskset.from_file`` already imported that module; the bound
-    ``task._env`` is the same object ``Taskset.run()`` uses when no
-    ``runtime=`` is passed. The CLI still serves it in a child process.
-    """
-    files = {
-        Path(factory.func.__code__.co_filename).resolve()
-        for factory in env.tasks.values()
-        if getattr(getattr(factory, "func", None), "__code__", None) is not None
-    }
-    if len(files) != 1:
-        raise ValueError(
-            "local spawn needs a bound Environment from a Python source "
-            "(``@env.template`` rows). Portable JSON rows require --remote, "
-            "--runtime hud, or a tcp:// url"
-        )
-    return files.pop()
-
-
-def _local_subprocess(task: Any) -> Any:
-    """Serve the Environment bound on ``task`` (``SubprocessRuntime``)."""
-    from hud.eval import SubprocessRuntime
-
-    env = task._env
-    if env is None:
-        raise ValueError(
-            "no placement: these rows have no bound Environment. "
-            "Pass a Python tasks/env module, or use --remote / --runtime hud / a tcp:// url."
-        )
-    return SubprocessRuntime(environment_file(env))(task)
-
-
 def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
-    "local" uses the Environment already bound on each row (the same
-    inference ``Taskset.run()`` does): container rows get ``DockerRuntime``,
-    otherwise that env's defining file is served in a subprocess;
-    "hud" opens the HUD runtime tunnel while keeping the agent loop local;
-    ``--remote`` submits every rollout for platform-hosted execution; a
-    ``tcp://`` url attaches to an env served elsewhere.
+    "local" spawns each row's own substrate: container rows get
+    ``DockerRuntime``, rows bound to a live Environment serve its source in a
+    subprocess; "hud" opens the HUD runtime tunnel while keeping the agent
+    loop local; ``--remote`` submits every rollout for platform-hosted
+    execution; a ``tcp://`` url attaches to an env served elsewhere.
     """
-    from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime
+    from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime
 
     if cfg.remote:
         return HostedRuntime()
@@ -618,11 +583,14 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
 
         def local(task: Any) -> Any:
             config = task.runtime_config
-            return (
-                docker(task)
-                if config is not None and (config.image is not None or config.compose is not None)
-                else _local_subprocess(task)
-            )
+            if config is not None and (config.image is not None or config.compose is not None):
+                return docker(task)
+            if task._env is None:
+                raise ValueError(
+                    "no placement: these rows have no bound Environment. Pass a Python "
+                    "tasks/env module, or use --remote / --runtime hud / a tcp:// url."
+                )
+            return SubprocessRuntime(task._env)(task)
 
         return local
     if cfg.runtime == "hud":

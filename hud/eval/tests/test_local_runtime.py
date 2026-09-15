@@ -112,6 +112,32 @@ async def test_subprocess_runtime_streams_environment_output(
     assert "environment warning" in captured.err
 
 
+def test_subprocess_runtime_serves_a_live_env_from_its_template_file(tmp_path, request) -> None:
+    module_name = f"sums_env_{request.node.name}"
+    env_py = tmp_path / f"{module_name}.py"
+    env_py.write_text(_SUMS_ENV.format(name="sums"), encoding="utf-8")
+    tasks_py = tmp_path / "tasks.py"
+    tasks_py.write_text(f"from {module_name} import add\n\ntasks = [add(a=2, b=3)]\n")
+    request.addfinalizer(lambda: sys.modules.pop(module_name, None))
+
+    task = next(iter(Taskset.from_module(tasks_py)))
+    assert task._env is not None
+    provider = SubprocessRuntime(task._env)
+
+    assert provider.source == env_py.resolve()
+    assert provider.env == "sums"
+
+
+def test_subprocess_runtime_rejects_env_without_templates() -> None:
+    with pytest.raises(ValueError, match="exactly one source file"):
+        SubprocessRuntime(Environment("demo"))
+
+
+def test_subprocess_runtime_rejects_env_pin_for_live_env() -> None:
+    with pytest.raises(TypeError, match="env= applies only to source paths"):
+        SubprocessRuntime(_sums_env(), env="sums")
+
+
 async def test_subprocess_runtime_fails_when_stdout_closes_before_serving(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

@@ -12,7 +12,6 @@ from hud.cli.eval import (
     EvalConfig,
     _build_agent,
     _is_bedrock_arn,
-    environment_file,
     find_tasks_file,
 )
 from hud.types import AgentType
@@ -320,13 +319,6 @@ def test_display_renders() -> None:
     EvalConfig(agent_type="openai", model="gpt").display()
 
 
-def test_local_subprocess_rejects_portable_rows() -> None:
-    from hud.eval import Task
-
-    with pytest.raises(ValueError, match="no bound Environment"):
-        eval_mod._local_subprocess(Task(env="demo", id="solve"))
-
-
 def test_eval_max_steps_lands_in_agent_config() -> None:
     cfg = EvalConfig(
         source="tasks.py",
@@ -554,59 +546,3 @@ class TestBedrockAutoDetection:
             pytest.raises(HudAuthenticationError),
         ):
             _build_agent(cfg)
-
-
-def _write(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-
-
-def test_environment_file_is_the_template_definition(tmp_path: Path) -> None:
-    from hud.eval import Taskset
-
-    env_py = tmp_path / "env.py"
-    _write(
-        env_py,
-        "from hud import Environment\n"
-        'env = Environment("demo")\n'
-        "@env.template(id='solve')\n"
-        "async def solve():\n"
-        '    yield "prompt"\n'
-        "    yield 1.0\n"
-        "task = solve()\n",
-    )
-    task = next(iter(Taskset.from_file(env_py)))
-    assert environment_file(task._env) == env_py.resolve()
-
-
-def test_environment_file_follows_split_tasks_import(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sys
-
-    from hud.eval import Taskset
-
-    monkeypatch.delitem(sys.modules, "env", raising=False)
-    env_py = tmp_path / "env.py"
-    _write(
-        env_py,
-        "from hud import Environment\n"
-        'env = Environment("demo")\n'
-        "@env.template(id='solve')\n"
-        "async def solve():\n"
-        '    yield "prompt"\n'
-        "    yield 1.0\n",
-    )
-    tasks_py = tmp_path / "tasks.py"
-    _write(tasks_py, "from env import solve\n\ntask = solve()\n")
-    try:
-        task = next(iter(Taskset.from_file(tasks_py)))
-        assert environment_file(task._env) == env_py.resolve()
-    finally:
-        sys.modules.pop("env", None)
-
-
-def test_environment_file_rejects_env_without_templates() -> None:
-    from hud.environment import Environment
-
-    with pytest.raises(ValueError, match="bound Environment"):
-        environment_file(Environment("demo"))

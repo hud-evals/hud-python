@@ -24,7 +24,6 @@ from hud.cli.app import (
     CLI,
     CliError,
 )
-from hud.cli.eval import environment_file
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -138,7 +137,7 @@ def _resolve(
             env = selected._env
             if env is None:
                 raise ValueError("These rows have no bound Environment.")
-            placement = SubprocessRuntime(environment_file(env))(selected)
+            placement = SubprocessRuntime(env)(selected)
         except ValueError as exc:
             raise CliError(
                 error="usage",
