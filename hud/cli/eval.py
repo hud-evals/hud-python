@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 hud_console = HUDConsole()
 
 _CONFIG_PATH = Path(".hud_eval.toml")
-_PLACEMENTS = ("local", "hud", "remote")
+_PLACEMENTS = ("local", "hud", "hosted")
 _SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
@@ -160,9 +160,9 @@ class EvalConfig(BaseModel):
     gateway: bool = False
     #: Placement: ``local`` (spawn each row's env — Docker for container rows,
     #: a subprocess serving the bound env's source otherwise), ``hud`` (runtime
-    #: tunnel, agent loop here), ``remote`` (whole rollout on the platform), or
+    #: tunnel, agent loop here), ``hosted`` (whole rollout on the platform), or
     #: a ``tcp://`` url of an already-served env. ``None`` infers from the
-    #: source: a file on disk runs locally, a platform taskset remotely.
+    #: source: a file on disk runs locally, a platform taskset hosted.
     runtime: str | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
@@ -171,7 +171,7 @@ class EvalConfig(BaseModel):
     def _known_placement(cls, value: str | None) -> str | None:
         if value is None or value in _PLACEMENTS or value.startswith("tcp://"):
             return value
-        raise ValueError(f"Unknown runtime {value!r}. Use local, hud, remote, or a tcp:// url.")
+        raise ValueError(f"Unknown runtime {value!r}. Use local, hud, hosted, or a tcp:// url.")
 
     @classmethod
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
@@ -199,9 +199,9 @@ class EvalConfig(BaseModel):
         return self.source is not None and Path(self.source).exists()
 
     def with_placement(self) -> EvalConfig:
-        """Pin ``runtime``: a local file spawns locally, a platform taskset runs remotely."""
+        """Pin ``runtime``: a local file spawns locally, a platform taskset runs hosted."""
         if self.runtime is None:
-            return self.model_copy(update={"runtime": "local" if self.source_is_file else "remote"})
+            return self.model_copy(update={"runtime": "local" if self.source_is_file else "hosted"})
         if self.runtime == "local" and not self.source_is_file:
             raise ValueError(
                 f"--runtime local needs a local env source, but {self.source!r} is a "
@@ -213,7 +213,7 @@ class EvalConfig(BaseModel):
         return self
 
     def require_credentials(self) -> None:
-        if self.gateway or self.runtime in ("hud", "remote"):
+        if self.gateway or self.runtime in ("hud", "hosted"):
             PlatformClient.from_settings()
         if (
             self.agent_type == AgentType.OPENAI_COMPATIBLE
@@ -278,7 +278,7 @@ def _build_agent(cfg: EvalConfig) -> Agent:
     assert cfg.agent_type is not None
     config = cfg.agent_type.config_cls(**cfg.agent_kwargs())
     if (
-        cfg.runtime != "remote"
+        cfg.runtime != "hosted"
         and config.model_client is None
         and cfg.agent_type != AgentType.OPENAI_COMPATIBLE
     ):
@@ -309,7 +309,7 @@ def _local_placement() -> Provider:
 
 def _placement(cfg: EvalConfig) -> Provider | HostedRuntime:
     match cfg.runtime:
-        case "remote":
+        case "hosted":
             return HostedRuntime()
         case "hud":
             return HUDRuntime()
@@ -461,13 +461,13 @@ def eval_command(
     runtime: str | None = typer.Option(
         None,
         "--runtime",
-        help="Placement: local, hud (runtime tunnel), or a tcp:// url. "
-        "Default: local for a tasks file; remote for a platform taskset.",
+        help="Placement: local, hud (runtime tunnel), hosted (whole rollout on the platform), "
+        "or a tcp:// url. Default: local for a tasks file; hosted for a platform taskset.",
     ),
     remote: bool = typer.Option(
         False,
         "--remote",
-        help="Run the whole rollout remotely on the HUD platform",
+        help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
 ) -> dict[str, Any]:
     """Run evaluation on datasets or individual tasks with agents.
@@ -496,7 +496,7 @@ def eval_command(
             "max_concurrent": max_concurrent,
             "max_steps": max_steps,
             "group_size": group_size,
-            "runtime": "remote" if remote else runtime,
+            "runtime": "hosted" if remote else runtime,
         }.items()
         if value is not None
     }
@@ -544,7 +544,7 @@ def eval_command(
             "agent": agent_type.value,
             "model": cfg.model,
             "runtime": cfg.runtime,
-            "remote": cfg.runtime == "remote",
+            "remote": cfg.runtime == "hosted",
             "all": cfg.all,
             "max_steps": cfg.max_steps,
             "max_concurrent": cfg.max_concurrent,

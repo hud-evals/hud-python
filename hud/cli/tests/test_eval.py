@@ -99,14 +99,14 @@ def test_load_missing_returns_defaults_without_writing(tmp_path: Path) -> None:
 def test_load_parses_eval_and_agent_sections(tmp_path: Path) -> None:
     path = tmp_path / ".hud_eval.toml"
     path.write_text(
-        '[eval]\nagent = "openai"\nmax_steps = 5\nruntime = "remote"\n\n'
+        '[eval]\nagent = "openai"\nmax_steps = 5\nruntime = "hosted"\n\n'
         '[openai]\nmodel = "gpt-4o"\n',
         encoding="utf-8",
     )
     cfg = EvalConfig.load(path)
     assert cfg.agent_type is not None and cfg.agent_type.value == "openai"
     assert cfg.max_steps == 5
-    assert cfg.runtime == "remote"
+    assert cfg.runtime == "hosted"
     assert cfg.agent_config == {"openai": {"model": "gpt-4o"}}
 
 
@@ -147,13 +147,13 @@ def test_placement_defaults_from_source(tmp_path: Path) -> None:
     tasks = tmp_path / "tasks.json"
     tasks.write_text("[]", encoding="utf-8")
     assert EvalConfig(source=str(tasks)).with_placement().runtime == "local"
-    assert EvalConfig(source="My Tasks").with_placement().runtime == "remote"
+    assert EvalConfig(source="My Tasks").with_placement().runtime == "hosted"
     assert EvalConfig(source="My Tasks", runtime="hud").with_placement().runtime == "hud"
     with pytest.raises(ValueError, match="platform taskset with no env source"):
         EvalConfig(source="My Tasks", runtime="local").with_placement()
 
 
-@pytest.mark.parametrize("fields", [{"runtime": "hud"}, {"runtime": "remote"}, {"gateway": True}])
+@pytest.mark.parametrize("fields", [{"runtime": "hud"}, {"runtime": "hosted"}, {"gateway": True}])
 def test_platform_features_require_hud_key(
     monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any]
 ) -> None:
@@ -319,6 +319,8 @@ def test_explicit_placements(eval_cli: _EvalCli) -> None:
     eval_cli.invoke("tasks.py", "openai", "--runtime", "hud", "--yes")
     assert isinstance(eval_cli.kwargs["runtime"], HUDRuntime)
     eval_cli.invoke("tasks.py", "openai", "--remote", "--yes")
+    assert isinstance(eval_cli.kwargs["runtime"], HostedRuntime)
+    eval_cli.invoke("tasks.py", "openai", "--runtime", "hosted", "--yes")
     assert isinstance(eval_cli.kwargs["runtime"], HostedRuntime)
     eval_cli.invoke("tasks.py", "openai", "--runtime", "tcp://127.0.0.1:7000", "--yes")
     assert eval_cli.kwargs["runtime"] == Runtime("tcp://127.0.0.1:7000")
