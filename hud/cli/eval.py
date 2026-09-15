@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import time
 import tomllib
 from collections import defaultdict
@@ -30,23 +29,17 @@ from hud.cli.app import (
 )
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.gateway import build_model_client, normalize_gateway_model_id
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from hud.agents.base import Agent
     from hud.eval.run import Run
 
-_BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
 _SUCCESS_THRESHOLD = 0.7
-
-
-def _is_bedrock_arn(model: str | None) -> bool:
-    """Check if a model string is a Bedrock inference profile ARN."""
-    return model is not None and bool(_BEDROCK_ARN_PATTERN.match(model))
-
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
@@ -83,18 +76,6 @@ def _resolve_env_vars(obj: Any) -> Any:
     return substitute(obj)
 
 
-def _require_bedrock_credentials() -> None:
-    missing_aws = (
-        not settings.aws_access_key_id
-        or not settings.aws_secret_access_key
-        or not settings.aws_region
-    )
-    if missing_aws:
-        raise HudAuthenticationError(
-            "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION are required for AWS Bedrock"
-        )
-
-
 @dataclass(frozen=True)
 class AgentPreset:
     """A preset agent configuration combining agent type, model, and optional config."""
@@ -115,30 +96,25 @@ _AGENT_PRESETS: list[AgentPreset] = [
         "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
         "grok-4-1-fast",
-        {
-            "openai_compatible": {
-                "base_url": settings.hud_gateway_url,
-                "model_name": "Grok 4-1 Fast",
-            }
-        },
+        {"openai_compatible": {"model_name": "Grok 4-1 Fast"}},
     ),
     AgentPreset(
         "GLM 5.2 (Z.ai)",
         AgentType.OPENAI_COMPATIBLE,
         "z-ai/glm-5.2",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM 5.2"}},
+        {"openai_compatible": {"model_name": "GLM 5.2"}},
     ),
     AgentPreset(
         "Kimi K2.6 (Moonshot)",
         AgentType.OPENAI_COMPATIBLE,
         "moonshotai/kimi-k2.6",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Kimi K2.6"}},
+        {"openai_compatible": {"model_name": "Kimi K2.6"}},
     ),
     AgentPreset(
         "MiniMax M3",
         AgentType.OPENAI_COMPATIBLE,
         "MiniMax-M3",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "MiniMax M3"}},
+        {"openai_compatible": {"model_name": "MiniMax M3"}},
     ),
 ]
 
@@ -307,14 +283,7 @@ class EvalConfig(BaseModel):
             kwargs["model"] = self.model
 
         if isinstance(kwargs.get("model"), str):
-            from hud.utils.gateway import normalize_gateway_model_id
-
             kwargs["model"] = normalize_gateway_model_id(kwargs["model"])
-
-        if self.agent_type == AgentType.OPENAI_COMPATIBLE and "api_key" not in kwargs:
-            base_url = kwargs.get("base_url", "")
-            if settings.hud_gateway_url in base_url and settings.api_key:
-                kwargs["api_key"] = settings.api_key
 
         kwargs["verbose"] = self.verbose or self.very_verbose
         kwargs["max_steps"] = self.max_steps
@@ -526,39 +495,30 @@ class EvalConfig(BaseModel):
         hud_console.print(table)
 
 
-def _build_agent(cfg: EvalConfig) -> Any:
-    """Construct a new-flow agent (``agent(run)``) from the eval config."""
+def _build_agent(cfg: EvalConfig) -> Agent:
+    """Construct the agent from the eval config.
+
+    The CLI prefers a provider's own key over the HUD gateway unless
+    ``--gateway`` forces routing. ``openai_compatible`` has no provider of
+    its own: its agent uses the gateway unless ``api_key``/``base_url`` are
+    configured. Hosted rollouts leave the client unset so the platform
+    rebuilds it remotely.
+    """
     if cfg.agent_type is None:
         raise ValueError("agent_type must be set")
     agent_kwargs = cfg.get_agent_kwargs()
     if cfg.auto_respond:
         agent_kwargs["auto_respond"] = True
 
-    from hud.agents.types import OpenAIChatConfig
-    from hud.utils.gateway import build_gateway_client, build_model_client
-
     config = cfg.agent_type.config_cls(**agent_kwargs)
-    custom_endpoint = isinstance(config, OpenAIChatConfig) and (
-        config.api_key is not None or config.base_url is not None
-    )
-    if not cfg.remote and config.model_client is None and not custom_endpoint:
-        if cfg.agent_type == AgentType.CLAUDE and _is_bedrock_arn(config.model):
-            _require_bedrock_credentials()
-
-            from anthropic import AsyncAnthropicBedrock
-
-            config.model_client = AsyncAnthropicBedrock(
-                aws_access_key=settings.aws_access_key_id,
-                aws_secret_key=settings.aws_secret_access_key,
-                aws_region=settings.aws_region,
-            )
-        elif cfg.gateway:
-            config.model_client = build_gateway_client(cfg.agent_type.gateway_provider)
-        else:
-            config.model_client = build_model_client(
-                cfg.agent_type.gateway_provider, prefer_provider=True
-            )
-
+    if (
+        not cfg.remote
+        and config.model_client is None
+        and cfg.agent_type != AgentType.OPENAI_COMPATIBLE
+    ):
+        config.model_client = build_model_client(
+            cfg.agent_type.gateway_provider, model=config.model, prefer_provider=not cfg.gateway
+        )
     # cls/config_cls are matched unions; the pairing is correct by construction.
     return cast("Any", cfg.agent_type.cls)(config=config)
 

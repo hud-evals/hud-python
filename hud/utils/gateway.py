@@ -7,6 +7,7 @@ gateway lives in :func:`hud.agents.create_agent`.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,8 @@ class GatewayModelsResponse(BaseModel):
     items: list[GatewayModelInfo]
 
 
+_BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
+
 _MODEL_ALIASES: dict[str, str] = {
     "deepseek-v4": "deepseek/deepseek-v4-pro",
     "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
@@ -78,8 +81,35 @@ def gateway_model_aliases() -> tuple[str, ...]:
     return tuple(_MODEL_ALIASES)
 
 
-def build_model_client(provider: str, *, prefer_provider: bool = False) -> GatewayClient:
-    """Resolve configured credentials; explicit client overrides belong to the caller."""
+def _is_bedrock_arn(model: str | None) -> bool:
+    return model is not None and _BEDROCK_ARN_PATTERN.match(model) is not None
+
+
+def build_model_client(
+    provider: str, *, model: str | None = None, prefer_provider: bool = False
+) -> GatewayClient:
+    """Resolve configured credentials; explicit client overrides belong to the caller.
+
+    A HUD key routes through the gateway unless ``prefer_provider`` and the
+    provider's own key is set. An Anthropic *model* that is a Bedrock
+    inference-profile ARN is only reachable through Bedrock, so it always
+    gets a Bedrock client from the AWS settings.
+    """
+    if provider == "anthropic" and _is_bedrock_arn(model):
+        if not (
+            settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_region
+        ):
+            raise HudAuthenticationError(
+                "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION are required "
+                "for AWS Bedrock"
+            )
+        from anthropic import AsyncAnthropicBedrock
+
+        return AsyncAnthropicBedrock(
+            aws_access_key=settings.aws_access_key_id,
+            aws_secret_key=settings.aws_secret_access_key,
+            aws_region=settings.aws_region,
+        )
     keys = {
         "anthropic": settings.anthropic_api_key,
         "gemini": settings.gemini_api_key,

@@ -107,7 +107,10 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
     def _resolve_client(self) -> AsyncAnthropic | AsyncAnthropicBedrock:
         if self.config.model_client is not None:
             return cast("AsyncAnthropic | AsyncAnthropicBedrock", self.config.model_client)
-        return cast("AsyncAnthropic", gateway.build_model_client("anthropic"))
+        return cast(
+            "AsyncAnthropic | AsyncAnthropicBedrock",
+            gateway.build_model_client("anthropic", model=self.config.model),
+        )
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 

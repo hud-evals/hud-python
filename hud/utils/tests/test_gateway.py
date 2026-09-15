@@ -11,6 +11,7 @@ import pytest
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 from hud.utils import gateway
+from hud.utils.exceptions import HudAuthenticationError
 
 if TYPE_CHECKING:
     from google.genai import Client as GenaiClient
@@ -126,6 +127,45 @@ async def test_openai_client_sends_child_and_parent_trace_ids(
         "Trace-Id": "child",
         "X-HUD-Parent-Trace-Id": "parent",
     }
+
+
+_BEDROCK_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/anthropic.claude"
+
+
+def test_bedrock_arn_model_gets_a_bedrock_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "aws_access_key_id", "AKIATEST")
+    monkeypatch.setattr(settings, "aws_secret_access_key", "secret")
+    monkeypatch.setattr(settings, "aws_region", "us-east-1")
+    bedrock = MagicMock(return_value=object())
+    monkeypatch.setattr("anthropic.AsyncAnthropicBedrock", bedrock)
+    gateway_client = MagicMock()
+    monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
+
+    client = gateway.build_model_client("anthropic", model=_BEDROCK_ARN)
+
+    assert client is bedrock.return_value
+    bedrock.assert_called_once_with(
+        aws_access_key="AKIATEST", aws_secret_key="secret", aws_region="us-east-1"
+    )
+    gateway_client.assert_not_called()
+
+
+def test_bedrock_arn_model_requires_aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "aws_access_key_id", None)
+    monkeypatch.setattr(settings, "aws_secret_access_key", None)
+    monkeypatch.setattr(settings, "aws_region", None)
+
+    with pytest.raises(HudAuthenticationError, match="AWS Bedrock"):
+        gateway.build_model_client("anthropic", model=_BEDROCK_ARN)
+
+
+def test_plain_anthropic_model_ignores_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    gateway_client = MagicMock(return_value=object())
+    monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
+
+    client = gateway.build_model_client("anthropic", model="claude-sonnet-4-6")
+
+    assert client is gateway_client.return_value
 
 
 @pytest.mark.asyncio

@@ -11,19 +11,10 @@ from hud.cli import eval as eval_mod
 from hud.cli.eval import (
     EvalConfig,
     _build_agent,
-    _is_bedrock_arn,
     find_tasks_file,
 )
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
-
-_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/anthropic.claude"
-
-
-def test_is_bedrock_arn() -> None:
-    assert _is_bedrock_arn(_ARN) is True
-    assert _is_bedrock_arn("claude-sonnet-4-6") is False
-    assert _is_bedrock_arn(None) is False
 
 
 def test_parse_agent_type_accepts_known_value() -> None:
@@ -441,6 +432,22 @@ def test_eval_custom_endpoint_overrides_gateway_selection(monkeypatch):
     assert agent.oai is client.return_value
 
 
+def test_eval_openai_compatible_routes_through_gateway_despite_openai_key(monkeypatch):
+    """A third-party chat model is not an OpenAI model: OPENAI_API_KEY must not claim it."""
+    gateway = MagicMock(return_value=object())
+    monkeypatch.setattr("hud.settings.settings.api_key", "hud-key")
+    monkeypatch.setattr("hud.settings.settings.openai_api_key", "provider-key")
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", gateway)
+    preset = next(p for p in eval_mod._AGENT_PRESETS if p.model == "MiniMax-M3")
+    monkeypatch.setattr(eval_mod.hud_console, "select", lambda *a, **k: preset)
+    cfg = EvalConfig().resolve_agent_interactive()
+    agent = eval_mod._build_agent(cfg)
+    gateway.assert_called_once_with("openai")
+    assert agent.oai is gateway.return_value
+    assert agent.config.model == "MiniMax-M3"
+    assert agent.config.base_url is None
+
+
 @patch("pathlib.Path.cwd")
 def test_find_tasks_file_with_arg(mock_cwd):
     assert find_tasks_file("some/path.json") == "some/path.json"
@@ -507,42 +514,23 @@ def test_find_tasks_file_multiple_files(mock_cwd, mock_console):
     assert "test2.jsonl" in call_args[1]["choices"]
 
 
-class TestBedrockAutoDetection:
-    VALID_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/my-profile"
+def test_build_agent_detects_bedrock_arn_from_config_checkpoint_name() -> None:
+    """Regression: ARN in [claude].checkpoint_name should trigger Bedrock client."""
+    arn = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/my-profile"
+    cfg = EvalConfig(
+        agent_type=AgentType.CLAUDE,
+        model=None,  # no CLI --model
+        agent_config={"claude": {"checkpoint_name": arn}},
+    )
 
-    def test_build_agent_detects_bedrock_arn_from_config_checkpoint_name(self) -> None:
-        """Regression: ARN in [claude].checkpoint_name should trigger Bedrock client."""
-        cfg = EvalConfig(
-            agent_type=AgentType.CLAUDE,
-            model=None,  # no CLI --model
-            agent_config={"claude": {"checkpoint_name": self.VALID_ARN}},
-        )
+    with (
+        patch("hud.settings.settings.aws_access_key_id", "AKIATEST"),
+        patch("hud.settings.settings.aws_secret_access_key", "secret"),
+        patch("hud.settings.settings.aws_region", "us-east-1"),
+        patch("anthropic.AsyncAnthropicBedrock", return_value=MagicMock()) as mock_bedrock,
+    ):
+        agent = _build_agent(cfg)
 
-        with (
-            patch("hud.settings.settings.aws_access_key_id", "AKIATEST"),
-            patch("hud.settings.settings.aws_secret_access_key", "secret"),
-            patch("hud.settings.settings.aws_region", "us-east-1"),
-            patch("anthropic.AsyncAnthropicBedrock", return_value=MagicMock()) as mock_bedrock,
-        ):
-            assert "model_client" not in cfg.get_agent_kwargs()
-            agent = _build_agent(cfg)
-
-        assert agent.config.model == self.VALID_ARN
-        assert agent.config.model_client is mock_bedrock.return_value
-        mock_bedrock.assert_called_once()
-
-    def test_build_agent_bedrock_arn_requires_aws_credentials(self) -> None:
-        """Should fail fast if ARN is detected but AWS creds are missing."""
-        cfg = EvalConfig(
-            agent_type=AgentType.CLAUDE,
-            model=None,
-            agent_config={"claude": {"checkpoint_name": self.VALID_ARN}},
-        )
-
-        with (
-            patch("hud.settings.settings.aws_access_key_id", None),
-            patch("hud.settings.settings.aws_secret_access_key", None),
-            patch("hud.settings.settings.aws_region", None),
-            pytest.raises(HudAuthenticationError),
-        ):
-            _build_agent(cfg)
+    assert agent.config.model == arn
+    assert agent.config.model_client is mock_bedrock.return_value
+    mock_bedrock.assert_called_once()
