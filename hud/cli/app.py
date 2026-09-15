@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import inspect
 import io
 import json
 import os
@@ -347,6 +349,8 @@ class CLIGroup(TyperGroup):
                 else contextlib.nullcontext()
             ):
                 result = super().invoke(ctx)
+                if inspect.isawaitable(result):
+                    result = asyncio.run(result)
             payload, code = (
                 (result.payload, result.exit_code) if isinstance(result, Result) else (result, 0)
             )

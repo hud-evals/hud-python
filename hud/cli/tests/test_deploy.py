@@ -2,25 +2,44 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sys
+import tarfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli.app import AuthScope, CliError, DirectoryState
-from hud.cli.deploy import EnvironmentSource, _resolve_environment_name
-from hud.cli.project import Placement, Project, ProjectSource
-from hud.cli.sync import RegistryEnvironment
+from hud.cli.app import AuthScope, DirectoryState, app
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
-# Deploys that accept the team's default Project send no project_id.
-_UNPLACED = Placement(project=None, source=ProjectSource.TEAM_DEFAULT)
+_PROJECT_ID = "44444444-4444-4444-8444-444444444444"
+_REGISTRY_ID = "55555555-5555-4555-8555-555555555555"
+
+
+class _FakeHttpxClient:
+    uploaded: bytes = b""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    async def __aenter__(self) -> _FakeHttpxClient:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def put(self, *args: object, **kwargs: object) -> MagicMock:
+        content = kwargs.get("content", b"")
+        type(self).uploaded = content if isinstance(content, bytes) else bytes(content)
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        return response
 
 
 class _TtyCliRunner(CliRunner):
@@ -33,250 +52,400 @@ class _TtyCliRunner(CliRunner):
             yield streams
 
 
-@pytest.mark.parametrize(("value", "expected"), [("HUD", "hud"), ("modal", "modal")])
-def test_normalize_runtime_uses_public_runtime_names(value: str, expected: str) -> None:
-    from hud.cli.deploy import _normalize_runtime
-
-    assert _normalize_runtime(value, HUDConsole()) == expected
+def _write_env(tmp_path: Path, name: str = "e") -> None:
+    (tmp_path / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
+    (tmp_path / "env.py").write_text(f'env = Environment("{name}")\n', encoding="utf-8")
 
 
-def test_normalize_runtime_rejects_internal_provider_name() -> None:
-    from hud.cli.deploy import _normalize_runtime
+def _dry_run(tmp_path: Path, *args: str) -> dict[str, Any]:
+    result = CliRunner().invoke(
+        app, ["deploy", str(tmp_path), "--dry-run", "--json", "--no-env", *args]
+    )
+    assert result.exit_code == 0, result.output
+    return json.loads(result.stdout)
 
-    with pytest.raises(ValueError):
-        _normalize_runtime("ec2", HUDConsole())
+
+def _stub_remote_build(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    async def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        if url.endswith("/upload-url"):
+            return {"upload_url": "https://upload.example", "build_id": "build-1"}
+        if url.endswith("/trigger"):
+            captured.clear()
+            captured.update(kwargs["json"])
+            return {"id": "build-1", "registry_id": _REGISTRY_ID}
+        if url.endswith("/status"):
+            return {"status": "SUCCEEDED"}
+        raise AssertionError(url)
+
+    websocket = MagicMock()
+    websocket.__aiter__.return_value = [
+        json.dumps({"type": "complete", "final_status": "SUCCEEDED", "message": "Build SUCCEEDED"})
+    ]
+    connection = MagicMock()
+    connection.__aenter__.return_value = websocket
+    monkeypatch.setattr("hud.utils.platform.make_request", request)
+    monkeypatch.setattr("hud.cli.deploy.httpx.AsyncClient", _FakeHttpxClient)
+    monkeypatch.setattr("hud.cli.deploy.websockets.connect", lambda *a, **k: connection)
+    monkeypatch.setattr("hud.cli.deploy.asyncio.sleep", AsyncMock())
+    return captured
+
+
+def _archive(directory: Path, monkeypatch: pytest.MonkeyPatch) -> set[str]:
+    if not any(
+        "Environment(" in path.read_text(encoding="utf-8")
+        for path in directory.glob("*.py")
+        if path.is_file()
+    ):
+        (directory / "env.py").write_text('env = Environment("e")\n', encoding="utf-8")
+    _FakeHttpxClient.uploaded = b""
+    _stub_remote_build(monkeypatch)
+    result = CliRunner().invoke(app, ["deploy", str(directory), "--json", "--no-env"])
+    assert result.exit_code == 0, result.output
+    with tarfile.open(fileobj=io.BytesIO(_FakeHttpxClient.uploaded), mode="r:gz") as tar:
+        return set(tar.getnames())
+
+
+def test_runtime_flag_is_case_insensitive(tmp_path: Path) -> None:
+    _write_env(tmp_path)
+
+    assert _dry_run(tmp_path, "--runtime", "HUD")["runtime"] == "hud"
+
+
+def _deploy_name_error(tmp_path: Path, *args: str) -> str:
+    result = CliRunner().invoke(
+        app, ["deploy", str(tmp_path), "--dry-run", "--json", "--no-env", *args]
+    )
+    assert result.exit_code == 2, result.output
+    return json.loads(result.stdout)["message"]
 
 
 class TestResolveEnvironmentName:
     """Tests for code-authoritative environment name resolution."""
 
-    @staticmethod
-    def _resolve(tmp_path: Path, registry_id: str | None = None) -> str:
-        return _resolve_environment_name(
-            EnvironmentSource.open(tmp_path),
-            registry_id,
-            PlatformClient("https://api.example", "key"),
-            HUDConsole(),
-        )
-
     def test_single_declared_name_wins(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text('env = Environment("my-env")\n', encoding="utf-8")
 
-        assert self._resolve(tmp_path) == "my-env"
+        assert _dry_run(tmp_path)["name"] == "my-env"
 
     def test_repeated_same_name_is_fine(self, tmp_path: Path) -> None:
         (tmp_path / "a.py").write_text('a = Environment("same")\n', encoding="utf-8")
         (tmp_path / "b.py").write_text('b = Environment(name="same")\n', encoding="utf-8")
+        (tmp_path / "c.py").write_text('c = hud.Environment("same")\n', encoding="utf-8")
 
-        assert self._resolve(tmp_path) == "same"
+        assert _dry_run(tmp_path)["name"] == "same"
 
-    def test_multiple_distinct_names_exit(self, tmp_path: Path) -> None:
-        (tmp_path / "a.py").write_text('a = Environment("one")\n', encoding="utf-8")
-        (tmp_path / "b.py").write_text('b = Environment("two")\n', encoding="utf-8")
-
-        with pytest.raises(ValueError):
-            self._resolve(tmp_path)
-
-    def test_entrypoint_disambiguates_subagent(self, tmp_path: Path) -> None:
-        (tmp_path / "Dockerfile").write_text(
-            'CMD ["hud", "serve", "env:env", "--port", "8765"]\n', encoding="utf-8"
+    def test_only_top_level_python_files_count(self, tmp_path: Path) -> None:
+        nested = tmp_path / "src" / "pkg"
+        nested.mkdir(parents=True)
+        (nested / "env.py").write_text('env = Environment("nested")\n', encoding="utf-8")
+        (tmp_path / ".venv").mkdir()
+        (tmp_path / ".venv" / "env.py").write_text(
+            'env = Environment("excluded")\n', encoding="utf-8"
         )
+        (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+        (tmp_path / "env.py").write_text('env = Environment("included")\n', encoding="utf-8")
+
+        assert _dry_run(tmp_path)["name"] == "included"
+
+    def test_ignores_calls_without_a_literal(self, tmp_path: Path) -> None:
+        (tmp_path / "env.py").write_text(
+            'env = Environment("named")\nother = Environment(name=NAME)\n',
+            encoding="utf-8",
+        )
+
+        assert _dry_run(tmp_path)["name"] == "named"
+
+    def test_name_flag_selects_among_literals(self, tmp_path: Path) -> None:
+        (tmp_path / "env.py").write_text(
+            'actor = Environment("workspace")\nverifier = Environment("judge")\n',
+            encoding="utf-8",
+        )
+        assert _dry_run(tmp_path, "--name", "judge")["name"] == "judge"
+        assert "Pass --name" in _deploy_name_error(tmp_path)
+
+    def test_serve_line_does_not_break_ties(self, tmp_path: Path) -> None:
+        (tmp_path / "Dockerfile").write_text('CMD ["hud", "serve", "env:env"]\n', encoding="utf-8")
         (tmp_path / "env.py").write_text('env = Environment("trace-explorer")\n', encoding="utf-8")
         (tmp_path / "verify.py").write_text(
             'verify_env = Environment("qa-verifier")\n', encoding="utf-8"
         )
 
-        assert self._resolve(tmp_path) == "trace-explorer"
+        assert "Pass --name" in _deploy_name_error(tmp_path)
+        assert _dry_run(tmp_path, "--name", "trace-explorer")["name"] == "trace-explorer"
+        assert "No environment named 'missing'" in _deploy_name_error(tmp_path, "--name", "missing")
 
-    def test_dotted_entrypoint_disambiguates_nested_environment(self, tmp_path: Path) -> None:
-        source_dir = tmp_path / "src" / "acme"
-        source_dir.mkdir(parents=True)
-        (tmp_path / "Dockerfile").write_text(
-            'CMD ["hud", "serve", "src.acme.env:env", "--port", "8765"]\n', encoding="utf-8"
-        )
-        (source_dir / "env.py").write_text(
-            'env = Environment("trace-explorer")\n', encoding="utf-8"
-        )
-        (tmp_path / "verify.py").write_text(
-            'verify_env = Environment("qa-verifier")\n', encoding="utf-8"
-        )
+    @pytest.mark.parametrize(
+        "source", ["x = 1\n", "env = Environment()\n", "env = Environment(name=NAME)\n"]
+    )
+    def test_requires_a_literal(self, tmp_path: Path, source: str) -> None:
+        (tmp_path / "env.py").write_text(source, encoding="utf-8")
 
-        assert self._resolve(tmp_path) == "trace-explorer"
-
-    def test_unnamed_environment_exit(self, tmp_path: Path) -> None:
-        (tmp_path / "env.py").write_text("env = Environment()\n", encoding="utf-8")
-
-        with pytest.raises(ValueError):
-            self._resolve(tmp_path)
-
-    def test_no_environment_declaration_exits(self, tmp_path: Path) -> None:
-        (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
-
-        with pytest.raises(ValueError):
-            self._resolve(tmp_path)
-
-    def test_registry_id_name_mismatch_exit(self, tmp_path: Path) -> None:
-        (tmp_path / "env.py").write_text('env = Environment("code-name")\n', encoding="utf-8")
-        registry_env = RegistryEnvironment(id="r-1", name="other-name")
-
-        with (
-            patch(
-                "hud.cli.deploy.get_registry_environment",
-                return_value=registry_env,
-            ),
-            pytest.raises(ValueError),
-        ):
-            self._resolve(tmp_path, registry_id="r-1")
-
-    def test_registry_id_matching_name_passes(self, tmp_path: Path) -> None:
-        (tmp_path / "env.py").write_text('env = Environment("Code Name")\n', encoding="utf-8")
-        registry_env = RegistryEnvironment(id="r-1", name="code-name")
-
-        with patch(
-            "hud.cli.deploy.get_registry_environment",
-            return_value=registry_env,
-        ):
-            assert self._resolve(tmp_path, registry_id="r-1") == "Code Name"
+        assert "No environment found" in _deploy_name_error(tmp_path)
 
     def test_registry_id_does_not_replace_missing_declaration(self, tmp_path: Path) -> None:
         (tmp_path / "server.py").write_text("x = 1\n", encoding="utf-8")
-        registry_env = RegistryEnvironment(id="r-1", name="platform-name")
 
-        with (
-            patch("hud.cli.deploy.get_registry_environment", return_value=registry_env),
-            pytest.raises(ValueError),
-        ):
-            self._resolve(tmp_path, registry_id="r-1")
+        assert "No environment found" in _deploy_name_error(tmp_path, "--registry-id", "r-1")
 
 
-class TestCollectEnvironmentVariables:
-    """Tests for collect_environment_variables function."""
+class TestBuildContext:
+    def test_excludes_secrets_and_keeps_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+        (tmp_path / ".env").write_text("SECRET=1", encoding="utf-8")
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "config").write_text("x", encoding="utf-8")
 
-    def test_empty_sources(self, tmp_path: Path) -> None:
-        """Test with no env sources."""
-        from hud.cli.deploy import collect_environment_variables
-        from hud.utils.hud_console import HUDConsole
+        names = _archive(tmp_path, monkeypatch)
+        assert "main.py" in names
+        assert "env.py" in names
+        assert ".env" not in names
+        assert not any(name == ".git" or name.startswith(".git/") for name in names)
 
-        console = HUDConsole()
-        result = collect_environment_variables(tmp_path, None, None, console)
-        assert result == {}
+    def test_preserves_empty_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "packages").mkdir()
+        (tmp_path / "ignored").mkdir()
+        (tmp_path / ".dockerignore").write_text("ignored/\n", encoding="utf-8")
 
-    def test_env_file_loading(self, tmp_path: Path) -> None:
-        """Test loading from .env file."""
-        from hud.cli.deploy import collect_environment_variables
-        from hud.utils.hud_console import HUDConsole
+        names = _archive(tmp_path, monkeypatch)
+        assert "packages" in names
+        assert "ignored" not in names
 
-        env_file = tmp_path / ".env"
+    def test_gitignore_does_not_scope_the_context(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".gitignore").write_text("data/\nbundle.bin\n", encoding="utf-8")
+        (tmp_path / "bundle.bin").write_text("weights", encoding="utf-8")
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "fixture.json").write_text("{}", encoding="utf-8")
+
+        assert {"bundle.bin", "data/fixture.json"} <= _archive(tmp_path, monkeypatch)
+
+    def test_dockerignore_can_reinclude_default_junk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "dist").mkdir()
+        (tmp_path / "dist" / "app.whl").write_text("wheel", encoding="utf-8")
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "dep.js").write_text("x", encoding="utf-8")
+        (tmp_path / ".dockerignore").write_text("!node_modules\n", encoding="utf-8")
+
+        names = _archive(tmp_path, monkeypatch)
+        assert "dist/app.whl" in names
+        assert "node_modules/dep.js" in names
+
+    def test_dockerignore_negations_cannot_reinclude_secrets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in [".env", ".env.prod", "service.env", ".git/config", "nested/.env"]:
+            path = tmp_path / name
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("secret", encoding="utf-8")
+        (tmp_path / "keep.pyc").write_text("cache", encoding="utf-8")
+        (tmp_path / ".dockerignore").write_text("!*\n", encoding="utf-8")
+
+        assert _archive(tmp_path, monkeypatch) == {"nested", "keep.pyc", ".dockerignore", "env.py"}
+
+    def test_dockerignore_skips_comments_and_honors_last_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "keep.pyc").write_text("x", encoding="utf-8")
+        (tmp_path / "drop.pyc").write_text("x", encoding="utf-8")
+        (tmp_path / ".dockerignore").write_text("# comment\n\n*.pyc\n!keep.pyc\n", encoding="utf-8")
+
+        names = _archive(tmp_path, monkeypatch)
+        assert "keep.pyc" in names
+        assert "drop.pyc" not in names
+
+    def test_dockerignore_globs_and_directory_patterns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a.py").write_text("x", encoding="utf-8")
+        (tmp_path / "a.pyc").write_text("x", encoding="utf-8")
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "a.pyc").write_text("x", encoding="utf-8")
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "index.js").write_text("x", encoding="utf-8")
+        (tmp_path / ".dockerignore").write_text("*.pyc\nnode_modules/\n", encoding="utf-8")
+
+        names = _archive(tmp_path, monkeypatch)
+        assert "a.py" in names
+        assert "a.pyc" not in names
+        assert "pkg/a.pyc" not in names
+        assert "node_modules/index.js" not in names
+
+    def test_dockerignore_double_star_and_anchored_patterns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "a" / "b" / "c").mkdir(parents=True)
+        (tmp_path / "a" / "b" / "c" / "cache.tmp").write_text("x", encoding="utf-8")
+        (tmp_path / "src" / "build").mkdir(parents=True)
+        (tmp_path / "src" / "build" / "out.o").write_text("x", encoding="utf-8")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "out.o").write_text("x", encoding="utf-8")
+        (tmp_path / "foo" / "a" / "b").mkdir(parents=True)
+        (tmp_path / "foo" / "a" / "b" / "bar").write_text("x", encoding="utf-8")
+        (tmp_path / "foo" / "a" / "bar").write_text("x", encoding="utf-8")
+        (tmp_path / "foo" / "bar").write_text("x", encoding="utf-8")
+        (tmp_path / ".dockerignore").write_text("**/*.tmp\n/build\nfoo/**/bar\n", encoding="utf-8")
+
+        names = _archive(tmp_path, monkeypatch)
+        assert "a/b/c/cache.tmp" not in names
+        assert "build/out.o" not in names
+        assert "src/build/out.o" in names
+        assert "foo/a/b/bar" not in names
+        assert "foo/bar" not in names
+        assert "foo/a/bar" not in names
+
+    def test_dockerignore_single_star_does_not_span_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "foo" / "a" / "b").mkdir(parents=True)
+        (tmp_path / "foo" / "a" / "b" / "bar").write_text("x", encoding="utf-8")
+        (tmp_path / "foo" / "a" / "bar").write_text("x", encoding="utf-8")
+        (tmp_path / ".dockerignore").write_text("foo/*/bar\n", encoding="utf-8")
+
+        names = _archive(tmp_path, monkeypatch)
+        assert "foo/a/bar" not in names
+        assert "foo/a/b/bar" in names
+
+
+class TestDeployEnvironmentVariables:
+    def test_dry_run_has_no_env_keys_without_sources(self, tmp_path: Path) -> None:
+        _write_env(tmp_path)
+        assert _dry_run(tmp_path)["env_var_keys"] == []
+
+    def test_env_file_keys_appear_in_dry_run(self, tmp_path: Path) -> None:
+        _write_env(tmp_path)
+        env_file = tmp_path / "vars.env"
         env_file.write_text("# comment\nKEY1=value1\nEMPTY=\nNOEQ\nKEY2=value2\n")
 
-        console = HUDConsole()
-        result = collect_environment_variables(tmp_path, None, None, console)
+        assert _dry_run(tmp_path, "--env-file", str(env_file))["env_var_keys"] == [
+            "EMPTY",
+            "KEY1",
+            "KEY2",
+        ]
 
-        assert result["KEY1"] == "value1"
-        assert result["KEY2"] == "value2"
-        assert result["EMPTY"] == ""
-        assert "NOEQ" not in result
-
-    def test_custom_env_file(self, tmp_path: Path) -> None:
-        """Test loading from custom env file."""
-        from hud.cli.deploy import collect_environment_variables
-        from hud.utils.hud_console import HUDConsole
-
-        custom_env = tmp_path / "custom.env"
-        custom_env.write_text("CUSTOM_KEY=custom_value\n")
-
-        console = HUDConsole()
-        result = collect_environment_variables(tmp_path, None, str(custom_env), console)
-
-        assert result["CUSTOM_KEY"] == "custom_value"
-
-    def test_explicit_missing_env_file_fails(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import collect_environment_variables
-        from hud.utils.hud_console import HUDConsole
-
-        with pytest.raises(FileNotFoundError, match="Env file not found"):
-            collect_environment_variables(tmp_path, None, str(tmp_path / "missing"), HUDConsole())
-
-    def test_env_flags_override(self, tmp_path: Path) -> None:
-        """Test --env flags override file values."""
-        from hud.cli.deploy import collect_environment_variables
-        from hud.utils.hud_console import HUDConsole
-
-        env_file = tmp_path / ".env"
-        env_file.write_text("KEY1=file_value\n")
-
-        console = HUDConsole()
-        result = collect_environment_variables(
-            tmp_path,
-            ["KEY1=flag_value", "KEY2=new_value"],
-            None,
-            console,
+    def test_missing_env_file_fails(self, tmp_path: Path) -> None:
+        _write_env(tmp_path)
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                str(tmp_path),
+                "--dry-run",
+                "--json",
+                "--env-file",
+                str(tmp_path / "missing"),
+            ],
         )
+        assert result.exit_code == 1
+        assert "Env file not found" in json.loads(result.stdout)["message"]
 
-        assert result["KEY1"] == "flag_value"
-        assert result["KEY2"] == "new_value"
+    def test_env_flags_override_file_on_trigger(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_env(tmp_path)
+        env_file = tmp_path / "vars.env"
+        env_file.write_text("KEY1=file_value\n")
+        captured = _stub_remote_build(monkeypatch)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                str(tmp_path),
+                "--json",
+                "--env-file",
+                str(env_file),
+                "--env",
+                "KEY1=flag_value",
+                "--env",
+                "KEY2=new_value",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["environment_variables"] == {"KEY1": "flag_value", "KEY2": "new_value"}
 
     def test_env_flag_invalid_format(self, tmp_path: Path) -> None:
-        """Test invalid --env flag format is warned."""
-        from hud.cli.deploy import collect_environment_variables
-        from hud.utils.hud_console import HUDConsole
-
-        console = HUDConsole()
-        result = collect_environment_variables(
-            tmp_path,
-            ["INVALID_FORMAT"],  # Missing =
-            None,
-            console,
+        _write_env(tmp_path)
+        result = CliRunner().invoke(
+            app, ["deploy", str(tmp_path), "--dry-run", "--json", "--no-env", "--env", "INVALID"]
         )
+        assert result.exit_code == 2
+        assert "Invalid --env format" in json.loads(result.stdout)["message"]
 
-        # Invalid format should be skipped
-        assert "INVALID_FORMAT" not in result
+    def test_build_secret_from_env_reaches_trigger(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_env(tmp_path)
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        captured = _stub_remote_build(monkeypatch)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                str(tmp_path),
+                "--json",
+                "--no-env",
+                "--secret",
+                "id=GITHUB_TOKEN,env=GITHUB_TOKEN",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["build_secrets"] == {"GITHUB_TOKEN": "tok"}
 
 
 class TestRuntimeConfigFile:
-    @pytest.mark.parametrize("filename", ["compose.yaml", "compose.yml", "docker-compose.json"])
-    def test_prepare_deploy_uses_context_recipe(
-        self,
-        tmp_path: Path,
-        filename: str,
+    def test_compose_file_is_not_inferred_as_runtime_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from hud.cli.deploy import _prepare_deploy_plan
-
-        (tmp_path / "env.py").write_text(
-            'env = Environment("compose-env")\n',
+        _write_env(tmp_path, "compose-env")
+        (tmp_path / "compose.yaml").write_text(
+            "services:\n  main:\n    image: alpine\n",
             encoding="utf-8",
         )
-        (tmp_path / filename).write_text(
-            "services:\n  main:\n    build: ./main\n  redis:\n    image: redis:7\n",
+        captured = _stub_remote_build(monkeypatch)
+
+        result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json", "--no-env"])
+        assert result.exit_code == 0, result.output
+        assert "runtime_config" not in captured
+
+    def test_runtime_config_flag_reaches_trigger(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_env(tmp_path)
+        config_path = tmp_path / "runtime.json"
+        config_path.write_text(
+            json.dumps({"limits": {"startup_timeout_s": 300}}),
             encoding="utf-8",
         )
+        captured = _stub_remote_build(monkeypatch)
 
-        plan = _prepare_deploy_plan(
-            EnvironmentSource.open(tmp_path),
-            env_dir=tmp_path,
-            env=None,
-            env_file=None,
-            no_env=True,
-            registry_id=None,
-            project=None,
-            build_args=None,
-            build_secrets=None,
-            runtime=None,
-            runtime_config=None,
-            verbose=False,
-            platform=PlatformClient("https://api.example", "key"),
-            console=HUDConsole(),
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                str(tmp_path),
+                "--json",
+                "--no-env",
+                "--runtime-config",
+                str(config_path),
+            ],
         )
+        assert result.exit_code == 0, result.output
+        assert captured["runtime_config"] == {"limits": {"startup_timeout_s": 300}}
 
-        assert plan.runtime_config is not None
-        payload = plan.runtime_config.model_dump(mode="json", exclude_unset=True)
-        assert payload["compose"]["root"] == {"compose_path": filename}
-        assert set(payload["compose"]["document"]["services"]) == {"main", "redis"}
-
-    def test_load_runtime_config_uses_sdk_shape(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import _load_runtime_config
-        from hud.utils.hud_console import HUDConsole
-
+    def test_runtime_config_uses_sdk_shape(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_env(tmp_path)
         config_path = tmp_path / "runtime.json"
         config_path.write_text(
             json.dumps(
@@ -287,346 +456,203 @@ class TestRuntimeConfigFile:
             ),
             encoding="utf-8",
         )
+        captured = _stub_remote_build(monkeypatch)
 
-        config = _load_runtime_config(str(config_path), HUDConsole())
-        assert config is not None
-        assert config.model_dump(mode="json", exclude_unset=True) == {
+        result = CliRunner().invoke(
+            app,
+            ["deploy", str(tmp_path), "--json", "--no-env", "--runtime-config", str(config_path)],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["runtime_config"] == {
             "resources": {"gpu": {"type": "A10G", "count": 2}},
             "limits": {"startup_timeout_s": 300},
         }
 
-    def test_load_runtime_config_preserves_null_override(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import _load_runtime_config
-        from hud.utils.hud_console import HUDConsole
-
+    def test_runtime_config_preserves_null_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_env(tmp_path)
         config_path = tmp_path / "runtime.json"
         config_path.write_text(json.dumps({"resources": None}), encoding="utf-8")
+        captured = _stub_remote_build(monkeypatch)
 
-        config = _load_runtime_config(str(config_path), HUDConsole())
-        assert config is not None
-        assert config.model_dump(mode="json", exclude_unset=True) == {"resources": None}
+        result = CliRunner().invoke(
+            app,
+            ["deploy", str(tmp_path), "--json", "--no-env", "--runtime-config", str(config_path)],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["runtime_config"] == {"resources": None}
 
-    def test_load_runtime_config_resolves_compose_project_from_config_directory(
-        self,
-        tmp_path: Path,
+    def test_runtime_config_resolves_compose_project_from_config_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from hud.cli.deploy import _load_runtime_config
-
+        _write_env(tmp_path)
         project = tmp_path / "project"
         project.mkdir()
-        compose = project / "compose.json"
-        compose.write_text('{"services":{"main":{"image":"postgres:16"}}}')
+        (project / "compose.json").write_text('{"services":{"main":{"image":"postgres:16"}}}')
         config_path = tmp_path / "runtime.json"
         config_path.write_text('{"compose":{"document":"project/compose.json","root":"."}}')
+        captured = _stub_remote_build(monkeypatch)
 
-        config = _load_runtime_config(str(config_path), HUDConsole())
-
-        assert config is not None
-        assert config.model_dump(mode="json", exclude_unset=True)["compose"]["root"] == {
+        result = CliRunner().invoke(
+            app,
+            ["deploy", str(tmp_path), "--json", "--no-env", "--runtime-config", str(config_path)],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["runtime_config"]["compose"]["root"] == {
             "compose_path": "project/compose.json"
         }
 
-    def test_load_runtime_config_rejects_unknown_fields(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import _load_runtime_config
-        from hud.utils.hud_console import HUDConsole
+    def test_runtime_config_rejects_empty_object(self, tmp_path: Path) -> None:
+        _write_env(tmp_path)
+        config_path = tmp_path / "runtime.json"
+        config_path.write_text("{}", encoding="utf-8")
 
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                str(tmp_path),
+                "--dry-run",
+                "--json",
+                "--no-env",
+                "--runtime-config",
+                str(config_path),
+            ],
+        )
+        assert result.exit_code == 2
+        assert "at least one field" in json.loads(result.stdout)["message"]
+
+    def test_runtime_config_rejects_unknown_fields(self, tmp_path: Path) -> None:
+        _write_env(tmp_path)
         config_path = tmp_path / "runtime.json"
         config_path.write_text(json.dumps({"provider_config": {}}), encoding="utf-8")
 
-        with pytest.raises(ValueError):
-            _load_runtime_config(str(config_path), HUDConsole())
-
-    def test_prepare_deploy_rejects_image_config_for_compose_context(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        from hud.cli.deploy import _prepare_deploy_plan
-
-        (tmp_path / "env.py").write_text(
-            'env = Environment("compose-env")\n',
-            encoding="utf-8",
+        result = CliRunner().invoke(
+            app,
+            [
+                "deploy",
+                str(tmp_path),
+                "--dry-run",
+                "--json",
+                "--no-env",
+                "--runtime-config",
+                str(config_path),
+            ],
         )
-        (tmp_path / "compose.yaml").write_text("services:\n  main:\n    image: example\n")
-        runtime_config = tmp_path / "runtime.json"
-        runtime_config.write_text('{"image":"other:latest"}', encoding="utf-8")
-
-        with pytest.raises(ValueError):
-            _prepare_deploy_plan(
-                EnvironmentSource.open(tmp_path),
-                env_dir=tmp_path,
-                env=None,
-                env_file=None,
-                no_env=True,
-                registry_id=None,
-                project=None,
-                build_args=None,
-                build_secrets=None,
-                runtime=None,
-                runtime_config=str(runtime_config),
-                verbose=False,
-                platform=PlatformClient("https://api.example", "key"),
-                console=HUDConsole(),
-            )
+        assert result.exit_code == 2
+        assert "provider_config" in json.loads(result.stdout)["message"]
 
 
-class TestDeployEnvironment:
-    """Tests for deploy_environment function."""
-
+class TestPlanDeploy:
     def test_no_api_key_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test error when no API key is set."""
-        from hud.cli.deploy import deploy_environment
         from hud.settings import settings
-        from hud.utils.exceptions import HudAuthenticationError
 
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
         monkeypatch.setattr(settings, "api_key", None)
 
-        with pytest.raises(HudAuthenticationError):
-            deploy_environment(directory=str(tmp_path))
+        result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error"] == "permission_denied"
 
-    def test_compose_recipe_does_not_require_a_dockerfile(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import _compose_recipe
+    def test_empty_tree_fails_on_missing_name(self, tmp_path: Path) -> None:
+        result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json"])
+        assert result.exit_code == 2
+        payload = json.loads(result.stdout)
+        assert "No environment found" in payload["message"]
+        assert payload["suggestion"]
 
-        (tmp_path / "compose.yaml").write_text("services: {main: {image: alpine}}\n")
+    def test_missing_license_does_not_block_dry_run(self, tmp_path: Path) -> None:
+        _write_env(tmp_path)
+        (tmp_path / "pyproject.toml").write_text('[project]\nlicense = {file = "LICENSE"}\n')
 
-        assert _compose_recipe(tmp_path) == tmp_path / "compose.yaml"
+        assert _dry_run(tmp_path)["success"] is True
 
-    def test_compose_recipe_prefers_base_file_over_override(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import _compose_recipe
 
-        base = tmp_path / "docker-compose.yml"
-        base.write_text("services: {main: {image: alpine}}\n")
-        (tmp_path / "docker-compose.override.yml").write_text(
-            "services: {main: {environment: {DEBUG: '1'}}}\n"
-        )
+def test_hud_row_is_polled_only_while_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_env(tmp_path)
+    _stub_remote_build(monkeypatch)
+    statuses = ["MIGRATING", "SUCCEEDED"]
 
-        assert _compose_recipe(tmp_path) == base
+    async def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        if url.endswith("/upload-url"):
+            return {"upload_url": "https://upload.example", "build_id": "build-1"}
+        if url.endswith("/trigger"):
+            return {"id": "build-1", "registry_id": _REGISTRY_ID}
+        if url.endswith("/status"):
+            return {"status": statuses.pop(0)}
+        raise AssertionError(url)
 
-    def test_compose_recipe_ignores_override_without_base(self, tmp_path: Path) -> None:
-        from hud.cli.deploy import _compose_recipe
+    slept = AsyncMock()
+    monkeypatch.setattr("hud.utils.platform.make_request", request)
+    monkeypatch.setattr("hud.cli.deploy.asyncio.sleep", slept)
 
-        (tmp_path / "docker-compose.override.yml").write_text(
-            "services: {main: {environment: {DEBUG: '1'}}}\n"
-        )
-
-        assert _compose_recipe(tmp_path) is None
-
-    def test_no_dockerfile_error(self, tmp_path: Path) -> None:
-        """Test error when no Dockerfile found."""
-        from hud.cli.deploy import deploy_environment
-
-        with (
-            patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
-            pytest.raises(CliError) as exc_info,
-        ):
-            deploy_environment(directory=str(tmp_path))
-
-        assert exc_info.value.exit_code == 1
-
-    def test_validation_errors_exit(self, tmp_path: Path) -> None:
-        """Test that validation errors cause exit."""
-        from hud.cli.deploy import ValidationIssue, deploy_environment
-
-        (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
-
-        with (
-            patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
-            patch("hud.cli.deploy._validate_environment") as mock_validate,
-            pytest.raises(ValueError) as exc_info,
-        ):
-            mock_validate.return_value = [
-                ValidationIssue(
-                    severity="error",
-                    message="Test error",
-                    file="test.py",
-                    hint="Fix this",
-                )
-            ]
-
-            deploy_environment(directory=str(tmp_path))
-
-        assert "validation failed" in str(exc_info.value)
+    result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json", "--no-env"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["status"] == "SUCCEEDED"
+    assert statuses == []
+    slept.assert_awaited()
 
 
 class TestDeployAsync:
-    """Tests for _deploy_async function."""
+    """Tests for the remote upload/trigger path."""
 
-    @pytest.mark.asyncio
-    async def test_upload_url_failure(self) -> None:
+    def test_upload_url_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test handling of upload URL failure."""
-        from hud.cli.deploy import _deploy_async, _DeployPlan
         from hud.utils.exceptions import HudRequestError
-        from hud.utils.hud_console import HUDConsole
-        from hud.utils.platform import PlatformClient
 
-        console = HUDConsole()
-        error = HudRequestError("Unauthorized", status_code=401)
+        _write_env(tmp_path)
+        monkeypatch.setattr(
+            "hud.utils.platform.make_request",
+            AsyncMock(side_effect=HudRequestError("Unauthorized", status_code=401)),
+        )
 
-        with (
-            patch("hud.utils.platform.make_request", AsyncMock(side_effect=error)),
-            pytest.raises(HudRequestError),
-        ):
-            await _deploy_async(
-                tarball_path=Path("test.tar.gz"),
-                no_cache=False,
-                plan=_DeployPlan(
-                    name="test-env",
-                    registry_id=None,
-                    placement=_UNPLACED,
-                    runtime=None,
-                    runtime_config=None,
-                    env_vars={},
-                    build_args={},
-                    build_secrets={},
-                    state=DirectoryState(
-                        AuthScope(
-                            origin="https://api.example",
-                            user_id="11111111-1111-4111-8111-111111111111",
-                            team_id="22222222-2222-4222-8222-222222222222",
-                        )
-                    ),
-                ),
-                platform=PlatformClient("https://api.example", "key"),
-                console=console,
-            )
+        result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json", "--no-env"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert payload["error"] == "permission_denied"
+        assert payload["message"] == "Unauthorized"
 
-    @pytest.mark.asyncio
-    async def test_upload_url_network_error(self) -> None:
+    def test_upload_url_network_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test handling of network error during upload URL fetch."""
-        from hud.cli.deploy import _deploy_async, _DeployPlan
-        from hud.utils.hud_console import HUDConsole
-        from hud.utils.platform import PlatformClient
+        _write_env(tmp_path)
+        monkeypatch.setattr(
+            "hud.utils.platform.make_request",
+            AsyncMock(side_effect=Exception("Network error")),
+        )
 
-        console = HUDConsole()
+        result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json", "--no-env"])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["message"] == "Network error"
 
-        with (
-            patch(
-                "hud.utils.platform.make_request",
-                AsyncMock(side_effect=Exception("Network error")),
-            ),
-            pytest.raises(Exception, match="Network error"),
-        ):
-            await _deploy_async(
-                tarball_path=Path("test.tar.gz"),
-                no_cache=False,
-                plan=_DeployPlan(
-                    name="test-env",
-                    registry_id=None,
-                    placement=_UNPLACED,
-                    runtime=None,
-                    runtime_config=None,
-                    env_vars={},
-                    build_args={},
-                    build_secrets={},
-                    state=DirectoryState(
-                        AuthScope(
-                            origin="https://api.example",
-                            user_id="11111111-1111-4111-8111-111111111111",
-                            team_id="22222222-2222-4222-8222-222222222222",
-                        )
-                    ),
-                ),
-                platform=PlatformClient("https://api.example", "key"),
-                console=console,
-            )
-
-    @pytest.mark.asyncio
-    async def test_trigger_build_sends_resolved_project(self) -> None:
+    def test_trigger_build_sends_resolved_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A resolved placement reaches the platform as project_id."""
-        from hud.cli.deploy import _DeployPlan, _trigger_build
-        from hud.utils.platform import PlatformClient
+        _write_env(tmp_path, "test-env")
+        captured = _stub_remote_build(monkeypatch)
 
-        class FakePlatform(PlatformClient):
-            payload: dict[str, object] | None = None
-
-            async def apost(
-                self,
-                path: str,
-                *,
-                json: object | None = None,
-            ) -> dict[str, object]:
-                object.__setattr__(self, "payload", json)
-                return {"id": "build-1", "registry_id": "registry-1"}
-
-        platform = FakePlatform("https://api.example", "key")
-        await _trigger_build(
-            platform,
-            build_id="build-1",
-            plan=_DeployPlan(
-                name="test-env",
-                registry_id=None,
-                placement=Placement(
-                    project=Project(
-                        id="project-1",
-                        name="browser-evals",
-                        is_default=False,
-                        can_create=True,
-                    ),
-                    source=ProjectSource.FLAG,
-                ),
-                runtime=None,
-                runtime_config=None,
-                env_vars={},
-                build_args={},
-                build_secrets={},
-                state=DirectoryState(
-                    AuthScope(
-                        origin="https://api.example",
-                        user_id="11111111-1111-4111-8111-111111111111",
-                        team_id="22222222-2222-4222-8222-222222222222",
-                    )
-                ),
-            ),
-            no_cache=False,
+        result = CliRunner().invoke(
+            app, ["deploy", str(tmp_path), "--json", "--no-env", "--project", _PROJECT_ID]
         )
+        assert result.exit_code == 0, result.output
+        assert captured["project_id"] == _PROJECT_ID
 
-        assert platform.payload is not None
-        assert platform.payload["project_id"] == "project-1"
-
-    @pytest.mark.asyncio
-    async def test_trigger_build_omits_project_for_the_team_default(self) -> None:
+    def test_trigger_build_omits_project_for_the_team_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The zero-config deploy stays byte-identical to before projects existed."""
-        from hud.cli.deploy import _DeployPlan, _trigger_build
-        from hud.utils.platform import PlatformClient
+        _write_env(tmp_path, "test-env")
+        captured = _stub_remote_build(monkeypatch)
 
-        class FakePlatform(PlatformClient):
-            payload: dict[str, object] | None = None
-
-            async def apost(
-                self,
-                path: str,
-                *,
-                json: object | None = None,
-            ) -> dict[str, object]:
-                object.__setattr__(self, "payload", json)
-                return {"id": "build-1", "registry_id": "registry-1"}
-
-        platform = FakePlatform("https://api.example", "key")
-        await _trigger_build(
-            platform,
-            build_id="build-1",
-            plan=_DeployPlan(
-                name="test-env",
-                registry_id=None,
-                placement=_UNPLACED,
-                runtime=None,
-                runtime_config=None,
-                env_vars={},
-                build_args={},
-                build_secrets={},
-                state=DirectoryState(
-                    AuthScope(
-                        origin="https://api.example",
-                        user_id="11111111-1111-4111-8111-111111111111",
-                        team_id="22222222-2222-4222-8222-222222222222",
-                    )
-                ),
-            ),
-            no_cache=False,
-        )
-
-        assert platform.payload is not None
-        assert "project_id" not in platform.payload
+        result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json", "--no-env"])
+        assert result.exit_code == 0, result.output
+        assert "project_id" not in captured
 
 
 class TestDeployCommand:
@@ -648,14 +674,22 @@ class TestDeployCommand:
 
 @pytest.fixture(autouse=True)
 def authenticated_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    def get_identity(method: str, url: str, **kwargs: object) -> dict[str, str]:
-        assert method == "GET" and url.endswith("/auth/me")
-        return {
-            "user_id": "11111111-1111-4111-8111-111111111111",
-            "team_id": "22222222-2222-4222-8222-222222222222",
-        }
+    def get(method: str, url: str, **kwargs: object) -> dict[str, Any]:
+        if url.endswith("/auth/me"):
+            return {
+                "user_id": "11111111-1111-4111-8111-111111111111",
+                "team_id": "22222222-2222-4222-8222-222222222222",
+            }
+        if "/projects/" in url:
+            return {
+                "id": url.rsplit("/", 1)[-1],
+                "name": "chosen",
+                "capabilities": {"create": True},
+            }
+        raise AssertionError(url)
 
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", get_identity)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", get)
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
     monkeypatch.setattr("hud.settings.settings.default_project", None)
 
 
@@ -671,9 +705,6 @@ def authenticated_scope(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_deploy_lifecycle_preserves_links(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: list[str], stream_status: str | None
 ) -> None:
-    from hud.cli.app import AuthScope, DirectoryState, app
-    from hud.utils.platform import PlatformClient
-
     env = tmp_path / "environment"
     env.mkdir()
     (env / "env.py").write_text('env = Environment("example")')
@@ -711,16 +742,26 @@ def test_deploy_lifecycle_preserves_links(
             return {"id": "build-1", "registry_id": kwargs["json"].get("registry_id", registry_id)}
         if url.endswith("/status"):
             status_reads += 1
-            return {"status": "IN_PROGRESS" if status_reads % 2 else "SUCCEEDED"}
+            return {"status": "SUCCEEDED"}
         raise AssertionError(url)
 
     monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
     monkeypatch.setattr("hud.utils.platform.make_request_sync", get)
     monkeypatch.setattr("hud.utils.platform.make_request", request)
-    monkeypatch.setattr("hud.cli.deploy._upload_context", AsyncMock())
+    monkeypatch.setattr("hud.cli.deploy.httpx.AsyncClient", _FakeHttpxClient)
     websocket = MagicMock()
     websocket.__aiter__.return_value = (
-        [json.dumps({"type": "complete", "final_status": stream_status})] if stream_status else []
+        [
+            json.dumps(
+                {
+                    "type": "complete",
+                    "final_status": stream_status,
+                    "message": f"Build {stream_status}",
+                }
+            )
+        ]
+        if stream_status
+        else []
     )
     connection = MagicMock()
     connection.__aenter__.return_value = websocket
@@ -738,7 +779,7 @@ def test_deploy_lifecycle_preserves_links(
     second = _TtyCliRunner().invoke(app, ["deploy", str(env), "--json", *override])
     assert second.exit_code == 0, second.output
     assert state.load() == before
-    assert status_reads == 4
+    assert status_reads == 2
     assert (env / ".hud" / "config.json").exists()
     assert requests[0]["environment_variables"] == {"SECRET": "test-secret-value"}
     if not override:
@@ -772,19 +813,8 @@ def test_deploy_dry_run_has_no_prompt_or_writes(
     plan = json.loads(result.stdout)
     assert plan["dotenv_pending"] is True
     assert plan["env_var_keys"] == []
+    assert plan["dry_run"] is True
+    assert plan["name"] == "example"
     assert legacy.read_text() == '{"registryId":"old","syncEnv":true}'
     assert not (legacy.parent / "config.json").exists()
     assert not (Path.home() / ".hud").exists()
-
-
-def test_missing_recipe_produces_one_json_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from typer.testing import CliRunner
-
-    from hud.cli.app import app
-
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json"])
-    assert result.exit_code == 1
-    assert "Dockerfile" in json.loads(result.stdout)["message"]

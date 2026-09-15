@@ -76,21 +76,29 @@ hud serve env.py -p 9000
 
 Build **and** publish to HUD infra in one step. The environment's name comes
 from the `Environment(...)` declaration in code; deploying the same name again
-rebuilds that environment.
+rebuilds that environment. A tree with more than one declaration (actor and
+judge in the same source) is two deploys: `hud deploy --name workspace` and
+`hud deploy --name judge`.
 
 ```bash
 hud deploy
+hud deploy --name judge
 hud deploy --project <project-id>
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--all`, `-a` | Deploy all environments in the directory. |
+| `--name` | Which `Environment(...)` name to register when top-level `*.py` files declare more than one. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). Upserts registry secrets. |
 | `--env-file` | Upsert registry secrets from this file. Keys omitted from the file are kept. |
 | `--no-env` | Skip seeding from a local `.env` on first deploy. Rebuilds already skip `.env` unless `--env-file` is passed. |
+| `--build-arg` | Docker build arg `KEY=VALUE` (repeatable). Omit on a rebuild to keep the registry's stored args. |
+| `--secret` | Docker build secret for this build only, e.g. `--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN` (`src=` also works). |
+| `--no-cache` | Disable the remote build cache. |
 | `--project` | One-command Project override by ID. Falls back to the directory Project, `HUD_DEFAULT_PROJECT`, then the team default. |
-| `--json` | Structured result on stdout. `--all --json` emits one summary document. |
+| `--runtime` | Persist a registry default runtime for tasks that do not specify one: `hud` or `modal`. |
+| `--runtime-config` | JSON `RuntimeConfig` to persist as the registry default (compose, resources, limits). Must set at least one field. |
+| `--json` | Structured result on stdout. |
 | `--dry-run` | Print the deploy plan without uploading or prompting. A first deploy with an unresolved `.env` reports `dotenv_pending`. |
 
 `--env` / `--env-file` upsert onto the registry's existing secrets. Omitting them on a rebuild keeps whatever is already stored. A first deploy that finds a local `.env` prompts once for that invocation (or needs `--env-file` / `--no-env` when stdin is not a TTY).

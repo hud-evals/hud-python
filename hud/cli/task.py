@@ -38,6 +38,7 @@ hud_console = HUDConsole()
 def _args_json(value: str) -> dict[str, Any]:
     return CLI.json_object(value, option="--args")
 
+
 task_app = CLI(
     help="Start a task or grade an answer (attaches to a running env, or spawns from source).",
     rich_markup_mode="rich",

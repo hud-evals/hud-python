@@ -1,20 +1,22 @@
-"""``hud.cli.eval.EvalConfig`` — agent parsing, kwargs building, TOML load, CLI merge.
-
-Pure config logic; no agent is constructed and no network is touched.
-"""
+"""Tests for ``hud.cli.eval``."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hud.cli import eval as eval_mod
-from hud.cli.eval import EvalConfig, _is_bedrock_arn
+from hud.cli.eval import (
+    EvalConfig,
+    _build_agent,
+    _is_bedrock_arn,
+    environment_file,
+    find_tasks_file,
+)
+from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/anthropic.claude"
 
@@ -445,3 +447,166 @@ def test_eval_custom_endpoint_overrides_gateway_selection(monkeypatch):
     agent = eval_mod._build_agent(cfg)
     client.assert_called_once_with(api_key="custom-key", base_url="https://custom.example")
     assert agent.oai is client.return_value
+
+
+@patch("pathlib.Path.cwd")
+def test_find_tasks_file_with_arg(mock_cwd):
+    assert find_tasks_file("some/path.json") == "some/path.json"
+    mock_cwd.assert_not_called()
+
+
+@patch("pathlib.Path.cwd")
+def test_find_tasks_file_no_files(mock_cwd):
+    mock_path = MagicMock(spec=Path)
+    mock_path.glob.return_value = []
+    mock_cwd.return_value = mock_path
+
+    with pytest.raises(FileNotFoundError, match="No task JSON or JSONL files found"):
+        find_tasks_file(None)
+
+
+@patch("hud.cli.eval.hud_console")
+@patch("pathlib.Path.cwd")
+def test_find_tasks_file_single_file(mock_cwd, mock_console):
+    mock_path = MagicMock(spec=Path)
+    mock_file = MagicMock(spec=Path)
+    mock_file.name = "test.json"
+
+    def glob_side_effect(pattern):
+        if pattern == "*.json":
+            return [mock_file]
+        return []
+
+    mock_path.glob.side_effect = glob_side_effect
+    mock_cwd.return_value = mock_path
+
+    result = find_tasks_file(None)
+    assert result == "test.json"
+    mock_console.select.assert_not_called()
+
+
+@patch("hud.cli.eval.hud_console")
+@patch("pathlib.Path.cwd")
+def test_find_tasks_file_multiple_files(mock_cwd, mock_console):
+    mock_path = MagicMock(spec=Path)
+    mock_file1 = MagicMock(spec=Path)
+    mock_file1.name = "test1.json"
+    mock_file2 = MagicMock(spec=Path)
+    mock_file2.name = "test2.jsonl"
+
+    def glob_side_effect(pattern):
+        if pattern == "*.json":
+            return [mock_file1]
+        if pattern == "*.jsonl":
+            return [mock_file2]
+        return []
+
+    mock_path.glob.side_effect = glob_side_effect
+    mock_cwd.return_value = mock_path
+    mock_console.select.return_value = "test2.jsonl"
+
+    result = find_tasks_file(None)
+
+    assert result == "test2.jsonl"
+    mock_console.select.assert_called_once()
+    call_args = mock_console.select.call_args
+    assert call_args[0][0] == "Select a tasks file"
+    assert "test1.json" in call_args[1]["choices"]
+    assert "test2.jsonl" in call_args[1]["choices"]
+
+
+class TestBedrockAutoDetection:
+    VALID_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/my-profile"
+
+    def test_build_agent_detects_bedrock_arn_from_config_checkpoint_name(self) -> None:
+        """Regression: ARN in [claude].checkpoint_name should trigger Bedrock client."""
+        cfg = EvalConfig(
+            agent_type=AgentType.CLAUDE,
+            model=None,  # no CLI --model
+            agent_config={"claude": {"checkpoint_name": self.VALID_ARN}},
+        )
+
+        with (
+            patch("hud.settings.settings.aws_access_key_id", "AKIATEST"),
+            patch("hud.settings.settings.aws_secret_access_key", "secret"),
+            patch("hud.settings.settings.aws_region", "us-east-1"),
+            patch("anthropic.AsyncAnthropicBedrock", return_value=MagicMock()) as mock_bedrock,
+        ):
+            assert "model_client" not in cfg.get_agent_kwargs()
+            agent = _build_agent(cfg)
+
+        assert agent.config.model == self.VALID_ARN
+        assert agent.config.model_client is mock_bedrock.return_value
+        mock_bedrock.assert_called_once()
+
+    def test_build_agent_bedrock_arn_requires_aws_credentials(self) -> None:
+        """Should fail fast if ARN is detected but AWS creds are missing."""
+        cfg = EvalConfig(
+            agent_type=AgentType.CLAUDE,
+            model=None,
+            agent_config={"claude": {"checkpoint_name": self.VALID_ARN}},
+        )
+
+        with (
+            patch("hud.settings.settings.aws_access_key_id", None),
+            patch("hud.settings.settings.aws_secret_access_key", None),
+            patch("hud.settings.settings.aws_region", None),
+            pytest.raises(HudAuthenticationError),
+        ):
+            _build_agent(cfg)
+
+
+def _write(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
+def test_environment_file_is_the_template_definition(tmp_path: Path) -> None:
+    from hud.eval import Taskset
+
+    env_py = tmp_path / "env.py"
+    _write(
+        env_py,
+        "from hud import Environment\n"
+        'env = Environment("demo")\n'
+        "@env.template(id='solve')\n"
+        "async def solve():\n"
+        '    yield "prompt"\n'
+        "    yield 1.0\n"
+        "task = solve()\n",
+    )
+    task = next(iter(Taskset.from_file(env_py)))
+    assert environment_file(task._env) == env_py.resolve()
+
+
+def test_environment_file_follows_split_tasks_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from hud.eval import Taskset
+
+    monkeypatch.delitem(sys.modules, "env", raising=False)
+    env_py = tmp_path / "env.py"
+    _write(
+        env_py,
+        "from hud import Environment\n"
+        'env = Environment("demo")\n'
+        "@env.template(id='solve')\n"
+        "async def solve():\n"
+        '    yield "prompt"\n'
+        "    yield 1.0\n",
+    )
+    tasks_py = tmp_path / "tasks.py"
+    _write(tasks_py, "from env import solve\n\ntask = solve()\n")
+    try:
+        task = next(iter(Taskset.from_file(tasks_py)))
+        assert environment_file(task._env) == env_py.resolve()
+    finally:
+        sys.modules.pop("env", None)
+
+
+def test_environment_file_rejects_env_without_templates() -> None:
+    from hud.environment import Environment
+
+    with pytest.raises(ValueError, match="bound Environment"):
+        environment_file(Environment("demo"))
