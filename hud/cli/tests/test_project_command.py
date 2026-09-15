@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import pytest
 from typer.testing import CliRunner
 
 from hud.cli import app
-from hud.cli.utils.config import AuthScope, DirectoryState
+from hud.cli.config import AuthScope, DirectoryState
 from hud.utils.exceptions import HudRequestError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 PROJECT_ID = "22222222-2222-4222-8222-222222222222"
 SCOPE = AuthScope(
@@ -48,7 +50,7 @@ def test_use_honors_directory_options(tmp_path: Path, override: bool) -> None:
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["id"] == PROJECT_ID
     assert DirectoryState(SCOPE, target).load().project_id == UUID(PROJECT_ID)
-    assert not (target / ".hud").exists()
+    assert (target / ".hud" / "config.json").exists()
     if override:
         assert DirectoryState(SCOPE, group).load().project_id is None
 
@@ -69,7 +71,7 @@ def test_use_dry_run_does_not_persist(tmp_path: Path) -> None:
         app, ["project", "use", PROJECT_ID, "-C", str(legacy.parent.parent), "--dry-run", "--json"]
     )
     assert result.exit_code == 0, result.output
-    assert not (Path.home() / ".hud" / "config.json").exists()
+    assert not (legacy.parent / "config.json").exists()
     assert legacy.read_text() == '{"projectId":"old"}'
 
 
@@ -79,7 +81,7 @@ def test_create_permission_error_is_one_json_document(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", denied)
     result = CliRunner().invoke(app, ["project", "create", "browser-evals", "--no-use", "--json"])
-    assert result.exit_code == 4
+    assert result.exit_code == 1
     assert json.loads(result.stdout)["error"] == "permission_denied"
 
 

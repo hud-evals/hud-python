@@ -10,20 +10,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
-from hud.cli.utils.api import require_api_key
-from hud.cli.utils.output import (
+from hud.cli import require_api_key
+from hud.cli.io import (
     CliError,
-    dry_run_option,
     emit_json,
     emit_quiet,
-    json_option,
     map_exception,
-    output_option,
-    quiet_option,
-    resolve_output_mode,
-    wants_json,
+    mark_json,
 )
+from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
 from hud.settings import settings
 from hud.utils.exceptions import HudException, HudTimeoutError
 from hud.utils.hud_console import DIM, GOLD, GREEN, RED, SECONDARY, HUDConsole
@@ -258,7 +253,7 @@ def _require_trace_agent(platform: PlatformClient, agent_id: str) -> None:
                 "The CLI currently supports trace agents only."
             ),
             input={"agent_id": agent_id, "subject_type": agent.get("subject_type")},
-            suggestion="Use a trace QA agent id from `hud qa --json`.",
+            suggestion="Use a trace QA agent id from `hud qa list --json`.",
         )
 
 
@@ -314,24 +309,7 @@ def _wait_for_results(
         time.sleep(_POLL_INTERVAL_SECONDS)
 
 
-@qa_app.callback(invoke_without_command=True)
-def list_agents(
-    ctx: typer.Context,
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
-    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
-    offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
-) -> None:
-    """List trace QA agents available to this team.
-
-    [not dim]Examples:
-        hud qa
-        hud qa --json
-        hud qa --quiet[/not dim]
-    """
-    if ctx.invoked_subcommand is not None:
-        return
+def _list_agents(*, json_output: bool, quiet: bool, limit: int, offset: int) -> None:
     response = cast(
         "dict[str, Any]",
         _platform().get(
@@ -339,12 +317,11 @@ def list_agents(
             params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
         ),
     )
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
-    if mode == "json":
+    if json_output is True:
         emit_json(response)
         return
     agents = response["items"]
-    if mode == "quiet":
+    if quiet:
         emit_quiet([str(agent.get("id") or "") for agent in agents if agent.get("id")])
         return
     if not agents:
@@ -352,6 +329,53 @@ def list_agents(
         return
     for agent in agents:
         _print_agent(agent)
+
+
+@qa_app.command("list")
+def list_command(
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
+    offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
+) -> None:
+    """List trace QA agents available to this team.
+
+    [not dim]Examples:
+        hud qa list
+        hud qa list --json
+        hud qa list --quiet[/not dim]
+    """
+    _list_agents(json_output=json_output, quiet=quiet, limit=limit, offset=offset)
+
+
+@qa_app.callback(invoke_without_command=True)
+def qa_command(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
+    offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
+) -> None:
+    """List trace QA agents, or run and inspect them.
+
+    Without a verb, lists available agents. ``hud qa`` is an alias for ``hud qa list``.
+
+    [not dim]Examples:
+        hud qa
+        hud qa list --json
+        hud qa run <agent-id> <trace-id>[/not dim]
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _list_agents(json_output=json_output, quiet=quiet, limit=limit, offset=offset)
 
 
 @qa_app.command("run")
@@ -377,9 +401,12 @@ def run_agent(
         min=1,
         help="Maximum seconds to wait for QA execution.",
     ),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    dry_run: bool = dry_run_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
 ) -> None:
     """Run one trace QA agent against the given traces.
 
@@ -397,7 +424,7 @@ def run_agent(
             "overwrite": overwrite,
             "wait": wait,
         }
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json(plan)
         else:
             typer.echo(f"--dry-run: would run agent {agent_id} on {len(trace_ids)} trace(s)")
@@ -414,7 +441,7 @@ def run_agent(
         )
     except HudException as exc:
         raise map_exception(exc, input={"agent_id": agent_id, "trace_ids": trace_ids}) from exc
-    as_json = wants_json(json_output, output)
+    as_json = json_output is True
     if not wait:
         _print_results(runs, json_output=as_json)
         return
@@ -440,8 +467,9 @@ def list_results(
         ...,
         help="One or more trace UUIDs.",
     ),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
     rollout: bool = typer.Option(
         False,
         "--rollout",
@@ -454,7 +482,7 @@ def list_results(
         "list[dict[str, Any]]",
         platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
     )
-    if wants_json(json_output, output):
+    if json_output is True:
         _print_results(results, json_output=True)
         return
     if not results:

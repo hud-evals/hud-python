@@ -10,16 +10,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli.utils.output import (
-    dry_run_option,
+from hud.cli import require_api_key
+from hud.cli.io import (
     emit_json,
     emit_quiet,
-    json_option,
     map_request_error,
-    output_option,
-    quiet_option,
-    resolve_output_mode,
-    wants_json,
+    mark_json,
 )
 from hud.utils.platform import PlatformClient
 
@@ -36,9 +32,12 @@ models_app = typer.Typer(
 
 @models_app.command("list")
 def list_models(
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
 ) -> None:
     """List models available through the HUD inference gateway.
 
@@ -50,7 +49,6 @@ def list_models(
         hud models list --json
         hud models list --quiet[/not dim]
     """
-    from hud.cli.utils.api import require_api_key
     from hud.settings import settings
     from hud.utils.gateway import list_gateway_models
 
@@ -58,11 +56,10 @@ def list_models(
 
     models_list = list_gateway_models()
 
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
-    if mode == "json":
+    if json_output is True:
         emit_json([m.model_dump() for m in models_list])
         return
-    if mode == "quiet":
+    if quiet:
         emit_quiet([m.model_name or m.id or "" for m in models_list if m.model_name or m.id])
         return
 
@@ -99,9 +96,12 @@ def list_models(
 def fork_model(
     source: str = typer.Argument(..., help="Source model slug or id to fork from"),
     name: str = typer.Option(..., "--name", "-n", help="Name for the new trainable model"),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    dry_run: bool = dry_run_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
     if_not_exists: bool = typer.Option(
         False,
         "--if-not-exists",
@@ -120,7 +120,6 @@ def fork_model(
         hud models fork claude-sonnet-4-6 --name my-sonnet --if-not-exists
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
-    from hud.cli.utils.api import require_api_key
     from hud.utils.exceptions import HudRequestError
 
     require_api_key("fork a model")
@@ -133,7 +132,7 @@ def fork_model(
             "name": name,
             "if_not_exists": if_not_exists,
         }
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json(payload)
         else:
             console.print(f"[dim]--dry-run: would fork {source!r} as {name!r}[/dim]")
@@ -147,7 +146,7 @@ def fork_model(
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
             existing = _existing_model(name)
-            if wants_json(json_output, output):
+            if json_output is True:
                 emit_json({**existing, "existed": True})
             else:
                 slug = existing.get("model_name") or name
@@ -160,7 +159,7 @@ def fork_model(
             input={"source": source, "name": name},
         ) from exc
 
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(model)
         return
     slug = model["model_name"]
@@ -179,9 +178,12 @@ def fork_model(
 @models_app.command("checkpoints")
 def list_checkpoints(
     model: str = typer.Argument(..., help="Model slug or id"),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
 ) -> None:
     """List a model's checkpoint tree, oldest first (▶ marks the active head).
 
@@ -190,17 +192,13 @@ def list_checkpoints(
         hud models checkpoints <model> --json
         hud models checkpoints <model> --quiet[/not dim]
     """
-    from hud.cli.utils.api import require_api_key
-
     require_api_key("list checkpoints")
     model_id = _resolve_model_id(model)
     checkpoints = _get_checkpoints(model_id)
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
-
-    if mode == "json":
+    if json_output is True:
         emit_json(checkpoints)
         return
-    if mode == "quiet":
+    if quiet:
         emit_quiet([str(ckpt.get("id") or "") for ckpt in checkpoints if ckpt.get("id")])
         return
     if not checkpoints:
@@ -236,9 +234,12 @@ def show_head(
     set_to: str | None = typer.Option(
         None, "--set", help="Checkpoint id to promote to head (rollback / select)"
     ),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    dry_run: bool = dry_run_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
 ) -> None:
     """Show — or with ``--set``, change — the model's active checkpoint (the
     weights the gateway serves now).
@@ -248,8 +249,6 @@ def show_head(
         hud models head <model> --json
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
-    from hud.cli.utils.api import require_api_key
-
     require_api_key("manage head")
     model_id = _resolve_model_id(model)
 
@@ -262,13 +261,13 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
-            if wants_json(json_output, output):
+            if json_output is True:
                 emit_json(payload)
             else:
                 console.print(f"[dim]--dry-run: would set head of {model} to {set_to}[/dim]")
             return
         _set_head(model_id, set_to)
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json({"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"})
             return
         console.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
@@ -277,7 +276,7 @@ def show_head(
 
     head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
 
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(head)
         return
     if head is None:

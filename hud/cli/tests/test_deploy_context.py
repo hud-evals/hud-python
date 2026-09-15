@@ -5,7 +5,7 @@ from __future__ import annotations
 import tarfile
 from typing import TYPE_CHECKING
 
-from hud.cli.utils.context import (
+from hud.cli.deploy import (
     create_build_context_tarball,
     format_size,
     parse_ignore_file,

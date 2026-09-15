@@ -1,4 +1,4 @@
-"""Cancel remote rollouts (``hud cancel`` and ``hud jobs cancel``)."""
+"""Cancel remote rollouts (``hud jobs cancel``; ``hud cancel`` is a hidden alias)."""
 
 from __future__ import annotations
 
@@ -7,20 +7,16 @@ from typing import Any
 
 import typer
 
-from hud.cli.utils.output import (
+from hud.cli.io import (
     CliError,
-    ExitCode,
     confirm_or_abort,
-    dry_run_option,
     emit_json,
-    json_option,
     map_exception,
-    output_option,
-    wants_json,
-    yes_option,
+    mark_json,
 )
 from hud.utils.exceptions import HudException
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient
 
 
 def run_cancel(
@@ -31,9 +27,8 @@ def run_cancel(
     yes: bool,
     dry_run: bool = False,
     json_output: bool = False,
-    output: str | None = None,
 ) -> None:
-    """Shared implementation for ``hud cancel`` and ``hud jobs cancel``."""
+    """Shared implementation for ``hud jobs cancel`` and the hidden ``hud cancel`` alias."""
     hud_console = HUDConsole()
 
     if not job_id and not all_jobs:
@@ -41,7 +36,6 @@ def run_cancel(
             error="usage",
             message="Provide a job_id or use --all to cancel all active jobs.",
             suggestion="hud jobs cancel <job-id>   or   hud jobs cancel --all --yes",
-            exit_code=ExitCode.USAGE,
         )
 
     if job_id and all_jobs:
@@ -50,7 +44,6 @@ def run_cancel(
             message="Cannot specify both job_id and --all.",
             input={"job_id": job_id, "all": all_jobs},
             suggestion="Pass either a job id or --all, not both.",
-            exit_code=ExitCode.USAGE,
         )
 
     if all_jobs:
@@ -68,7 +61,7 @@ def run_cancel(
         "all": all_jobs,
     }
     if dry_run:
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json(plan)
         else:
             hud_console.info(f"--dry-run: would {action.replace('_', ' ')}")
@@ -88,18 +81,19 @@ def run_cancel(
         confirm_or_abort(f"Cancel all tasks in job {job_id}?", yes=yes, default=False)
 
     async def _cancel() -> dict[str, Any]:
-        from hud.cli.utils.jobs import cancel_all_jobs, cancel_job, cancel_task
-
+        platform = PlatformClient.from_settings()
         if all_jobs:
             hud_console.info("Cancelling all active jobs...")
-            return await cancel_all_jobs()
+            return await platform.apost("/rollouts/cancel_user_jobs", json={})
         if trace_id:
             assert job_id is not None
             hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
-            return await cancel_task(job_id, trace_id)
+            return await platform.apost(
+                "/rollouts/cancel", json={"job_id": job_id, "trace_id": trace_id}
+            )
         assert job_id is not None
         hud_console.info(f"Cancelling job {job_id}...")
-        return await cancel_job(job_id)
+        return await platform.apost("/rollouts/cancel_job", json={"job_id": job_id})
 
     try:
         result = asyncio.run(_cancel())
@@ -107,7 +101,7 @@ def run_cancel(
         raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
 
     payload: dict[str, Any] = {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(payload)
         return
 
@@ -148,20 +142,25 @@ def cancel_command(
     all_jobs: bool = typer.Option(
         False, "--all", "-a", help="Cancel ALL active jobs for your account (panic button)."
     ),
-    yes: bool = yes_option(),
-    dry_run: bool = dry_run_option(),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
-    """Cancel remote rollouts.
-
-    Prefer ``hud jobs cancel`` in new scripts; this command is kept as an alias.
+    """Deprecated. Use ``hud jobs cancel``.
 
     [not dim]Examples:
-        hud cancel <job_id>                 # Cancel all tasks in a job
-        hud cancel <job_id> --trace-id <id> # Cancel specific task run
-        hud cancel --all --yes              # Cancel ALL active jobs (panic button)
-        hud cancel <job_id> --dry-run --json[/not dim]
+        hud jobs cancel <job_id>
+        hud jobs cancel <job_id> --trace-id <id>
+        hud jobs cancel --all --yes[/not dim]
     """
     run_cancel(
         job_id=job_id,
@@ -170,5 +169,4 @@ def cancel_command(
         yes=yes,
         dry_run=dry_run,
         json_output=json_output,
-        output=output,
     )

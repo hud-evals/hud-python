@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -12,27 +14,19 @@ from uuid import UUID
 import typer
 from typer.core import TyperGroup
 
-from hud.cli.utils.api import require_api_key
-from hud.cli.utils.config import AuthScope, DirectoryLink, DirectoryState
-from hud.cli.utils.output import (
+from hud.cli import require_api_key
+from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
+from hud.cli.io import (
     CliError,
     confirm_or_abort,
     emit_json,
-    is_interactive,
-    json_option,
     map_request_error,
-    output_option,
-    wants_json,
+    mark_json,
 )
-from hud.cli.utils.project import (
+from hud.cli.project import (
     PROJECT_OPTION_HELP,
     require_writable_placement,
     resolve_placement,
-)
-from hud.cli.utils.registry import (
-    RegistryEnvironment,
-    get_registry_environment,
-    list_registry_environments,
 )
 from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
@@ -41,6 +35,80 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RegistryEnvironment:
+    id: str
+    name: str
+    version: str = ""
+    project_id: str | None = None
+
+    @classmethod
+    def from_record(cls, data: dict[str, Any]) -> RegistryEnvironment:
+        env_id = data.get("id")
+        if not isinstance(env_id, str) or not env_id:
+            raise ValueError("registry environment record needs an id")
+        latest_build = data.get("latest_build")
+        version = latest_build.get("version") if isinstance(latest_build, dict) else None
+        return cls(
+            id=env_id,
+            name=str(data.get("name") or "unnamed"),
+            version=str(version) if version is not None else "",
+            project_id=str(data["project_id"]) if data.get("project_id") else None,
+        )
+
+    @property
+    def short_id(self) -> str:
+        return self.id[:8]
+
+    @property
+    def version_label(self) -> str:
+        return f" v{self.version}" if self.version else ""
+
+
+def get_registry_environment(
+    platform: PlatformClient,
+    registry_id: str,
+) -> RegistryEnvironment:
+    try:
+        registry_id = str(UUID(registry_id))
+    except ValueError as exc:
+        raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
+    try:
+        data = platform.get(f"/registry/{registry_id}")
+    except HudRequestError as e:
+        if e.status_code == 404:
+            raise CliError(
+                "not_found",
+                f"Environment {registry_id} is inaccessible or deleted.",
+                suggestion="Run 'hud sync env <id>' to link an accessible environment.",
+            ) from e
+        raise
+    return RegistryEnvironment.from_record(data)
+
+
+def list_registry_environments(
+    platform: PlatformClient,
+    *,
+    limit: int = 500,
+    sort_by: str | None = "date",
+) -> list[RegistryEnvironment]:
+    environments: list[RegistryEnvironment] = []
+    offset = 0
+    while True:
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if sort_by:
+            params["sort_by"] = sort_by
+        data = platform.get("/registry", params=params)
+        page = [RegistryEnvironment.from_record(item) for item in data["items"]]
+        environments.extend(page)
+        offset += len(page)
+        if offset >= data["total"]:
+            return environments
+        if not page:
+            raise ValueError("Registry API returned an empty page before the reported total")
+
 
 sync_app = typer.Typer(
     name="sync",
@@ -64,7 +132,7 @@ def _taskset_target(
             "'hud sync tasks <name>' first to store it."
         )
     if target_ref == stored_taskset_id and not taskset and not taskset_id:
-        console.info("Using taskset ID from ~/.hud/config.json")
+        console.info(f"Using taskset ID from {CONFIG_PATH}")
     return target_ref
 
 
@@ -198,7 +266,7 @@ def _save_taskset_id(result: dict[str, object], console: HUDConsole, state: Dire
         return
     changed = state.update(DirectoryLink(taskset_id=UUID(returned_id)))
     if changed:
-        console.dim_info("Taskset ID saved to:", "~/.hud/config.json")
+        console.dim_info("Taskset ID saved to:", str(CONFIG_PATH))
     from hud.settings import settings
 
     console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
@@ -208,7 +276,7 @@ def _save_taskset_id(result: dict[str, object], console: HUDConsole, state: Dire
 def sync_tasks_command(
     taskset: str | None = typer.Argument(
         None,
-        help="Taskset name or ID (reads from ~/.hud/config.json if omitted)",
+        help="Taskset name or ID (reads from .hud/config.json if omitted)",
     ),
     source: str = typer.Argument(
         ".",
@@ -243,12 +311,10 @@ def sync_tasks_command(
         False,
         "--yes",
         "-y",
-        help="Skip confirmation prompt",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
     dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Show sync plan without uploading",
+        False, "--dry-run", help="Print the planned action without making changes."
     ),
     force: bool = typer.Option(
         False,
@@ -260,8 +326,9 @@ def sync_tasks_command(
         "--export",
         help="Export remote tasks to a file instead of syncing. Supports .json, .jsonl, and .csv",
     ),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Sync local task definitions to a platform taskset.
 
@@ -341,14 +408,14 @@ def sync_tasks_command(
             if remote_taskset.taskset_id is None:
                 raise CliError("not_found", "Cannot link a taskset that does not exist")
             state.update(DirectoryLink(taskset_id=UUID(remote_taskset.taskset_id)))
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json({**plan_payload, "status": "up_to_date", "dry_run": dry_run})
             return
         hud_console.success("All tasks up to date")
         return
 
     if dry_run:
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json({**plan_payload, "dry_run": True, "action": "sync_tasks"})
         else:
             hud_console.info("\n  --dry-run: no changes made")
@@ -376,7 +443,7 @@ def sync_tasks_command(
     created = int(result.get("tasks_created", 0))
     updated = int(result.get("tasks_updated", 0))
 
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(
             {
                 **plan_payload,
@@ -405,16 +472,19 @@ def sync_env_command(
         False,
         "--yes",
         "-y",
-        help="Skip confirmation prompt",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Link local directory to a platform environment.
 
     [not dim]Validates an environment ID, verifies it exists, and stores
-    the registry ID in ~/.hud/config.json for task sync checks.
+    the registry ID in .hud/config.json for task sync checks.
 
     Examples:
         hud sync env <environment-id>           # link cwd to '<environment-id>'
@@ -426,7 +496,7 @@ def sync_env_command(
 
     require_api_key("sync environments")
 
-    if name is None and (dry_run is True or not is_interactive()):
+    if name is None and (dry_run is True or not sys.stdin.isatty()):
         raise CliError(
             "usage",
             "Pass an environment ID for a dry run or noninteractive link.",
@@ -464,7 +534,7 @@ def sync_env_command(
         selected_env = get_registry_environment(platform, name)
 
     if dry_run:
-        if wants_json(json_output, output):
+        if json_output is True:
             emit_json({"dry_run": True, "action": "link_environment", "id": selected_env.id})
         else:
             hud_console.info(f"Would link to {selected_env.name} ({selected_env.id})")
@@ -475,7 +545,7 @@ def sync_env_command(
         confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
     changed = state.update(DirectoryLink(registry_id=UUID(selected_env.id)))
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(
             {
                 "name": selected_env.name,
@@ -486,7 +556,7 @@ def sync_env_command(
         return
     hud_console.success(f"Linked to: {selected_env.name} ({selected_env.short_id}...)")
     if changed:
-        hud_console.dim_info("Config saved to:", "~/.hud/config.json")
+        hud_console.dim_info("Link saved to:", str(CONFIG_PATH))
 
 
 @sync_app.callback(invoke_without_command=True)
@@ -496,7 +566,7 @@ def sync_callback(ctx: typer.Context) -> None:
     [not dim]Without a subcommand, syncs tasks using stored config.
 
     Examples:
-        hud sync                         # sync tasks using ~/.hud/config.json
+        hud sync                         # sync tasks using .hud/config.json
         hud sync tasks my-taskset        # sync tasks to specific taskset
         hud sync env <environment-id>    # link to environment[/not dim]
     """

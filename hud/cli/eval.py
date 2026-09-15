@@ -14,25 +14,32 @@ import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import mean, pstdev
 from string import Template
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import typer
 from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
-from hud.cli.utils.api import require_api_key
-from hud.cli.utils.config import parse_key_value
-from hud.cli.utils.output import json_option
-from hud.cli.utils.source import EnvironmentSource
+from hud.cli import require_api_key
+from hud.cli.config import parse_key_value
+from hud.cli.io import CliError, confirm_or_abort, emit_json, mark_json, read_text_arg
+from hud.cli.source import environment_file
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import canonical_record_id
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from hud.eval.run import Run
+
 _BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
+_SUCCESS_THRESHOLD = 0.7
 
 
 def _is_bedrock_arn(model: str | None) -> bool:
@@ -555,17 +562,30 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
+def _local_subprocess(task: Any) -> Any:
+    """Serve the Environment bound on ``task`` (``SubprocessRuntime``)."""
+    from hud.eval import SubprocessRuntime
+
+    env = task._env
+    if env is None:
+        raise ValueError(
+            "no placement: these rows have no bound Environment. "
+            "Pass a Python tasks/env module, or use --remote / --runtime hud / a tcp:// url."
+        )
+    return SubprocessRuntime(environment_file(env))(task)
+
+
 def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) -> Any:
     """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
 
-    "local" runs each row's env beside the tasks file: rows that declare a
-    container substrate (``runtime_config`` image or compose) get
-    ``DockerRuntime``, otherwise the env source is served in a subprocess;
+    "local" uses the Environment already bound on each row (the same
+    inference ``Taskset.run()`` does): container rows get ``DockerRuntime``,
+    otherwise that env's defining file is served in a subprocess;
     "hud" opens the HUD runtime tunnel while keeping the agent loop local;
     ``--remote`` submits every rollout for platform-hosted execution; a
     ``tcp://`` url attaches to an env served elsewhere.
     """
-    from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime
+    from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime
 
     if cfg.remote:
         require_api_key("run remote hosted evals")
@@ -574,14 +594,13 @@ def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) 
         if source_path is None:
             raise ValueError("local placement requires a local source path")
         docker = DockerRuntime()
-        subprocess = SubprocessRuntime(EnvironmentSource.local_source(source_path))
 
         def local(task: Any) -> Any:
             config = task.runtime_config
             return (
                 docker(task)
                 if config is not None and (config.image is not None or config.compose is not None)
-                else subprocess(task)
+                else _local_subprocess(task)
             )
 
         return local
@@ -667,6 +686,94 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
     return job
 
 
+def _truncate(text: str | list[Any] | None, max_len: int) -> str:
+    if not text:
+        return "—"
+    if not isinstance(text, str):
+        text = str(text)
+    text = text.replace("\n", " ").strip()
+    return text[: max_len - 2] + ".." if len(text) > max_len else text
+
+
+def display_runs(
+    runs: Sequence[Run],
+    *,
+    name: str = "",
+    elapsed: float | None = None,
+    show_details: bool = True,
+) -> None:
+    """Print a summary (+ per-run details table) for a batch of runs."""
+    if not runs:
+        print("No results to display")  # noqa: T201
+        return
+
+    rewards = [r.reward for r in runs]
+    errors = [r for r in runs if r.trace.is_error]
+    mean_reward = mean(rewards)
+    std_reward = pstdev(rewards) if len(rewards) > 1 else 0.0
+    success_rate = sum(1 for r in rewards if r > _SUCCESS_THRESHOLD) / len(runs)
+
+    console = hud_console.console
+    title = f"'{name}' Results" if name else "Evaluation Complete"
+    console.print(f"\n[bold]{title}[/bold]")
+    console.print(f"  [dim]Runs:[/dim] {len(runs)}")
+    if elapsed:
+        rate = len(runs) / elapsed if elapsed > 0 else 0
+        console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s ({rate:.1f}/s)")
+    console.print(
+        f"  [dim]Mean reward:[/dim] [green]{mean_reward:.3f}[/green] +/- {std_reward:.3f}"
+    )
+    console.print(f"  [dim]Success rate:[/dim] [yellow]{success_rate * 100:.1f}%[/yellow]")
+    if errors:
+        console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
+
+    if show_details and len(runs) <= 50:
+        table = Table(title="Details", show_header=True, header_style="bold")
+        table.add_column("#", style="dim", justify="right", width=4)
+        table.add_column("Prompt", style="dim", max_width=35)
+        table.add_column("Answer", style="dim", max_width=35)
+        table.add_column("Reward", justify="right", style="green", width=8)
+        table.add_column("", justify="center", width=3)
+        for i, run in enumerate(runs):
+            if run.trace.is_error:
+                status = "[red]✗[/red]"
+            elif run.reward > _SUCCESS_THRESHOLD:
+                status = "[green]✓[/green]"
+            else:
+                status = "[yellow]○[/yellow]"
+            row: list[Any] = [
+                str(i),
+                _truncate(run.prompt, 35),
+                _truncate(run.trace.content, 35),
+                f"{run.reward:.3f}",
+                status,
+            ]
+            table.add_row(*row)
+        console.print(table)
+
+    if std_reward > 0.3:
+        console.print(f"\n[yellow]High variance (std={std_reward:.3f})[/yellow]")
+    console.print()
+
+
+def find_tasks_file(tasks_file: str | None, msg: str = "Select a tasks file") -> str:
+    """Return a local tasks file, prompting when more than one exists."""
+    if tasks_file:
+        return tasks_file
+
+    cwd = Path.cwd()
+    names = [
+        path.name
+        for path in (*cwd.glob("*.json"), *cwd.glob("*.jsonl"))
+        if not path.name.startswith(".")
+    ]
+    if not names:
+        raise FileNotFoundError("No task JSON or JSONL files found in current directory")
+    if len(names) == 1:
+        return names[0]
+    return hud_console.select(msg, choices=names)
+
+
 def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
@@ -705,10 +812,17 @@ def eval_command(
         "--task-ids",
         help="Comma-separated task slugs (or 0-based indices) to run",
     ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
-    json_output: bool = json_option(),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Print the resolved eval plan without running."
+        False, "--dry-run", help="Print the planned action without making changes."
     ),
     gateway: bool = typer.Option(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
@@ -741,8 +855,6 @@ def eval_command(
     hud_console.info("Initializing evaluation...")
 
     if from_json is not None:
-        from hud.cli.utils.output import read_text_arg
-
         cfg = EvalConfig.model_validate_json(read_text_arg(str(from_json)))
     else:
         cfg = EvalConfig.load()
@@ -766,8 +878,6 @@ def eval_command(
         remote=remote,
     )
 
-    from hud.cli.utils.output import CliError, emit_json, wants_json
-
     if dry_run and (cfg.source is None or cfg.agent_type is None):
         raise CliError(
             "usage", "Dry-run requires an explicit task source and agent (or configured defaults)."
@@ -788,15 +898,13 @@ def eval_command(
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
         }
-        if wants_json(json_output):
+        if json_output is True:
             emit_json(plan)
         else:
             hud_console.info("--dry-run: no evaluation started")
         return
 
     if cfg.source is None:
-        from hud.cli.utils.tasks import find_tasks_file
-
         cfg = cfg.model_copy(update={"source": find_tasks_file(None, msg="Select a tasks file")})
         hud_console.success(f"Selected: {cfg.source}")
 
@@ -816,8 +924,6 @@ def eval_command(
 
     cfg.display()
 
-    from hud.cli.utils.output import confirm_or_abort
-
     confirm_or_abort("Proceed?", yes=yes, default=True)
 
     start_time = time.time()
@@ -825,7 +931,7 @@ def eval_command(
     elapsed = time.time() - start_time
 
     runs = job.runs
-    if wants_json(json_output):
+    if json_output is True:
         emit_json(
             {
                 "job_id": job.id,
@@ -848,6 +954,4 @@ def eval_command(
         )
         return
     if runs:
-        from hud.cli.utils.display import display_runs
-
         display_runs(runs, name=cfg.source or "", elapsed=elapsed)

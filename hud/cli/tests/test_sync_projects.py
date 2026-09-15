@@ -10,8 +10,10 @@ from typer.testing import CliRunner
 
 import hud.cli.sync as sync_module
 from hud.cli import app
+from hud.cli.config import AuthScope, DirectoryState
 from hud.eval import Task, Taskset
 from hud.utils.exceptions import HudRequestError
+from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -152,14 +154,6 @@ def test_project_override_does_not_pin_directory(
 def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stale: bool
 ) -> None:
-    import json
-
-    from typer.testing import CliRunner
-
-    from hud.cli import app
-    from hud.cli.utils.config import load_config
-    from hud.utils.exceptions import HudRequestError
-
     source = tmp_path / "tasks.py"
     source.write_text(
         "from hud.eval import Task\ntasks = [Task(env='example', id='solve', slug='one')]\n"
@@ -190,11 +184,12 @@ def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
     monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
     first = CliRunner().invoke(app, ["sync", "tasks", "demo", str(source), "--yes", "--json"])
     assert first.exit_code == 0, first.output
-    before = load_config()
+    state = DirectoryState(AuthScope.resolve(PlatformClient.from_settings()), tmp_path)
+    before = state.load()
     second = CliRunner().invoke(app, ["sync", "tasks", "--yes", "--json", "--force"])
-    assert load_config() == before
+    assert state.load() == before
     if stale:
-        assert second.exit_code == 3, second.output
+        assert second.exit_code == 1, second.output
         assert json.loads(second.stdout)["error"] == "not_found"
         assert len(uploads) == 1
     else:
@@ -207,19 +202,15 @@ def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
         override = CliRunner().invoke(app, args)
         assert override.exit_code == 0, override.output
         assert uploads[-1]["taskset_id"] == other
-        assert load_config() == before
+        assert state.load() == before
         planned_link = CliRunner().invoke(app, [*args, "--link", "--dry-run"])
         assert planned_link.exit_code == 0, planned_link.output
-        assert load_config() == before
+        assert state.load() == before
         relinked = CliRunner().invoke(app, [*args, "--link"])
         assert relinked.exit_code == 0, relinked.output
-        assert str(load_config().directories[0].link.taskset_id) == other
+        assert str(state.load().taskset_id) == other
 
-        from hud.utils.hud_console import HUDConsole
-
-        monkeypatch.setattr("hud.cli.utils.output.is_interactive", lambda: True)
-        monkeypatch.setattr(HUDConsole, "confirm", lambda *a, **k: True)
-        alias = CliRunner().invoke(app, ["--json", "sync"])
+        alias = CliRunner().invoke(app, ["sync", "tasks", "--yes", "--json", "--force"])
         assert alias.exit_code == 0, alias.output
         assert json.loads(alias.stdout)["taskset_id"] == other
 
@@ -228,7 +219,7 @@ def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
     ("status_code", "exit_code", "error"),
     [
         (400, 1, "failure"),
-        (403, 4, "permission_denied"),
+        (403, 1, "permission_denied"),
         (500, 1, "server_error"),
     ],
 )

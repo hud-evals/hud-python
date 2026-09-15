@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import json
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
-import typer
 
-from hud.cli.utils.output import (
+from hud.cli.io import (
     CliError,
     ExitCode,
     confirm_or_abort,
+    emit_error,
     emit_json,
     emit_quiet,
+    json_object,
     map_request_error,
     read_text_arg,
-    resolve_output_mode,
-    wants_json,
 )
 from hud.utils.exceptions import HudRequestError
 
@@ -25,28 +25,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_wants_json_from_flag_and_output() -> None:
-    assert wants_json(True) is True
-    assert wants_json(False, "json") is True
-    assert wants_json(False, "table") is False
-    assert wants_json(False) is False
-
-
-def test_wants_json_ignores_typer_option_defaults() -> None:
-    """Direct command calls leave typer.Option objects in place; they are not True."""
-    assert wants_json(typer.Option(False, "--json")) is False  # type: ignore[arg-type]
-
-
-def test_resolve_output_mode_prefers_json_over_quiet() -> None:
-    assert resolve_output_mode(json_output=True, quiet=True) == "json"
-    assert resolve_output_mode(quiet=True) == "quiet"
-    assert resolve_output_mode() == "table"
-
-
-def test_resolve_output_mode_rejects_unknown_format() -> None:
+def test_json_object_names_the_flag() -> None:
+    assert json_object('{"image": "x"}', option="--payload") == {"image": "x"}
     with pytest.raises(CliError) as exc_info:
-        resolve_output_mode(output="yaml")
-    assert exc_info.value.exit_code == ExitCode.USAGE
+        json_object("[]", option="--payload")
+    assert exc_info.value.message == "--payload must be a JSON object"
+    assert exc_info.value.input == {"payload": "[]"}
 
 
 def test_emit_json_goes_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
@@ -71,32 +55,58 @@ def test_output_mode_does_not_leak_between_invocations() -> None:
     runner = CliRunner()
     first = runner.invoke(app, ["version", "--json"])
     second = runner.invoke(app, ["version"])
-    alias = runner.invoke(app, ["--version", "--json"])
+    flag = runner.invoke(app, ["--version"])
     assert json.loads(first.stdout)["name"] == "hud"
     assert second.stdout.startswith("HUD CLI version:")
-    assert json.loads(alias.stdout) == json.loads(first.stdout)
+    assert flag.exit_code == 0
+    assert "HUD CLI version:" in flag.stdout
+    unexpected = runner.invoke(app, ["--json", "version"])
+    assert unexpected.exit_code != 0
 
 
 def test_map_request_error_status_codes() -> None:
-    assert map_request_error(HudRequestError("x", status_code=404)).exit_code == ExitCode.NOT_FOUND
-    assert map_request_error(HudRequestError("x", status_code=403)).exit_code == ExitCode.PERMISSION
-    assert map_request_error(HudRequestError("x", status_code=409)).exit_code == ExitCode.CONFLICT
+    not_found = map_request_error(HudRequestError("x", status_code=404))
+    assert not_found.error == "not_found"
+    assert not_found.exit_code == ExitCode.FAILURE
+    permission = map_request_error(HudRequestError("x", status_code=403))
+    assert permission.error == "permission_denied"
+    assert permission.exit_code == ExitCode.FAILURE
+    conflict = map_request_error(HudRequestError("x", status_code=409))
+    assert conflict.error == "conflict"
+    assert conflict.exit_code == ExitCode.FAILURE
     mapped = map_request_error(HudRequestError("x", status_code=429))
-    assert mapped.transient is True
     assert mapped.error == "rate_limited"
+
+
+def test_emit_error_json_writes_only_stdout(capsys: pytest.CaptureFixture[str]) -> None:
+    emit_error(
+        CliError(error="not_found", message="missing job", suggestion="Check the id."),
+        json_output=True,
+    )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["error"] == "not_found"
+    assert captured.err == ""
+
+
+def test_emit_error_text_writes_only_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    emit_error(CliError(error="not_found", message="missing job", suggestion="Check the id."))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: missing job" in captured.err
+    assert "Hint: Check the id." in captured.err
 
 
 def test_confirm_or_abort_noninteractive_requires_yes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("hud.cli.utils.output.is_interactive", lambda: False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     with pytest.raises(CliError) as exc_info:
         confirm_or_abort("Proceed?")
     assert exc_info.value.exit_code == ExitCode.USAGE
 
 
 def test_confirm_or_abort_yes_skips_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("hud.cli.utils.output.is_interactive", lambda: False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     confirm_or_abort("Proceed?", yes=True)
 
 
@@ -105,11 +115,12 @@ def test_read_text_arg_stdin_and_file(tmp_path: Path, monkeypatch: pytest.Monkey
     target.write_text("hello", encoding="utf-8")
     assert read_text_arg(str(target)) == "hello"
 
-    monkeypatch.setattr("hud.cli.utils.output.sys.stdin.read", lambda: "from-stdin")
+    monkeypatch.setattr("hud.cli.io.sys.stdin.read", lambda: "from-stdin")
     assert read_text_arg("-") == "from-stdin"
 
 
 def test_read_text_arg_missing_file_is_not_found() -> None:
     with pytest.raises(CliError) as exc_info:
         read_text_arg("/definitely/missing/hud-cli-file.txt")
-    assert exc_info.value.exit_code == ExitCode.NOT_FOUND
+    assert exc_info.value.error == "not_found"
+    assert exc_info.value.exit_code == ExitCode.FAILURE

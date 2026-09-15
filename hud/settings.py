@@ -149,7 +149,8 @@ class Settings(BaseSettings):
     telemetry_local_dir: str | None = Field(
         default=None,
         description="If set, also write each telemetry span to <dir>/<trace_id>.jsonl "
-        "locally. Independent of the backend exporter — works with no API key.",
+        "locally. Independent of the backend exporter — works with no API key. "
+        "When unset and telemetry is disabled, spans go to ~/.hud/spans.",
         validation_alias="HUD_TELEMETRY_LOCAL_DIR",
     )
 
@@ -178,6 +179,14 @@ class Settings(BaseSettings):
         ),
         validation_alias="HUD_CLIENT_TIMEOUT",
     )
+
+    @property
+    def span_dir(self) -> str | None:
+        if self.telemetry_local_dir:
+            return self.telemetry_local_dir
+        if not self.telemetry_enabled:
+            return str(Path.home() / ".hud" / "spans")
+        return None
 
 
 # Create a singleton instance

@@ -1,34 +1,162 @@
-"""Show and select the Project used for resource placement."""
+"""Projects: platform records, placement, and the ``hud project`` commands."""
 
 from __future__ import annotations
 
-from dataclasses import asdict
+import uuid
+from dataclasses import asdict, dataclass
+from enum import Enum
+from typing import Any
 
 import typer
 
-from hud.cli.utils.api import require_api_key
-from hud.cli.utils.config import AuthScope, DirectoryLink, DirectoryState
-from hud.cli.utils.output import (
-    dry_run_option,
+from hud.cli import require_api_key
+from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
+from hud.cli.io import (
     emit_json,
     emit_quiet,
-    json_option,
-    output_option,
-    quiet_option,
-    resolve_output_mode,
-    wants_json,
+    mark_json,
 )
-from hud.cli.utils.project import (
-    Placement,
-    Project,
-    ProjectSource,
-    list_projects,
-    require_writable_placement,
-    resolve_placement,
-    resolve_project,
-)
+from hud.settings import settings
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+
+
+class ProjectSource(Enum):
+    """Where a resolved Project came from, most specific first."""
+
+    FLAG = "--project"
+    CONFIG = str(CONFIG_PATH)
+    GLOBAL_DEFAULT = "HUD_DEFAULT_PROJECT"
+    TEAM_DEFAULT = "team default"
+
+
+PROJECT_OPTION_HELP = (
+    "Project ID for this command. Defaults to the directory's saved "
+    "project, HUD_DEFAULT_PROJECT, then your team default. Does not change "
+    "directory configuration."
+)
+
+
+@dataclass(frozen=True)
+class Project:
+    id: str
+    name: str
+    is_default: bool
+    can_create: bool
+
+    @classmethod
+    def from_record(cls, data: dict[str, Any]) -> Project:
+        capabilities = data.get("capabilities")
+        return cls(
+            id=str(data["id"]),
+            name=str(data.get("name") or "unnamed"),
+            is_default=bool(data.get("is_default")),
+            can_create=bool(capabilities.get("create"))
+            if isinstance(capabilities, dict)
+            else False,
+        )
+
+
+@dataclass(frozen=True)
+class Placement:
+    """The Project selected for the current directory."""
+
+    project: Project | None
+    source: ProjectSource
+
+    @property
+    def project_id(self) -> str | None:
+        """The id to send to the platform, or None to accept the team default."""
+        return self.project.id if self.project else None
+
+    @property
+    def label(self) -> str:
+        if self.project is None:
+            return "team default Project"
+        return f"{self.project.name} (via {self.source.value})"
+
+
+class ProjectNotFound(LookupError):
+    """No visible Project matches the given reference."""
+
+    def __init__(self, ref: str) -> None:
+        self.ref = ref
+        super().__init__(f"No project found matching '{ref}'")
+
+
+class ProjectNotWritable(PermissionError):
+    """The caller may see the Project but may not create resources in it."""
+
+    def __init__(self, project: Project) -> None:
+        self.project = project
+        super().__init__(
+            f"You do not have permission to create environments or tasksets in "
+            f"project '{project.name}'"
+        )
+
+
+def list_projects(platform: PlatformClient) -> list[Project]:
+    """Every Project visible to the caller."""
+    projects: list[Project] = []
+    offset = 0
+    while True:
+        data = platform.get("/projects", params={"limit": 500, "offset": offset})
+        page = _projects_from_page(data)
+        projects.extend(page)
+        offset += len(page)
+        if offset >= data["total"]:
+            return projects
+        if not page:
+            raise ValueError("Projects API returned an empty page before the reported total")
+
+
+def _projects_from_page(data: Any) -> list[Project]:
+    records = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(records, list):
+        return []
+    return [Project.from_record(item) for item in records if isinstance(item, dict)]
+
+
+def resolve_project(platform: PlatformClient, ref: str) -> Project:
+    """Resolve a canonical Project ID within the authenticated scope."""
+    try:
+        project_id = str(uuid.UUID(ref))
+    except ValueError as exc:
+        raise ValueError(
+            "Pass a Project ID from 'hud project list'; name lookup is not supported"
+        ) from exc
+    try:
+        return Project.from_record(platform.get(f"/projects/{project_id}"))
+    except HudRequestError as exc:
+        if exc.status_code != 404:
+            raise
+        raise ProjectNotFound(ref) from exc
+
+
+def resolve_placement(
+    platform: PlatformClient,
+    link: DirectoryLink,
+    *,
+    flag: str | None,
+) -> Placement:
+    """Resolve the configured Project."""
+    for ref, source in (
+        (flag, ProjectSource.FLAG),
+        (str(link.project_id) if link.project_id else None, ProjectSource.CONFIG),
+        (settings.default_project, ProjectSource.GLOBAL_DEFAULT),
+    ):
+        if ref:
+            project = resolve_project(platform, ref)
+            return Placement(project=project, source=source)
+
+    return Placement(project=None, source=ProjectSource.TEAM_DEFAULT)
+
+
+def require_writable_placement(placement: Placement) -> None:
+    if placement.project is not None and not placement.project.can_create:
+        raise ProjectNotWritable(placement.project)
+
 
 project_app = typer.Typer(
     name="project",
@@ -40,17 +168,19 @@ project_app = typer.Typer(
 
 @project_app.command("list")
 def list_command(
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
 ) -> None:
     """List all visible Projects and their canonical IDs."""
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
     require_api_key("list projects")
     projects = list_projects(PlatformClient.from_settings())
-    if mode == "json":
+    if json_output is True:
         emit_json([asdict(project) for project in projects])
-    elif mode == "quiet":
+    elif quiet:
         emit_quiet([project.id for project in projects])
     else:
         console = HUDConsole()
@@ -69,8 +199,12 @@ def create_command(
     description: str | None = typer.Option(None, "--description"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
     no_use: bool = typer.Option(False, "--no-use", help="Create without linking this directory"),
-    json_output: bool = json_option(),
-    dry_run: bool = dry_run_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
 ) -> None:
     """Create a Project and link this directory unless --no-use is passed."""
     require_api_key("create a project")
@@ -79,7 +213,7 @@ def create_command(
     if description:
         payload["description"] = description
     if dry_run:
-        if wants_json(json_output):
+        if json_output is True:
             emit_json({"dry_run": True, "action": "create_project", **payload})
         else:
             HUDConsole().info(f"Would create Project {name}")
@@ -96,7 +230,7 @@ def create_command(
     created = Project.from_record(platform.post("/projects", json=payload))
     if state is not None:
         state.update(DirectoryLink(project_id=created.id))
-    if wants_json(json_output):
+    if json_output is True:
         emit_json(asdict(created))
     else:
         HUDConsole().success(f"Created Project: {created.name} ({created.id})")
@@ -107,10 +241,14 @@ def use_command(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help="Project ID from hud project list"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
-    json_output: bool = json_option(),
-    dry_run: bool = dry_run_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
 ) -> None:
-    """Link a directory to a Project in ~/.hud/config.json for this account and team."""
+    """Link a directory to a Project in .hud/config.json for this account and team."""
     require_api_key("select a project")
     platform = PlatformClient.from_settings()
     state = DirectoryState(
@@ -121,7 +259,7 @@ def use_command(
     require_writable_placement(Placement(project, ProjectSource.FLAG))
     if not dry_run:
         state.update(DirectoryLink(project_id=project.id))
-    if wants_json(json_output):
+    if json_output is True:
         emit_json({**asdict(project), "dry_run": dry_run})
     else:
         HUDConsole().success(
@@ -133,7 +271,9 @@ def use_command(
 def project_callback(
     ctx: typer.Context,
     directory: str = typer.Option(".", "--directory", "-C"),
-    json_output: bool = json_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Show the Project selected for this directory."""
     ctx.meta["hud_project_directory"] = directory
@@ -144,7 +284,7 @@ def project_callback(
     platform.get("/projects", params={"limit": 1})
     state = DirectoryState(AuthScope.resolve(platform), directory)
     placement = resolve_placement(platform, state.load(), flag=None)
-    if wants_json(json_output):
+    if json_output is True:
         emit_json(
             {
                 "project": asdict(placement.project) if placement.project else None,

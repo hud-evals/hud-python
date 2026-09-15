@@ -3,49 +3,59 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import os
+import sys
+import tarfile
+import tempfile
 import time
+import tomllib
 from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import httpx
 import typer
+import websockets
 from pydantic import ValidationError
+from rich.panel import Panel
+from rich.table import Table
+from websockets.exceptions import ConnectionClosed
 
-from hud.cli.utils.api import missing_api_key_error
-from hud.cli.utils.build_display import display_build_summary
-from hud.cli.utils.build_logs import wait_for_build
-from hud.cli.utils.config import (
+from hud.cli import require_api_key
+from hud.cli.config import (
     AuthScope,
     DirectoryLink,
     DirectoryState,
     parse_env_file,
     parse_key_value,
 )
-from hud.cli.utils.context import create_build_context_tarball, format_size
-from hud.cli.utils.output import (
+from hud.cli.io import (
     CliError,
     emit_json,
-    is_interactive,
-    json_option,
     map_exception,
-    wants_json,
+    mark_json,
 )
-from hud.cli.utils.project import (
+from hud.cli.project import (
     PROJECT_OPTION_HELP,
     Placement,
     require_writable_placement,
     resolve_placement,
 )
-from hud.cli.utils.registry import get_registry_environment
-from hud.cli.utils.source import EnvironmentSource
+from hud.cli.source import EnvironmentSource
+from hud.cli.sync import get_registry_environment
 from hud.eval.runtime import ComposeProject, RuntimeConfig
+from hud.settings import settings
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
+
+if TYPE_CHECKING:
+    from rich.console import Console
 
 _VALID_RUNTIMES = {"hud", "modal"}
 _COMPOSE_RECIPE_NAMES = (
@@ -175,9 +185,210 @@ def collect_environment_variables(
     return env_vars
 
 
+@dataclass(frozen=True)
+class ValidationIssue:
+    severity: str
+    message: str
+    file: str | None = None
+    hint: str | None = None
+
+
+def _load_pyproject(env_source: EnvironmentSource) -> dict[str, Any] | ValidationIssue:
+    pyproject_path = env_source.root / "pyproject.toml"
+    if not pyproject_path.exists():
+        return {}
+    try:
+        with pyproject_path.open("rb") as file:
+            data = tomllib.load(file)
+    except tomllib.TOMLDecodeError as exc:
+        return ValidationIssue(
+            severity="error",
+            message=f"Failed to parse pyproject.toml: {exc}",
+            file="pyproject.toml",
+        )
+    return data
+
+
+def _validate_project_references(
+    env_source: EnvironmentSource, project: dict[str, Any]
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    license_info = project.get("license")
+    if isinstance(license_info, dict):
+        license_file = license_info.get("file")
+        if isinstance(license_file, str) and not (env_source.root / license_file).exists():
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    message=f"License file not found: {license_file}",
+                    file="pyproject.toml",
+                    hint=(
+                        f"Create a {license_file} file or remove the "
+                        "license.file reference from pyproject.toml"
+                    ),
+                )
+            )
+
+    readme = project.get("readme")
+    if isinstance(readme, str) and not (env_source.root / readme).exists():
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                message=f"Readme file not found: {readme}",
+                file="pyproject.toml",
+                hint=f"Create a {readme} file or remove the readme reference",
+            )
+        )
+    elif isinstance(readme, dict):
+        readme_file = readme.get("file")
+        if isinstance(readme_file, str) and not (env_source.root / readme_file).exists():
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    message=f"Readme file not found: {readme_file}",
+                    file="pyproject.toml",
+                    hint=f"Create a {readme_file} file or remove the readme.file reference",
+                )
+            )
+
+    return issues
+
+
+def _validate_hatch_includes(
+    env_source: EnvironmentSource, targets: dict[str, Any]
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for target_name, target_config in targets.items():
+        if not isinstance(target_config, dict):
+            continue
+        includes = target_config.get("include", [])
+        for pattern in includes:
+            is_literal = isinstance(pattern, str) and "*" not in pattern and "?" not in pattern
+            if is_literal and not (env_source.root / pattern).exists():
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        message=f"Included file/dir not found: {pattern}",
+                        file="pyproject.toml",
+                        hint=f"Referenced in [tool.hatch.build.targets.{target_name}].include",
+                    )
+                )
+    return issues
+
+
+def _validate_pyproject(env_source: EnvironmentSource) -> list[ValidationIssue]:
+    data = _load_pyproject(env_source)
+    if isinstance(data, ValidationIssue):
+        return [data]
+
+    issues: list[ValidationIssue] = []
+    project = data.get("project", {})
+    if isinstance(project, dict):
+        issues.extend(_validate_project_references(env_source, project))
+
+    tool = data.get("tool", {})
+    if isinstance(tool, dict):
+        hatch = tool.get("hatch", {})
+        if isinstance(hatch, dict):
+            build = hatch.get("build", {})
+            if isinstance(build, dict):
+                targets = build.get("targets", {})
+                if isinstance(targets, dict):
+                    issues.extend(_validate_hatch_includes(env_source, targets))
+
+    return issues
+
+
+def _copied_dockerfile_sources(instruction: str) -> list[str]:
+    if not instruction.upper().startswith("COPY "):
+        return []
+    parts = instruction.split()
+    if len(parts) < 3:
+        return []
+    src_idx = 1
+    while src_idx < len(parts) - 1 and parts[src_idx].startswith("--"):
+        src_idx += 1
+    return [
+        "__ALL__" if src == "." else src.removeprefix("./").rstrip("/").rstrip("*")
+        for src in parts[src_idx:-1]
+    ]
+
+
+def _check_pyproject_copy_order(
+    env_source: EnvironmentSource,
+    project: dict[str, Any],
+    copied_files: set[str],
+    dockerfile_name: str,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    license_info = project.get("license")
+    if isinstance(license_info, dict):
+        license_file = license_info.get("file")
+        license_missing = (
+            isinstance(license_file, str) and license_file.removeprefix("./") not in copied_files
+        )
+        if license_missing:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    message="LICENSE file not copied before uv sync/pip install",
+                    file=dockerfile_name,
+                    hint=(
+                        f"Add 'COPY {license_file} ./' before the RUN command "
+                        "that installs dependencies"
+                    ),
+                )
+            )
+
+    readme = project.get("readme")
+    if isinstance(readme, str) and readme.removeprefix("./") not in copied_files:
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                message="README not copied before uv sync/pip install",
+                file=dockerfile_name,
+                hint=f"Add 'COPY {readme} ./' before the RUN command, or builds may fail",
+            )
+        )
+
+    return issues
+
+
+def _validate_dockerfile(env_source: EnvironmentSource) -> list[ValidationIssue]:
+    dockerfile = env_source.dockerfile
+    if dockerfile is None:
+        return []
+
+    copied_files: set[str] = set()
+    has_install_before_full_copy = False
+    for instruction in env_source.dockerfile_instructions():
+        copied_files.update(_copied_dockerfile_sources(instruction))
+        line_lower = instruction.lower()
+        if (
+            "uv sync" in line_lower or "pip install" in line_lower
+        ) and "__ALL__" not in copied_files:
+            has_install_before_full_copy = True
+
+    if not has_install_before_full_copy or not (env_source.root / "pyproject.toml").exists():
+        return []
+
+    data = _load_pyproject(env_source)
+    if isinstance(data, ValidationIssue):
+        return [data]
+    project = data.get("project", {})
+    if not isinstance(project, dict):
+        return []
+    return _check_pyproject_copy_order(env_source, project, copied_files, dockerfile.name)
+
+
+def _validate_environment(env_source: EnvironmentSource) -> list[ValidationIssue]:
+    return [*_validate_pyproject(env_source), *_validate_dockerfile(env_source)]
+
+
 def _validate_before_deploy(env_source: EnvironmentSource, console: HUDConsole) -> None:
     console.progress_message("Validating environment...")
-    validation_issues = env_source.validate()
+    validation_issues = _validate_environment(env_source)
 
     errors = [issue for issue in validation_issues if issue.severity == "error"]
     warnings = [issue for issue in validation_issues if issue.severity == "warning"]
@@ -292,6 +503,171 @@ def _collect_build_secrets(
     return secrets
 
 
+SENSITIVE_EXCLUDES = [".git", ".git/*", ".env", ".env.*", "*.env"]
+DEFAULT_EXCLUDES = [
+    "__pycache__",
+    "__pycache__/*",
+    "*.pyc",
+    "*.pyo",
+    ".venv",
+    ".venv/*",
+    "venv",
+    "venv/*",
+    "node_modules",
+    "node_modules/*",
+    ".mypy_cache",
+    ".mypy_cache/*",
+    ".pytest_cache",
+    ".pytest_cache/*",
+    ".ruff_cache",
+    ".ruff_cache/*",
+    "*.egg-info",
+    "*.egg-info/*",
+    "dist",
+    "dist/*",
+    "build",
+    "build/*",
+    ".DS_Store",
+    "Thumbs.db",
+]
+
+
+def parse_ignore_file(ignore_path: Path) -> list[str]:
+    if not ignore_path.exists():
+        return []
+    return [
+        line.strip()
+        for line in ignore_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def _matches_pattern(rel_path_str: str, path: Path, pattern: str) -> bool:
+    if pattern.endswith("/"):
+        pattern = pattern[:-1]
+        if path.is_dir() and fnmatch.fnmatch(rel_path_str, pattern):
+            return True
+        return fnmatch.fnmatch(rel_path_str, f"{pattern}/*")
+
+    if "**" in pattern:
+        regex_pattern = pattern.replace("**", "*")
+        if fnmatch.fnmatch(rel_path_str, regex_pattern):
+            return True
+        parts = rel_path_str.split("/")
+        for i in range(len(parts)):
+            partial = "/".join(parts[: i + 1])
+            if fnmatch.fnmatch(partial, regex_pattern):
+                return True
+        return False
+
+    if fnmatch.fnmatch(rel_path_str, pattern):
+        return True
+    if fnmatch.fnmatch(path.name, pattern):
+        return True
+    parts = rel_path_str.split("/")
+    for i in range(len(parts)):
+        partial = "/".join(parts[: i + 1])
+        if fnmatch.fnmatch(partial, pattern):
+            return True
+    return False
+
+
+def should_ignore(path: Path, base_path: Path, ignore_patterns: list[str]) -> bool:
+    try:
+        rel_path_str = str(path.relative_to(base_path)).replace("\\", "/")
+    except ValueError:
+        return False
+
+    ignored = False
+    for pattern in ignore_patterns:
+        if pattern.startswith("!"):
+            if ignored and _matches_pattern(rel_path_str, path, pattern[1:]):
+                ignored = False
+        elif _matches_pattern(rel_path_str, path, pattern):
+            ignored = True
+    return ignored
+
+
+def create_build_context_tarball(
+    directory: Path,
+    dockerignore_path: Path | None = None,
+    verbose: bool = False,
+) -> tuple[Path, int, int, float]:
+    start_time = time.time()
+    hud_console = HUDConsole()
+    directory = directory.resolve()
+
+    ignore_patterns = list(DEFAULT_EXCLUDES)
+    loaded_sources: list[str] = []
+
+    gitignore_path = directory / ".gitignore"
+    if gitignore_path.exists():
+        gitignore_patterns = parse_ignore_file(gitignore_path)
+        ignore_patterns.extend(gitignore_patterns)
+        loaded_sources.append(f".gitignore ({len(gitignore_patterns)} patterns)")
+
+    if dockerignore_path is None:
+        dockerignore_path = directory / ".dockerignore"
+    if dockerignore_path.exists():
+        dockerignore_patterns = parse_ignore_file(dockerignore_path)
+        ignore_patterns.extend(dockerignore_patterns)
+        loaded_sources.append(f".dockerignore ({len(dockerignore_patterns)} patterns)")
+
+    ignore_patterns.extend(SENSITIVE_EXCLUDES)
+
+    if verbose and loaded_sources:
+        hud_console.info(f"Loaded ignore patterns from: {', '.join(loaded_sources)}")
+
+    temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
+        suffix=".tar.gz",
+        delete=False,
+        prefix="hud-build-context-",
+    )
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+
+    file_count = 0
+    try:
+        with tarfile.open(temp_path, "w:gz") as tar:
+            for root, dirs, files in os.walk(directory):
+                root_path = Path(root)
+                dirs[:] = [
+                    d for d in dirs if not should_ignore(root_path / d, directory, ignore_patterns)
+                ]
+                for child in dirs:
+                    dir_path = root_path / child
+                    tar.add(
+                        dir_path,
+                        arcname=str(dir_path.relative_to(directory)),
+                        recursive=False,
+                    )
+                for file in files:
+                    file_path = root_path / file
+                    if should_ignore(file_path, directory, ignore_patterns):
+                        if verbose:
+                            hud_console.debug(f"Skipping: {file_path.relative_to(directory)}")
+                        continue
+                    arcname = str(file_path.relative_to(directory))
+                    tar.add(file_path, arcname=arcname)
+                    file_count += 1
+                    if verbose:
+                        hud_console.debug(f"Added: {arcname}")
+
+        return temp_path, temp_path.stat().st_size, file_count, time.time() - start_time
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def format_size(size_bytes: int) -> str:
+    size: float = float(size_bytes)
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 def _create_tarball(env_dir: Path, *, verbose: bool, console: HUDConsole) -> Path:
     console.progress_message("Creating build context tarball...")
     try:
@@ -400,6 +776,380 @@ def _prepare_deploy_plan(
     )
 
 
+def display_build_summary(
+    status_response: dict[str, Any],
+    registry_id: str,
+    console: HUDConsole | None = None,
+    platform_url: str | None = None,
+    env_name: str | None = None,
+) -> None:
+    """Display a rich summary of a completed build."""
+    if console is None:
+        console = HUDConsole()
+
+    if platform_url is None:
+        platform_url = settings.hud_web_url
+
+    rich_console = console.console
+
+    status = status_response.get("status", "UNKNOWN")
+    version = status_response.get("version", "unknown")
+    duration = status_response.get("duration_seconds")
+    image_name = status_response.get("image_name")
+    uri = status_response.get("uri")
+    lock_data = status_response.get("lock")
+
+    duration_str = _format_duration(duration) if duration else "unknown"
+
+    if status == "SUCCEEDED":
+        status_text = "[green]✓[/green] [bold green]SUCCEEDED[/bold green]"
+    elif status == "FAILED":
+        status_text = "[red]✗[/red] [bold red]FAILED[/bold red]"
+    else:
+        status_text = f"[yellow]●[/yellow] [bold yellow]{status}[/bold yellow]"
+
+    summary_lines = [
+        f"[bold]Status:[/bold]     {status_text}",
+        f"[bold]Duration:[/bold]   {duration_str}",
+        f"[bold]Version:[/bold]    {version}",
+    ]
+
+    if env_name:
+        summary_lines.insert(0, f"[bold]Environment:[/bold] [cyan]{env_name}[/cyan]")
+
+    if uri:
+        summary_lines.append(f"[bold]Image:[/bold]      [dim]{uri}[/dim]")
+    elif image_name:
+        summary_lines.append(f"[bold]Image:[/bold]      [dim]{image_name}[/dim]")
+
+    summary_content = "\n".join(summary_lines)
+
+    rich_console.print()
+    rich_console.print(
+        Panel(
+            summary_content,
+            title="[bold cyan]Build Summary[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+
+    if lock_data and isinstance(lock_data, dict):
+        _display_lock_details(rich_console, lock_data)
+
+    env_url = f"{platform_url}/environments/{registry_id}"
+    rich_console.print()
+    rich_console.print(
+        Panel(
+            f"[bold]View on HUD:[/bold] [link={env_url}]{env_url}[/link]",
+            border_style="blue",
+            padding=(0, 2),
+        )
+    )
+
+    if status == "SUCCEEDED" and env_name and lock_data:
+        _display_usage_example(rich_console, env_name, lock_data)
+
+    rich_console.print()
+
+
+def _display_lock_details(
+    rich_console: Console,
+    lock_data: dict[str, Any],
+) -> None:
+    tasks = lock_data.get("tasks") or []
+    if tasks:
+        rich_console.print()
+        tasks_table = Table(
+            title=f"[bold]Tasks ({len(tasks)})[/bold]",
+            show_header=True,
+            header_style="bold",
+            border_style="dim",
+        )
+        tasks_table.add_column("Slug", style="cyan")
+        tasks_table.add_column("Task", style="magenta")
+        tasks_table.add_column("Args", style="dim")
+
+        for task in tasks[:10]:
+            if not isinstance(task, dict):
+                tasks_table.add_row(str(task), "", "")
+                continue
+            slug = str(task.get("slug") or "")
+            task_id = str(task.get("task") or task.get("id") or "")
+            args = task.get("args") or {}
+            args_str = ", ".join(sorted(args)) if isinstance(args, dict) and args else "No args"
+            tasks_table.add_row(slug, task_id, args_str)
+
+        if len(tasks) > 10:
+            tasks_table.add_row(
+                f"[dim]... and {len(tasks) - 10} more[/dim]",
+                "",
+                "",
+            )
+
+        rich_console.print(tasks_table)
+
+    env_config = lock_data.get("environment") or {}
+    if env_config:
+        variables = env_config.get("variables") or {}
+        required_vars = variables.get("required", [])
+        optional_vars = variables.get("optional", [])
+
+        if required_vars or optional_vars:
+            rich_console.print()
+            env_lines = []
+            if required_vars:
+                env_lines.append(f"[bold]Required:[/bold] {', '.join(required_vars)}")
+            if optional_vars:
+                env_lines.append(f"[bold]Optional:[/bold] {', '.join(optional_vars)}")
+
+            rich_console.print(
+                Panel(
+                    "\n".join(env_lines),
+                    title="[bold]Environment Variables[/bold]",
+                    border_style="dim",
+                    padding=(0, 2),
+                )
+            )
+
+    capabilities = lock_data.get("capabilities") or []
+    if capabilities:
+        capability_names = [
+            capability.get("name", str(capability))
+            if isinstance(capability, dict)
+            else str(capability)
+            for capability in capabilities[:10]
+        ]
+        capabilities_str = ", ".join(capability_names)
+        if len(capabilities) > 10:
+            capabilities_str += f", ... and {len(capabilities) - 10} more"
+
+        rich_console.print()
+        rich_console.print(
+            Panel(
+                f"[bold]Capabilities ({len(capabilities)}):[/bold] {capabilities_str}",
+                border_style="dim",
+                padding=(0, 2),
+            )
+        )
+
+
+def _display_usage_example(
+    rich_console: Console,
+    env_name: str,
+    lock_data: dict[str, Any],
+) -> None:
+    tasks = lock_data.get("tasks") or []
+    if not tasks:
+        return
+
+    first = tasks[0]
+    if not isinstance(first, dict):
+        return
+
+    task_example: dict[str, Any] = {
+        "env": env_name,
+        "id": first.get("task") or first.get("id") or "",
+    }
+    if first.get("slug"):
+        task_example["slug"] = first["slug"]
+    args = first.get("args")
+    if isinstance(args, dict) and args:
+        task_example["args"] = args
+
+    example_json = json.dumps(task_example, indent=2)
+    rich_console.print()
+    rich_console.print(
+        Panel(
+            f"[bold]Task JSON:[/bold]\n[dim]{example_json}[/dim]",
+            title="[bold]Quick Start[/bold]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}m {secs}s"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    return f"{hours}h {minutes}m"
+
+
+async def wait_for_build(
+    platform: PlatformClient, build_id: str, console: HUDConsole
+) -> dict[str, Any]:
+    """Stream progress, then confirm the terminal result through the status API."""
+    await _stream_build_logs(platform, build_id, console=console)
+    return await _poll_build_status(platform, build_id, console=console)
+
+
+async def _stream_build_logs(
+    platform: PlatformClient,
+    build_id: str,
+    console: HUDConsole | None = None,
+    max_reconnects: int = 3,
+) -> None:
+    if console is None:
+        console = HUDConsole()
+
+    ws_base = platform.base_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_base.rstrip('/')}/builds/{build_id}/logs?api_key={platform.api_key}"
+
+    for attempt in range(max_reconnects + 1):
+        try:
+            console.info("Connecting to build logs stream...")
+            async with websockets.connect(
+                ws_url,
+                ping_interval=30,
+                ping_timeout=10,
+            ) as websocket:
+                async for message in websocket:
+                    try:
+                        data = json.loads(message)
+                        msg_type = data.get("type", "")
+
+                        if msg_type == "status":
+                            console.info(data.get("message", "Connected"))
+
+                        elif msg_type == "status_update":
+                            status = data.get("status", "")
+                            if status != "IN_PROGRESS":
+                                console.info(f"Build status: {status}")
+
+                        elif msg_type == "log":
+                            log_message = data.get("message", "")
+                            timestamp = data.get("timestamp")
+                            if log_message:
+                                _print_log_line(console, log_message, timestamp)
+
+                        elif msg_type == "complete":
+                            final_status = data.get("final_status", "UNKNOWN")
+                            completion_msg = data.get("message", f"Build {final_status}")
+                            console.info(completion_msg)
+                            return
+
+                        elif msg_type == "error":
+                            error_msg = data.get("error", "Unknown error")
+                            console.error(f"Build error: {error_msg}")
+                            return
+
+                    except json.JSONDecodeError:
+                        console.info(str(message))
+
+        except ConnectionClosed as e:
+            if e.code == 4003:
+                console.error(f"Access denied: {e.reason}")
+                return
+
+            console.warning(f"Log stream closed: {e.reason}")
+        except Exception as e:
+            console.warning(f"Log stream unavailable: {e}")
+
+        if attempt < max_reconnects:
+            await asyncio.sleep(min(2 ** (attempt + 1), 30))
+
+
+def _print_log_line(
+    console: HUDConsole,
+    message: str,
+    timestamp: str | int | None = None,
+) -> None:
+    message = message.rstrip()
+
+    prefix = ""
+    if timestamp:
+        try:
+            if isinstance(timestamp, int):
+                dt = datetime.fromtimestamp(timestamp / 1000)
+                prefix = f"[{dt.strftime('%H:%M:%S')}] "
+            elif isinstance(timestamp, str):
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                prefix = f"[{dt.strftime('%H:%M:%S')}] "
+        except Exception:  # noqa: S110
+            pass
+
+    lower_msg = message.lower()
+
+    is_error_handling = any(
+        pattern in lower_msg
+        for pattern in [
+            "2>/dev/null",
+            "|| true",
+            "|| echo",
+            "|| :",
+            "if [",
+            "if aws",
+            "if docker",
+            "--quiet",
+        ]
+    )
+
+    stripped_msg = message.strip()
+    is_actual_error = not is_error_handling and (
+        lower_msg.startswith(("error:", "error "))
+        or "exit status 1" in lower_msg
+        or "exit code: 1" in lower_msg
+        or "command did not exit successfully" in lower_msg
+        or "failed to" in lower_msg
+        or ": FAILED" in message
+        or "State: FAILED" in message
+        or stripped_msg.startswith(("OSError:", "Exception:"))
+    )
+
+    if is_actual_error:
+        console.error(f"{prefix}{message}")
+    elif "warning" in lower_msg or "warn:" in lower_msg:
+        console.warning(f"{prefix}{message}")
+    elif "success" in lower_msg or "completed successfully" in lower_msg:
+        console.success(f"{prefix}{message}")
+    else:
+        console.info(f"{prefix}{message}")
+
+
+async def _poll_build_status(
+    platform: PlatformClient,
+    build_id: str,
+    console: HUDConsole | None = None,
+    poll_interval: float = 5.0,
+    max_wait: float = 3600.0,
+) -> dict[str, Any]:
+    if console is None:
+        console = HUDConsole()
+
+    start_time = asyncio.get_event_loop().time()
+    last_status = ""
+
+    while True:
+        elapsed = asyncio.get_event_loop().time() - start_time
+        if elapsed > max_wait:
+            console.error(f"Build timed out after {max_wait}s")
+            return {"status": "TIMED_OUT"}
+
+        try:
+            data = await platform.aget(f"/builds/{build_id}/status")
+
+            status = data.get("status", "")
+            if status != last_status:
+                console.info(f"Build status: {status}")
+                last_status = status
+
+            if status in ["SUCCEEDED", "FAILED", "STOPPED", "TIMED_OUT"]:
+                return data
+
+        except HudRequestError as e:
+            if e.status_code is not None and 400 <= e.status_code < 500 and e.status_code != 429:
+                raise
+            console.warning(f"Status check failed: {e.status_code or e}")
+
+        await asyncio.sleep(poll_interval)
+
+
 def deploy_environment(
     directory: str = ".",
     env: list[str] | None = None,
@@ -420,10 +1170,7 @@ def deploy_environment(
     console = HUDConsole()
     env_source = EnvironmentSource.open(directory)
     env_dir = env_source.root
-    from hud.settings import settings
-
-    if not settings.api_key:
-        raise missing_api_key_error("deploy environments")
+    require_api_key("deploy environments")
     if _compose_recipe(env_dir) is None and env_source.dockerfile is None:
         raise CliError(
             "failure",
@@ -461,9 +1208,9 @@ def deploy_environment(
             dotenv_pending=plan.dotenv_pending,
         )
     if plan.dotenv_pending:
-        if not is_interactive():
+        if not sys.stdin.isatty():
             raise CliError(
-                "confirmation_required",
+                "usage",
                 "Choose whether to upload .env before deploying.",
                 suggestion="Pass --env-file .env to include it, or --no-env to skip it.",
             )
@@ -692,9 +1439,11 @@ def deploy_command(
         "--runtime-config",
         help="Path to a JSON RuntimeConfig for hosted runs",
     ),
-    json_output: bool = json_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Print the deploy plan without uploading."
+        False, "--dry-run", help="Print the planned action without making changes."
     ),
 ) -> None:
     """Deploy HUD environment to the platform.
@@ -736,7 +1485,7 @@ def deploy_command(
             )
             payload = asdict(result)
             success = result.success
-            if not dry_run and not wants_json(json_output):
+            if not dry_run and json_output is not True:
                 display_build_summary(
                     status_response=result.details,
                     registry_id=result.registry_id or "",
@@ -752,7 +1501,7 @@ def deploy_command(
             HUDConsole().error(f"{target.name}: {error.message}")
         (succeeded if success else failed).append(target.name)
         entries.append({"directory": target.name, **payload})
-    if wants_json(json_output):
+    if json_output is True:
         emit_json(
             {"succeeded": succeeded, "failed": failed, "dry_run": dry_run, "environments": entries}
             if all_envs

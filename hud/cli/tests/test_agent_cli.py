@@ -1,4 +1,4 @@
-"""Agent-friendly CLI contracts: JSON, exit codes, help, aliases, quiet."""
+"""CLI contracts: JSON, exit codes, help, aliases, quiet."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from hud.cli import app
-from hud.cli.utils.config import AuthScope, DirectoryState
-from hud.cli.utils.output import ExitCode
-from hud.cli.utils.project import Placement, ProjectSource
+from hud.cli.config import AuthScope, DirectoryState
+from hud.cli.io import ExitCode
+from hud.cli.project import Placement, ProjectSource
 from hud.utils.exceptions import HudRequestError
 
 if TYPE_CHECKING:
@@ -54,8 +54,8 @@ def test_model_commands_share_platform_transport(monkeypatch):
         assert requests[-1][:2] == (method, f"https://api.example/v2{endpoint}")
 
 
-def test_client_rejects_non_object_args_before_connecting():
-    result = runner.invoke(app, ["client", "run", "solve", "--args", "[]", "--json"])
+def test_task_rejects_non_object_args_before_connecting():
+    result = runner.invoke(app, ["task", "grade", "solve", "--args", "[]", "--json"])
     assert result.exit_code == ExitCode.USAGE
     assert json.loads(result.stdout)["message"] == "--args must be a JSON object"
 
@@ -88,15 +88,40 @@ def _write_env_dirs(parent: Any, *names: str) -> None:
         (env_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n')
 
 
-def test_root_help_lists_nouns_and_exit_codes() -> None:
+def test_root_help_lists_nouns() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     text = _plain(result.output)
+    assert "Usage: hud COMMAND" in text
+    assert "[OPTIONS] COMMAND [ARGS]" not in text
     assert "jobs" in text
     assert "models" in text
     assert "task" in text
-    assert "--json" in text
-    assert "not found" in text.lower() or "3" in text
+    assert re.search(r"^ {2}auth\b", text, re.M) is None
+    assert re.search(r"^ {2}client\b", text, re.M) is None
+    assert re.search(r"^ {2}cancel\b", text, re.M) is None
+    assert "--help" in text
+    assert "--version" in text
+    assert "--json" not in text
+    assert text.index("--help") < text.index("--version")
+    assert "Show help." in text
+    assert "Show this message and exit." not in text
+
+
+def test_plan_flags_use_shared_help() -> None:
+    for args in (
+        ["eval", "--help"],
+        ["deploy", "--help"],
+        ["sync", "tasks", "--help"],
+        ["sync", "env", "--help"],
+        ["jobs", "cancel", "--help"],
+    ):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0, result.output
+        text = " ".join(_plain(result.output).replace("│", " ").split())
+        assert "planned action" in text
+        if args[0] != "deploy":
+            assert "non-interactive terminals" in text
 
 
 def test_jobs_list_help_documents_json_and_examples() -> None:
@@ -116,7 +141,7 @@ def test_jobs_list_json_and_quiet() -> None:
         ]
     }
     with (
-        patch("hud.cli.utils.api.require_api_key", return_value="key"),
+        patch("hud.cli.jobs.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
         json_result = runner.invoke(app, ["jobs", "list", "--json"])
@@ -135,16 +160,17 @@ def test_jobs_get_not_found_exit_code() -> None:
     client = MagicMock()
     client.get.side_effect = HudRequestError("missing", status_code=404)
     with (
-        patch("hud.cli.utils.api.require_api_key", return_value="key"),
+        patch("hud.cli.jobs.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
         result = runner.invoke(
             app, ["jobs", "get", "00000000-0000-0000-0000-000000000001", "--json"]
         )
 
-    assert result.exit_code == ExitCode.NOT_FOUND
+    assert result.exit_code == ExitCode.FAILURE
     payload = json.loads(_stdout(result))
     assert payload["error"] == "not_found"
+    assert "Error:" not in (result.stderr or "")
     assert payload["input"]["job_id"] == "00000000-0000-0000-0000-000000000001"
 
 
@@ -152,7 +178,7 @@ def test_legacy_jobs_id_still_lists_traces() -> None:
     client = MagicMock()
     client.get.return_value = {"items": [{"id": "tr-1", "status": "done", "reward": 1.0}]}
     with (
-        patch("hud.cli.utils.api.require_api_key", return_value="key"),
+        patch("hud.cli.jobs.require_api_key", return_value="key"),
         patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
     ):
         result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-000000000099", "--json"])
@@ -187,13 +213,16 @@ def test_cancel_dry_run_json_skips_confirmation() -> None:
     }
 
 
-def test_cancel_alias_still_registered() -> None:
+def test_cancel_alias_is_hidden_and_deprecated() -> None:
     result = runner.invoke(app, ["cancel", "--help"])
     assert result.exit_code == 0
     text = _plain(result.output)
     assert "--json" in text
     assert "--dry-run" in text
     assert "--yes" in text
+    assert "deprecated" in text.lower()
+    root = _plain(runner.invoke(app, ["--help"]).output)
+    assert re.search(r"^ {2}cancel\b", root, re.M) is None
 
 
 def test_trace_get_help_and_alias() -> None:
@@ -203,7 +232,7 @@ def test_trace_get_help_and_alias() -> None:
 
     with (
         patch("hud.cli.trace._load_remote", return_value=[{"kind": "agent_message", "text": "hi"}]),
-        patch("hud.cli.utils.api.require_api_key", return_value="key"),
+        patch("hud.cli.trace.require_api_key", return_value="key"),
         patch("hud.settings.settings.telemetry_local_dir", None),
     ):
         result = runner.invoke(app, ["trace", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"])
@@ -225,10 +254,10 @@ def test_set_invalid_assignment_is_usage() -> None:
     assert json.loads(_stdout(result))["error"] == "usage"
 
 
-def test_auth_noun_group_is_registered() -> None:
+def test_auth_noun_group_is_removed() -> None:
     result = runner.invoke(app, ["auth", "--help"])
-    assert result.exit_code == 0
-    assert "set" in result.output
+    assert result.exit_code != 0
+    assert "No such command" in _plain(result.output) or "Usage:" in _plain(result.output)
 
 
 def test_models_list_help_has_examples() -> None:
@@ -244,7 +273,7 @@ def test_missing_api_key_is_permission(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(settings, "api_key", "")
     result = runner.invoke(app, ["jobs", "list", "--json"])
-    assert result.exit_code == ExitCode.PERMISSION
+    assert result.exit_code == ExitCode.FAILURE
     payload = json.loads(_stdout(result))
     assert payload["error"] == "permission_denied"
 
@@ -256,7 +285,7 @@ def test_init_conflict_exit_code(tmp_path: Any) -> None:
     result = runner.invoke(
         app, ["init", "taken", "--dir", str(tmp_path), "--preset", "blank", "--json"]
     )
-    assert result.exit_code == ExitCode.CONFLICT
+    assert result.exit_code == ExitCode.FAILURE
     payload = json.loads(_stdout(result))
     assert payload["error"] == "conflict"
 
@@ -320,12 +349,11 @@ def test_deploy_all_json_is_single_document(tmp_path: Any) -> None:
         )
 
     with (
-        patch("hud.settings.settings") as mock_settings,
+        patch("hud.cli.deploy.require_api_key", return_value="key"),
         patch("hud.cli.deploy._validate_before_deploy"),
         patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
         patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
     ):
-        mock_settings.api_key = "key"
         result = runner.invoke(app, ["deploy", str(tmp_path), "--all", "--dry-run", "--json"])
 
     assert result.exit_code == 0
@@ -380,14 +408,13 @@ def test_deploy_all_json_includes_failed_env_details(tmp_path: Any) -> None:
         return path
 
     with (
-        patch("hud.settings.settings") as mock_settings,
+        patch("hud.cli.deploy.require_api_key", return_value="key"),
         patch("hud.cli.deploy._validate_before_deploy"),
         patch("hud.cli.deploy._prepare_deploy_plan", side_effect=_plan),
         patch("hud.cli.deploy._create_tarball", side_effect=_tarball),
         patch("hud.cli.deploy._deploy_async", side_effect=_deploy),
         patch("hud.cli.deploy.PlatformClient.from_settings", return_value=MagicMock()),
     ):
-        mock_settings.api_key = "key"
         result = runner.invoke(app, ["deploy", str(tmp_path), "--all", "--json"])
 
     assert result.exit_code == 1

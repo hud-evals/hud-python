@@ -11,13 +11,10 @@ from typing import Any
 import httpx
 import typer
 
-from hud.cli.utils.output import (
+from hud.cli.io import (
     CliError,
-    ExitCode,
-    dry_run_option,
     emit_json,
-    json_option,
-    wants_json,
+    mark_json,
 )
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
@@ -41,7 +38,6 @@ def _resolve_preset(
             raise CliError(
                 error="usage",
                 message=f"Unknown example environment {preset!r}. Available: {available}",
-                exit_code=ExitCode.USAGE,
             )
         return preset
 
@@ -57,8 +53,7 @@ def _resolve_preset(
     raise CliError(
         error="usage",
         message="Nothing to create. Pass a name (hud init my-env), a --template, "
-        "or run in an interactive terminal to choose an example environment.",
-        exit_code=ExitCode.USAGE,
+        "        or run in an interactive terminal to choose an example environment.",
     )
 
 
@@ -69,8 +64,12 @@ def init_command(
     ),
     directory: str = typer.Option(".", "--dir", "-d", help="Parent directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
-    json_output: bool = json_option(),
-    dry_run: bool = dry_run_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
     preset: str | None = typer.Option(
         None,
         "--template",
@@ -99,7 +98,6 @@ def init_command(
             raise CliError(
                 error="usage",
                 message="Pass --template for a dry run without a name.",
-                exit_code=ExitCode.USAGE,
             )
         preset = DEFAULT_PRESET_ID
     preset_id = _resolve_preset(preset, name, hud_console)
@@ -111,7 +109,7 @@ def init_command(
         )
 
     if dry_run is True:
-        if wants_json(json_output):
+        if json_output is True:
             emit_json({"dry_run": True, "action": "init", "path": str(target), "preset": preset_id})
         else:
             hud_console.info(f"--dry-run: would create {target}")
@@ -146,7 +144,7 @@ def init_command(
         ) from exc
     hud_console.status_item(f"environments/{preset_id}", "✓")
 
-    if wants_json(json_output):
+    if json_output is True:
         emit_json(
             {
                 "path": str(target),

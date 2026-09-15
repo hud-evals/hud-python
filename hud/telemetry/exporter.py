@@ -63,9 +63,9 @@ _local_lock = threading.Lock()
 def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
     """Append one span as a JSON line to ``<local_dir>/<trace_id>.jsonl``.
 
-    Runs regardless of ``telemetry_enabled`` / ``api_key``: set
-    ``HUD_TELEMETRY_LOCAL_DIR`` to dump every span (the agent's steps — reasoning,
-    tool calls, results) to disk with no backend. Best-effort.
+    Runs regardless of ``telemetry_enabled`` / ``api_key``. Set
+    ``HUD_TELEMETRY_LOCAL_DIR`` to choose a directory, or leave it unset while
+    uploads are off to write under ``~/.hud/spans``. Best-effort.
     """
     if not local_dir:
         return
@@ -90,7 +90,7 @@ def queue_span(span: dict[str, Any]) -> None:
 
     if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
         return
-    _export_local(span, settings.telemetry_local_dir)
+    _export_local(span, settings.span_dir)
     if not settings.telemetry_enabled or not settings.api_key:
         return
     _ensure_worker()

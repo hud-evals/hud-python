@@ -74,11 +74,9 @@ class TestMainFunction:
         original_argv = sys.argv
         try:
             sys.argv = ["hud"]
-            with patch("hud.cli.console") as mock_console:
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
-                assert exc_info.value.code == 2
-                assert any("Quick Start" in str(call) for call in mock_console.print.call_args_list)
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 2
         finally:
             sys.argv = original_argv
 

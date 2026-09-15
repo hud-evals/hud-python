@@ -15,13 +15,12 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
-from hud.cli.utils.output import (
-    UnknownTokenAsGetGroup,
+from hud.cli import require_api_key
+from hud.cli.groups import ImplicitGetGroup
+from hud.cli.io import (
     emit_json,
-    json_option,
     map_request_error,
-    output_option,
-    wants_json,
+    mark_json,
 )
 from hud.utils.exceptions import HudRequestError
 
@@ -29,7 +28,7 @@ console = Console()
 
 trace_app = typer.Typer(
     name="trace",
-    cls=UnknownTokenAsGetGroup,
+    cls=ImplicitGetGroup,
     help="Inspect a rollout trace.",
     add_completion=False,
     rich_markup_mode="rich",
@@ -41,15 +40,13 @@ def _show_trace(
     trace_id: str,
     *,
     json_output: bool,
-    output: str | None,
     local_dir: str | None,
 ) -> None:
-    from hud.cli.utils.api import require_api_key
     from hud.settings import settings
     from hud.telemetry.span import normalize_trace_id
     from hud.utils.platform import canonical_record_id
 
-    dir_to_use = local_dir or settings.telemetry_local_dir
+    dir_to_use = local_dir or settings.span_dir
     otel_id = normalize_trace_id(trace_id)
 
     events: list[dict[str, Any]] | None = None
@@ -67,7 +64,7 @@ def _show_trace(
         require_api_key("fetch trace")
         events = _load_remote(trace_id)
 
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(events)
         return
 
@@ -87,37 +84,33 @@ def _show_trace(
 
 @trace_app.command("get")
 def get_command(
-    ctx: typer.Context,
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
     local_dir: str | None = typer.Option(
-        None, "--local-dir", help="Override HUD_TELEMETRY_LOCAL_DIR"
+        None, "--local-dir", help="Override the local span directory"
     ),
 ) -> None:
     """Render the turns and tool calls for one rollout.
 
-    Checks ``HUD_TELEMETRY_LOCAL_DIR`` first (fast, no API needed), then
-    falls back to ``GET /v2/trace/{id}/events`` on the platform.
+    Checks the local span directory first (``HUD_TELEMETRY_LOCAL_DIR``, or
+    ``~/.hud/spans`` when uploads are disabled), then ``GET /v2/trace/{id}/events``.
 
     [not dim]Examples:
         hud trace get <trace-id>
         hud trace get <trace-id> --json
         hud trace <trace-id> --json[/not dim]
     """
-    _show_trace(
-        trace_id,
-        json_output=json_output or ctx.meta.get("hud_output") == "json",
-        output=output,
-        local_dir=local_dir,
-    )
+    _show_trace(trace_id, json_output=json_output, local_dir=local_dir)
 
 
 @trace_app.callback(invoke_without_command=True)
 def trace_command(
     ctx: typer.Context,
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Inspect a rollout trace.
 

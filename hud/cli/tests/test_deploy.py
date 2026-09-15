@@ -3,23 +3,36 @@
 from __future__ import annotations
 
 import json
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from typer.testing import CliRunner
 
+from hud.cli.config import AuthScope, DirectoryState
 from hud.cli.deploy import _resolve_environment_name
-from hud.cli.utils.config import AuthScope, DirectoryState
-from hud.cli.utils.output import CliError
-from hud.cli.utils.project import Placement, Project, ProjectSource
-from hud.cli.utils.registry import RegistryEnvironment
-from hud.cli.utils.source import EnvironmentSource
+from hud.cli.io import CliError
+from hud.cli.project import Placement, Project, ProjectSource
+from hud.cli.source import EnvironmentSource
+from hud.cli.sync import RegistryEnvironment
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 # Deploys that accept the team's default Project send no project_id.
 _UNPLACED = Placement(project=None, source=ProjectSource.TEAM_DEFAULT)
+
+
+class _TtyCliRunner(CliRunner):
+    """CliRunner replaces stdin with a pipe; this one still reports a TTY."""
+
+    @contextmanager
+    def isolation(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        with super().isolation(*args, **kwargs) as streams:
+            sys.stdin.isatty = lambda: True  # type: ignore[method-assign]
+            yield streams
 
 
 @pytest.mark.parametrize(("value", "expected"), [("HUD", "hud"), ("modal", "modal")])
@@ -367,14 +380,14 @@ class TestDeployEnvironment:
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
 
         with (
-            patch("hud.settings.settings") as mock_settings,
+            patch("hud.cli.settings") as mock_settings,
             pytest.raises(CliError) as exc_info,
         ):
             mock_settings.api_key = None
 
             deploy_environment(directory=str(tmp_path))
 
-        assert exc_info.value.exit_code == 4
+        assert exc_info.value.exit_code == 1
 
     def test_compose_recipe_does_not_require_a_dockerfile(self, tmp_path: Path) -> None:
         from hud.cli.deploy import _compose_recipe
@@ -408,28 +421,24 @@ class TestDeployEnvironment:
         from hud.cli.deploy import deploy_environment
 
         with (
-            patch("hud.settings.settings") as mock_settings,
+            patch("hud.cli.deploy.require_api_key", return_value="test-key"),
             pytest.raises(CliError) as exc_info,
         ):
-            mock_settings.api_key = "test-key"
-
             deploy_environment(directory=str(tmp_path))
 
         assert exc_info.value.exit_code == 1
 
     def test_validation_errors_exit(self, tmp_path: Path) -> None:
         """Test that validation errors cause exit."""
-        from hud.cli.deploy import deploy_environment
-        from hud.cli.utils.source import ValidationIssue
+        from hud.cli.deploy import ValidationIssue, deploy_environment
 
         (tmp_path / "Dockerfile.hud").write_text("FROM python:3.12")
 
         with (
-            patch("hud.settings.settings") as mock_settings,
-            patch("hud.cli.utils.source.EnvironmentSource.validate") as mock_validate,
+            patch("hud.cli.deploy.require_api_key", return_value="test-key"),
+            patch("hud.cli.deploy._validate_environment") as mock_validate,
             pytest.raises(ValueError) as exc_info,
         ):
-            mock_settings.api_key = "test-key"
             mock_validate.return_value = [
                 ValidationIssue(
                     severity="error",
@@ -667,10 +676,9 @@ def authenticated_scope(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_deploy_lifecycle_preserves_links_and_consent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: list[str], stream_status: str | None
 ) -> None:
-    from typer.testing import CliRunner
-
     from hud.cli import app
-    from hud.cli.utils.config import load_config
+    from hud.cli.config import AuthScope, DirectoryState
+    from hud.utils.platform import PlatformClient
 
     env = tmp_path / "environment"
     env.mkdir()
@@ -722,22 +730,23 @@ def test_deploy_lifecycle_preserves_links_and_consent(
     )
     connection = MagicMock()
     connection.__aenter__.return_value = websocket
-    monkeypatch.setattr("hud.cli.utils.build_logs.websockets.connect", lambda *a, **k: connection)
-    monkeypatch.setattr("hud.cli.utils.build_logs.asyncio.sleep", AsyncMock())
-    monkeypatch.setattr("hud.cli.deploy.is_interactive", lambda: True)
+    monkeypatch.setattr("hud.cli.deploy.websockets.connect", lambda *a, **k: connection)
+    monkeypatch.setattr("hud.cli.deploy.asyncio.sleep", AsyncMock())
     prompts = MagicMock(return_value=True)
     monkeypatch.setattr(HUDConsole, "confirm", prompts)
-    first = CliRunner().invoke(app, ["deploy", str(env), "--json"])
+    first = _TtyCliRunner().invoke(app, ["deploy", str(env), "--json"])
     assert first.exit_code == 0, first.output
     assert json.loads(first.stdout)["registry_id"] == registry_id
     assert "test-secret-value" not in first.stdout
-    before = load_config()
-    second = CliRunner().invoke(app, ["deploy", str(env), "--json", *override])
+    state = DirectoryState(AuthScope.resolve(PlatformClient.from_settings()), env)
+    before = state.load()
+    assert before.registry_id is not None
+    second = _TtyCliRunner().invoke(app, ["deploy", str(env), "--json", *override])
     assert second.exit_code == 0, second.output
-    assert load_config() == before
+    assert state.load() == before
     assert status_reads == 4
     assert requests[0]["environment_variables"] == {"SECRET": "test-secret-value"}
-    assert not (env / ".hud").exists()
+    assert (env / ".hud" / "config.json").exists()
     if not override:
         assert prompts.call_count == 1
         assert "registry_id" not in requests[-1]

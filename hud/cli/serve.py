@@ -66,7 +66,7 @@ def serve_command(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs."),
 ) -> None:
-    """🔥 Serve a HUD Environment locally (its tcp control channel).
+    """Serve a HUD Environment locally (its tcp control channel).
 
     [not dim]Examples:
         hud serve                # auto-detect env.py

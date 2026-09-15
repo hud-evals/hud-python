@@ -42,6 +42,28 @@ def test_default_project_accepts_a_name_or_id(monkeypatch):
     assert Settings().default_project == "browser-evals"
 
 
+def test_span_dir_defaults_to_home_when_uploads_are_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    monkeypatch.setenv("HUD_TELEMETRY_LOCAL_DIR", "")
+    monkeypatch.setattr("hud.settings.Path.home", lambda: tmp_path)
+
+    assert Settings().span_dir == str(tmp_path / ".hud" / "spans")
+
+
+def test_span_dir_explicit_local_dir_wins_when_uploads_are_off(monkeypatch):
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    monkeypatch.setenv("HUD_TELEMETRY_LOCAL_DIR", "./spans")
+
+    assert Settings().span_dir == "./spans"
+
+
+def test_span_dir_is_unset_when_uploads_are_on(monkeypatch):
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "true")
+    monkeypatch.setenv("HUD_TELEMETRY_LOCAL_DIR", "")
+
+    assert Settings().span_dir is None
+
+
 def test_cli_analytics_is_independent_of_trace_telemetry(monkeypatch):
     monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "true")
     monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "false")

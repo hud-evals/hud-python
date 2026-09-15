@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -10,8 +11,8 @@ from typer.testing import CliRunner
 
 import hud.cli.sync as sync_module
 from hud.cli import app
+from hud.cli.io import CliError
 from hud.cli.sync import _write_csv
-from hud.cli.utils.output import CliError
 from hud.eval import Task
 from hud.utils.exceptions import HudRequestError
 
@@ -41,7 +42,7 @@ def test_sync_env_noninteractive_requires_name(
 ) -> None:
     monkeypatch.setattr(sync_module, "require_api_key", lambda _: None)
     monkeypatch.setattr(sync_module.PlatformClient, "from_settings", lambda: object())
-    monkeypatch.setattr(sync_module, "is_interactive", lambda: False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     with pytest.raises(CliError) as exc_info:
         sync_module.sync_env_command(name=None, directory=str(tmp_path), yes=False)
@@ -78,10 +79,10 @@ def test_sync_failures_render_one_structured_error(
         "registry": ["env", registry_id],
     }[failure]
     result = CliRunner().invoke(app, ["sync", *args, "--json"])
-    assert result.exit_code == (3 if failure == "source" else 4), result.output
+    assert result.exit_code == 1, result.output
     payload = json.loads(result.stdout)
     assert payload["error"] == ("not_found" if failure == "source" else "permission_denied")
-    assert result.stderr.count(payload["message"]) == 1
+    assert payload["message"] not in (result.stderr or "")
 
 
 def test_relinking_same_environment_reports_unchanged(

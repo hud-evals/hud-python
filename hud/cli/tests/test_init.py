@@ -13,8 +13,8 @@ import pytest
 from hud.cli import init as init_module
 from hud.cli import presets as presets_module
 from hud.cli.init import init_command
+from hud.cli.io import CliError
 from hud.cli.presets import materialize_preset
-from hud.cli.utils.output import CliError
 
 if TYPE_CHECKING:
     from pathlib import Path

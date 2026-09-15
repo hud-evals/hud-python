@@ -1,14 +1,10 @@
-"""``hud.cli.utils.build_display`` — build summary rendering + duration formatting.
-
-These mostly assert "renders without raising" (output is Rich), exercising the
-lock-detail / usage-example branches; ``_format_duration`` is checked directly.
-"""
+"""Deploy build-summary rendering and duration formatting."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from hud.cli.utils.build_display import (
+from hud.cli.deploy import (
     _format_duration,
     display_build_summary,
 )

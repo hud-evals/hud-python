@@ -1,10 +1,12 @@
-"""EnvironmentSource: identity, dockerfile, source files, references, validation."""
+"""EnvironmentSource identity and the live-env source file."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.cli.utils.source import EnvironmentSource
+import pytest
+
+from hud.cli.source import EnvironmentSource, environment_file
 from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:
@@ -13,9 +15,6 @@ if TYPE_CHECKING:
 
 def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
-
-
-# ─── identity ──────────────────────────────────────────────────────────
 
 
 def test_normalize_environment_name() -> None:
@@ -55,9 +54,6 @@ def test_prefers_dockerfile_hud(tmp_path: Path) -> None:
     assert EnvironmentSource.open(d).dockerfile == d / "Dockerfile"
     (d / "Dockerfile.hud").write_text("FROM python:3.12")
     assert EnvironmentSource.open(d).dockerfile == d / "Dockerfile.hud"
-
-
-# ─── Environment("name") references ────────────────────────────────────
 
 
 def test_finds_positional_name_reference(tmp_path: Path) -> None:
@@ -149,9 +145,6 @@ def test_no_references_is_a_pass(tmp_path: Path) -> None:
     assert EnvironmentSource.open(tmp_path).environment_name_references() == []
 
 
-# ─── served environment (Dockerfile entrypoint) ──────────────────────────
-
-
 def test_served_module_parses_exec_form(tmp_path: Path) -> None:
     _write(tmp_path / "Dockerfile", 'CMD ["hud", "serve", "env:env", "--port", "8765"]\n')
 
@@ -200,80 +193,53 @@ def test_served_name_none_without_dockerfile(tmp_path: Path) -> None:
     assert EnvironmentSource.open(tmp_path).served_environment_name() is None
 
 
-# ─── validation ────────────────────────────────────────────────────────
+def test_environment_file_is_the_template_definition(tmp_path: Path) -> None:
+    from hud.eval import Taskset
 
-
-def test_no_pyproject_is_clean(tmp_path: Path) -> None:
-    assert EnvironmentSource.open(tmp_path).validate_pyproject_references() == []
-
-
-def test_missing_license_file_is_error(tmp_path: Path) -> None:
-    _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\nlicense = {file = "LICENSE"}\n')
-
-    issues = EnvironmentSource.open(tmp_path).validate_pyproject_references()
-
-    assert [i.severity for i in issues] == ["error"]
-    assert "License file not found" in issues[0].message
-
-
-def test_missing_readme_is_warning(tmp_path: Path) -> None:
-    _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\nreadme = "README.md"\n')
-
-    issues = EnvironmentSource.open(tmp_path).validate_pyproject_references()
-
-    assert [i.severity for i in issues] == ["warning"]
-    assert "Readme file not found" in issues[0].message
-
-
-def test_all_references_present_is_clean(tmp_path: Path) -> None:
+    env_py = tmp_path / "env.py"
     _write(
-        tmp_path / "pyproject.toml",
-        '[project]\nname = "x"\nlicense = {file = "LICENSE"}\nreadme = "README.md"\n',
+        env_py,
+        "from hud import Environment\n"
+        'env = Environment("demo")\n'
+        "@env.template(id='solve')\n"
+        "async def solve():\n"
+        '    yield "prompt"\n'
+        "    yield 1.0\n"
+        "task = solve()\n",
     )
-    _write(tmp_path / "LICENSE", "MIT")
-    _write(tmp_path / "README.md", "# x")
-
-    assert EnvironmentSource.open(tmp_path).validate_pyproject_references() == []
+    task = next(iter(Taskset.from_file(env_py)))
+    assert environment_file(task._env) == env_py.resolve()
 
 
-def test_unparseable_pyproject_is_error(tmp_path: Path) -> None:
-    _write(tmp_path / "pyproject.toml", "this is not = valid = toml [[[")
+def test_environment_file_follows_split_tasks_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
 
-    issues = EnvironmentSource.open(tmp_path).validate_pyproject_references()
+    from hud.eval import Taskset
 
-    assert any(i.severity == "error" and "Failed to parse" in i.message for i in issues)
-
-
-def test_license_not_copied_before_install_is_error(tmp_path: Path) -> None:
-    _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\nlicense = {file = "LICENSE"}\n')
+    monkeypatch.delitem(sys.modules, "env", raising=False)
+    env_py = tmp_path / "env.py"
     _write(
-        tmp_path / "Dockerfile.hud",
-        "FROM python:3.11\nCOPY pyproject.toml ./\nRUN uv sync\nCOPY . .\n",
+        env_py,
+        "from hud import Environment\n"
+        'env = Environment("demo")\n'
+        "@env.template(id='solve')\n"
+        "async def solve():\n"
+        '    yield "prompt"\n'
+        "    yield 1.0\n",
     )
-
-    issues = EnvironmentSource.open(tmp_path).validate_dockerfile()
-
-    assert any(i.severity == "error" and "LICENSE" in i.message for i in issues)
-
-
-def test_full_copy_before_install_is_clean(tmp_path: Path) -> None:
-    _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\nlicense = {file = "LICENSE"}\n')
-    _write(tmp_path / "Dockerfile.hud", "FROM python:3.11\nCOPY . .\nRUN uv sync\n")
-
-    # ``COPY . .`` precedes the install, so nothing is missing.
-    assert EnvironmentSource.open(tmp_path).validate_dockerfile() == []
+    tasks_py = tmp_path / "tasks.py"
+    _write(tasks_py, "from env import solve\n\ntask = solve()\n")
+    try:
+        task = next(iter(Taskset.from_file(tasks_py)))
+        assert environment_file(task._env) == env_py.resolve()
+    finally:
+        sys.modules.pop("env", None)
 
 
-def test_no_dockerfile_is_clean(tmp_path: Path) -> None:
-    assert EnvironmentSource.open(tmp_path).validate_dockerfile() == []
+def test_environment_file_rejects_env_without_templates() -> None:
+    from hud.environment import Environment
 
-
-def test_validate_environment_aggregates(tmp_path: Path) -> None:
-    _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\nlicense = {file = "LICENSE"}\n')
-    _write(
-        tmp_path / "Dockerfile.hud",
-        "FROM python:3.11\nCOPY pyproject.toml ./\nRUN uv sync\nCOPY . .\n",
-    )
-
-    issues = EnvironmentSource.open(tmp_path).validate()
-    assert len(issues) >= 2
+    with pytest.raises(ValueError, match="bound Environment"):
+        environment_file(Environment("demo"))

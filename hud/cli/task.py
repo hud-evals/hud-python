@@ -20,19 +20,15 @@ from urllib.parse import urlsplit
 
 import typer
 
-from hud.cli.utils.output import (
+from hud.cli.io import (
     CliError,
     emit_json,
     emit_quiet,
-    json_option,
-    output_option,
-    quiet_option,
+    mark_json,
+    parse_args,
     read_text_arg,
-    resolve_output_mode,
-    wants_json,
 )
-from hud.cli.utils.source import EnvironmentSource
-from hud.cli.utils.tasks import parse_task_args
+from hud.cli.source import environment_file
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -63,6 +59,17 @@ def _collect(source: str) -> Any:
         ) from exc
 
 
+def _attach_runtime(url: str) -> Runtime:
+    from hud.eval.runtime import Runtime
+
+    parts = urlsplit(url if "://" in url else f"tcp://{url}")
+    if parts.scheme != "tcp":
+        raise CliError(error="usage", message="Task control channels require a tcp:// URL")
+    host = parts.hostname or "127.0.0.1"
+    host = f"[{host}]" if ":" in host else host
+    return Runtime(f"tcp://{host}:{parts.port or 8765}")
+
+
 def _local_env_url(port: int = 8765) -> str | None:
     """Return a control-channel URL if an env is already serving locally on ``port``
     (e.g. ``hud serve``, or a built image whose CMD serves on :8765), else ``None``."""
@@ -87,22 +94,15 @@ def _resolve(
     """
     from contextlib import nullcontext
 
-    from hud.eval.runtime import Runtime, SubprocessRuntime
+    from hud.eval.runtime import SubprocessRuntime
 
     attach = url
     if attach is None and source is None:
         attach = _local_env_url()
-    endpoint = None
-    if attach is not None:
-        parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
-        if parts.scheme != "tcp":
-            raise CliError(error="usage", message="Task control channels require a tcp:// URL")
-        host = parts.hostname or "127.0.0.1"
-        host = f"[{host}]" if ":" in host else host
-        endpoint = f"tcp://{host}:{parts.port or 8765}"
+    endpoint = _attach_runtime(attach) if attach is not None else None
 
     if endpoint is not None and source is None:
-        return task, args or {}, nullcontext(Runtime(endpoint))
+        return task, args or {}, nullcontext(endpoint)
 
     taskset = _collect(source or ".")
     if not taskset:
@@ -131,9 +131,21 @@ def _resolve(
         )
     selected = matches[0]
     if endpoint is not None:
-        placement = nullcontext(Runtime(endpoint))
+        placement = nullcontext(endpoint)
     else:
-        placement = SubprocessRuntime(EnvironmentSource.local_source(source or "."))(selected)
+        try:
+            env = selected._env
+            if env is None:
+                raise ValueError("These rows have no bound Environment.")
+            placement = SubprocessRuntime(environment_file(env))(selected)
+        except ValueError as exc:
+            raise CliError(
+                error="usage",
+                message=str(exc),
+                input={"source": source or "."},
+                suggestion="Pass --source to a tasks.py / env.py that binds an Environment, "
+                "or --url to attach to a served env.",
+            ) from exc
     return selected.id, selected.args if args is None else args, placement
 
 
@@ -143,14 +155,13 @@ def _emit(
     out: Path | None,
     *,
     json_output: bool = False,
-    output: str | None = None,
 ) -> None:
     """Thin output: JSON/file for the full frame, else the headline value to stdout."""
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
         return
-    if wants_json(json_output, output):
+    if json_output is True:
         emit_json(result)
         return
     value = result.get(headline, result)
@@ -160,9 +171,12 @@ def _emit(
 @task_app.command("list")
 def list_command(
     source: str = typer.Option(".", "--source", "-s", help="Env source (.py/dir/JSON)."),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
 ) -> None:
     """List the tasks (slug + task id + args) exposed by a source.
 
@@ -174,11 +188,10 @@ def list_command(
     items = [
         {"slug": slug, "id": task.id, "args": task.args} for slug, task in _collect(source).items()
     ]
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
-    if mode == "json":
+    if json_output is True:
         emit_json(items)
         return
-    if mode == "quiet":
+    if quiet:
         emit_quiet([item["slug"] for item in items])
         return
     for item in items:
@@ -195,7 +208,9 @@ def start_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: str | None = typer.Option(None, "--args", "-a", help="JSON object of task args."),
+    args: dict[str, Any] | None = typer.Option(  # noqa: B008
+        None, "--args", "-a", help="JSON object of task args.", parser=parse_args
+    ),
     url: str | None = typer.Option(
         None,
         "--url",
@@ -205,8 +220,9 @@ def start_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the prompt here instead of stdout."
     ),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Start a task and return its prompt (the env's first yield).
 
@@ -215,9 +231,7 @@ def start_command(
         hud task start fix_bug --json
         hud task start fix_bug --source . --args '{}'[/not dim]
     """
-    task_id, task_args, placement = _resolve(
-        task, source, url, parse_task_args(args) if args is not None else None
-    )
+    task_id, task_args, placement = _resolve(task, source, url, args)
 
     async def _run() -> dict[str, Any]:
         from hud.clients import connect
@@ -227,7 +241,7 @@ def start_command(
         async with placement as runtime, connect(runtime) as client:
             return await client.start_task(task_id, task_args)
 
-    _emit(asyncio.run(_run()), "prompt", out, json_output=json_output, output=output)
+    _emit(asyncio.run(_run()), "prompt", out, json_output=json_output)
 
 
 @task_app.command("grade")
@@ -245,7 +259,9 @@ def grade_command(
         "-s",
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
-    args: str | None = typer.Option(None, "--args", "-a", help="JSON object of task args."),
+    args: dict[str, Any] | None = typer.Option(  # noqa: B008
+        None, "--args", "-a", help="JSON object of task args.", parser=parse_args
+    ),
     url: str | None = typer.Option(
         None,
         "--url",
@@ -255,8 +271,9 @@ def grade_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the full JSON result here (else print the reward)."
     ),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Grade an answer for a task and return its reward.
 
@@ -266,9 +283,7 @@ def grade_command(
         hud task grade fix_bug --answer-file answer.txt[/not dim]
     """
     answer_text = read_text_arg(answer_file) if answer_file is not None else answer
-    task_id, task_args, placement = _resolve(
-        task, source, url, parse_task_args(args) if args is not None else None
-    )
+    task_id, task_args, placement = _resolve(task, source, url, args)
 
     async def _run() -> dict[str, Any]:
         from hud.clients import connect
@@ -284,7 +299,7 @@ def grade_command(
                 await client.start_task(task_id, task_args)
                 return await client.grade({"answer": answer_text})
 
-    _emit(asyncio.run(_run()), "score", out, json_output=json_output, output=output)
+    _emit(asyncio.run(_run()), "score", out, json_output=json_output)
 
 
 __all__ = ["task_app"]

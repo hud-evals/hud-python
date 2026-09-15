@@ -45,7 +45,7 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     ".hg",
     ".svn",
     ".jj",
-    # HUD CLI state written into env dirs (e.g. deploy's .hud/config.json).
+    # HUD CLI workspace state (e.g. .hud/config.json).
     ".hud/",
     ".tmp/",
     ".gradle/",

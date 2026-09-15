@@ -11,7 +11,7 @@ import pytest
 
 from hud.cli import eval as eval_mod
 from hud.cli.eval import EvalConfig, _is_bedrock_arn
-from hud.cli.utils.output import CliError
+from hud.cli.io import CliError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,25 +153,30 @@ def test_resolve_placement_routes_each_local_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import hud.eval as eval_api
+    from hud.environment import Environment
     from hud.eval import RuntimeConfig, Task
+
+    env = Environment("source")
+
+    @env.template(id="run")
+    async def run() -> None:
+        yield "prompt"
+        yield 1.0
 
     docker = lambda task: ("docker", task)
     subprocess = lambda task: ("subprocess", task)
     monkeypatch.setattr(eval_api, "DockerRuntime", lambda: docker)
     monkeypatch.setattr(eval_api, "SubprocessRuntime", lambda _path: subprocess)
 
+    bound = run()
+    image = Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest"))
     placement = eval_mod._resolve_placement(
         EvalConfig(runtime="local"),
         tmp_path,
-        [
-            Task(env="source", id="run"),
-            Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest")),
-        ],
+        [bound, image],
     )
 
-    source = Task(env="source", id="run")
-    image = Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest"))
-    assert placement(source) == ("subprocess", source)
+    assert placement(bound) == ("subprocess", bound)
     assert placement(image) == ("docker", image)
 
 
@@ -313,6 +318,13 @@ def test_display_renders() -> None:
     EvalConfig(agent_type="openai", model="gpt").display()
 
 
+def test_local_subprocess_rejects_portable_rows() -> None:
+    from hud.eval import Task
+
+    with pytest.raises(ValueError, match="no bound Environment"):
+        eval_mod._local_subprocess(Task(env="demo", id="solve"))
+
+
 def test_eval_max_steps_lands_in_agent_config() -> None:
     cfg = EvalConfig(
         source="tasks.py",
@@ -322,35 +334,6 @@ def test_eval_max_steps_lands_in_agent_config() -> None:
     )
     agent = eval_mod._build_agent(cfg)
     assert agent.config.max_steps == 17
-
-
-def test_spawn_target_serves_single_file_env(tmp_path: Path) -> None:
-    env_py = tmp_path / "tasks.py"
-    env_py.write_text(
-        'from hud import Environment\nenv = Environment(name="demo")\n',
-        encoding="utf-8",
-    )
-    assert eval_mod.EnvironmentSource.local_source(env_py) == env_py.resolve()
-
-
-def test_spawn_target_resolves_split_tasks_layout(tmp_path: Path) -> None:
-    (tmp_path / "env.py").write_text(
-        'from hud.environment import Environment\nenv = Environment(name="demo")\n',
-        encoding="utf-8",
-    )
-    tasks_py = tmp_path / "tasks.py"
-    tasks_py.write_text("from env import env\n\ntasks = []\n", encoding="utf-8")
-    assert eval_mod.EnvironmentSource.local_source(tasks_py) == (tmp_path / "env.py").resolve()
-
-
-def test_spawn_target_json_uses_parent_directory(tmp_path: Path) -> None:
-    tasks_json = tmp_path / "tasks.json"
-    tasks_json.write_text("[]", encoding="utf-8")
-    assert eval_mod.EnvironmentSource.local_source(tasks_json) == tmp_path.resolve()
-
-
-def test_spawn_target_directory_is_served_as_is(tmp_path: Path) -> None:
-    assert eval_mod.EnvironmentSource.local_source(tmp_path) == tmp_path.resolve()
 
 
 @pytest.mark.parametrize("args", [[], ["tasks.json", "claude"]])

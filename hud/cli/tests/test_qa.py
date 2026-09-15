@@ -81,6 +81,25 @@ def test_qa_lists_agent_name_and_uuid() -> None:
     )
 
 
+def test_qa_list_verb_matches_bare_qa() -> None:
+    platform = MagicMock()
+    platform.get.return_value = {
+        "items": [_agent()],
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+    }
+
+    result = _invoke(platform, ["qa", "list"])
+
+    assert result.exit_code == 0
+    assert result.output.strip() == f"Failure Analysis\t{_AGENT_ID}"
+    platform.get.assert_called_once_with(
+        "/qa-agents",
+        params={"subject_type": "trace", "limit": 50, "offset": 0},
+    )
+
+
 def test_qa_run_rejects_resource_agents() -> None:
     platform = MagicMock()
     platform.get.return_value = _agent(subject_type="environment")

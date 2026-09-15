@@ -5,19 +5,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hud.cli.utils.tasks import find_tasks_file
+from hud.cli.eval import find_tasks_file
 
 
 @patch("pathlib.Path.cwd")
 def test_find_tasks_file_with_arg(mock_cwd):
-    """Test that when a tasks file is provided, it's returned as-is."""
     assert find_tasks_file("some/path.json") == "some/path.json"
     mock_cwd.assert_not_called()
 
 
 @patch("pathlib.Path.cwd")
 def test_find_tasks_file_no_files(mock_cwd):
-    """Test that FileNotFoundError is raised when no task files exist."""
     mock_path = MagicMock(spec=Path)
     mock_path.glob.return_value = []
     mock_cwd.return_value = mock_path
@@ -26,13 +24,12 @@ def test_find_tasks_file_no_files(mock_cwd):
         find_tasks_file(None)
 
 
-@patch("hud.cli.utils.tasks.hud_console")
+@patch("hud.cli.eval.hud_console")
 @patch("pathlib.Path.cwd")
 def test_find_tasks_file_single_file(mock_cwd, mock_console):
-    """Test that when only one file exists, it's returned without prompting."""
     mock_path = MagicMock(spec=Path)
     mock_file = MagicMock(spec=Path)
-    mock_file.__str__.return_value = "test.json"
+    mock_file.name = "test.json"
 
     def glob_side_effect(pattern):
         if pattern == "*.json":
@@ -40,7 +37,6 @@ def test_find_tasks_file_single_file(mock_cwd, mock_console):
         return []
 
     mock_path.glob.side_effect = glob_side_effect
-    mock_path.__str__.return_value = str(Path.cwd())
     mock_cwd.return_value = mock_path
 
     result = find_tasks_file(None)
@@ -48,15 +44,14 @@ def test_find_tasks_file_single_file(mock_cwd, mock_console):
     mock_console.select.assert_not_called()
 
 
-@patch("hud.cli.utils.tasks.hud_console")
+@patch("hud.cli.eval.hud_console")
 @patch("pathlib.Path.cwd")
 def test_find_tasks_file_multiple_files(mock_cwd, mock_console):
-    """Test that when multiple files exist, user is prompted to select one."""
     mock_path = MagicMock(spec=Path)
     mock_file1 = MagicMock(spec=Path)
-    mock_file1.__str__.return_value = "test1.json"
+    mock_file1.name = "test1.json"
     mock_file2 = MagicMock(spec=Path)
-    mock_file2.__str__.return_value = "test2.jsonl"
+    mock_file2.name = "test2.jsonl"
 
     def glob_side_effect(pattern):
         if pattern == "*.json":
@@ -66,7 +61,6 @@ def test_find_tasks_file_multiple_files(mock_cwd, mock_console):
         return []
 
     mock_path.glob.side_effect = glob_side_effect
-    mock_path.__str__.return_value = str(Path.cwd())
     mock_cwd.return_value = mock_path
     mock_console.select.return_value = "test2.jsonl"
 

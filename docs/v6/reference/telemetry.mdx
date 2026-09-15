@@ -31,13 +31,14 @@ Spans also include execution metadata such as step order, timings, status, and e
 uploads require your API key and power the trace viewer.
 
 - **No API key (the default):** spans are not uploaded anywhere.
-- **`HUD_TELEMETRY_LOCAL_DIR=./spans`:** emitted spans are also written to local
-  files, including without an API key or with backend telemetry disabled. Local writes are
-  best-effort; filesystem errors do not fail the evaluation.
-- **Fully local trace storage:** `HUD_TELEMETRY_ENABLED=0` plus
-  `HUD_TELEMETRY_LOCAL_DIR=./spans` stops backend trace uploads and writes other emitted spans
-  locally on a best-effort basis. Disabling trace telemetry also stops workspace file-tracking
-  spans. CLI analytics are independent; set `HUD_CLI_ANALYTICS_ENABLED=0` to disable them too.
+- **`HUD_TELEMETRY_ENABLED=0`:** spans are not uploaded. Emitted spans are written to
+  `~/.hud/spans` so `hud trace` can still read them. Override the directory with
+  `HUD_TELEMETRY_LOCAL_DIR`. Disabling uploads also stops workspace file-tracking spans.
+- **`HUD_TELEMETRY_LOCAL_DIR=./spans`:** write spans there even when uploads are on
+  (and without an API key). Local writes are best-effort; filesystem errors do not fail
+  the evaluation. A project `.env` or the process environment is the right place for a
+  relative path — not `~/.hud/.env`.
+- CLI analytics are independent; set `HUD_CLI_ANALYTICS_ENABLED=0` to disable them.
 
 ## Anonymous CLI usage events
 
@@ -69,6 +70,5 @@ task file, a trace id, a typo, is recorded as `other` or omitted, so positional
 input is never transmitted. The install id is a random identifier for one
 machine — it is not tied to your account.
 
-Events are sent in the background and abandoned after 1.5 seconds, so a slow
-or failed send cannot break a command and adds at most 1.5 seconds to its exit.
+The POST is bounded by a 1s timeout. A failed send cannot break a command.
 A one-time notice is printed the first time the install id is created.

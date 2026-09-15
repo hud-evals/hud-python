@@ -52,20 +52,26 @@ async def test_url_without_source_uses_raw_task_and_args(monkeypatch):
 
 
 async def test_task_source_uses_sibling_environment_for_start_and_grade(tmp_path, monkeypatch):
+    import sys
+
     from hud.clients import connect
 
     monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    monkeypatch.delitem(sys.modules, "env", raising=False)
     (tmp_path / "env.py").write_text(
         'from hud import Environment\nenv = Environment("example")\n'
         '@env.template(id="solve")\nasync def solve():\n'
         '    answer = yield "question"\n    yield 1.0 if answer == "answer" else 0.0\n'
     )
     source = tmp_path / "tasks.py"
-    source.write_text('from hud.eval import Task\ntasks = [Task(env="example", id="solve")]\n')
-    task_id, args, placement = task_module._resolve("solve", str(source), None, {})
-    async with placement as runtime, connect(runtime) as client:
-        await client.start_task(task_id, args)
-        result = await client.grade({"answer": "answer"})
+    source.write_text("from env import solve\n\ntasks = [solve()]\n")
+    try:
+        task_id, args, placement = task_module._resolve("solve", str(source), None, {})
+        async with placement as runtime, connect(runtime) as client:
+            await client.start_task(task_id, args)
+            result = await client.grade({"answer": "answer"})
+    finally:
+        sys.modules.pop("env", None)
     assert result["score"] == 1.0
 
 
@@ -107,6 +113,16 @@ async def test_grade_only_starts_when_no_task_is_in_progress(mode):
             if mode == "failed_grade"
             else "2 parked sessions" in result.output
         )
+
+
+def test_portable_json_source_cannot_spawn_locally(tmp_path):
+    source = Taskset(
+        "authored",
+        [Task(env="example", id="solve", slug="solve")],
+    ).to_file(tmp_path / "tasks.json")
+    result = CliRunner().invoke(app, ["task", "start", "solve", "--source", str(source), "--json"])
+    assert result.exit_code == 2
+    assert "bound Environment" in json.loads(result.stdout)["message"]
 
 
 def test_task_id_matching_multiple_rows_requires_unique_slug(tmp_path):

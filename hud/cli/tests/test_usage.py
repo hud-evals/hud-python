@@ -5,135 +5,178 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import pytest
+import typer
 
-from hud.cli.utils import usage
+from hud.cli import app, usage
+from hud.utils.exceptions import HudException
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-class TestCommandTokens:
-    @pytest.fixture(autouse=True)
-    def _fresh_registry(self) -> None:
-        """Rebuild the cached registry so earlier tests cannot poison it."""
-        usage._registered_commands.cache_clear()
-
-    def test_arguments_are_never_captured(self) -> None:
-        """The second token of a plain command is user input and must not be sent."""
-        assert usage._command_tokens(["hud", "eval", "tasks.py", "claude"]) == ("eval", None)
-
-    def test_registered_subcommands_are_captured(self) -> None:
-        assert usage._command_tokens(["hud", "models", "list"]) == ("models", "list")
-
-    def test_callback_group_positionals_are_never_captured(self) -> None:
-        """``hud trace <id>`` and ``hud jobs <id>`` take user data, not subcommands."""
-        assert usage._command_tokens(["hud", "trace", "8b1f2c3d4e5f"]) == ("trace", None)
-        assert usage._command_tokens(["hud", "jobs", "0f9e8d7c"]) == ("jobs", None)
-
-    def test_jobs_verbs_are_captured(self) -> None:
-        assert usage._command_tokens(["hud", "jobs", "list"]) == ("jobs", "list")
-        assert usage._command_tokens(["hud", "jobs", "cancel"]) == ("jobs", "cancel")
-        assert usage._command_tokens(["hud", "trace", "get"]) == ("trace", "get")
-
-    def test_unregistered_command_is_other(self) -> None:
-        """A token that is not a registered command is never sent verbatim."""
-        assert usage._command_tokens(["hud", "secret-name"]) == ("other", None)
-
-    def test_bare_invocation_is_help(self) -> None:
-        assert usage._command_tokens(["hud"]) == ("help", None)
-
-    def test_flags_are_skipped(self) -> None:
-        assert usage._command_tokens(["hud", "--verbose", "serve"]) == ("serve", None)
+def _event(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    error: BaseException | None = None,
+) -> dict[str, Any] | None:
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        httpx, "post", lambda _url, json=None, **_k: sent.append(json) or httpx.Response(204)
+    )
+    try:
+        with usage.recorded_invocation(argv, app):
+            if error is not None:
+                raise error
+    except BaseException as exc:
+        if exc is not error and type(exc) is not type(error):
+            raise
+    if not sent:
+        return None
+    (payload,) = sent
+    (event,) = payload["events"]
+    return event
 
 
-class TestClassify:
-    def test_typer_exit_from_hud_exception_names_the_cause(self) -> None:
-        """The CLI converts HudException via ``raise typer.Exit(1) from e``."""
-        import typer
-
-        from hud.utils.exceptions import HudException
-
-        try:
-            try:
-                raise HudException("boom")
-            except HudException as e:
-                raise typer.Exit(1) from e
-        except typer.Exit as converted:
-            assert usage._classify(converted) == (1, "HudException")
-
-    def test_plain_exit_has_no_error_class(self) -> None:
-        import typer
-
-        assert usage._classify(typer.Exit(2)) == (2, None)
-
-    def test_keyboard_interrupt(self) -> None:
-        assert usage._classify(KeyboardInterrupt()) == (130, "KeyboardInterrupt")
-
-    def test_unexpected_exception(self) -> None:
-        assert usage._classify(ValueError("x")) == (1, "ValueError")
+@pytest.fixture(autouse=True)
+def _analytics_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "1")
+    monkeypatch.setenv("HUD_TELEMETRY_URL", "https://telemetry.example.test/v3/api")
 
 
-class TestInstallId:
-    def test_created_once_and_persisted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """First call creates an id and prints the notice; later calls reuse it silently."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-
-        first = usage._install_id()
-        second = usage._install_id()
-
-        assert first == second
-        assert uuid.UUID(first)
-        captured = capsys.readouterr()
-        assert captured.err.count("anonymous usage data") == 1
+def test_arguments_are_never_captured(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "eval", "tasks.py", "claude"], monkeypatch)
+    assert event is not None
+    assert event["command"] == "eval"
+    assert event["subcommand"] is None
 
 
-class TestRecordInvocation:
-    def test_opt_out_applies_immediately(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
-        sent: list[dict[str, object]] = []
-        monkeypatch.setattr(usage, "_post", lambda _url, payload: sent.append(payload))
+def test_registered_subcommands_are_captured(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "models", "list"], monkeypatch)
+    assert event is not None
+    assert (event["command"], event["subcommand"]) == ("models", "list")
 
-        usage.record_invocation(["hud", "eval"], exit_code=0, error_class=None, duration_ms=10)
 
-        assert sent == []
+def test_callback_group_positionals_are_never_captured(monkeypatch: pytest.MonkeyPatch) -> None:
+    trace = _event(["hud", "trace", "8b1f2c3d4e5f"], monkeypatch)
+    jobs = _event(["hud", "jobs", "0f9e8d7c"], monkeypatch)
+    assert trace is not None and jobs is not None
+    assert (trace["command"], trace["subcommand"]) == ("trace", None)
+    assert (jobs["command"], jobs["subcommand"]) == ("jobs", None)
 
-    def test_payload_is_the_allowlist(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The sent payload holds command facts only — no argv, paths, or messages."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "1")
-        monkeypatch.setenv("HUD_TELEMETRY_URL", "https://telemetry.example.test/v3/api")
-        sent: list[tuple[str, dict[str, Any]]] = []
-        monkeypatch.setattr(usage, "_post", lambda url, payload: sent.append((url, payload)))
 
-        usage.record_invocation(
-            ["hud", "serve", "my_env.py"],
-            exit_code=1,
-            error_class="HudException",
-            duration_ms=42,
-        )
+def test_jobs_verbs_are_captured(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _event(["hud", "jobs", "list"], monkeypatch)["subcommand"] == "list"
+    assert _event(["hud", "jobs", "cancel"], monkeypatch)["subcommand"] == "cancel"
+    assert _event(["hud", "trace", "get"], monkeypatch)["subcommand"] == "get"
+    assert _event(["hud", "qa", "list"], monkeypatch)["subcommand"] == "list"
 
-        (url, payload) = sent[0]
-        assert url == "https://telemetry.example.test/v3/api/sdk-events/cli"
-        (event,) = payload["events"]
-        assert event["command"] == "serve"
-        assert event["subcommand"] is None  # my_env.py must not appear
-        assert event["exit_code"] == 1
-        assert event["error_class"] == "HudException"
-        assert "my_env.py" not in str(payload)
-        assert set(event) == {
-            "command",
-            "subcommand",
-            "exit_code",
-            "error_class",
-            "duration_ms",
-            "cli_version",
-            "python_version",
-            "os",
-            "is_ci",
-            "install_id",
-        }
+
+def test_unregistered_command_is_other(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "secret-name"], monkeypatch)
+    assert event is not None
+    assert event["command"] == "other"
+    assert "secret-name" not in event.values()
+
+
+def test_bare_invocation_is_help(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud"], monkeypatch)
+    assert event is not None
+    assert event["command"] == "help"
+
+
+def test_version_flag_is_not_an_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _event(["hud", "--version"], monkeypatch) is None
+    assert _event(["hud", "--version", "--json"], monkeypatch) is None
+
+
+def test_flags_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "--verbose", "serve"], monkeypatch)
+    assert event is not None
+    assert event["command"] == "serve"
+
+
+def test_typer_exit_from_hud_exception_names_the_cause(monkeypatch: pytest.MonkeyPatch) -> None:
+    try:
+        raise HudException("boom")
+    except HudException as exc:
+        converted = typer.Exit(1)
+        converted.__cause__ = exc
+    event = _event(["hud", "eval"], monkeypatch, error=converted)
+    assert event is not None
+    assert (event["exit_code"], event["error_class"]) == (1, "HudException")
+
+
+def test_plain_exit_has_no_error_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "eval"], monkeypatch, error=typer.Exit(2))
+    assert event is not None
+    assert (event["exit_code"], event["error_class"]) == (2, None)
+
+
+def test_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "eval"], monkeypatch, error=KeyboardInterrupt())
+    assert event is not None
+    assert (event["exit_code"], event["error_class"]) == (130, "KeyboardInterrupt")
+
+
+def test_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _event(["hud", "eval"], monkeypatch, error=ValueError("x"))
+    assert event is not None
+    assert (event["exit_code"], event["error_class"]) == (1, "ValueError")
+
+
+def test_install_id_created_once(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = _event(["hud", "eval"], monkeypatch)
+    second = _event(["hud", "eval"], monkeypatch)
+    assert first is not None and second is not None
+    assert first["install_id"] == second["install_id"]
+    assert uuid.UUID(first["install_id"])
+    assert capsys.readouterr().err.count("anonymous CLI usage") == 1
+
+
+def test_opt_out_applies_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
+    assert _event(["hud", "eval"], monkeypatch) is None
+
+
+def test_command_error_propagates_when_opted_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
+    with (
+        pytest.raises(ValueError, match="boom"),
+        usage.recorded_invocation(["hud", "eval"], app),
+    ):
+        raise ValueError("boom")
+
+
+def test_payload_is_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, json=None, **_k: sent.append((url, json)) or httpx.Response(204),
+    )
+    with usage.recorded_invocation(["hud", "serve", "my_env.py"], app):
+        pass
+    (url, payload) = sent[0]
+    assert url == "https://telemetry.example.test/v3/api/sdk-events/cli"
+    (event,) = payload["events"]
+    assert event["command"] == "serve"
+    assert event["subcommand"] is None
+    assert "my_env.py" not in str(payload)
+    assert set(event) == {
+        "command",
+        "subcommand",
+        "exit_code",
+        "error_class",
+        "duration_ms",
+        "cli_version",
+        "python_version",
+        "os",
+        "is_ci",
+        "install_id",
+    }

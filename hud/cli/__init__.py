@@ -6,21 +6,32 @@ import sys
 
 import typer
 from rich.console import Console
-from rich.panel import Panel
 
-from hud.cli.utils.output import CliError, CLIGroup, json_option
+from hud.cli.io import CliError, CLIGroup, emit_json, mark_json
+from hud.settings import settings
+
+
+def require_api_key(action: str = "perform this action") -> str:
+    """Return the HUD API key, or raise if none is configured."""
+    api_key = settings.api_key
+    if not api_key:
+        raise CliError(
+            error="permission_denied",
+            message="No HUD API key found",
+            input={"action": action},
+            suggestion=(
+                f"A HUD API key is required to {action}. "
+                "Run 'hud set HUD_API_KEY=your-key-here'. "
+                f"Get a key at: {settings.hud_web_url}/settings"
+            ),
+        )
+    return api_key
+
 
 app = typer.Typer(
     name="hud",
     cls=CLIGroup,
-    help=(
-        "HUD CLI — environments, evaluations, and the HUD platform.\n\n"
-        "Resource commands use noun-verb grammar "
-        "(hud jobs list, hud models fork, hud task start).\n"
-        "Pass --json on list/get/create/status commands for structured stdout; "
-        "progress and errors go to stderr.\n\n"
-        "Exit codes: 0 ok · 1 failure · 2 usage · 3 not found · 4 permission · 5 conflict."
-    ),
+    help="Build, test, and deploy HUD environments.",
     add_completion=False,
     rich_markup_mode="rich",
     pretty_exceptions_enable=False,
@@ -34,7 +45,6 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 from .cancel import cancel_command  # noqa: E402
-from .client import client_app  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
 from .init import init_command  # noqa: E402
@@ -51,7 +61,7 @@ app.command(name="serve")(serve_command)
 app.command(name="deploy")(deploy_command)
 app.command(name="eval")(eval_command)
 app.command(name="init")(init_command)
-app.command(name="cancel")(cancel_command)
+app.command(name="cancel", hidden=True, deprecated=True)(cancel_command)
 app.add_typer(models_app, name="models")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(jobs_app, name="job", hidden=True)
@@ -65,22 +75,22 @@ def set_command(
     assignments: list[str] = typer.Argument(  # noqa: B008
         ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
     ),
-    json_output: bool = json_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Persist API keys or other variables for HUD to use by default.
 
     [not dim]Examples:
         hud set ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-...
         hud set HUD_API_KEY=sk-... --json
-        hud auth set HUD_API_KEY=sk-...
 
     Values are stored in ~/.hud/.env and are loaded by hud.settings with
     the lowest precedence (overridden by process env and project .env).[/not dim]
     """
-    from hud.cli.utils.output import ExitCode, emit_json, wants_json
     from hud.utils.hud_console import HUDConsole
 
-    from .utils.config import parse_key_value, set_env_values
+    from .config import parse_key_value, set_env_values
 
     hud_console = HUDConsole()
 
@@ -93,13 +103,12 @@ def set_command(
                 message=f"Invalid assignment (expected KEY=VALUE): {item}",
                 input={"assignment": item},
                 suggestion="Pass one or more KEY=VALUE pairs.",
-                exit_code=ExitCode.USAGE,
             )
         key, value = parsed
         updates[key] = value
 
     path = set_env_values(updates)
-    if wants_json(json_output):
+    if json_output is True:
         emit_json({"path": str(path), "keys": list(updates)})
         return
     hud_console.success("Saved credentials to user config")
@@ -108,7 +117,9 @@ def set_command(
 
 @app.command()
 def version(
-    json_output: bool = json_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Show HUD CLI version.
 
@@ -117,9 +128,8 @@ def version(
         hud version --json[/not dim]
     """
     from hud import __version__  # lazy: keeps CLI startup off the full package import
-    from hud.cli.utils.output import emit_json, wants_json
 
-    if wants_json(json_output):
+    if json_output is True:
         emit_json({"name": "hud", "version": __version__})
         return
     console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
@@ -128,36 +138,22 @@ def version(
 @app.callback(invoke_without_command=True)
 def root_command(
     ctx: typer.Context,
-    show_version: bool = typer.Option(False, "--version", help="Show the CLI version"),
-    json_output: bool = json_option(),
+    show_help: bool = typer.Option(False, "--help", help="Show help."),
+    show_version: bool = typer.Option(False, "--version", help="Show version."),
 ) -> None:
+    if show_help:
+        typer.echo(ctx.get_help())
+        raise typer.Exit
     if show_version:
-        version(json_output=json_output)
+        version(json_output=False)
         raise typer.Exit
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(2)
 
 
-# Client subcommand group (drive a running env control channel from the shell)
-app.add_typer(client_app, name="client")
-
-# Task subcommand group (start a task / grade an answer, direct from source or via --url)
 app.add_typer(task_app, name="task")
-
-# Sync subcommand group (migrated to the Taskset flow)
 app.add_typer(sync_app, name="sync")
-
-# Credential command group.
-auth_app = typer.Typer(
-    name="auth",
-    help="Authenticate and persist credentials.",
-    add_completion=False,
-    rich_markup_mode="rich",
-    no_args_is_help=True,
-)
-auth_app.command("set")(set_command)
-app.add_typer(auth_app, name="auth")
 
 
 # ---------------------------------------------------------------------------
@@ -180,25 +176,12 @@ def main() -> None:
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
         console = Console()  # recreate against the new stdout
 
-    if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
-        from .utils.version_check import display_update_prompt
+    from .update import notify_if_outdated
+    from .usage import recorded_invocation
 
-        display_update_prompt()
+    notify_if_outdated(sys.argv)
 
-    from .utils.usage import recorded_invocation
-
-    with recorded_invocation(sys.argv):
-        if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):
-            console.print(
-                Panel.fit(
-                    "[bold cyan]HUD CLI[/bold cyan]\nBuild, test, and deploy environments",
-                    border_style="cyan",
-                )
-            )
-            console.print("\n[yellow]Quick Start:[/yellow]")
-            console.print("  Run evaluations: [cyan]hud eval tasks.py claude[/cyan]")
-            console.print("  List platform jobs: [cyan]hud jobs list --json[/cyan]\n")
-
+    with recorded_invocation(sys.argv, app):
         app()
 
 

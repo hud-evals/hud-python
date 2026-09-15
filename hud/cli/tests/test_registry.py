@@ -6,11 +6,8 @@ from typing import Any
 
 import pytest
 
-from hud.cli.utils.output import CliError
-from hud.cli.utils.registry import (
-    RegistryEnvironment,
-    get_registry_environment,
-)
+from hud.cli.io import CliError
+from hud.cli.sync import RegistryEnvironment, get_registry_environment
 from hud.utils.exceptions import HudRequestError
 from hud.utils.platform import PlatformClient
 
@@ -53,7 +50,7 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
         get_registry_environment(
             PlatformClient("https://api.example", "key"), "12345678-1234-5678-1234-567812345678"
         )
-    assert error.value.exit_code == 3
+    assert error.value.exit_code == 1
 
 
 def test_name_resolution_requires_selection(monkeypatch: pytest.MonkeyPatch) -> None:

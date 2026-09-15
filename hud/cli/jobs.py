@@ -4,7 +4,7 @@ Noun-verb surface:
 
     hud jobs list              # recent jobs
     hud jobs get <id>          # traces for one job
-    hud jobs cancel <id>       # cancel a job (also ``hud cancel``)
+    hud jobs cancel <id>       # cancel a job
 
 ``hud jobs`` and ``hud jobs <id>`` remain as backward-compatible shortcuts.
 """
@@ -18,17 +18,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli.utils.output import (
-    UnknownTokenAsGetGroup,
-    dry_run_option,
+from hud.cli import require_api_key
+from hud.cli.groups import ImplicitGetGroup
+from hud.cli.io import (
     emit_json,
     emit_quiet,
-    json_option,
     map_request_error,
-    output_option,
-    quiet_option,
-    resolve_output_mode,
-    yes_option,
+    mark_json,
 )
 from hud.utils.exceptions import HudRequestError
 
@@ -36,7 +32,7 @@ console = Console()
 
 jobs_app = typer.Typer(
     name="jobs",
-    cls=UnknownTokenAsGetGroup,
+    cls=ImplicitGetGroup,
     help="List jobs, inspect their traces, and cancel rollouts.",
     add_completion=False,
     rich_markup_mode="rich",
@@ -54,20 +50,17 @@ def _items(data: Any) -> list[Any]:
     return []
 
 
-def _list_jobs(*, json_output: bool, output: str | None, quiet: bool, limit: int) -> None:
-    from hud.cli.utils.api import require_api_key
+def _list_jobs(*, json_output: bool, quiet: bool, limit: int) -> None:
     from hud.utils.platform import PlatformClient
 
     require_api_key("list jobs")
     client = PlatformClient.from_settings()
     data = client.get("/jobs", params={"limit": limit})
     items = _items(data)
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
-
-    if mode == "json":
+    if json_output is True:
         emit_json(items)
         return
-    if mode == "quiet":
+    if quiet:
         emit_quiet([str(job.get("id") or "") for job in items if job.get("id")])
         return
 
@@ -104,11 +97,9 @@ def _show_job_traces(
     job_id: str,
     *,
     json_output: bool,
-    output: str | None,
     quiet: bool,
     limit: int,
 ) -> None:
-    from hud.cli.utils.api import require_api_key
     from hud.settings import settings
     from hud.utils.platform import PlatformClient, canonical_record_id
 
@@ -120,12 +111,10 @@ def _show_job_traces(
     except HudRequestError as exc:
         raise map_request_error(exc, resource="Job", input={"job_id": job_id}) from exc
     items = _items(data)
-    mode = resolve_output_mode(json_output=json_output, output=output, quiet=quiet)
-
-    if mode == "json":
+    if json_output is True:
         emit_json(items)
         return
-    if mode == "quiet":
+    if quiet:
         emit_quiet([str(tr.get("id") or "") for tr in items if tr.get("id")])
         return
 
@@ -162,9 +151,12 @@ def _show_job_traces(
 
 @jobs_app.command("list")
 def list_command(
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
 ) -> None:
     """List recent jobs.
@@ -175,15 +167,18 @@ def list_command(
         hud jobs list --quiet | xargs -n1 hud jobs get
         hud jobs list -n 50[/not dim]
     """
-    _list_jobs(json_output=json_output, output=output, quiet=quiet, limit=limit)
+    _list_jobs(json_output=json_output, quiet=quiet, limit=limit)
 
 
 @jobs_app.command("get")
 def get_command(
     job_id: str = typer.Argument(..., help="Job ID"),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
 ) -> None:
     """Show traces for a specific job.
@@ -193,7 +188,7 @@ def get_command(
         hud jobs get <job-id> --json
         hud jobs get <job-id> --quiet[/not dim]
     """
-    _show_job_traces(job_id, json_output=json_output, output=output, quiet=quiet, limit=limit)
+    _show_job_traces(job_id, json_output=json_output, quiet=quiet, limit=limit)
 
 
 @jobs_app.command("cancel")
@@ -207,10 +202,18 @@ def cancel_job_command(
     all_jobs: bool = typer.Option(
         False, "--all", "-a", help="Cancel ALL active jobs for your account (panic button)."
     ),
-    yes: bool = yes_option(),
-    dry_run: bool = dry_run_option(),
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
 ) -> None:
     """Cancel remote rollouts for a job, a trace, or every active job.
 
@@ -229,16 +232,18 @@ def cancel_job_command(
         yes=yes,
         dry_run=dry_run,
         json_output=json_output,
-        output=output,
     )
 
 
 @jobs_app.callback(invoke_without_command=True)
 def jobs_command(
     ctx: typer.Context,
-    json_output: bool = json_option(),
-    output: str | None = output_option(),
-    quiet: bool = quiet_option(),
+    json_output: bool = typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
 ) -> None:
     """List recent jobs, or show traces for a specific job.
@@ -255,4 +260,4 @@ def jobs_command(
     """
     if ctx.invoked_subcommand is not None:
         return
-    _list_jobs(json_output=json_output, output=output, quiet=quiet, limit=limit)
+    _list_jobs(json_output=json_output, quiet=quiet, limit=limit)

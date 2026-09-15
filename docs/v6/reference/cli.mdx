@@ -16,24 +16,19 @@ hud set HUD_API_KEY=your-key-here
 
 This stores the key in `~/.hud/.env`. For CI, set `HUD_API_KEY` in the process environment.
 
-## Agent-friendly flags
+## Flags and output
 
-List, get, create, and status commands accept `--json` (or `--output json`). JSON is written to **stdout**; progress, warnings, and human error text go to **stderr**. List commands also accept `--quiet` / `-q` for one identifier per line.
+List, get, create, and status commands accept `--json`. JSON is written to **stdout**; progress and warnings go to **stderr**. With `--json`, a failure is one JSON object on stdout: `{"error": "not_found", "message": "...", "input": {...}, "suggestion": "..."}`. List commands also accept `--quiet` / `-q` for one identifier per line.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success |
-| `1` | General failure |
+| `1` | Failure |
 | `2` | Usage error (bad arguments, or a prompt needed in a non-interactive terminal) |
-| `3` | Resource not found |
-| `4` | Permission denied (including a missing API key) |
-| `5` | Conflict (resource already exists) |
-
-With `--json`, failures also print a structured object to stdout: `{"error": "not_found", "message": "...", "input": {...}, "suggestion": "..."}`.
 
 Mutating commands accept `--dry-run` where an action can be described without performing it, and `--yes` / `-y` to skip confirmation. `--dry-run` never prompts. In a non-interactive terminal a real mutating action does not prompt; pass `--yes` or it exits `2`.
 
-Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Older shortcuts stay registered: `hud jobs <id>`, `hud trace <id>`, `hud cancel`, `hud set`. Hidden alias: `hud job` → `hud jobs`. `hud auth set` is an alias for `hud set`.
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Older shortcuts stay registered: `hud jobs <id>`, `hud trace <id>`, `hud set`. Hidden aliases: `hud job` → `hud jobs`; `hud cancel` is a deprecated alias for `hud jobs cancel`.
 
 ## Build & iterate
 
@@ -103,7 +98,7 @@ A real noninteractive deploy needs `--env-file .env` to include secrets or `--no
 
 ### `hud eval`
 
-The primary local iteration loop: run an agent over a task source (`.py`, directory, or JSON/JSONL), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env - no shared state between tasks.
+The primary local iteration loop: run an agent over a Python task source (`.py` or a directory), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env — no shared state between tasks. JSON/JSONL rows are portable data (no bound Environment); run those with `--remote`, `--runtime hud`, or a `tcp://` attach.
 
 ```bash
 # Split layout (hud init): templates in env.py, task rows in tasks.py
@@ -119,7 +114,7 @@ hud eval env.py claude --full                     # every task, auto-respond, 10
 ```
 
 <Note>
-`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). It spawns `env.py` for the control channel automatically - you don't pass both files.
+`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). Rows created from `@env.template` already carry that Environment; the CLI serves its defining file in a subprocess — the same inference `Taskset.run()` uses when you omit `runtime=`.
 </Note>
 
 **What you don't need for a local run:**
@@ -153,7 +148,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 
 ## Run a packaged image
 
-`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD also spawns that source locally. With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`) - it doesn't attach.
+`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD serves the Environment bound on that task (the same inference as `Taskset.run()` with no `runtime=`). With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`).
 
 ```bash
 hud task list
@@ -179,7 +174,7 @@ hud project                              # resolved Project for the current dire
 hud project list                         # visible Projects and access
 hud project create browser-evals         # create and use a Project (team admins)
 hud project create browser-evals --no-use
-hud project use <project-id>            # save project_id to ~/.hud/config.json
+hud project use <project-id>            # save project_id to .hud/config.json
 hud project use <project-id> -C ./my-env
 ```
 
@@ -197,19 +192,27 @@ hud project use <project-id> -C ./my-env
 | Priority | Source | Scope |
 |----------|--------|-------|
 | 1 | `--project <project-id>` | Current command |
-| 2 | `~/.hud/config.json` → `project_id` | Current directory |
+| 2 | `.hud/config.json` → `project_id` | Current directory |
 | 3 | `HUD_DEFAULT_PROJECT` | Machine-wide fallback |
 | 4 | Team default Project | Zero-configuration fallback |
 
-`--project` does not change `~/.hud/config.json`. Use `hud project use <project-id>` when later deploys
+`--project` does not change `.hud/config.json`. Use `hud project use <project-id>` when later deploys
 and task syncs from the directory should use that Project. Set a fallback for unconfigured
 directories with `hud set HUD_DEFAULT_PROJECT=<project-id>`.
 
-Links in `~/.hud/config.json` are scoped to the canonical directory path, API origin, authenticated user, and team. New worktrees or moved directories require relinking. Existing resources remain in their original Project.
+`.hud/config.json` is CLI-owned workspace state (gitignored). It stores the Project, environment, and
+taskset ids for this working copy, plus the API origin, user, and team that created the link.
+A worktree or copy of the directory keeps the file; credentials that do not match the stored
+scope fail instead of using the ids. Existing resources remain in their original Project.
 
-Old directory-local `.hud/config.json` and `.hud/deploy.json` files are left untouched and are not imported. Relink with `hud project use <project-id>`, `hud sync env <environment-id>`, or `hud sync tasks <taskset-id> --link --yes`. The first successful task upload records its canonical ID; later explicit targets only replace it with `--link`.
+Legacy `.hud/deploy.json` is left unread. A `.hud/config.json` that is not this schema fails instead
+of being imported. Relink with `hud project use <project-id>`, `hud sync env <environment-id>`, or
+`hud sync tasks <taskset-id> --link --yes`. The first successful task upload records its canonical
+ID; later explicit targets only replace it with `--link`.
 
-Credentials remain in `~/.hud/.env`, cache in `~/.hud/.cache`, and authored source and `.hud_eval.toml` remain in the project. Missing evaluation configuration uses defaults without creating a file; malformed or invalid configuration fails instead of falling back to defaults.
+Credentials remain in `~/.hud/.env`, cache in `~/.hud/.cache`, and authored source and
+`.hud_eval.toml` remain in the project. Missing evaluation configuration uses defaults without
+creating a file; malformed or invalid configuration fails instead of falling back to defaults.
 
 ### `hud sync`
 
@@ -231,13 +234,15 @@ experimental [Harbor integration](/v6/experimental/harbor).
 ### Platform QA
 
 ```bash
+hud qa list
 hud qa
 hud qa run <agent-id> <trace-id>
 hud qa results <trace-id>
 hud qa results <trace-id> --rollout
 ```
 
-`hud qa` lists **trace** agents (name and UUID), including public ones.
+`hud qa list` lists **trace** agents (name and UUID), including public ones.
+`hud qa` is an alias for `list`.
 Copy an id into `hud qa run`. Reuses matching evidence by default and waits
 for every requested trace. Pass `--overwrite` to create a fresh attempt,
 `--no-wait` to return after launch, or `--json` for machine-readable output.
@@ -263,12 +268,11 @@ hud jobs get <job-id>         # traces for one job
 hud jobs cancel <job-id> --yes
 hud jobs                      # alias for list
 hud jobs <job-id>             # alias for get
-hud cancel <job-id>           # alias for jobs cancel
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--json` / `--output json` | Structured stdout. |
+| `--json` | Structured stdout. |
 | `--quiet`, `-q` | Bare ids, one per line. |
 | `--limit`, `-n` | Max rows (default 20). |
 | `--yes`, `-y` | Skip cancel confirmation. |
@@ -277,7 +281,8 @@ hud cancel <job-id>           # alias for jobs cancel
 ### `hud trace`
 
 Inspect a single rollout. Reads from the local telemetry JSONL file first
-(`HUD_TELEMETRY_LOCAL_DIR/<trace_id>.jsonl`) and falls back to the platform API.
+(`HUD_TELEMETRY_LOCAL_DIR` or `~/.hud/spans` when uploads are disabled) and falls
+back to the platform API.
 
 ```bash
 hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results
@@ -285,19 +290,20 @@ hud trace get <trace-id> --json   # raw event list
 hud trace <trace-id>              # alias for get
 ```
 
-Set `HUD_TELEMETRY_LOCAL_DIR` in your environment to write spans to disk during a
-rollout so `hud trace` can read them offline without an API call.
+Set `HUD_TELEMETRY_ENABLED=0` to keep spans on disk at `~/.hud/spans`, or set
+`HUD_TELEMETRY_LOCAL_DIR` to choose a directory. `hud trace` reads those files
+without an API call.
 
 ## Other commands
 
 | Command | Description |
 |---------|-------------|
-| `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. Also `hud auth set`. |
+| `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
 | `hud models list` | List gateway models (`--json`, `--quiet`). |
 | `hud models fork <model> --name <slug>` | Fork a trainable model (`--json`, `--dry-run`, `--if-not-exists`). |
 | `hud models checkpoints <model>` | List a model's checkpoint tree. |
 | `hud models head <model> [--set <checkpoint-id>]` | Show - or set - a model's active checkpoint. |
-| `hud jobs cancel` / `hud cancel` | Cancel a running job (`--yes`, `--dry-run`, `--json`). |
+| `hud jobs cancel` | Cancel a running job (`--yes`, `--dry-run`, `--json`). |
 | `hud version` | Show the CLI version (`--json`). |
 
 ## See also

@@ -126,6 +126,16 @@ class TestLocalExport:
         lines = (tmp_path / "t-1.jsonl").read_text(encoding="utf-8").splitlines()
         assert json.loads(lines[0])["name"] == "s"
 
+    def test_disabled_uploads_write_to_home_spans(self, monkeypatch, tmp_path):
+        _configure(monkeypatch, api_key=None, enabled=False)
+        monkeypatch.setattr(settings, "telemetry_local_dir", None)
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        queue_span({"name": "s", "trace_id": "t-1", "attributes": {"hud.task_run_id": "task-1"}})
+
+        lines = (tmp_path / ".hud" / "spans" / "t-1.jsonl").read_text(encoding="utf-8").splitlines()
+        assert json.loads(lines[0])["name"] == "s"
+
     def test_non_str_local_dir_fails_loudly(self, monkeypatch):
         _configure(monkeypatch, api_key=None, enabled=False)
         monkeypatch.setattr(settings, "telemetry_local_dir", object())
