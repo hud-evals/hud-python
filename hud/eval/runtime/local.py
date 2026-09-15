@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import sys
 from collections import deque
 from contextlib import asynccontextmanager
@@ -142,7 +143,7 @@ class LocalRuntime:
 
 def _template_source(env: Environment) -> Path:
     """The one ``.py`` file whose ``@env.template`` declarations bind *env*."""
-    files = {Path(factory.func.__code__.co_filename).resolve() for factory in env.tasks.values()}
+    files = {Path(inspect.getfile(factory.func)).resolve() for factory in env.tasks.values()}
     if len(files) != 1:
         raise ValueError(
             f"SubprocessRuntime: Environment {env.name!r} must declare its @env.template "

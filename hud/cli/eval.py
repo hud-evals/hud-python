@@ -1,6 +1,6 @@
-"""HUD evaluation command for running tasks and datasets.
+"""``hud eval`` — run an agent over a taskset and report the graded job.
 
-Config Override Order: CLI arguments > .hud_eval.toml > defaults
+Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
 """
 
 from __future__ import annotations
@@ -10,23 +10,19 @@ import logging
 import os
 import time
 import tomllib
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from statistics import mean, pstdev
 from string import Template
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from rich import box
 from rich.table import Table
 
-from hud.cli.app import (
-    CLI,
-    CliError,
-    parse_key_value,
-)
+from hud.agents import resolve_agent_model
+from hud.cli.app import CLI, CliError, parse_key_value
+from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime, Taskset
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.gateway import build_model_client, normalize_gateway_model_id
@@ -34,56 +30,32 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
-    from hud.eval.run import Run
+    from hud.eval import Job, Provider, Task
 
-_SUCCESS_THRESHOLD = 0.7
-
-logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
 
-_CONFIG_PATH = ".hud_eval.toml"
-_PLACEMENT_CONFLICT_ERROR = "--runtime and --remote are mutually exclusive placement options"
-
-
-def _resolve_env_vars(obj: Any) -> Any:
-    """Recursively resolve ``${VAR_NAME}`` placeholders in config values.
-
-    Sources values from ``os.environ`` and ``hud.settings`` (uppercase aliases
-    included, so both ``${api_key}`` and ``${API_KEY}`` work). Missing
-    variables resolve to empty strings.
-    """
-    mapping: dict[str, Any] = dict(os.environ)
-    settings_dict = settings.model_dump()
-    mapping.update(settings_dict)
-    mapping.update({key.upper(): val for key, val in settings_dict.items()})
-    if settings.api_key:
-        mapping["HUD_API_KEY"] = settings.api_key
-
-    safe_mapping: defaultdict[str, Any] = defaultdict(str, mapping)
-
-    def substitute(value: Any) -> Any:
-        if isinstance(value, str):
-            return Template(value).substitute(safe_mapping)
-        if isinstance(value, dict):
-            return {k: substitute(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [substitute(item) for item in value]
-        return value
-
-    return substitute(obj)
+_CONFIG_PATH = Path(".hud_eval.toml")
+_PLACEMENTS = ("local", "hud", "remote")
+_SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
 @dataclass(frozen=True)
 class AgentPreset:
-    """A preset agent configuration combining agent type, model, and optional config."""
+    """An interactive-picker entry: agent type, model, and its display name."""
 
     name: str
     agent_type: AgentType
-    model: str | None = None
-    agent_config: dict[str, Any] | None = None
+    model: str
+    model_name: str | None = None
+
+    def overrides(self) -> dict[str, Any]:
+        overrides: dict[str, Any] = {"agent_type": self.agent_type, "model": self.model}
+        if self.model_name is not None:
+            overrides["agent_config"] = {self.agent_type.value: {"model_name": self.model_name}}
+        return overrides
 
 
 _AGENT_PRESETS: list[AgentPreset] = [
@@ -93,30 +65,38 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("GPT-5.5", AgentType.OPENAI, "gpt-5.5"),
     AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3.1-pro-preview"),
     AgentPreset(
-        "Grok 4-1 Fast (xAI)",
-        AgentType.OPENAI_COMPATIBLE,
-        "grok-4-1-fast",
-        {"openai_compatible": {"model_name": "Grok 4-1 Fast"}},
+        "Grok 4-1 Fast (xAI)", AgentType.OPENAI_COMPATIBLE, "grok-4-1-fast", "Grok 4-1 Fast"
     ),
+    AgentPreset("GLM 5.2 (Z.ai)", AgentType.OPENAI_COMPATIBLE, "z-ai/glm-5.2", "GLM 5.2"),
     AgentPreset(
-        "GLM 5.2 (Z.ai)",
-        AgentType.OPENAI_COMPATIBLE,
-        "z-ai/glm-5.2",
-        {"openai_compatible": {"model_name": "GLM 5.2"}},
+        "Kimi K2.6 (Moonshot)", AgentType.OPENAI_COMPATIBLE, "moonshotai/kimi-k2.6", "Kimi K2.6"
     ),
-    AgentPreset(
-        "Kimi K2.6 (Moonshot)",
-        AgentType.OPENAI_COMPATIBLE,
-        "moonshotai/kimi-k2.6",
-        {"openai_compatible": {"model_name": "Kimi K2.6"}},
-    ),
-    AgentPreset(
-        "MiniMax M3",
-        AgentType.OPENAI_COMPATIBLE,
-        "MiniMax-M3",
-        {"openai_compatible": {"model_name": "MiniMax M3"}},
-    ),
+    AgentPreset("MiniMax M3", AgentType.OPENAI_COMPATIBLE, "MiniMax-M3", "MiniMax M3"),
 ]
+
+
+def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
+    """Expand ``${VAR}`` placeholders; an unset variable is a config error."""
+    if isinstance(value, dict):
+        return {key: _substitute_env(item, mapping) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_substitute_env(item, mapping) for item in value]
+    if not isinstance(value, str):
+        return value
+    try:
+        return Template(value).substitute(mapping)
+    except KeyError as exc:
+        raise ValueError(f"{_CONFIG_PATH}: ${{{exc.args[0]}}} is not set") from None
+
+
+def _env_mapping() -> dict[str, Any]:
+    """Process environment plus ``hud.settings`` fields in either case."""
+    fields = settings.model_dump()
+    mapping: dict[str, Any] = {**os.environ, **fields}
+    mapping.update({key.upper(): value for key, value in fields.items()})
+    if settings.api_key:
+        mapping["HUD_API_KEY"] = settings.api_key
+    return mapping
 
 
 def _parse_config_value(value: str) -> bool | int | float | str:
@@ -134,62 +114,40 @@ def _parse_config_value(value: str) -> bool | int | float | str:
             return value
 
 
-def _merge_agent_config(
-    current: dict[str, Any],
-    *,
-    selected_agent: AgentType | str | None,
-    updates: list[str] | None,
-) -> dict[str, Any] | None:
-    if not updates:
-        return None
-    if isinstance(selected_agent, str):
-        try:
-            selected_agent = AgentType(selected_agent)
-        except ValueError:
-            selected_agent = None
+def _agent_config_updates(
+    items: list[str], agent_type: AgentType | None
+) -> dict[str, dict[str, Any]]:
+    """Parse ``--config key=value`` into per-agent sections.
 
-    merged = dict(current)
-    for item in updates:
+    ``claude.max_tokens=1`` targets one agent explicitly; a bare key applies
+    to the selected agent.
+    """
+    updates: dict[str, dict[str, Any]] = {}
+    for item in items:
         parsed = parse_key_value(item)
         if parsed is None:
-            continue
+            raise ValueError(f"--config expects key=value, got {item!r}")
         key, value = parsed
-        parsed_value = _parse_config_value(value)
-
-        if "." in key:
-            agent_name, param = key.split(".", 1)
-        elif selected_agent is not None:
-            agent_name, param = selected_agent.value, key
-        else:
-            continue
-
-        existing = merged.get(agent_name, {})
-        agent_config = dict(existing) if isinstance(existing, dict) else {}
-        agent_config[param] = parsed_value
-        merged[agent_name] = agent_config
-    return merged
+        section, sep, param = key.partition(".")
+        if not sep:
+            if agent_type is None:
+                raise ValueError(
+                    f"--config {key}=... needs an agent; pass one or write <agent>.{key}=..."
+                )
+            section, param = agent_type.value, key
+        updates.setdefault(AgentType(section).value, {})[param] = _parse_config_value(value)
+    return updates
 
 
 class EvalConfig(BaseModel):
-    """Configuration for hud eval command."""
+    """``[eval]`` settings plus the per-agent ``[claude]``/``[openai]``/... sections."""
 
-    _EVAL_FIELDS: ClassVar[set[str]] = {
-        "source",
-        "agent_type",
-        "task_ids",
-        "all",
-        "max_concurrent",
-        "max_steps",
-        "verbose",
-        "very_verbose",
-        "group_size",
-        "auto_respond",
-        "gateway",
-        "runtime",
-        "remote",
-    }
+    model_config = ConfigDict(extra="forbid")
+
     source: str | None = None
-    agent_type: AgentType | None = None
+    agent_type: AgentType | None = Field(
+        default=None, validation_alias=AliasChoices("agent_type", "agent")
+    )
     model: str | None = None
     task_ids: list[str] | None = None
     all: bool = False
@@ -197,54 +155,54 @@ class EvalConfig(BaseModel):
     max_steps: int = 10
     verbose: bool = False
     very_verbose: bool = False
-    auto_respond: bool | None = None
+    auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
-    #: Placement: "local" (spawn each row's env from the source), "hud"
-    #: (HUD runtime tunnel), or a tcp:// url of an already-served env.
-    #: ``None`` means "infer from the source": a local file runs locally, a
-    #: platform taskset (slug/id, no env source on disk) runs remotely.
+    #: Placement: ``local`` (spawn each row's env — Docker for container rows,
+    #: a subprocess serving the bound env's source otherwise), ``hud`` (runtime
+    #: tunnel, agent loop here), ``remote`` (whole rollout on the platform), or
+    #: a ``tcp://`` url of an already-served env. ``None`` infers from the
+    #: source: a file on disk runs locally, a platform taskset remotely.
     runtime: str | None = None
-    #: Run the whole rollout remotely on the HUD platform.
-    remote: bool = False
+    agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
-    agent_config: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("agent_type", mode="before")
+    @field_validator("runtime")
     @classmethod
-    def _parse_agent_type(cls, v: Any) -> AgentType | None:
-        if v is None:
-            return None
-        if isinstance(v, AgentType):
-            return v
-        if isinstance(v, str):
-            try:
-                return AgentType(v)
-            except ValueError:
-                valid = [e.value for e in AgentType]
-                raise ValueError(
-                    f"Invalid agent: {v}. Must be one of: {', '.join(valid)}"
-                ) from None
-        return v
+    def _known_placement(cls, value: str | None) -> str | None:
+        if value is None or value in _PLACEMENTS or value.startswith("tcp://"):
+            return value
+        raise ValueError(f"Unknown runtime {value!r}. Use local, hud, remote, or a tcp:// url.")
 
-    def source_is_local_file(self) -> bool:
-        """Whether ``source`` points at an on-disk taskset (vs. a platform slug/id)."""
+    @classmethod
+    def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
+        if not path.exists():
+            return cls()
+        with path.open("rb") as stream:
+            data = _substitute_env(tomllib.load(stream), _env_mapping())
+        agent_config = {agent.value: data.pop(agent.value) for agent in AgentType if agent in data}
+        eval_section = data.pop("eval", {})
+        if data:
+            raise ValueError(f"{path}: unknown sections: {', '.join(sorted(data))}")
+        return cls.model_validate({**eval_section, "agent_config": agent_config})
+
+    def merge(self, overrides: dict[str, Any]) -> EvalConfig:
+        """Layer ``overrides`` on this config; agent sections merge one level deep."""
+        data = self.model_dump()
+        for name, params in overrides.get("agent_config", {}).items():
+            data["agent_config"][name] = {**data["agent_config"].get(name, {}), **params}
+        return self.model_validate(
+            {**data, **{k: v for k, v in overrides.items() if k != "agent_config"}}
+        )
+
+    @property
+    def source_is_file(self) -> bool:
         return self.source is not None and Path(self.source).exists()
 
-    def resolve_runtime(self) -> EvalConfig:
-        """Pin the effective placement from the source type.
-
-        A local file/dir has its env source on disk, so it defaults to spawning
-        envs locally; a platform taskset (slug or id) has no env source on disk,
-        so it defaults to whole-rollout remote execution. An explicit
-        ``--runtime`` is always honored, except ``local`` against a platform
-        taskset, which has no env to spawn.
-        """
+    def with_placement(self) -> EvalConfig:
+        """Pin ``runtime``: a local file spawns locally, a platform taskset runs remotely."""
         if self.runtime is None:
-            if self.source_is_local_file():
-                return self.model_copy(update={"runtime": "local"})
-            return self.model_copy(update={"remote": True})
-        if self.runtime == "local" and not self.source_is_local_file():
+            return self.model_copy(update={"runtime": "local" if self.source_is_file else "remote"})
+        if self.runtime == "local" and not self.source_is_file:
             raise ValueError(
                 f"--runtime local needs a local env source, but {self.source!r} is a "
                 "platform taskset with no env source on disk. Run it on the platform "
@@ -254,244 +212,57 @@ class EvalConfig(BaseModel):
             )
         return self
 
-    def validate_api_keys(self) -> None:
-        if self.remote or self.runtime == "hud" or self.gateway:
+    def require_credentials(self) -> None:
+        if self.gateway or self.runtime in ("hud", "remote"):
             PlatformClient.from_settings()
-        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
-            config_model = self.agent_config.get("openai_compatible", {}).get("model")
-            if not self.model and not config_model:
-                raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
+        if (
+            self.agent_type == AgentType.OPENAI_COMPATIBLE
+            and self.model is None
+            and "model" not in self.agent_config.get("openai_compatible", {})
+        ):
+            raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
-    def get_agent_kwargs(self) -> dict[str, Any]:
-        """Build agent kwargs from config.
-
-        Model precedence:
-        1. CLI --model (highest priority)
-        2. [agent_type].model in TOML (per-agent config)
-        """
-        if self.agent_type is None:
-            raise ValueError("agent_type must be set before calling get_agent_kwargs()")
-
-        kwargs: dict[str, Any] = {}
-
-        agent_key = self.agent_type.value
-        if agent_key in self.agent_config:
-            agent_cfg = dict(self.agent_config[agent_key])
-            kwargs.update(agent_cfg)
-
+    def agent_kwargs(self) -> dict[str, Any]:
+        """The agent's config kwargs: its TOML section, then ``--model`` on top."""
+        assert self.agent_type is not None
+        kwargs = dict(self.agent_config.get(self.agent_type.value, {}))
         if self.model:
             kwargs["model"] = self.model
-
         if isinstance(kwargs.get("model"), str):
             kwargs["model"] = normalize_gateway_model_id(kwargs["model"])
-
-        kwargs["verbose"] = self.verbose or self.very_verbose
         kwargs["max_steps"] = self.max_steps
-
+        if self.auto_respond:
+            kwargs["auto_respond"] = True
         return kwargs
 
-    @classmethod
-    def load(cls, path: str = _CONFIG_PATH) -> EvalConfig:
-        """Load config from TOML file."""
-        p = Path(path)
-        if not p.exists():
-            return cls()
-
-        with p.open("rb") as f:
-            toml_data = tomllib.load(f)
-
-        toml_data = _resolve_env_vars(toml_data)
-
-        eval_section = toml_data.get("eval", {})
-        data: dict[str, Any] = {}
-
-        if "agent" in eval_section:
-            data["agent_type"] = eval_section["agent"]
-        for key in cls._EVAL_FIELDS:
-            if key in eval_section:
-                data[key] = eval_section[key]
-
-        agent_config: dict[str, Any] = {}
-        for agent_type in AgentType:
-            if agent_type.value in toml_data:
-                agent_config[agent_type.value] = toml_data[agent_type.value]
-        data["agent_config"] = agent_config
-
-        return cls.model_validate(data)
-
-    def merge_cli(
-        self,
-        *,
-        source: str | None = None,
-        agent: str | None = None,
-        model: str | None = None,
-        all: bool = False,
-        full: bool = False,
-        max_concurrent: int | None = None,
-        max_steps: int | None = None,
-        verbose: bool = False,
-        very_verbose: bool = False,
-        auto_respond: bool = False,
-        group_size: int | None = None,
-        gateway: bool = False,
-        config: list[str] | None = None,
-        task_ids: str | None = None,
-        runtime: str | None = None,
-        remote: bool = False,
-    ) -> EvalConfig:
-        """Merge CLI args (non-None values override config)."""
-        if runtime is not None and remote:
-            raise ValueError(_PLACEMENT_CONFLICT_ERROR)
-
-        overrides: dict[str, Any] = {
-            key: value
-            for key, value in {
-                "source": source,
-                "model": model,
-                "max_concurrent": max_concurrent,
-                "max_steps": max_steps,
-                "group_size": group_size,
-                "runtime": runtime,
-            }.items()
-            if value is not None
-        }
-        if agent is not None:
-            try:
-                AgentType(agent)
-                overrides["agent_type"] = agent
-            except ValueError:
-                from hud.agents import resolve_agent_model
-
-                agent_type, model_name = resolve_agent_model(agent)
-                overrides["agent_type"] = agent_type.value
-                overrides.setdefault("model", model_name)
-
-        if task_ids is not None:
-            overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
-
-        if runtime is not None:
-            overrides["remote"] = False
-
-        for key, value in {
-            "all": all,
-            "verbose": verbose,
-            "very_verbose": very_verbose,
-            "auto_respond": auto_respond,
-            "gateway": gateway,
-            "remote": remote,
-        }.items():
-            if value:
-                overrides[key] = True
-
-        if full:
-            overrides["all"] = True
-            if "auto_respond" not in overrides:
-                overrides["auto_respond"] = True
-            if "max_steps" not in overrides:
-                overrides["max_steps"] = 100
-
-        merged_agent_config = _merge_agent_config(
-            self.agent_config,
-            selected_agent=overrides.get("agent_type") or self.agent_type,
-            updates=config,
-        )
-        if merged_agent_config is not None:
-            overrides["agent_config"] = merged_agent_config
-
-        return self.model_validate({**self.model_dump(), **overrides})
-
-    def resolve_agent_interactive(self) -> EvalConfig:
-        """Prompt user to select an agent preset if not set. Returns updated config."""
-        if self.agent_type is not None:
-            return self
-
-        choices: list[str | dict[str, Any]] = [
-            {"name": preset.name, "value": preset} for preset in _AGENT_PRESETS
-        ]
-
-        selected = cast(
-            "AgentPreset",
-            hud_console.select("Select an agent:", choices=choices, default=0),
-        )
-
-        updates: dict[str, Any] = {"agent_type": selected.agent_type}
-        if selected.model:
-            updates["model"] = selected.model
-        if selected.agent_config:
-            merged = dict(self.agent_config)
-            for key, value in selected.agent_config.items():
-                if key in merged:
-                    merged[key] = {**merged[key], **value}
-                else:
-                    merged[key] = value
-            updates["agent_config"] = merged
-
-        return self.model_validate({**self.model_dump(), **updates})
-
     def display(self) -> None:
-        """Display settings in a table."""
         table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
         table.add_column("Setting", style="yellow")
         table.add_column("Value", style="green")
-
-        table.add_row("source", str(self.source or "-"))
-        table.add_row("runtime", str(self.runtime or "-"))
+        table.add_row("source", self.source or "-")
+        table.add_row("runtime", self.runtime or "-")
         table.add_row("agent", self.agent_type.value if self.agent_type else "-")
         if self.task_ids:
-            table.add_row(
-                "task_ids", ", ".join(self.task_ids[:5]) + ("..." if len(self.task_ids) > 5 else "")
-            )
+            shown = ", ".join(self.task_ids[:5])
+            table.add_row("task_ids", shown + ("..." if len(self.task_ids) > 5 else ""))
         table.add_row("all", str(self.all))
         table.add_row("max_steps", str(self.max_steps))
         table.add_row("max_concurrent", str(self.max_concurrent))
         if self.group_size > 1:
             table.add_row("group_size", str(self.group_size))
-        if self.auto_respond:
-            table.add_row("auto_respond", "[bold green]True[/bold green]")
-        if self.very_verbose:
-            table.add_row("very_verbose", "[bold green]True[/bold green]")
-        elif self.verbose:
-            table.add_row("verbose", "[bold green]True[/bold green]")
-        if self.gateway:
-            table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
-        if self.remote:
-            table.add_row("remote", "[bold green]True[/bold green]")
-
-        if self.agent_type:
+        for flag in ("auto_respond", "very_verbose", "verbose", "gateway"):
+            if getattr(self, flag):
+                table.add_row(flag, "[bold green]True[/bold green]")
+        if self.agent_type is not None:
             table.add_row("", "")
             table.add_row(f"[dim]{self.agent_type.value} config[/dim]", "")
-
-            config_cls = self.agent_type.config_cls
-            defaults = config_cls()
-            overrides = self.agent_config.get(self.agent_type.value, {})
-            skip = {
-                "model_client",
-                "model_name",
-                "model_config",
-                "system_prompt",
-            }
-
-            sensitive_fields = {"api_key", "api_secret", "token", "password", "secret"}
-
-            for name in config_cls.model_fields:
-                if name in skip:
+            for name, value in self.agent_kwargs().items():
+                if name in ("max_steps", "auto_respond"):
                     continue
-                if name == "model":
-                    if self.model:
-                        value = self.model
-                    elif overrides.get("model"):
-                        value = overrides["model"]
-                    else:
-                        value = getattr(defaults, "model", None)
-                    table.add_row("  model", str(value) if value else "-")
-                elif name in overrides:
-                    value = overrides[name]
-                    if name in sensitive_fields and value:
-                        display_value = f"{str(value)[:4]}****" if len(str(value)) > 4 else "****"
-                    else:
-                        display_value = str(value)
-                    table.add_row(f"  {name}", display_value)
-
+                shown = str(value)
+                if any(marker in name for marker in _SECRET_MARKERS) and shown:
+                    shown = f"{shown[:4]}****" if len(shown) > 4 else "****"
+                table.add_row(f"  {name}", shown)
         hud_console.print(table)
 
 
@@ -504,15 +275,10 @@ def _build_agent(cfg: EvalConfig) -> Agent:
     configured. Hosted rollouts leave the client unset so the platform
     rebuilds it remotely.
     """
-    if cfg.agent_type is None:
-        raise ValueError("agent_type must be set")
-    agent_kwargs = cfg.get_agent_kwargs()
-    if cfg.auto_respond:
-        agent_kwargs["auto_respond"] = True
-
-    config = cfg.agent_type.config_cls(**agent_kwargs)
+    assert cfg.agent_type is not None
+    config = cfg.agent_type.config_cls(**cfg.agent_kwargs())
     if (
-        not cfg.remote
+        cfg.runtime != "remote"
         and config.model_client is None
         and cfg.agent_type != AgentType.OPENAI_COMPATIBLE
     ):
@@ -523,67 +289,45 @@ def _build_agent(cfg: EvalConfig) -> Agent:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
-def _resolve_placement(cfg: EvalConfig, source_path: Path | None, taskset: Any) -> Any:
-    """Map the config's ``runtime`` onto a placement for ``Taskset.run``.
+def _local_placement() -> Provider:
+    """Spawn each row's own substrate from what the row declares."""
+    docker = DockerRuntime()
 
-    "local" spawns each row's own substrate: container rows get
-    ``DockerRuntime``, rows bound to a live Environment serve its source in a
-    subprocess; "hud" opens the HUD runtime tunnel while keeping the agent
-    loop local; ``--remote`` submits every rollout for platform-hosted
-    execution; a ``tcp://`` url attaches to an env served elsewhere.
-    """
-    from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime
+    def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
+        config = task.runtime_config
+        if config is not None and (config.image is not None or config.compose is not None):
+            return docker(task)
+        if task._env is None:
+            raise ValueError(
+                "no placement: these rows have no bound Environment. Pass a Python "
+                "tasks/env module, or use --remote / --runtime hud / a tcp:// url."
+            )
+        return SubprocessRuntime(task._env)(task)
 
-    if cfg.remote:
-        return HostedRuntime()
-    if cfg.runtime == "local":
-        if source_path is None:
-            raise ValueError("local placement requires a local source path")
-        docker = DockerRuntime()
-
-        def local(task: Any) -> Any:
-            config = task.runtime_config
-            if config is not None and (config.image is not None or config.compose is not None):
-                return docker(task)
-            if task._env is None:
-                raise ValueError(
-                    "no placement: these rows have no bound Environment. Pass a Python "
-                    "tasks/env module, or use --remote / --runtime hud / a tcp:// url."
-                )
-            return SubprocessRuntime(task._env)(task)
-
-        return local
-    if cfg.runtime == "hud":
-        return HUDRuntime()
-    if cfg.runtime is not None and cfg.runtime.startswith("tcp://"):
-        return Runtime(cfg.runtime)
-    raise ValueError(
-        f"Unknown runtime {cfg.runtime!r}. Use 'local', 'hud', a tcp:// url, or --remote."
-    )
+    return spawn
 
 
-async def _run_evaluation(cfg: EvalConfig) -> Any:
-    """Run evaluation on the Env/Task/Taskset/Run flow.
+def _placement(cfg: EvalConfig) -> Provider | HostedRuntime:
+    match cfg.runtime:
+        case "remote":
+            return HostedRuntime()
+        case "hud":
+            return HUDRuntime()
+        case "local":
+            return _local_placement()
+        case url:
+            assert url is not None and url.startswith("tcp://")
+            return Runtime(url)
 
-    Loads a ``Taskset`` from a Python source or JSON/JSONL taskset and runs it
-    on the configured placement (default: spawned local substrates — each
-    rollout serves its own row's env, so mixed-env tasksets are one job).
-    Returns the ``Job`` receipt containing the live execution ``Run`` results.
-    """
-    if cfg.source is None or cfg.agent_type is None:
-        raise ValueError("source and agent_type must be set")
 
-    from hud.eval import Taskset
-
-    source_path = Path(cfg.source)
-    is_local = await asyncio.to_thread(source_path.exists)
-    if is_local:
+def _load_taskset(cfg: EvalConfig) -> Taskset:
+    assert cfg.source is not None
+    if cfg.source_is_file:
         hud_console.info(f"Loading tasks from: {cfg.source}")
-        taskset = Taskset.from_file(source_path)
+        taskset = Taskset.from_file(cfg.source)
     else:
         hud_console.info(f"Loading platform taskset: {cfg.source}")
         taskset = Taskset.from_api(cfg.source)
-
     if not taskset:
         raise ValueError(
             f"No runnable Tasks found in {cfg.source}. Define a `hud.Environment` with "
@@ -608,117 +352,65 @@ async def _run_evaluation(cfg: EvalConfig) -> Any:
                 f"Running only 1 of {total} tasks (the first). "
                 f"Add --full to run all {total}, or --task-ids to pick specific ones."
             )
-
     hud_console.info(f"Loaded {len(taskset)} task(s)")
+    return taskset
 
-    if len(taskset) == 1 and cfg.group_size == 1:
+
+def _configure_logging(cfg: EvalConfig, *, single_run: bool) -> None:
+    if cfg.very_verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
+        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+    elif cfg.verbose or single_run:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
-    else:
-        hud_console.info(
-            f"Running evaluation (max_concurrent: {cfg.max_concurrent}, "
-            f"group_size: {cfg.group_size})"
-        )
-
-    agent = _build_agent(cfg)
-    placement = _resolve_placement(cfg, source_path if is_local else None, taskset)
-
-    job = await taskset.run(
-        agent,
-        runtime=placement,
-        group=cfg.group_size,
-        max_concurrent=cfg.max_concurrent,
-    )
-    if job.runs and settings.telemetry_enabled and settings.api_key:
-        hud_console.info(f"{settings.hud_web_url}/jobs/{canonical_record_id(job.id)}")
-
-    return job
 
 
 def _truncate(text: str | list[Any] | None, max_len: int) -> str:
     if not text:
         return "—"
-    if not isinstance(text, str):
-        text = str(text)
-    text = text.replace("\n", " ").strip()
-    return text[: max_len - 2] + ".." if len(text) > max_len else text
+    flat = str(text).replace("\n", " ").strip()
+    return flat[: max_len - 2] + ".." if len(flat) > max_len else flat
 
 
-def display_runs(
-    runs: Sequence[Run],
-    *,
-    name: str = "",
-    elapsed: float | None = None,
-    show_details: bool = True,
-) -> None:
-    """Print a summary (+ per-run details table) for a batch of runs."""
-    if not runs:
-        print("No results to display")  # noqa: T201
-        return
-
-    rewards = [r.reward for r in runs]
-    errors = [r for r in runs if r.trace.is_error]
-    mean_reward = mean(rewards)
-    std_reward = pstdev(rewards) if len(rewards) > 1 else 0.0
-    success_rate = sum(1 for r in rewards if r > _SUCCESS_THRESHOLD) / len(runs)
-
-    title = f"'{name}' Results" if name else "Evaluation Complete"
-    hud_console.print(f"\n[bold]{title}[/bold]")
-    hud_console.print(f"  [dim]Runs:[/dim] {len(runs)}")
-    if elapsed:
-        rate = len(runs) / elapsed if elapsed > 0 else 0
-        hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s ({rate:.1f}/s)")
-    hud_console.print(
-        f"  [dim]Mean reward:[/dim] [green]{mean_reward:.3f}[/green] +/- {std_reward:.3f}"
-    )
-    hud_console.print(f"  [dim]Success rate:[/dim] [yellow]{success_rate * 100:.1f}%[/yellow]")
+def _display_job(job: Job, *, source: str, elapsed: float) -> None:
+    errors = set(map(id, job.errors))
+    hud_console.print(f"\n[bold]'{source}' Results[/bold]")
+    hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
+    hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
+    hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
     if errors:
         hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
 
-    if show_details and len(runs) <= 50:
+    if len(job.runs) <= 50:
         table = Table(title="Details", show_header=True, header_style="bold")
         table.add_column("#", style="dim", justify="right", width=4)
         table.add_column("Prompt", style="dim", max_width=35)
         table.add_column("Answer", style="dim", max_width=35)
         table.add_column("Reward", justify="right", style="green", width=8)
-        table.add_column("", justify="center", width=3)
-        for i, run in enumerate(runs):
-            if run.trace.is_error:
-                status = "[red]✗[/red]"
-            elif run.reward > _SUCCESS_THRESHOLD:
-                status = "[green]✓[/green]"
-            else:
-                status = "[yellow]○[/yellow]"
-            row: list[Any] = [
-                str(i),
+        for index, run in enumerate(job.runs):
+            table.add_row(
+                str(index),
                 _truncate(run.prompt, 35),
                 _truncate(run.trace.content, 35),
-                f"{run.reward:.3f}",
-                status,
-            ]
-            table.add_row(*row)
+                "[red]error[/red]" if id(run) in errors else f"{run.reward:.3f}",
+            )
         hud_console.print(table)
-
-    if std_reward > 0.3:
-        hud_console.print(f"\n[yellow]High variance (std={std_reward:.3f})[/yellow]")
     hud_console.print()
 
 
-def find_tasks_file(tasks_file: str | None, msg: str = "Select a tasks file") -> str:
-    """Return a local tasks file, prompting when more than one exists."""
-    if tasks_file:
-        return tasks_file
-
-    cwd = Path.cwd()
-    names = [
+def _pick_tasks_file() -> str:
+    """The tasks JSON/JSONL in the working directory, prompting when there are several."""
+    names = sorted(
         path.name
-        for path in (*cwd.glob("*.json"), *cwd.glob("*.jsonl"))
-        if not path.name.startswith(".")
-    ]
+        for path in Path.cwd().iterdir()
+        if path.suffix in (".json", ".jsonl") and not path.name.startswith(".")
+    )
     if not names:
         raise FileNotFoundError("No task JSON or JSONL files found in current directory")
     if len(names) == 1:
         return names[0]
-    return hud_console.select(msg, choices=names)
+    return hud_console.select("Select a tasks file", choices=names)
 
 
 def eval_command(
@@ -731,16 +423,11 @@ def eval_command(
     full: bool = typer.Option(
         False,
         "--full",
-        help="Run the entire dataset. Shortcut for --all --auto-respond  --max-steps 100",
+        help="Run the entire dataset. Shortcut for --all --auto-respond --max-steps 100",
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(  # noqa: B008
         None, "--config", "-c", help="Agent config: key=value"
-    ),
-    from_json: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--from-json",
-        help="Load full eval configuration from a JSON file (e.g. exported from a HUD job).",
     ),
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
@@ -782,7 +469,7 @@ def eval_command(
         "--remote",
         help="Run the whole rollout remotely on the HUD platform",
     ),
-) -> Any:
+) -> dict[str, Any]:
     """Run evaluation on datasets or individual tasks with agents.
 
     Examples:
@@ -797,85 +484,118 @@ def eval_command(
         hud eval tasks.json claude --dry-run --json
     """
     hud_console.info("Initializing evaluation...")
+    cfg = EvalConfig.load()
 
-    if from_json is not None:
-        cfg = EvalConfig.model_validate_json(CLI.read_text(str(from_json)))
-    else:
-        cfg = EvalConfig.load()
-
-    cfg = cfg.merge_cli(
-        source=source,
-        agent=agent,
-        model=model,
-        all=all,
-        full=full,
-        max_concurrent=max_concurrent,
-        max_steps=max_steps,
-        task_ids=task_ids,
-        verbose=verbose,
-        very_verbose=very_verbose,
-        auto_respond=auto_respond,
-        group_size=group_size,
-        config=config,
-        gateway=gateway,
-        runtime=runtime,
-        remote=remote,
+    if runtime is not None and remote:
+        raise ValueError("--runtime and --remote are mutually exclusive placement options")
+    overrides: dict[str, Any] = {
+        key: value
+        for key, value in {
+            "source": source,
+            "model": model,
+            "max_concurrent": max_concurrent,
+            "max_steps": max_steps,
+            "group_size": group_size,
+            "runtime": "remote" if remote else runtime,
+        }.items()
+        if value is not None
+    }
+    overrides.update(
+        {
+            key: True
+            for key, value in {
+                "all": all or full,
+                "verbose": verbose,
+                "very_verbose": very_verbose,
+                "auto_respond": auto_respond or full,
+                "gateway": gateway,
+            }.items()
+            if value
+        }
     )
-
-    if dry_run and (cfg.source is None or cfg.agent_type is None):
-        raise CliError(
-            "usage", "Dry-run requires an explicit task source and agent (or configured defaults)."
+    if full:
+        overrides.setdefault("max_steps", 100)
+    if agent is not None:
+        agent_type, model_id = resolve_agent_model(agent)
+        overrides["agent_type"] = agent_type
+        if model_id != agent_type.value:
+            overrides.setdefault("model", model_id)
+    if task_ids is not None:
+        overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
+    if config:
+        overrides["agent_config"] = _agent_config_updates(
+            config, overrides.get("agent_type", cfg.agent_type)
         )
+    cfg = cfg.merge(overrides)
+
     if dry_run:
-        cfg = cfg.resolve_runtime()
-        plan = {
+        agent_type = cfg.agent_type
+        if cfg.source is None or agent_type is None:
+            raise CliError(
+                "usage",
+                "Dry-run requires an explicit task source and agent (or configured defaults).",
+            )
+        cfg = cfg.with_placement()
+        hud_console.info("--dry-run: no evaluation started")
+        return {
             "dry_run": True,
             "action": "eval",
             "source": cfg.source,
-            "agent": cfg.agent_type.value if cfg.agent_type else None,
+            "agent": agent_type.value,
             "model": cfg.model,
             "runtime": cfg.runtime,
-            "remote": cfg.remote,
+            "remote": cfg.runtime == "remote",
             "all": cfg.all,
             "max_steps": cfg.max_steps,
             "max_concurrent": cfg.max_concurrent,
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
         }
-        hud_console.info("--dry-run: no evaluation started")
-        return plan
 
     if cfg.source is None:
-        cfg = cfg.model_copy(update={"source": find_tasks_file(None, msg="Select a tasks file")})
+        cfg = cfg.merge({"source": _pick_tasks_file()})
         hud_console.success(f"Selected: {cfg.source}")
-
-    cfg = cfg.resolve_agent_interactive()
-    cfg = cfg.resolve_runtime()
-
-    if cfg.very_verbose:
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
-        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
-        # Suppress noisy HTTP client logs
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-    elif cfg.verbose:
-        logging.getLogger("hud.agents").setLevel(logging.INFO)
-
-    cfg.validate_api_keys()
-
+    if cfg.agent_type is None:
+        preset = cast(
+            "AgentPreset",
+            hud_console.select(
+                "Select an agent:",
+                choices=[{"name": preset.name, "value": preset} for preset in _AGENT_PRESETS],
+                default=0,
+            ),
+        )
+        cfg = cfg.merge(preset.overrides())
+    cfg = cfg.with_placement()
+    cfg.require_credentials()
     cfg.display()
-
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 
-    start_time = time.time()
-    job = asyncio.run(_run_evaluation(cfg))
-    elapsed = time.time() - start_time
-
-    runs = job.runs
-    saved = {
+    taskset = _load_taskset(cfg)
+    single_run = len(taskset) == 1 and cfg.group_size == 1
+    _configure_logging(cfg, single_run=single_run)
+    if not single_run:
+        hud_console.info(
+            f"Running evaluation (max_concurrent: {cfg.max_concurrent}, "
+            f"group_size: {cfg.group_size})"
+        )
+    started = time.monotonic()
+    job = asyncio.run(
+        taskset.run(
+            _build_agent(cfg),
+            runtime=_placement(cfg),
+            group=cfg.group_size,
+            max_concurrent=cfg.max_concurrent,
+        )
+    )
+    elapsed = time.monotonic() - started
+    if job.runs and settings.telemetry_enabled and settings.api_key:
+        hud_console.info(f"{settings.hud_web_url}/jobs/{canonical_record_id(job.id)}")
+    if job.runs:
+        _display_job(job, source=cfg.source or "", elapsed=elapsed)
+    return {
         "job_id": job.id,
         "source": cfg.source,
-        "run_count": len(runs),
+        "run_count": len(job.runs),
         "mean_reward": job.reward,
         "error_count": len(job.errors),
         "elapsed_seconds": elapsed,
@@ -887,10 +607,6 @@ def eval_command(
                 "is_error": run.trace.is_error,
                 "trace_id": run.trace_id,
             }
-            for run in runs
+            for run in job.runs
         ],
     }
-
-    if saved["runs"]:
-        display_runs(runs, name=str(saved["source"] or ""), elapsed=float(saved["elapsed_seconds"]))
-    return saved
