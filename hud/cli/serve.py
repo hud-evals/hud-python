@@ -28,15 +28,15 @@ def _load_environment(module: str | None, factory_args: dict[str, str]) -> Any:
 def _serve_environment(env: Any, host: str, port: int) -> None:
     """Serve an ``Environment``'s control channel (tcp JSON-RPC) until interrupted."""
     hud_console.section_title("Environment")
-    hud_console.console.print(
+    hud_console.print(
         f"{hud_console.sym.ITEM} {escape(env.name)}",
         highlight=False,
     )
-    hud_console.console.print(
+    hud_console.print(
         f"{hud_console.sym.ITEM} serving on tcp://{host}:{port}",
         highlight=False,
     )
-    hud_console.console.print(
+    hud_console.print(
         f"{hud_console.sym.ITEM} {len(env.tasks)} task(s), {len(env.capabilities)} capability(ies)",
         highlight=False,
     )

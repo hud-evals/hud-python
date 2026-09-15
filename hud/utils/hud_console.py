@@ -127,15 +127,9 @@ class HUDConsole:
         console = self._stderr_console if stderr else self._stdout_console
         console.print(f"[{TEXT} not bold]{escape(message)}[/{TEXT} not bold]")
 
-    def print(self, message: str, stderr: bool = True) -> None:
-        """Print a message.
-
-        Args:
-            message: The message to print
-            stderr: If True, output to stderr (default), otherwise stdout
-        """
+    def print(self, message: Any = "", stderr: bool = True, **kwargs: Any) -> None:
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(message)
+        console.print(message, **kwargs)
 
     def dim_info(self, label: str, value: str, stderr: bool = True) -> None:
         """Print dimmed info with a label.
@@ -303,8 +297,11 @@ class HUDConsole:
         self.render_support_hint(stderr=stderr)
 
     @property
+    def stdout(self) -> Console:
+        return self._stdout_console
+
+    @property
     def console(self) -> Console:
-        """Get the stderr console for direct access when needed."""
         return self._stderr_console
 
     def debug(self, message: str, stderr: bool = True) -> None:

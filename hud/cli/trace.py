@@ -7,7 +7,6 @@ import json
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
@@ -17,8 +16,9 @@ from hud.cli.app import (
     CliError,
 )
 from hud.utils.exceptions import HudRequestError
+from hud.utils.hud_console import HUDConsole
 
-console = Console()
+hud_console = HUDConsole()
 
 trace_app = CLI(
     name="trace",
@@ -56,15 +56,15 @@ def _show_trace(
         events = _load_remote(trace_id)
 
     if not events:
-        console.print("[yellow]No events found for this trace.[/yellow]")
+        hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")
         return events
-    console.print(
+    hud_console.stdout.print(
         Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
     )
-    console.print(f"[dim]Source: {source}[/dim]\n")
+    hud_console.stdout.print(f"[dim]Source: {source}[/dim]\n")
     _render_events(events)
     web = settings.hud_web_url.rstrip("/")
-    console.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
+    hud_console.stdout.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
     return events
 
 
@@ -175,15 +175,15 @@ def _render_events(events: list[dict[str, Any]]) -> None:
 
         if kind == "agent_message":
             turn += 1
-            console.print(Rule(f"[cyan]Turn {turn} — agent[/cyan]", style="cyan"))
+            hud_console.stdout.print(Rule(f"[cyan]Turn {turn} — agent[/cyan]", style="cyan"))
 
             reasoning = ev.get("reasoning")
             if reasoning:
-                console.print(Text(reasoning, style="dim italic"))
+                hud_console.stdout.print(Text(reasoning, style="dim italic"))
 
             text = ev.get("text")
             if text:
-                console.print(Text(str(text)))
+                hud_console.stdout.print(Text(str(text)))
 
             for tc in ev.get("tool_calls") or []:
                 name = tc.get("name") or tc.get("function", {}).get("name", "?")
@@ -191,31 +191,31 @@ def _render_events(events: list[dict[str, Any]]) -> None:
                 if isinstance(args, str):
                     with contextlib.suppress(Exception):
                         args = json.loads(args)
-                console.print(
+                hud_console.stdout.print(
                     Text.assemble(
                         "  ", ("→", "green"), " ", (str(name), "bold"), f"({_fmt_args(args)})"
                     )
                 )
 
             if ev.get("error"):
-                console.print(Text(f"  error: {ev['error']}", style="red"))
+                hud_console.stdout.print(Text(f"  error: {ev['error']}", style="red"))
 
         elif kind in ("tool_call", "tool_result"):
             name = ev.get("tool_name") or ev.get("name") or "?"
             result = ev.get("result_text") or ev.get("result") or ""
             error = ev.get("error")
             if error:
-                console.print(Text(f"  ✗ {name}: {error}", style="red"))
+                hud_console.stdout.print(Text(f"  ✗ {name}: {error}", style="red"))
             else:
-                console.print(Text(f"  {name} →", style="dim"))
+                hud_console.stdout.print(Text(f"  {name} →", style="dim"))
                 for line in str(result).splitlines():
-                    console.print(Text(f"    {line}"))
+                    hud_console.stdout.print(Text(f"    {line}"))
 
         elif kind == "environment":
             msg = ev.get("text") or ev.get("content") or ""
             if msg:
-                console.print(Rule("[yellow]env[/yellow]", style="yellow"))
-                console.print(Text(str(msg)))
+                hud_console.stdout.print(Rule("[yellow]env[/yellow]", style="yellow"))
+                hud_console.stdout.print(Text(str(msg)))
 
 
 def _fmt_args(args: Any) -> str:

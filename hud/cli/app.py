@@ -20,7 +20,6 @@ import typer
 from dotenv import dotenv_values, set_key
 from packaging.version import parse as parse_version
 from pydantic import BaseModel, ConfigDict, model_validator
-from rich.console import Console
 from typer.core import TyperCommand, TyperGroup, TyperOption
 
 from hud.settings import Settings
@@ -422,9 +421,9 @@ class CLI(typer.Typer):
                 message="Confirmation required in a non-interactive terminal.",
                 suggestion="Re-run with --yes to continue.",
             )
-        console = HUDConsole()
-        if not console.confirm(message, default=default):
-            console.info("Cancelled.")
+        hud_console = HUDConsole()
+        if not hud_console.confirm(message, default=default):
+            hud_console.info("Cancelled.")
             raise typer.Exit(ExitCode.SUCCESS)
 
 
@@ -435,8 +434,6 @@ app = CLI(
     rich_markup_mode="rich",
     pretty_exceptions_enable=False,
 )
-
-console = Console()
 
 
 def set_command(
@@ -483,7 +480,7 @@ def version() -> dict[str, str]:
         hud version --json[/not dim]
     """
     result = {"name": "hud", "version": __version__}
-    console.print(f"HUD CLI version: [cyan]{result['version']}[/cyan]")
+    HUDConsole().print(f"HUD CLI version: [cyan]{result['version']}[/cyan]", stderr=False)
     return result
 
 
@@ -626,7 +623,6 @@ def notify_if_outdated(argv: list[str]) -> None:
 
 def main() -> None:
     """Main entry point for the CLI."""
-    global console
     # Windows cmd.exe uses the system code page (e.g. cp1252) which can't
     # encode the emoji that Rich uses. Rewrap stdout/stderr as UTF-8 so
     # Rich's legacy Windows renderer never hits a charmap error.
@@ -635,7 +631,6 @@ def main() -> None:
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
         if hasattr(sys.stderr, "buffer"):
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-        console = Console()
 
     notify_if_outdated(sys.argv)
 

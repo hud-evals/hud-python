@@ -523,7 +523,7 @@ class EvalConfig(BaseModel):
                         display_value = str(value)
                     table.add_row(f"  {name}", display_value)
 
-        hud_console.console.print(table)
+        hud_console.print(table)
 
 
 def _build_agent(cfg: EvalConfig) -> Any:
@@ -733,19 +733,18 @@ def display_runs(
     std_reward = pstdev(rewards) if len(rewards) > 1 else 0.0
     success_rate = sum(1 for r in rewards if r > _SUCCESS_THRESHOLD) / len(runs)
 
-    console = hud_console.console
     title = f"'{name}' Results" if name else "Evaluation Complete"
-    console.print(f"\n[bold]{title}[/bold]")
-    console.print(f"  [dim]Runs:[/dim] {len(runs)}")
+    hud_console.print(f"\n[bold]{title}[/bold]")
+    hud_console.print(f"  [dim]Runs:[/dim] {len(runs)}")
     if elapsed:
         rate = len(runs) / elapsed if elapsed > 0 else 0
-        console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s ({rate:.1f}/s)")
-    console.print(
+        hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s ({rate:.1f}/s)")
+    hud_console.print(
         f"  [dim]Mean reward:[/dim] [green]{mean_reward:.3f}[/green] +/- {std_reward:.3f}"
     )
-    console.print(f"  [dim]Success rate:[/dim] [yellow]{success_rate * 100:.1f}%[/yellow]")
+    hud_console.print(f"  [dim]Success rate:[/dim] [yellow]{success_rate * 100:.1f}%[/yellow]")
     if errors:
-        console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
+        hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
 
     if show_details and len(runs) <= 50:
         table = Table(title="Details", show_header=True, header_style="bold")
@@ -769,11 +768,11 @@ def display_runs(
                 status,
             ]
             table.add_row(*row)
-        console.print(table)
+        hud_console.print(table)
 
     if std_reward > 0.3:
-        console.print(f"\n[yellow]High variance (std={std_reward:.3f})[/yellow]")
-    console.print()
+        hud_console.print(f"\n[yellow]High variance (std={std_reward:.3f})[/yellow]")
+    hud_console.print()
 
 
 def find_tasks_file(tasks_file: str | None, msg: str = "Select a tasks file") -> str:

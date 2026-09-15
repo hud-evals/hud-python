@@ -15,7 +15,6 @@ import asyncio
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
@@ -28,7 +27,7 @@ from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
-console = Console()
+hud_console = HUDConsole()
 
 jobs_app = CLI(
     name="jobs",
@@ -53,10 +52,10 @@ def _render_jobs(items: list[Any]) -> None:
     from hud.settings import settings
 
     if not items:
-        console.print("[yellow]No jobs found.[/yellow]")
+        hud_console.stdout.print("[yellow]No jobs found.[/yellow]")
         return
 
-    console.print(Panel.fit("[bold cyan]Recent Jobs[/bold cyan]", border_style="cyan"))
+    hud_console.stdout.print(Panel.fit("[bold cyan]Recent Jobs[/bold cyan]", border_style="cyan"))
     table = Table()
     table.add_column("ID", style="blue", no_wrap=True)
     table.add_column("Name", style="cyan")
@@ -71,20 +70,20 @@ def _render_jobs(items: list[Any]) -> None:
             job.get("status") or "-",
             str(job.get("created_at") or ""),
         )
-    console.print(table)
+    hud_console.stdout.print(table)
     web = settings.hud_web_url.rstrip("/")
-    console.print(f"\n[dim]View: {web}/jobs[/dim]")
-    console.print("[dim]Tip: hud jobs get <id> to see traces for a specific job[/dim]")
+    hud_console.stdout.print(f"\n[dim]View: {web}/jobs[/dim]")
+    hud_console.stdout.print("[dim]Tip: hud jobs get <id> to see traces for a specific job[/dim]")
 
 
 def _render_job_traces(job_id: str, items: list[Any], *, web: str) -> None:
     view = f"{web.rstrip('/')}/jobs/{job_id}"
     if not items:
-        console.print("[yellow]No traces found for this job.[/yellow]")
-        console.print(f"[dim]View: {view}[/dim]")
+        hud_console.stdout.print("[yellow]No traces found for this job.[/yellow]")
+        hud_console.stdout.print(f"[dim]View: {view}[/dim]")
         return
 
-    console.print(
+    hud_console.stdout.print(
         Panel.fit(f"[bold cyan]Job Traces[/bold cyan] [dim]{job_id}[/dim]", border_style="cyan")
     )
     table = Table()
@@ -102,9 +101,11 @@ def _render_job_traces(job_id: str, items: list[Any], *, web: str) -> None:
             str(tr.get("start_time") or tr.get("created_at") or ""),
             (tr.get("error") or "")[:40],
         )
-    console.print(table)
-    console.print(f"\n[dim]View: {view}[/dim]")
-    console.print("[dim]Tip: hud trace get <trace_id> to inspect a specific rollout[/dim]")
+    hud_console.stdout.print(table)
+    hud_console.stdout.print(f"\n[dim]View: {view}[/dim]")
+    hud_console.stdout.print(
+        "[dim]Tip: hud trace get <trace_id> to inspect a specific rollout[/dim]"
+    )
 
 
 def _list_jobs(*, quiet: bool, limit: int) -> list[Any]:
@@ -181,7 +182,6 @@ def get_command(
 
 
 def _render_cancel_plan(plan: dict[str, Any]) -> None:
-    hud_console = HUDConsole()
     hud_console.info(f"--dry-run: would {str(plan['action']).replace('_', ' ')}")
     if plan.get("job_id"):
         hud_console.info(f"  job_id: {plan['job_id']}")
@@ -190,7 +190,6 @@ def _render_cancel_plan(plan: dict[str, Any]) -> None:
 
 
 def _render_cancel(payload: dict[str, Any]) -> None:
-    hud_console = HUDConsole()
     if payload["action"] == "cancel_all":
         jobs_cancelled = payload.get("jobs_cancelled", 0)
         tasks_cancelled = payload.get("total_tasks_cancelled", 0)
@@ -223,8 +222,6 @@ def _run_cancel(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Cancel a job, a trace, or every active job."""
-    hud_console = HUDConsole()
-
     if not job_id and not all_jobs:
         raise CliError(
             error="usage",

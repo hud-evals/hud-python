@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
@@ -24,7 +23,6 @@ from hud.utils.hud_console import DIM, GOLD, GREEN, RED, SECONDARY, HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
-_console = Console()
 
 _POLL_INTERVAL_SECONDS = 2.0
 _TERMINAL_STATUSES = {"completed", "error"}
@@ -334,7 +332,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
                     body.append("\n")
             if text:
                 body.append(str(text))
-            _console.print(
+            hud_console.stdout.print(
                 Panel(
                     body,
                     title=_bold_title(f"Turn {turn} · agent"),
@@ -355,7 +353,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
                     body.append("\n\n")
                     body.append_text(_capped_text(str(result), max_lines=_RESULT_LINE_CAP))
                 border = GREEN
-            _console.print(
+            hud_console.stdout.print(
                 Panel(
                     body,
                     title=_bold_title(name),
@@ -366,7 +364,7 @@ def _render_qa_rollout(events: list[dict[str, Any]]) -> None:
         elif kind == "subagent":
             name = str(event.get("agent_name") or "subagent")
             args = event.get("arguments") or {}
-            _console.print(
+            hud_console.stdout.print(
                 Panel(
                     Text(_tool_command(event) if args else name, style=DIM),
                     title=_bold_title(name),
@@ -412,7 +410,7 @@ def _print_result_tui(
             stderr=False,
         )
     if view.summary:
-        _console.print(
+        hud_console.stdout.print(
             Panel(
                 Text(view.summary),
                 title=_bold_title("Summary"),
@@ -426,7 +424,7 @@ def _print_result_tui(
             if finding.description:
                 body.append("\n\n")
             body.append(f"fault: {finding.fault}", style=DIM)
-        _console.print(
+        hud_console.stdout.print(
             Panel(
                 body,
                 title=_bold_title(f"{index}. {finding.title}"),

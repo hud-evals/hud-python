@@ -6,7 +6,6 @@ from typing import Any
 from uuid import UUID
 
 import typer
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
@@ -14,9 +13,10 @@ from hud.cli.app import (
     CLI,
     CliError,
 )
+from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
-console = Console()
+hud_console = HUDConsole()
 
 models_app = CLI(
     name="models",
@@ -38,9 +38,11 @@ def _render_models(rows: list[dict[str, Any]]) -> None:
     from hud.settings import settings
 
     if not rows:
-        console.print("[yellow]No models found[/yellow]")
+        hud_console.stdout.print("[yellow]No models found[/yellow]")
         return
-    console.print(Panel.fit("[bold cyan]Available Models[/bold cyan]", border_style="cyan"))
+    hud_console.stdout.print(
+        Panel.fit("[bold cyan]Available Models[/bold cyan]", border_style="cyan")
+    )
     table = Table()
     table.add_column("Name", style="cyan")
     table.add_column("Model (API)", style="green")
@@ -57,19 +59,21 @@ def _render_models(rows: list[dict[str, Any]]) -> None:
             model.get("sdk_agent_type") or "-",
             "✓" if model.get("is_trainable") else "",
         )
-    console.print(table)
-    console.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
+    hud_console.stdout.print(table)
+    hud_console.stdout.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
     web = settings.hud_web_url.rstrip("/")
-    console.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
+    hud_console.stdout.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
 
 
 def _render_head(model_id: str, head: dict[str, Any] | None) -> None:
     if head is None:
-        console.print("[yellow]No active checkpoint — this model serves its base weights[/yellow]")
-        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+        hud_console.stdout.print(
+            "[yellow]No active checkpoint — this model serves its base weights[/yellow]"
+        )
+        hud_console.stdout.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
         return
     reward = head.get("mean_reward")
-    console.print(
+    hud_console.stdout.print(
         Panel.fit(
             f"[bold green]HEAD[/bold green] [cyan]{head.get('name') or head['id'][:8]}[/cyan]\n"
             f"sampler: [green]{head.get('checkpoint_name') or '-'}[/green]\n"
@@ -79,7 +83,7 @@ def _render_head(model_id: str, head: dict[str, Any] | None) -> None:
             border_style="green",
         )
     )
-    console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+    hud_console.stdout.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
 
 
 @models_app.command("list")
@@ -149,7 +153,7 @@ def fork_model(
             "name": name,
             "if_not_exists": if_not_exists,
         }
-        console.print(
+        hud_console.stdout.print(
             f"[dim]--dry-run: would fork {payload['source']!r} as {payload['name']!r}[/dim]"
         )
         return payload
@@ -163,11 +167,11 @@ def fork_model(
         if exc.status_code == 409 and if_not_exists:
             existing = _existing_model(name)
             saved = {**existing, "existed": True}
-            console.print(
+            hud_console.stdout.print(
                 "[yellow]Model already exists[/yellow] "
                 f"[cyan]{saved.get('model_name') or name}[/cyan]"
             )
-            console.print(f"[dim]id: {saved.get('id')}[/dim]")
+            hud_console.stdout.print(f"[dim]id: {saved.get('id')}[/dim]")
             return saved
         raise CliError.from_http(
             exc,
@@ -176,7 +180,7 @@ def fork_model(
         ) from exc
 
     slug = model["model_name"]
-    console.print(
+    hud_console.stdout.print(
         Panel.fit(
             f"[bold green]Forked[/bold green] [cyan]{model.get('name') or slug}[/cyan]\n"
             f"slug: [green]{slug}[/green]\n"
@@ -184,8 +188,8 @@ def fork_model(
             border_style="green",
         )
     )
-    console.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
-    console.print(f"[dim]View: {_model_url(model['id'])}[/dim]")
+    hud_console.stdout.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
+    hud_console.stdout.print(f"[dim]View: {_model_url(model['id'])}[/dim]")
     return model
 
 
@@ -208,10 +212,10 @@ def list_checkpoints(
 
     def _render(rows: list[dict[str, Any]]) -> None:
         if not rows:
-            console.print(
+            hud_console.stdout.print(
                 "[yellow]No checkpoints yet — this model serves its base weights[/yellow]"
             )
-            console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+            hud_console.stdout.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
             return
         table = Table(title="Checkpoints")
         table.add_column("", style="green")
@@ -230,8 +234,8 @@ def list_checkpoints(
                 str(ckpt.get("num_traces") or "-"),
                 str(ckpt.get("created_at") or ""),
             )
-        console.print(table)
-        console.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+        hud_console.stdout.print(table)
+        hud_console.stdout.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
 
     if quiet:
         for ckpt in checkpoints:
@@ -271,15 +275,19 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
-            console.print(
+            hud_console.stdout.print(
                 f"[dim]--dry-run: would set head of {payload['model']} "
                 f"to {payload['checkpoint_id']}[/dim]"
             )
             return payload
         _set_head(model_id, set_to)
         saved = {"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"}
-        console.print(f"[green]Head set to[/green] [cyan]{saved['checkpoint_id']}[/cyan]")
-        console.print(f"[dim]View: {_model_url(saved['model_id'], tab='checkpoints')}[/dim]")
+        hud_console.stdout.print(
+            f"[green]Head set to[/green] [cyan]{saved['checkpoint_id']}[/cyan]"
+        )
+        hud_console.stdout.print(
+            f"[dim]View: {_model_url(saved['model_id'], tab='checkpoints')}[/dim]"
+        )
         return saved
 
     head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
