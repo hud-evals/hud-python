@@ -7,7 +7,7 @@ import sys
 import typer
 from rich.console import Console
 
-from hud.cli.io import CliError, CLIGroup, emit_json, mark_json
+from hud.cli.io import CliError, CLIGroup, json_option, report
 from hud.settings import settings
 
 
@@ -75,9 +75,7 @@ def set_command(
     assignments: list[str] = typer.Argument(  # noqa: B008
         ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Persist API keys or other variables for HUD to use by default.
 
@@ -107,19 +105,19 @@ def set_command(
         key, value = parsed
         updates[key] = value
 
-    path = set_env_values(updates)
-    if json_output is True:
-        emit_json({"path": str(path), "keys": list(updates)})
-        return
-    hud_console.success("Saved credentials to user config")
-    hud_console.info(f"Location: {path}")
+    result = {"path": str(set_env_values(updates)), "keys": list(updates)}
+
+    def _render(saved: dict[str, object]) -> None:
+        hud_console.success("Saved credentials to user config")
+        hud_console.info(f"Location: {saved['path']}")
+        hud_console.info(f"Keys: {', '.join(str(key) for key in saved['keys'])}")
+
+    report(result, json_output=json_output, render=_render)
 
 
 @app.command()
 def version(
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Show HUD CLI version.
 
@@ -129,10 +127,12 @@ def version(
     """
     from hud import __version__  # lazy: keeps CLI startup off the full package import
 
-    if json_output is True:
-        emit_json({"name": "hud", "version": __version__})
-        return
-    console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
+    result = {"name": "hud", "version": __version__}
+    report(
+        result,
+        json_output=json_output,
+        render=lambda saved: console.print(f"HUD CLI version: [cyan]{saved['version']}[/cyan]"),
+    )
 
 
 @app.callback(invoke_without_command=True)

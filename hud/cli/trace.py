@@ -18,9 +18,9 @@ from rich.text import Text
 from hud.cli import require_api_key
 from hud.cli.groups import ImplicitGetGroup
 from hud.cli.io import (
-    emit_json,
+    json_option,
     map_request_error,
-    mark_json,
+    report,
 )
 from hud.utils.exceptions import HudRequestError
 
@@ -64,30 +64,25 @@ def _show_trace(
         require_api_key("fetch trace")
         events = _load_remote(trace_id)
 
-    if json_output is True:
-        emit_json(events)
-        return
+    def _render(rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            console.print("[yellow]No events found for this trace.[/yellow]")
+            return
+        console.print(
+            Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
+        )
+        console.print(f"[dim]Source: {source}[/dim]\n")
+        _render_events(rows)
+        web = settings.hud_web_url.rstrip("/")
+        console.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
 
-    if not events:
-        console.print("[yellow]No events found for this trace.[/yellow]")
-        return
-
-    console.print(
-        Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
-    )
-    console.print(f"[dim]Source: {source}[/dim]\n")
-    _render_events(events)
-
-    web = settings.hud_web_url.rstrip("/")
-    console.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
+    report(events, json_output=json_output, render=_render)
 
 
 @trace_app.command("get")
 def get_command(
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     local_dir: str | None = typer.Option(
         None, "--local-dir", help="Override the local span directory"
     ),
@@ -108,9 +103,7 @@ def get_command(
 @trace_app.callback(invoke_without_command=True)
 def trace_command(
     ctx: typer.Context,
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Inspect a rollout trace.
 

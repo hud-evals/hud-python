@@ -22,11 +22,10 @@ import typer
 
 from hud.cli.io import (
     CliError,
-    emit_json,
-    emit_quiet,
-    mark_json,
+    json_option,
     parse_args,
     read_text_arg,
+    report,
 )
 from hud.cli.source import environment_file
 from hud.utils.hud_console import HUDConsole
@@ -161,19 +160,18 @@ def _emit(
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
         return
-    if json_output is True:
-        emit_json(result)
-        return
-    value = result.get(headline, result)
-    typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
+
+    def _render(frame: dict[str, Any]) -> None:
+        value = frame.get(headline, frame)
+        typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
+
+    report(result, json_output=json_output, render=_render)
 
 
 @task_app.command("list")
 def list_command(
     source: str = typer.Option(".", "--source", "-s", help="Env source (.py/dir/JSON)."),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -188,15 +186,19 @@ def list_command(
     items = [
         {"slug": slug, "id": task.id, "args": task.args} for slug, task in _collect(source).items()
     ]
-    if json_output is True:
-        emit_json(items)
-        return
-    if quiet:
-        emit_quiet([item["slug"] for item in items])
-        return
-    for item in items:
-        args = f" {json.dumps(item['args'])}" if item["args"] else ""
-        typer.echo(f"{item['slug']}\t{item['id']}{args}")
+
+    def _render(rows: list[dict[str, Any]]) -> None:
+        for item in rows:
+            args = f" {json.dumps(item['args'])}" if item["args"] else ""
+            typer.echo(f"{item['slug']}\t{item['id']}{args}")
+
+    report(
+        items,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda rows: [item["slug"] for item in rows],
+        render=_render,
+    )
 
 
 @task_app.command("start")
@@ -220,9 +222,7 @@ def start_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the prompt here instead of stdout."
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Start a task and return its prompt (the env's first yield).
 
@@ -271,9 +271,7 @@ def grade_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the full JSON result here (else print the reward)."
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Grade an answer for a task and return its reward.
 

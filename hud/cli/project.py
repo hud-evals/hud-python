@@ -12,9 +12,8 @@ import typer
 from hud.cli import require_api_key
 from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
 from hud.cli.io import (
-    emit_json,
-    emit_quiet,
-    mark_json,
+    json_option,
+    report,
 )
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
@@ -168,28 +167,31 @@ project_app = typer.Typer(
 
 @project_app.command("list")
 def list_command(
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
 ) -> None:
     """List all visible Projects and their canonical IDs."""
     require_api_key("list projects")
-    projects = list_projects(PlatformClient.from_settings())
-    if json_output is True:
-        emit_json([asdict(project) for project in projects])
-    elif quiet:
-        emit_quiet([project.id for project in projects])
-    else:
+    rows = [asdict(project) for project in list_projects(PlatformClient.from_settings())]
+
+    def _render(projects: list[dict[str, Any]]) -> None:
         console = HUDConsole()
         for project in projects:
-            tags = " (default)" if project.is_default else ""
-            tags += " (read-only)" if not project.can_create else ""
-            console.info(f"{project.name}  {project.id}{tags}")
+            tags = " (default)" if project["is_default"] else ""
+            tags += " (read-only)" if not project["can_create"] else ""
+            console.info(f"{project['name']}  {project['id']}{tags}")
         if not projects:
             console.info("No projects found")
+
+    report(
+        rows,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda projects: [project["id"] for project in projects],
+        render=_render,
+    )
 
 
 @project_app.command("create")
@@ -199,9 +201,7 @@ def create_command(
     description: str | None = typer.Option(None, "--description"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
     no_use: bool = typer.Option(False, "--no-use", help="Create without linking this directory"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -213,10 +213,12 @@ def create_command(
     if description:
         payload["description"] = description
     if dry_run:
-        if json_output is True:
-            emit_json({"dry_run": True, "action": "create_project", **payload})
-        else:
-            HUDConsole().info(f"Would create Project {name}")
+        plan = {"dry_run": True, "action": "create_project", **payload}
+        report(
+            plan,
+            json_output=json_output,
+            render=lambda saved: HUDConsole().info(f"Would create Project {saved['name']}"),
+        )
         return
     state = (
         None
@@ -230,10 +232,12 @@ def create_command(
     created = Project.from_record(platform.post("/projects", json=payload))
     if state is not None:
         state.update(DirectoryLink(project_id=created.id))
-    if json_output is True:
-        emit_json(asdict(created))
-    else:
-        HUDConsole().success(f"Created Project: {created.name} ({created.id})")
+    saved = asdict(created)
+    report(
+        saved,
+        json_output=json_output,
+        render=lambda row: HUDConsole().success(f"Created Project: {row['name']} ({row['id']})"),
+    )
 
 
 @project_app.command("use")
@@ -241,9 +245,7 @@ def use_command(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help="Project ID from hud project list"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -259,21 +261,21 @@ def use_command(
     require_writable_placement(Placement(project, ProjectSource.FLAG))
     if not dry_run:
         state.update(DirectoryLink(project_id=project.id))
-    if json_output is True:
-        emit_json({**asdict(project), "dry_run": dry_run})
-    else:
-        HUDConsole().success(
-            f"{'Would use' if dry_run else 'Using'} Project: {project.name} ({project.id})"
-        )
+    saved = {**asdict(project), "dry_run": dry_run}
+    report(
+        saved,
+        json_output=json_output,
+        render=lambda row: HUDConsole().success(
+            f"{'Would use' if row['dry_run'] else 'Using'} Project: {row['name']} ({row['id']})"
+        ),
+    )
 
 
 @project_app.callback(invoke_without_command=True)
 def project_callback(
     ctx: typer.Context,
     directory: str = typer.Option(".", "--directory", "-C"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Show the Project selected for this directory."""
     ctx.meta["hud_project_directory"] = directory
@@ -284,12 +286,13 @@ def project_callback(
     platform.get("/projects", params={"limit": 1})
     state = DirectoryState(AuthScope.resolve(platform), directory)
     placement = resolve_placement(platform, state.load(), flag=None)
-    if json_output is True:
-        emit_json(
-            {
-                "project": asdict(placement.project) if placement.project else None,
-                "source": placement.source.value,
-            }
-        )
-    else:
-        HUDConsole().info(f"Project: {placement.label}")
+    saved = {
+        "project": asdict(placement.project) if placement.project else None,
+        "source": placement.source.value,
+        "label": placement.label,
+    }
+    report(
+        saved,
+        json_output=json_output,
+        render=lambda row: HUDConsole().info(f"Project: {row['label']}"),
+    )

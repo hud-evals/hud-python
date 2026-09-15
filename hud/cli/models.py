@@ -12,10 +12,9 @@ from rich.table import Table
 
 from hud.cli import require_api_key
 from hud.cli.io import (
-    emit_json,
-    emit_quiet,
+    json_option,
     map_request_error,
-    mark_json,
+    report,
 )
 from hud.utils.platform import PlatformClient
 
@@ -30,11 +29,64 @@ models_app = typer.Typer(
 )
 
 
+def _provider_name(row: dict[str, Any]) -> str:
+    provider = row.get("provider")
+    if isinstance(provider, dict):
+        return str(provider.get("name") or "-")
+    return "-"
+
+
+def _render_models(rows: list[dict[str, Any]]) -> None:
+    from hud.settings import settings
+
+    if not rows:
+        console.print("[yellow]No models found[/yellow]")
+        return
+    console.print(Panel.fit("[bold cyan]Available Models[/bold cyan]", border_style="cyan"))
+    table = Table()
+    table.add_column("Name", style="cyan")
+    table.add_column("Model (API)", style="green")
+    table.add_column("ID", style="blue", no_wrap=True)
+    table.add_column("Provider", style="yellow")
+    table.add_column("Agent", style="magenta")
+    table.add_column("Trainable", style="green", justify="center")
+    for model in rows:
+        table.add_row(
+            model.get("name") or model.get("id") or "-",
+            model.get("model_name") or model.get("id") or "-",
+            model.get("id") or "-",
+            _provider_name(model),
+            model.get("sdk_agent_type") or "-",
+            "✓" if model.get("is_trainable") else "",
+        )
+    console.print(table)
+    console.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
+    web = settings.hud_web_url.rstrip("/")
+    console.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
+
+
+def _render_head(model_id: str, head: dict[str, Any] | None) -> None:
+    if head is None:
+        console.print("[yellow]No active checkpoint — this model serves its base weights[/yellow]")
+        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+        return
+    reward = head.get("mean_reward")
+    console.print(
+        Panel.fit(
+            f"[bold green]HEAD[/bold green] [cyan]{head.get('name') or head['id'][:8]}[/cyan]\n"
+            f"sampler: [green]{head.get('checkpoint_name') or '-'}[/green]\n"
+            f"reward:  {f'{reward:.3f}' if reward is not None else '-'}    "
+            f"loss: {head.get('loss_fn') or '-'}    traces: {head.get('num_traces') or '-'}\n"
+            f"created: [dim]{head.get('created_at') or ''}[/dim]",
+            border_style="green",
+        )
+    )
+    console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+
+
 @models_app.command("list")
 def list_models(
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -49,56 +101,32 @@ def list_models(
         hud models list --json
         hud models list --quiet[/not dim]
     """
-    from hud.settings import settings
     from hud.utils.gateway import list_gateway_models
 
     require_api_key("list models")
 
-    models_list = list_gateway_models()
-
-    if json_output is True:
-        emit_json([m.model_dump() for m in models_list])
-        return
-    if quiet:
-        emit_quiet([m.model_name or m.id or "" for m in models_list if m.model_name or m.id])
-        return
-
-    if not models_list:
-        console.print("[yellow]No models found[/yellow]")
-        return
-
-    models_list = sorted(models_list, key=lambda m: (m.name or m.id or "").lower())
-    console.print(Panel.fit("[bold cyan]Available Models[/bold cyan]", border_style="cyan"))
-
-    table = Table()
-    table.add_column("Name", style="cyan")
-    table.add_column("Model (API)", style="green")
-    table.add_column("ID", style="blue", no_wrap=True)
-    table.add_column("Provider", style="yellow")
-    table.add_column("Agent", style="magenta")
-    table.add_column("Trainable", style="green", justify="center")
-    for model in models_list:
-        table.add_row(
-            model.name or model.id or "-",
-            model.model_name or model.id or "-",
-            model.id or "-",
-            model.provider.name or "-",
-            model.sdk_agent_type or "-",
-            "✓" if model.is_trainable else "",
-        )
-    console.print(table)
-    console.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
-    web = settings.hud_web_url.rstrip("/")
-    console.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
+    rows = [
+        model.model_dump()
+        for model in sorted(list_gateway_models(), key=lambda m: (m.name or m.id or "").lower())
+    ]
+    report(
+        rows,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda models: [
+            str(model.get("model_name") or model.get("id") or "")
+            for model in models
+            if model.get("model_name") or model.get("id")
+        ],
+        render=_render_models,
+    )
 
 
 @models_app.command("fork")
 def fork_model(
     source: str = typer.Argument(..., help="Source model slug or id to fork from"),
     name: str = typer.Option(..., "--name", "-n", help="Name for the new trainable model"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -132,10 +160,13 @@ def fork_model(
             "name": name,
             "if_not_exists": if_not_exists,
         }
-        if json_output is True:
-            emit_json(payload)
-        else:
-            console.print(f"[dim]--dry-run: would fork {source!r} as {name!r}[/dim]")
+        report(
+            payload,
+            json_output=json_output,
+            render=lambda saved: console.print(
+                f"[dim]--dry-run: would fork {saved['source']!r} as {saved['name']!r}[/dim]"
+            ),
+        )
         return
 
     source_id = _resolve_model_id(source)
@@ -146,12 +177,18 @@ def fork_model(
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
             existing = _existing_model(name)
-            if json_output is True:
-                emit_json({**existing, "existed": True})
-            else:
-                slug = existing.get("model_name") or name
-                console.print(f"[yellow]Model already exists[/yellow] [cyan]{slug}[/cyan]")
-                console.print(f"[dim]id: {existing.get('id')}[/dim]")
+            saved = {**existing, "existed": True}
+            report(
+                saved,
+                json_output=json_output,
+                render=lambda row: (
+                    console.print(
+                        "[yellow]Model already exists[/yellow] "
+                        f"[cyan]{row.get('model_name') or name}[/cyan]"
+                    ),
+                    console.print(f"[dim]id: {row.get('id')}[/dim]"),
+                ),
+            )
             return
         raise map_request_error(
             exc,
@@ -159,28 +196,26 @@ def fork_model(
             input={"source": source, "name": name},
         ) from exc
 
-    if json_output is True:
-        emit_json(model)
-        return
-    slug = model["model_name"]
-    console.print(
-        Panel.fit(
-            f"[bold green]Forked[/bold green] [cyan]{model.get('name') or slug}[/cyan]\n"
-            f"slug: [green]{slug}[/green]\n"
-            f"id:   [dim]{model['id']}[/dim]",
-            border_style="green",
+    def _render_fork(saved: dict[str, Any]) -> None:
+        slug = saved["model_name"]
+        console.print(
+            Panel.fit(
+                f"[bold green]Forked[/bold green] [cyan]{saved.get('name') or slug}[/cyan]\n"
+                f"slug: [green]{slug}[/green]\n"
+                f"id:   [dim]{saved['id']}[/dim]",
+                border_style="green",
+            )
         )
-    )
-    console.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
-    console.print(f"[dim]View: {_model_url(model['id'])}[/dim]")
+        console.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
+        console.print(f"[dim]View: {_model_url(saved['id'])}[/dim]")
+
+    report(model, json_output=json_output, render=_render_fork)
 
 
 @models_app.command("checkpoints")
 def list_checkpoints(
     model: str = typer.Argument(..., help="Model slug or id"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -194,38 +229,42 @@ def list_checkpoints(
     """
     require_api_key("list checkpoints")
     model_id = _resolve_model_id(model)
-    checkpoints = _get_checkpoints(model_id)
-    if json_output is True:
-        emit_json(checkpoints)
-        return
-    if quiet:
-        emit_quiet([str(ckpt.get("id") or "") for ckpt in checkpoints if ckpt.get("id")])
-        return
-    if not checkpoints:
-        console.print("[yellow]No checkpoints yet — this model serves its base weights[/yellow]")
-        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
-        return
+    checkpoints = sorted(_get_checkpoints(model_id), key=lambda c: c.get("created_at") or "")
 
-    checkpoints = sorted(checkpoints, key=lambda c: c.get("created_at") or "")
-    table = Table(title="Checkpoints")
-    table.add_column("", style="green")  # active marker
-    table.add_column("Name", style="cyan")
-    table.add_column("Reward", style="yellow", justify="right")
-    table.add_column("Loss", style="magenta")
-    table.add_column("Traces", justify="right")
-    table.add_column("Created", style="dim")
-    for ckpt in checkpoints:
-        reward = ckpt.get("mean_reward")
-        table.add_row(
-            "▶" if ckpt.get("is_active") else "",
-            ckpt.get("name") or ckpt["id"][:8],
-            f"{reward:.3f}" if reward is not None else "-",
-            ckpt.get("loss_fn") or "-",
-            str(ckpt.get("num_traces") or "-"),
-            str(ckpt.get("created_at") or ""),
-        )
-    console.print(table)
-    console.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+    def _render(rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            console.print(
+                "[yellow]No checkpoints yet — this model serves its base weights[/yellow]"
+            )
+            console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+            return
+        table = Table(title="Checkpoints")
+        table.add_column("", style="green")
+        table.add_column("Name", style="cyan")
+        table.add_column("Reward", style="yellow", justify="right")
+        table.add_column("Loss", style="magenta")
+        table.add_column("Traces", justify="right")
+        table.add_column("Created", style="dim")
+        for ckpt in rows:
+            reward = ckpt.get("mean_reward")
+            table.add_row(
+                "▶" if ckpt.get("is_active") else "",
+                ckpt.get("name") or ckpt["id"][:8],
+                f"{reward:.3f}" if reward is not None else "-",
+                ckpt.get("loss_fn") or "-",
+                str(ckpt.get("num_traces") or "-"),
+                str(ckpt.get("created_at") or ""),
+            )
+        console.print(table)
+        console.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+
+    report(
+        checkpoints,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda rows: [str(ckpt.get("id") or "") for ckpt in rows if ckpt.get("id")],
+        render=_render,
+    )
 
 
 @models_app.command("head")
@@ -234,9 +273,7 @@ def show_head(
     set_to: str | None = typer.Option(
         None, "--set", help="Checkpoint id to promote to head (rollback / select)"
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -261,41 +298,29 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
-            if json_output is True:
-                emit_json(payload)
-            else:
-                console.print(f"[dim]--dry-run: would set head of {model} to {set_to}[/dim]")
+            report(
+                payload,
+                json_output=json_output,
+                render=lambda saved: console.print(
+                    f"[dim]--dry-run: would set head of {saved['model']} "
+                    f"to {saved['checkpoint_id']}[/dim]"
+                ),
+            )
             return
         _set_head(model_id, set_to)
-        if json_output is True:
-            emit_json({"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"})
-            return
-        console.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
-        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+        saved = {"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"}
+        report(
+            saved,
+            json_output=json_output,
+            render=lambda row: (
+                console.print(f"[green]Head set to[/green] [cyan]{row['checkpoint_id']}[/cyan]"),
+                console.print(f"[dim]View: {_model_url(row['model_id'], tab='checkpoints')}[/dim]"),
+            ),
+        )
         return
 
     head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
-
-    if json_output is True:
-        emit_json(head)
-        return
-    if head is None:
-        console.print("[yellow]No active checkpoint — this model serves its base weights[/yellow]")
-        console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
-        return
-
-    reward = head.get("mean_reward")
-    console.print(
-        Panel.fit(
-            f"[bold green]HEAD[/bold green] [cyan]{head.get('name') or head['id'][:8]}[/cyan]\n"
-            f"sampler: [green]{head.get('checkpoint_name') or '-'}[/green]\n"
-            f"reward:  {f'{reward:.3f}' if reward is not None else '-'}    "
-            f"loss: {head.get('loss_fn') or '-'}    traces: {head.get('num_traces') or '-'}\n"
-            f"created: [dim]{head.get('created_at') or ''}[/dim]",
-            border_style="green",
-        )
-    )
-    console.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+    report(head, json_output=json_output, render=lambda row: _render_head(model_id, row))
 
 
 def _model_url(model_id: str, *, tab: str | None = None) -> str:

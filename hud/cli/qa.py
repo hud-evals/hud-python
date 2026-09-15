@@ -13,10 +13,9 @@ from rich.text import Text
 from hud.cli import require_api_key
 from hud.cli.io import (
     CliError,
-    emit_json,
-    emit_quiet,
+    json_option,
     map_exception,
-    mark_json,
+    report,
 )
 from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
 from hud.settings import settings
@@ -50,10 +49,7 @@ def _print_agent(agent: dict[str, Any]) -> None:
     typer.echo(f"{agent.get('name', '-')}\t{agent.get('id', '-')}")
 
 
-def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
-    if json_output:
-        emit_json(results)
-        return
+def _print_results_human(results: list[dict[str, Any]]) -> None:
     if not results:
         typer.echo("No QA results found.")
         return
@@ -66,6 +62,10 @@ def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
         stale = " stale" if result.get("stale") is True else ""
         line = f"{subject_id}\t{agent}\t{verdict}{stale}"
         typer.echo(f"{line}\t{summary}" if summary else line)
+
+
+def _print_results(results: list[dict[str, Any]], *, json_output: bool) -> None:
+    report(results, json_output=json_output, render=_print_results_human)
 
 
 def _fetch_rollout(platform: PlatformClient, result_id: str) -> list[dict[str, Any]]:
@@ -317,25 +317,29 @@ def _list_agents(*, json_output: bool, quiet: bool, limit: int, offset: int) -> 
             params={"subject_type": _TRACE_SUBJECT, "limit": limit, "offset": offset},
         ),
     )
-    if json_output is True:
-        emit_json(response)
-        return
-    agents = response["items"]
-    if quiet:
-        emit_quiet([str(agent.get("id") or "") for agent in agents if agent.get("id")])
-        return
-    if not agents:
-        typer.echo("No trace QA agents found.")
-        return
-    for agent in agents:
-        _print_agent(agent)
+
+    def _render(payload: dict[str, Any]) -> None:
+        agents = payload["items"]
+        if not agents:
+            typer.echo("No trace QA agents found.")
+            return
+        for agent in agents:
+            _print_agent(agent)
+
+    report(
+        response,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda payload: [
+            str(agent.get("id") or "") for agent in payload["items"] if agent.get("id")
+        ],
+        render=_render,
+    )
 
 
 @qa_app.command("list")
 def list_command(
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -355,9 +359,7 @@ def list_command(
 @qa_app.callback(invoke_without_command=True)
 def qa_command(
     ctx: typer.Context,
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -401,9 +403,7 @@ def run_agent(
         min=1,
         help="Maximum seconds to wait for QA execution.",
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -424,10 +424,14 @@ def run_agent(
             "overwrite": overwrite,
             "wait": wait,
         }
-        if json_output is True:
-            emit_json(plan)
-        else:
-            typer.echo(f"--dry-run: would run agent {agent_id} on {len(trace_ids)} trace(s)")
+        report(
+            plan,
+            json_output=json_output,
+            render=lambda saved: typer.echo(
+                f"--dry-run: would run agent {saved['agent_id']} "
+                f"on {len(saved['trace_ids'])} trace(s)"
+            ),
+        )
         return
     platform = _platform()
     _require_trace_agent(platform, agent_id)
@@ -467,9 +471,7 @@ def list_results(
         ...,
         help="One or more trace UUIDs.",
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     rollout: bool = typer.Option(
         False,
         "--rollout",
@@ -482,15 +484,16 @@ def list_results(
         "list[dict[str, Any]]",
         platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
     )
-    if json_output is True:
-        _print_results(results, json_output=True)
-        return
-    if not results:
-        typer.echo("No QA results found.")
-        return
-    for result in results:
-        events: list[dict[str, Any]] | None = None
-        result_id = result.get("id")
-        if rollout and result_id:
-            events = _fetch_rollout(platform, str(result_id))
-        _print_result_tui(result, events)
+
+    def _render(rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            typer.echo("No QA results found.")
+            return
+        for result in rows:
+            events: list[dict[str, Any]] | None = None
+            result_id = result.get("id")
+            if rollout and result_id:
+                events = _fetch_rollout(platform, str(result_id))
+            _print_result_tui(result, events)
+
+    report(results, json_output=json_output, render=_render)

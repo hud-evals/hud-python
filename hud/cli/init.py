@@ -13,8 +13,8 @@ import typer
 
 from hud.cli.io import (
     CliError,
-    emit_json,
-    mark_json,
+    json_option,
+    report,
 )
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
@@ -64,9 +64,7 @@ def init_command(
     ),
     directory: str = typer.Option(".", "--dir", "-d", help="Parent directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -109,10 +107,12 @@ def init_command(
         )
 
     if dry_run is True:
-        if json_output is True:
-            emit_json({"dry_run": True, "action": "init", "path": str(target), "preset": preset_id})
-        else:
-            hud_console.info(f"--dry-run: would create {target}")
+        plan = {"dry_run": True, "action": "init", "path": str(target), "preset": preset_id}
+        report(
+            plan,
+            json_output=json_output,
+            render=lambda saved: hud_console.info(f"--dry-run: would create {saved['path']}"),
+        )
         return
 
     hud_console.header(f"HUD Init: {target.name}")
@@ -144,26 +144,21 @@ def init_command(
         ) from exc
     hud_console.status_item(f"environments/{preset_id}", "✓")
 
-    if json_output is True:
-        emit_json(
-            {
-                "path": str(target),
-                "preset": preset_id,
-                "created": True,
-            }
-        )
-        return
+    saved = {"path": str(target), "preset": preset_id, "created": True}
 
-    hud_console.section_title("Next Steps")
-    hud_console.info("")
-    hud_console.command_example(f"cd {target}", "1. Enter the package")
-    hud_console.info("")
-    hud_console.info("2. Read the README for this environment's setup + tasks.")
-    hud_console.info("")
-    hud_console.command_example("hud eval tasks.py claude", "3. Run an agent over the tasks")
-    hud_console.info("")
-    hud_console.info("4. Deploy for scale")
-    hud_console.info("   hud deploy, then run many evals in parallel.")
-    hud_console.info("")
-    hud_console.info("Tip: Install the HUD skill so your coding agent can help you build:")
-    hud_console.command_example("npx skills add docs.hud.ai", "Install HUD skill")
+    def _render(row: dict[str, Any]) -> None:
+        hud_console.section_title("Next Steps")
+        hud_console.info("")
+        hud_console.command_example(f"cd {row['path']}", "1. Enter the package")
+        hud_console.info("")
+        hud_console.info("2. Read the README for this environment's setup + tasks.")
+        hud_console.info("")
+        hud_console.command_example("hud eval tasks.py claude", "3. Run an agent over the tasks")
+        hud_console.info("")
+        hud_console.info("4. Deploy for scale")
+        hud_console.info("   hud deploy, then run many evals in parallel.")
+        hud_console.info("")
+        hud_console.info("Tip: Install the HUD skill so your coding agent can help you build:")
+        hud_console.command_example("npx skills add docs.hud.ai", "Install HUD skill")
+
+    report(saved, json_output=json_output, render=_render)

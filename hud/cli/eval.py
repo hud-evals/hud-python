@@ -25,7 +25,7 @@ from rich.table import Table
 
 from hud.cli import require_api_key
 from hud.cli.config import parse_key_value
-from hud.cli.io import CliError, confirm_or_abort, emit_json, mark_json, read_text_arg
+from hud.cli.io import CliError, confirm_or_abort, json_option, read_text_arg, report
 from hud.cli.source import environment_file
 from hud.settings import settings
 from hud.types import AgentType
@@ -818,9 +818,7 @@ def eval_command(
         "-y",
         help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -898,10 +896,11 @@ def eval_command(
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
         }
-        if json_output is True:
-            emit_json(plan)
-        else:
-            hud_console.info("--dry-run: no evaluation started")
+        report(
+            plan,
+            json_output=json_output,
+            render=lambda _saved: hud_console.info("--dry-run: no evaluation started"),
+        )
         return
 
     if cfg.source is None:
@@ -931,27 +930,27 @@ def eval_command(
     elapsed = time.time() - start_time
 
     runs = job.runs
-    if json_output is True:
-        emit_json(
+    saved = {
+        "job_id": job.id,
+        "source": cfg.source,
+        "run_count": len(runs),
+        "mean_reward": job.reward,
+        "error_count": len(job.errors),
+        "elapsed_seconds": elapsed,
+        "runs": [
             {
-                "job_id": job.id,
-                "source": cfg.source,
-                "run_count": len(runs),
-                "mean_reward": job.reward,
-                "error_count": len(job.errors),
-                "elapsed_seconds": elapsed,
-                "runs": [
-                    {
-                        "task_id": run.task_id,
-                        "slug": run.slug,
-                        "reward": run.reward,
-                        "is_error": run.trace.is_error,
-                        "trace_id": run.trace_id,
-                    }
-                    for run in runs
-                ],
+                "task_id": run.task_id,
+                "slug": run.slug,
+                "reward": run.reward,
+                "is_error": run.trace.is_error,
+                "trace_id": run.trace_id,
             }
-        )
-        return
-    if runs:
-        display_runs(runs, name=cfg.source or "", elapsed=elapsed)
+            for run in runs
+        ],
+    }
+
+    def _render(row: dict[str, Any]) -> None:
+        if row["runs"]:
+            display_runs(runs, name=str(row["source"] or ""), elapsed=float(row["elapsed_seconds"]))
+
+    report(saved, json_output=json_output, render=_render)

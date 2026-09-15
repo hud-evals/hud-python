@@ -211,6 +211,9 @@ lint.ignore = [
     "E731", # Allow lambda assignments.
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["hud.cli.io.json_option", "json_option"]
+
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
 # Robot runtime/harness: bare prints are deliberate operator feedback on env/agent loops.

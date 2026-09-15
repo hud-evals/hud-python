@@ -10,13 +10,47 @@ import typer
 from hud.cli.io import (
     CliError,
     confirm_or_abort,
-    emit_json,
+    json_option,
     map_exception,
-    mark_json,
+    report,
 )
 from hud.utils.exceptions import HudException
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+
+
+def _render_cancel_plan(plan: dict[str, Any]) -> None:
+    hud_console = HUDConsole()
+    hud_console.info(f"--dry-run: would {str(plan['action']).replace('_', ' ')}")
+    if plan.get("job_id"):
+        hud_console.info(f"  job_id: {plan['job_id']}")
+    if plan.get("trace_id"):
+        hud_console.info(f"  trace_id: {plan['trace_id']}")
+
+
+def _render_cancel(payload: dict[str, Any]) -> None:
+    hud_console = HUDConsole()
+    if payload["action"] == "cancel_all":
+        jobs_cancelled = payload.get("jobs_cancelled", 0)
+        tasks_cancelled = payload.get("total_tasks_cancelled", 0)
+        if jobs_cancelled == 0:
+            hud_console.info("No active jobs found.")
+            return
+        hud_console.success(f"Cancelled {jobs_cancelled} job(s), {tasks_cancelled} task(s) total.")
+        for job in payload.get("job_details", []):
+            hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
+        return
+    if payload.get("trace_id"):
+        if payload.get("status") == "accepted":
+            hud_console.success("Task cancellation requested.")
+        else:
+            hud_console.warning("Task not found or already finished.")
+        return
+    cancelled = payload.get("cancelled", 0)
+    if cancelled == 0:
+        hud_console.warning(f"No active tasks found for job {payload['job_id']}")
+        return
+    hud_console.success(f"Cancellation requested for {cancelled} task(s).")
 
 
 def run_cancel(
@@ -61,14 +95,7 @@ def run_cancel(
         "all": all_jobs,
     }
     if dry_run:
-        if json_output is True:
-            emit_json(plan)
-        else:
-            hud_console.info(f"--dry-run: would {action.replace('_', ' ')}")
-            if job_id:
-                hud_console.info(f"  job_id: {job_id}")
-            if trace_id:
-                hud_console.info(f"  trace_id: {trace_id}")
+        report(plan, json_output=json_output, render=_render_cancel_plan)
         return
 
     if all_jobs:
@@ -101,35 +128,7 @@ def run_cancel(
         raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
 
     payload: dict[str, Any] = {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
-    if json_output is True:
-        emit_json(payload)
-        return
-
-    if all_jobs:
-        jobs_cancelled = result.get("jobs_cancelled", 0)
-        tasks_cancelled = result.get("total_tasks_cancelled", 0)
-        if jobs_cancelled == 0:
-            hud_console.info("No active jobs found.")
-        else:
-            hud_console.success(
-                f"Cancelled {jobs_cancelled} job(s), {tasks_cancelled} task(s) total."
-            )
-            for job in result.get("job_details", []):
-                hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
-        return
-
-    if trace_id:
-        if result.get("status") == "accepted":
-            hud_console.success("Task cancellation requested.")
-        else:
-            hud_console.warning("Task not found or already finished.")
-        return
-
-    cancelled = result.get("cancelled", 0)
-    if cancelled == 0:
-        hud_console.warning(f"No active tasks found for job {job_id}")
-    else:
-        hud_console.success(f"Cancellation requested for {cancelled} task(s).")
+    report(payload, json_output=json_output, render=_render_cancel)
 
 
 def cancel_command(
@@ -151,9 +150,7 @@ def cancel_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Deprecated. Use ``hud jobs cancel``.
 

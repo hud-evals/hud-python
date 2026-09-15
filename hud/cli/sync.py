@@ -19,9 +19,9 @@ from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
 from hud.cli.io import (
     CliError,
     confirm_or_abort,
-    emit_json,
+    json_option,
     map_request_error,
-    mark_json,
+    report,
 )
 from hud.cli.project import (
     PROJECT_OPTION_HELP,
@@ -326,9 +326,7 @@ def sync_tasks_command(
         "--export",
         help="Export remote tasks to a file instead of syncing. Supports .json, .jsonl, and .csv",
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Sync local task definitions to a platform taskset.
 
@@ -408,17 +406,19 @@ def sync_tasks_command(
             if remote_taskset.taskset_id is None:
                 raise CliError("not_found", "Cannot link a taskset that does not exist")
             state.update(DirectoryLink(taskset_id=UUID(remote_taskset.taskset_id)))
-        if json_output is True:
-            emit_json({**plan_payload, "status": "up_to_date", "dry_run": dry_run})
-            return
-        hud_console.success("All tasks up to date")
+        report(
+            {**plan_payload, "status": "up_to_date", "dry_run": dry_run},
+            json_output=json_output,
+            render=lambda _saved: hud_console.success("All tasks up to date"),
+        )
         return
 
     if dry_run:
-        if json_output is True:
-            emit_json({**plan_payload, "dry_run": True, "action": "sync_tasks"})
-        else:
-            hud_console.info("\n  --dry-run: no changes made")
+        report(
+            {**plan_payload, "dry_run": True, "action": "sync_tasks"},
+            json_output=json_output,
+            render=lambda _saved: hud_console.info("\n  --dry-run: no changes made"),
+        )
         return
 
     confirm_or_abort("Proceed?", yes=yes, default=False)
@@ -443,19 +443,21 @@ def sync_tasks_command(
     created = int(result.get("tasks_created", 0))
     updated = int(result.get("tasks_updated", 0))
 
-    if json_output is True:
-        emit_json(
-            {
-                **plan_payload,
-                "status": "synced",
-                "tasks_created": created,
-                "tasks_updated": updated,
-                "taskset_id": result.get("taskset_id"),
-            }
-        )
-    else:
+    saved = {
+        **plan_payload,
+        "status": "synced",
+        "tasks_created": created,
+        "tasks_updated": updated,
+        "taskset_id": result.get("taskset_id"),
+    }
+
+    def _render(row: dict[str, Any]) -> None:
         hud_console.success("Sync complete")
+        created = row["tasks_created"]
+        updated = row["tasks_updated"]
         hud_console.info(f"  + {created} created, ~ {updated} updated")
+
+    report(saved, json_output=json_output, render=_render)
 
 
 @sync_app.command("env")
@@ -477,9 +479,7 @@ def sync_env_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Link local directory to a platform environment.
 
@@ -534,10 +534,17 @@ def sync_env_command(
         selected_env = get_registry_environment(platform, name)
 
     if dry_run:
-        if json_output is True:
-            emit_json({"dry_run": True, "action": "link_environment", "id": selected_env.id})
-        else:
-            hud_console.info(f"Would link to {selected_env.name} ({selected_env.id})")
+        plan = {
+            "dry_run": True,
+            "action": "link_environment",
+            "id": selected_env.id,
+            "name": selected_env.name,
+        }
+        report(
+            plan,
+            json_output=json_output,
+            render=lambda row: hud_console.info(f"Would link to {row['name']} ({row['id']})"),
+        )
         return
 
     if existing_registry_id and existing_registry_id != selected_env.id:
@@ -545,18 +552,20 @@ def sync_env_command(
         confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
     changed = state.update(DirectoryLink(registry_id=UUID(selected_env.id)))
-    if json_output is True:
-        emit_json(
-            {
-                "name": selected_env.name,
-                "id": selected_env.id,
-                "changed": changed,
-            }
-        )
-        return
-    hud_console.success(f"Linked to: {selected_env.name} ({selected_env.short_id}...)")
-    if changed:
-        hud_console.dim_info("Link saved to:", str(CONFIG_PATH))
+    saved = {
+        "name": selected_env.name,
+        "id": selected_env.id,
+        "short_id": selected_env.short_id,
+        "changed": changed,
+    }
+    report(
+        saved,
+        json_output=json_output,
+        render=lambda row: (
+            hud_console.success(f"Linked to: {row['name']} ({row['short_id']}...)"),
+            hud_console.dim_info("Link saved to:", str(CONFIG_PATH)) if row["changed"] else None,
+        ),
+    )
 
 
 @sync_app.callback(invoke_without_command=True)

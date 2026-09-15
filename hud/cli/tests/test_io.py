@@ -18,6 +18,7 @@ from hud.cli.io import (
     json_object,
     map_request_error,
     read_text_arg,
+    report,
 )
 from hud.utils.exceptions import HudRequestError
 
@@ -38,6 +39,16 @@ def test_emit_json_goes_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"id": "job-1", "count": 2}
     assert captured.err == ""
+
+
+def test_report_json_and_human_use_the_same_payload(capsys: pytest.CaptureFixture[str]) -> None:
+    payload = {"path": "/tmp/.hud/.env", "keys": ["HUD_API_KEY"]}
+    seen: list[object] = []
+    report(payload, json_output=True, render=seen.append)
+    assert json.loads(capsys.readouterr().out) == payload
+    assert seen == []
+    report(payload, json_output=False, render=seen.append)
+    assert seen == [payload]
 
 
 def test_emit_quiet_one_value_per_line(capsys: pytest.CaptureFixture[str]) -> None:

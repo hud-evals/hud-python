@@ -21,10 +21,9 @@ from rich.table import Table
 from hud.cli import require_api_key
 from hud.cli.groups import ImplicitGetGroup
 from hud.cli.io import (
-    emit_json,
-    emit_quiet,
+    json_option,
     map_request_error,
-    mark_json,
+    report,
 )
 from hud.utils.exceptions import HudRequestError
 
@@ -50,19 +49,8 @@ def _items(data: Any) -> list[Any]:
     return []
 
 
-def _list_jobs(*, json_output: bool, quiet: bool, limit: int) -> None:
-    from hud.utils.platform import PlatformClient
-
-    require_api_key("list jobs")
-    client = PlatformClient.from_settings()
-    data = client.get("/jobs", params={"limit": limit})
-    items = _items(data)
-    if json_output is True:
-        emit_json(items)
-        return
-    if quiet:
-        emit_quiet([str(job.get("id") or "") for job in items if job.get("id")])
-        return
+def _render_jobs(items: list[Any]) -> None:
+    from hud.settings import settings
 
     if not items:
         console.print("[yellow]No jobs found.[/yellow]")
@@ -75,11 +63,6 @@ def _list_jobs(*, json_output: bool, quiet: bool, limit: int) -> None:
     table.add_column("Taskset", style="dim")
     table.add_column("Status", style="yellow")
     table.add_column("Created", style="dim")
-
-    from hud.settings import settings
-
-    web = settings.hud_web_url.rstrip("/")
-
     for job in items:
         table.add_row(
             str(job.get("id") or ""),
@@ -89,8 +72,55 @@ def _list_jobs(*, json_output: bool, quiet: bool, limit: int) -> None:
             str(job.get("created_at") or ""),
         )
     console.print(table)
+    web = settings.hud_web_url.rstrip("/")
     console.print(f"\n[dim]View: {web}/jobs[/dim]")
     console.print("[dim]Tip: hud jobs get <id> to see traces for a specific job[/dim]")
+
+
+def _render_job_traces(job_id: str, items: list[Any], *, web: str) -> None:
+    view = f"{web.rstrip('/')}/jobs/{job_id}"
+    if not items:
+        console.print("[yellow]No traces found for this job.[/yellow]")
+        console.print(f"[dim]View: {view}[/dim]")
+        return
+
+    console.print(
+        Panel.fit(f"[bold cyan]Job Traces[/bold cyan] [dim]{job_id}[/dim]", border_style="cyan")
+    )
+    table = Table()
+    table.add_column("Trace ID", style="blue", no_wrap=True)
+    table.add_column("Status", style="yellow")
+    table.add_column("Reward", style="green", justify="right")
+    table.add_column("Started", style="dim")
+    table.add_column("Error", style="red")
+    for tr in items:
+        reward = tr.get("reward")
+        table.add_row(
+            str(tr.get("id") or ""),
+            tr.get("status") or "-",
+            f"{reward:.3f}" if reward is not None else "-",
+            str(tr.get("start_time") or tr.get("created_at") or ""),
+            (tr.get("error") or "")[:40],
+        )
+    console.print(table)
+    console.print(f"\n[dim]View: {view}[/dim]")
+    console.print("[dim]Tip: hud trace get <trace_id> to inspect a specific rollout[/dim]")
+
+
+def _list_jobs(*, json_output: bool, quiet: bool, limit: int) -> None:
+    from hud.utils.platform import PlatformClient
+
+    require_api_key("list jobs")
+    client = PlatformClient.from_settings()
+    data = client.get("/jobs", params={"limit": limit})
+    items = _items(data)
+    report(
+        items,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda jobs: [str(job.get("id") or "") for job in jobs if job.get("id")],
+        render=_render_jobs,
+    )
 
 
 def _show_job_traces(
@@ -111,49 +141,18 @@ def _show_job_traces(
     except HudRequestError as exc:
         raise map_request_error(exc, resource="Job", input={"job_id": job_id}) from exc
     items = _items(data)
-    if json_output is True:
-        emit_json(items)
-        return
-    if quiet:
-        emit_quiet([str(tr.get("id") or "") for tr in items if tr.get("id")])
-        return
-
-    web = settings.hud_web_url.rstrip("/")
-
-    if not items:
-        console.print("[yellow]No traces found for this job.[/yellow]")
-        console.print(f"[dim]View: {web}/jobs/{job_id}[/dim]")
-        return
-
-    console.print(
-        Panel.fit(f"[bold cyan]Job Traces[/bold cyan] [dim]{job_id}[/dim]", border_style="cyan")
+    report(
+        items,
+        json_output=json_output,
+        quiet=quiet,
+        ids=lambda traces: [str(tr.get("id") or "") for tr in traces if tr.get("id")],
+        render=lambda traces: _render_job_traces(job_id, traces, web=settings.hud_web_url),
     )
-    table = Table()
-    table.add_column("Trace ID", style="blue", no_wrap=True)
-    table.add_column("Status", style="yellow")
-    table.add_column("Reward", style="green", justify="right")
-    table.add_column("Started", style="dim")
-    table.add_column("Error", style="red")
-
-    for tr in items:
-        reward = tr.get("reward")
-        table.add_row(
-            str(tr.get("id") or ""),
-            tr.get("status") or "-",
-            f"{reward:.3f}" if reward is not None else "-",
-            str(tr.get("start_time") or tr.get("created_at") or ""),
-            (tr.get("error") or "")[:40],
-        )
-    console.print(table)
-    console.print(f"\n[dim]View: {web}/jobs/{job_id}[/dim]")
-    console.print("[dim]Tip: hud trace get <trace_id> to inspect a specific rollout[/dim]")
 
 
 @jobs_app.command("list")
 def list_command(
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -173,9 +172,7 @@ def list_command(
 @jobs_app.command("get")
 def get_command(
     job_id: str = typer.Argument(..., help="Job ID"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -211,9 +208,7 @@ def cancel_job_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
 ) -> None:
     """Cancel remote rollouts for a job, a trace, or every active job.
 
@@ -238,9 +233,7 @@ def cancel_job_command(
 @jobs_app.callback(invoke_without_command=True)
 def jobs_command(
     ctx: typer.Context,
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),

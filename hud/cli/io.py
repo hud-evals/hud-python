@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from typer.core import TyperGroup
 
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ExitCode:
@@ -72,6 +75,34 @@ def mark_json(ctx: typer.Context, value: bool) -> bool:
     if value:
         ctx.meta["hud_output"] = "json"
     return value or ctx.meta.get("hud_output") == "json"
+
+
+def json_option() -> Any:
+    return typer.Option(
+        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
+    )
+
+
+def report(
+    payload: Any,
+    *,
+    json_output: bool,
+    render: Callable[[Any], None],
+    quiet: bool = False,
+    ids: Callable[[Any], list[Any]] | None = None,
+) -> None:
+    """Print one command result as JSON, quiet ids, or the human view.
+
+    ``payload`` is the source of truth. ``--json`` dumps it; ``render`` may only
+    read from it so the two views cannot invent different fields.
+    """
+    if json_output is True:
+        emit_json(payload)
+        return
+    if quiet:
+        emit_quiet(ids(payload) if ids is not None else payload)
+        return
+    render(payload)
 
 
 def json_object(value: str, *, option: str) -> dict[str, Any]:

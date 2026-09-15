@@ -35,9 +35,9 @@ from hud.cli.config import (
 )
 from hud.cli.io import (
     CliError,
-    emit_json,
+    json_option,
     map_exception,
-    mark_json,
+    report,
 )
 from hud.cli.project import (
     PROJECT_OPTION_HELP,
@@ -1439,9 +1439,7 @@ def deploy_command(
         "--runtime-config",
         help="Path to a JSON RuntimeConfig for hosted runs",
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Write JSON to stdout.", callback=mark_json, is_eager=True
-    ),
+    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -1501,16 +1499,21 @@ def deploy_command(
             HUDConsole().error(f"{target.name}: {error.message}")
         (succeeded if success else failed).append(target.name)
         entries.append({"directory": target.name, **payload})
-    if json_output is True:
-        emit_json(
-            {"succeeded": succeeded, "failed": failed, "dry_run": dry_run, "environments": entries}
-            if all_envs
-            else entries[0]
-        )
-    elif dry_run:
-        for entry in entries:
+    saved: dict[str, Any] = (
+        {"succeeded": succeeded, "failed": failed, "dry_run": dry_run, "environments": entries}
+        if all_envs
+        else entries[0]
+    )
+
+    def _render(row: dict[str, Any]) -> None:
+        if not dry_run:
+            return
+        environments = row.get("environments", [row])
+        for entry in environments:
             HUDConsole().info(f"Would deploy {entry.get('name', entry['directory'])}")
             if entry.get("dotenv_pending"):
                 HUDConsole().info("Uploading .env requires an explicit choice before deployment.")
+
+    report(saved, json_output=json_output, render=_render)
     if failed:
         raise typer.Exit(1)
