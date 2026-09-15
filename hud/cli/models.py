@@ -10,16 +10,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli.io import (
-    json_option,
-    map_request_error,
-    report,
+from hud.cli.app import (
+    CLI,
+    CliError,
 )
 from hud.utils.platform import PlatformClient
 
 console = Console()
 
-models_app = typer.Typer(
+models_app = CLI(
     name="models",
     help="List gateway models and fork trainable ones.",
     add_completion=False,
@@ -85,11 +84,10 @@ def _render_head(model_id: str, head: dict[str, Any] | None) -> None:
 
 @models_app.command("list")
 def list_models(
-    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
-) -> None:
+) -> Any:
     """List models available through the HUD inference gateway.
 
     The platform model catalog — the same models `create_agent` and `hud eval`
@@ -106,24 +104,20 @@ def list_models(
         model.model_dump()
         for model in sorted(list_gateway_models(), key=lambda m: (m.name or m.id or "").lower())
     ]
-    report(
-        rows,
-        json_output=json_output,
-        quiet=quiet,
-        ids=lambda models: [
-            str(model.get("model_name") or model.get("id") or "")
-            for model in models
-            if model.get("model_name") or model.get("id")
-        ],
-        render=_render_models,
-    )
+    if quiet:
+        for model in rows:
+            ident = model.get("model_name") or model.get("id")
+            if ident:
+                typer.echo(ident)
+    else:
+        _render_models(rows)
+    return rows
 
 
 @models_app.command("fork")
 def fork_model(
     source: str = typer.Argument(..., help="Source model slug or id to fork from"),
     name: str = typer.Option(..., "--name", "-n", help="Name for the new trainable model"),
-    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -132,7 +126,7 @@ def fork_model(
         "--if-not-exists",
         help="If a model with this name already exists, print it and exit 0.",
     ),
-) -> None:
+) -> Any:
     """Create a team-owned trainable model derived from an existing one.
 
     The fork starts from the source model's active checkpoint, so you can keep
@@ -155,14 +149,10 @@ def fork_model(
             "name": name,
             "if_not_exists": if_not_exists,
         }
-        report(
-            payload,
-            json_output=json_output,
-            render=lambda saved: console.print(
-                f"[dim]--dry-run: would fork {saved['source']!r} as {saved['name']!r}[/dim]"
-            ),
+        console.print(
+            f"[dim]--dry-run: would fork {payload['source']!r} as {payload['name']!r}[/dim]"
         )
-        return
+        return payload
 
     source_id = _resolve_model_id(source)
     try:
@@ -173,48 +163,39 @@ def fork_model(
         if exc.status_code == 409 and if_not_exists:
             existing = _existing_model(name)
             saved = {**existing, "existed": True}
-            report(
-                saved,
-                json_output=json_output,
-                render=lambda row: (
-                    console.print(
-                        "[yellow]Model already exists[/yellow] "
-                        f"[cyan]{row.get('model_name') or name}[/cyan]"
-                    ),
-                    console.print(f"[dim]id: {row.get('id')}[/dim]"),
-                ),
+            console.print(
+                "[yellow]Model already exists[/yellow] "
+                f"[cyan]{saved.get('model_name') or name}[/cyan]"
             )
-            return
-        raise map_request_error(
+            console.print(f"[dim]id: {saved.get('id')}[/dim]")
+            return saved
+        raise CliError.from_http(
             exc,
             resource="Model",
             input={"source": source, "name": name},
         ) from exc
 
-    def _render_fork(saved: dict[str, Any]) -> None:
-        slug = saved["model_name"]
-        console.print(
-            Panel.fit(
-                f"[bold green]Forked[/bold green] [cyan]{saved.get('name') or slug}[/cyan]\n"
-                f"slug: [green]{slug}[/green]\n"
-                f"id:   [dim]{saved['id']}[/dim]",
-                border_style="green",
-            )
+    slug = model["model_name"]
+    console.print(
+        Panel.fit(
+            f"[bold green]Forked[/bold green] [cyan]{model.get('name') or slug}[/cyan]\n"
+            f"slug: [green]{slug}[/green]\n"
+            f"id:   [dim]{model['id']}[/dim]",
+            border_style="green",
         )
-        console.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
-        console.print(f"[dim]View: {_model_url(saved['id'])}[/dim]")
-
-    report(model, json_output=json_output, render=_render_fork)
+    )
+    console.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
+    console.print(f"[dim]View: {_model_url(model['id'])}[/dim]")
+    return model
 
 
 @models_app.command("checkpoints")
 def list_checkpoints(
     model: str = typer.Argument(..., help="Model slug or id"),
-    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
-) -> None:
+) -> Any:
     """List a model's checkpoint tree, oldest first (▶ marks the active head).
 
     [not dim]Examples:
@@ -252,13 +233,13 @@ def list_checkpoints(
         console.print(table)
         console.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
 
-    report(
-        checkpoints,
-        json_output=json_output,
-        quiet=quiet,
-        ids=lambda rows: [str(ckpt.get("id") or "") for ckpt in rows if ckpt.get("id")],
-        render=_render,
-    )
+    if quiet:
+        for ckpt in checkpoints:
+            if ckpt.get("id"):
+                typer.echo(ckpt["id"])
+    else:
+        _render(checkpoints)
+    return checkpoints
 
 
 @models_app.command("head")
@@ -267,11 +248,10 @@ def show_head(
     set_to: str | None = typer.Option(
         None, "--set", help="Checkpoint id to promote to head (rollback / select)"
     ),
-    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-) -> None:
+) -> Any:
     """Show — or with ``--set``, change — the model's active checkpoint (the
     weights the gateway serves now).
 
@@ -291,29 +271,20 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
-            report(
-                payload,
-                json_output=json_output,
-                render=lambda saved: console.print(
-                    f"[dim]--dry-run: would set head of {saved['model']} "
-                    f"to {saved['checkpoint_id']}[/dim]"
-                ),
+            console.print(
+                f"[dim]--dry-run: would set head of {payload['model']} "
+                f"to {payload['checkpoint_id']}[/dim]"
             )
-            return
+            return payload
         _set_head(model_id, set_to)
         saved = {"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"}
-        report(
-            saved,
-            json_output=json_output,
-            render=lambda row: (
-                console.print(f"[green]Head set to[/green] [cyan]{row['checkpoint_id']}[/cyan]"),
-                console.print(f"[dim]View: {_model_url(row['model_id'], tab='checkpoints')}[/dim]"),
-            ),
-        )
-        return
+        console.print(f"[green]Head set to[/green] [cyan]{saved['checkpoint_id']}[/cyan]")
+        console.print(f"[dim]View: {_model_url(saved['model_id'], tab='checkpoints')}[/dim]")
+        return saved
 
     head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
-    report(head, json_output=json_output, render=lambda row: _render_head(model_id, row))
+    _render_head(model_id, head)
+    return head
 
 
 def _model_url(model_id: str, *, tab: str | None = None) -> str:
@@ -334,7 +305,7 @@ def _resolve_model_id(model: str) -> str:
         try:
             data = PlatformClient.from_settings().get("/models/resolve", params={"model": model})
         except HudRequestError as exc:
-            raise map_request_error(exc, resource="Model", input={"model": model}) from exc
+            raise CliError.from_http(exc, resource="Model", input={"model": model}) from exc
         return str(data["id"])
 
 
@@ -350,7 +321,7 @@ def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
     try:
         return PlatformClient.from_settings().get(f"/models/{model_id}/checkpoints")
     except HudRequestError as exc:
-        raise map_request_error(exc, resource="Checkpoints", input={"model": model_id}) from exc
+        raise CliError.from_http(exc, resource="Checkpoints", input={"model": model_id}) from exc
 
 
 def _set_head(model_id: str, checkpoint_id: str) -> None:
@@ -361,7 +332,7 @@ def _set_head(model_id: str, checkpoint_id: str) -> None:
             f"/models/{model_id}/head", json={"checkpoint_id": checkpoint_id}
         )
     except HudRequestError as exc:
-        raise map_request_error(
+        raise CliError.from_http(
             exc,
             resource="Checkpoint",
             input={"model": model_id, "checkpoint_id": checkpoint_id},

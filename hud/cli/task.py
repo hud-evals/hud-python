@@ -20,14 +20,11 @@ from urllib.parse import urlsplit
 
 import typer
 
-from hud.cli.io import (
+from hud.cli.app import (
+    CLI,
     CliError,
-    json_option,
-    parse_args,
-    read_text_arg,
-    report,
 )
-from hud.cli.source import environment_file
+from hud.cli.eval import environment_file
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -37,7 +34,11 @@ if TYPE_CHECKING:
 
 hud_console = HUDConsole()
 
-task_app = typer.Typer(
+
+def _args_json(value: str) -> dict[str, Any]:
+    return CLI.json_object(value, option="--args")
+
+task_app = CLI(
     help="Start a task or grade an answer (attaches to a running env, or spawns from source).",
     rich_markup_mode="rich",
 )
@@ -152,30 +153,25 @@ def _emit(
     result: dict[str, Any],
     headline: str,
     out: Path | None,
-    *,
-    json_output: bool = False,
-) -> None:
-    """Thin output: JSON/file for the full frame, else the headline value to stdout."""
+) -> dict[str, Any] | None:
+    """Write the full frame to ``--out``, otherwise the headline value to stdout."""
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
-        return
+        return None
 
-    def _render(frame: dict[str, Any]) -> None:
-        value = frame.get(headline, frame)
-        typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
-
-    report(result, json_output=json_output, render=_render)
+    value = result.get(headline, result)
+    typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
+    return result
 
 
 @task_app.command("list")
 def list_command(
     source: str = typer.Option(".", "--source", "-s", help="Env source (.py/dir/JSON)."),
-    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
-) -> None:
+) -> Any:
     """List the tasks (slug + task id + args) exposed by a source.
 
     [not dim]Examples:
@@ -192,13 +188,12 @@ def list_command(
             args = f" {json.dumps(item['args'])}" if item["args"] else ""
             typer.echo(f"{item['slug']}\t{item['id']}{args}")
 
-    report(
-        items,
-        json_output=json_output,
-        quiet=quiet,
-        ids=lambda rows: [item["slug"] for item in rows],
-        render=_render,
-    )
+    if quiet:
+        for item in items:
+            typer.echo(item["slug"])
+    else:
+        _render(items)
+    return items
 
 
 @task_app.command("start")
@@ -211,7 +206,7 @@ def start_command(
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
     args: dict[str, Any] | None = typer.Option(  # noqa: B008
-        None, "--args", "-a", help="JSON object of task args.", parser=parse_args
+        None, "--args", "-a", help="JSON object of task args.", parser=_args_json
     ),
     url: str | None = typer.Option(
         None,
@@ -222,8 +217,7 @@ def start_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the prompt here instead of stdout."
     ),
-    json_output: bool = json_option(),
-) -> None:
+) -> Any:
     """Start a task and return its prompt (the env's first yield).
 
     [not dim]Examples:
@@ -241,7 +235,7 @@ def start_command(
         async with placement as runtime, connect(runtime) as client:
             return await client.start_task(task_id, task_args)
 
-    _emit(asyncio.run(_run()), "prompt", out, json_output=json_output)
+    return _emit(asyncio.run(_run()), "prompt", out)
 
 
 @task_app.command("grade")
@@ -260,7 +254,7 @@ def grade_command(
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
     args: dict[str, Any] | None = typer.Option(  # noqa: B008
-        None, "--args", "-a", help="JSON object of task args.", parser=parse_args
+        None, "--args", "-a", help="JSON object of task args.", parser=_args_json
     ),
     url: str | None = typer.Option(
         None,
@@ -271,8 +265,7 @@ def grade_command(
     out: Path | None = typer.Option(  # noqa: B008
         None, "--out", "-o", help="Write the full JSON result here (else print the reward)."
     ),
-    json_output: bool = json_option(),
-) -> None:
+) -> Any:
     """Grade an answer for a task and return its reward.
 
     [not dim]Examples:
@@ -280,7 +273,7 @@ def grade_command(
         hud task grade fix_bug --answer-file - --json
         hud task grade fix_bug --answer-file answer.txt[/not dim]
     """
-    answer_text = read_text_arg(answer_file) if answer_file is not None else answer
+    answer_text = CLI.read_text(answer_file) if answer_file is not None else answer
     task_id, task_args, placement = _resolve(task, source, url, args)
 
     async def _run() -> dict[str, Any]:
@@ -297,7 +290,7 @@ def grade_command(
                 await client.start_task(task_id, task_args)
                 return await client.grade({"answer": answer_text})
 
-    _emit(asyncio.run(_run()), "score", out, json_output=json_output)
+    return _emit(asyncio.run(_run()), "score", out)
 
 
 __all__ = ["task_app"]

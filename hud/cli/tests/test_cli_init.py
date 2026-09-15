@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import app, main
+from hud.cli.app import app, main
 
 runner = CliRunner()
 
@@ -29,7 +29,7 @@ class TestCLICommands:
         import re
 
         ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
-        with patch("hud.__version__", "1.2.3"):
+        with patch("hud.cli.app.__version__", "1.2.3"):
             result = runner.invoke(app, ["version"])
             assert result.exit_code == 0
             clean_output = ansi_escape.sub("", result.output)
@@ -59,11 +59,11 @@ class TestMainFunction:
         try:
             sys.argv = ["hud", "--help"]
             with (
-                patch("hud.cli.console") as mock_console,
-                patch("hud.cli.app") as mock_app,
+                patch("hud.cli.app.notify_if_outdated"),
+                patch("hud.cli.app.app") as mock_app,
             ):
                 main()
-                assert mock_console.print.called or mock_app.called
+                mock_app.assert_called()
         finally:
             sys.argv = original_argv
 

@@ -11,10 +11,8 @@ import httpx
 import pytest
 
 from hud.cli import init as init_module
-from hud.cli import presets as presets_module
-from hud.cli.init import init_command
-from hud.cli.io import CliError
-from hud.cli.presets import materialize_preset
+from hud.cli.app import CliError
+from hud.cli.init import init_command, materialize_preset
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -144,7 +142,7 @@ def test_init_failure_uses_json_error_and_removes_partial_directory(tmp_path, mo
 
     from typer.testing import CliRunner
 
-    from hud.cli import app
+    from hud.cli.app import app
 
     def fail(preset, target):
         target.mkdir()
@@ -172,9 +170,9 @@ def test_materialize_preset_copies_local_source(
 
     target = tmp_path / "project"
     monkeypatch.setattr(
-        presets_module,
+        init_module,
         "__file__",
-        str(repository / "hud" / "cli" / "presets.py"),
+        str(repository / "hud" / "cli" / "init.py"),
     )
     materialize_preset("coding", target)
 
@@ -197,9 +195,9 @@ def test_materialize_preset_rejects_destination_symlink(
     outside.write_text("original")
     (target / "env.py").symlink_to(outside)
     monkeypatch.setattr(
-        presets_module,
+        init_module,
         "__file__",
-        str(repository / "hud" / "cli" / "presets.py"),
+        str(repository / "hud" / "cli" / "init.py"),
     )
 
     with pytest.raises(ValueError, match="symlinks"):
@@ -212,9 +210,9 @@ def test_materialize_preset_rejects_release_destination_symlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        presets_module,
+        init_module,
         "__file__",
-        str(tmp_path / "installed" / "hud" / "cli" / "presets.py"),
+        str(tmp_path / "installed" / "hud" / "cli" / "init.py"),
     )
     target = tmp_path / "project"
     target.symlink_to(tmp_path / "outside", target_is_directory=True)
@@ -240,13 +238,13 @@ def test_materialize_preset_extracts_matching_sdk_release(
             request=httpx.Request("GET", "https://example.test"),
         )
     )
-    monkeypatch.setattr(presets_module.httpx, "get", get)
+    monkeypatch.setattr(init_module.httpx, "get", get)
     monkeypatch.setattr(
-        presets_module,
+        init_module,
         "__file__",
-        str(tmp_path / "installed" / "hud" / "cli" / "presets.py"),
+        str(tmp_path / "installed" / "hud" / "cli" / "init.py"),
     )
-    monkeypatch.setattr(presets_module, "__version__", "1.2.3")
+    monkeypatch.setattr(init_module, "__version__", "1.2.3")
 
     target = tmp_path / "project"
     materialize_preset("coding", target)
@@ -268,13 +266,13 @@ def test_materialize_preset_rejects_unsafe_archive_path(
             request=httpx.Request("GET", "https://example.test"),
         )
     )
-    monkeypatch.setattr(presets_module.httpx, "get", get)
+    monkeypatch.setattr(init_module.httpx, "get", get)
     monkeypatch.setattr(
-        presets_module,
+        init_module,
         "__file__",
-        str(tmp_path / "installed" / "hud" / "cli" / "presets.py"),
+        str(tmp_path / "installed" / "hud" / "cli" / "init.py"),
     )
-    monkeypatch.setattr(presets_module, "__version__", "1.2.3")
+    monkeypatch.setattr(init_module, "__version__", "1.2.3")
 
     with pytest.raises(ValueError, match="unsafe path"):
         materialize_preset("coding", tmp_path / "project")
@@ -286,10 +284,10 @@ def test_materialize_preset_requires_checkout_for_development_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        presets_module,
+        init_module,
         "__file__",
-        str(tmp_path / "installed" / "hud" / "cli" / "presets.py"),
+        str(tmp_path / "installed" / "hud" / "cli" / "init.py"),
     )
-    monkeypatch.setattr(presets_module, "__version__", "1.2.3.dev0")
+    monkeypatch.setattr(init_module, "__version__", "1.2.3.dev0")
     with pytest.raises(ValueError, match="development version"):
         materialize_preset("coding", tmp_path / "project")

@@ -7,11 +7,10 @@ import re
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
+from typer.main import get_command
 from typer.testing import CliRunner
 
-from hud.cli import app
-from hud.cli.config import AuthScope, DirectoryState
-from hud.cli.io import ExitCode
+from hud.cli.app import AuthScope, DirectoryState, ExitCode, app
 from hud.cli.project import Placement, ProjectSource
 from hud.utils.exceptions import HudRequestError
 
@@ -106,6 +105,23 @@ def test_root_help_lists_nouns() -> None:
     assert text.index("--help") < text.index("--version")
     assert "Show help." in text
     assert "Show this message and exit." not in text
+    assert get_command(app).list_commands(None) == [
+        "init",
+        "serve",
+        "deploy",
+        "eval",
+        "task",
+        "project",
+        "sync",
+        "qa",
+        "jobs",
+        "job",
+        "cancel",
+        "trace",
+        "models",
+        "set",
+        "version",
+    ]
 
 
 def test_plan_flags_use_shared_help() -> None:
@@ -172,16 +188,9 @@ def test_jobs_get_not_found_exit_code() -> None:
     assert payload["input"]["job_id"] == "00000000-0000-0000-0000-000000000001"
 
 
-def test_legacy_jobs_id_still_lists_traces() -> None:
-    client = MagicMock()
-    client.get.return_value = {"items": [{"id": "tr-1", "status": "done", "reward": 1.0}]}
-    with (
-        patch("hud.utils.platform.PlatformClient.from_settings", return_value=client),
-    ):
-        result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-000000000099", "--json"])
-
-    assert result.exit_code == 0
-    assert json.loads(_stdout(result))[0]["id"] == "tr-1"
+def test_jobs_bare_id_is_not_a_command() -> None:
+    result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-000000000099", "--json"])
+    assert result.exit_code == ExitCode.USAGE
 
 
 def test_cancel_usage_error_and_dry_run() -> None:
@@ -222,7 +231,7 @@ def test_cancel_alias_is_hidden_and_deprecated() -> None:
     assert re.search(r"^ {2}cancel\b", root, re.M) is None
 
 
-def test_trace_get_help_and_alias() -> None:
+def test_trace_get_help_and_json() -> None:
     get_help = runner.invoke(app, ["trace", "get", "--help"])
     assert get_help.exit_code == 0
     assert "--json" in _plain(get_help.output)
@@ -231,7 +240,7 @@ def test_trace_get_help_and_alias() -> None:
         patch("hud.cli.trace._load_remote", return_value=[{"kind": "agent_message", "text": "hi"}]),
         patch("hud.settings.settings.telemetry_local_dir", None),
     ):
-        result = runner.invoke(app, ["trace", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"])
+        result = runner.invoke(app, ["trace", "get", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"])
     assert result.exit_code == 0
     assert json.loads(_stdout(result))[0]["kind"] == "agent_message"
 

@@ -9,8 +9,7 @@ from uuid import UUID
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import app
-from hud.cli.config import AuthScope, DirectoryState
+from hud.cli.app import AuthScope, DirectoryState, app
 from hud.utils.exceptions import HudRequestError
 
 if TYPE_CHECKING:

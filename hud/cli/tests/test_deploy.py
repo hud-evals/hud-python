@@ -12,11 +12,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli.config import AuthScope, DirectoryState
-from hud.cli.deploy import _resolve_environment_name
-from hud.cli.io import CliError
+from hud.cli.app import AuthScope, CliError, DirectoryState
+from hud.cli.deploy import EnvironmentSource, _resolve_environment_name
 from hud.cli.project import Placement, Project, ProjectSource
-from hud.cli.source import EnvironmentSource
 from hud.cli.sync import RegistryEnvironment
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -169,13 +167,15 @@ class TestCollectEnvironmentVariables:
         from hud.utils.hud_console import HUDConsole
 
         env_file = tmp_path / ".env"
-        env_file.write_text("KEY1=value1\nKEY2=value2\n")
+        env_file.write_text("# comment\nKEY1=value1\nEMPTY=\nNOEQ\nKEY2=value2\n")
 
         console = HUDConsole()
         result = collect_environment_variables(tmp_path, None, None, console)
 
         assert result["KEY1"] == "value1"
         assert result["KEY2"] == "value2"
+        assert result["EMPTY"] == ""
+        assert "NOEQ" not in result
 
     def test_custom_env_file(self, tmp_path: Path) -> None:
         """Test loading from custom env file."""
@@ -668,11 +668,10 @@ def authenticated_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 @pytest.mark.parametrize("stream_status", ["SUCCEEDED", "UNKNOWN", None])
-def test_deploy_lifecycle_preserves_links_and_consent(
+def test_deploy_lifecycle_preserves_links(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: list[str], stream_status: str | None
 ) -> None:
-    from hud.cli import app
-    from hud.cli.config import AuthScope, DirectoryState
+    from hud.cli.app import AuthScope, DirectoryState, app
     from hud.utils.platform import PlatformClient
 
     env = tmp_path / "environment"
@@ -740,11 +739,15 @@ def test_deploy_lifecycle_preserves_links_and_consent(
     assert second.exit_code == 0, second.output
     assert state.load() == before
     assert status_reads == 4
-    assert requests[0]["environment_variables"] == {"SECRET": "test-secret-value"}
     assert (env / ".hud" / "config.json").exists()
+    assert requests[0]["environment_variables"] == {"SECRET": "test-secret-value"}
     if not override:
         assert prompts.call_count == 1
         assert "registry_id" not in requests[-1]
+        assert "environment_variables" not in requests[-1]
+    elif override[:1] == ["--registry-id"]:
+        assert prompts.call_count == 1
+        assert "environment_variables" not in requests[-1]
 
 
 def test_deploy_dry_run_has_no_prompt_or_writes(
@@ -752,7 +755,7 @@ def test_deploy_dry_run_has_no_prompt_or_writes(
 ) -> None:
     from typer.testing import CliRunner
 
-    from hud.cli import app
+    from hud.cli.app import app
 
     env = tmp_path / "environment"
     env.mkdir()
@@ -779,7 +782,7 @@ def test_missing_recipe_produces_one_json_error(
 ) -> None:
     from typer.testing import CliRunner
 
-    from hud.cli import app
+    from hud.cli.app import app
 
     monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
     result = CliRunner().invoke(app, ["deploy", str(tmp_path), "--json"])

@@ -49,7 +49,7 @@ classifiers = [
 "Documentation" = "https://docs.hud.ai"
 
 [project.scripts]
-hud = "hud.cli:main"
+hud = "hud.cli.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -210,9 +210,6 @@ lint.ignore = [
     "S603", # subprocess calls with shell=False are fine.
     "E731", # Allow lambda assignments.
 ]
-
-[tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["hud.cli.io.json_option", "json_option"]
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]

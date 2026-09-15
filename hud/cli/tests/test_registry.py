@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from hud.cli.io import CliError
+from hud.cli.app import CliError
 from hud.cli.sync import RegistryEnvironment, get_registry_environment
 from hud.utils.exceptions import HudRequestError
 from hud.utils.platform import PlatformClient

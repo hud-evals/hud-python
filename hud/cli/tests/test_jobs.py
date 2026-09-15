@@ -31,7 +31,7 @@ def test_job_detail_accepts_compact_id_and_prints_canonical_link(
     monkeypatch.setattr(settings, "hud_web_url", "https://hud.test")
     monkeypatch.setattr(PlatformClient, "from_settings", classmethod(lambda cls: client))
 
-    result = CliRunner().invoke(jobs.jobs_app, [compact_id])
+    result = CliRunner().invoke(jobs.jobs_app, ["get", compact_id])
 
     assert result.exit_code == 0
     assert client.calls == [(f"/jobs/{canonical_id}/traces", {"limit": 20})]

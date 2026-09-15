@@ -1,7 +1,4 @@
-"""``hud trace`` — render a rollout's conversation turns.
-
-Noun-verb surface: ``hud trace get <id>``. ``hud trace <id>`` remains as an alias.
-"""
+"""``hud trace`` — render a rollout's conversation turns."""
 
 from __future__ import annotations
 
@@ -15,19 +12,16 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
-from hud.cli.groups import ImplicitGetGroup
-from hud.cli.io import (
-    json_option,
-    map_request_error,
-    report,
+from hud.cli.app import (
+    CLI,
+    CliError,
 )
 from hud.utils.exceptions import HudRequestError
 
 console = Console()
 
-trace_app = typer.Typer(
+trace_app = CLI(
     name="trace",
-    cls=ImplicitGetGroup,
     help="Inspect a rollout trace.",
     add_completion=False,
     rich_markup_mode="rich",
@@ -38,9 +32,8 @@ trace_app = typer.Typer(
 def _show_trace(
     trace_id: str,
     *,
-    json_output: bool,
     local_dir: str | None,
-) -> None:
+) -> list[dict[str, Any]]:
     from hud.settings import settings
     from hud.telemetry.span import normalize_trace_id
     from hud.utils.platform import canonical_record_id
@@ -62,29 +55,26 @@ def _show_trace(
     if events is None:
         events = _load_remote(trace_id)
 
-    def _render(rows: list[dict[str, Any]]) -> None:
-        if not rows:
-            console.print("[yellow]No events found for this trace.[/yellow]")
-            return
-        console.print(
-            Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
-        )
-        console.print(f"[dim]Source: {source}[/dim]\n")
-        _render_events(rows)
-        web = settings.hud_web_url.rstrip("/")
-        console.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
-
-    report(events, json_output=json_output, render=_render)
+    if not events:
+        console.print("[yellow]No events found for this trace.[/yellow]")
+        return events
+    console.print(
+        Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
+    )
+    console.print(f"[dim]Source: {source}[/dim]\n")
+    _render_events(events)
+    web = settings.hud_web_url.rstrip("/")
+    console.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
+    return events
 
 
 @trace_app.command("get")
 def get_command(
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
-    json_output: bool = json_option(),
     local_dir: str | None = typer.Option(
         None, "--local-dir", help="Override the local span directory"
     ),
-) -> None:
+) -> Any:
     """Render the turns and tool calls for one rollout.
 
     Checks the local span directory first (``HUD_TELEMETRY_LOCAL_DIR``, or
@@ -92,27 +82,9 @@ def get_command(
 
     [not dim]Examples:
         hud trace get <trace-id>
-        hud trace get <trace-id> --json
-        hud trace <trace-id> --json[/not dim]
+        hud trace get <trace-id> --json[/not dim]
     """
-    _show_trace(trace_id, json_output=json_output, local_dir=local_dir)
-
-
-@trace_app.callback(invoke_without_command=True)
-def trace_command(
-    ctx: typer.Context,
-    json_output: bool = json_option(),
-) -> None:
-    """Inspect a rollout trace.
-
-    Prefer ``hud trace get <id>`` in scripts; ``hud trace <id>`` is rewritten to get.
-
-    [not dim]Examples:
-        hud trace get <trace-id>
-        hud trace <trace-id> --json[/not dim]
-    """
-    if ctx.invoked_subcommand is not None:
-        return
+    return _show_trace(trace_id, local_dir=local_dir)
 
 
 # ── local JSONL ────────────────────────────────────────────────────────────────
@@ -184,7 +156,7 @@ def _load_remote(trace_id: str) -> list[dict[str, Any]]:
     try:
         data = client.get(f"/trace/{trace_id}/events")
     except HudRequestError as exc:
-        raise map_request_error(exc, resource="Trace", input={"trace_id": trace_id}) from exc
+        raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
 
     if isinstance(data, dict):
         return data.get("events", [])

@@ -9,7 +9,7 @@ import httpx
 import pytest
 import typer
 
-from hud.cli import app, usage
+from hud.cli.app import app, recorded_invocation
 from hud.utils.exceptions import HudException
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ def _event(
         httpx, "post", lambda _url, json=None, **_k: sent.append(json) or httpx.Response(204)
     )
     try:
-        with usage.recorded_invocation(argv, app):
+        with recorded_invocation(argv, app):
             if error is not None:
                 raise error
     except BaseException as exc:
@@ -148,7 +148,7 @@ def test_command_error_propagates_when_opted_out(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "0")
     with (
         pytest.raises(ValueError, match="boom"),
-        usage.recorded_invocation(["hud", "eval"], app),
+        recorded_invocation(["hud", "eval"], app),
     ):
         raise ValueError("boom")
 
@@ -160,7 +160,7 @@ def test_payload_is_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
         "post",
         lambda url, json=None, **_k: sent.append((url, json)) or httpx.Response(204),
     )
-    with usage.recorded_invocation(["hud", "serve", "my_env.py"], app):
+    with recorded_invocation(["hud", "serve", "my_env.py"], app):
         pass
     (url, payload) = sent[0]
     assert url == "https://telemetry.example.test/v3/api/sdk-events/cli"

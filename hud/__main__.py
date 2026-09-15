@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hud.cli import main
+from hud.cli.app import main
 
 if __name__ == "__main__":
     main()

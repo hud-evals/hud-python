@@ -1,4 +1,4 @@
-"""EnvironmentSource identity and the live-env source file."""
+"""Environment source-tree identity and the live-env definition file."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.cli.source import EnvironmentSource, environment_file
+from hud.cli.app import app  # noqa: F401
+from hud.cli.deploy import EnvironmentSource
+from hud.cli.eval import environment_file
 from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:

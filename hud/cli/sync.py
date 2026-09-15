@@ -14,13 +14,13 @@ from uuid import UUID
 import typer
 from typer.core import TyperGroup
 
-from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
-from hud.cli.io import (
+from hud.cli.app import (
+    CLI,
+    CONFIG_PATH,
+    AuthScope,
     CliError,
-    confirm_or_abort,
-    json_option,
-    map_request_error,
-    report,
+    DirectoryLink,
+    DirectoryState,
 )
 from hud.cli.project import (
     PROJECT_OPTION_HELP,
@@ -109,7 +109,7 @@ def list_registry_environments(
             raise ValueError("Registry API returned an empty page before the reported total")
 
 
-sync_app = typer.Typer(
+sync_app = CLI(
     name="sync",
     help="Sync tasks and environments to the HUD platform",
     add_completion=False,
@@ -325,8 +325,7 @@ def sync_tasks_command(
         "--export",
         help="Export remote tasks to a file instead of syncing. Supports .json, .jsonl, and .csv",
     ),
-    json_output: bool = json_option(),
-) -> None:
+) -> Any:
     """Sync local task definitions to a platform taskset.
 
     [not dim]Collects Task objects from Python files, directories, or JSON,
@@ -403,22 +402,14 @@ def sync_tasks_command(
             if remote_taskset.taskset_id is None:
                 raise CliError("not_found", "Cannot link a taskset that does not exist")
             state.update(DirectoryLink(taskset_id=UUID(remote_taskset.taskset_id)))
-        report(
-            {**plan_payload, "status": "up_to_date", "dry_run": dry_run},
-            json_output=json_output,
-            render=lambda _saved: hud_console.success("All tasks up to date"),
-        )
-        return
+        hud_console.success("All tasks up to date")
+        return {**plan_payload, "status": "up_to_date", "dry_run": dry_run}
 
     if dry_run:
-        report(
-            {**plan_payload, "dry_run": True, "action": "sync_tasks"},
-            json_output=json_output,
-            render=lambda _saved: hud_console.info("\n  --dry-run: no changes made"),
-        )
-        return
+        hud_console.info("\n  --dry-run: no changes made")
+        return {**plan_payload, "dry_run": True, "action": "sync_tasks"}
 
-    confirm_or_abort("Proceed?", yes=yes, default=False)
+    CLI.confirm_or_abort("Proceed?", yes=yes, default=False)
     require_writable_placement(placement)
 
     # Upload tasks; the platform validates referenced environments.
@@ -432,7 +423,7 @@ def sync_tasks_command(
             taskset_id=remote_taskset.taskset_id,
         )
     except HudRequestError as exc:
-        raise map_request_error(exc, input={"taskset": plan.taskset_name}) from exc
+        raise CliError.from_http(exc, input={"taskset": plan.taskset_name}) from exc
 
     if link_target is True or (link.taskset_id is None and taskset_id is None and project is None):
         _save_taskset_id(result, hud_console, state)
@@ -448,13 +439,9 @@ def sync_tasks_command(
         "taskset_id": result.get("taskset_id"),
     }
 
-    def _render(row: dict[str, Any]) -> None:
-        hud_console.success("Sync complete")
-        created = row["tasks_created"]
-        updated = row["tasks_updated"]
-        hud_console.info(f"  + {created} created, ~ {updated} updated")
-
-    report(saved, json_output=json_output, render=_render)
+    hud_console.success("Sync complete")
+    hud_console.info(f"  + {created} created, ~ {updated} updated")
+    return saved
 
 
 @sync_app.command("env")
@@ -476,8 +463,7 @@ def sync_env_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-    json_output: bool = json_option(),
-) -> None:
+) -> Any:
     """Link local directory to a platform environment.
 
     [not dim]Validates an environment ID, verifies it exists, and stores
@@ -535,16 +521,12 @@ def sync_env_command(
             "id": selected_env.id,
             "name": selected_env.name,
         }
-        report(
-            plan,
-            json_output=json_output,
-            render=lambda row: hud_console.info(f"Would link to {row['name']} ({row['id']})"),
-        )
-        return
+        hud_console.info(f"Would link to {plan['name']} ({plan['id']})")
+        return plan
 
     if existing_registry_id and existing_registry_id != selected_env.id:
         hud_console.warning(f"Currently linked to: {existing_registry_id[:8]}...")
-        confirm_or_abort("Switch to new environment?", yes=yes, default=False)
+        CLI.confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
     changed = state.update(DirectoryLink(registry_id=UUID(selected_env.id)))
     saved = {
@@ -553,18 +535,14 @@ def sync_env_command(
         "short_id": selected_env.short_id,
         "changed": changed,
     }
-    report(
-        saved,
-        json_output=json_output,
-        render=lambda row: (
-            hud_console.success(f"Linked to: {row['name']} ({row['short_id']}...)"),
-            hud_console.dim_info("Link saved to:", str(CONFIG_PATH)) if row["changed"] else None,
-        ),
-    )
+    hud_console.success(f"Linked to: {saved['name']} ({saved['short_id']}...)")
+    if saved["changed"]:
+        hud_console.dim_info("Link saved to:", str(CONFIG_PATH))
+    return saved
 
 
 @sync_app.callback(invoke_without_command=True)
-def sync_callback(ctx: typer.Context) -> None:
+def sync_callback(ctx: typer.Context) -> Any:
     """Sync tasks and environments to the HUD platform.
 
     [not dim]Without a subcommand, syncs tasks using stored config.
@@ -581,4 +559,4 @@ def sync_callback(ctx: typer.Context) -> None:
     command = ctx.command.get_command(ctx, "tasks")
     assert command is not None
     with command.make_context("tasks", [], parent=ctx) as task_context:
-        command.invoke(task_context)
+        return command.invoke(task_context)

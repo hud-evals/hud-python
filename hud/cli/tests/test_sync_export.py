@@ -10,8 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 import hud.cli.sync as sync_module
-from hud.cli import app
-from hud.cli.io import CliError
+from hud.cli.app import CliError, app
 from hud.cli.sync import _write_csv
 from hud.eval import Task
 from hud.utils.exceptions import HudRequestError

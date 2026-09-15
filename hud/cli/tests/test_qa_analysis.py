@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hud.cli.qa_analysis import is_standard_result_blob, presentation_for_result
+from hud.cli.qa import is_standard_result_blob, presentation_for_result
 
 
 def test_failure_analysis_problems_are_a_failed_agent_finding() -> None:

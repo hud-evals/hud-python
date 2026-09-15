@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from hud.cli.config import DirectoryLink
+from hud.cli.app import DirectoryLink
 from hud.cli.project import (
     Project,
     ProjectNotWritable,

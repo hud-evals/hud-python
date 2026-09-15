@@ -4,8 +4,8 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import app
 from hud.cli import task as task_module
+from hud.cli.app import app
 from hud.eval import Task, Taskset
 
 

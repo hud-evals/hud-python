@@ -9,10 +9,12 @@ from typing import Any
 
 import typer
 
-from hud.cli.config import CONFIG_PATH, AuthScope, DirectoryLink, DirectoryState
-from hud.cli.io import (
-    json_option,
-    report,
+from hud.cli.app import (
+    CLI,
+    CONFIG_PATH,
+    AuthScope,
+    DirectoryLink,
+    DirectoryState,
 )
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
@@ -156,7 +158,7 @@ def require_writable_placement(placement: Placement) -> None:
         raise ProjectNotWritable(placement.project)
 
 
-project_app = typer.Typer(
+project_app = CLI(
     name="project",
     help="Show and choose the Project for new environments and tasksets",
     add_completion=False,
@@ -166,11 +168,10 @@ project_app = typer.Typer(
 
 @project_app.command("list")
 def list_command(
-    json_output: bool = json_option(),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
-) -> None:
+) -> Any:
     """List all visible Projects and their canonical IDs."""
     rows = [asdict(project) for project in list_projects(PlatformClient.from_settings())]
 
@@ -183,13 +184,12 @@ def list_command(
         if not projects:
             console.info("No projects found")
 
-    report(
-        rows,
-        json_output=json_output,
-        quiet=quiet,
-        ids=lambda projects: [project["id"] for project in projects],
-        render=_render,
-    )
+    if quiet:
+        for project in rows:
+            typer.echo(project["id"])
+    else:
+        _render(rows)
+    return rows
 
 
 @project_app.command("create")
@@ -199,11 +199,10 @@ def create_command(
     description: str | None = typer.Option(None, "--description"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
     no_use: bool = typer.Option(False, "--no-use", help="Create without linking this directory"),
-    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-) -> None:
+) -> Any:
     """Create a Project and link this directory unless --no-use is passed."""
     platform = PlatformClient.from_settings()
     payload = {"name": name}
@@ -211,12 +210,8 @@ def create_command(
         payload["description"] = description
     if dry_run:
         plan = {"dry_run": True, "action": "create_project", **payload}
-        report(
-            plan,
-            json_output=json_output,
-            render=lambda saved: HUDConsole().info(f"Would create Project {saved['name']}"),
-        )
-        return
+        HUDConsole().info(f"Would create Project {plan['name']}")
+        return plan
     state = (
         None
         if no_use
@@ -230,11 +225,8 @@ def create_command(
     if state is not None:
         state.update(DirectoryLink(project_id=created.id))
     saved = asdict(created)
-    report(
-        saved,
-        json_output=json_output,
-        render=lambda row: HUDConsole().success(f"Created Project: {row['name']} ({row['id']})"),
-    )
+    HUDConsole().success(f"Created Project: {saved['name']} ({saved['id']})")
+    return saved
 
 
 @project_app.command("use")
@@ -242,11 +234,10 @@ def use_command(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help="Project ID from hud project list"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
-    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
-) -> None:
+) -> Any:
     """Link a directory to a Project in .hud/config.json for this account and team."""
     platform = PlatformClient.from_settings()
     state = DirectoryState(
@@ -258,21 +249,17 @@ def use_command(
     if not dry_run:
         state.update(DirectoryLink(project_id=project.id))
     saved = {**asdict(project), "dry_run": dry_run}
-    report(
-        saved,
-        json_output=json_output,
-        render=lambda row: HUDConsole().success(
-            f"{'Would use' if row['dry_run'] else 'Using'} Project: {row['name']} ({row['id']})"
-        ),
+    HUDConsole().success(
+        f"{'Would use' if saved['dry_run'] else 'Using'} Project: {saved['name']} ({saved['id']})"
     )
+    return saved
 
 
 @project_app.callback(invoke_without_command=True)
 def project_callback(
     ctx: typer.Context,
     directory: str = typer.Option(".", "--directory", "-C"),
-    json_output: bool = json_option(),
-) -> None:
+) -> Any:
     """Show the Project selected for this directory."""
     ctx.meta["hud_project_directory"] = directory
     if ctx.invoked_subcommand is not None:
@@ -286,8 +273,5 @@ def project_callback(
         "source": placement.source.value,
         "label": placement.label,
     }
-    report(
-        saved,
-        json_output=json_output,
-        render=lambda row: HUDConsole().info(f"Project: {row['label']}"),
-    )
+    HUDConsole().info(f"Project: {saved['label']}")
+    return saved

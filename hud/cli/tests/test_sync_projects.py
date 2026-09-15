@@ -9,8 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 import hud.cli.sync as sync_module
-from hud.cli import app
-from hud.cli.config import AuthScope, DirectoryState
+from hud.cli.app import AuthScope, DirectoryState, app
 from hud.eval import Task, Taskset
 from hud.utils.exceptions import HudRequestError
 from hud.utils.platform import PlatformClient

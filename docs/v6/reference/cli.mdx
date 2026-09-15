@@ -28,7 +28,7 @@ List, get, create, and status commands accept `--json`. JSON is written to **std
 
 Mutating commands accept `--dry-run` where an action can be described without performing it, and `--yes` / `-y` to skip confirmation. `--dry-run` never prompts. In a non-interactive terminal a real mutating action does not prompt; pass `--yes` or it exits `2`.
 
-Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Older shortcuts stay registered: `hud jobs <id>`, `hud trace <id>`, `hud set`. Hidden aliases: `hud job` → `hud jobs`; `hud cancel` is a deprecated alias for `hud jobs cancel`.
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Bare `hud jobs` and `hud qa` list. Hidden aliases: `hud job` → `hud jobs`; `hud cancel` is a deprecated alias for `hud jobs cancel`.
 
 ## Build & iterate
 
@@ -86,13 +86,14 @@ hud deploy --project <project-id>
 | Option | Description |
 |--------|-------------|
 | `--all`, `-a` | Deploy all environments in the directory. |
-| `--env`, `-e` | Env var `KEY=VALUE` (repeatable). |
-| `--env-file` | Path to a `.env` file. |
+| `--env`, `-e` | Env var `KEY=VALUE` (repeatable). Upserts registry secrets. |
+| `--env-file` | Upsert registry secrets from this file. Keys omitted from the file are kept. |
+| `--no-env` | Skip seeding from a local `.env` on first deploy. Rebuilds already skip `.env` unless `--env-file` is passed. |
 | `--project` | One-command Project override by ID. Falls back to the directory Project, `HUD_DEFAULT_PROJECT`, then the team default. |
 | `--json` | Structured result on stdout. `--all --json` emits one summary document. |
-| `--dry-run` | Print the deploy plan without uploading or prompting. Unresolved `.env` consent is reported as `dotenv_pending`. |
+| `--dry-run` | Print the deploy plan without uploading or prompting. A first deploy with an unresolved `.env` reports `dotenv_pending`. |
 
-A real noninteractive deploy needs `--env-file .env` to include secrets or `--no-env` to skip them when no saved consent applies. An interactive choice is remembered for that destination; explicit flags do not change it.
+`--env` / `--env-file` upsert onto the registry's existing secrets. Omitting them on a rebuild keeps whatever is already stored. A first deploy that finds a local `.env` prompts once for that invocation (or needs `--env-file` / `--no-env` when stdin is not a TTY).
 
 ## Evaluate
 
@@ -205,9 +206,9 @@ taskset ids for this working copy, plus the API origin, user, and team that crea
 A worktree or copy of the directory keeps the file; credentials that do not match the stored
 scope fail instead of using the ids. Existing resources remain in their original Project.
 
-Legacy `.hud/deploy.json` is left unread. A `.hud/config.json` that is not this schema fails instead
-of being imported. Relink with `hud project use <project-id>`, `hud sync env <environment-id>`, or
-`hud sync tasks <taskset-id> --link --yes`. The first successful task upload records its canonical
+Legacy `.hud/deploy.json` is left unread. A `.hud/config.json` that is not this schema, or that was
+written under different credentials, fails instead of being imported. Delete the file; the next
+deploy, project, or sync command writes a new one. The first successful task upload records its canonical
 ID; later explicit targets only replace it with `--link`.
 
 Credentials remain in `~/.hud/.env`, cache in `~/.hud/.cache`, and authored source and
@@ -267,7 +268,6 @@ hud jobs list --quiet         # job ids, one per line
 hud jobs get <job-id>         # traces for one job
 hud jobs cancel <job-id> --yes
 hud jobs                      # alias for list
-hud jobs <job-id>             # alias for get
 ```
 
 | Option | Description |
@@ -287,7 +287,6 @@ back to the platform API.
 ```bash
 hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results
 hud trace get <trace-id> --json   # raw event list
-hud trace <trace-id>              # alias for get
 ```
 
 Set `HUD_TELEMETRY_ENABLED=0` to keep spans on disk at `~/.hud/spans`, or set

@@ -344,7 +344,7 @@ def test_eval_dry_run_does_not_prompt_or_write(
 
     from typer.testing import CliRunner
 
-    from hud.cli import app
+    from hud.cli.app import app
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / "tasks.json").write_text("[]")
@@ -416,7 +416,7 @@ def test_eval_invalid_configuration_is_a_structured_error(tmp_path, monkeypatch,
 
     from typer.testing import CliRunner
 
-    from hud.cli import app
+    from hud.cli.app import app
 
     monkeypatch.chdir(tmp_path)
     config = tmp_path / ".hud_eval.toml"

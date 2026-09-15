@@ -23,9 +23,11 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
-from hud.cli.config import parse_key_value
-from hud.cli.io import CliError, confirm_or_abort, json_option, read_text_arg, report
-from hud.cli.source import environment_file
+from hud.cli.app import (
+    CLI,
+    CliError,
+    parse_key_value,
+)
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
@@ -561,6 +563,27 @@ def _build_agent(cfg: EvalConfig) -> Any:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
+def environment_file(env: Any) -> Path:
+    """The ``.py`` file that defined this live env's templates.
+
+    ``Taskset.from_file`` already imported that module; the bound
+    ``task._env`` is the same object ``Taskset.run()`` uses when no
+    ``runtime=`` is passed. The CLI still serves it in a child process.
+    """
+    files = {
+        Path(factory.func.__code__.co_filename).resolve()
+        for factory in env.tasks.values()
+        if getattr(getattr(factory, "func", None), "__code__", None) is not None
+    }
+    if len(files) != 1:
+        raise ValueError(
+            "local spawn needs a bound Environment from a Python source "
+            "(``@env.template`` rows). Portable JSON rows require --remote, "
+            "--runtime hud, or a tcp:// url"
+        )
+    return files.pop()
+
+
 def _local_subprocess(task: Any) -> Any:
     """Serve the Environment bound on ``task`` (``SubprocessRuntime``)."""
     from hud.eval import SubprocessRuntime
@@ -815,7 +838,6 @@ def eval_command(
         "-y",
         help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
-    json_output: bool = json_option(),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -833,7 +855,7 @@ def eval_command(
         "--remote",
         help="Run the whole rollout remotely on the HUD platform",
     ),
-) -> None:
+) -> Any:
     """Run evaluation on datasets or individual tasks with agents.
 
     Examples:
@@ -850,7 +872,7 @@ def eval_command(
     hud_console.info("Initializing evaluation...")
 
     if from_json is not None:
-        cfg = EvalConfig.model_validate_json(read_text_arg(str(from_json)))
+        cfg = EvalConfig.model_validate_json(CLI.read_text(str(from_json)))
     else:
         cfg = EvalConfig.load()
 
@@ -893,12 +915,8 @@ def eval_command(
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
         }
-        report(
-            plan,
-            json_output=json_output,
-            render=lambda _saved: hud_console.info("--dry-run: no evaluation started"),
-        )
-        return
+        hud_console.info("--dry-run: no evaluation started")
+        return plan
 
     if cfg.source is None:
         cfg = cfg.model_copy(update={"source": find_tasks_file(None, msg="Select a tasks file")})
@@ -920,7 +938,7 @@ def eval_command(
 
     cfg.display()
 
-    confirm_or_abort("Proceed?", yes=yes, default=True)
+    CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 
     start_time = time.time()
     job = asyncio.run(_run_evaluation(cfg))
@@ -946,8 +964,6 @@ def eval_command(
         ],
     }
 
-    def _render(row: dict[str, Any]) -> None:
-        if row["runs"]:
-            display_runs(runs, name=str(row["source"] or ""), elapsed=float(row["elapsed_seconds"]))
-
-    report(saved, json_output=json_output, render=_render)
+    if saved["runs"]:
+        display_runs(runs, name=str(saved["source"] or ""), elapsed=float(saved["elapsed_seconds"]))
+    return saved

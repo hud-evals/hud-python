@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import app
+from hud.cli.app import app
 
 runner = CliRunner()
 

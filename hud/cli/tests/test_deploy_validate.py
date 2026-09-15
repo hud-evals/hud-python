@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hud.cli.deploy import _validate_dockerfile, _validate_environment, _validate_pyproject
-from hud.cli.source import EnvironmentSource
+from hud.cli.app import app  # noqa: F401
+from hud.cli.deploy import (
+    EnvironmentSource,
+    _validate_dockerfile,
+    _validate_environment,
+    _validate_pyproject,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
