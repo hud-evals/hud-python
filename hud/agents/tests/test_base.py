@@ -136,11 +136,10 @@ def test_create_agent_resolves_gateway_model_metadata(
 @pytest.mark.parametrize(
     ("alias", "canonical"),
     [
-        ("deepseek-v4", "deepseek/deepseek-v4-pro"),
-        ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+        ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),  # slug without provider prefix
         ("glm-5.2", "z-ai/glm-5.2"),
         ("kimi-k2.6", "moonshotai/kimi-k2.6"),
-        ("minimax-m3", "MiniMax-M3"),
+        ("minimax-m3", "MiniMax-M3"),  # case-insensitive
     ],
 )
 def test_create_agent_accepts_gateway_model_aliases(

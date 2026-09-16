@@ -35,11 +35,7 @@ from hud.eval import (
 )
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.gateway import (
-    build_gateway_client,
-    list_gateway_models,
-    normalize_gateway_model_id,
-)
+from hud.utils.gateway import build_gateway_client, list_gateway_models
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -456,8 +452,6 @@ def eval_command(
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
     if cfg.model:
         agent_kwargs["model"] = cfg.model
-    if isinstance(agent_kwargs.get("model"), str):
-        agent_kwargs["model"] = normalize_gateway_model_id(agent_kwargs["model"])
     agent_kwargs["max_steps"] = cfg.max_steps
     if cfg.auto_respond:
         agent_kwargs["auto_respond"] = True

@@ -168,9 +168,7 @@ def list_checkpoints(
         hud models checkpoints <model> --quiet[/not dim]
     """
     model_id = resolve_gateway_model(model).id
-    checkpoints = sorted(
-        asyncio.run(TrainingClient(model_id).checkpoints()), key=lambda c: c.created_at or ""
-    )
+    checkpoints = asyncio.run(TrainingClient(model_id).checkpoints())
     rows = [checkpoint.model_dump() for checkpoint in checkpoints]
     if quiet:
         for ckpt in checkpoints:

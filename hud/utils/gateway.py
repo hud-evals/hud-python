@@ -59,18 +59,6 @@ class GatewayModelsResponse(BaseModel):
 
 _BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
 
-_MODEL_ALIASES: dict[str, str] = {
-    "deepseek-v4": "deepseek/deepseek-v4-pro",
-    "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
-    "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
-    "glm-5.2": "z-ai/glm-5.2",
-    "kimi-2.6": "moonshotai/kimi-k2.6",
-    "kimi-k2.6": "moonshotai/kimi-k2.6",
-    "minimax-m3": "MiniMax-M3",
-    "minimax-m2.7": "MiniMax-M2.7",
-    "minimax-m2.5": "MiniMax-M2.5",
-}
-
 
 def _inject_trace_id(request: httpx.Request) -> None:
     request.headers.update(get_trace_headers())
@@ -78,11 +66,6 @@ def _inject_trace_id(request: httpx.Request) -> None:
 
 async def _inject_trace_id_async(request: httpx.Request) -> None:
     _inject_trace_id(request)
-
-
-def normalize_gateway_model_id(model: str) -> str:
-    """Return the canonical HUD gateway model slug for known short aliases."""
-    return _MODEL_ALIASES.get(model.lower(), model)
 
 
 def _is_bedrock_arn(model: str | None) -> bool:
@@ -200,13 +183,22 @@ def list_gateway_models() -> list[GatewayModelInfo]:
 
 
 def resolve_gateway_model(model: str) -> GatewayModelInfo:
-    """The catalog entry for a model id, slug, or display name (short aliases accepted)."""
-    wanted = normalize_gateway_model_id(model)
-    catalog = list_gateway_models()
-    for entry in catalog:
-        if wanted in (entry.id, entry.name, entry.model_name):
+    """The catalog entry for a model id, display name, or slug (case-insensitive;
+    a slug's provider prefix is optional)."""
+    names = [
+        (name, entry)
+        for entry in list_gateway_models()
+        for name in (
+            entry.id,
+            entry.name,
+            entry.model_name,
+            (entry.model_name or "").rsplit("/", 1)[-1],
+        )
+        if name
+    ]
+    for name, entry in names:
+        if name.lower() == model.lower():
             return entry
-    known = [name for entry in catalog for name in (entry.id, entry.name, entry.model_name) if name]
-    near = difflib.get_close_matches(model, [*known, *_MODEL_ALIASES], n=3, cutoff=0.5)
+    near = difflib.get_close_matches(model, [name for name, _ in names], n=3, cutoff=0.5)
     hint = f" Did you mean: {', '.join(near)}?" if near else " Run `hud models` to list them."
     raise ValueError(f"Model {model!r} not found in the HUD gateway registry.{hint}")

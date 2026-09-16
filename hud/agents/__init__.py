@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
-from hud.utils.gateway import normalize_gateway_model_id, resolve_gateway_model
+from hud.utils.gateway import resolve_gateway_model
 
 if TYPE_CHECKING:
     from typing import TypeAlias
@@ -53,11 +53,10 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
 
 def resolve_agent_model(model: str) -> tuple[AgentType, str]:
-    """Resolve a model alias, catalog ID/name, or agent type without constructing a client."""
-    normalized = normalize_gateway_model_id(model)
-    agent_type = next((candidate for candidate in AgentType if candidate.value == normalized), None)
+    """Resolve a catalog id/name/slug or an agent type without constructing a client."""
+    agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
     if agent_type is not None:
-        return agent_type, normalized
+        return agent_type, model
     try:
         entry = resolve_gateway_model(model)
     except HudAuthenticationError:
@@ -76,7 +75,7 @@ def resolve_agent_model(model: str) -> tuple[AgentType, str]:
         agent_type = AgentType(entry.sdk_agent_type)
     except ValueError as exc:
         raise ValueError(f"Model {model!r} has invalid agent type metadata") from exc
-    return agent_type, entry.model_name or normalized
+    return agent_type, entry.model_name or model
 
 
 _LAZY_EXPORTS = {
