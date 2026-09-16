@@ -138,23 +138,6 @@ class EvalConfig(BaseModel):
             {**data, **{k: v for k, v in overrides.items() if k != "agent_config"}}
         )
 
-    def with_placement(self) -> EvalConfig:
-        """Pin ``runtime``: a local file spawns locally, a platform taskset runs hosted."""
-        is_file = self.source is not None and Path(self.source).exists()
-        if self.runtime is None:
-            return self.model_copy(
-                update={"runtime": Placement.LOCAL if is_file else Placement.HOSTED}
-            )
-        if self.runtime is Placement.LOCAL and not is_file:
-            raise ValueError(
-                f"--runtime local needs a local env source, but {self.source!r} is a "
-                "platform taskset with no env source on disk. Run it on the platform "
-                "by omitting --runtime or passing --remote, export it first "
-                "(hud sync tasks <name> --export tasks.json) and run that file, "
-                "or attach to a served env with --runtime tcp://host:port."
-            )
-        return self
-
 
 def _is_container_row(task: Task) -> bool:
     config = task.runtime_config
@@ -308,7 +291,9 @@ def eval_command(
                 "usage",
                 "Dry-run requires an explicit task source and agent (or configured defaults).",
             )
-        cfg = cfg.with_placement()
+        planned = cfg.runtime or (
+            Placement.LOCAL if Path(cfg.source).exists() else Placement.HOSTED
+        )
         hud_console.info("--dry-run: no evaluation started")
         return {
             "dry_run": True,
@@ -316,8 +301,8 @@ def eval_command(
             "source": cfg.source,
             "agent": agent_type.value,
             "model": cfg.model,
-            "runtime": cfg.runtime,
-            "remote": cfg.runtime is Placement.HOSTED,
+            "runtime": planned,
+            "remote": planned is Placement.HOSTED,
             "all": cfg.all,
             "max_steps": cfg.max_steps,
             "max_concurrent": cfg.max_concurrent,
@@ -378,9 +363,13 @@ def eval_command(
             picked["agent_config"] = {picked_type.value: {"model_name": picked_model.name}}
         cfg = cfg.merge(picked)
 
-    cfg = cfg.with_placement()
-    agent_type = cfg.agent_type
-    assert agent_type is not None and cfg.runtime is not None and cfg.source is not None
+    agent_type, source = cfg.agent_type, cfg.source
+    assert agent_type is not None and source is not None
+    # A file on disk spawns locally; a platform taskset runs on the platform.
+    if cfg.runtime is None:
+        is_file = Path(source).exists()
+        cfg = cfg.merge({"runtime": Placement.LOCAL if is_file else Placement.HOSTED})
+    assert cfg.runtime is not None
 
     if cfg.gateway or cfg.runtime in (Placement.HUD, Placement.HOSTED):
         PlatformClient.from_settings()
@@ -391,15 +380,15 @@ def eval_command(
     ):
         raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
-    if Path(cfg.source).exists():
-        hud_console.info(f"Loading tasks from: {cfg.source}")
-        taskset = Taskset.from_file(cfg.source)
+    if Path(source).exists():
+        hud_console.info(f"Loading tasks from: {source}")
+        taskset = Taskset.from_file(source)
     else:
-        hud_console.info(f"Loading platform taskset: {cfg.source}")
-        taskset = Taskset.from_api(cfg.source)
+        hud_console.info(f"Loading platform taskset: {source}")
+        taskset = Taskset.from_api(source)
     if not taskset:
         raise ValueError(
-            f"No runnable Tasks found in {cfg.source}. Define a `hud.Environment` with "
+            f"No runnable Tasks found in {source}. Define a `hud.Environment` with "
             "`@env.template` and expose Tasks (for example, `t = my_task(arg=...)`)."
         )
     if cfg.task_ids:

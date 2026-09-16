@@ -170,14 +170,23 @@ def test_load_rejects_invalid_configuration(tmp_path: Path, contents: str, match
         EvalConfig.load(path)
 
 
-def test_placement_defaults_from_source(tmp_path: Path) -> None:
-    tasks = tmp_path / "tasks.json"
-    tasks.write_text("[]", encoding="utf-8")
-    assert EvalConfig(source=str(tasks)).with_placement().runtime == "local"
-    assert EvalConfig(source="My Tasks").with_placement().runtime == "hosted"
-    assert EvalConfig(source="My Tasks", runtime="hud").with_placement().runtime == "hud"
-    with pytest.raises(ValueError, match="platform taskset with no env source"):
-        EvalConfig(source="My Tasks", runtime="local").with_placement()
+def test_placement_defaults_from_source(eval_cli: _EvalCli) -> None:
+    assert eval_cli.invoke("tasks.py", "openai", "--dry-run")["runtime"] == "local"
+    assert eval_cli.invoke("My Tasks", "openai", "--dry-run")["runtime"] == "hosted"
+    assert (
+        eval_cli.invoke("My Tasks", "openai", "--runtime", "hud", "--dry-run")["runtime"] == "hud"
+    )
+
+
+def test_local_against_a_platform_taskset_is_refused(eval_cli: _EvalCli, monkeypatch) -> None:
+    monkeypatch.setattr(
+        Taskset,
+        "from_api",
+        classmethod(lambda cls, name: Taskset(name, [Task(env="demo", id="a")])),
+    )
+    payload = eval_cli.invoke("My Tasks", "openai", "--runtime", "local", "--yes", exit_code=2)
+    assert "have no bound Environment or container image (a)" in payload["message"]
+    assert eval_cli.taskset is None
 
 
 @pytest.mark.parametrize("flags", [["--runtime", "hud"], ["--remote"], ["--gateway"]])
