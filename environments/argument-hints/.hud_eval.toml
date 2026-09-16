@@ -1,0 +1,33 @@
+# hud eval configuration. Command-line arguments override these values.
+# Every key is optional; unknown keys are an error. ${VAR} expands from the
+# environment and HUD settings, and an unset variable is an error.
+
+[eval]
+# source = "tasks.py"           # tasks file, or a platform taskset name / id
+# agent = "claude"              # claude, openai, gemini, openai_compatible
+# model = "claude-sonnet-4-6"
+# all = false                   # run every task instead of just the first
+# task_ids = ["fix_bug", "0"]   # slugs or 0-based indices
+# max_steps = 10
+# max_concurrent = 30
+# group_size = 1                # runs per task
+# auto_respond = false
+# gateway = false               # force LLM calls through the HUD gateway
+# runtime = "local"             # local, hud, hosted, docker, modal, daytona, or tcp://host:port
+# verbose = false
+# very_verbose = false
+
+# Per-agent sections are passed to that agent's config.
+[claude]
+# max_tokens = 16384
+
+[openai]
+# temperature = 0.7
+
+[gemini]
+# thinking_level = "high"
+
+[openai_compatible]
+# model = "my-model"
+# base_url = "http://localhost:8000/v1"
+# api_key = "${MY_PROVIDER_API_KEY}"

@@ -59,6 +59,8 @@ hud/rl/checkpoints_test/
 .hud/
 .hud_eval_config
 .hud_eval.toml
+# The template hud init copies into new projects.
+!environments/*/.hud_eval.toml
 
 docs/internal
 

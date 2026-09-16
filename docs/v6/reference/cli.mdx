@@ -155,6 +155,37 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--json` | Structured results on stdout. |
 | `--dry-run` | Print the resolved eval plan without running. |
 
+#### `.hud_eval.toml`
+
+Defaults for the directory you run `hud eval` from. Precedence is CLI arguments, then this file, then built-in defaults. `hud init` drops a fully commented template into new projects; `hud eval` never writes one itself, and a missing file just means defaults.
+
+```toml
+[eval]
+source = "tasks.py"           # tasks file, or a platform taskset name / id
+agent = "claude"              # claude, openai, gemini, openai_compatible
+model = "claude-sonnet-4-6"
+all = false                   # run every task instead of just the first
+task_ids = ["fix_bug", "0"]   # slugs or 0-based indices
+max_steps = 10
+max_concurrent = 30
+group_size = 1                # runs per task
+auto_respond = false
+gateway = false               # force LLM calls through the HUD gateway
+runtime = "local"             # local, hud, hosted, docker, modal, daytona, or tcp://host:port
+verbose = false
+very_verbose = false
+
+[claude]                      # one section per agent; keys go to that agent's config
+max_tokens = 16384
+
+[openai_compatible]
+model = "my-model"
+base_url = "http://localhost:8000/v1"
+api_key = "${MY_PROVIDER_API_KEY}"
+```
+
+Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown keys, unknown sections, and a file that does not parse. `--config key=value` layers onto the selected agent's section. There is no `remote` key: use `runtime = "hosted"`.
+
 ## Run a packaged image
 
 `hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD serves the Environment bound on that task from its source in a subprocess. With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`).

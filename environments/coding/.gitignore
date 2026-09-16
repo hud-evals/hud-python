@@ -20,7 +20,6 @@ dist/
 hud.lock.yaml
 .hud
 .hud_local/
-.hud_eval.toml
 
 # The SDK repo ignores uv.lock at its root; this template pins its own so the
 # example resolves reproducibly.

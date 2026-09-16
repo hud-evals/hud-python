@@ -14,7 +14,6 @@ __pycache__/
 # HUD generated files
 .hud/
 hud.lock.yaml
-.hud_eval.toml
 remote_tasks.json
 
 # Ruff cache

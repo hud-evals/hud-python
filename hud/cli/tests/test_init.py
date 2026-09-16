@@ -15,7 +15,9 @@ from typer.testing import CliRunner
 from hud.cli import CliError
 from hud.cli import init as init_module
 from hud.cli.__main__ import app
+from hud.cli.eval import EvalConfig
 from hud.cli.init import init_command
+from hud.types import AgentType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -94,11 +96,16 @@ def test_blank_materializes_a_runnable_example(tmp_path: Path) -> None:
         "tasks.py",
         "Dockerfile.hud",
         ".dockerignore",
+        ".hud_eval.toml",
     }
     assert 'Environment(name="berry")' in (target / "env.py").read_text()
     assert "package = false" in (target / "pyproject.toml").read_text()
     assert 'CMD ["uv", "run", "hud", "serve"' in (target / "Dockerfile.hud").read_text()
     assert ".venv" in (target / ".dockerignore").read_text()
+    # The template is all comments: a fresh project evaluates with built-in defaults.
+    assert EvalConfig.load(target / ".hud_eval.toml") == EvalConfig(
+        agent_config={agent.value: {} for agent in AgentType}
+    )
 
 
 def test_env_name_is_normalized(tmp_path: Path) -> None:
