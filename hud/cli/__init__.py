@@ -371,6 +371,21 @@ class CLIGroup(TyperGroup):
             raise typer.Exit(error.exit_code) from exc
 
 
+class IdGetGroup(CLIGroup):
+    """Accept a UUID in place of ``get <id>``, including preceding options."""
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        _, remaining, _ = self.make_parser(ctx).parse_args(args.copy())
+        if remaining:
+            try:
+                UUID(remaining[0])
+            except ValueError:
+                pass
+            else:
+                args = ["get", *args]
+        return super().parse_args(ctx, args)
+
+
 class CLI(typer.Typer):
     def __init__(self, *args: Any, cls: type[TyperGroup] | None = None, **kwargs: Any) -> None:
         super().__init__(*args, cls=cls or CLIGroup, **kwargs)

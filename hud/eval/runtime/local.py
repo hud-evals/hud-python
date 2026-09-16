@@ -154,6 +154,9 @@ class SubprocessRuntime:
     unless *env* pins one explicitly; placing a row whose env the source does
     not define fails loudly in the child.
 
+    Set *task_source* when the path authors task rows: the child reloads their
+    imports and serves the bound environment, including multi-file registrations.
+
     The child's working directory is the source's directory, so sibling
     imports and relative data paths resolve; ``@env.initialize`` daemons start
     in the child and die with it. Because the source is re-imported in the
@@ -167,6 +170,7 @@ class SubprocessRuntime:
         *,
         env: str | None = None,
         ready_timeout: float = 120.0,
+        task_source: bool = False,
     ) -> None:
         from hud.environment.env import Environment as _Environment
 
@@ -186,6 +190,7 @@ class SubprocessRuntime:
             self.source = Path(source).resolve()
             self.env = env
         self.ready_timeout = ready_timeout
+        self.task_source = task_source
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
@@ -195,6 +200,8 @@ class SubprocessRuntime:
             raise FileNotFoundError(f"SubprocessRuntime: source not found: {self.source}")
         cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
         cmd += ["--env", self.env or task.env]
+        if self.task_source:
+            cmd.append("--task-source")
         proc = await create_process_group_exec(
             *cmd,
             term_timeout=10.0,

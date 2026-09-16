@@ -26,9 +26,9 @@ List, get, create, and status commands accept `--json`. JSON is written to **std
 | `1` | Failure |
 | `2` | Usage error (bad arguments, or a prompt needed in a non-interactive terminal) |
 
-Mutating commands accept `--dry-run` where an action can be described without performing it, and `--yes` / `-y` to skip confirmation. `--dry-run` never prompts. In a non-interactive terminal a real mutating action does not prompt; pass `--yes` or it exits `2`.
+Commands that support `--dry-run` describe the action without performing it or prompting. Commands with confirmation prompts, such as eval and job cancellation, accept `--yes` / `-y`; without it, a required prompt exits `2` in a non-interactive terminal. Commands without confirmation prompts do not require `--yes`. Deploy handles local `.env` selection separately with `--env-file` or `--no-env`.
 
-Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Bare `hud jobs` and `hud qa` list. `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). `hud jobs <id>` and `hud trace <id>` are shorthands for `get`. Bare `hud jobs` and `hud qa` list. `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
 
 ## Build & iterate
 
@@ -50,7 +50,7 @@ hud init my-env --dir envs            # coding → ./envs/my-env
 
 | Option | Description |
 |--------|-------------|
-| `--template`, `-t` | Example environment to use: `coding`, `cua`, or `blank`. Omit for the interactive picker; a named non-interactive run uses `coding`. `--preset`/`-p` are aliases. |
+| `--template`, `-t` | Example environment to use: `coding`, `cua`, `blank`, or `argument-hints`. Omit for the interactive picker; a named non-interactive run uses `coding`. `--preset`/`-p` are aliases. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 | `--json` | Structured result on stdout. |
@@ -76,9 +76,9 @@ hud serve env.py -p 9000
 
 Build **and** publish to HUD infra in one step. The environment's name comes
 from the `Environment(...)` declaration in code; deploying the same name again
-rebuilds that environment. A tree with more than one declaration (actor and
-judge in the same source) is two deploys: `hud deploy --name workspace` and
-`hud deploy --name judge`.
+rebuilds that environment. `--name` selects the registry identity; it does not
+change the image's entrypoint. For multiple environments, each build must serve
+the selected name through its Dockerfile or build configuration.
 
 ```bash
 hud deploy
@@ -95,7 +95,7 @@ hud deploy --project <name-or-id>
 | `--build-arg` | Docker build arg `KEY=VALUE` (repeatable). Omit on a rebuild to keep the registry's stored args. |
 | `--secret` | Docker build secret for this build only, e.g. `--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN` (`src=` also works). |
 | `--no-cache` | Disable the remote build cache. |
-| `--project` | One-command Project override by ID. Falls back to the directory Project, `HUD_DEFAULT_PROJECT`, then the team default. |
+| `--project` | One-command Project override by name or ID. Falls back to the directory Project, `HUD_DEFAULT_PROJECT`, then the team default. |
 | `--runtime` | Persist a registry default runtime for tasks that do not specify one: `hud` or `modal`. |
 | `--runtime-config` | JSON `RuntimeConfig` to persist as the registry default (compose, resources, limits). Must set at least one field. |
 | `--json` | Structured result on stdout. |
@@ -123,13 +123,13 @@ hud eval env.py claude --full                     # every task, auto-respond, 10
 ```
 
 <Note>
-`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). Rows created from `@env.template` already carry that Environment; the CLI serves its defining file in a fresh subprocess per rollout, and rows whose `runtime_config` names an image start a container. (`Taskset.run()` without `runtime=` serves a live env in-process instead — see [placement](/v6/internals/placement#resolution).)
+`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). The CLI reloads that source in a fresh subprocess and serves the Environment bound to the selected task, preserving registrations across imported modules. Rows whose `runtime_config` specifies an image or Compose project use Docker. (`Taskset.run()` without `runtime=` serves a live env in-process instead — see [placement](/v6/internals/placement#resolution).)
 </Note>
 
 **What you don't need for a local run:**
-- A HUD API key - local evals don't hit the platform
+- A HUD API key when using a direct provider key with HUD telemetry uploads disabled. Gateway inference and platform reporting require HUD credentials.
 - `hud serve` running - `hud eval` spawns the env subprocess for you
-- Docker - unless your env explicitly uses `DockerRuntime`
+- Docker - unless a task's runtime configuration specifies an image or Compose project
 - An SSH connection - the gateway timeout only applies when `env.workspace()` is declared
 
 For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claude`. The tasks are fetched from the platform and the rollouts run remotely by default, since the env source is not on disk.
@@ -170,7 +170,7 @@ max_steps = 10
 max_concurrent = 30
 group_size = 1                # runs per task
 auto_respond = false
-gateway = false               # force LLM calls through the HUD gateway
+gateway = false               # set true to force LLM calls through the HUD gateway
 runtime = "local"             # local, hud, hosted, docker, modal, daytona, or tcp://host:port
 verbose = false
 very_verbose = false
@@ -184,11 +184,11 @@ base_url = "http://localhost:8000/v1"
 api_key = "${MY_PROVIDER_API_KEY}"
 ```
 
-Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown keys, unknown sections, and a file that does not parse. `--config key=value` layers onto the selected agent's section. There is no `remote` key: use `runtime = "hosted"`.
+Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown `[eval]` keys, unknown sections, and a file that does not parse. Agent-specific sections follow the selected agent's configuration model; they do not all reject unknown keys. `--config key=value` layers onto the selected agent's section. There is no `remote` key: use `runtime = "hosted"`.
 
 ## Run a packaged image
 
-`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD serves the Environment bound on that task from its source in a subprocess. With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`).
+`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source` (default `.`). Without `--url`, HUD reloads the source and serves the task's Environment in a subprocess. With both `--source` and `--url`, it runs the resolved task against the already-served environment. Pass `--url` without `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source.
 
 ```bash
 hud task list
@@ -309,6 +309,7 @@ hud jobs list                 # recent jobs
 hud jobs list --json          # raw JSON array on stdout
 hud jobs list --quiet         # job ids, one per line
 hud jobs get <job-id>         # traces for one job
+hud jobs <job-id>             # shorthand for get
 hud jobs cancel <job-id> --yes
 hud jobs                      # alias for list
 ```
@@ -330,6 +331,7 @@ back to the platform API.
 ```bash
 hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results
 hud trace get <trace-id> --json   # raw event list
+hud trace <trace-id> --json       # shorthand for get
 ```
 
 Set `HUD_TELEMETRY_ENABLED=0` to keep spans on disk at `~/.hud/spans`, or set

@@ -13,7 +13,7 @@ reuse the rollout logprobs as the behavior proxy, form the token ratio
 trust region (zero gradient, not clipped), and normalize at the token level so
 long and short trajectories contribute evenly.
 
-    uv run ppo_custom_loss.py --steps 10   # set MODEL below (pick one with `hud models`)
+    uv run ppo_custom_loss.py --steps 10   # set MODEL below (pick one with `hud models list`)
 
 Requires torch (declared in this cookbook's pyproject; in the SDK it is the
 ``hud[train]`` extra).
@@ -34,7 +34,7 @@ from hud.eval import Job
 from hud.train import DatumTensors
 
 # The trainable gateway model to sample from and train, in place.
-# Pick one with `hud models` and paste its id here.
+# Pick one with `hud models list` and paste its id here.
 MODEL = "<trainable-model>"
 
 

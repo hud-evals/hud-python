@@ -10,7 +10,7 @@ Runs are passed directly: ``TrainingClient`` reads each ``Run``'s trajectory and
 reward. (Pass ``run.trace_id`` strings instead to train on trajectories the
 platform already holds.)
 
-    uv run simple_train.py --steps 10   # set MODEL below (pick one with `hud models`)
+    uv run simple_train.py --steps 10   # set MODEL below (pick one with `hud models list`)
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from hud.agents.types import AgentStep
 from hud.eval import Job
 
 # The trainable gateway model to sample from and train, in place.
-# Pick one with `hud models` and paste its id here.
+# Pick one with `hud models list` and paste its id here.
 MODEL = "Qwen3 4B Instruct 2507 (Tinker)"
 
 

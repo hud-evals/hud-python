@@ -15,6 +15,7 @@ from rich.text import Text
 from hud.cli import (
     CLI,
     CliError,
+    IdGetGroup,
 )
 from hud.settings import settings
 from hud.telemetry.span import normalize_trace_id
@@ -25,6 +26,7 @@ from hud.utils.platform import PlatformClient
 hud_console = HUDConsole()
 
 trace_app = CLI(
+    cls=IdGetGroup,
     name="trace",
     help="Inspect a rollout trace.",
     add_completion=False,

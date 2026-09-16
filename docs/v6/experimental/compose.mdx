@@ -160,9 +160,11 @@ files for `main`'s security options, resources, and an ephemeral host port, star
 returns the published control-channel address, and removes the project and its volumes when the
 rollout ends.
 
-**Hosted execution** is `HostedRuntime` like any other environment: `hud deploy` uploads the
-project root, the platform builds every service privately from it, and hosted rollouts run the
-stack. Declared `RuntimeResources` apply.
+**Hosted execution** uses `HostedRuntime`. Pass a JSON `RuntimeConfig` containing the Compose
+project with `hud deploy --runtime-config runtime.json`; a Compose filename alone does not
+select the build recipe. The command uploads the project root and supplies the explicit
+configuration to the builder. See the [Harbor deployment example](/v6/experimental/harbor#deploy-and-sync)
+for a file-backed Compose configuration. Declared `RuntimeResources` apply.
 
 `RuntimeConfig.compose.service_access=True` mounts a Docker socket at `/media/hud/docker.sock` in
 `main`. It is an explicit capability for environment code that must inspect or copy from sibling

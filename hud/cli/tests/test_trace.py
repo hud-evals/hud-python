@@ -31,8 +31,9 @@ def test_trace_link_uses_web_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("options_first", [False, True])
+@pytest.mark.parametrize("verb", [[], ["get"]])
 def test_trace_json_accepts_options_on_either_side_of_id(
-    monkeypatch: pytest.MonkeyPatch, options_first: bool
+    monkeypatch: pytest.MonkeyPatch, options_first: bool, verb: list[str]
 ) -> None:
     trace_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
     events = [{"kind": "agent_message", "text": "done"}]
@@ -45,8 +46,8 @@ def test_trace_json_accepts_options_on_either_side_of_id(
 
     monkeypatch.setattr(PlatformClient, "get", get_events)
 
-    args = ["get", "--json", trace_id] if options_first else ["get", trace_id, "--json"]
-    result = CliRunner().invoke(app, ["trace", *args])
+    args = ["--json", trace_id] if options_first else [trace_id, "--json"]
+    result = CliRunner().invoke(app, ["trace", *verb, *args])
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == events

@@ -708,8 +708,8 @@ def test_jobs_get_not_found_exit_code() -> None:
     assert payload["input"]["job_id"] == "00000000-0000-0000-0000-000000000001"
 
 
-def test_jobs_bare_id_is_not_a_command() -> None:
-    result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-000000000099", "--json"])
+def test_jobs_malformed_bare_id_is_a_usage_error() -> None:
+    result = runner.invoke(app, ["jobs", "00000000-0000-0000-0000-invalid", "--json"])
     assert result.exit_code == ExitCode.USAGE
 
 

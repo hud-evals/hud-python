@@ -75,6 +75,69 @@ async def test_task_source_uses_sibling_environment_for_start_and_grade(tmp_path
     assert result["score"] == 1.0
 
 
+@pytest.mark.parametrize("command", ["task", "eval"])
+@pytest.mark.parametrize("expose_env", [False, True])
+@pytest.mark.parametrize("directory", [False, True])
+def test_multifile_source_replays_all_registrations(
+    tmp_path, monkeypatch, command, expose_env, directory
+):
+    import sys
+
+    from hud.clients import connect
+    from hud.eval import Job
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "api_key", "test-key")
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    monkeypatch.chdir(tmp_path)
+    package = tmp_path / "split_example"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "core.py").write_text('from hud import Environment\nenv = Environment("split")\n')
+    for name in ("first", "second"):
+        (package / f"{name}.py").write_text(
+            "from .core import env\n"
+            f'@env.template(id="{name}")\nasync def {name}():\n'
+            '    answer = yield "question"\n'
+            '    yield 1.0 if answer == "answer" and len(env.tasks) == 2 else 0.0\n'
+        )
+    source = tmp_path / "tasks.py"
+    source.write_text(
+        "from split_example.first import first\n"
+        "from split_example.second import second\n"
+        + ("from split_example.core import env\n" if expose_env else "")
+        + "tasks = [first(), second()]\n"
+    )
+    if directory:
+        (tmp_path / "env.py").write_text("from split_example.core import env\n")
+        source = tmp_path
+    scores = []
+
+    async def run(self, agent, *, runtime, **kwargs):
+        for task in self:
+            async with runtime(task) as placed, connect(placed) as client:
+                await client.start_task(task.id, task.args)
+                scores.append((await client.grade({"answer": "answer"}))["score"])
+        return Job(id="test-job", name="split")
+
+    if command == "eval":
+        monkeypatch.setattr(Taskset, "run", run)
+        args = ["eval", str(source), "openai", "--all", "--yes"]
+    else:
+        args = ["task", "grade", "second", "--source", str(source), "--answer", "answer"]
+    try:
+        result = CliRunner().invoke(app, [*args, "--json"])
+    finally:
+        for name in list(sys.modules):
+            if name == "split_example" or name.startswith("split_example."):
+                sys.modules.pop(name)
+    assert result.exit_code == 0, result.output
+    if command == "eval":
+        assert scores == [1.0, 1.0]
+    else:
+        assert json.loads(result.stdout)["score"] == 1.0
+
+
 @pytest.mark.parametrize("mode", ["empty", "parked", "failed_grade", "ambiguous"])
 async def test_grade_only_starts_when_no_task_is_in_progress(mode):
     from hud.clients import connect
@@ -115,7 +178,8 @@ async def test_grade_only_starts_when_no_task_is_in_progress(mode):
         )
 
 
-async def test_json_source_spawns_the_env_beside_it(tmp_path, monkeypatch):
+@pytest.mark.parametrize("suffix", ["json", "py"])
+async def test_unbound_source_spawns_the_env_beside_it(tmp_path, monkeypatch, suffix):
     from hud.clients import connect
 
     monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
@@ -128,6 +192,9 @@ async def test_json_source_spawns_the_env_beside_it(tmp_path, monkeypatch):
         "authored",
         [Task(env="example", id="solve", slug="solve")],
     ).to_file(tmp_path / "tasks.json")
+    if suffix == "py":
+        source = tmp_path / "tasks.py"
+        source.write_text('from hud.eval import Task\ntasks = [Task(env="example", id="solve")]\n')
 
     task_id, args, placement = task_module._resolve("solve", str(source), None, None)
     async with placement as runtime, connect(runtime) as client:

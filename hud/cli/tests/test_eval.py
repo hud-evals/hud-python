@@ -350,7 +350,8 @@ def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, mon
     docker = MagicMock(name="docker")
     subprocesses: dict[object, MagicMock] = {}
 
-    def subprocess_runtime(source: object) -> MagicMock:
+    def subprocess_runtime(source: object, *, task_source: bool = False) -> MagicMock:
+        assert task_source == (source == tmp_path / "mixed.py")
         return subprocesses.setdefault(source, MagicMock(name=f"subprocess({source})"))
 
     monkeypatch.setattr(eval_mod, "DockerRuntime", lambda: docker)
@@ -371,9 +372,8 @@ def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, mon
     assert eval_cli.taskset is not None
     bound = next(iter(eval_cli.taskset))
 
-    assert placement(bound) is subprocesses[bound._env].return_value
+    assert placement(bound) is subprocesses[tmp_path / "mixed.py"].return_value
     assert placement(image) is docker.return_value
-    # A row without a bound env is served from the tasks file's directory.
     assert placement(data_row) is subprocesses[tmp_path.resolve()].return_value
 
 
@@ -382,7 +382,9 @@ def test_json_rows_are_served_from_their_directory(
 ) -> None:
     sources: list[object] = []
     monkeypatch.setattr(
-        eval_mod, "SubprocessRuntime", lambda source: sources.append(source) or MagicMock()
+        eval_mod,
+        "SubprocessRuntime",
+        lambda source, **kwargs: sources.append(source) or MagicMock(),
     )
     (tmp_path / "rows.json").write_text(
         '[{"env": "demo", "id": "a"}, {"env": "demo", "id": "b"}]', encoding="utf-8"

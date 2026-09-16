@@ -562,13 +562,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Serve a HUD environment from source.")
     parser.add_argument("path", help="A .py file or a directory defining an Environment.")
     parser.add_argument("--env", default=None, help="Environment name when several are defined.")
+    parser.add_argument("--task-source", action="store_true", help="Resolve task-bound envs.")
     parser.add_argument(
         "--host", default="127.0.0.1", help="Interface to bind (0.0.0.0 inside containers)."
     )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
     asyncio.run(
-        _serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
+        _serve_until_terminated(
+            load_environment(args.path, name=args.env, task_source=args.task_source),
+            args.host,
+            args.port,
+        )
     )
 
 

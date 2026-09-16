@@ -33,6 +33,7 @@ def load_environment(
     *,
     name: str | None = None,
     args: dict[str, Any] | None = None,
+    task_source: bool = False,
 ) -> Environment:
     """Resolve an environment reference to the one :class:`Environment` it names.
 
@@ -42,6 +43,9 @@ def load_environment(
     (default ``env``): an ``Environment`` directly, or a factory called with
     *args* to build one — how programmatic envs (integrations, adapted
     images) are served without a source file. Raises when nothing resolves.
+
+    With *task_source*, environments bound to authored task rows take precedence
+    over other declarations found while scanning the source.
     """
     # Three forms of reference, decided by what the target *is* rather than by
     # importability — every directory in the working tree is an importable
@@ -65,17 +69,27 @@ def load_environment(
     if path.exists() and not package_attribute:
         if args:
             raise ValueError(f"args= applies to factory targets, not source path {target}")
-        matched = [
-            env
-            for module in iter_modules(path)
-            for attr, env in vars(module).items()
-            if isinstance(env, Environment) and (name is None or name in (attr, env.name))
-        ]
+        matched: dict[int, Environment] = {}
+        bound: dict[int, Environment] = {}
+        for module in iter_modules(path):
+            for attr, env in vars(module).items():
+                if isinstance(env, Environment) and (name is None or name in (attr, env.name)):
+                    matched[id(env)] = env
+            if task_source:
+                # Task imports depend on Environment; resolve after module initialization.
+                from hud.eval.taskset import Taskset
+
+                for task in Taskset._scan_tasks(module):
+                    env = task._env
+                    if env is not None and (name is None or name == env.name):
+                        bound[id(env)] = env
+        if bound:
+            matched = bound
         if not matched:
             raise ValueError(f"no Environment{f' named {name!r}' if name else ''} found in {path}")
         if len(matched) > 1:
             raise ValueError(f"multiple Environments in {path}; select one by name")
-        return matched[0]
+        return next(iter(matched.values()))
 
     if path.is_file() or "/" in str(target):
         raise FileNotFoundError(f"no environment source at {target}")
