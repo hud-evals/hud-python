@@ -22,11 +22,7 @@ from hud.cli import (
     DirectoryLink,
     DirectoryState,
 )
-from hud.cli.project import (
-    PROJECT_OPTION_HELP,
-    require_writable_placement,
-    resolve_placement,
-)
+from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
 from hud.settings import settings
@@ -367,7 +363,7 @@ def sync_tasks_command(
     # Creating a new taskset is only allowed when targeting an explicit name
     # (not an --id or a stored id, which must already exist).
     allow_create = taskset is not None and taskset_id is None
-    placement = resolve_placement(
+    placement = Placement.resolve(
         platform,
         link,
         flag=project,
@@ -409,7 +405,7 @@ def sync_tasks_command(
         return {**plan_payload, "dry_run": True, "action": "sync_tasks"}
 
     CLI.confirm_or_abort("Proceed?", yes=yes, default=False)
-    require_writable_placement(placement)
+    placement.require_writable()
 
     # Upload tasks; the platform validates referenced environments.
     hud_console.progress_message("Uploading tasks...")

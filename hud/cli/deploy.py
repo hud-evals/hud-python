@@ -32,11 +32,7 @@ from hud.cli import (
     Result,
     parse_key_value,
 )
-from hud.cli.project import (
-    PROJECT_OPTION_HELP,
-    require_writable_placement,
-    resolve_placement,
-)
+from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.eval.runtime import RuntimeConfig
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
@@ -234,8 +230,8 @@ async def deploy_command(
         name = names.pop()
     state = DirectoryState(AuthScope.resolve(platform), env_dir)
     link = state.load()
-    placement = resolve_placement(platform, link, flag=project)
-    require_writable_placement(placement)
+    placement = Placement.resolve(platform, link, flag=project)
+    placement.require_writable()
     first_deploy = link.registry_id is None and registry_id is None
     env_file_path = Path(env_file) if env_file else None
     dotenv_pending = (

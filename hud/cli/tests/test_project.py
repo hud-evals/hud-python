@@ -12,13 +12,7 @@ from typer.testing import CliRunner
 
 from hud.cli import AuthScope, CliError, DirectoryLink, DirectoryState
 from hud.cli.__main__ import app
-from hud.cli.project import (
-    Project,
-    list_projects,
-    require_writable_placement,
-    resolve_placement,
-    resolve_project,
-)
+from hud.cli.project import Placement, Project
 from hud.utils.exceptions import HudRequestError
 from hud.utils.platform import PlatformClient
 
@@ -74,8 +68,11 @@ def _no_global_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hud.settings.settings.default_project", None)
 
 
-def test_list_reads_paginated_items(platform: PlatformClient) -> None:
-    assert [project.name for project in list_projects(platform)] == [
+def test_list_reads_paginated_items(platform: PlatformClient, monkeypatch) -> None:
+    monkeypatch.setattr(PlatformClient, "from_settings", classmethod(lambda cls: platform))
+    result = CliRunner().invoke(app, ["project", "list", "--json"])
+    assert result.exit_code == 0, result.output
+    assert [project["name"] for project in json.loads(result.stdout)] == [
         "default",
         "browser-evals",
         "locked-down",
@@ -84,12 +81,12 @@ def test_list_reads_paginated_items(platform: PlatformClient) -> None:
 
 def test_project_names_require_explicit_selection(platform: PlatformClient) -> None:
     with pytest.raises(ValueError, match="Project ID"):
-        resolve_project(platform, "browser-evals")
+        Project.resolve(platform, "browser-evals")
 
 
 def test_resolve_matches_an_id(platform: PlatformClient) -> None:
-    assert resolve_project(platform, _BROWSER_ID).name == "browser-evals"
-    assert resolve_project(platform, _BROWSER_ID.upper()).name == "browser-evals"
+    assert Project.resolve(platform, _BROWSER_ID).name == "browser-evals"
+    assert Project.resolve(platform, _BROWSER_ID.upper()).name == "browser-evals"
 
 
 def test_flag_outranks_directory_config(
@@ -100,7 +97,7 @@ def test_flag_outranks_directory_config(
     monkeypatch.setattr("hud.settings.settings.default_project", "locked-down")
     source = DirectoryLink(project_id=UUID(_DEFAULT_ID))
 
-    placement = resolve_placement(platform, source, flag=_BROWSER_ID)
+    placement = Placement.resolve(platform, source, flag=_BROWSER_ID)
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
@@ -116,7 +113,7 @@ def test_directory_config_applies_without_a_flag(
     monkeypatch.setattr("hud.settings.settings.default_project", "default")
     source = DirectoryLink(project_id=UUID(_BROWSER_ID))
 
-    placement = resolve_placement(platform, source, flag=None)
+    placement = Placement.resolve(platform, source, flag=None)
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
@@ -130,7 +127,7 @@ def test_global_default_applies_to_an_unpinned_directory(
 ) -> None:
     monkeypatch.setattr("hud.settings.settings.default_project", _BROWSER_ID)
 
-    placement = resolve_placement(platform, DirectoryLink(), flag=None)
+    placement = Placement.resolve(platform, DirectoryLink(), flag=None)
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
@@ -145,7 +142,7 @@ def test_unconfigured_placement_sends_no_project_and_makes_no_call(
 ) -> None:
     """The zero-config path stays free: no project on the wire, no lookup."""
     _no_global_default(monkeypatch)
-    placement = resolve_placement(platform, DirectoryLink(), flag=None)
+    placement = Placement.resolve(platform, DirectoryLink(), flag=None)
 
     assert placement.project_id is None
     assert placement.source == "team default"
@@ -160,12 +157,12 @@ def test_placement_resolves_a_project_the_caller_cannot_create_in(
 ) -> None:
     _no_global_default(monkeypatch)
     source = DirectoryLink()
-    placement = resolve_placement(platform, source, flag=_READONLY_ID)
+    placement = Placement.resolve(platform, source, flag=_READONLY_ID)
     assert placement.project is not None
     assert placement.project.id == _READONLY_ID
 
     with pytest.raises(CliError, match="permission") as info:
-        require_writable_placement(placement)
+        placement.require_writable()
     assert info.value.error == "permission_denied"
 
 

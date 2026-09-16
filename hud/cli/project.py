@@ -44,6 +44,20 @@ class Project:
             can_create=bool(data.get("capabilities", {}).get("create")),
         )
 
+    @classmethod
+    def resolve(cls, platform: PlatformClient, ref: str) -> Project:
+        """The Project with this canonical ID, within the authenticated scope."""
+        try:
+            project_id = str(uuid.UUID(ref))
+        except ValueError as exc:
+            raise ValueError(
+                "Pass a Project ID from 'hud project list'; name lookup is not supported"
+            ) from exc
+        try:
+            return cls.from_record(platform.get(f"/projects/{project_id}"))
+        except HudRequestError as exc:
+            raise CliError.from_http(exc, resource="Project", input={"project": ref}) from exc
+
 
 @dataclass(frozen=True)
 class Placement:
@@ -64,56 +78,28 @@ class Placement:
             return "team default Project"
         return f"{self.project.name} (via {self.source})"
 
+    @classmethod
+    def resolve(
+        cls, platform: PlatformClient, link: DirectoryLink, *, flag: str | None
+    ) -> Placement:
+        """The configured Project, most specific source first."""
+        for ref, source in (
+            (flag, "--project"),
+            (str(link.project_id) if link.project_id else None, str(CONFIG_PATH)),
+            (settings.default_project, "HUD_DEFAULT_PROJECT"),
+        ):
+            if ref:
+                return cls(Project.resolve(platform, ref), source)
+        return cls(None, "team default")
 
-def list_projects(platform: PlatformClient) -> list[Project]:
-    """Every Project visible to the caller."""
-    projects: list[Project] = []
-    while True:
-        data = platform.get("/projects", params={"limit": 500, "offset": len(projects)})
-        page = [Project.from_record(item) for item in data["items"]]
-        projects.extend(page)
-        if len(projects) >= data["total"]:
-            return projects
-        if not page:
-            raise ValueError("Projects API returned an empty page before the reported total")
-
-
-def resolve_project(platform: PlatformClient, ref: str) -> Project:
-    """The Project with this canonical ID, within the authenticated scope."""
-    try:
-        project_id = str(uuid.UUID(ref))
-    except ValueError as exc:
-        raise ValueError(
-            "Pass a Project ID from 'hud project list'; name lookup is not supported"
-        ) from exc
-    try:
-        return Project.from_record(platform.get(f"/projects/{project_id}"))
-    except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Project", input={"project": ref}) from exc
-
-
-def resolve_placement(
-    platform: PlatformClient, link: DirectoryLink, *, flag: str | None
-) -> Placement:
-    """The configured Project, most specific source first."""
-    for ref, source in (
-        (flag, "--project"),
-        (str(link.project_id) if link.project_id else None, str(CONFIG_PATH)),
-        (settings.default_project, "HUD_DEFAULT_PROJECT"),
-    ):
-        if ref:
-            return Placement(resolve_project(platform, ref), source)
-    return Placement(None, "team default")
-
-
-def require_writable_placement(placement: Placement) -> None:
-    if placement.project is not None and not placement.project.can_create:
-        raise CliError(
-            error="permission_denied",
-            message="You do not have permission to create environments or tasksets in "
-            f"project '{placement.project.name}'",
-            input={"project": placement.project.id},
-        )
+    def require_writable(self) -> None:
+        if self.project is not None and not self.project.can_create:
+            raise CliError(
+                error="permission_denied",
+                message="You do not have permission to create environments or tasksets in "
+                f"project '{self.project.name}'",
+                input={"project": self.project.id},
+            )
 
 
 project_app = CLI(
@@ -131,7 +117,16 @@ def list_command(
     ),
 ) -> Any:
     """List all visible Projects and their canonical IDs."""
-    projects = list_projects(PlatformClient.from_settings())
+    platform = PlatformClient.from_settings()
+    projects: list[Project] = []
+    while True:
+        data = platform.get("/projects", params={"limit": 500, "offset": len(projects)})
+        page = [Project.from_record(item) for item in data["items"]]
+        projects.extend(page)
+        if len(projects) >= data["total"]:
+            break
+        if not page:
+            raise ValueError("Projects API returned an empty page before the reported total")
     if quiet:
         for project in projects:
             typer.echo(project.id)
@@ -196,8 +191,10 @@ def use_command(
         AuthScope.resolve(platform), directory or ctx.meta["hud_project_directory"]
     )
     state.load()
-    project = resolve_project(platform, ref)
-    require_writable_placement(Placement(project, "--project"))
+    placement = Placement(Project.resolve(platform, ref), "--project")
+    placement.require_writable()
+    project = placement.project
+    assert project is not None
     if not dry_run:
         state.update(DirectoryLink(project_id=project.id))
     HUDConsole().success(
@@ -219,7 +216,7 @@ def project_callback(
     # Projects are feature-gated per team; surface that before reading the directory.
     platform.get("/projects", params={"limit": 1})
     state = DirectoryState(AuthScope.resolve(platform), directory)
-    placement = resolve_placement(platform, state.load(), flag=None)
+    placement = Placement.resolve(platform, state.load(), flag=None)
     HUDConsole().info(f"Project: {placement.label}")
     return {
         "project": asdict(placement.project) if placement.project else None,
