@@ -140,11 +140,6 @@ class EvalConfig(BaseModel):
         )
 
 
-def _is_container_row(task: Task) -> bool:
-    config = task.runtime_config
-    return config is not None and (config.image is not None or config.compose is not None)
-
-
 def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
@@ -422,7 +417,11 @@ def eval_command(
             unspawnable = [
                 slug
                 for slug, task in taskset.items()
-                if task._env is None and not _is_container_row(task)
+                if task._env is None
+                and not (
+                    task.runtime_config
+                    and (task.runtime_config.image or task.runtime_config.compose)
+                )
             ]
             if unspawnable:
                 shown = ", ".join(unspawnable[:5]) + ("..." if len(unspawnable) > 5 else "")
@@ -434,7 +433,8 @@ def eval_command(
             docker = DockerRuntime()
 
             def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
-                if _is_container_row(task):
+                config = task.runtime_config
+                if config and (config.image or config.compose):
                     return docker(task)
                 assert task._env is not None
                 return SubprocessRuntime(task._env)(task)
