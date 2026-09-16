@@ -48,6 +48,7 @@ tasks = [solve(n=0), solve(n=1)]
 """
 
 _BEDROCK_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/my-profile"
+_CONTAINER_ROW = '{"env": "demo", "id": "solve", "runtime_config": {"image": "example:latest"}}'
 
 
 @dataclass
@@ -298,21 +299,39 @@ def test_group_and_concurrency_reach_the_scheduler(eval_cli: _EvalCli) -> None:
     assert eval_cli.kwargs["max_concurrent"] == 2
 
 
-def test_local_placement_routes_each_row(eval_cli: _EvalCli, monkeypatch) -> None:
+def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, monkeypatch) -> None:
     docker = MagicMock(name="docker")
     subprocess = MagicMock(name="subprocess")
     monkeypatch.setattr(eval_mod, "DockerRuntime", lambda: docker)
     monkeypatch.setattr(eval_mod, "SubprocessRuntime", lambda env: subprocess)
-    eval_cli.invoke("tasks.py", "openai", "--yes")
+    image = Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest"))
+    (tmp_path / "mixed.py").write_text(
+        _TASKS_PY + "from hud.eval import RuntimeConfig, Task\n"
+        "tasks.append(Task(env='image', id='run', "
+        "runtime_config=RuntimeConfig(image='example:latest')))\n",
+        encoding="utf-8",
+    )
+    try:
+        eval_cli.invoke("mixed.py", "openai", "--all", "--yes")
+    finally:
+        sys.modules.pop("mixed", None)
     placement = eval_cli.kwargs["runtime"]
     assert eval_cli.taskset is not None
     bound = next(iter(eval_cli.taskset))
-    image = Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest"))
 
     assert placement(bound) is subprocess.return_value
     assert placement(image) is docker.return_value
-    with pytest.raises(ValueError, match="no bound Environment"):
-        placement(Task(env="portable", id="run"))
+
+
+def test_portable_rows_are_refused_before_running(eval_cli: _EvalCli, tmp_path: Path) -> None:
+    (tmp_path / "rows.json").write_text(
+        '[{"env": "demo", "id": "a"}, {"env": "demo", "id": "b"}]', encoding="utf-8"
+    )
+    payload = eval_cli.invoke("rows.json", "openai", "--all", "--yes", exit_code=2)
+    assert payload["error"] == "usage"
+    assert "2 task(s) have no bound Environment or container image (a, b)" in payload["message"]
+    assert "--runtime hud" in payload["message"]
+    assert eval_cli.taskset is None  # refused before Taskset.run
 
 
 def test_explicit_placements(eval_cli: _EvalCli) -> None:
@@ -458,7 +477,7 @@ def test_missing_source_with_no_tasks_files_is_not_found(eval_cli: _EvalCli, mon
 def test_single_tasks_file_is_picked_without_prompting(
     eval_cli: _EvalCli, tmp_path: Path, monkeypatch
 ) -> None:
-    (tmp_path / "rows.json").write_text('[{"env": "demo", "id": "solve"}]', encoding="utf-8")
+    (tmp_path / "rows.json").write_text(f"[{_CONTAINER_ROW}]", encoding="utf-8")
     (tmp_path / ".hidden.json").write_text("[]", encoding="utf-8")
 
     def select(self: HUDConsole, message: str, choices: Any, **_: Any) -> Any:
@@ -473,8 +492,8 @@ def test_single_tasks_file_is_picked_without_prompting(
 def test_several_tasks_files_prompt_for_one(
     eval_cli: _EvalCli, tmp_path: Path, monkeypatch
 ) -> None:
-    (tmp_path / "rows.json").write_text('[{"env": "demo", "id": "solve"}]', encoding="utf-8")
-    (tmp_path / "more.jsonl").write_text('{"env": "demo", "id": "solve"}\n', encoding="utf-8")
+    (tmp_path / "rows.json").write_text(f"[{_CONTAINER_ROW}]", encoding="utf-8")
+    (tmp_path / "more.jsonl").write_text(_CONTAINER_ROW + "\n", encoding="utf-8")
     seen: list[str] = []
 
     def select(self: HUDConsole, message: str, choices: Any, **_: Any) -> str:

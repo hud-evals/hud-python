@@ -281,32 +281,42 @@ def _build_agent(cfg: EvalConfig) -> Agent:
     return cast("Any", cfg.agent_type.cls)(config=config)
 
 
-def _local_placement() -> Provider:
-    """Spawn each row's own substrate from what the row declares."""
+def _is_container_row(task: Task) -> bool:
+    config = task.runtime_config
+    return config is not None and (config.image is not None or config.compose is not None)
+
+
+def _local_placement(taskset: Taskset) -> Provider:
+    """Spawn each row's own substrate: a container for container rows, a
+    subprocess serving the bound env's source otherwise."""
+    portable = [
+        slug for slug, task in taskset.items() if task._env is None and not _is_container_row(task)
+    ]
+    if portable:
+        shown = ", ".join(portable[:5]) + ("..." if len(portable) > 5 else "")
+        raise ValueError(
+            f"{len(portable)} task(s) have no bound Environment or container image ({shown}). "
+            "Portable rows need --runtime hud, --remote, or --runtime tcp://host:port."
+        )
     docker = DockerRuntime()
 
     def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
-        config = task.runtime_config
-        if config is not None and (config.image is not None or config.compose is not None):
+        if _is_container_row(task):
             return docker(task)
-        if task._env is not None:
-            return SubprocessRuntime(task._env)(task)
-        raise ValueError(
-            "no placement: these rows have no bound Environment. Pass a Python "
-            "tasks/env module, or use --remote / --runtime hud / a tcp:// url."
-        )
+        assert task._env is not None
+        return SubprocessRuntime(task._env)(task)
 
     return spawn
 
 
-def _placement(cfg: EvalConfig) -> Provider | HostedRuntime:
+def _placement(cfg: EvalConfig, taskset: Taskset) -> Provider | HostedRuntime:
     match cfg.runtime:
         case "hosted":
             return HostedRuntime()
         case "hud":
             return HUDRuntime()
         case "local":
-            return _local_placement()
+            return _local_placement(taskset)
         case url:
             assert url is not None and url.startswith("tcp://")
             return Runtime(url)
@@ -559,10 +569,11 @@ def eval_command(
         cfg = cfg.merge(preset.overrides())
     cfg = cfg.with_placement()
     cfg.require_credentials()
+    taskset = _load_taskset(cfg)
+    placement = _placement(cfg, taskset)
     cfg.display()
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 
-    taskset = _load_taskset(cfg)
     single_run = len(taskset) == 1 and cfg.group_size == 1
     _configure_logging(cfg, single_run=single_run)
     if not single_run:
@@ -574,7 +585,7 @@ def eval_command(
     job = asyncio.run(
         taskset.run(
             _build_agent(cfg),
-            runtime=_placement(cfg),
+            runtime=placement,
             group=cfg.group_size,
             max_concurrent=cfg.max_concurrent,
         )
