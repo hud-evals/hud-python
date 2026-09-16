@@ -6,6 +6,7 @@ import contextlib
 import json
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import typer
 from rich.panel import Panel
@@ -20,7 +21,7 @@ from hud.settings import settings
 from hud.telemetry.span import normalize_trace_id
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
-from hud.utils.platform import PlatformClient, canonical_record_id
+from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
 
@@ -62,7 +63,7 @@ def _show_trace(
     hud_console.stdout.print(f"[dim]Source: {source}[/dim]\n")
     _render_events(events)
     web = settings.hud_web_url.rstrip("/")
-    hud_console.stdout.print(f"\n[dim]View: {web}/trace/{canonical_record_id(otel_id)}[/dim]")
+    hud_console.stdout.print(f"\n[dim]View: {web}/trace/{UUID(otel_id)}[/dim]")
     return events
 
 

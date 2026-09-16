@@ -13,7 +13,7 @@ from hud.eval.run import Grade, Run, validate_rollout_timeouts
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.span import normalize_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient, canonical_record_id
+from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
@@ -80,7 +80,7 @@ class HostedRuntime:
             parent_trace_id = None
         if parent_trace_id is not None:
             try:
-                parent_trace_id = canonical_record_id(parent_trace_id)
+                parent_trace_id = str(uuid.UUID(parent_trace_id))
             except ValueError:
                 parent_trace_id = None
         timeout = self.run_timeout if rollout_timeout is None else rollout_timeout

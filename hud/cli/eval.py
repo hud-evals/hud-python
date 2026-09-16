@@ -14,6 +14,7 @@ from enum import StrEnum
 from pathlib import Path
 from string import Template
 from typing import TYPE_CHECKING, Annotated, Any, assert_never, cast
+from uuid import UUID
 
 import typer
 from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlConstraints
@@ -40,7 +41,7 @@ from hud.utils.gateway import (
     normalize_gateway_model_id,
 )
 from hud.utils.hud_console import HUDConsole
-from hud.utils.platform import PlatformClient, canonical_record_id
+from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -528,7 +529,7 @@ def eval_command(
     )
     elapsed = time.monotonic() - started
     if job.runs and settings.telemetry_enabled and settings.api_key:
-        hud_console.info(f"{settings.hud_web_url}/jobs/{canonical_record_id(job.id)}")
+        hud_console.info(f"{settings.hud_web_url}/jobs/{UUID(job.id)}")
 
     if job.runs:
         errors = set(map(id, job.errors))

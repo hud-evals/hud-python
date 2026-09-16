@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from uuid import UUID
 
 import typer
 from rich.panel import Panel
@@ -26,7 +27,7 @@ from hud.cli import (
 from hud.settings import settings
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
-from hud.utils.platform import PlatformClient, canonical_record_id
+from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
 
@@ -127,7 +128,7 @@ def _show_job_traces(
     limit: int,
 ) -> list[Any]:
     client = PlatformClient.from_settings()
-    job_id = canonical_record_id(job_id)
+    job_id = str(UUID(job_id))
     try:
         data = client.get(f"/jobs/{job_id}/traces", params={"limit": limit})
     except HudRequestError as exc:

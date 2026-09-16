@@ -24,7 +24,7 @@ import numpy as np
 from hud.agents.types import InferenceStep, ObservationStep, StateFeature
 from hud.telemetry.context import get_current_trace_id
 from hud.types import Step
-from hud.utils.platform import PlatformClient, canonical_record_id
+from hud.utils.platform import PlatformClient
 
 from .video import VideoStreamer
 
@@ -192,7 +192,7 @@ class JobRecorder:
         self.model = model
         seed_job_id = job_id or uuid.uuid4().hex
         try:
-            self.job_id = canonical_record_id(seed_job_id)
+            self.job_id = str(uuid.UUID(seed_job_id))
         except ValueError as exc:
             raise ValueError("job_id must be a UUID") from exc
         # The input spelling is part of the shipped deterministic trace-ID contract.
