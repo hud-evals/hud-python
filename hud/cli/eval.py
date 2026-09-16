@@ -10,12 +10,13 @@ import logging
 import os
 import time
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from string import Template
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import typer
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlConstraints
 from rich import box
 from rich.table import Table
 
@@ -51,17 +52,30 @@ if TYPE_CHECKING:
 hud_console = HUDConsole()
 
 _CONFIG_PATH = Path(".hud_eval.toml")
-#: Providers a row's ``runtime_config`` can be handed to as-is; each validates
-#: its own inputs. ``local`` is composed here and ``tcp://`` attaches.
-_PROVIDERS: dict[str, Callable[[], Provider | HostedRuntime]] = {
-    "hud": HUDRuntime,
-    "hosted": HostedRuntime,
-    "docker": DockerRuntime,
-    "modal": ModalRuntime,
-    "daytona": DaytonaRuntime,
-}
-_PLACEMENTS = ("local", *_PROVIDERS)
 _SECRET_MARKERS = ("key", "secret", "token", "password")
+
+
+class Placement(StrEnum):
+    """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead."""
+
+    LOCAL = "local"
+    HUD = "hud"
+    HOSTED = "hosted"
+    DOCKER = "docker"
+    MODAL = "modal"
+    DAYTONA = "daytona"
+
+
+#: Providers a row's ``runtime_config`` is handed to as-is; each validates its
+#: own inputs. ``LOCAL`` is composed in the command.
+_PROVIDERS: dict[Placement, Callable[[], Provider | HostedRuntime]] = {
+    Placement.HUD: HUDRuntime,
+    Placement.HOSTED: HostedRuntime,
+    Placement.DOCKER: DockerRuntime,
+    Placement.MODAL: ModalRuntime,
+    Placement.DAYTONA: DaytonaRuntime,
+}
+TcpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["tcp"])]
 
 
 def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
@@ -97,22 +111,12 @@ class EvalConfig(BaseModel):
     auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
-    #: Placement: ``local`` (spawn each row's env — Docker for container rows,
-    #: a subprocess serving the bound env's source otherwise), a provider name
-    #: from ``_PROVIDERS``, or a ``tcp://`` url of an already-served env.
-    #: ``None`` infers from the source: a file on disk runs locally, a platform
-    #: taskset hosted.
-    runtime: str | None = None
+    #: ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
+    #: serving the bound env's source otherwise); other names hand rows to that
+    #: provider; a ``tcp://`` url attaches to an already-served env. ``None``
+    #: infers from the source: a file on disk runs locally, a platform taskset hosted.
+    runtime: Placement | TcpUrl | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
-
-    @field_validator("runtime")
-    @classmethod
-    def _known_placement(cls, value: str | None) -> str | None:
-        if value is None or value in _PLACEMENTS or value.startswith("tcp://"):
-            return value
-        raise ValueError(
-            f"Unknown runtime {value!r}. Use {', '.join(_PLACEMENTS)}, or a tcp:// url."
-        )
 
     @classmethod
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
@@ -144,8 +148,10 @@ class EvalConfig(BaseModel):
         """Pin ``runtime``: a local file spawns locally, a platform taskset runs hosted."""
         is_file = self.source is not None and Path(self.source).exists()
         if self.runtime is None:
-            return self.model_copy(update={"runtime": "local" if is_file else "hosted"})
-        if self.runtime == "local" and not is_file:
+            return self.model_copy(
+                update={"runtime": Placement.LOCAL if is_file else Placement.HOSTED}
+            )
+        if self.runtime is Placement.LOCAL and not is_file:
             raise ValueError(
                 f"--runtime local needs a local env source, but {self.source!r} is a "
                 "platform taskset with no env source on disk. Run it on the platform "
@@ -245,7 +251,7 @@ def eval_command(
             "max_concurrent": max_concurrent,
             "max_steps": max_steps,
             "group_size": group_size,
-            "runtime": "hosted" if remote else runtime,
+            "runtime": Placement.HOSTED if remote else runtime,
         }.items()
         if value is not None
     }
@@ -317,7 +323,7 @@ def eval_command(
             "agent": agent_type.value,
             "model": cfg.model,
             "runtime": cfg.runtime,
-            "remote": cfg.runtime == "hosted",
+            "remote": cfg.runtime is Placement.HOSTED,
             "all": cfg.all,
             "max_steps": cfg.max_steps,
             "max_concurrent": cfg.max_concurrent,
@@ -382,7 +388,7 @@ def eval_command(
     agent_type = cfg.agent_type
     assert agent_type is not None and cfg.runtime is not None and cfg.source is not None
 
-    if cfg.gateway or cfg.runtime in ("hud", "hosted"):
+    if cfg.gateway or cfg.runtime in (Placement.HUD, Placement.HOSTED):
         PlatformClient.from_settings()
     if (
         agent_type == AgentType.OPENAI_COMPATIBLE
@@ -423,7 +429,9 @@ def eval_command(
     hud_console.info(f"Loaded {len(taskset)} task(s)")
 
     placement: Provider | HostedRuntime
-    if cfg.runtime == "local":
+    if isinstance(cfg.runtime, AnyUrl):
+        placement = Runtime(str(cfg.runtime))
+    elif cfg.runtime is Placement.LOCAL:
         # Isolate each row: its container, or a subprocess serving the bound env's
         # source (``Taskset.run`` alone would serve a live env in-process).
         portable = [
@@ -447,8 +455,6 @@ def eval_command(
             return SubprocessRuntime(task._env)(task)
 
         placement = spawn
-    elif cfg.runtime.startswith("tcp://"):
-        placement = Runtime(cfg.runtime)
     else:
         placement = _PROVIDERS[cfg.runtime]()
 
@@ -466,7 +472,7 @@ def eval_command(
     table.add_column("Setting", style="yellow")
     table.add_column("Value", style="green")
     table.add_row("source", cfg.source)
-    table.add_row("runtime", cfg.runtime)
+    table.add_row("runtime", str(cfg.runtime))
     table.add_row("agent", agent_type.value)
     if cfg.task_ids:
         shown = ", ".join(cfg.task_ids[:5])
@@ -508,7 +514,11 @@ def eval_command(
     # The agent picks its own client (provider key, else gateway); --gateway
     # overrides that. Hosted rollouts leave it unset for the platform to build.
     agent_config = agent_type.config_cls(**agent_kwargs)
-    if cfg.gateway and cfg.runtime != "hosted" and agent_type != AgentType.OPENAI_COMPATIBLE:
+    if (
+        cfg.gateway
+        and cfg.runtime is not Placement.HOSTED
+        and agent_type != AgentType.OPENAI_COMPATIBLE
+    ):
         agent_config.model_client = build_gateway_client(agent_type.gateway_provider)
     # cls/config_cls are matched unions; the pairing is correct by construction.
     agent_instance = cast("Any", agent_type.cls)(config=agent_config)

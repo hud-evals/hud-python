@@ -159,7 +159,7 @@ def test_load_rejects_unset_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     [
         ('[eval]\nmodle = "x"\n', "modle"),
         ('[eval]\nagent = "not-an-agent"\n', "claude"),
-        ('[eval]\nruntime = "cloud"\n', "Unknown runtime"),
+        ('[eval]\nruntime = "cloud"\n', "'local', 'hud', 'hosted', 'docker', 'modal' or 'daytona'"),
         ("[other]\nx = 1\n", "unknown sections: other"),
     ],
 )
@@ -376,10 +376,10 @@ def test_explicit_placements(eval_cli: _EvalCli) -> None:
 
 def test_unknown_runtime_lists_the_choices(eval_cli: _EvalCli) -> None:
     payload = eval_cli.invoke("tasks.py", "openai", "--runtime", "cloud", "--yes", exit_code=2)
-    assert (
-        "Unknown runtime 'cloud'. Use local, hud, hosted, docker, modal, daytona"
-        in (payload["message"])
-    )
+    assert "'local', 'hud', 'hosted', 'docker', 'modal' or 'daytona'" in payload["message"]
+    assert "URL scheme should be 'tcp'" not in payload["message"]  # 'cloud' is not url-shaped
+    payload = eval_cli.invoke("tasks.py", "openai", "--runtime", "http://x:1", "--yes", exit_code=2)
+    assert "URL scheme should be 'tcp'" in payload["message"]
 
 
 def test_python_task_source_loads_on_main_thread(eval_cli: _EvalCli, tmp_path: Path) -> None:
