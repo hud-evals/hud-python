@@ -318,43 +318,46 @@ def eval_command(
 
     if cfg.agent_type is None:
         # Pick the agent type, then a current catalog model of that type, newest first.
-        if not settings.api_key:
-            raise ValueError(
-                "No agent given. Pass a model or agent type (hud eval tasks.py "
-                "claude-sonnet-4-6), or set HUD_API_KEY to pick from the model catalog."
-            )
+        # The catalog is per-team, so without HUD_API_KEY the agent's default model is used.
         picked_type = AgentType(
             hud_console.select(
                 "Select an agent:", choices=[agent.value for agent in AgentType], default=0
             )
         )
-        models = sorted(
-            (
-                catalog_model
-                for catalog_model in list_gateway_models()
-                if catalog_model.sdk_agent_type == picked_type.value
-                and catalog_model.deprecated_at is None
-                and catalog_model.model_name
-            ),
-            key=lambda catalog_model: catalog_model.recency,
-            reverse=True,
-        )
-        if not models:
-            raise ValueError(f"The model catalog has no {picked_type.value} models.")
-        picked_model = cast(
-            "GatewayModelInfo",
-            hud_console.select(
-                "Select a model:",
-                choices=[
-                    {"name": f"{m.name or m.model_name} ({m.model_name})", "value": m}
-                    for m in models
-                ],
-                default=0,
-            ),
-        )
-        picked: dict[str, Any] = {"agent_type": picked_type, "model": picked_model.model_name}
-        if picked_model.name:
-            picked["agent_config"] = {picked_type.value: {"model_name": picked_model.name}}
+        picked: dict[str, Any] = {"agent_type": picked_type}
+        if settings.api_key:
+            models = sorted(
+                (
+                    catalog_model
+                    for catalog_model in list_gateway_models()
+                    if catalog_model.sdk_agent_type == picked_type.value
+                    and catalog_model.deprecated_at is None
+                    and catalog_model.model_name
+                ),
+                key=lambda catalog_model: catalog_model.recency,
+                reverse=True,
+            )
+            if not models:
+                raise ValueError(f"The model catalog has no {picked_type.value} models.")
+            picked_model = cast(
+                "GatewayModelInfo",
+                hud_console.select(
+                    "Select a model:",
+                    choices=[
+                        {"name": f"{m.name or m.model_name} ({m.model_name})", "value": m}
+                        for m in models
+                    ],
+                    default=0,
+                ),
+            )
+            picked["model"] = picked_model.model_name
+            if picked_model.name:
+                picked["agent_config"] = {picked_type.value: {"model_name": picked_model.name}}
+        else:
+            hud_console.info(
+                f"Using the {picked_type.value} agent's default model "
+                f"({picked_type.config_cls().model}); set HUD_API_KEY to pick from the catalog."
+            )
         cfg = cfg.merge(picked)
 
     agent_type, source = cfg.agent_type, cfg.source

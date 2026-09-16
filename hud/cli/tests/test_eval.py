@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from typer.testing import CliRunner
 
+from hud.agents.types import ClaudeConfig
 from hud.cli import eval as eval_mod
 from hud.cli.__main__ import app
 from hud.cli.eval import EvalConfig
@@ -554,11 +555,20 @@ def test_interactive_picker_offers_current_catalog_models_newest_first(
     assert eval_cli.agent.config.model_name == "Kimi K2.7"
 
 
-def test_interactive_picker_needs_a_hud_key(eval_cli: _EvalCli, monkeypatch) -> None:
+def test_interactive_picker_without_a_hud_key_uses_the_agent_default_model(
+    eval_cli: _EvalCli, monkeypatch
+) -> None:
     monkeypatch.setattr(settings, "api_key", None)
-    monkeypatch.setattr(HUDConsole, "select", lambda *a, **k: pytest.fail("prompted"))
-    payload = eval_cli.invoke("tasks.py", "--yes", exit_code=2)
-    assert "set HUD_API_KEY to pick from the model catalog" in payload["message"]
+    monkeypatch.setattr(settings, "anthropic_api_key", "provider-key")
+    monkeypatch.setattr(
+        "hud.cli.eval.list_gateway_models", lambda: pytest.fail("catalog needs a key")
+    )
+    monkeypatch.setattr(
+        HUDConsole, "select", _picker("claude", lambda choices: pytest.fail("model prompt"))
+    )
+    eval_cli.invoke("tasks.py", "--yes")
+    assert isinstance(eval_cli.agent.config, ClaudeConfig)
+    assert eval_cli.agent.config.model == ClaudeConfig().model
 
 
 # ─── command: source discovery and results ─────────────────────────────
