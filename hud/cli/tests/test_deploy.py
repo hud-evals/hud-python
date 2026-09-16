@@ -137,18 +137,18 @@ class TestResolveEnvironmentName:
 
         assert _dry_run(tmp_path)["name"] == "same"
 
-    def test_only_top_level_python_files_count(self, tmp_path: Path) -> None:
-        nested = tmp_path / "src" / "pkg"
+    def test_nested_source_counts_but_junk_directories_do_not(self, tmp_path: Path) -> None:
+        nested = tmp_path / "server" / "pkg"
         nested.mkdir(parents=True)
         (nested / "env.py").write_text('env = Environment("nested")\n', encoding="utf-8")
-        (tmp_path / ".venv").mkdir()
-        (tmp_path / ".venv" / "env.py").write_text(
-            'env = Environment("excluded")\n', encoding="utf-8"
-        )
+        for junk in (".venv", "node_modules", "__pycache__"):
+            (tmp_path / junk).mkdir()
+            (tmp_path / junk / "env.py").write_text(
+                'env = Environment("excluded")\n', encoding="utf-8"
+            )
         (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
-        (tmp_path / "env.py").write_text('env = Environment("included")\n', encoding="utf-8")
 
-        assert _dry_run(tmp_path)["name"] == "included"
+        assert _dry_run(tmp_path)["name"] == "nested"
 
     def test_ignores_calls_without_a_literal(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text(

@@ -88,7 +88,7 @@ hud deploy --project <name-or-id>
 
 | Option | Description |
 |--------|-------------|
-| `--name` | Which `Environment(...)` name to register when top-level `*.py` files declare more than one. |
+| `--name` | Which `Environment(...)` name to register when the directory's `.py` files (searched recursively, skipping `.venv`, `node_modules`, caches) declare more than one. |
 | `--env`, `-e` | Env var `KEY=VALUE` (repeatable). Upserts registry secrets. |
 | `--env-file` | Upsert registry secrets from this file. Keys omitted from the file are kept. |
 | `--no-env` | Skip seeding from a local `.env` on first deploy. Rebuilds already skip `.env` unless `--env-file` is passed. |

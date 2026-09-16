@@ -58,6 +58,44 @@ DEFAULT_EXCLUDES = [
 ]
 """Local junk no image needs. Applied first, so ``.dockerignore`` can re-include any of it."""
 
+_UNSEARCHED_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+}
+"""Directories skipped when looking for ``Environment(...)`` declarations."""
+
+
+def _environment_names(tree: ast.AST) -> set[str]:
+    """Literal names passed to ``Environment(...)`` calls in *tree*."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        callee = (
+            func.id
+            if isinstance(func, ast.Name)
+            else func.attr
+            if isinstance(func, ast.Attribute)
+            else None
+        )
+        if callee != "Environment":
+            continue
+        name_node = (
+            node.args[0]
+            if node.args
+            else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+        )
+        if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
+            names.add(name_node.value)
+    return names
+
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
     """Compile one ``.dockerignore`` glob: ``*`` is one segment, ``**`` is any depth."""
@@ -189,37 +227,20 @@ async def deploy_command(
     if env_dir.is_file():
         env_dir = env_dir.parent
     names: set[str] = set()
-    for path in env_dir.glob("*.py"):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError):
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+    for dirpath, dirnames, filenames in os.walk(env_dir):
+        dirnames[:] = [d for d in dirnames if d not in _UNSEARCHED_DIRS]
+        for path in (Path(dirpath) / f for f in filenames if f.endswith(".py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
                 continue
-            func = node.func
-            callee = (
-                func.id
-                if isinstance(func, ast.Name)
-                else func.attr
-                if isinstance(func, ast.Attribute)
-                else None
-            )
-            if callee != "Environment":
-                continue
-            name_node = (
-                node.args[0]
-                if node.args
-                else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-            )
-            if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
-                names.add(name_node.value)
+            names.update(_environment_names(tree))
     found = ", ".join(sorted(names))
     if not names:
         raise CliError(
             "usage",
             f"No environment found in {env_dir}.",
-            suggestion="Declare the environment in a top-level .py file.",
+            suggestion="Declare the environment with Environment(name=...) in a .py file.",
         )
     if name is not None:
         if name not in names:
