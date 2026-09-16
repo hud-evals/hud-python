@@ -15,10 +15,13 @@ from hud.cli import eval as eval_mod
 from hud.cli.__main__ import app
 from hud.cli.eval import EvalConfig
 from hud.eval import (
+    DaytonaRuntime,
+    DockerRuntime,
     Grade,
     HostedRuntime,
     HUDRuntime,
     Job,
+    ModalRuntime,
     Run,
     Runtime,
     RuntimeConfig,
@@ -343,6 +346,21 @@ def test_explicit_placements(eval_cli: _EvalCli) -> None:
     assert isinstance(eval_cli.kwargs["runtime"], HostedRuntime)
     eval_cli.invoke("tasks.py", "openai", "--runtime", "tcp://127.0.0.1:7000", "--yes")
     assert eval_cli.kwargs["runtime"] == Runtime("tcp://127.0.0.1:7000")
+    for name, cls in (
+        ("docker", DockerRuntime),
+        ("modal", ModalRuntime),
+        ("daytona", DaytonaRuntime),
+    ):
+        eval_cli.invoke("tasks.py", "openai", "--runtime", name, "--yes")
+        assert isinstance(eval_cli.kwargs["runtime"], cls)
+
+
+def test_unknown_runtime_lists_the_choices(eval_cli: _EvalCli) -> None:
+    payload = eval_cli.invoke("tasks.py", "openai", "--runtime", "cloud", "--yes", exit_code=2)
+    assert (
+        "Unknown runtime 'cloud'. Use local, hud, hosted, docker, modal, daytona"
+        in (payload["message"])
+    )
 
 
 def test_python_task_source_loads_on_main_thread(eval_cli: _EvalCli, tmp_path: Path) -> None:

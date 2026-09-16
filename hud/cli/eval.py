@@ -22,7 +22,16 @@ from rich.table import Table
 
 from hud.agents import resolve_agent_model
 from hud.cli import CLI, CliError, parse_key_value
-from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime, Taskset
+from hud.eval import (
+    DaytonaRuntime,
+    DockerRuntime,
+    HostedRuntime,
+    HUDRuntime,
+    ModalRuntime,
+    Runtime,
+    SubprocessRuntime,
+    Taskset,
+)
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils import gateway
@@ -31,6 +40,7 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
@@ -39,7 +49,16 @@ if TYPE_CHECKING:
 hud_console = HUDConsole()
 
 _CONFIG_PATH = Path(".hud_eval.toml")
-_PLACEMENTS = ("local", "hud", "hosted")
+#: Providers a row's ``runtime_config`` can be handed to as-is; each validates
+#: its own inputs. ``local`` is composed here and ``tcp://`` attaches.
+_PROVIDERS: dict[str, Callable[[], Provider | HostedRuntime]] = {
+    "hud": HUDRuntime,
+    "hosted": HostedRuntime,
+    "docker": DockerRuntime,
+    "modal": ModalRuntime,
+    "daytona": DaytonaRuntime,
+}
+_PLACEMENTS = ("local", *_PROVIDERS)
 _SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
@@ -160,10 +179,10 @@ class EvalConfig(BaseModel):
     group_size: int = 1
     gateway: bool = False
     #: Placement: ``local`` (spawn each row's env — Docker for container rows,
-    #: a subprocess serving the bound env's source otherwise), ``hud`` (runtime
-    #: tunnel, agent loop here), ``hosted`` (whole rollout on the platform), or
-    #: a ``tcp://`` url of an already-served env. ``None`` infers from the
-    #: source: a file on disk runs locally, a platform taskset hosted.
+    #: a subprocess serving the bound env's source otherwise), a provider name
+    #: from ``_PROVIDERS``, or a ``tcp://`` url of an already-served env.
+    #: ``None`` infers from the source: a file on disk runs locally, a platform
+    #: taskset hosted.
     runtime: str | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
@@ -172,7 +191,9 @@ class EvalConfig(BaseModel):
     def _known_placement(cls, value: str | None) -> str | None:
         if value is None or value in _PLACEMENTS or value.startswith("tcp://"):
             return value
-        raise ValueError(f"Unknown runtime {value!r}. Use local, hud, hosted, or a tcp:// url.")
+        raise ValueError(
+            f"Unknown runtime {value!r}. Use {', '.join(_PLACEMENTS)}, or a tcp:// url."
+        )
 
     @classmethod
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
@@ -307,16 +328,12 @@ def _local_placement(taskset: Taskset) -> Provider:
 
 
 def _placement(cfg: EvalConfig, taskset: Taskset) -> Provider | HostedRuntime:
-    match cfg.runtime:
-        case "hosted":
-            return HostedRuntime()
-        case "hud":
-            return HUDRuntime()
-        case "local":
-            return _local_placement(taskset)
-        case url:
-            assert url is not None and url.startswith("tcp://")
-            return Runtime(url)
+    assert cfg.runtime is not None
+    if cfg.runtime == "local":
+        return _local_placement(taskset)
+    if cfg.runtime.startswith("tcp://"):
+        return Runtime(cfg.runtime)
+    return _PROVIDERS[cfg.runtime]()
 
 
 def _load_taskset(cfg: EvalConfig) -> Taskset:
@@ -460,8 +477,9 @@ def eval_command(
     runtime: str | None = typer.Option(
         None,
         "--runtime",
-        help="Placement: local, hud (runtime tunnel), hosted (whole rollout on the platform), "
-        "or a tcp:// url. Default: local for a tasks file; hosted for a platform taskset.",
+        help="Placement: local (subprocess/Docker per row), hud (runtime tunnel), hosted (whole "
+        "rollout on the platform), docker, modal, daytona, or a tcp:// url. "
+        "Default: local for a tasks file; hosted for a platform taskset.",
     ),
     remote: bool = typer.Option(
         False,
