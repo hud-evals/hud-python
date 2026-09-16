@@ -71,32 +71,6 @@ _UNSEARCHED_DIRS = {
 """Directories skipped when looking for ``Environment(...)`` declarations."""
 
 
-def _environment_names(tree: ast.AST) -> set[str]:
-    """Literal names passed to ``Environment(...)`` calls in *tree*."""
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        callee = (
-            func.id
-            if isinstance(func, ast.Name)
-            else func.attr
-            if isinstance(func, ast.Attribute)
-            else None
-        )
-        if callee != "Environment":
-            continue
-        name_node = (
-            node.args[0]
-            if node.args
-            else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-        )
-        if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
-            names.add(name_node.value)
-    return names
-
-
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
     """Compile one ``.dockerignore`` glob: ``*`` is one segment, ``**`` is any depth."""
     if pattern.startswith("/"):
@@ -234,7 +208,26 @@ async def deploy_command(
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (OSError, SyntaxError):
                 continue
-            names.update(_environment_names(tree))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                callee = (
+                    func.id
+                    if isinstance(func, ast.Name)
+                    else func.attr
+                    if isinstance(func, ast.Attribute)
+                    else None
+                )
+                if callee != "Environment":
+                    continue
+                name_node = (
+                    node.args[0]
+                    if node.args
+                    else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+                )
+                if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
+                    names.add(name_node.value)
     found = ", ".join(sorted(names))
     if not names:
         raise CliError(
