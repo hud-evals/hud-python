@@ -564,9 +564,13 @@ def test_model_commands_share_platform_transport(monkeypatch):
             return {"items": [{"id": model_id, "name": "owner/model + version"}], "total": 1}
         return [] if method == "GET" else {"id": model_id, "model_name": "forked"}
 
+    async def async_request(method, url, **kwargs):
+        return request(method, url, **kwargs)
+
     monkeypatch.setattr(settings, "api_key", "test-key")
     monkeypatch.setattr(settings, "hud_api_url", "https://api.example/")
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)  # catalog, fork
+    monkeypatch.setattr("hud.train.base.make_request", async_request)  # TrainingClient
     for command, extra, method, endpoint in [
         ("checkpoints", [], "GET", f"/models/{model_id}/checkpoints"),
         ("head", ["--set", "checkpoint"], "PUT", f"/models/{model_id}/head"),

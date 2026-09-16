@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
-from uuid import UUID
 
 import typer
 from rich.panel import Panel
@@ -14,6 +14,7 @@ from hud.cli import (
     CliError,
 )
 from hud.settings import settings
+from hud.train import TrainingClient
 from hud.utils.exceptions import HudRequestError
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
@@ -28,21 +29,6 @@ models_app = CLI(
     rich_markup_mode="rich",
     no_args_is_help=True,
 )
-
-
-def _resolve_model_id(model: str) -> str:
-    """Map a model slug or display name to its id (an id passes straight through)."""
-    try:
-        return str(UUID(model))
-    except ValueError:
-        return resolve_gateway_model(model).id
-
-
-def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
-    try:
-        return PlatformClient.from_settings().get(f"/models/{model_id}/checkpoints")
-    except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Checkpoints", input={"model": model_id}) from exc
 
 
 @models_app.command("list")
@@ -136,7 +122,7 @@ def fork_model(
             "if_not_exists": if_not_exists,
         }
 
-    source_id = _resolve_model_id(source)
+    source_id = resolve_gateway_model(source).id
     try:
         model = PlatformClient.from_settings().post(
             "/models/fork", json={"source_model_id": source_id, "name": name}
@@ -144,7 +130,7 @@ def fork_model(
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
             hud_console.stdout.print(f"[yellow]Model already exists[/yellow] [cyan]{name}[/cyan]")
-            existing_id = _resolve_model_id(name)
+            existing_id = resolve_gateway_model(name).id
             hud_console.stdout.print(f"[dim]id: {existing_id}[/dim]")
             return {"id": existing_id, "model_name": name, "existed": True}
         raise CliError.from_http(
@@ -183,13 +169,15 @@ def list_checkpoints(
         hud models checkpoints <model> --json
         hud models checkpoints <model> --quiet[/not dim]
     """
-    model_id = _resolve_model_id(model)
-    checkpoints = sorted(_get_checkpoints(model_id), key=lambda c: c.get("created_at") or "")
+    model_id = resolve_gateway_model(model).id
+    checkpoints = sorted(
+        asyncio.run(TrainingClient(model_id).checkpoints()), key=lambda c: c.created_at or ""
+    )
+    rows = [checkpoint.model_dump() for checkpoint in checkpoints]
     if quiet:
         for ckpt in checkpoints:
-            if ckpt.get("id"):
-                typer.echo(ckpt["id"])
-        return checkpoints
+            typer.echo(ckpt.id)
+        return rows
 
     view = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}?tab=checkpoints"
     if not checkpoints:
@@ -197,7 +185,7 @@ def list_checkpoints(
             "[yellow]No checkpoints yet — this model serves its base weights[/yellow]"
         )
         hud_console.stdout.print(f"[dim]View: {view}[/dim]")
-        return checkpoints
+        return rows
 
     table = Table(title="Checkpoints")
     table.add_column("", style="green")
@@ -207,18 +195,17 @@ def list_checkpoints(
     table.add_column("Traces", justify="right")
     table.add_column("Created", style="dim")
     for ckpt in checkpoints:
-        reward = ckpt.get("mean_reward")
         table.add_row(
-            "▶" if ckpt.get("is_active") else "",
-            ckpt.get("name") or ckpt["id"][:8],
-            f"{reward:.3f}" if reward is not None else "-",
-            ckpt.get("loss_fn") or "-",
-            str(ckpt.get("num_traces") or "-"),
-            str(ckpt.get("created_at") or ""),
+            "▶" if ckpt.is_active else "",
+            ckpt.name or ckpt.id[:8],
+            f"{ckpt.mean_reward:.3f}" if ckpt.mean_reward is not None else "-",
+            ckpt.loss_fn or "-",
+            str(ckpt.num_traces or "-"),
+            ckpt.created_at or "",
         )
     hud_console.stdout.print(table)
     hud_console.stdout.print(f"\n[dim]View: {view}[/dim]")
-    return checkpoints
+    return rows
 
 
 @models_app.command("head")
@@ -239,7 +226,8 @@ def show_head(
         hud models head <model> --json
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
-    model_id = _resolve_model_id(model)
+    model_id = resolve_gateway_model(model).id
+    client = TrainingClient(model_id)
     view = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}?tab=checkpoints"
 
     if set_to is not None:
@@ -252,36 +240,27 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
-        try:
-            PlatformClient.from_settings().put(
-                f"/models/{model_id}/head", json={"checkpoint_id": set_to}
-            )
-        except HudRequestError as exc:
-            raise CliError.from_http(
-                exc,
-                resource="Checkpoint",
-                input={"model": model_id, "checkpoint_id": set_to},
-            ) from exc
+        asyncio.run(client.set_head(set_to))
         hud_console.stdout.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
         hud_console.stdout.print(f"[dim]View: {view}[/dim]")
         return {"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"}
 
-    head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
+    head = asyncio.run(client.head())
     if head is None:
         hud_console.stdout.print(
             "[yellow]No active checkpoint — this model serves its base weights[/yellow]"
         )
     else:
-        reward = head.get("mean_reward")
+        reward = f"{head.mean_reward:.3f}" if head.mean_reward is not None else "-"
         hud_console.stdout.print(
             Panel.fit(
-                f"[bold green]HEAD[/bold green] [cyan]{head.get('name') or head['id'][:8]}[/cyan]\n"
-                f"sampler: [green]{head.get('checkpoint_name') or '-'}[/green]\n"
-                f"reward:  {f'{reward:.3f}' if reward is not None else '-'}    "
-                f"loss: {head.get('loss_fn') or '-'}    traces: {head.get('num_traces') or '-'}\n"
-                f"created: [dim]{head.get('created_at') or ''}[/dim]",
+                f"[bold green]HEAD[/bold green] [cyan]{head.name or head.id[:8]}[/cyan]\n"
+                f"sampler: [green]{head.checkpoint_name or '-'}[/green]\n"
+                f"reward:  {reward}    loss: {head.loss_fn or '-'}    "
+                f"traces: {head.num_traces or '-'}\n"
+                f"created: [dim]{head.created_at or ''}[/dim]",
                 border_style="green",
             )
         )
     hud_console.stdout.print(f"[dim]View: {view}[/dim]")
-    return head
+    return head.model_dump() if head is not None else None
