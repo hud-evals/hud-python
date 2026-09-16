@@ -193,24 +193,21 @@ def test_openai_compatible_requires_a_model(eval_cli: _EvalCli) -> None:
     assert "Model name is required" in payload["message"]
 
 
-def test_agent_kwargs_model_precedence_and_aliases() -> None:
-    cfg = EvalConfig(
-        agent_type="openai_compatible",
-        model="glm-5.2",
-        max_steps=7,
-        auto_respond=True,
-        agent_config={"openai_compatible": {"temperature": 0.5, "model": "kimi-2.6"}},
+def test_cli_model_wins_over_config_section_and_aliases_normalize(
+    eval_cli: _EvalCli, tmp_path: Path
+) -> None:
+    (tmp_path / ".hud_eval.toml").write_text(
+        '[openai_compatible]\nmodel = "kimi-2.6"\ncompletion_kwargs = { temperature = 0.5 }\n',
+        encoding="utf-8",
     )
-    assert cfg.agent_kwargs() == {
-        "temperature": 0.5,
-        "model": "z-ai/glm-5.2",
-        "max_steps": 7,
-        "auto_respond": True,
-    }
-    from_section = EvalConfig(
-        agent_type="openai_compatible", agent_config={"openai_compatible": {"model": "kimi-2.6"}}
-    )
-    assert from_section.agent_kwargs()["model"] == "moonshotai/kimi-k2.6"
+    eval_cli.invoke("tasks.py", "openai_compatible", "--yes")
+    assert eval_cli.agent.config.model == "moonshotai/kimi-k2.6"
+    assert eval_cli.agent.config.completion_kwargs == {"temperature": 0.5}
+
+    eval_cli.invoke("tasks.py", "openai_compatible", "-m", "glm-5.2", "--max-steps", "7", "--yes")
+    assert eval_cli.agent.config.model == "z-ai/glm-5.2"
+    assert eval_cli.agent.config.max_steps == 7
+    assert eval_cli.agent.config.completion_kwargs == {"temperature": 0.5}
 
 
 # ─── command: planning and validation ──────────────────────────────────

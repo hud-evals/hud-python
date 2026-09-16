@@ -140,15 +140,12 @@ class EvalConfig(BaseModel):
             {**data, **{k: v for k, v in overrides.items() if k != "agent_config"}}
         )
 
-    @property
-    def source_is_file(self) -> bool:
-        return self.source is not None and Path(self.source).exists()
-
     def with_placement(self) -> EvalConfig:
         """Pin ``runtime``: a local file spawns locally, a platform taskset runs hosted."""
+        is_file = self.source is not None and Path(self.source).exists()
         if self.runtime is None:
-            return self.model_copy(update={"runtime": "local" if self.source_is_file else "hosted"})
-        if self.runtime == "local" and not self.source_is_file:
+            return self.model_copy(update={"runtime": "local" if is_file else "hosted"})
+        if self.runtime == "local" and not is_file:
             raise ValueError(
                 f"--runtime local needs a local env source, but {self.source!r} is a "
                 "platform taskset with no env source on disk. Run it on the platform "
@@ -157,19 +154,6 @@ class EvalConfig(BaseModel):
                 "or attach to a served env with --runtime tcp://host:port."
             )
         return self
-
-    def agent_kwargs(self) -> dict[str, Any]:
-        """The agent's config kwargs: its TOML section, then ``--model`` on top."""
-        assert self.agent_type is not None
-        kwargs = dict(self.agent_config.get(self.agent_type.value, {}))
-        if self.model:
-            kwargs["model"] = self.model
-        if isinstance(kwargs.get("model"), str):
-            kwargs["model"] = normalize_gateway_model_id(kwargs["model"])
-        kwargs["max_steps"] = self.max_steps
-        if self.auto_respond:
-            kwargs["auto_respond"] = True
-        return kwargs
 
 
 def _is_container_row(task: Task) -> bool:
@@ -407,7 +391,7 @@ def eval_command(
     ):
         raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
-    if cfg.source_is_file:
+    if Path(cfg.source).exists():
         hud_console.info(f"Loading tasks from: {cfg.source}")
         taskset = Taskset.from_file(cfg.source)
     else:
@@ -468,6 +452,16 @@ def eval_command(
     else:
         placement = _PROVIDERS[cfg.runtime]()
 
+    # The agent's config kwargs: its TOML section, then --model on top.
+    agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
+    if cfg.model:
+        agent_kwargs["model"] = cfg.model
+    if isinstance(agent_kwargs.get("model"), str):
+        agent_kwargs["model"] = normalize_gateway_model_id(agent_kwargs["model"])
+    agent_kwargs["max_steps"] = cfg.max_steps
+    if cfg.auto_respond:
+        agent_kwargs["auto_respond"] = True
+
     table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
     table.add_column("Setting", style="yellow")
     table.add_column("Value", style="green")
@@ -487,7 +481,7 @@ def eval_command(
             table.add_row(flag, "[bold green]True[/bold green]")
     table.add_row("", "")
     table.add_row(f"[dim]{agent_type.value} config[/dim]", "")
-    for name, value in cfg.agent_kwargs().items():
+    for name, value in agent_kwargs.items():
         if name in ("max_steps", "auto_respond"):
             continue
         shown = str(value)
@@ -513,7 +507,7 @@ def eval_command(
 
     # The agent picks its own client (provider key, else gateway); --gateway
     # overrides that. Hosted rollouts leave it unset for the platform to build.
-    agent_config = agent_type.config_cls(**cfg.agent_kwargs())
+    agent_config = agent_type.config_cls(**agent_kwargs)
     if cfg.gateway and cfg.runtime != "hosted" and agent_type != AgentType.OPENAI_COMPATIBLE:
         agent_config.model_client = build_gateway_client(agent_type.gateway_provider)
     # cls/config_cls are matched unions; the pairing is correct by construction.
