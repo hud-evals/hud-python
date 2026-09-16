@@ -30,61 +30,23 @@ models_app = CLI(
 )
 
 
-def _provider_name(row: dict[str, Any]) -> str:
-    provider = row.get("provider")
-    if isinstance(provider, dict):
-        return str(provider.get("name") or "-")
-    return "-"
+def _resolve_model_id(model: str) -> str:
+    """Map a model slug to its id (an id passes straight through)."""
+    try:
+        return str(UUID(model))
+    except ValueError:
+        try:
+            data = PlatformClient.from_settings().get("/models/resolve", params={"model": model})
+        except HudRequestError as exc:
+            raise CliError.from_http(exc, resource="Model", input={"model": model}) from exc
+        return str(data["id"])
 
 
-def _render_models(rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        hud_console.stdout.print("[yellow]No models found[/yellow]")
-        return
-    hud_console.stdout.print(
-        Panel.fit("[bold cyan]Available Models[/bold cyan]", border_style="cyan")
-    )
-    table = Table()
-    table.add_column("Name", style="cyan")
-    table.add_column("Model (API)", style="green")
-    table.add_column("ID", style="blue", no_wrap=True)
-    table.add_column("Provider", style="yellow")
-    table.add_column("Agent", style="magenta")
-    table.add_column("Trainable", style="green", justify="center")
-    for model in rows:
-        table.add_row(
-            model.get("name") or model.get("id") or "-",
-            model.get("model_name") or model.get("id") or "-",
-            model.get("id") or "-",
-            _provider_name(model),
-            model.get("sdk_agent_type") or "-",
-            "✓" if model.get("is_trainable") else "",
-        )
-    hud_console.stdout.print(table)
-    hud_console.stdout.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
-    web = settings.hud_web_url.rstrip("/")
-    hud_console.stdout.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
-
-
-def _render_head(model_id: str, head: dict[str, Any] | None) -> None:
-    if head is None:
-        hud_console.stdout.print(
-            "[yellow]No active checkpoint — this model serves its base weights[/yellow]"
-        )
-        hud_console.stdout.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
-        return
-    reward = head.get("mean_reward")
-    hud_console.stdout.print(
-        Panel.fit(
-            f"[bold green]HEAD[/bold green] [cyan]{head.get('name') or head['id'][:8]}[/cyan]\n"
-            f"sampler: [green]{head.get('checkpoint_name') or '-'}[/green]\n"
-            f"reward:  {f'{reward:.3f}' if reward is not None else '-'}    "
-            f"loss: {head.get('loss_fn') or '-'}    traces: {head.get('num_traces') or '-'}\n"
-            f"created: [dim]{head.get('created_at') or ''}[/dim]",
-            border_style="green",
-        )
-    )
-    hud_console.stdout.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
+def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
+    try:
+        return PlatformClient.from_settings().get(f"/models/{model_id}/checkpoints")
+    except HudRequestError as exc:
+        raise CliError.from_http(exc, resource="Checkpoints", input={"model": model_id}) from exc
 
 
 @models_app.command("list")
@@ -112,8 +74,34 @@ def list_models(
             ident = model.get("model_name") or model.get("id")
             if ident:
                 typer.echo(ident)
-    else:
-        _render_models(rows)
+        return rows
+    if not rows:
+        hud_console.stdout.print("[yellow]No models found[/yellow]")
+        return rows
+
+    hud_console.stdout.print(
+        Panel.fit("[bold cyan]Available Models[/bold cyan]", border_style="cyan")
+    )
+    table = Table()
+    table.add_column("Name", style="cyan")
+    table.add_column("Model (API)", style="green")
+    table.add_column("ID", style="blue", no_wrap=True)
+    table.add_column("Provider", style="yellow")
+    table.add_column("Agent", style="magenta")
+    table.add_column("Trainable", style="green", justify="center")
+    for model in rows:
+        table.add_row(
+            model.get("name") or model.get("id") or "-",
+            model.get("model_name") or model.get("id") or "-",
+            model.get("id") or "-",
+            model["provider"].get("name") or "-",
+            model.get("sdk_agent_type") or "-",
+            "✓" if model.get("is_trainable") else "",
+        )
+    hud_console.stdout.print(table)
+    hud_console.stdout.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
+    web = settings.hud_web_url.rstrip("/")
+    hud_console.stdout.print(f"[dim]View a model in the browser: {web}/models/<id>[/dim]")
     return rows
 
 
@@ -143,17 +131,14 @@ def fork_model(
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
     if dry_run:
-        payload = {
+        hud_console.stdout.print(f"[dim]--dry-run: would fork {source!r} as {name!r}[/dim]")
+        return {
             "dry_run": True,
             "action": "fork",
             "source": source,
             "name": name,
             "if_not_exists": if_not_exists,
         }
-        hud_console.stdout.print(
-            f"[dim]--dry-run: would fork {payload['source']!r} as {payload['name']!r}[/dim]"
-        )
-        return payload
 
     source_id = _resolve_model_id(source)
     try:
@@ -162,14 +147,10 @@ def fork_model(
         )
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
-            existing = _existing_model(name)
-            saved = {**existing, "existed": True}
-            hud_console.stdout.print(
-                "[yellow]Model already exists[/yellow] "
-                f"[cyan]{saved.get('model_name') or name}[/cyan]"
-            )
-            hud_console.stdout.print(f"[dim]id: {saved.get('id')}[/dim]")
-            return saved
+            hud_console.stdout.print(f"[yellow]Model already exists[/yellow] [cyan]{name}[/cyan]")
+            existing_id = _resolve_model_id(name)
+            hud_console.stdout.print(f"[dim]id: {existing_id}[/dim]")
+            return {"id": existing_id, "model_name": name, "existed": True}
         raise CliError.from_http(
             exc,
             resource="Model",
@@ -186,7 +167,9 @@ def fork_model(
         )
     )
     hud_console.stdout.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
-    hud_console.stdout.print(f"[dim]View: {_model_url(model['id'])}[/dim]")
+    hud_console.stdout.print(
+        f"[dim]View: {settings.hud_web_url.rstrip('/')}/models/{model['id']}[/dim]"
+    )
     return model
 
 
@@ -206,40 +189,39 @@ def list_checkpoints(
     """
     model_id = _resolve_model_id(model)
     checkpoints = sorted(_get_checkpoints(model_id), key=lambda c: c.get("created_at") or "")
-
-    def _render(rows: list[dict[str, Any]]) -> None:
-        if not rows:
-            hud_console.stdout.print(
-                "[yellow]No checkpoints yet — this model serves its base weights[/yellow]"
-            )
-            hud_console.stdout.print(f"[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
-            return
-        table = Table(title="Checkpoints")
-        table.add_column("", style="green")
-        table.add_column("Name", style="cyan")
-        table.add_column("Reward", style="yellow", justify="right")
-        table.add_column("Loss", style="magenta")
-        table.add_column("Traces", justify="right")
-        table.add_column("Created", style="dim")
-        for ckpt in rows:
-            reward = ckpt.get("mean_reward")
-            table.add_row(
-                "▶" if ckpt.get("is_active") else "",
-                ckpt.get("name") or ckpt["id"][:8],
-                f"{reward:.3f}" if reward is not None else "-",
-                ckpt.get("loss_fn") or "-",
-                str(ckpt.get("num_traces") or "-"),
-                str(ckpt.get("created_at") or ""),
-            )
-        hud_console.stdout.print(table)
-        hud_console.stdout.print(f"\n[dim]View: {_model_url(model_id, tab='checkpoints')}[/dim]")
-
     if quiet:
         for ckpt in checkpoints:
             if ckpt.get("id"):
                 typer.echo(ckpt["id"])
-    else:
-        _render(checkpoints)
+        return checkpoints
+
+    view = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}?tab=checkpoints"
+    if not checkpoints:
+        hud_console.stdout.print(
+            "[yellow]No checkpoints yet — this model serves its base weights[/yellow]"
+        )
+        hud_console.stdout.print(f"[dim]View: {view}[/dim]")
+        return checkpoints
+
+    table = Table(title="Checkpoints")
+    table.add_column("", style="green")
+    table.add_column("Name", style="cyan")
+    table.add_column("Reward", style="yellow", justify="right")
+    table.add_column("Loss", style="magenta")
+    table.add_column("Traces", justify="right")
+    table.add_column("Created", style="dim")
+    for ckpt in checkpoints:
+        reward = ckpt.get("mean_reward")
+        table.add_row(
+            "▶" if ckpt.get("is_active") else "",
+            ckpt.get("name") or ckpt["id"][:8],
+            f"{reward:.3f}" if reward is not None else "-",
+            ckpt.get("loss_fn") or "-",
+            str(ckpt.get("num_traces") or "-"),
+            str(ckpt.get("created_at") or ""),
+        )
+    hud_console.stdout.print(table)
+    hud_console.stdout.print(f"\n[dim]View: {view}[/dim]")
     return checkpoints
 
 
@@ -262,75 +244,48 @@ def show_head(
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
     model_id = _resolve_model_id(model)
+    view = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}?tab=checkpoints"
 
     if set_to is not None:
         if dry_run:
-            payload = {
+            hud_console.stdout.print(f"[dim]--dry-run: would set head of {model} to {set_to}[/dim]")
+            return {
                 "dry_run": True,
                 "action": "set_head",
                 "model": model,
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
-            hud_console.stdout.print(
-                f"[dim]--dry-run: would set head of {payload['model']} "
-                f"to {payload['checkpoint_id']}[/dim]"
+        try:
+            PlatformClient.from_settings().put(
+                f"/models/{model_id}/head", json={"checkpoint_id": set_to}
             )
-            return payload
-        _set_head(model_id, set_to)
-        saved = {"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"}
-        hud_console.stdout.print(
-            f"[green]Head set to[/green] [cyan]{saved['checkpoint_id']}[/cyan]"
-        )
-        hud_console.stdout.print(
-            f"[dim]View: {_model_url(saved['model_id'], tab='checkpoints')}[/dim]"
-        )
-        return saved
+        except HudRequestError as exc:
+            raise CliError.from_http(
+                exc,
+                resource="Checkpoint",
+                input={"model": model_id, "checkpoint_id": set_to},
+            ) from exc
+        hud_console.stdout.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
+        hud_console.stdout.print(f"[dim]View: {view}[/dim]")
+        return {"model_id": model_id, "checkpoint_id": set_to, "action": "set_head"}
 
     head = next((c for c in _get_checkpoints(model_id) if c.get("is_active")), None)
-    _render_head(model_id, head)
-    return head
-
-
-def _model_url(model_id: str, *, tab: str | None = None) -> str:
-    """Web app URL for a model (optionally a specific tab, e.g. ``checkpoints``)."""
-    url = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}"
-    return f"{url}?tab={tab}" if tab else url
-
-
-def _resolve_model_id(model: str) -> str:
-    """Map a model slug to its id (an id passes straight through)."""
-    try:
-        return str(UUID(model))
-    except ValueError:
-        try:
-            data = PlatformClient.from_settings().get("/models/resolve", params={"model": model})
-        except HudRequestError as exc:
-            raise CliError.from_http(exc, resource="Model", input={"model": model}) from exc
-        return str(data["id"])
-
-
-def _existing_model(name: str) -> dict[str, Any]:
-    """Resolve a model name after a conflict so ``--if-not-exists`` can return it."""
-    model_id = _resolve_model_id(name)
-    return {"id": model_id, "model_name": name}
-
-
-def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
-    try:
-        return PlatformClient.from_settings().get(f"/models/{model_id}/checkpoints")
-    except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Checkpoints", input={"model": model_id}) from exc
-
-
-def _set_head(model_id: str, checkpoint_id: str) -> None:
-    try:
-        PlatformClient.from_settings().put(
-            f"/models/{model_id}/head", json={"checkpoint_id": checkpoint_id}
+    if head is None:
+        hud_console.stdout.print(
+            "[yellow]No active checkpoint — this model serves its base weights[/yellow]"
         )
-    except HudRequestError as exc:
-        raise CliError.from_http(
-            exc,
-            resource="Checkpoint",
-            input={"model": model_id, "checkpoint_id": checkpoint_id},
-        ) from exc
+    else:
+        reward = head.get("mean_reward")
+        hud_console.stdout.print(
+            Panel.fit(
+                f"[bold green]HEAD[/bold green] [cyan]{head.get('name') or head['id'][:8]}[/cyan]\n"
+                f"sampler: [green]{head.get('checkpoint_name') or '-'}[/green]\n"
+                f"reward:  {f'{reward:.3f}' if reward is not None else '-'}    "
+                f"loss: {head.get('loss_fn') or '-'}    traces: {head.get('num_traces') or '-'}\n"
+                f"created: [dim]{head.get('created_at') or ''}[/dim]",
+                border_style="green",
+            )
+        )
+    hud_console.stdout.print(f"[dim]View: {view}[/dim]")
+    return head
