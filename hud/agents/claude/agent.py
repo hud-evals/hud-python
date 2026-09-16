@@ -109,7 +109,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             return cast("AsyncAnthropic | AsyncAnthropicBedrock", self.config.model_client)
         return cast(
             "AsyncAnthropic | AsyncAnthropicBedrock",
-            gateway.build_model_client("anthropic", model=self.config.model),
+            gateway.build_model_client(
+                "anthropic", model=self.config.model, gateway=self.config.gateway
+            ),
         )
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────

@@ -123,7 +123,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             )
         config = self.config.model_dump(
             mode="json",
-            exclude={"model_client", "api_key", "base_url", "hosted_tools"},
+            exclude={"model_client", "gateway", "api_key", "base_url", "hosted_tools"},
         )
         return {"type": agent_type.value, "config": config}
 

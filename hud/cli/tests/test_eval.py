@@ -452,9 +452,7 @@ def test_provider_key_wins_unless_gateway_is_forced(
     direct = MagicMock(return_value=object())
     gateway = MagicMock(return_value=object())
     monkeypatch.setattr(factory, direct)
-    # The agent's own fallback resolves through the gateway module; --gateway is applied by the CLI.
     monkeypatch.setattr("hud.utils.gateway.build_gateway_client", gateway)
-    monkeypatch.setattr("hud.cli.eval.build_gateway_client", gateway)
     flags = ["--gateway"] if force_gateway else []
     eval_cli.invoke("tasks.py", agent_type, *flags, "--yes")
     if provider_key and not force_gateway:

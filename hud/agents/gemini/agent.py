@@ -55,7 +55,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
         model_client = config.model_client
         if model_client is None:
-            model_client = gateway.build_model_client("gemini")
+            model_client = gateway.build_model_client("gemini", gateway=config.gateway)
 
         self.gemini_client: genai.Client = cast("genai.Client", model_client)
         self.temperature = config.temperature

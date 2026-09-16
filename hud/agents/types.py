@@ -68,8 +68,11 @@ class AgentConfig(BaseModel):
     model_name: str = "Agent"
     model: str = Field(default="unknown", validation_alias=_model_alias)
     #: Provider client (AsyncAnthropic, AsyncOpenAI, genai.Client, ...). When unset,
-    #: agents resolve one from settings (HUD gateway or provider API key).
+    #: agents build one: the provider's own key when set, otherwise the HUD gateway.
     model_client: Any = None
+    #: Use the HUD gateway even when the provider's own key is set. ``create_agent``
+    #: turns this on; hosted execution always routes through the gateway.
+    gateway: bool = False
 
 
 # -----------------------------------------------------------------------------

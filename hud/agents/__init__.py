@@ -27,10 +27,11 @@ if TYPE_CHECKING:
 def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     """Create an agent routed through the HUD gateway.
 
-    Leaves ``model_client`` unset so provider agent constructors build the HUD
-    gateway client locally, while :class:`~hud.eval.runtime.HostedRuntime` can
-    serialize the config and rebuild the client remotely. Explicitly supplied
-    clients remain custom/BYOK and are not serializable.
+    Sets ``gateway=True`` on the config instead of attaching a client, so the
+    provider agent builds the gateway client locally and
+    :class:`~hud.eval.runtime.HostedRuntime` can serialize the config and rebuild
+    it remotely. Explicitly supplied clients remain custom/BYOK and are not
+    serializable.
 
     For direct API access with provider API keys, instantiate the agent classes
     directly.
@@ -47,6 +48,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
     agent_type, model_id = resolve_agent_model(model)
     kwargs.setdefault("model", model_id)
+    kwargs["gateway"] = True
     # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
     return agent_type.cls(cast("Any", config))

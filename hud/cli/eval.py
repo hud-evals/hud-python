@@ -35,7 +35,7 @@ from hud.eval import (
 )
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.gateway import build_gateway_client, list_gateway_models
+from hud.utils.gateway import list_gateway_models
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -318,7 +318,6 @@ def eval_command(
 
     if cfg.agent_type is None:
         # Pick the agent type, then a current catalog model of that type, newest first.
-        # The catalog is per-team, so without HUD_API_KEY the agent's default model is used.
         picked_type = AgentType(
             hud_console.select(
                 "Select an agent:", choices=[agent.value for agent in AgentType], default=0
@@ -454,6 +453,8 @@ def eval_command(
     agent_kwargs["max_steps"] = cfg.max_steps
     if cfg.auto_respond:
         agent_kwargs["auto_respond"] = True
+    if cfg.gateway:
+        agent_kwargs["gateway"] = True
 
     table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
     table.add_column("Setting", style="yellow")
@@ -495,17 +496,8 @@ def eval_command(
             f"group_size: {cfg.group_size})"
         )
 
-    # The agent picks its own client (provider key, else gateway); --gateway
-    # overrides that. Hosted rollouts leave it unset for the platform to build.
-    agent_config = agent_type.config_cls(**agent_kwargs)
-    if (
-        cfg.gateway
-        and cfg.runtime is not Placement.HOSTED
-        and agent_type != AgentType.OPENAI_COMPATIBLE
-    ):
-        agent_config.model_client = build_gateway_client(agent_type.gateway_provider)
     # cls/config_cls are matched unions; the pairing is correct by construction.
-    agent_instance = cast("Any", agent_type.cls)(config=agent_config)
+    agent_instance = cast("Any", agent_type.cls)(config=agent_type.config_cls(**agent_kwargs))
 
     started = time.monotonic()
     job = asyncio.run(

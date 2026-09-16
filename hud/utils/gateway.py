@@ -61,12 +61,12 @@ async def _inject_trace_id(request: httpx.Request) -> None:
     request.headers.update(get_trace_headers())
 
 
-def build_model_client(provider: str, *, model: str | None = None) -> GatewayClient:
-    """The provider's own key when set, otherwise the HUD gateway.
-
-    ``create_agent`` is the always-gateway path; this is what provider agents
-    constructed directly use. A Bedrock inference-profile ARN as the Anthropic
-    *model* is only reachable through Bedrock.
+def build_model_client(
+    provider: str, *, model: str | None = None, gateway: bool = False
+) -> GatewayClient:
+    """The provider's own key when set, otherwise the HUD gateway; *gateway* skips the
+    provider key. A Bedrock inference-profile ARN as the Anthropic *model* is only
+    reachable through Bedrock.
     """
     if provider == "anthropic" and model and model.startswith("arn:aws:bedrock:"):
         if not (
@@ -89,7 +89,7 @@ def build_model_client(provider: str, *, model: str | None = None) -> GatewayCli
         "openai": settings.openai_api_key,
     }
     key = keys[provider]
-    if not key:
+    if gateway or not key:
         if settings.api_key:
             return build_gateway_client(provider)
         raise HudAuthenticationError(

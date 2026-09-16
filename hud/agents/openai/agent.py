@@ -71,7 +71,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
         model_client = config.model_client
         if model_client is None:
-            model_client = gateway.build_model_client("openai")
+            model_client = gateway.build_model_client("openai", gateway=config.gateway)
 
         self.openai_client: AsyncOpenAI = cast("AsyncOpenAI", model_client)
         self._model = config.model
