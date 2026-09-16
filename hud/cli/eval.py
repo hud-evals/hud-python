@@ -13,7 +13,7 @@ import tomllib
 from enum import StrEnum
 from pathlib import Path
 from string import Template
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, assert_never, cast
 
 import typer
 from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlConstraints
@@ -43,7 +43,6 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from contextlib import AbstractAsyncContextManager
 
     from hud.eval import Provider, Task
@@ -56,7 +55,11 @@ _SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
 class Placement(StrEnum):
-    """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead."""
+    """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead.
+
+    ``LOCAL`` is composed per row in the command; every other name is a provider
+    each row's ``runtime_config`` is handed to as-is.
+    """
 
     LOCAL = "local"
     HUD = "hud"
@@ -66,15 +69,6 @@ class Placement(StrEnum):
     DAYTONA = "daytona"
 
 
-#: Providers a row's ``runtime_config`` is handed to as-is; each validates its
-#: own inputs. ``LOCAL`` is composed in the command.
-_PROVIDERS: dict[Placement, Callable[[], Provider | HostedRuntime]] = {
-    Placement.HUD: HUDRuntime,
-    Placement.HOSTED: HostedRuntime,
-    Placement.DOCKER: DockerRuntime,
-    Placement.MODAL: ModalRuntime,
-    Placement.DAYTONA: DaytonaRuntime,
-}
 TcpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["tcp"])]
 
 
@@ -429,34 +423,45 @@ def eval_command(
     hud_console.info(f"Loaded {len(taskset)} task(s)")
 
     placement: Provider | HostedRuntime
-    if isinstance(cfg.runtime, AnyUrl):
-        placement = Runtime(str(cfg.runtime))
-    elif cfg.runtime is Placement.LOCAL:
-        # Isolate each row: its container, or a subprocess serving the bound env's
-        # source (``Taskset.run`` alone would serve a live env in-process).
-        portable = [
-            slug
-            for slug, task in taskset.items()
-            if task._env is None and not _is_container_row(task)
-        ]
-        if portable:
-            shown = ", ".join(portable[:5]) + ("..." if len(portable) > 5 else "")
-            raise ValueError(
-                f"{len(portable)} task(s) have no bound Environment or container image "
-                f"({shown}). Portable rows need --runtime hud, --remote, or "
-                "--runtime tcp://host:port."
-            )
-        docker = DockerRuntime()
+    match cfg.runtime:
+        case AnyUrl():
+            placement = Runtime(str(cfg.runtime))
+        case Placement.LOCAL:
+            # Isolate each row: its container, or a subprocess serving the bound env's
+            # source (``Taskset.run`` alone would serve a live env in-process).
+            portable = [
+                slug
+                for slug, task in taskset.items()
+                if task._env is None and not _is_container_row(task)
+            ]
+            if portable:
+                shown = ", ".join(portable[:5]) + ("..." if len(portable) > 5 else "")
+                raise ValueError(
+                    f"{len(portable)} task(s) have no bound Environment or container image "
+                    f"({shown}). Portable rows need --runtime hud, --remote, or "
+                    "--runtime tcp://host:port."
+                )
+            docker = DockerRuntime()
 
-        def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
-            if _is_container_row(task):
-                return docker(task)
-            assert task._env is not None
-            return SubprocessRuntime(task._env)(task)
+            def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
+                if _is_container_row(task):
+                    return docker(task)
+                assert task._env is not None
+                return SubprocessRuntime(task._env)(task)
 
-        placement = spawn
-    else:
-        placement = _PROVIDERS[cfg.runtime]()
+            placement = spawn
+        case Placement.HUD:
+            placement = HUDRuntime()
+        case Placement.HOSTED:
+            placement = HostedRuntime()
+        case Placement.DOCKER:
+            placement = DockerRuntime()
+        case Placement.MODAL:
+            placement = ModalRuntime()
+        case Placement.DAYTONA:
+            placement = DaytonaRuntime()
+        case _:
+            assert_never(cfg.runtime)
 
     # The agent's config kwargs: its TOML section, then --model on top.
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
