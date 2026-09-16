@@ -22,7 +22,7 @@ async def test_source_resolves_authored_task_for_existing_runtime(tmp_path, over
     task_id, args, placement = task_module._resolve(
         "flask-4992",
         str(source),
-        "127.0.0.1:9000",
+        "tcp://127.0.0.1:9000",
         override,
     )
 

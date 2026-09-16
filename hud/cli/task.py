@@ -6,18 +6,15 @@ runs against the already-served control channel instead.
 
     hud task list                          # what tasks this source exposes
     hud task start fix_config              # -> the task's prompt (stdout)
-    hud task grade fix_config --answer "…" # -> the reward (stdout); --out for JSON
+    hud task grade fix_config --answer "…" # -> the reward (stdout); --json for the frame
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import socket
 from contextlib import nullcontext
-from pathlib import Path  # noqa: TC003 - Typer resolves command annotations at runtime.
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
 import typer
 
@@ -41,31 +38,14 @@ task_app = CLI(
 def _resolve(
     task: str, source: str | None, url: str | None, args: dict[str, Any] | None
 ) -> tuple[str, dict[str, Any], AbstractAsyncContextManager[Runtime]]:
-    """Resolve ``(task_id, args, placement)`` for ``start`` and ``grade``.
+    """``(task_id, args, placement)`` for ``start`` and ``grade``.
 
-    ``--source`` resolves an authored task id/slug and its bound args. ``--url``
-    selects an existing substrate; otherwise an explicit source is spawned. With
-    neither option, a local env on :8765 is used when present, or ``.`` is resolved
-    and spawned. ``--args`` overrides authored args when supplied.
+    ``--url`` alone runs ``task`` as a raw template id with ``--args``. A source
+    (``--source``, default ``.``) resolves an authored slug/id/index to its template
+    id and bound args, and is spawned unless ``--url`` names a served env.
     """
-    attach = url
-    if attach is None and source is None:
-        # An env already serving locally (hud serve, or a built image's CMD).
-        try:
-            with socket.create_connection(("127.0.0.1", 8765), timeout=0.25):
-                attach = "tcp://127.0.0.1:8765"
-        except OSError:
-            attach = None
-    endpoint: Runtime | None = None
-    if attach is not None:
-        parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
-        if parts.scheme != "tcp":
-            raise CliError(error="usage", message="Task control channels require a tcp:// URL")
-        host = parts.hostname or "127.0.0.1"
-        endpoint = Runtime(f"tcp://{f'[{host}]' if ':' in host else host}:{parts.port or 8765}")
-
-    if endpoint is not None and source is None:
-        return task, args or {}, nullcontext(endpoint)
+    if url is not None and source is None:
+        return task, args or {}, nullcontext(Runtime(url))
 
     taskset = Taskset.from_file(source or ".")
     if not taskset:
@@ -93,8 +73,8 @@ def _resolve(
             message=f"Ambiguous task {task!r}; use a unique slug shown by hud task list.",
         )
     selected = matches[0]
-    if endpoint is not None:
-        placement: AbstractAsyncContextManager[Runtime] = nullcontext(endpoint)
+    if url is not None:
+        placement: AbstractAsyncContextManager[Runtime] = nullcontext(Runtime(url))
     elif selected._env is None:
         raise CliError(
             error="usage",
@@ -106,17 +86,6 @@ def _resolve(
     else:
         placement = SubprocessRuntime(selected._env)(selected)
     return selected.id, selected.args if args is None else args, placement
-
-
-def _emit(result: dict[str, Any], headline: str, out: Path | None) -> dict[str, Any] | None:
-    """Write the full frame to ``--out``, otherwise the headline value to stdout."""
-    if out is not None:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
-        return None
-    value = result.get(headline, result)
-    typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
-    return result
 
 
 @task_app.command("list")
@@ -166,13 +135,11 @@ def start_command(
         None,
         "--url",
         "-u",
-        help="Run against this served control channel; --source may still resolve the task.",
-    ),
-    out: Path | None = typer.Option(  # noqa: B008
-        None, "--out", "-o", help="Write the prompt here instead of stdout."
+        help="Run against this served control channel (tcp://host:port); --source may still "
+        "resolve the task.",
     ),
 ) -> Any:
-    """Start a task and return its prompt (the env's first yield).
+    """Start a task and print its prompt (the env's first yield).
 
     [not dim]Examples:
         hud task start fix_bug
@@ -187,7 +154,10 @@ def start_command(
         async with placement as runtime, connect(runtime) as client:
             return await client.start_task(task_id, task_args)
 
-    return _emit(asyncio.run(_run()), "prompt", out)
+    result = asyncio.run(_run())
+    prompt = result.get("prompt", result)
+    typer.echo(prompt if isinstance(prompt, str) else json.dumps(prompt, default=str))
+    return result
 
 
 @task_app.command("grade")
@@ -216,13 +186,11 @@ def grade_command(
         None,
         "--url",
         "-u",
-        help="Run against this served control channel; --source may still resolve the task.",
-    ),
-    out: Path | None = typer.Option(  # noqa: B008
-        None, "--out", "-o", help="Write the full JSON result here (else print the reward)."
+        help="Run against this served control channel (tcp://host:port); --source may still "
+        "resolve the task.",
     ),
 ) -> Any:
-    """Grade an answer for a task and return its reward.
+    """Grade an answer for a task and print its reward.
 
     [not dim]Examples:
         hud task grade fix_bug --answer "done"
@@ -243,4 +211,6 @@ def grade_command(
                 await client.start_task(task_id, task_args)
                 return await client.grade({"answer": answer_text})
 
-    return _emit(asyncio.run(_run()), "score", out)
+    result = asyncio.run(_run())
+    typer.echo(json.dumps(result.get("score", result), default=str))
+    return result
