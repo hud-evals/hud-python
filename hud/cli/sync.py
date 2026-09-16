@@ -79,11 +79,6 @@ def sync_tasks_command(
         ".",
         help="Source: Python file, directory, or JSON/JSONL (default: current directory)",
     ),
-    taskset_id: str | None = typer.Option(
-        None,
-        "--id",
-        help="Taskset ID directly (skip name resolution)",
-    ),
     link_target: bool = typer.Option(
         False,
         "--link",
@@ -98,11 +93,6 @@ def sync_tasks_command(
         None,
         "--task",
         help="Only sync tasks matching this slug",
-    ),
-    exclude: list[str] | None = typer.Option(  # noqa: B008
-        None,
-        "--exclude",
-        help="Exclude tasks by slug (repeatable)",
     ),
     yes: bool = typer.Option(
         False,
@@ -147,14 +137,13 @@ def sync_tasks_command(
     state = DirectoryState(AuthScope.resolve(platform))
     link = state.load()
 
-    stored_taskset_id = str(link.taskset_id) if link.taskset_id else None
-    target_ref = taskset_id or taskset or stored_taskset_id
+    target_ref = taskset or (str(link.taskset_id) if link.taskset_id else None)
     if not target_ref:
         raise ValueError(
             "No taskset specified. Pass a taskset name/ID or run "
             "'hud sync tasks <name>' first to store it."
         )
-    if not taskset and not taskset_id:
+    if taskset is None:
         hud_console.info(f"Using taskset ID from {CONFIG_PATH}")
 
     if export:
@@ -205,10 +194,6 @@ def sync_tasks_command(
         local_taskset = local_taskset.filter([task_filter])
         if not local_taskset:
             raise ValueError(f"No task found with slug '{task_filter}'")
-    if exclude:
-        local_taskset = local_taskset.exclude(exclude)
-        if not local_taskset:
-            raise ValueError("No tasks left after exclusions")
 
     if link.registry_id is not None:
         linked_name = RegistryEnvironment.resolve(platform, str(link.registry_id)).name
@@ -223,7 +208,7 @@ def sync_tasks_command(
 
     # The remote taskset to diff against. --force diffs against an empty one so
     # every task uploads. A missing remote is created only for an explicit name,
-    # never for an --id or a stored id.
+    # never for a stored id.
     taskset_uuid, display = resolve_taskset_id(platform, target_ref)
     if taskset_uuid:
         record = platform.get(f"/tasksets/{taskset_uuid}")
@@ -232,7 +217,7 @@ def sync_tasks_command(
             if force
             else Taskset.from_api(taskset_uuid)
         )
-    elif taskset is not None and taskset_id is None:
+    elif taskset is not None:
         hud_console.info(f"Taskset '{display}' not found; it will be created")
         remote_taskset = Taskset(display, [])
     else:
@@ -285,9 +270,7 @@ def sync_tasks_command(
         raise CliError.from_http(exc, input={"taskset": plan.taskset_name}) from exc
 
     returned_id = result.get("taskset_id")
-    if returned_id and (
-        link_target or (link.taskset_id is None and taskset_id is None and project is None)
-    ):
+    if returned_id and (link_target or (link.taskset_id is None and project is None)):
         if state.update(DirectoryLink(taskset_id=UUID(returned_id))):
             hud_console.dim_info("Taskset ID saved to:", str(CONFIG_PATH))
         hud_console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
@@ -367,7 +350,7 @@ def sync_env_command(
                 "Select an environment",
                 [
                     {
-                        "name": f"{env.name}{f' v{env.version}' if env.version else ''} ({env.id})"
+                        "name": f"{env.name} ({env.id})"
                         + (" (currently linked)" if env.id == linked_id else ""),
                         "value": env,
                     }

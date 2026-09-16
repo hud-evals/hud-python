@@ -57,8 +57,7 @@ def list_command(
     items = PlatformClient.from_settings().get("/jobs", params={"limit": limit})["items"]
     if quiet:
         for job in items:
-            if job.get("id"):
-                typer.echo(job["id"])
+            typer.echo(job["id"])
         return items
     if not items:
         hud_console.stdout.print("[yellow]No jobs found.[/yellow]")
@@ -73,7 +72,7 @@ def list_command(
     table.add_column("Created", style="dim")
     for job in items:
         table.add_row(
-            str(job.get("id") or ""),
+            job["id"],
             job.get("name") or "-",
             job.get("taskset_name") or "-",
             job.get("status") or "-",
@@ -110,8 +109,7 @@ def get_command(
     items = data["items"]
     if quiet:
         for trace in items:
-            if trace.get("id"):
-                typer.echo(trace["id"])
+            typer.echo(trace["id"])
         return items
 
     view = f"{settings.hud_web_url.rstrip('/')}/jobs/{job_id}"
@@ -132,7 +130,7 @@ def get_command(
     for tr in items:
         reward = tr.get("reward")
         table.add_row(
-            str(tr.get("id") or ""),
+            tr["id"],
             tr.get("status") or "-",
             f"{reward:.3f}" if reward is not None else "-",
             str(tr.get("start_time") or tr.get("created_at") or ""),

@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import typer
@@ -210,18 +210,15 @@ def notify_if_outdated(argv: list[str]) -> None:
         return
     with contextlib.suppress(Exception):
         cache = Path.home() / _VERSION_CACHE
-        latest: str | None = None
-        try:
-            data = json.loads(cache.read_text())
-            if time.time() - data["checked_at"] <= _VERSION_TTL_S:
-                latest = data["latest"]
-        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-            pass
-        fetched = latest is None
-        if latest is None:
-            latest = httpx.get(_PYPI, timeout=httpx.Timeout(1.0, connect=0.5)).json()["info"][
-                "version"
-            ]
+        cached: dict[str, Any] = (
+            json.loads(cache.read_text()) if cache.exists() else {"checked_at": 0.0}
+        )
+        fetched = time.time() - cached["checked_at"] > _VERSION_TTL_S
+        latest = (
+            httpx.get(_PYPI, timeout=httpx.Timeout(1.0, connect=0.5)).json()["info"]["version"]
+            if fetched
+            else cached["latest"]
+        )
         if parse_version(latest) > parse_version(__version__):
             tool_install = "uv/tools/" in sys.prefix.replace("\\", "/")
             in_project_venv = not tool_install and (
@@ -263,7 +260,6 @@ app.add_typer(project_app, name="project")
 app.add_typer(sync_app, name="sync")
 app.add_typer(qa_app, name="qa")
 app.add_typer(jobs_app, name="jobs")
-app.add_typer(jobs_app, name="job", hidden=True)
 app.command(name="cancel", hidden=True, deprecated=True)(cancel_job_command)
 app.add_typer(trace_app, name="trace")
 app.add_typer(models_app, name="models")

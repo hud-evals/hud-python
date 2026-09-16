@@ -20,7 +20,7 @@ from uuid import UUID
 
 import typer
 from dotenv import set_key
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 from typer.core import TyperCommand, TyperGroup, TyperOption
 
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
@@ -64,13 +64,6 @@ class DirectoryLink(BaseModel):
     registry_id: UUID | None = None
     taskset_id: UUID | None = None
     project_id: UUID | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _ignore_legacy_sync_env(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "sync_env" in data:
-            return {key: value for key, value in data.items() if key != "sync_env"}
-        return data
 
 
 class DirectoryState:
@@ -234,6 +227,8 @@ class CliError(Exception):
 def map_exception(exc: BaseException, *, input: dict[str, Any] | None = None) -> CliError:
     if isinstance(exc, CliError):
         return exc
+    # Typer vendors Click, so its UsageError (unknown command, bad option) is not
+    # click.UsageError; the exit code is the stable signal.
     if getattr(exc, "exit_code", None) == ExitCode.USAGE:
         return CliError(error="usage", message=str(exc), input=input)
     if isinstance(exc, ValueError):
@@ -260,8 +255,6 @@ def map_exception(exc: BaseException, *, input: dict[str, Any] | None = None) ->
 
 
 def _add_json_option(command: Any) -> None:
-    if any("--json" in getattr(param, "opts", ()) for param in command.params):
-        return
     command.params.append(
         TyperOption(
             param_decls=["--json"],
@@ -291,7 +284,6 @@ class CLIGroup(TyperGroup):
         "sync",
         "qa",
         "jobs",
-        "job",
         "cancel",
         "trace",
         "models",

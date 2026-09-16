@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import sys
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from typer.testing import CliRunner
 
-import hud.cli.sync as sync_module
 from hud.cli import AuthScope, CliError, DirectoryState
 from hud.cli.__main__ import app
 from hud.cli.sync import RegistryEnvironment
@@ -274,17 +272,10 @@ def test_export_csv_flattens_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert 'two,solve,e,"{""x"": 2}"' in csv_text
 
 
-def test_sync_env_noninteractive_requires_name(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(sync_module.PlatformClient, "from_settings", lambda: object())
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-
-    with pytest.raises(CliError) as exc_info:
-        sync_module.sync_env_command(name=None, directory=str(tmp_path), yes=False, dry_run=False)
-
-    assert exc_info.value.exit_code == 2
+def test_sync_env_noninteractive_requires_name(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["sync", "env", "--json"])
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["error"] == "usage"
 
 
 @pytest.mark.parametrize("failure", ["source", "export", "upload", "registry"])
@@ -343,14 +334,6 @@ def test_relinking_same_environment_reports_unchanged(
         result = CliRunner().invoke(app, args)
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["changed"] is changed
-
-
-def test_from_record_maps_registry_detail_response() -> None:
-    env = RegistryEnvironment.from_record(
-        {"id": "abc123456", "name": "my-env", "latest_build": {"version": 2}}
-    )
-
-    assert env == RegistryEnvironment(id="abc123456", name="my-env", version="2")
 
 
 def test_resolve_verifies_uuid(monkeypatch: pytest.MonkeyPatch) -> None:

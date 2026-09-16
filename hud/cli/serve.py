@@ -12,6 +12,7 @@ import logging
 import typer
 from rich.markup import escape
 
+from hud.cli import parse_key_value
 from hud.environment import load_environment
 from hud.environment.server import serve
 from hud.utils.hud_console import HUDConsole
@@ -52,8 +53,10 @@ def serve_command(
 
     factory_args: dict[str, str] = {}
     for pair in arg or []:
-        key, _, value = pair.partition("=")
-        factory_args[key] = value
+        parsed = parse_key_value(pair)
+        if parsed is None:
+            raise ValueError(f"--arg expects key=value, got {pair!r}")
+        factory_args[parsed[0]] = parsed[1]
     target, _, name = (module or "env").partition(":")
     env = load_environment(target, name=name or None, args=factory_args or None)
 

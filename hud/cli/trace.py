@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -37,9 +36,6 @@ trace_app = CLI(
 @trace_app.command("get")
 def get_command(
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
-    local_dir: str | None = typer.Option(
-        None, "--local-dir", help="Override the local span directory"
-    ),
 ) -> Any:
     """Render the turns and tool calls for one rollout.
 
@@ -51,8 +47,7 @@ def get_command(
         hud trace get <trace-id> --json[/not dim]
     """
     otel_id = normalize_trace_id(trace_id)
-    span_dir = local_dir or settings.span_dir
-    local = Path(span_dir) / f"{otel_id}.jsonl" if span_dir else None
+    local = Path(settings.span_dir) / f"{otel_id}.jsonl" if settings.span_dir else None
 
     events: list[dict[str, Any]] = []
     if local is not None and local.exists():
@@ -91,9 +86,9 @@ def get_command(
                         )
                     events.append(
                         {
-                            "kind": "tool_result",
-                            "name": msg.get("name") or msg.get("tool_call_id"),
-                            "result": str(content),
+                            "kind": "tool_call",
+                            "tool_name": msg.get("name") or msg.get("tool_call_id"),
+                            "result_text": str(content),
                         }
                     )
     else:
@@ -125,34 +120,20 @@ def get_command(
             if event.get("text"):
                 hud_console.stdout.print(Text(str(event["text"])))
             for call in event.get("tool_calls") or []:
-                name = call.get("name") or call.get("function", {}).get("name", "?")
-                arguments = call.get("arguments") or call.get("function", {}).get("arguments") or {}
-                if isinstance(arguments, str):
-                    with contextlib.suppress(json.JSONDecodeError):  # else show the raw string
-                        arguments = json.loads(arguments)
-                shown = (
-                    ", ".join(f"{k}={v!r}" for k, v in arguments.items())
-                    if isinstance(arguments, dict)
-                    else str(arguments)
-                )
+                shown = ", ".join(f"{k}={v!r}" for k, v in (call.get("arguments") or {}).items())
                 hud_console.stdout.print(
-                    Text.assemble("  ", ("→", "green"), " ", (str(name), "bold"), f"({shown})")
+                    Text.assemble("  ", ("→", "green"), " ", (call["name"], "bold"), f"({shown})")
                 )
             if event.get("error"):
                 hud_console.stdout.print(Text(f"  error: {event['error']}", style="red"))
-        elif kind in ("tool_call", "tool_result"):
-            name = event.get("tool_name") or event.get("name") or "?"
+        elif kind == "tool_call":
+            name = event.get("tool_name") or "?"
             if event.get("error"):
                 hud_console.stdout.print(Text(f"  ✗ {name}: {event['error']}", style="red"))
             else:
                 hud_console.stdout.print(Text(f"  {name} →", style="dim"))
-                for line in str(event.get("result_text") or event.get("result") or "").splitlines():
+                for line in (event.get("result_text") or "").splitlines():
                     hud_console.stdout.print(Text(f"    {line}"))
-        elif kind == "environment":
-            message = event.get("text") or event.get("content") or ""
-            if message:
-                hud_console.stdout.print(Rule("[yellow]env[/yellow]", style="yellow"))
-                hud_console.stdout.print(Text(str(message)))
 
     web = settings.hud_web_url.rstrip("/")
     hud_console.stdout.print(f"\n[dim]View: {web}/trace/{UUID(otel_id)}[/dim]")

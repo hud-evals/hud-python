@@ -88,32 +88,6 @@ def test_scoped_links_do_not_cross_origins_users_teams_or_directories(tmp_path: 
     assert state.path == directory / ".hud" / "config.json"
 
 
-def test_legacy_sync_env_is_ignored_and_dropped_on_write(tmp_path: Path) -> None:
-    scope = AuthScope.model_validate(SCOPE)
-    directory = tmp_path / "environment"
-    path = directory / ".hud" / "config.json"
-    path.parent.mkdir(parents=True)
-    registry = UUID(int=10)
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "scope": SCOPE,
-                "registry_id": str(registry),
-                "sync_env": {str(registry): True},
-            }
-        )
-    )
-    state = DirectoryState(scope, directory)
-    link = state.load()
-    assert link.registry_id == registry
-    assert link.scope == scope
-    assert state.update(DirectoryLink(taskset_id=UUID(int=11))) is True
-    stored = json.loads(path.read_text(encoding="utf-8"))
-    assert "sync_env" not in stored
-    assert stored["taskset_id"] == str(UUID(int=11))
-
-
 def test_read_leaves_legacy_files_and_home_untouched(tmp_path: Path) -> None:
     directory = tmp_path / "environment"
     legacy = directory / ".hud" / "deploy.json"
@@ -618,7 +592,6 @@ def test_root_help_lists_nouns() -> None:
         "sync",
         "qa",
         "jobs",
-        "job",
         "cancel",
         "trace",
         "models",
@@ -664,14 +637,12 @@ def test_jobs_list_json_and_quiet() -> None:
     ):
         json_result = runner.invoke(app, ["jobs", "list", "--json"])
         quiet_result = runner.invoke(app, ["jobs", "list", "--quiet"])
-        alias_result = runner.invoke(app, ["job", "list", "--quiet"])
 
     assert json_result.exit_code == 0
     payload = json.loads(_stdout(json_result))
     assert payload[0]["id"] == "job-1"
     assert quiet_result.exit_code == 0
     assert quiet_result.stdout.strip() == "job-1" or "job-1" in quiet_result.output
-    assert alias_result.exit_code == 0
 
 
 def test_jobs_get_not_found_exit_code() -> None:
