@@ -30,9 +30,11 @@ from hud.eval import (
 )
 from hud.settings import settings
 from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.gateway import GatewayModelInfo
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _TASKS_PY = """\
@@ -86,9 +88,31 @@ def eval_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _EvalCli:
     return cli
 
 
-def _select_preset(model: str) -> Any:
-    preset = next(p for p in eval_mod._AGENT_PRESETS if p.model == model)
-    return lambda self, message, choices, **_: preset
+def _catalog(*rows: tuple[str, str, str, str]) -> list[GatewayModelInfo]:
+    """(sdk_agent_type, name, model_name, created_at) rows, as the gateway catalog returns them."""
+    return [
+        GatewayModelInfo(
+            id=model_name,
+            name=name,
+            model_name=model_name,
+            sdk_agent_type=agent,
+            created_at=created,
+        )
+        for agent, name, model_name, created in rows
+    ]
+
+
+def _picker(agent: str, pick_model: Callable[[list[Any]], Any]) -> Any:
+    """A ``HUDConsole.select`` that answers the agent prompt with ``agent`` and the model
+    prompt via ``pick_model(choices)``."""
+
+    def select(self: HUDConsole, message: str, choices: Any, **_: Any) -> Any:
+        if message == "Select an agent:":
+            return agent
+        assert message == "Select a model:"
+        return pick_model(list(choices))
+
+    return select
 
 
 # ─── config file contract ───────────────────────────────────────────────
@@ -476,11 +500,43 @@ def test_bedrock_arn_in_config_selects_bedrock_client(eval_cli: _EvalCli, monkey
     assert eval_cli.agent.anthropic_client is bedrock.return_value
 
 
-def test_interactive_preset_selects_agent_and_model(eval_cli: _EvalCli, monkeypatch) -> None:
-    monkeypatch.setattr(HUDConsole, "select", _select_preset("MiniMax-M3"))
+def test_interactive_picker_offers_current_catalog_models_newest_first(
+    eval_cli: _EvalCli, monkeypatch
+) -> None:
+    catalog = _catalog(
+        ("openai_compatible", "MiniMax M3", "MiniMax-M3", "2026-06-20T00:00:00Z"),
+        ("openai_compatible", "Kimi K2.7", "moonshotai/kimi-k2.7", "2026-09-01T00:00:00Z"),
+        ("claude", "Claude Opus 5", "claude-opus-5", "2026-07-27T00:00:00Z"),
+    )
+    catalog.append(
+        GatewayModelInfo(
+            name="Old",
+            model_name="old",
+            sdk_agent_type="openai_compatible",
+            created_at="2026-09-10T00:00:00Z",
+            deprecated_at="2026-09-11T00:00:00Z",
+        )
+    )
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: catalog)
+    offered: list[str] = []
+
+    def pick(choices: list[Any]) -> Any:
+        offered.extend(choice["name"] for choice in choices)
+        return choices[0]["value"]
+
+    monkeypatch.setattr(HUDConsole, "select", _picker("openai_compatible", pick))
     eval_cli.invoke("tasks.py", "--yes")
-    assert eval_cli.agent.config.model == "MiniMax-M3"
-    assert eval_cli.agent.config.model_name == "MiniMax M3"
+
+    assert offered == ["Kimi K2.7 (moonshotai/kimi-k2.7)", "MiniMax M3 (MiniMax-M3)"]
+    assert eval_cli.agent.config.model == "moonshotai/kimi-k2.7"
+    assert eval_cli.agent.config.model_name == "Kimi K2.7"
+
+
+def test_interactive_picker_needs_a_hud_key(eval_cli: _EvalCli, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "api_key", None)
+    monkeypatch.setattr(HUDConsole, "select", lambda *a, **k: pytest.fail("prompted"))
+    payload = eval_cli.invoke("tasks.py", "--yes", exit_code=2)
+    assert "set HUD_API_KEY to pick from the model catalog" in payload["message"]
 
 
 # ─── command: source discovery and results ─────────────────────────────
@@ -497,14 +553,16 @@ def test_single_tasks_file_is_picked_without_prompting(
 ) -> None:
     (tmp_path / "rows.json").write_text(f"[{_CONTAINER_ROW}]", encoding="utf-8")
     (tmp_path / ".hidden.json").write_text("[]", encoding="utf-8")
-
-    def select(self: HUDConsole, message: str, choices: Any, **_: Any) -> Any:
-        assert message == "Select an agent:"
-        return next(p for p in eval_mod._AGENT_PRESETS if p.model == "gpt-5.6")
-
-    monkeypatch.setattr(HUDConsole, "select", select)
+    monkeypatch.setattr(
+        "hud.utils.gateway.list_gateway_models",
+        lambda: _catalog(("openai", "GPT 5.6", "gpt-5.6", "2026-06-12T00:00:00Z")),
+    )
+    monkeypatch.setattr(
+        HUDConsole, "select", _picker("openai", lambda choices: choices[0]["value"])
+    )
     payload = eval_cli.invoke("--yes")
     assert payload["source"] == "rows.json"
+    assert eval_cli.agent.config.model == "gpt-5.6"
 
 
 def test_several_tasks_files_prompt_for_one(

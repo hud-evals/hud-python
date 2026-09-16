@@ -10,7 +10,6 @@ import logging
 import os
 import time
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 from typing import TYPE_CHECKING, Any, cast
@@ -45,6 +44,7 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.eval import Job, Provider, Task
+    from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()
 
@@ -62,37 +62,46 @@ _PLACEMENTS = ("local", *_PROVIDERS)
 _SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
-@dataclass(frozen=True)
-class AgentPreset:
-    """An interactive-picker entry: agent type, model, and its display name."""
-
-    name: str
-    agent_type: AgentType
-    model: str
-    model_name: str | None = None
-
-    def overrides(self) -> dict[str, Any]:
-        overrides: dict[str, Any] = {"agent_type": self.agent_type, "model": self.model}
-        if self.model_name is not None:
-            overrides["agent_config"] = {self.agent_type.value: {"model_name": self.model_name}}
-        return overrides
-
-
-_AGENT_PRESETS: list[AgentPreset] = [
-    AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
-    AgentPreset("Claude Opus 4.8", AgentType.CLAUDE, "claude-opus-4-8"),
-    AgentPreset("GPT-5.6", AgentType.OPENAI, "gpt-5.6"),
-    AgentPreset("GPT-5.5", AgentType.OPENAI, "gpt-5.5"),
-    AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3.1-pro-preview"),
-    AgentPreset(
-        "Grok 4-1 Fast (xAI)", AgentType.OPENAI_COMPATIBLE, "grok-4-1-fast", "Grok 4-1 Fast"
-    ),
-    AgentPreset("GLM 5.2 (Z.ai)", AgentType.OPENAI_COMPATIBLE, "z-ai/glm-5.2", "GLM 5.2"),
-    AgentPreset(
-        "Kimi K2.6 (Moonshot)", AgentType.OPENAI_COMPATIBLE, "moonshotai/kimi-k2.6", "Kimi K2.6"
-    ),
-    AgentPreset("MiniMax M3", AgentType.OPENAI_COMPATIBLE, "MiniMax-M3", "MiniMax M3"),
-]
+def _pick_agent() -> dict[str, Any]:
+    """Interactive agent choice: the agent type, then a current catalog model of that type."""
+    if not settings.api_key:
+        raise ValueError(
+            "No agent given. Pass a model or agent type (hud eval tasks.py claude-sonnet-4-6), "
+            "or set HUD_API_KEY to pick from the model catalog."
+        )
+    agent_type = AgentType(
+        hud_console.select(
+            "Select an agent:", choices=[agent.value for agent in AgentType], default=0
+        )
+    )
+    models = sorted(
+        (
+            model
+            for model in gateway.list_gateway_models()
+            if model.sdk_agent_type == agent_type.value
+            and model.deprecated_at is None
+            and model.model_name
+        ),
+        key=lambda model: model.recency,
+        reverse=True,
+    )
+    if not models:
+        raise ValueError(f"The model catalog has no {agent_type.value} models.")
+    chosen = cast(
+        "GatewayModelInfo",
+        hud_console.select(
+            "Select a model:",
+            choices=[
+                {"name": f"{model.name or model.model_name} ({model.model_name})", "value": model}
+                for model in models
+            ],
+            default=0,
+        ),
+    )
+    overrides: dict[str, Any] = {"agent_type": agent_type, "model": chosen.model_name}
+    if chosen.name:
+        overrides["agent_config"] = {agent_type.value: {"model_name": chosen.name}}
+    return overrides
 
 
 def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
@@ -573,15 +582,7 @@ def eval_command(
         cfg = cfg.merge({"source": _pick_tasks_file()})
         hud_console.success(f"Selected: {cfg.source}")
     if cfg.agent_type is None:
-        preset = cast(
-            "AgentPreset",
-            hud_console.select(
-                "Select an agent:",
-                choices=[{"name": preset.name, "value": preset} for preset in _AGENT_PRESETS],
-                default=0,
-            ),
-        )
-        cfg = cfg.merge(preset.overrides())
+        cfg = cfg.merge(_pick_agent())
     cfg = cfg.with_placement()
     cfg.require_credentials()
     taskset = _load_taskset(cfg)

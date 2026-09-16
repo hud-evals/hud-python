@@ -8,6 +8,7 @@ gateway lives in :func:`hud.agents.create_agent`.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -40,12 +41,21 @@ class GatewayModelInfo(BaseModel):
     sdk_agent_type: str | None = None
     is_trainable: bool = False
     provider: GatewayProviderInfo = Field(default_factory=GatewayProviderInfo)
+    created_at: datetime | None = None
+    released_at: datetime | None = None
+    deprecated_at: datetime | None = None
+
+    @property
+    def recency(self) -> datetime:
+        """Sort key for "newest first": the model's release, else when it joined the catalog."""
+        return self.released_at or self.created_at or datetime.min.replace(tzinfo=UTC)
 
 
 class GatewayModelsResponse(BaseModel):
-    """`GET /models` — a paginated platform response; only `items` is read."""
+    """One page of `GET /models`."""
 
     items: list[GatewayModelInfo]
+    total: int
 
 
 _BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
@@ -188,6 +198,15 @@ def build_gateway_client(provider: str) -> GatewayClient:
 
 @lru_cache(maxsize=1)
 def list_gateway_models() -> list[GatewayModelInfo]:
-    """Models available through the HUD gateway (the platform model catalog)."""
-    payload = PlatformClient.from_settings().get("/models")
-    return GatewayModelsResponse.model_validate(payload).items
+    """Models available through the HUD gateway (the whole platform model catalog)."""
+    platform = PlatformClient.from_settings()
+    models: list[GatewayModelInfo] = []
+    while True:
+        page = GatewayModelsResponse.model_validate(
+            platform.get("/models", params={"limit": 100, "offset": len(models)})
+        )
+        models.extend(page.items)
+        if len(models) >= page.total:
+            return models
+        if not page.items:
+            raise ValueError("Models API returned an empty page before the reported total")
