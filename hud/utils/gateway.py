@@ -6,7 +6,6 @@ Agent construction on top of the gateway lives in :func:`hud.agents.create_agent
 from __future__ import annotations
 
 import difflib
-import re
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -57,19 +56,12 @@ class GatewayModelsResponse(BaseModel):
     total: int
 
 
-_BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
-
-
 def _inject_trace_id(request: httpx.Request) -> None:
     request.headers.update(get_trace_headers())
 
 
 async def _inject_trace_id_async(request: httpx.Request) -> None:
     _inject_trace_id(request)
-
-
-def _is_bedrock_arn(model: str | None) -> bool:
-    return model is not None and _BEDROCK_ARN_PATTERN.match(model) is not None
 
 
 def build_model_client(provider: str, *, model: str | None = None) -> GatewayClient:
@@ -79,7 +71,7 @@ def build_model_client(provider: str, *, model: str | None = None) -> GatewayCli
     constructed directly use. A Bedrock inference-profile ARN as the Anthropic
     *model* is only reachable through Bedrock.
     """
-    if provider == "anthropic" and _is_bedrock_arn(model):
+    if provider == "anthropic" and model and model.startswith("arn:aws:bedrock:"):
         if not (
             settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_region
         ):
