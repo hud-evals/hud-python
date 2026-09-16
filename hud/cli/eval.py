@@ -177,13 +177,6 @@ def _is_container_row(task: Task) -> bool:
     return config is not None and (config.image is not None or config.compose is not None)
 
 
-def _truncate(text: str | list[Any] | None, max_len: int) -> str:
-    if not text:
-        return "—"
-    flat = str(text).replace("\n", " ").strip()
-    return flat[: max_len - 2] + ".." if len(flat) > max_len else flat
-
-
 def eval_command(
     source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
@@ -554,10 +547,13 @@ def eval_command(
             details.add_column("Answer", style="dim", max_width=35)
             details.add_column("Reward", justify="right", style="green", width=8)
             for index, run in enumerate(job.runs):
+                cells = []
+                for text in (run.prompt, run.trace.content):
+                    flat = str(text).replace("\n", " ").strip() if text else ""
+                    cells.append((flat[:33] + ".." if len(flat) > 35 else flat) or "—")
                 details.add_row(
                     str(index),
-                    _truncate(run.prompt, 35),
-                    _truncate(run.trace.content, 35),
+                    *cells,
                     "[red]error[/red]" if id(run) in errors else f"{run.reward:.3f}",
                 )
             hud_console.print(details)
