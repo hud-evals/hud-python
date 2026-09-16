@@ -28,17 +28,9 @@ from hud.cli import (
 from hud.clients import HudProtocolError, connect
 from hud.eval import Taskset
 from hud.eval.runtime import Runtime, SubprocessRuntime
-from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
-
-hud_console = HUDConsole()
-
-
-def _args_json(value: str) -> dict[str, Any]:
-    return CLI.json_object(value, option="--args")
-
 
 task_app = CLI(
     help="Start a task or grade an answer (attaches to a running env, or spawns from source).",
@@ -46,59 +38,36 @@ task_app = CLI(
 )
 
 
-def _collect(source: str) -> Any:
-    """Collect a Taskset from a source (``.py``/dir or JSON/JSONL), like ``hud eval``."""
-    try:
-        return Taskset.from_file(source)
-    except FileNotFoundError as exc:
-        raise CliError(
-            error="not_found",
-            message=str(exc),
-            input={"source": source},
-            suggestion="Pass --source to a tasks file or directory.",
-        ) from exc
-
-
-def _attach_runtime(url: str) -> Runtime:
-    parts = urlsplit(url if "://" in url else f"tcp://{url}")
-    if parts.scheme != "tcp":
-        raise CliError(error="usage", message="Task control channels require a tcp:// URL")
-    host = parts.hostname or "127.0.0.1"
-    host = f"[{host}]" if ":" in host else host
-    return Runtime(f"tcp://{host}:{parts.port or 8765}")
-
-
-def _local_env_url(port: int = 8765) -> str | None:
-    """Return a control-channel URL if an env is already serving locally on ``port``
-    (e.g. ``hud serve``, or a built image whose CMD serves on :8765), else ``None``."""
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.25):
-            return f"tcp://127.0.0.1:{port}"
-    except OSError:
-        return None
-
-
 def _resolve(
     task: str, source: str | None, url: str | None, args: dict[str, Any] | None
 ) -> tuple[str, dict[str, Any], AbstractAsyncContextManager[Runtime]]:
-    """Resolve ``(task_id, args, placement)``.
+    """Resolve ``(task_id, args, placement)`` for ``start`` and ``grade``.
 
     ``--source`` resolves an authored task id/slug and its bound args. ``--url``
     selects an existing substrate; otherwise an explicit source is spawned. With
     neither option, a local env on :8765 is used when present, or ``.`` is resolved
-    and spawned.
-
-    ``--args`` overrides authored args when supplied.
+    and spawned. ``--args`` overrides authored args when supplied.
     """
     attach = url
     if attach is None and source is None:
-        attach = _local_env_url()
-    endpoint = _attach_runtime(attach) if attach is not None else None
+        # An env already serving locally (hud serve, or a built image's CMD).
+        try:
+            with socket.create_connection(("127.0.0.1", 8765), timeout=0.25):
+                attach = "tcp://127.0.0.1:8765"
+        except OSError:
+            attach = None
+    endpoint: Runtime | None = None
+    if attach is not None:
+        parts = urlsplit(attach if "://" in attach else f"tcp://{attach}")
+        if parts.scheme != "tcp":
+            raise CliError(error="usage", message="Task control channels require a tcp:// URL")
+        host = parts.hostname or "127.0.0.1"
+        endpoint = Runtime(f"tcp://{f'[{host}]' if ':' in host else host}:{parts.port or 8765}")
 
     if endpoint is not None and source is None:
         return task, args or {}, nullcontext(endpoint)
 
-    taskset = _collect(source or ".")
+    taskset = Taskset.from_file(source or ".")
     if not taskset:
         raise CliError(
             error="not_found",
@@ -125,35 +94,26 @@ def _resolve(
         )
     selected = matches[0]
     if endpoint is not None:
-        placement = nullcontext(endpoint)
+        placement: AbstractAsyncContextManager[Runtime] = nullcontext(endpoint)
+    elif selected._env is None:
+        raise CliError(
+            error="usage",
+            message="These rows have no bound Environment.",
+            input={"source": source or "."},
+            suggestion="Pass --source to a tasks.py / env.py that binds an Environment, "
+            "or --url to attach to a served env.",
+        )
     else:
-        try:
-            env = selected._env
-            if env is None:
-                raise ValueError("These rows have no bound Environment.")
-            placement = SubprocessRuntime(env)(selected)
-        except ValueError as exc:
-            raise CliError(
-                error="usage",
-                message=str(exc),
-                input={"source": source or "."},
-                suggestion="Pass --source to a tasks.py / env.py that binds an Environment, "
-                "or --url to attach to a served env.",
-            ) from exc
+        placement = SubprocessRuntime(selected._env)(selected)
     return selected.id, selected.args if args is None else args, placement
 
 
-def _emit(
-    result: dict[str, Any],
-    headline: str,
-    out: Path | None,
-) -> dict[str, Any] | None:
+def _emit(result: dict[str, Any], headline: str, out: Path | None) -> dict[str, Any] | None:
     """Write the full frame to ``--out``, otherwise the headline value to stdout."""
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
         return None
-
     value = result.get(headline, result)
     typer.echo(value if isinstance(value, str) else json.dumps(value, default=str))
     return result
@@ -174,19 +134,15 @@ def list_command(
         hud task list --quiet[/not dim]
     """
     items = [
-        {"slug": slug, "id": task.id, "args": task.args} for slug, task in _collect(source).items()
+        {"slug": slug, "id": task.id, "args": task.args}
+        for slug, task in Taskset.from_file(source).items()
     ]
-
-    def _render(rows: list[dict[str, Any]]) -> None:
-        for item in rows:
+    for item in items:
+        if quiet:
+            typer.echo(item["slug"])
+        else:
             args = f" {json.dumps(item['args'])}" if item["args"] else ""
             typer.echo(f"{item['slug']}\t{item['id']}{args}")
-
-    if quiet:
-        for item in items:
-            typer.echo(item["slug"])
-    else:
-        _render(items)
     return items
 
 
@@ -200,7 +156,11 @@ def start_command(
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
     args: dict[str, Any] | None = typer.Option(  # noqa: B008
-        None, "--args", "-a", help="JSON object of task args.", parser=_args_json
+        None,
+        "--args",
+        "-a",
+        help="JSON object of task args.",
+        parser=lambda value: CLI.json_object(value, option="--args"),
     ),
     url: str | None = typer.Option(
         None,
@@ -246,7 +206,11 @@ def grade_command(
         help="Resolve the task from this source (.py/dir/JSON); spawn it unless --url is set.",
     ),
     args: dict[str, Any] | None = typer.Option(  # noqa: B008
-        None, "--args", "-a", help="JSON object of task args.", parser=_args_json
+        None,
+        "--args",
+        "-a",
+        help="JSON object of task args.",
+        parser=lambda value: CLI.json_object(value, option="--args"),
     ),
     url: str | None = typer.Option(
         None,
@@ -280,6 +244,3 @@ def grade_command(
                 return await client.grade({"answer": answer_text})
 
     return _emit(asyncio.run(_run()), "score", out)
-
-
-__all__ = ["task_app"]

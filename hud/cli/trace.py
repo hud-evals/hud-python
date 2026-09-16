@@ -34,39 +34,6 @@ trace_app = CLI(
 )
 
 
-def _show_trace(
-    trace_id: str,
-    *,
-    local_dir: str | None,
-) -> list[dict[str, Any]]:
-    dir_to_use = local_dir or settings.span_dir
-    otel_id = normalize_trace_id(trace_id)
-
-    events: list[dict[str, Any]] | None = None
-    source = "platform"
-
-    if dir_to_use:
-        path = Path(dir_to_use) / f"{otel_id}.jsonl"
-        if path.exists():
-            events = _load_local(path)
-            source = f"local ({path})"
-
-    if events is None:
-        events = _load_remote(trace_id)
-
-    if not events:
-        hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")
-        return events
-    hud_console.stdout.print(
-        Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
-    )
-    hud_console.stdout.print(f"[dim]Source: {source}[/dim]\n")
-    _render_events(events)
-    web = settings.hud_web_url.rstrip("/")
-    hud_console.stdout.print(f"\n[dim]View: {web}/trace/{UUID(otel_id)}[/dim]")
-    return events
-
-
 @trace_app.command("get")
 def get_command(
     trace_id: str = typer.Argument(..., help="Trace ID (UUID or 32-hex OTel id)"),
@@ -83,33 +50,25 @@ def get_command(
         hud trace get <trace-id>
         hud trace get <trace-id> --json[/not dim]
     """
-    return _show_trace(trace_id, local_dir=local_dir)
-
-
-# ── local JSONL ────────────────────────────────────────────────────────────────
-
-
-def _load_local(path: Any) -> list[dict[str, Any]]:
-    """Read spans from a local .jsonl file and convert to a flat event list."""
-    spans: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                with contextlib.suppress(json.JSONDecodeError):
-                    spans.append(json.loads(line))
+    otel_id = normalize_trace_id(trace_id)
+    span_dir = local_dir or settings.span_dir
+    local = Path(span_dir) / f"{otel_id}.jsonl" if span_dir else None
 
     events: list[dict[str, Any]] = []
-    for span in sorted(spans, key=lambda s: s.get("start_time", "")):
-        attrs = span.get("attributes", {})
-        schema = attrs.get("hud.schema")
-        payload = attrs.get("hud.payload", {})
-        if not isinstance(payload, dict):
-            continue
-
-        source = payload.get("source")
-        if schema == "hud.step.v1":
-            if source == "agent":
+    if local is not None and local.exists():
+        # Local spans: one JSON span per line; step spans carry the conversation payload.
+        source = f"local ({local})"
+        spans = [
+            json.loads(line)
+            for line in local.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for span in sorted(spans, key=lambda s: s.get("start_time", "")):
+            attrs = span.get("attributes", {})
+            payload = attrs.get("hud.payload", {})
+            if attrs.get("hud.schema") != "hud.step.v1" or not isinstance(payload, dict):
+                continue
+            if payload.get("source") == "agent":
                 events.append(
                     {
                         "kind": "agent_message",
@@ -119,103 +78,82 @@ def _load_local(path: Any) -> list[dict[str, Any]]:
                         "error": payload.get("error"),
                     }
                 )
-            elif source == "tool":
-                # ToolStep messages hold the tool results
-                events.extend(
-                    {
-                        "kind": "tool_result",
-                        "name": msg.get("name") or msg.get("tool_call_id"),
-                        "result": _msg_text(msg),
-                    }
-                    for msg in payload.get("messages", [])
-                    if msg.get("role") == "tool"
-                )
-    return events
+            elif payload.get("source") == "tool":
+                for msg in payload.get("messages", []):
+                    if msg.get("role") != "tool":
+                        continue
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        content = "\n".join(
+                            part.get("text", "")
+                            for part in content
+                            if isinstance(part, dict) and part.get("type") == "text"
+                        )
+                    events.append(
+                        {
+                            "kind": "tool_result",
+                            "name": msg.get("name") or msg.get("tool_call_id"),
+                            "result": str(content),
+                        }
+                    )
+    else:
+        source = "platform"
+        try:
+            data = PlatformClient.from_settings().get(f"/trace/{trace_id}/events")
+        except HudRequestError as exc:
+            raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
+        events = data["events"]
 
+    if not events:
+        hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")
+        return events
+    hud_console.stdout.print(
+        Panel.fit(f"[bold cyan]Trace[/bold cyan] [dim]{trace_id}[/dim]", border_style="cyan")
+    )
+    hud_console.stdout.print(f"[dim]Source: {source}[/dim]\n")
 
-def _msg_text(msg: dict[str, Any]) -> str:
-    content = msg.get("content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = [
-            c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
-        ]
-        return "\n".join(parts)
-    return str(content)
-
-
-# ── remote events API ──────────────────────────────────────────────────────────
-
-
-def _load_remote(trace_id: str) -> list[dict[str, Any]]:
-    client = PlatformClient.from_settings()
-    try:
-        data = client.get(f"/trace/{trace_id}/events")
-    except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
-
-    if isinstance(data, dict):
-        return data.get("events", [])
-    return []
-
-
-# ── rendering ──────────────────────────────────────────────────────────────────
-
-
-def _render_events(events: list[dict[str, Any]]) -> None:
     # Payloads render as Text, never as markup: rich would read a literal
     # `[len(s) // 2]` in agent output as a style tag and drop it.
     turn = 0
-    for ev in events:
-        kind = ev.get("kind")
-
+    for event in events:
+        kind = event.get("kind")
         if kind == "agent_message":
             turn += 1
             hud_console.stdout.print(Rule(f"[cyan]Turn {turn} — agent[/cyan]", style="cyan"))
-
-            reasoning = ev.get("reasoning")
-            if reasoning:
-                hud_console.stdout.print(Text(reasoning, style="dim italic"))
-
-            text = ev.get("text")
-            if text:
-                hud_console.stdout.print(Text(str(text)))
-
-            for tc in ev.get("tool_calls") or []:
-                name = tc.get("name") or tc.get("function", {}).get("name", "?")
-                args = tc.get("arguments") or tc.get("function", {}).get("arguments") or {}
-                if isinstance(args, str):
-                    with contextlib.suppress(Exception):
-                        args = json.loads(args)
-                hud_console.stdout.print(
-                    Text.assemble(
-                        "  ", ("→", "green"), " ", (str(name), "bold"), f"({_fmt_args(args)})"
-                    )
+            if event.get("reasoning"):
+                hud_console.stdout.print(Text(event["reasoning"], style="dim italic"))
+            if event.get("text"):
+                hud_console.stdout.print(Text(str(event["text"])))
+            for call in event.get("tool_calls") or []:
+                name = call.get("name") or call.get("function", {}).get("name", "?")
+                arguments = call.get("arguments") or call.get("function", {}).get("arguments") or {}
+                if isinstance(arguments, str):
+                    with contextlib.suppress(json.JSONDecodeError):  # else show the raw string
+                        arguments = json.loads(arguments)
+                shown = (
+                    ", ".join(f"{k}={v!r}" for k, v in arguments.items())
+                    if isinstance(arguments, dict)
+                    else str(arguments)
                 )
-
-            if ev.get("error"):
-                hud_console.stdout.print(Text(f"  error: {ev['error']}", style="red"))
-
+                hud_console.stdout.print(
+                    Text.assemble("  ", ("→", "green"), " ", (str(name), "bold"), f"({shown})")
+                )
+            if event.get("error"):
+                hud_console.stdout.print(Text(f"  error: {event['error']}", style="red"))
         elif kind in ("tool_call", "tool_result"):
-            name = ev.get("tool_name") or ev.get("name") or "?"
-            result = ev.get("result_text") or ev.get("result") or ""
-            error = ev.get("error")
-            if error:
-                hud_console.stdout.print(Text(f"  ✗ {name}: {error}", style="red"))
+            name = event.get("tool_name") or event.get("name") or "?"
+            if event.get("error"):
+                hud_console.stdout.print(Text(f"  ✗ {name}: {event['error']}", style="red"))
             else:
                 hud_console.stdout.print(Text(f"  {name} →", style="dim"))
-                for line in str(result).splitlines():
+                for line in str(event.get("result_text") or event.get("result") or "").splitlines():
                     hud_console.stdout.print(Text(f"    {line}"))
-
         elif kind == "environment":
-            msg = ev.get("text") or ev.get("content") or ""
-            if msg:
+            message = event.get("text") or event.get("content") or ""
+            if message:
                 hud_console.stdout.print(Rule("[yellow]env[/yellow]", style="yellow"))
-                hud_console.stdout.print(Text(str(msg)))
+                hud_console.stdout.print(Text(str(message)))
 
-
-def _fmt_args(args: Any) -> str:
-    if isinstance(args, dict):
-        return ", ".join(f"{k}={v!r}" for k, v in args.items())
-    return str(args)
+    web = settings.hud_web_url.rstrip("/")
+    hud_console.stdout.print(f"\n[dim]View: {web}/trace/{UUID(otel_id)}[/dim]")
+    return events

@@ -33,10 +33,10 @@ async def test_source_resolves_authored_task_for_existing_runtime(tmp_path, over
 
 
 async def test_url_without_source_uses_raw_task_and_args(monkeypatch):
-    def fail(source):
+    def fail(cls, source):
         raise AssertionError(f"unexpected task source: {source}")
 
-    monkeypatch.setattr(task_module, "_collect", fail)
+    monkeypatch.setattr(Taskset, "from_file", classmethod(fail))
 
     task_id, args, placement = task_module._resolve(
         "coding-task",

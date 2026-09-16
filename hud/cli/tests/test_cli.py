@@ -740,7 +740,11 @@ def test_trace_get_help_and_json() -> None:
     assert "--json" in _plain(get_help.output)
 
     with (
-        patch("hud.cli.trace._load_remote", return_value=[{"kind": "agent_message", "text": "hi"}]),
+        patch(
+            "hud.utils.platform.PlatformClient.get",
+            return_value={"events": [{"kind": "agent_message", "text": "hi"}]},
+        ),
+        patch("hud.settings.settings.api_key", "test-key"),
         patch("hud.settings.settings.telemetry_local_dir", None),
     ):
         result = runner.invoke(app, ["trace", "get", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json"])

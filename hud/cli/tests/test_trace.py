@@ -5,7 +5,6 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import trace
 from hud.cli.__main__ import app
 from hud.settings import settings
 from hud.utils.platform import PlatformClient
@@ -14,10 +13,11 @@ from hud.utils.platform import PlatformClient
 def test_trace_link_uses_web_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
     trace_id = "03dd2a73d3df4d10a54ae3d87c2d530d"
     monkeypatch.setattr(settings, "api_key", "test-key")
+    monkeypatch.setattr(settings, "telemetry_local_dir", None)
     monkeypatch.setattr(
-        trace,
-        "_load_remote",
-        lambda _: [{"kind": "agent_message", "text": "done"}],
+        PlatformClient,
+        "get",
+        lambda self, path: {"events": [{"kind": "agent_message", "text": "done"}]},
     )
 
     result = CliRunner().invoke(app, ["trace", "get", trace_id])
