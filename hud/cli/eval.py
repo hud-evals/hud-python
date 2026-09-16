@@ -33,8 +33,11 @@ from hud.eval import (
 )
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils import gateway
-from hud.utils.gateway import normalize_gateway_model_id
+from hud.utils.gateway import (
+    build_gateway_client,
+    list_gateway_models,
+    normalize_gateway_model_id,
+)
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
@@ -42,7 +45,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractAsyncContextManager
 
-    from hud.agents.base import Agent
     from hud.eval import Job, Provider, Task
     from hud.utils.gateway import GatewayModelInfo
 
@@ -77,7 +79,7 @@ def _pick_agent() -> dict[str, Any]:
     models = sorted(
         (
             model
-            for model in gateway.list_gateway_models()
+            for model in list_gateway_models()
             if model.sdk_agent_type == agent_type.value
             and model.deprecated_at is None
             and model.model_name
@@ -118,31 +120,6 @@ def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
         raise ValueError(f"{_CONFIG_PATH}: ${{{exc.args[0]}}} is not set") from None
 
 
-def _env_mapping() -> dict[str, Any]:
-    """Process environment plus ``hud.settings`` fields in either case."""
-    fields = settings.model_dump()
-    mapping: dict[str, Any] = {**os.environ, **fields}
-    mapping.update({key.upper(): value for key, value in fields.items()})
-    if settings.api_key:
-        mapping["HUD_API_KEY"] = settings.api_key
-    return mapping
-
-
-def _parse_config_value(value: str) -> bool | int | float | str:
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    try:
-        return int(value)
-    except ValueError:
-        try:
-            return float(value)
-        except ValueError:
-            return value
-
-
 def _agent_config_updates(
     items: list[str], agent_type: AgentType | None
 ) -> dict[str, dict[str, Any]]:
@@ -164,7 +141,17 @@ def _agent_config_updates(
                     f"--config {key}=... needs an agent; pass one or write <agent>.{key}=..."
                 )
             section, param = agent_type.value, key
-        updates.setdefault(AgentType(section).value, {})[param] = _parse_config_value(value)
+        parsed_value: bool | int | float | str = value
+        if value.lower() in ("true", "false"):
+            parsed_value = value.lower() == "true"
+        else:
+            for number in (int, float):
+                try:
+                    parsed_value = number(value)
+                    break
+                except ValueError:
+                    continue
+        updates.setdefault(AgentType(section).value, {})[param] = parsed_value
     return updates
 
 
@@ -208,8 +195,13 @@ class EvalConfig(BaseModel):
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
         if not path.exists():
             return cls()
+        fields = settings.model_dump()
+        mapping: dict[str, Any] = {**os.environ, **fields}
+        mapping.update({key.upper(): value for key, value in fields.items()})
+        if settings.api_key:
+            mapping["HUD_API_KEY"] = settings.api_key
         with path.open("rb") as stream:
-            data = _substitute_env(tomllib.load(stream), _env_mapping())
+            data = _substitute_env(tomllib.load(stream), mapping)
         agent_config = {agent.value: data.pop(agent.value) for agent in AgentType if agent in data}
         eval_section = data.pop("eval", {})
         if data:
@@ -242,16 +234,6 @@ class EvalConfig(BaseModel):
                 "or attach to a served env with --runtime tcp://host:port."
             )
         return self
-
-    def require_credentials(self) -> None:
-        if self.gateway or self.runtime in ("hud", "hosted"):
-            PlatformClient.from_settings()
-        if (
-            self.agent_type == AgentType.OPENAI_COMPATIBLE
-            and self.model is None
-            and "model" not in self.agent_config.get("openai_compatible", {})
-        ):
-            raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
     def agent_kwargs(self) -> dict[str, Any]:
         """The agent's config kwargs: its TOML section, then ``--model`` on top."""
@@ -297,17 +279,6 @@ class EvalConfig(BaseModel):
         hud_console.print(table)
 
 
-def _build_agent(cfg: EvalConfig) -> Agent:
-    """The agent picks its own client (provider key, else gateway); ``--gateway``
-    overrides that. Hosted rollouts keep the client unset so the platform builds it."""
-    assert cfg.agent_type is not None
-    config = cfg.agent_type.config_cls(**cfg.agent_kwargs())
-    if cfg.gateway and cfg.runtime != "hosted" and cfg.agent_type != AgentType.OPENAI_COMPATIBLE:
-        config.model_client = gateway.build_gateway_client(cfg.agent_type.gateway_provider)
-    # cls/config_cls are matched unions; the pairing is correct by construction.
-    return cast("Any", cfg.agent_type.cls)(config=config)
-
-
 def _is_container_row(task: Task) -> bool:
     config = task.runtime_config
     return config is not None and (config.image is not None or config.compose is not None)
@@ -334,15 +305,6 @@ def _local_placement(taskset: Taskset) -> Provider:
         return SubprocessRuntime(task._env)(task)
 
     return spawn
-
-
-def _placement(cfg: EvalConfig, taskset: Taskset) -> Provider | HostedRuntime:
-    assert cfg.runtime is not None
-    if cfg.runtime == "local":
-        return _local_placement(taskset)
-    if cfg.runtime.startswith("tcp://"):
-        return Runtime(cfg.runtime)
-    return _PROVIDERS[cfg.runtime]()
 
 
 def _load_taskset(cfg: EvalConfig) -> Taskset:
@@ -381,16 +343,6 @@ def _load_taskset(cfg: EvalConfig) -> Taskset:
     return taskset
 
 
-def _configure_logging(cfg: EvalConfig, *, single_run: bool) -> None:
-    if cfg.very_verbose:
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
-        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-    elif cfg.verbose or single_run:
-        logging.getLogger("hud.agents").setLevel(logging.INFO)
-
-
 def _truncate(text: str | list[Any] | None, max_len: int) -> str:
     if not text:
         return "—"
@@ -422,20 +374,6 @@ def _display_job(job: Job, *, source: str, elapsed: float) -> None:
             )
         hud_console.print(table)
     hud_console.print()
-
-
-def _pick_tasks_file() -> str:
-    """The tasks JSON/JSONL in the working directory, prompting when there are several."""
-    names = sorted(
-        path.name
-        for path in Path.cwd().iterdir()
-        if path.suffix in (".json", ".jsonl") and not path.name.startswith(".")
-    )
-    if not names:
-        raise FileNotFoundError("No task JSON or JSONL files found in current directory")
-    if len(names) == 1:
-        return names[0]
-    return hud_console.select("Select a tasks file", choices=names)
 
 
 def eval_command(
@@ -579,28 +517,67 @@ def eval_command(
         }
 
     if cfg.source is None:
-        cfg = cfg.merge({"source": _pick_tasks_file()})
+        names = sorted(
+            path.name
+            for path in Path.cwd().iterdir()
+            if path.suffix in (".json", ".jsonl") and not path.name.startswith(".")
+        )
+        if not names:
+            raise FileNotFoundError("No task JSON or JSONL files found in current directory")
+        chosen = names[0] if len(names) == 1 else hud_console.select("Select a tasks file", names)
+        cfg = cfg.merge({"source": chosen})
         hud_console.success(f"Selected: {cfg.source}")
     if cfg.agent_type is None:
         cfg = cfg.merge(_pick_agent())
     cfg = cfg.with_placement()
-    cfg.require_credentials()
+    agent_type = cfg.agent_type
+    assert agent_type is not None and cfg.runtime is not None
+
+    if cfg.gateway or cfg.runtime in ("hud", "hosted"):
+        PlatformClient.from_settings()
+    if (
+        agent_type == AgentType.OPENAI_COMPATIBLE
+        and cfg.model is None
+        and "model" not in cfg.agent_config.get("openai_compatible", {})
+    ):
+        raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
+
     taskset = _load_taskset(cfg)
-    placement = _placement(cfg, taskset)
+    if cfg.runtime == "local":
+        placement: Provider | HostedRuntime = _local_placement(taskset)
+    elif cfg.runtime.startswith("tcp://"):
+        placement = Runtime(cfg.runtime)
+    else:
+        placement = _PROVIDERS[cfg.runtime]()
     cfg.display()
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 
     single_run = len(taskset) == 1 and cfg.group_size == 1
-    _configure_logging(cfg, single_run=single_run)
+    if cfg.very_verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
+        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+    elif cfg.verbose or single_run:
+        logging.getLogger("hud.agents").setLevel(logging.INFO)
     if not single_run:
         hud_console.info(
             f"Running evaluation (max_concurrent: {cfg.max_concurrent}, "
             f"group_size: {cfg.group_size})"
         )
+
+    # The agent picks its own client (provider key, else gateway); --gateway
+    # overrides that. Hosted rollouts leave it unset for the platform to build.
+    agent_config = agent_type.config_cls(**cfg.agent_kwargs())
+    if cfg.gateway and cfg.runtime != "hosted" and agent_type != AgentType.OPENAI_COMPATIBLE:
+        agent_config.model_client = build_gateway_client(agent_type.gateway_provider)
+    # cls/config_cls are matched unions; the pairing is correct by construction.
+    agent_instance = cast("Any", agent_type.cls)(config=agent_config)
+
     started = time.monotonic()
     job = asyncio.run(
         taskset.run(
-            _build_agent(cfg),
+            agent_instance,
             runtime=placement,
             group=cfg.group_size,
             max_concurrent=cfg.max_concurrent,

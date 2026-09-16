@@ -29,7 +29,6 @@ from hud.eval import (
     Taskset,
 )
 from hud.settings import settings
-from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.gateway import GatewayModelInfo
 from hud.utils.hud_console import HUDConsole
 
@@ -181,18 +180,17 @@ def test_placement_defaults_from_source(tmp_path: Path) -> None:
         EvalConfig(source="My Tasks", runtime="local").with_placement()
 
 
-@pytest.mark.parametrize("fields", [{"runtime": "hud"}, {"runtime": "hosted"}, {"gateway": True}])
-def test_platform_features_require_hud_key(
-    monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any]
-) -> None:
+@pytest.mark.parametrize("flags", [["--runtime", "hud"], ["--remote"], ["--gateway"]])
+def test_platform_features_require_hud_key(eval_cli: _EvalCli, monkeypatch, flags) -> None:
     monkeypatch.setattr(settings, "api_key", None)
-    with pytest.raises(HudAuthenticationError):
-        EvalConfig(agent_type="gemini", **fields).require_credentials()
+    payload = eval_cli.invoke("tasks.py", "gemini", *flags, "--yes", exit_code=1)
+    assert payload["error"] == "permission_denied"
+    assert eval_cli.taskset is None
 
 
-def test_openai_compatible_requires_a_model() -> None:
-    with pytest.raises(ValueError, match="Model name is required"):
-        EvalConfig(agent_type="openai_compatible").require_credentials()
+def test_openai_compatible_requires_a_model(eval_cli: _EvalCli) -> None:
+    payload = eval_cli.invoke("tasks.py", "openai_compatible", "--yes", exit_code=2)
+    assert "Model name is required" in payload["message"]
 
 
 def test_agent_kwargs_model_precedence_and_aliases() -> None:
@@ -432,7 +430,9 @@ def test_provider_key_wins_unless_gateway_is_forced(
     direct = MagicMock(return_value=object())
     gateway = MagicMock(return_value=object())
     monkeypatch.setattr(factory, direct)
+    # The agent's own fallback resolves through the gateway module; --gateway is applied by the CLI.
     monkeypatch.setattr("hud.utils.gateway.build_gateway_client", gateway)
+    monkeypatch.setattr("hud.cli.eval.build_gateway_client", gateway)
     flags = ["--gateway"] if force_gateway else []
     eval_cli.invoke("tasks.py", agent_type, *flags, "--yes")
     if provider_key and not force_gateway:
@@ -517,7 +517,7 @@ def test_interactive_picker_offers_current_catalog_models_newest_first(
             deprecated_at="2026-09-11T00:00:00Z",
         )
     )
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: catalog)
+    monkeypatch.setattr("hud.cli.eval.list_gateway_models", lambda: catalog)
     offered: list[str] = []
 
     def pick(choices: list[Any]) -> Any:
@@ -554,7 +554,7 @@ def test_single_tasks_file_is_picked_without_prompting(
     (tmp_path / "rows.json").write_text(f"[{_CONTAINER_ROW}]", encoding="utf-8")
     (tmp_path / ".hidden.json").write_text("[]", encoding="utf-8")
     monkeypatch.setattr(
-        "hud.utils.gateway.list_gateway_models",
+        "hud.cli.eval.list_gateway_models",
         lambda: _catalog(("openai", "GPT 5.6", "gpt-5.6", "2026-06-12T00:00:00Z")),
     )
     monkeypatch.setattr(
