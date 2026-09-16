@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractAsyncContextManager
 
-    from hud.eval import Job, Provider, Task
+    from hud.eval import Provider, Task
     from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()
@@ -64,48 +64,6 @@ _PLACEMENTS = ("local", *_PROVIDERS)
 _SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
-def _pick_agent() -> dict[str, Any]:
-    """Interactive agent choice: the agent type, then a current catalog model of that type."""
-    if not settings.api_key:
-        raise ValueError(
-            "No agent given. Pass a model or agent type (hud eval tasks.py claude-sonnet-4-6), "
-            "or set HUD_API_KEY to pick from the model catalog."
-        )
-    agent_type = AgentType(
-        hud_console.select(
-            "Select an agent:", choices=[agent.value for agent in AgentType], default=0
-        )
-    )
-    models = sorted(
-        (
-            model
-            for model in list_gateway_models()
-            if model.sdk_agent_type == agent_type.value
-            and model.deprecated_at is None
-            and model.model_name
-        ),
-        key=lambda model: model.recency,
-        reverse=True,
-    )
-    if not models:
-        raise ValueError(f"The model catalog has no {agent_type.value} models.")
-    chosen = cast(
-        "GatewayModelInfo",
-        hud_console.select(
-            "Select a model:",
-            choices=[
-                {"name": f"{model.name or model.model_name} ({model.model_name})", "value": model}
-                for model in models
-            ],
-            default=0,
-        ),
-    )
-    overrides: dict[str, Any] = {"agent_type": agent_type, "model": chosen.model_name}
-    if chosen.name:
-        overrides["agent_config"] = {agent_type.value: {"model_name": chosen.name}}
-    return overrides
-
-
 def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
     """Expand ``${VAR}`` placeholders; an unset variable is a config error."""
     if isinstance(value, dict):
@@ -118,41 +76,6 @@ def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
         return Template(value).substitute(mapping)
     except KeyError as exc:
         raise ValueError(f"{_CONFIG_PATH}: ${{{exc.args[0]}}} is not set") from None
-
-
-def _agent_config_updates(
-    items: list[str], agent_type: AgentType | None
-) -> dict[str, dict[str, Any]]:
-    """Parse ``--config key=value`` into per-agent sections.
-
-    ``claude.max_tokens=1`` targets one agent explicitly; a bare key applies
-    to the selected agent.
-    """
-    updates: dict[str, dict[str, Any]] = {}
-    for item in items:
-        parsed = parse_key_value(item)
-        if parsed is None:
-            raise ValueError(f"--config expects key=value, got {item!r}")
-        key, value = parsed
-        section, sep, param = key.partition(".")
-        if not sep:
-            if agent_type is None:
-                raise ValueError(
-                    f"--config {key}=... needs an agent; pass one or write <agent>.{key}=..."
-                )
-            section, param = agent_type.value, key
-        parsed_value: bool | int | float | str = value
-        if value.lower() in ("true", "false"):
-            parsed_value = value.lower() == "true"
-        else:
-            for number in (int, float):
-                try:
-                    parsed_value = number(value)
-                    break
-                except ValueError:
-                    continue
-        updates.setdefault(AgentType(section).value, {})[param] = parsed_value
-    return updates
 
 
 class EvalConfig(BaseModel):
@@ -248,99 +171,10 @@ class EvalConfig(BaseModel):
             kwargs["auto_respond"] = True
         return kwargs
 
-    def display(self) -> None:
-        table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
-        table.add_column("Setting", style="yellow")
-        table.add_column("Value", style="green")
-        table.add_row("source", self.source or "-")
-        table.add_row("runtime", self.runtime or "-")
-        table.add_row("agent", self.agent_type.value if self.agent_type else "-")
-        if self.task_ids:
-            shown = ", ".join(self.task_ids[:5])
-            table.add_row("task_ids", shown + ("..." if len(self.task_ids) > 5 else ""))
-        table.add_row("all", str(self.all))
-        table.add_row("max_steps", str(self.max_steps))
-        table.add_row("max_concurrent", str(self.max_concurrent))
-        if self.group_size > 1:
-            table.add_row("group_size", str(self.group_size))
-        for flag in ("auto_respond", "very_verbose", "verbose", "gateway"):
-            if getattr(self, flag):
-                table.add_row(flag, "[bold green]True[/bold green]")
-        if self.agent_type is not None:
-            table.add_row("", "")
-            table.add_row(f"[dim]{self.agent_type.value} config[/dim]", "")
-            for name, value in self.agent_kwargs().items():
-                if name in ("max_steps", "auto_respond"):
-                    continue
-                shown = str(value)
-                if any(marker in name for marker in _SECRET_MARKERS) and shown:
-                    shown = f"{shown[:4]}****" if len(shown) > 4 else "****"
-                table.add_row(f"  {name}", shown)
-        hud_console.print(table)
-
 
 def _is_container_row(task: Task) -> bool:
     config = task.runtime_config
     return config is not None and (config.image is not None or config.compose is not None)
-
-
-def _local_placement(taskset: Taskset) -> Provider:
-    """Isolate each row: its container, or a subprocess serving the bound env's
-    source (``Taskset.run`` alone would serve a live env in-process)."""
-    portable = [
-        slug for slug, task in taskset.items() if task._env is None and not _is_container_row(task)
-    ]
-    if portable:
-        shown = ", ".join(portable[:5]) + ("..." if len(portable) > 5 else "")
-        raise ValueError(
-            f"{len(portable)} task(s) have no bound Environment or container image ({shown}). "
-            "Portable rows need --runtime hud, --remote, or --runtime tcp://host:port."
-        )
-    docker = DockerRuntime()
-
-    def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
-        if _is_container_row(task):
-            return docker(task)
-        assert task._env is not None
-        return SubprocessRuntime(task._env)(task)
-
-    return spawn
-
-
-def _load_taskset(cfg: EvalConfig) -> Taskset:
-    assert cfg.source is not None
-    if cfg.source_is_file:
-        hud_console.info(f"Loading tasks from: {cfg.source}")
-        taskset = Taskset.from_file(cfg.source)
-    else:
-        hud_console.info(f"Loading platform taskset: {cfg.source}")
-        taskset = Taskset.from_api(cfg.source)
-    if not taskset:
-        raise ValueError(
-            f"No runnable Tasks found in {cfg.source}. Define a `hud.Environment` with "
-            "`@env.template` and expose Tasks (for example, `t = my_task(arg=...)`)."
-        )
-
-    if cfg.task_ids:
-        wanted = set(cfg.task_ids)
-        taskset = taskset.filter(
-            slug
-            for index, (slug, task) in enumerate(taskset.items())
-            if slug in wanted or task.id in wanted or str(index) in wanted
-        )
-        if not taskset:
-            raise ValueError(f"No tasks matching: {', '.join(cfg.task_ids)}")
-        hud_console.info(f"Filtered to {len(taskset)} task(s)")
-    elif not cfg.all:
-        total = len(taskset)
-        taskset = taskset.filter([next(iter(taskset.tasks))])
-        if total > 1:
-            hud_console.warning(
-                f"Running only 1 of {total} tasks (the first). "
-                f"Add --full to run all {total}, or --task-ids to pick specific ones."
-            )
-    hud_console.info(f"Loaded {len(taskset)} task(s)")
-    return taskset
 
 
 def _truncate(text: str | list[Any] | None, max_len: int) -> str:
@@ -348,32 +182,6 @@ def _truncate(text: str | list[Any] | None, max_len: int) -> str:
         return "—"
     flat = str(text).replace("\n", " ").strip()
     return flat[: max_len - 2] + ".." if len(flat) > max_len else flat
-
-
-def _display_job(job: Job, *, source: str, elapsed: float) -> None:
-    errors = set(map(id, job.errors))
-    hud_console.print(f"\n[bold]'{source}' Results[/bold]")
-    hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
-    hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
-    hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
-    if errors:
-        hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
-
-    if len(job.runs) <= 50:
-        table = Table(title="Details", show_header=True, header_style="bold")
-        table.add_column("#", style="dim", justify="right", width=4)
-        table.add_column("Prompt", style="dim", max_width=35)
-        table.add_column("Answer", style="dim", max_width=35)
-        table.add_column("Reward", justify="right", style="green", width=8)
-        for index, run in enumerate(job.runs):
-            table.add_row(
-                str(index),
-                _truncate(run.prompt, 35),
-                _truncate(run.trace.content, 35),
-                "[red]error[/red]" if id(run) in errors else f"{run.reward:.3f}",
-            )
-        hud_console.print(table)
-    hud_console.print()
 
 
 def eval_command(
@@ -487,9 +295,33 @@ def eval_command(
     if task_ids is not None:
         overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
     if config:
-        overrides["agent_config"] = _agent_config_updates(
-            config, overrides.get("agent_type", cfg.agent_type)
-        )
+        # ``claude.max_tokens=1`` targets one agent; a bare key applies to the selected agent.
+        selected = overrides.get("agent_type", cfg.agent_type)
+        sections: dict[str, dict[str, Any]] = {}
+        for item in config:
+            parsed = parse_key_value(item)
+            if parsed is None:
+                raise ValueError(f"--config expects key=value, got {item!r}")
+            key, value = parsed
+            section, sep, param = key.partition(".")
+            if not sep:
+                if selected is None:
+                    raise ValueError(
+                        f"--config {key}=... needs an agent; pass one or write <agent>.{key}=..."
+                    )
+                section, param = selected.value, key
+            parsed_value: bool | int | float | str = value
+            if value.lower() in ("true", "false"):
+                parsed_value = value.lower() == "true"
+            else:
+                for number in (int, float):
+                    try:
+                        parsed_value = number(value)
+                        break
+                    except ValueError:
+                        continue
+            sections.setdefault(AgentType(section).value, {})[param] = parsed_value
+        overrides["agent_config"] = sections
     cfg = cfg.merge(overrides)
 
     if dry_run:
@@ -527,11 +359,51 @@ def eval_command(
         chosen = names[0] if len(names) == 1 else hud_console.select("Select a tasks file", names)
         cfg = cfg.merge({"source": chosen})
         hud_console.success(f"Selected: {cfg.source}")
+
     if cfg.agent_type is None:
-        cfg = cfg.merge(_pick_agent())
+        # Pick the agent type, then a current catalog model of that type, newest first.
+        if not settings.api_key:
+            raise ValueError(
+                "No agent given. Pass a model or agent type (hud eval tasks.py "
+                "claude-sonnet-4-6), or set HUD_API_KEY to pick from the model catalog."
+            )
+        picked_type = AgentType(
+            hud_console.select(
+                "Select an agent:", choices=[agent.value for agent in AgentType], default=0
+            )
+        )
+        models = sorted(
+            (
+                catalog_model
+                for catalog_model in list_gateway_models()
+                if catalog_model.sdk_agent_type == picked_type.value
+                and catalog_model.deprecated_at is None
+                and catalog_model.model_name
+            ),
+            key=lambda catalog_model: catalog_model.recency,
+            reverse=True,
+        )
+        if not models:
+            raise ValueError(f"The model catalog has no {picked_type.value} models.")
+        picked_model = cast(
+            "GatewayModelInfo",
+            hud_console.select(
+                "Select a model:",
+                choices=[
+                    {"name": f"{m.name or m.model_name} ({m.model_name})", "value": m}
+                    for m in models
+                ],
+                default=0,
+            ),
+        )
+        picked: dict[str, Any] = {"agent_type": picked_type, "model": picked_model.model_name}
+        if picked_model.name:
+            picked["agent_config"] = {picked_type.value: {"model_name": picked_model.name}}
+        cfg = cfg.merge(picked)
+
     cfg = cfg.with_placement()
     agent_type = cfg.agent_type
-    assert agent_type is not None and cfg.runtime is not None
+    assert agent_type is not None and cfg.runtime is not None and cfg.source is not None
 
     if cfg.gateway or cfg.runtime in ("hud", "hosted"):
         PlatformClient.from_settings()
@@ -542,14 +414,94 @@ def eval_command(
     ):
         raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
-    taskset = _load_taskset(cfg)
+    if cfg.source_is_file:
+        hud_console.info(f"Loading tasks from: {cfg.source}")
+        taskset = Taskset.from_file(cfg.source)
+    else:
+        hud_console.info(f"Loading platform taskset: {cfg.source}")
+        taskset = Taskset.from_api(cfg.source)
+    if not taskset:
+        raise ValueError(
+            f"No runnable Tasks found in {cfg.source}. Define a `hud.Environment` with "
+            "`@env.template` and expose Tasks (for example, `t = my_task(arg=...)`)."
+        )
+    if cfg.task_ids:
+        wanted = set(cfg.task_ids)
+        taskset = taskset.filter(
+            slug
+            for index, (slug, task) in enumerate(taskset.items())
+            if slug in wanted or task.id in wanted or str(index) in wanted
+        )
+        if not taskset:
+            raise ValueError(f"No tasks matching: {', '.join(cfg.task_ids)}")
+        hud_console.info(f"Filtered to {len(taskset)} task(s)")
+    elif not cfg.all:
+        total = len(taskset)
+        taskset = taskset.filter([next(iter(taskset.tasks))])
+        if total > 1:
+            hud_console.warning(
+                f"Running only 1 of {total} tasks (the first). "
+                f"Add --full to run all {total}, or --task-ids to pick specific ones."
+            )
+    hud_console.info(f"Loaded {len(taskset)} task(s)")
+
+    placement: Provider | HostedRuntime
     if cfg.runtime == "local":
-        placement: Provider | HostedRuntime = _local_placement(taskset)
+        # Isolate each row: its container, or a subprocess serving the bound env's
+        # source (``Taskset.run`` alone would serve a live env in-process).
+        portable = [
+            slug
+            for slug, task in taskset.items()
+            if task._env is None and not _is_container_row(task)
+        ]
+        if portable:
+            shown = ", ".join(portable[:5]) + ("..." if len(portable) > 5 else "")
+            raise ValueError(
+                f"{len(portable)} task(s) have no bound Environment or container image "
+                f"({shown}). Portable rows need --runtime hud, --remote, or "
+                "--runtime tcp://host:port."
+            )
+        docker = DockerRuntime()
+
+        def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
+            if _is_container_row(task):
+                return docker(task)
+            assert task._env is not None
+            return SubprocessRuntime(task._env)(task)
+
+        placement = spawn
     elif cfg.runtime.startswith("tcp://"):
         placement = Runtime(cfg.runtime)
     else:
         placement = _PROVIDERS[cfg.runtime]()
-    cfg.display()
+
+    table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
+    table.add_column("Setting", style="yellow")
+    table.add_column("Value", style="green")
+    table.add_row("source", cfg.source)
+    table.add_row("runtime", cfg.runtime)
+    table.add_row("agent", agent_type.value)
+    if cfg.task_ids:
+        shown = ", ".join(cfg.task_ids[:5])
+        table.add_row("task_ids", shown + ("..." if len(cfg.task_ids) > 5 else ""))
+    table.add_row("all", str(cfg.all))
+    table.add_row("max_steps", str(cfg.max_steps))
+    table.add_row("max_concurrent", str(cfg.max_concurrent))
+    if cfg.group_size > 1:
+        table.add_row("group_size", str(cfg.group_size))
+    for flag in ("auto_respond", "very_verbose", "verbose", "gateway"):
+        if getattr(cfg, flag):
+            table.add_row(flag, "[bold green]True[/bold green]")
+    table.add_row("", "")
+    table.add_row(f"[dim]{agent_type.value} config[/dim]", "")
+    for name, value in cfg.agent_kwargs().items():
+        if name in ("max_steps", "auto_respond"):
+            continue
+        shown = str(value)
+        if any(marker in name for marker in _SECRET_MARKERS) and shown:
+            shown = f"{shown[:4]}****" if len(shown) > 4 else "****"
+        table.add_row(f"  {name}", shown)
+    hud_console.print(table)
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 
     single_run = len(taskset) == 1 and cfg.group_size == 1
@@ -586,8 +538,31 @@ def eval_command(
     elapsed = time.monotonic() - started
     if job.runs and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"{settings.hud_web_url}/jobs/{canonical_record_id(job.id)}")
+
     if job.runs:
-        _display_job(job, source=cfg.source or "", elapsed=elapsed)
+        errors = set(map(id, job.errors))
+        hud_console.print(f"\n[bold]'{cfg.source}' Results[/bold]")
+        hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
+        hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
+        hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
+        if errors:
+            hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
+        if len(job.runs) <= 50:
+            details = Table(title="Details", show_header=True, header_style="bold")
+            details.add_column("#", style="dim", justify="right", width=4)
+            details.add_column("Prompt", style="dim", max_width=35)
+            details.add_column("Answer", style="dim", max_width=35)
+            details.add_column("Reward", justify="right", style="green", width=8)
+            for index, run in enumerate(job.runs):
+                details.add_row(
+                    str(index),
+                    _truncate(run.prompt, 35),
+                    _truncate(run.trace.content, 35),
+                    "[red]error[/red]" if id(run) in errors else f"{run.reward:.3f}",
+                )
+            hud_console.print(details)
+        hud_console.print()
+
     return {
         "job_id": job.id,
         "source": cfg.source,
