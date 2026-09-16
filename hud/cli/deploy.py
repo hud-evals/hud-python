@@ -35,7 +35,9 @@ from hud.cli import (
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.eval.runtime import RuntimeConfig
 from hud.settings import settings
+from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
@@ -245,6 +247,21 @@ async def deploy_command(
         raise ValueError(f"Multiple environments in {env_dir}: {found}. Pass --name to choose one.")
     else:
         name = names.pop()
+    if registry_id is not None:
+        try:
+            registered = platform.get(f"/registry/{registry_id}")["name"]
+        except HudRequestError as exc:
+            raise CliError.from_http(
+                exc, resource="Environment", input={"registry_id": registry_id}
+            ) from exc
+        if normalize_environment_name(name) != registered:
+            raise CliError(
+                "usage",
+                f"Code declares Environment({name!r}) but --registry-id targets {registered!r}.",
+                suggestion="Rename the environment in code, or drop --registry-id to deploy "
+                "by name.",
+                input={"registry_id": registry_id, "name": name},
+            )
     state = DirectoryState(AuthScope.resolve(platform), env_dir)
     link = state.load()
     placement = Placement.resolve(platform, link, flag=project)

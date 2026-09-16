@@ -128,33 +128,8 @@ def test_subprocess_runtime_serves_a_live_env_from_its_template_file(tmp_path, r
     assert provider.env == "sums"
 
 
-def test_subprocess_runtime_serves_a_multi_module_env_from_its_directory(tmp_path, request) -> None:
-    module_name = f"split_env_{request.node.name}"
-    (tmp_path / f"{module_name}.py").write_text(_SUMS_ENV.format(name="split"), encoding="utf-8")
-    (tmp_path / "more.py").write_text(
-        f"from {module_name} import env\n\n"
-        '@env.template(id="sub")\nasync def sub(a: int, b: int):\n'
-        '    answer = yield f"sub:{a}:{b}"\n    yield 1.0 if answer == str(a - b) else 0.0\n',
-        encoding="utf-8",
-    )
-    (tmp_path / "tasks.py").write_text(
-        f"from {module_name} import add\nfrom more import sub\n\n"
-        "tasks = [add(a=2, b=3), sub(a=5, b=1)]\n"
-    )
-    request.addfinalizer(
-        lambda: (sys.modules.pop(module_name, None), sys.modules.pop("more", None))
-    )
-
-    task = next(iter(Taskset.from_module(tmp_path / "tasks.py")))
-    assert task._env is not None
-    provider = SubprocessRuntime(task._env)
-
-    assert provider.source == tmp_path.resolve()
-    assert provider.env == "split"
-
-
 def test_subprocess_runtime_rejects_env_without_templates() -> None:
-    with pytest.raises(ValueError, match="one source directory"):
+    with pytest.raises(ValueError, match="exactly one source file"):
         SubprocessRuntime(Environment("demo"))
 
 

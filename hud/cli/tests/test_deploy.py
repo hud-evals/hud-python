@@ -204,6 +204,21 @@ class TestResolveEnvironmentName:
 
         assert "No environment found" in _deploy_name_error(tmp_path, "--registry-id", "r-1")
 
+    def test_registry_id_must_name_the_declared_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "env.py").write_text('env = Environment("My Env")\n', encoding="utf-8")
+        monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+
+        def get(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+            assert url.endswith(f"/registry/{_REGISTRY_ID}")
+            return {"id": _REGISTRY_ID, "name": "other-env"}
+
+        monkeypatch.setattr("hud.utils.platform.make_request_sync", get)
+        message = _deploy_name_error(tmp_path, "--registry-id", _REGISTRY_ID)
+        assert "Environment('My Env')" in message
+        assert "targets 'other-env'" in message
+
 
 class TestBuildContext:
     def test_excludes_secrets_and_keeps_source(

@@ -53,11 +53,17 @@ def get_command(
     if local is not None and local.exists():
         # Local spans: one JSON span per line; step spans carry the conversation payload.
         source = f"local ({local})"
-        spans = [
-            json.loads(line)
-            for line in local.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        spans: list[dict[str, Any]] = []
+        incomplete = 0
+        for line in local.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                spans.append(json.loads(line))
+            except json.JSONDecodeError:
+                incomplete += 1  # the exporter appends; an interrupted write leaves a partial line
+        if incomplete:
+            hud_console.warning(f"Skipped {incomplete} incomplete span record(s) in {local}")
         for span in sorted(spans, key=lambda s: s.get("start_time", "")):
             attrs = span.get("attributes", {})
             payload = attrs.get("hud.payload", {})

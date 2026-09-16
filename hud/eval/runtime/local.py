@@ -149,10 +149,10 @@ class SubprocessRuntime:
     ephemeral loopback port, yields its :class:`Runtime`, and terminates the
     child on exit. *source* is a ``.py`` file, a directory of them, or a live
     :class:`~hud.environment.Environment`, which is served from the file its
-    ``@env.template`` declarations live in (their directory, when they span
-    files). The served env is the placed task's ``env`` name (so a mixed-env
-    taskset works against one source), unless *env* pins one explicitly;
-    placing a row whose env the source does not define fails loudly in the child.
+    ``@env.template`` declarations live in. The served env is the placed
+    task's ``env`` name (so a mixed-env taskset works against one source),
+    unless *env* pins one explicitly; placing a row whose env the source does
+    not define fails loudly in the child.
 
     The child's working directory is the source's directory, so sibling
     imports and relative data paths resolve; ``@env.initialize`` daemons start
@@ -174,14 +174,13 @@ class SubprocessRuntime:
             if env is not None:
                 raise TypeError("SubprocessRuntime: env= applies only to source paths")
             files = {Path(inspect.getfile(t.func)).resolve() for t in source.tasks.values()}
-            directories = {file.parent for file in files}
-            if len(directories) != 1:
+            if len(files) != 1:
                 raise ValueError(
                     f"SubprocessRuntime: Environment {source.name!r} must declare its "
-                    "@env.template tasks in one source directory to be served from source"
+                    "@env.template tasks in exactly one source file to be served from source; "
+                    "serve a source path instead"
                 )
-            # One file is served directly; templates split across files serve the directory.
-            self.source = files.pop() if len(files) == 1 else directories.pop()
+            self.source = files.pop()
             self.env: str | None = source.name
         else:
             self.source = Path(source).resolve()
