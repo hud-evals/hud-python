@@ -11,7 +11,6 @@ Noun-verb surface:
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from uuid import UUID
 
@@ -40,20 +39,30 @@ jobs_app = CLI(
 )
 
 
-def _items(data: Any) -> list[Any]:
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        items = data.get("items")
-        if isinstance(items, list):
-            return items
-    return []
+@jobs_app.command("list")
+def list_command(
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
+) -> Any:
+    """List recent jobs.
 
-
-def _render_jobs(items: list[Any]) -> None:
+    [not dim]Examples:
+        hud jobs list
+        hud jobs list --json
+        hud jobs list --quiet | xargs -n1 hud jobs get
+        hud jobs list -n 50[/not dim]
+    """
+    items = PlatformClient.from_settings().get("/jobs", params={"limit": limit})["items"]
+    if quiet:
+        for job in items:
+            if job.get("id"):
+                typer.echo(job["id"])
+        return items
     if not items:
         hud_console.stdout.print("[yellow]No jobs found.[/yellow]")
-        return
+        return items
 
     hud_console.stdout.print(Panel.fit("[bold cyan]Recent Jobs[/bold cyan]", border_style="cyan"))
     table = Table()
@@ -74,14 +83,42 @@ def _render_jobs(items: list[Any]) -> None:
     web = settings.hud_web_url.rstrip("/")
     hud_console.stdout.print(f"\n[dim]View: {web}/jobs[/dim]")
     hud_console.stdout.print("[dim]Tip: hud jobs get <id> to see traces for a specific job[/dim]")
+    return items
 
 
-def _render_job_traces(job_id: str, items: list[Any], *, web: str) -> None:
-    view = f"{web.rstrip('/')}/jobs/{job_id}"
+@jobs_app.command("get")
+def get_command(
+    job_id: str = typer.Argument(..., help="Job ID"),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
+) -> Any:
+    """Show traces for a specific job.
+
+    [not dim]Examples:
+        hud jobs get <job-id>
+        hud jobs get <job-id> --json
+        hud jobs get <job-id> --quiet[/not dim]
+    """
+    client = PlatformClient.from_settings()
+    job_id = str(UUID(job_id))
+    try:
+        data = client.get(f"/jobs/{job_id}/traces", params={"limit": limit})
+    except HudRequestError as exc:
+        raise CliError.from_http(exc, resource="Job", input={"job_id": job_id}) from exc
+    items = data["items"]
+    if quiet:
+        for trace in items:
+            if trace.get("id"):
+                typer.echo(trace["id"])
+        return items
+
+    view = f"{settings.hud_web_url.rstrip('/')}/jobs/{job_id}"
     if not items:
         hud_console.stdout.print("[yellow]No traces found for this job.[/yellow]")
         hud_console.stdout.print(f"[dim]View: {view}[/dim]")
-        return
+        return items
 
     hud_console.stdout.print(
         Panel.fit(f"[bold cyan]Job Traces[/bold cyan] [dim]{job_id}[/dim]", border_style="cyan")
@@ -106,185 +143,7 @@ def _render_job_traces(job_id: str, items: list[Any], *, web: str) -> None:
     hud_console.stdout.print(
         "[dim]Tip: hud trace get <trace_id> to inspect a specific rollout[/dim]"
     )
-
-
-def _list_jobs(*, quiet: bool, limit: int) -> list[Any]:
-    client = PlatformClient.from_settings()
-    data = client.get("/jobs", params={"limit": limit})
-    items = _items(data)
-    if quiet:
-        for job in items:
-            if job.get("id"):
-                typer.echo(job["id"])
-    else:
-        _render_jobs(items)
     return items
-
-
-def _show_job_traces(
-    job_id: str,
-    *,
-    quiet: bool,
-    limit: int,
-) -> list[Any]:
-    client = PlatformClient.from_settings()
-    job_id = str(UUID(job_id))
-    try:
-        data = client.get(f"/jobs/{job_id}/traces", params={"limit": limit})
-    except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Job", input={"job_id": job_id}) from exc
-    items = _items(data)
-    if quiet:
-        for trace in items:
-            if trace.get("id"):
-                typer.echo(trace["id"])
-    else:
-        _render_job_traces(job_id, items, web=settings.hud_web_url)
-    return items
-
-
-@jobs_app.command("list")
-def list_command(
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
-    ),
-    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
-) -> Any:
-    """List recent jobs.
-
-    [not dim]Examples:
-        hud jobs list
-        hud jobs list --json
-        hud jobs list --quiet | xargs -n1 hud jobs get
-        hud jobs list -n 50[/not dim]
-    """
-    return _list_jobs(quiet=quiet, limit=limit)
-
-
-@jobs_app.command("get")
-def get_command(
-    job_id: str = typer.Argument(..., help="Job ID"),
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
-    ),
-    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
-) -> Any:
-    """Show traces for a specific job.
-
-    [not dim]Examples:
-        hud jobs get <job-id>
-        hud jobs get <job-id> --json
-        hud jobs get <job-id> --quiet[/not dim]
-    """
-    return _show_job_traces(job_id, quiet=quiet, limit=limit)
-
-
-def _render_cancel_plan(plan: dict[str, Any]) -> None:
-    hud_console.info(f"--dry-run: would {str(plan['action']).replace('_', ' ')}")
-    if plan.get("job_id"):
-        hud_console.info(f"  job_id: {plan['job_id']}")
-    if plan.get("trace_id"):
-        hud_console.info(f"  trace_id: {plan['trace_id']}")
-
-
-def _render_cancel(payload: dict[str, Any]) -> None:
-    if payload["action"] == "cancel_all":
-        jobs_cancelled = payload.get("jobs_cancelled", 0)
-        tasks_cancelled = payload.get("total_tasks_cancelled", 0)
-        if jobs_cancelled == 0:
-            hud_console.info("No active jobs found.")
-            return
-        hud_console.success(f"Cancelled {jobs_cancelled} job(s), {tasks_cancelled} task(s) total.")
-        for job in payload.get("job_details", []):
-            hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
-        return
-    if payload.get("trace_id"):
-        if payload.get("status") == "accepted":
-            hud_console.success("Task cancellation requested.")
-        else:
-            hud_console.warning("Task not found or already finished.")
-        return
-    cancelled = payload.get("cancelled", 0)
-    if cancelled == 0:
-        hud_console.warning(f"No active tasks found for job {payload['job_id']}")
-        return
-    hud_console.success(f"Cancellation requested for {cancelled} task(s).")
-
-
-def _run_cancel(
-    *,
-    job_id: str | None,
-    trace_id: str | None,
-    all_jobs: bool,
-    yes: bool,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    """Cancel a job, a trace, or every active job."""
-    if not job_id and not all_jobs:
-        raise CliError(
-            error="usage",
-            message="Provide a job_id or use --all to cancel all active jobs.",
-            suggestion="hud jobs cancel <job-id>   or   hud jobs cancel --all --yes",
-        )
-
-    if job_id and all_jobs:
-        raise CliError(
-            error="usage",
-            message="Cannot specify both job_id and --all.",
-            input={"job_id": job_id, "all": all_jobs},
-            suggestion="Pass either a job id or --all, not both.",
-        )
-
-    if all_jobs:
-        action = "cancel_all"
-    elif job_id and not trace_id:
-        action = "cancel_job"
-    else:
-        action = "cancel_trace"
-
-    plan: dict[str, Any] = {
-        "dry_run": True,
-        "action": action,
-        "job_id": job_id,
-        "trace_id": trace_id,
-        "all": all_jobs,
-    }
-    if dry_run:
-        _render_cancel_plan(plan)
-        return plan
-
-    if all_jobs:
-        CLI.confirm_or_abort(
-            "This will cancel ALL your active jobs. Continue?",
-            yes=yes,
-            default=False,
-        )
-    elif job_id and not trace_id:
-        CLI.confirm_or_abort(f"Cancel all tasks in job {job_id}?", yes=yes, default=False)
-
-    async def _cancel() -> dict[str, Any]:
-        platform = PlatformClient.from_settings()
-        if all_jobs:
-            hud_console.info("Cancelling all active jobs...")
-            return await platform.apost("/rollouts/cancel_user_jobs", json={})
-        if trace_id:
-            assert job_id is not None
-            hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
-            return await platform.apost(
-                "/rollouts/cancel", json={"job_id": job_id, "trace_id": trace_id}
-            )
-        assert job_id is not None
-        hud_console.info(f"Cancelling job {job_id}...")
-        return await platform.apost("/rollouts/cancel_job", json={"job_id": job_id})
-
-    try:
-        result = asyncio.run(_cancel())
-    except HudException as exc:
-        raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
-
-    payload: dict[str, Any] = {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
-    _render_cancel(payload)
-    return payload
 
 
 @jobs_app.command("cancel")
@@ -316,13 +175,74 @@ def cancel_job_command(
         hud jobs cancel --all --yes
         hud jobs cancel <job-id> --dry-run --json[/not dim]
     """
-    return _run_cancel(
-        job_id=job_id,
-        trace_id=trace_id,
-        all_jobs=all_jobs,
-        yes=yes,
-        dry_run=dry_run,
-    )
+    if not job_id and not all_jobs:
+        raise CliError(
+            error="usage",
+            message="Provide a job_id or use --all to cancel all active jobs.",
+            suggestion="hud jobs cancel <job-id>   or   hud jobs cancel --all --yes",
+        )
+    if job_id and all_jobs:
+        raise CliError(
+            error="usage",
+            message="Cannot specify both job_id and --all.",
+            input={"job_id": job_id, "all": all_jobs},
+            suggestion="Pass either a job id or --all, not both.",
+        )
+
+    action = "cancel_all" if all_jobs else "cancel_trace" if trace_id else "cancel_job"
+    if dry_run:
+        hud_console.info(f"--dry-run: would {action.replace('_', ' ')}")
+        if job_id:
+            hud_console.info(f"  job_id: {job_id}")
+        if trace_id:
+            hud_console.info(f"  trace_id: {trace_id}")
+        return {
+            "dry_run": True,
+            "action": action,
+            "job_id": job_id,
+            "trace_id": trace_id,
+            "all": all_jobs,
+        }
+
+    platform = PlatformClient.from_settings()
+    try:
+        if all_jobs:
+            CLI.confirm_or_abort(
+                "This will cancel ALL your active jobs. Continue?", yes=yes, default=False
+            )
+            hud_console.info("Cancelling all active jobs...")
+            result = platform.post("/rollouts/cancel_user_jobs", json={})
+            jobs_cancelled = result.get("jobs_cancelled", 0)
+            if jobs_cancelled == 0:
+                hud_console.info("No active jobs found.")
+            else:
+                hud_console.success(
+                    f"Cancelled {jobs_cancelled} job(s), "
+                    f"{result.get('total_tasks_cancelled', 0)} task(s) total."
+                )
+                for job in result.get("job_details", []):
+                    hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
+        elif trace_id:
+            hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
+            result = platform.post(
+                "/rollouts/cancel", json={"job_id": job_id, "trace_id": trace_id}
+            )
+            if result.get("status") == "accepted":
+                hud_console.success("Task cancellation requested.")
+            else:
+                hud_console.warning("Task not found or already finished.")
+        else:
+            CLI.confirm_or_abort(f"Cancel all tasks in job {job_id}?", yes=yes, default=False)
+            hud_console.info(f"Cancelling job {job_id}...")
+            result = platform.post("/rollouts/cancel_job", json={"job_id": job_id})
+            cancelled = result.get("cancelled", 0)
+            if cancelled == 0:
+                hud_console.warning(f"No active tasks found for job {job_id}")
+            else:
+                hud_console.success(f"Cancellation requested for {cancelled} task(s).")
+    except HudException as exc:
+        raise map_exception(exc, input={"job_id": job_id, "trace_id": trace_id}) from exc
+    return {"action": action, "job_id": job_id, "trace_id": trace_id, **result}
 
 
 @jobs_app.callback(invoke_without_command=True)
@@ -346,4 +266,4 @@ def jobs_command(
     """
     if ctx.invoked_subcommand is not None:
         return None
-    return _list_jobs(quiet=quiet, limit=limit)
+    return list_command(quiet=quiet, limit=limit)
