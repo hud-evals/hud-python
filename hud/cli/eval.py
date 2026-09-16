@@ -21,7 +21,7 @@ from rich import box
 from rich.table import Table
 
 from hud.agents import resolve_agent_model
-from hud.cli.app import CLI, CliError, parse_key_value
+from hud.cli import CLI, CliError, parse_key_value
 from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime, Taskset
 from hud.settings import settings
 from hud.types import AgentType

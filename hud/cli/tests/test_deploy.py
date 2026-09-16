@@ -14,7 +14,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli.app import AuthScope, DirectoryState, app
+from hud.cli import AuthScope, DirectoryState
+from hud.cli.__main__ import app
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -796,7 +797,7 @@ def test_deploy_dry_run_has_no_prompt_or_writes(
 ) -> None:
     from typer.testing import CliRunner
 
-    from hud.cli.app import app
+    from hud.cli.__main__ import app
 
     env = tmp_path / "environment"
     env.mkdir()

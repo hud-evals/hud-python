@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+from hud.cli import CliError
 from hud.cli import init as init_module
-from hud.cli.app import CliError
 from hud.cli.init import init_command, materialize_preset
 
 if TYPE_CHECKING:
@@ -142,7 +142,7 @@ def test_init_failure_uses_json_error_and_removes_partial_directory(tmp_path, mo
 
     from typer.testing import CliRunner
 
-    from hud.cli.app import app
+    from hud.cli.__main__ import app
 
     def fail(preset, target):
         target.mkdir()

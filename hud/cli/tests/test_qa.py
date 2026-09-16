@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli.app import app
+from hud.cli.__main__ import app
 from hud.cli.qa import is_standard_result_blob, presentation_for_result
 
 runner = CliRunner()

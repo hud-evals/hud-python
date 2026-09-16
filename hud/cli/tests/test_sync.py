@@ -10,7 +10,8 @@ import pytest
 from typer.testing import CliRunner
 
 import hud.cli.sync as sync_module
-from hud.cli.app import AuthScope, CliError, DirectoryState, app
+from hud.cli import AuthScope, CliError, DirectoryState
+from hud.cli.__main__ import app
 from hud.cli.sync import RegistryEnvironment, _write_csv, get_registry_environment
 from hud.eval import Task, Taskset
 from hud.utils.exceptions import HudRequestError

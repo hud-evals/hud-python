@@ -10,7 +10,8 @@ from uuid import UUID
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli.app import AuthScope, DirectoryLink, DirectoryState, app
+from hud.cli import AuthScope, DirectoryLink, DirectoryState
+from hud.cli.__main__ import app
 from hud.cli.project import (
     Project,
     ProjectNotWritable,

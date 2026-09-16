@@ -7,11 +7,14 @@ so agents can connect to it.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import typer
 from rich.markup import escape
 
+from hud.environment import load_environment
+from hud.environment.server import serve
 from hud.utils.hud_console import HUDConsole
 
 hud_console = HUDConsole()
@@ -19,8 +22,6 @@ hud_console = HUDConsole()
 
 def _load_environment(module: str | None, factory_args: dict[str, str]) -> Any:
     """Resolve the serve target (``target[:name]``)."""
-    from hud.environment import load_environment
-
     target, _, name = (module or "env").partition(":")
     return load_environment(target, name=name or None, args=factory_args or None)
 
@@ -41,8 +42,6 @@ def _serve_environment(env: Any, host: str, port: int) -> None:
         highlight=False,
     )
     hud_console.hint("Press Ctrl+C to stop.")
-    from hud.environment.server import serve
-
     try:
         asyncio.run(serve(env, host, port))
     except KeyboardInterrupt:
@@ -78,8 +77,6 @@ def serve_command(
     MCP-server hot-reload / Docker dev mode is no longer supported.[/not dim]
     """
     if verbose:
-        import logging
-
         logging.basicConfig(level=logging.INFO)
 
     factory_args: dict[str, str] = {}

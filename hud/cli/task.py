@@ -14,22 +14,24 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+from contextlib import nullcontext
 from pathlib import Path  # noqa: TC003 - Typer resolves command annotations at runtime.
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import typer
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CliError,
 )
+from hud.clients import HudProtocolError, connect
+from hud.eval import Taskset
+from hud.eval.runtime import Runtime, SubprocessRuntime
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
-
-    from hud.eval.runtime import Runtime
 
 hud_console = HUDConsole()
 
@@ -46,8 +48,6 @@ task_app = CLI(
 
 def _collect(source: str) -> Any:
     """Collect a Taskset from a source (``.py``/dir or JSON/JSONL), like ``hud eval``."""
-    from hud.eval import Taskset
-
     try:
         return Taskset.from_file(source)
     except FileNotFoundError as exc:
@@ -60,8 +60,6 @@ def _collect(source: str) -> Any:
 
 
 def _attach_runtime(url: str) -> Runtime:
-    from hud.eval.runtime import Runtime
-
     parts = urlsplit(url if "://" in url else f"tcp://{url}")
     if parts.scheme != "tcp":
         raise CliError(error="usage", message="Task control channels require a tcp:// URL")
@@ -92,10 +90,6 @@ def _resolve(
 
     ``--args`` overrides authored args when supplied.
     """
-    from contextlib import nullcontext
-
-    from hud.eval.runtime import SubprocessRuntime
-
     attach = url
     if attach is None and source is None:
         attach = _local_env_url()
@@ -228,8 +222,6 @@ def start_command(
     task_id, task_args, placement = _resolve(task, source, url, args)
 
     async def _run() -> dict[str, Any]:
-        from hud.clients import connect
-
         # Start and disconnect without grading; an attached (persistent) env keeps
         # the session for a later `hud task grade` to resume.
         async with placement as runtime, connect(runtime) as client:
@@ -277,9 +269,6 @@ def grade_command(
     task_id, task_args, placement = _resolve(task, source, url, args)
 
     async def _run() -> dict[str, Any]:
-        from hud.clients import connect
-        from hud.clients.client import HudProtocolError
-
         async with placement as runtime, connect(runtime) as client:
             try:
                 return await client.grade({"answer": answer_text})  # resume a prior start

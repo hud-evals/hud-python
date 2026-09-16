@@ -14,7 +14,7 @@ from uuid import UUID
 import typer
 from typer.core import TyperGroup
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CONFIG_PATH,
     AuthScope,
@@ -29,6 +29,7 @@ from hud.cli.project import (
 )
 from hud.eval import Taskset
 from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
+from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
@@ -266,8 +267,6 @@ def _save_taskset_id(result: dict[str, object], console: HUDConsole, state: Dire
     changed = state.update(DirectoryLink(taskset_id=UUID(returned_id)))
     if changed:
         console.dim_info("Taskset ID saved to:", str(CONFIG_PATH))
-    from hud.settings import settings
-
     console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
 
 

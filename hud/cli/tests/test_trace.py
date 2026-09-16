@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from hud.cli import trace
-from hud.cli.app import app
+from hud.cli.__main__ import app
 from hud.settings import settings
 from hud.utils.platform import PlatformClient
 

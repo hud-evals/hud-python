@@ -9,7 +9,7 @@ from typing import Any
 
 import typer
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CONFIG_PATH,
     AuthScope,

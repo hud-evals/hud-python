@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -11,12 +12,15 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CliError,
 )
+from hud.settings import settings
+from hud.telemetry.span import normalize_trace_id
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.platform import PlatformClient, canonical_record_id
 
 hud_console = HUDConsole()
 
@@ -34,10 +38,6 @@ def _show_trace(
     *,
     local_dir: str | None,
 ) -> list[dict[str, Any]]:
-    from hud.settings import settings
-    from hud.telemetry.span import normalize_trace_id
-    from hud.utils.platform import canonical_record_id
-
     dir_to_use = local_dir or settings.span_dir
     otel_id = normalize_trace_id(trace_id)
 
@@ -45,8 +45,6 @@ def _show_trace(
     source = "platform"
 
     if dir_to_use:
-        from pathlib import Path
-
         path = Path(dir_to_use) / f"{otel_id}.jsonl"
         if path.exists():
             events = _load_local(path)
@@ -150,8 +148,6 @@ def _msg_text(msg: dict[str, Any]) -> str:
 
 
 def _load_remote(trace_id: str) -> list[dict[str, Any]]:
-    from hud.utils.platform import PlatformClient
-
     client = PlatformClient.from_settings()
     try:
         data = client.get(f"/trace/{trace_id}/events")

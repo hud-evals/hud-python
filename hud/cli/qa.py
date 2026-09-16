@@ -11,7 +11,7 @@ import typer
 from rich.panel import Panel
 from rich.text import Text
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CliError,
     Result,

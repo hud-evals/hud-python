@@ -24,7 +24,7 @@ import websockets
 from dotenv import dotenv_values
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-from hud.cli.app import (
+from hud.cli import (
     AuthScope,
     CliError,
     DirectoryLink,

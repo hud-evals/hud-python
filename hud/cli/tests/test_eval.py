@@ -12,7 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from hud.cli import eval as eval_mod
-from hud.cli.app import app
+from hud.cli.__main__ import app
 from hud.cli.eval import EvalConfig
 from hud.eval import (
     Grade,

@@ -49,7 +49,7 @@ classifiers = [
 "Documentation" = "https://docs.hud.ai"
 
 [project.scripts]
-hud = "hud.cli.app:main"
+hud = "hud.cli.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

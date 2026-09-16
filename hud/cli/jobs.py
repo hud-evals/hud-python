@@ -18,11 +18,12 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CliError,
     map_exception,
 )
+from hud.settings import settings
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
@@ -49,8 +50,6 @@ def _items(data: Any) -> list[Any]:
 
 
 def _render_jobs(items: list[Any]) -> None:
-    from hud.settings import settings
-
     if not items:
         hud_console.stdout.print("[yellow]No jobs found.[/yellow]")
         return
@@ -127,8 +126,6 @@ def _show_job_traces(
     quiet: bool,
     limit: int,
 ) -> list[Any]:
-    from hud.settings import settings
-
     client = PlatformClient.from_settings()
     job_id = canonical_record_id(job_id)
     try:

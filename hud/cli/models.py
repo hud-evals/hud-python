@@ -9,10 +9,13 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     CliError,
 )
+from hud.settings import settings
+from hud.utils.exceptions import HudRequestError
+from hud.utils.gateway import list_gateway_models
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -35,8 +38,6 @@ def _provider_name(row: dict[str, Any]) -> str:
 
 
 def _render_models(rows: list[dict[str, Any]]) -> None:
-    from hud.settings import settings
-
     if not rows:
         hud_console.stdout.print("[yellow]No models found[/yellow]")
         return
@@ -102,8 +103,6 @@ def list_models(
         hud models list --json
         hud models list --quiet[/not dim]
     """
-    from hud.utils.gateway import list_gateway_models
-
     rows = [
         model.model_dump()
         for model in sorted(list_gateway_models(), key=lambda m: (m.name or m.id or "").lower())
@@ -143,8 +142,6 @@ def fork_model(
         hud models fork claude-sonnet-4-6 --name my-sonnet --if-not-exists
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
-    from hud.utils.exceptions import HudRequestError
-
     if dry_run:
         payload = {
             "dry_run": True,
@@ -297,16 +294,12 @@ def show_head(
 
 def _model_url(model_id: str, *, tab: str | None = None) -> str:
     """Web app URL for a model (optionally a specific tab, e.g. ``checkpoints``)."""
-    from hud.settings import settings
-
     url = f"{settings.hud_web_url.rstrip('/')}/models/{model_id}"
     return f"{url}?tab={tab}" if tab else url
 
 
 def _resolve_model_id(model: str) -> str:
     """Map a model slug to its id (an id passes straight through)."""
-    from hud.utils.exceptions import HudRequestError
-
     try:
         return str(UUID(model))
     except ValueError:
@@ -324,8 +317,6 @@ def _existing_model(name: str) -> dict[str, Any]:
 
 
 def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
-    from hud.utils.exceptions import HudRequestError
-
     try:
         return PlatformClient.from_settings().get(f"/models/{model_id}/checkpoints")
     except HudRequestError as exc:
@@ -333,8 +324,6 @@ def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:
 
 
 def _set_head(model_id: str, checkpoint_id: str) -> None:
-    from hud.utils.exceptions import HudRequestError
-
     try:
         PlatformClient.from_settings().put(
             f"/models/{model_id}/head", json={"checkpoint_id": checkpoint_id}

@@ -15,7 +15,7 @@ import httpx
 import typer
 from packaging.version import Version
 
-from hud.cli.app import CliError
+from hud.cli import CliError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__

@@ -1,4 +1,4 @@
-"""Tests for ``hud.cli.app``."""
+"""Tests for ``hud.cli`` (infrastructure) and ``hud.cli.__main__`` (the assembled command)."""
 
 from __future__ import annotations
 
@@ -19,20 +19,16 @@ from dotenv import dotenv_values
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from hud.cli.app import (
+from hud.cli import (
     CLI,
     AuthScope,
     CliError,
     DirectoryLink,
     DirectoryState,
     ExitCode,
-    app,
-    main,
-    notify_if_outdated,
-    recorded_invocation,
     set_env_values,
-    version,
 )
+from hud.cli.__main__ import app, main, notify_if_outdated, recorded_invocation, version
 from hud.utils.exceptions import HudException, HudRequestError
 from hud.utils.platform import PlatformClient
 
@@ -164,7 +160,7 @@ def test_json_object_names_the_flag() -> None:
 def test_output_mode_does_not_leak_between_invocations() -> None:
     from typer.testing import CliRunner
 
-    from hud.cli.app import app
+    from hud.cli.__main__ import app
 
     runner = CliRunner()
     first = runner.invoke(app, ["version", "--json"])
@@ -196,7 +192,7 @@ def test_map_request_error_status_codes() -> None:
 def test_failure_text_writes_only_stderr() -> None:
     from typer.testing import CliRunner
 
-    from hud.cli.app import app
+    from hud.cli.__main__ import app
 
     result = CliRunner().invoke(app, ["set", "NOT_A_PAIR"])
     assert result.exit_code == ExitCode.USAGE
@@ -224,7 +220,7 @@ def test_read_text_stdin_and_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     target.write_text("hello", encoding="utf-8")
     assert CLI.read_text(str(target)) == "hello"
 
-    monkeypatch.setattr("hud.cli.app.sys.stdin.read", lambda: "from-stdin")
+    monkeypatch.setattr("hud.cli.sys.stdin.read", lambda: "from-stdin")
     assert CLI.read_text("-") == "from-stdin"
 
 
@@ -250,7 +246,7 @@ class TestVersionCheck:
         monkeypatch.delenv("CI", raising=False)
         monkeypatch.delenv("HUD_SKIP_VERSION_CHECK", raising=False)
         monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-        monkeypatch.setattr("hud.cli.app.__version__", "1.0.0")
+        monkeypatch.setattr("hud.cli.__main__.__version__", "1.0.0")
 
     def test_outdated_prints_banner_and_reuses_cache(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
@@ -504,7 +500,7 @@ class TestCLICommands:
         assert "Usage:" in result.output
 
     def test_version_command(self) -> None:
-        with patch("hud.cli.app.__version__", "1.2.3"):
+        with patch("hud.cli.__main__.__version__", "1.2.3"):
             result = runner.invoke(app, ["version"])
             assert result.exit_code == 0
             assert "1.2.3" in _plain(result.output)
@@ -530,8 +526,8 @@ class TestMainFunction:
         try:
             sys.argv = ["hud", "--help"]
             with (
-                patch("hud.cli.app.notify_if_outdated"),
-                patch("hud.cli.app.app") as mock_app,
+                patch("hud.cli.__main__.notify_if_outdated"),
+                patch("hud.cli.__main__.app") as mock_app,
             ):
                 main()
                 mock_app.assert_called()
