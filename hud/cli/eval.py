@@ -195,9 +195,8 @@ def eval_command(
 ) -> dict[str, Any]:
     """Run evaluation on datasets or individual tasks with agents.
 
-    A Python task source (tasks.py or a directory) runs locally, each rollout in a
-    fresh subprocess. JSON/JSONL rows carry no Environment; run them with --remote,
-    --runtime hud, or --runtime tcp://host:port.
+    A tasks file (tasks.py, a directory, or JSON/JSONL beside its env source) runs
+    locally, each rollout in a fresh subprocess; a platform taskset runs hosted.
 
     Examples:
         hud eval tasks.py claude-sonnet-4-6
@@ -205,8 +204,8 @@ def eval_command(
         hud eval "My Tasks" claude-sonnet-4-6 --full   # Platform taskset, run on the platform
         hud eval tasks.py claude --config max_tokens=32768
         hud eval tasks.py claude --gateway             # Route LLM calls through HUD Gateway
-        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # JSON rows on the HUD runtime
-        hud eval tasks.json claude-sonnet-4-6 --remote       # JSON rows, whole rollout remote
+        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use the HUD runtime tunnel
+        hud eval tasks.json claude-sonnet-4-6 --remote       # Execute the rollout remotely
         hud eval tasks.py claude --yes --json
         hud eval tasks.py claude --dry-run --json
     """
@@ -412,31 +411,24 @@ def eval_command(
             placement = Runtime(str(cfg.runtime))
         case Placement.LOCAL:
             # Isolate each row: its container, or a subprocess serving the bound env's
-            # source (``Taskset.run`` alone would serve a live env in-process).
-            unspawnable = [
-                slug
-                for slug, task in taskset.items()
-                if task._env is None
-                and not (
-                    task.runtime_config
-                    and (task.runtime_config.image or task.runtime_config.compose)
-                )
-            ]
-            if unspawnable:
-                shown = ", ".join(unspawnable[:5]) + ("..." if len(unspawnable) > 5 else "")
+            # source (``Taskset.run`` alone would serve a live env in-process). Data
+            # rows (JSON/JSONL) only name their env; its source lives beside the file.
+            if not Path(source).exists():
                 raise ValueError(
-                    f"{len(unspawnable)} task(s) have no bound Environment or container image "
-                    f"({shown}), so there is nothing to spawn locally. Run them against a "
-                    "served env with --runtime hud, --remote, or --runtime tcp://host:port."
+                    f"{source} is a platform taskset, so there is no env source to spawn "
+                    "locally. Run it with --remote, --runtime hud, or --runtime tcp://host:port."
                 )
             docker = DockerRuntime()
+            source_dir = Path(source).resolve()
+            beside = SubprocessRuntime(source_dir if source_dir.is_dir() else source_dir.parent)
 
             def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
                 config = task.runtime_config
                 if config and (config.image or config.compose):
                     return docker(task)
-                assert task._env is not None
-                return SubprocessRuntime(task._env)(task)
+                if task._env is not None:
+                    return SubprocessRuntime(task._env)(task)
+                return beside(task)
 
             placement = spawn
         case Placement.HUD:

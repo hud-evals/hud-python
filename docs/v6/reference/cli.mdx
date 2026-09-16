@@ -107,7 +107,7 @@ hud deploy --project <name-or-id>
 
 ### `hud eval`
 
-The primary local iteration loop: run an agent over a Python task source (`.py` or a directory), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env — no shared state between tasks. JSON/JSONL rows are portable data (no bound Environment); run those with `--remote`, `--runtime hud`, or a `tcp://` attach.
+The primary local iteration loop: run an agent over a task source (`.py`, a directory, or JSON/JSONL), grade the result, and print the reward. Each rollout gets a **fresh subprocess** for the env — no shared state between tasks. JSON/JSONL rows only name their env, so locally they are served from the env source in the same directory as the file (an exported `tasks.json` beside `env.py`); rows whose `runtime_config` names an image start a container instead. To run data rows against an env served elsewhere use `--remote`, `--runtime hud`, or a `tcp://` attach.
 
 ```bash
 # Split layout (hud init): templates in env.py, task rows in tasks.py

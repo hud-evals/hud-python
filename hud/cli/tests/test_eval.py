@@ -185,7 +185,8 @@ def test_local_against_a_platform_taskset_is_refused(eval_cli: _EvalCli, monkeyp
         classmethod(lambda cls, name: Taskset(name, [Task(env="demo", id="a")])),
     )
     payload = eval_cli.invoke("My Tasks", "openai", "--runtime", "local", "--yes", exit_code=2)
-    assert "have no bound Environment or container image (a)" in payload["message"]
+    assert "My Tasks is a platform taskset" in payload["message"]
+    assert "--remote" in payload["message"]
     assert eval_cli.taskset is None
 
 
@@ -335,10 +336,15 @@ def test_group_and_concurrency_reach_the_scheduler(eval_cli: _EvalCli) -> None:
 
 def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, monkeypatch) -> None:
     docker = MagicMock(name="docker")
-    subprocess = MagicMock(name="subprocess")
+    subprocesses: dict[object, MagicMock] = {}
+
+    def subprocess_runtime(source: object) -> MagicMock:
+        return subprocesses.setdefault(source, MagicMock(name=f"subprocess({source})"))
+
     monkeypatch.setattr(eval_mod, "DockerRuntime", lambda: docker)
-    monkeypatch.setattr(eval_mod, "SubprocessRuntime", lambda env: subprocess)
+    monkeypatch.setattr(eval_mod, "SubprocessRuntime", subprocess_runtime)
     image = Task(env="image", id="run", runtime_config=RuntimeConfig(image="example:latest"))
+    data_row = Task(env="demo", id="plain")
     (tmp_path / "mixed.py").write_text(
         _TASKS_PY + "from hud.eval import RuntimeConfig, Task\n"
         "tasks.append(Task(env='image', id='run', "
@@ -353,21 +359,25 @@ def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, mon
     assert eval_cli.taskset is not None
     bound = next(iter(eval_cli.taskset))
 
-    assert placement(bound) is subprocess.return_value
+    assert placement(bound) is subprocesses[bound._env].return_value
     assert placement(image) is docker.return_value
+    # A row without a bound env is served from the tasks file's directory.
+    assert placement(data_row) is subprocesses[tmp_path.resolve()].return_value
 
 
-def test_rows_with_nothing_to_spawn_are_refused_before_running(
-    eval_cli: _EvalCli, tmp_path: Path
+def test_json_rows_are_served_from_their_directory(
+    eval_cli: _EvalCli, tmp_path: Path, monkeypatch
 ) -> None:
+    sources: list[object] = []
+    monkeypatch.setattr(
+        eval_mod, "SubprocessRuntime", lambda source: sources.append(source) or MagicMock()
+    )
     (tmp_path / "rows.json").write_text(
         '[{"env": "demo", "id": "a"}, {"env": "demo", "id": "b"}]', encoding="utf-8"
     )
-    payload = eval_cli.invoke("rows.json", "openai", "--all", "--yes", exit_code=2)
-    assert payload["error"] == "usage"
-    assert "2 task(s) have no bound Environment or container image (a, b)" in payload["message"]
-    assert "--runtime hud" in payload["message"]
-    assert eval_cli.taskset is None  # refused before Taskset.run
+    eval_cli.invoke("rows.json", "openai", "--all", "--yes")
+    assert eval_cli.taskset is not None and len(eval_cli.taskset) == 2
+    assert sources == [tmp_path.resolve()]
 
 
 def test_explicit_placements(eval_cli: _EvalCli) -> None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import nullcontext
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -75,16 +76,12 @@ def _resolve(
     selected = matches[0]
     if url is not None:
         placement: AbstractAsyncContextManager[Runtime] = nullcontext(Runtime(url))
-    elif selected._env is None:
-        raise CliError(
-            error="usage",
-            message="These rows have no bound Environment.",
-            input={"source": source or "."},
-            suggestion="Pass --source to a tasks.py / env.py that binds an Environment, "
-            "or --url to attach to a served env.",
-        )
-    else:
+    elif selected._env is not None:
         placement = SubprocessRuntime(selected._env)(selected)
+    else:
+        # A data row (JSON/JSONL) names its env; the env source lives beside the file.
+        path = Path(source or ".").resolve()
+        placement = SubprocessRuntime(path if path.is_dir() else path.parent)(selected)
     return selected.id, selected.args if args is None else args, placement
 
 

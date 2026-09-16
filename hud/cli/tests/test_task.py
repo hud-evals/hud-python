@@ -115,14 +115,25 @@ async def test_grade_only_starts_when_no_task_is_in_progress(mode):
         )
 
 
-def test_portable_json_source_cannot_spawn_locally(tmp_path):
+async def test_json_source_spawns_the_env_beside_it(tmp_path, monkeypatch):
+    from hud.clients import connect
+
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    (tmp_path / "env.py").write_text(
+        'from hud import Environment\nenv = Environment("example")\n'
+        '@env.template(id="solve")\nasync def solve():\n'
+        '    answer = yield "question"\n    yield 1.0 if answer == "answer" else 0.0\n'
+    )
     source = Taskset(
         "authored",
         [Task(env="example", id="solve", slug="solve")],
     ).to_file(tmp_path / "tasks.json")
-    result = CliRunner().invoke(app, ["task", "start", "solve", "--source", str(source), "--json"])
-    assert result.exit_code == 2
-    assert "bound Environment" in json.loads(result.stdout)["message"]
+
+    task_id, args, placement = task_module._resolve("solve", str(source), None, None)
+    async with placement as runtime, connect(runtime) as client:
+        await client.start_task(task_id, args)
+        result = await client.grade({"answer": "answer"})
+    assert result["score"] == 1.0
 
 
 def test_task_id_matching_multiple_rows_requires_unique_slug(tmp_path):
