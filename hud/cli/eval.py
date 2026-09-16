@@ -136,7 +136,7 @@ class EvalConfig(BaseModel):
 
 
 def eval_command(
-    source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
+    source: str | None = typer.Argument(None, help="Tasks file (.py, .json) or platform taskset"),
     agent: str | None = typer.Argument(
         None,
         help="Model name (e.g. claude-sonnet-4-6) or agent type (claude, openai, gemini, openai_compatible)",  # noqa: E501
@@ -195,16 +195,20 @@ def eval_command(
 ) -> dict[str, Any]:
     """Run evaluation on datasets or individual tasks with agents.
 
+    A Python task source (tasks.py or a directory) runs locally, each rollout in a
+    fresh subprocess. JSON/JSONL rows carry no Environment; run them with --remote,
+    --runtime hud, or --runtime tcp://host:port.
+
     Examples:
-        hud eval tasks.json claude-sonnet-4-6
-        hud eval tasks.json claude
+        hud eval tasks.py claude-sonnet-4-6
+        hud eval tasks.py claude
         hud eval "My Tasks" claude-sonnet-4-6 --full   # Platform taskset, run on the platform
-        hud eval tasks.json claude --config max_tokens=32768
-        hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
-        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use HUD runtime tunnel
-        hud eval tasks.json claude-sonnet-4-6 --remote       # Execute rollout remotely
-        hud eval tasks.json claude --yes --json
-        hud eval tasks.json claude --dry-run --json
+        hud eval tasks.py claude --config max_tokens=32768
+        hud eval tasks.py claude --gateway             # Route LLM calls through HUD Gateway
+        hud eval tasks.json claude-sonnet-4-6 --runtime hud  # JSON rows on the HUD runtime
+        hud eval tasks.json claude-sonnet-4-6 --remote       # JSON rows, whole rollout remote
+        hud eval tasks.py claude --yes --json
+        hud eval tasks.py claude --dry-run --json
     """
     hud_console.info("Initializing evaluation...")
     cfg = EvalConfig.load()

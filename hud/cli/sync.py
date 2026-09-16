@@ -123,7 +123,7 @@ def sync_tasks_command(
         hud sync tasks my-taskset              # scan cwd, sync to 'my-taskset'
         hud sync tasks my-taskset tasks.py     # from specific file
         hud sync tasks my-taskset tasks/       # from directory
-        hud sync tasks                         # use stored taskset ID from ~/.hud/config.json
+        hud sync tasks                         # use stored taskset ID from .hud/config.json
         hud sync tasks my-taskset --dry-run    # preview without uploading
         hud sync tasks my-taskset --yes        # skip confirmation (CI)
         hud sync tasks my-taskset --export tasks.csv   # export to CSV
