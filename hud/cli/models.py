@@ -47,17 +47,13 @@ def list_models(
         hud models list --json
         hud models list --quiet[/not dim]
     """
-    rows = [
-        model.model_dump()
-        for model in sorted(list_gateway_models(), key=lambda m: (m.name or m.id or "").lower())
-    ]
+    models = sorted(list_gateway_models(), key=lambda m: (m.name or m.id).lower())
+    rows = [model.model_dump() for model in models]
     if quiet:
-        for model in rows:
-            ident = model.get("model_name") or model.get("id")
-            if ident:
-                typer.echo(ident)
+        for model in models:
+            typer.echo(model.model_name or model.id)
         return rows
-    if not rows:
+    if not models:
         hud_console.stdout.print("[yellow]No models found[/yellow]")
         return rows
 
@@ -71,14 +67,14 @@ def list_models(
     table.add_column("Provider", style="yellow")
     table.add_column("Agent", style="magenta")
     table.add_column("Trainable", style="green", justify="center")
-    for model in rows:
+    for model in models:
         table.add_row(
-            model.get("name") or model.get("id") or "-",
-            model.get("model_name") or model.get("id") or "-",
-            model.get("id") or "-",
-            model["provider"].get("name") or "-",
-            model.get("sdk_agent_type") or "-",
-            "✓" if model.get("is_trainable") else "",
+            model.name or model.id,
+            model.model_name or model.id,
+            model.id,
+            model.provider.name or "-",
+            model.sdk_agent_type or "-",
+            "✓" if model.is_trainable else "",
         )
     hud_console.stdout.print(table)
     hud_console.stdout.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
@@ -129,10 +125,12 @@ def fork_model(
         )
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
-            hud_console.stdout.print(f"[yellow]Model already exists[/yellow] [cyan]{name}[/cyan]")
-            existing_id = resolve_gateway_model(name).id
-            hud_console.stdout.print(f"[dim]id: {existing_id}[/dim]")
-            return {"id": existing_id, "model_name": name, "existed": True}
+            existing = resolve_gateway_model(name)
+            hud_console.stdout.print(
+                f"[yellow]Model already exists[/yellow] [cyan]{existing.model_name or name}[/cyan]"
+            )
+            hud_console.stdout.print(f"[dim]id: {existing.id}[/dim]")
+            return {**existing.model_dump(), "existed": True}
         raise CliError.from_http(
             exc,
             resource="Model",

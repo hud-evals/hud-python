@@ -1,8 +1,6 @@
-"""HUD inference gateway: provider clients and the model catalog.
+"""HUD inference gateway: provider clients, and the model catalog they resolve against.
 
-The sibling of :mod:`hud.utils.platform` — that module talks to the platform
-API, this one talks to the inference gateway. Agent construction on top of the
-gateway lives in :func:`hud.agents.create_agent`.
+Agent construction on top of the gateway lives in :func:`hud.agents.create_agent`.
 """
 
 from __future__ import annotations
@@ -137,14 +135,7 @@ def build_model_client(provider: str, *, model: str | None = None) -> GatewayCli
 
 
 def build_gateway_client(provider: str) -> GatewayClient:
-    """Build a client configured for HUD gateway routing.
-
-    Args:
-        provider: Provider name ("anthropic", "openai", "gemini", etc.)
-
-    Returns:
-        Configured async client for the provider.
-    """
+    """A *provider* SDK client pointed at the HUD gateway, with trace headers attached."""
     # Provider SDK clients bypass hud.utils.requests, so guard here.
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required for HUD gateway clients")
