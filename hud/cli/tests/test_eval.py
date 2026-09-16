@@ -354,7 +354,7 @@ def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, mon
     assert placement(image) is docker.return_value
 
 
-def test_portable_rows_are_refused_before_running(eval_cli: _EvalCli, tmp_path: Path) -> None:
+def test_rows_with_nothing_to_spawn_are_refused_before_running(eval_cli: _EvalCli, tmp_path: Path) -> None:
     (tmp_path / "rows.json").write_text(
         '[{"env": "demo", "id": "a"}, {"env": "demo", "id": "b"}]', encoding="utf-8"
     )

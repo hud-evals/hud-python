@@ -418,17 +418,17 @@ def eval_command(
         case Placement.LOCAL:
             # Isolate each row: its container, or a subprocess serving the bound env's
             # source (``Taskset.run`` alone would serve a live env in-process).
-            portable = [
+            unspawnable = [
                 slug
                 for slug, task in taskset.items()
                 if task._env is None and not _is_container_row(task)
             ]
-            if portable:
-                shown = ", ".join(portable[:5]) + ("..." if len(portable) > 5 else "")
+            if unspawnable:
+                shown = ", ".join(unspawnable[:5]) + ("..." if len(unspawnable) > 5 else "")
                 raise ValueError(
-                    f"{len(portable)} task(s) have no bound Environment or container image "
-                    f"({shown}). Portable rows need --runtime hud, --remote, or "
-                    "--runtime tcp://host:port."
+                    f"{len(unspawnable)} task(s) have no bound Environment or container image "
+                    f"({shown}), so there is nothing to spawn locally. Run them against a "
+                    "served env with --runtime hud, --remote, or --runtime tcp://host:port."
                 )
             docker = DockerRuntime()
 
