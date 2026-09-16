@@ -267,14 +267,6 @@ class EvalConfig(BaseModel):
 
 
 def _build_agent(cfg: EvalConfig) -> Agent:
-    """Construct the agent from the eval config.
-
-    The CLI prefers a provider's own key over the HUD gateway unless
-    ``--gateway`` forces routing. ``openai_compatible`` has no provider of
-    its own: its agent uses the gateway unless ``api_key``/``base_url`` are
-    configured. Hosted rollouts leave the client unset so the platform
-    rebuilds it remotely.
-    """
     assert cfg.agent_type is not None
     config = cfg.agent_type.config_cls(**cfg.agent_kwargs())
     if (
@@ -297,12 +289,12 @@ def _local_placement() -> Provider:
         config = task.runtime_config
         if config is not None and (config.image is not None or config.compose is not None):
             return docker(task)
-        if task._env is None:
-            raise ValueError(
-                "no placement: these rows have no bound Environment. Pass a Python "
-                "tasks/env module, or use --remote / --runtime hud / a tcp:// url."
-            )
-        return SubprocessRuntime(task._env)(task)
+        if task._env is not None:
+            return SubprocessRuntime(task._env)(task)
+        raise ValueError(
+            "no placement: these rows have no bound Environment. Pass a Python "
+            "tasks/env module, or use --remote / --runtime hud / a tcp:// url."
+        )
 
     return spawn
 

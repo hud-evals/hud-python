@@ -141,17 +141,6 @@ class LocalRuntime:
                 self._live_lock.release()
 
 
-def _template_source(env: Environment) -> Path:
-    """The one ``.py`` file whose ``@env.template`` declarations bind *env*."""
-    files = {Path(inspect.getfile(factory.func)).resolve() for factory in env.tasks.values()}
-    if len(files) != 1:
-        raise ValueError(
-            f"SubprocessRuntime: Environment {env.name!r} must declare its @env.template "
-            "tasks in exactly one source file to be served from source"
-        )
-    return files.pop()
-
-
 class SubprocessRuntime:
     """The child-process provider: serve the placed row's env from *source*.
 
@@ -184,7 +173,13 @@ class SubprocessRuntime:
         if isinstance(source, _Environment):
             if env is not None:
                 raise TypeError("SubprocessRuntime: env= applies only to source paths")
-            self.source = _template_source(source)
+            files = {Path(inspect.getfile(t.func)).resolve() for t in source.tasks.values()}
+            if len(files) != 1:
+                raise ValueError(
+                    f"SubprocessRuntime: Environment {source.name!r} must declare its "
+                    "@env.template tasks in exactly one source file to be served from source"
+                )
+            self.source = files.pop()
             self.env: str | None = source.name
         else:
             self.source = Path(source).resolve()

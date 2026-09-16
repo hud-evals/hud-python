@@ -88,13 +88,7 @@ def _is_bedrock_arn(model: str | None) -> bool:
 def build_model_client(
     provider: str, *, model: str | None = None, prefer_provider: bool = False
 ) -> GatewayClient:
-    """Resolve configured credentials; explicit client overrides belong to the caller.
-
-    A HUD key routes through the gateway unless ``prefer_provider`` and the
-    provider's own key is set. An Anthropic *model* that is a Bedrock
-    inference-profile ARN is only reachable through Bedrock, so it always
-    gets a Bedrock client from the AWS settings.
-    """
+    """Resolve configured credentials; explicit client overrides belong to the caller."""
     if provider == "anthropic" and _is_bedrock_arn(model):
         if not (
             settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_region
