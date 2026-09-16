@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 import hud.cli.sync as sync_module
 from hud.cli import AuthScope, CliError, DirectoryState
 from hud.cli.__main__ import app
-from hud.cli.sync import RegistryEnvironment, _write_csv, get_registry_environment
+from hud.cli.sync import RegistryEnvironment
 from hud.eval import Task, Taskset
 from hud.utils.exceptions import HudRequestError
 from hud.utils.platform import PlatformClient
@@ -21,132 +21,102 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class _ReadOnlyPlatform:
-    api_url = "https://api.example"
-
-    def get(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        if url == "/auth/me":
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            }
-        assert url.startswith("/projects/")
-        return {
-            "id": "33333333-3333-4333-8333-333333333333",
-            "name": "locked-down",
-            "capabilities": {"create": False},
-        }
+_TASKSET_ID = "44444444-4444-4444-8444-444444444444"
+_READONLY_PROJECT = "33333333-3333-4333-8333-333333333333"
+_WRITABLE_PROJECT = "22222222-2222-4222-8222-222222222222"
+_ROW = {"env": "example", "id": "solve", "slug": "one"}
 
 
-class _WritablePlatform:
-    api_url = "https://api.example"
-
-    def get(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        if url == "/auth/me":
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            }
-        assert url.startswith("/projects/")
-        return {
-            "id": "22222222-2222-4222-8222-222222222222",
-            "name": "browser-evals",
-            "capabilities": {"create": True},
-        }
-
-
-def _run_sync(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    remote: Taskset,
-    *,
-    dry_run: bool,
+def _stub_platform(
+    monkeypatch: pytest.MonkeyPatch, *, remote_rows: list[dict[str, Any]], uploads: list[Any]
 ) -> None:
-    task = Task(env="example", id="solve", slug="one")
-    local = Taskset("demo", [task])
+    """A platform holding taskset ``demo`` with ``remote_rows`` and two projects."""
 
+    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        if url.endswith("/auth/me"):
+            return {
+                "user_id": "11111111-1111-4111-8111-111111111111",
+                "team_id": _WRITABLE_PROJECT,
+            }
+        if url.endswith(f"/projects/{_READONLY_PROJECT}"):
+            return {"id": _READONLY_PROJECT, "name": "locked-down", "capabilities": {}}
+        if url.endswith(f"/projects/{_WRITABLE_PROJECT}"):
+            return {
+                "id": _WRITABLE_PROJECT,
+                "name": "browser-evals",
+                "capabilities": {"create": True},
+            }
+        if url.endswith("/tasksets/by-name/demo"):
+            return {"taskset_id": _TASKSET_ID, "name": "demo"}
+        if url.endswith(f"/tasksets/{_TASKSET_ID}"):
+            return {"id": _TASKSET_ID, "name": "demo"}
+        if url.endswith(f"/tasksets/{_TASKSET_ID}/export"):
+            return {
+                "name": "demo",
+                "tasks": [
+                    {"env": row["env"], "scenario": row["id"], "name": row["slug"]}
+                    for row in remote_rows
+                ],
+            }
+        if url.endswith("/tasks/upload"):
+            uploads.append(kwargs["json"])
+            return {"taskset_id": _TASKSET_ID, "tasks_created": 1}
+        raise AssertionError((method, url))
+
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    monkeypatch.setattr("hud.settings.settings.default_project", None)
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_read_only_project_allows_no_op_and_preview(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dry_run: bool
+) -> None:
+    """A read-only project is only refused when something would actually upload."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        sync_module.PlatformClient,
-        "from_settings",
-        lambda: _ReadOnlyPlatform(),
-    )
-    monkeypatch.setattr(sync_module, "_load_local_taskset", lambda *args, **kwargs: local)
-    monkeypatch.setattr(sync_module, "_fetch_remote_taskset", lambda *args, **kwargs: remote)
-    monkeypatch.setattr(
-        sync_module,
-        "upload_taskset",
-        lambda *args, **kwargs: pytest.fail("read-only no-op must not upload"),
-    )
+    (tmp_path / "tasks.json").write_text(json.dumps([_ROW]))
+    uploads: list[Any] = []
+    # Up to date: identical remote row; dry run: empty remote, so a create is planned.
+    _stub_platform(monkeypatch, remote_rows=[] if dry_run else [_ROW], uploads=uploads)
 
-    sync_module.sync_tasks_command(
-        taskset="demo",
-        source=".",
-        taskset_id=None,
-        project="33333333-3333-4333-8333-333333333333",
-        task_filter=None,
-        exclude=None,
-        yes=True,
-        dry_run=dry_run,
-        force=False,
-        export=None,
-    )
+    args = [
+        "sync",
+        "tasks",
+        "demo",
+        "tasks.json",
+        "--project",
+        _READONLY_PROJECT,
+        "--yes",
+        "--json",
+    ]
+    result = CliRunner().invoke(app, [*args, "--dry-run"] if dry_run else args)
 
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["dry_run"] is dry_run
+    assert uploads == []
 
-def test_read_only_project_allows_up_to_date_sync(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    task = Task(env="example", id="solve", slug="one")
-    _run_sync(monkeypatch, tmp_path, Taskset("demo", [task]), dry_run=False)
-
-
-def test_read_only_project_allows_dry_run(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _run_sync(monkeypatch, tmp_path, Taskset("demo", []), dry_run=True)
+    if dry_run:
+        refused = CliRunner().invoke(app, args)
+        assert refused.exit_code == 1, refused.output
+        assert json.loads(refused.stdout)["error"] == "permission_denied"
+        assert uploads == []
 
 
 def test_project_override_does_not_pin_directory(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    task = Task(env="example", id="solve", slug="one")
-    local = Taskset("demo", [task])
-
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        sync_module.PlatformClient,
-        "from_settings",
-        lambda: _WritablePlatform(),
-    )
-    monkeypatch.setattr(sync_module, "_load_local_taskset", lambda *args, **kwargs: local)
-    monkeypatch.setattr(
-        sync_module,
-        "_fetch_remote_taskset",
-        lambda *args, **kwargs: Taskset("demo", []),
+    (tmp_path / "tasks.json").write_text(json.dumps([_ROW]))
+    uploads: list[Any] = []
+    _stub_platform(monkeypatch, remote_rows=[], uploads=uploads)
+
+    result = CliRunner().invoke(
+        app,
+        ["sync", "tasks", "demo", "tasks.json", "--project", _WRITABLE_PROJECT, "--yes", "--json"],
     )
 
-    def upload(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        assert kwargs["project_id"] == "22222222-2222-4222-8222-222222222222"
-        return {"taskset_id": "taskset-1", "tasks_created": 1}
-
-    monkeypatch.setattr(sync_module, "upload_taskset", upload)
-
-    sync_module.sync_tasks_command(
-        taskset="demo",
-        source=".",
-        taskset_id=None,
-        project="22222222-2222-4222-8222-222222222222",
-        task_filter=None,
-        exclude=None,
-        yes=True,
-        dry_run=False,
-        force=False,
-        export=None,
-    )
-
+    assert result.exit_code == 0, result.output
+    assert uploads[0]["project_id"] == _WRITABLE_PROJECT
     assert not (tmp_path / ".hud" / "config.json").exists()
 
 
@@ -276,17 +246,29 @@ def test_rejected_upload_exits_with_failure(
     assert not (tmp_path / ".hud" / "config.json").exists()
 
 
-def test_write_csv_flattens_args(tmp_path: Path) -> None:
-    rows = [
-        Task(env="e", id="solve", args={"n": 1}, slug="one"),
-        Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two"),
-    ]
-    rows = [row.model_dump() for row in rows]
+def test_export_csv_flattens_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
+    remote = Taskset(
+        "demo",
+        [
+            Task(env="e", id="solve", args={"n": 1}, slug="one"),
+            Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two"),
+        ],
+    )
+    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda cls, name: remote))
+    monkeypatch.setattr(
+        "hud.utils.platform.make_request_sync",
+        lambda method, url, **kw: {
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "team_id": _WRITABLE_PROJECT,
+        },
+    )
 
-    out = tmp_path / "tasks.csv"
-    _write_csv(out, rows)
+    result = CliRunner().invoke(app, ["sync", "tasks", "demo", "--export", "tasks.csv"])
 
-    csv_text = out.read_text()
+    assert result.exit_code == 0, result.output
+    csv_text = (tmp_path / "tasks.csv").read_text()
     assert "slug,id,env,arg:n" in csv_text
     assert "one,solve,e,1" in csv_text
     assert 'two,solve,e,"{""x"": 2}"' in csv_text
@@ -300,7 +282,7 @@ def test_sync_env_noninteractive_requires_name(
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     with pytest.raises(CliError) as exc_info:
-        sync_module.sync_env_command(name=None, directory=str(tmp_path), yes=False)
+        sync_module.sync_env_command(name=None, directory=str(tmp_path), yes=False, dry_run=False)
 
     assert exc_info.value.exit_code == 2
 
@@ -368,10 +350,7 @@ def test_from_record_maps_registry_detail_response() -> None:
         {"id": "abc123456", "name": "my-env", "latest_build": {"version": 2}}
     )
 
-    assert env.id == "abc123456"
-    assert env.name == "my-env"
-    assert env.short_id == "abc12345"
-    assert env.version_label == " v2"
+    assert env == RegistryEnvironment(id="abc123456", name="my-env", version="2")
 
 
 def test_resolve_verifies_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -380,7 +359,7 @@ def test_resolve_verifies_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
         return {"id": "12345678-1234-5678-1234-567812345678", "name": "verified"}
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    env = get_registry_environment(
+    env = RegistryEnvironment.resolve(
         PlatformClient("https://api.example", "key"),
         "12345678-1234-5678-1234-567812345678",
     )
@@ -398,7 +377,7 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
     monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
 
     with pytest.raises(CliError, match="inaccessible or deleted") as error:
-        get_registry_environment(
+        RegistryEnvironment.resolve(
             PlatformClient("https://api.example", "key"), "12345678-1234-5678-1234-567812345678"
         )
     assert error.value.exit_code == 1
@@ -410,4 +389,4 @@ def test_name_resolution_requires_selection(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr("hud.utils.platform.make_request_sync", unexpected)
     with pytest.raises(ValueError, match="environment ID"):
-        get_registry_environment(PlatformClient("https://api.example", "key"), "browser")
+        RegistryEnvironment.resolve(PlatformClient("https://api.example", "key"), "browser")

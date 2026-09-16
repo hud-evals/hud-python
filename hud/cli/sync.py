@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
-import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import typer
@@ -30,80 +29,36 @@ from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
-LOGGER = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True)
 class RegistryEnvironment:
     id: str
     name: str
     version: str = ""
-    project_id: str | None = None
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> RegistryEnvironment:
-        env_id = data.get("id")
-        if not isinstance(env_id, str) or not env_id:
-            raise ValueError("registry environment record needs an id")
-        latest_build = data.get("latest_build")
-        version = latest_build.get("version") if isinstance(latest_build, dict) else None
+        version = (data.get("latest_build") or {}).get("version")
         return cls(
-            id=env_id,
-            name=str(data.get("name") or "unnamed"),
-            version=str(version) if version is not None else "",
-            project_id=str(data["project_id"]) if data.get("project_id") else None,
+            id=data["id"], name=data["name"], version="" if version is None else str(version)
         )
 
-    @property
-    def short_id(self) -> str:
-        return self.id[:8]
-
-    @property
-    def version_label(self) -> str:
-        return f" v{self.version}" if self.version else ""
-
-
-def get_registry_environment(
-    platform: PlatformClient,
-    registry_id: str,
-) -> RegistryEnvironment:
-    try:
-        registry_id = str(UUID(registry_id))
-    except ValueError as exc:
-        raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
-    try:
-        data = platform.get(f"/registry/{registry_id}")
-    except HudRequestError as e:
-        if e.status_code == 404:
+    @classmethod
+    def resolve(cls, platform: PlatformClient, registry_id: str) -> RegistryEnvironment:
+        try:
+            registry_id = str(UUID(registry_id))
+        except ValueError as exc:
+            raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
+        try:
+            return cls.from_record(platform.get(f"/registry/{registry_id}"))
+        except HudRequestError as exc:
+            if exc.status_code != 404:
+                raise
             raise CliError(
                 "not_found",
                 f"Environment {registry_id} is inaccessible or deleted.",
                 suggestion="Run 'hud sync env <id>' to link an accessible environment.",
-            ) from e
-        raise
-    return RegistryEnvironment.from_record(data)
-
-
-def list_registry_environments(
-    platform: PlatformClient,
-    *,
-    limit: int = 500,
-    sort_by: str | None = "date",
-) -> list[RegistryEnvironment]:
-    environments: list[RegistryEnvironment] = []
-    offset = 0
-    while True:
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-        if sort_by:
-            params["sort_by"] = sort_by
-        data = platform.get("/registry", params=params)
-        page = [RegistryEnvironment.from_record(item) for item in data["items"]]
-        environments.extend(page)
-        offset += len(page)
-        if offset >= data["total"]:
-            return environments
-        if not page:
-            raise ValueError("Registry API returned an empty page before the reported total")
+            ) from exc
 
 
 sync_app = CLI(
@@ -112,158 +67,6 @@ sync_app = CLI(
     add_completion=False,
     rich_markup_mode="rich",
 )
-
-
-def _taskset_target(
-    taskset: str | None,
-    taskset_id: str | None,
-    console: HUDConsole,
-    link: DirectoryLink,
-) -> str:
-    stored_taskset_id = str(link.taskset_id) if link.taskset_id else None
-    target_ref = taskset_id or taskset or stored_taskset_id
-    if not target_ref:
-        raise ValueError(
-            "No taskset specified. Pass a taskset name/ID or run "
-            "'hud sync tasks <name>' first to store it."
-        )
-    if target_ref == stored_taskset_id and not taskset and not taskset_id:
-        console.info(f"Using taskset ID from {CONFIG_PATH}")
-    return target_ref
-
-
-def _write_csv(path: Path, entries: list[dict[str, Any]]) -> None:
-    """Spreadsheet view of task rows: one ``arg:`` column per key."""
-    arg_keys = sorted({key for entry in entries for key in (entry.get("args") or {})})
-    fieldnames = [
-        "slug",
-        "id",
-        "env",
-        *[f"arg:{key}" for key in arg_keys],
-    ]
-
-    def cell(value: Any) -> Any:
-        return json.dumps(value, default=str) if isinstance(value, (dict, list)) else value
-
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for entry in entries:
-            args = entry.get("args") or {}
-            writer.writerow(
-                {
-                    "slug": entry.get("slug") or "",
-                    "id": entry.get("id") or "",
-                    "env": entry.get("env") or "",
-                    **{f"arg:{key}": cell(args.get(key)) for key in arg_keys},
-                }
-            )
-
-
-def _export_taskset(
-    target_ref: str,
-    output_path: str,
-    console: HUDConsole,
-) -> None:
-    console.progress_message("Fetching remote taskset...")
-    remote_taskset = Taskset.from_api(target_ref)
-    if not remote_taskset:
-        console.warning("No tasks found in taskset")
-        return
-    out = Path(output_path)
-    if out.suffix.lower() == ".csv":
-        out.parent.mkdir(parents=True, exist_ok=True)
-        _write_csv(
-            out,
-            [task.model_dump(mode="json", exclude_none=True) for task in remote_taskset],
-        )
-    else:
-        out = remote_taskset.to_file(out)
-    console.success(f"Exported {len(remote_taskset)} tasks to {out}")
-
-
-def _load_local_taskset(
-    source: str,
-    *,
-    task_filter: str | None,
-    exclude: list[str] | None,
-    console: HUDConsole,
-) -> Taskset:
-    console.progress_message(f"Collecting tasks from {source}...")
-    taskset = Taskset.from_file(source)
-    if not taskset:
-        raise ValueError(f"No Task objects found in: {source}")
-    console.success(f"Found {len(taskset)} task(s)")
-
-    if task_filter:
-        taskset = taskset.filter([task_filter])
-        if not taskset:
-            raise ValueError(f"No task found with slug '{task_filter}'")
-    if exclude:
-        taskset = taskset.exclude(exclude)
-        if not taskset:
-            raise ValueError("No tasks left after exclusions")
-    return taskset
-
-
-def _warn_on_linked_environment_mismatch(
-    taskset: Taskset,
-    platform: PlatformClient,
-    console: HUDConsole,
-    link: DirectoryLink,
-) -> None:
-    if link.registry_id is None:
-        return
-    platform_env_name = get_registry_environment(platform, str(link.registry_id)).name
-
-    mismatched_names = taskset.environment_names() - {platform_env_name}
-    if mismatched_names:
-        console.warning(
-            "Local task env names do not match the linked platform environment "
-            f"'{platform_env_name}': {', '.join(sorted(mismatched_names))}"
-        )
-
-
-def _fetch_remote_taskset(
-    platform: PlatformClient,
-    target_ref: str,
-    *,
-    force: bool,
-    allow_create: bool,
-    console: HUDConsole,
-) -> Taskset:
-    """The remote taskset to diff against.
-
-    ``--force`` diffs against an empty taskset so every task uploads. A missing
-    remote diffs as all-create when *allow_create* is set, and is an error
-    otherwise.
-    """
-    taskset_uuid, display = resolve_taskset_id(platform, target_ref)
-    if taskset_uuid:
-        record = platform.get(f"/tasksets/{taskset_uuid}")
-        if force:
-            return Taskset(str(record["name"]), [], taskset_id=taskset_uuid)
-        return Taskset.from_api(taskset_uuid)
-    if allow_create:
-        console.info(f"Taskset '{display}' not found; it will be created")
-        return Taskset(display, [])
-
-    raise CliError(
-        error="not_found",
-        message=f"Taskset not found: {target_ref}",
-        input={"taskset": target_ref},
-        suggestion="Pass a taskset name to create it, or use an existing id.",
-    )
-
-
-def _save_taskset_id(result: dict[str, object], console: HUDConsole, state: DirectoryState) -> None:
-    returned_id = result.get("taskset_id")
-    if not isinstance(returned_id, str) or not returned_id:
-        return
-    changed = state.update(DirectoryLink(taskset_id=UUID(returned_id)))
-    if changed:
-        console.dim_info("Taskset ID saved to:", str(CONFIG_PATH))
-    console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
 
 
 @sync_app.command("tasks")
@@ -341,41 +144,104 @@ def sync_tasks_command(
     hud_console.header("Sync Tasks", icon="")
 
     platform = PlatformClient.from_settings()
-
     state = DirectoryState(AuthScope.resolve(platform))
     link = state.load()
-    target_ref = _taskset_target(taskset, taskset_id, hud_console, link)
+
+    stored_taskset_id = str(link.taskset_id) if link.taskset_id else None
+    target_ref = taskset_id or taskset or stored_taskset_id
+    if not target_ref:
+        raise ValueError(
+            "No taskset specified. Pass a taskset name/ID or run "
+            "'hud sync tasks <name>' first to store it."
+        )
+    if not taskset and not taskset_id:
+        hud_console.info(f"Using taskset ID from {CONFIG_PATH}")
 
     if export:
-        if link_target is True:
+        if link_target:
             raise ValueError("--link cannot be combined with --export")
-        _export_taskset(target_ref, export, hud_console)
-        return
+        hud_console.progress_message("Fetching remote taskset...")
+        remote = Taskset.from_api(target_ref)
+        if not remote:
+            hud_console.warning("No tasks found in taskset")
+            return None
+        out = Path(export)
+        if out.suffix.lower() == ".csv":
+            # Spreadsheet view: one ``arg:`` column per key; nested values as JSON.
+            rows = [task.model_dump(mode="json", exclude_none=True) for task in remote]
+            arg_keys = sorted({key for row in rows for key in (row.get("args") or {})})
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with out.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle, fieldnames=["slug", "id", "env", *(f"arg:{k}" for k in arg_keys)]
+                )
+                writer.writeheader()
+                for row in rows:
+                    args = row.get("args") or {}
+                    writer.writerow(
+                        {
+                            "slug": row["slug"],
+                            "id": row["id"],
+                            "env": row["env"],
+                            **{
+                                f"arg:{key}": json.dumps(args[key], default=str)
+                                if isinstance(args.get(key), (dict, list))
+                                else args.get(key)
+                                for key in arg_keys
+                            },
+                        }
+                    )
+        else:
+            out = remote.to_file(out)
+        hud_console.success(f"Exported {len(remote)} tasks to {out}")
+        return None
 
-    local_taskset = _load_local_taskset(
-        source,
-        task_filter=task_filter,
-        exclude=exclude,
-        console=hud_console,
-    )
-    _warn_on_linked_environment_mismatch(local_taskset, platform, hud_console, link)
+    hud_console.progress_message(f"Collecting tasks from {source}...")
+    local_taskset = Taskset.from_file(source)
+    if not local_taskset:
+        raise ValueError(f"No Task objects found in: {source}")
+    hud_console.success(f"Found {len(local_taskset)} task(s)")
+    if task_filter:
+        local_taskset = local_taskset.filter([task_filter])
+        if not local_taskset:
+            raise ValueError(f"No task found with slug '{task_filter}'")
+    if exclude:
+        local_taskset = local_taskset.exclude(exclude)
+        if not local_taskset:
+            raise ValueError("No tasks left after exclusions")
 
-    # Creating a new taskset is only allowed when targeting an explicit name
-    # (not an --id or a stored id, which must already exist).
-    allow_create = taskset is not None and taskset_id is None
-    placement = Placement.resolve(
-        platform,
-        link,
-        flag=project,
-    )
+    if link.registry_id is not None:
+        linked_name = RegistryEnvironment.resolve(platform, str(link.registry_id)).name
+        mismatched = local_taskset.environment_names() - {linked_name}
+        if mismatched:
+            hud_console.warning(
+                "Local task env names do not match the linked platform environment "
+                f"'{linked_name}': {', '.join(sorted(mismatched))}"
+            )
 
-    remote_taskset = _fetch_remote_taskset(
-        platform,
-        target_ref,
-        force=force,
-        allow_create=allow_create,
-        console=hud_console,
-    )
+    placement = Placement.resolve(platform, link, flag=project)
+
+    # The remote taskset to diff against. --force diffs against an empty one so
+    # every task uploads. A missing remote is created only for an explicit name,
+    # never for an --id or a stored id.
+    taskset_uuid, display = resolve_taskset_id(platform, target_ref)
+    if taskset_uuid:
+        record = platform.get(f"/tasksets/{taskset_uuid}")
+        remote_taskset = (
+            Taskset(str(record["name"]), [], taskset_id=taskset_uuid)
+            if force
+            else Taskset.from_api(taskset_uuid)
+        )
+    elif taskset is not None and taskset_id is None:
+        hud_console.info(f"Taskset '{display}' not found; it will be created")
+        remote_taskset = Taskset(display, [])
+    else:
+        raise CliError(
+            error="not_found",
+            message=f"Taskset not found: {target_ref}",
+            input={"taskset": target_ref},
+            suggestion="Pass a taskset name to create it, or use an existing id.",
+        )
     plan = diff(local_taskset, remote_taskset)
 
     plan_payload = {
@@ -386,20 +252,18 @@ def sync_tasks_command(
         "remote_only_count": len(plan.remote_only),
         "to_apply": [task.id for task in plan.to_apply],
     }
-
     if force:
         hud_console.info(f"\n  --force: uploading all {len(plan.to_apply)} task(s)")
     else:
         hud_console.info("\n" + plan.summary())
 
     if not plan.to_apply:
-        if link_target is True and not dry_run:
+        if link_target and not dry_run:
             if remote_taskset.taskset_id is None:
                 raise CliError("not_found", "Cannot link a taskset that does not exist")
             state.update(DirectoryLink(taskset_id=UUID(remote_taskset.taskset_id)))
         hud_console.success("All tasks up to date")
         return {**plan_payload, "status": "up_to_date", "dry_run": dry_run}
-
     if dry_run:
         hud_console.info("\n  --dry-run: no changes made")
         return {**plan_payload, "dry_run": True, "action": "sync_tasks"}
@@ -420,23 +284,25 @@ def sync_tasks_command(
     except HudRequestError as exc:
         raise CliError.from_http(exc, input={"taskset": plan.taskset_name}) from exc
 
-    if link_target is True or (link.taskset_id is None and taskset_id is None and project is None):
-        _save_taskset_id(result, hud_console, state)
+    returned_id = result.get("taskset_id")
+    if returned_id and (
+        link_target or (link.taskset_id is None and taskset_id is None and project is None)
+    ):
+        if state.update(DirectoryLink(taskset_id=UUID(returned_id))):
+            hud_console.dim_info("Taskset ID saved to:", str(CONFIG_PATH))
+        hud_console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
 
     created = int(result.get("tasks_created", 0))
     updated = int(result.get("tasks_updated", 0))
-
-    saved = {
+    hud_console.success("Sync complete")
+    hud_console.info(f"  + {created} created, ~ {updated} updated")
+    return {
         **plan_payload,
         "status": "synced",
         "tasks_created": created,
         "tasks_updated": updated,
-        "taskset_id": result.get("taskset_id"),
+        "taskset_id": returned_id,
     }
-
-    hud_console.success("Sync complete")
-    hud_console.info(f"  + {created} created, ~ {updated} updated")
-    return saved
 
 
 @sync_app.command("env")
@@ -472,68 +338,69 @@ def sync_env_command(
     hud_console = HUDConsole()
     hud_console.header("Sync Environment", icon="")
 
-    if name is None and (dry_run is True or not sys.stdin.isatty()):
-        raise CliError(
-            "usage",
-            "Pass an environment ID for a dry run or noninteractive link.",
-        )
+    if name is None and (dry_run or not sys.stdin.isatty()):
+        raise CliError("usage", "Pass an environment ID for a dry run or noninteractive link.")
 
     platform = PlatformClient.from_settings()
-    env_dir = Path(directory).resolve()
-    state = DirectoryState(AuthScope.resolve(platform), env_dir)
+    state = DirectoryState(AuthScope.resolve(platform), Path(directory).resolve())
     link = state.load()
-    existing_registry_id = str(link.registry_id) if link.registry_id else None
-    selected_env: RegistryEnvironment | None = None
+    linked_id = str(link.registry_id) if link.registry_id else None
 
     if name is None:
         hud_console.info("Fetching your environments...")
-        envs = list_registry_environments(platform)
+        envs: list[RegistryEnvironment] = []
+        while True:
+            data = platform.get(
+                "/registry", params={"limit": 500, "offset": len(envs), "sort_by": "date"}
+            )
+            page = [RegistryEnvironment.from_record(item) for item in data["items"]]
+            envs.extend(page)
+            if len(envs) >= data["total"]:
+                break
+            if not page:
+                raise ValueError("Registry API returned an empty page before the reported total")
         if not envs:
             raise CliError("not_found", "No environments found. Deploy one with 'hud deploy'.")
-
-        hud_console.info("\nYour environments:")
-        for i, env in enumerate(envs, 1):
-            marker = " (currently linked)" if env.id == existing_registry_id else ""
-            hud_console.info(f"  {i}. {env.name}{env.version_label} ({env.id}){marker}")
-
-        try:
-            name = input("Select environment number (or paste full ID): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            raise typer.Exit(0) from None
-        if name.isdecimal():
-            index = int(name) - 1
-            if not 0 <= index < len(envs):
-                raise ValueError("Invalid selection")
-            selected_env = envs[index]
-
-    if selected_env is None:
-        selected_env = get_registry_environment(platform, name)
+        selected = cast(
+            "RegistryEnvironment",
+            hud_console.select(
+                "Select an environment",
+                [
+                    {
+                        "name": f"{env.name}{f' v{env.version}' if env.version else ''} ({env.id})"
+                        + (" (currently linked)" if env.id == linked_id else ""),
+                        "value": env,
+                    }
+                    for env in envs
+                ],
+                default=0,
+            ),
+        )
+    else:
+        selected = RegistryEnvironment.resolve(platform, name)
 
     if dry_run:
-        plan = {
+        hud_console.info(f"Would link to {selected.name} ({selected.id})")
+        return {
             "dry_run": True,
             "action": "link_environment",
-            "id": selected_env.id,
-            "name": selected_env.name,
+            "id": selected.id,
+            "name": selected.name,
         }
-        hud_console.info(f"Would link to {plan['name']} ({plan['id']})")
-        return plan
-
-    if existing_registry_id and existing_registry_id != selected_env.id:
-        hud_console.warning(f"Currently linked to: {existing_registry_id[:8]}...")
+    if linked_id and linked_id != selected.id:
+        hud_console.warning(f"Currently linked to: {linked_id[:8]}...")
         CLI.confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
-    changed = state.update(DirectoryLink(registry_id=UUID(selected_env.id)))
-    saved = {
-        "name": selected_env.name,
-        "id": selected_env.id,
-        "short_id": selected_env.short_id,
+    changed = state.update(DirectoryLink(registry_id=UUID(selected.id)))
+    hud_console.success(f"Linked to: {selected.name} ({selected.id[:8]}...)")
+    if changed:
+        hud_console.dim_info("Link saved to:", str(CONFIG_PATH))
+    return {
+        "name": selected.name,
+        "id": selected.id,
+        "short_id": selected.id[:8],
         "changed": changed,
     }
-    hud_console.success(f"Linked to: {saved['name']} ({saved['short_id']}...)")
-    if saved["changed"]:
-        hud_console.dim_info("Link saved to:", str(CONFIG_PATH))
-    return saved
 
 
 @sync_app.callback(invoke_without_command=True)
