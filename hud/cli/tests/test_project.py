@@ -79,9 +79,17 @@ def test_list_reads_paginated_items(platform: PlatformClient, monkeypatch) -> No
     ]
 
 
-def test_project_names_require_explicit_selection(platform: PlatformClient) -> None:
-    with pytest.raises(ValueError, match="Project ID"):
-        Project.resolve(platform, "browser-evals")
+def test_resolve_matches_a_normalized_name(platform: PlatformClient) -> None:
+    assert Project.resolve(platform, "browser-evals").id == _BROWSER_ID
+    assert Project.resolve(platform, "Browser Evals").id == _BROWSER_ID
+
+
+def test_resolve_rejects_partial_and_unknown_names(platform: PlatformClient) -> None:
+    with pytest.raises(CliError, match="No Project named 'browser'") as error:
+        Project.resolve(platform, "browser")
+    assert error.value.error == "not_found"
+    with pytest.raises(CliError, match="No Project named 'nope'"):
+        Project.resolve(platform, "nope")
 
 
 def test_resolve_matches_an_id(platform: PlatformClient) -> None:

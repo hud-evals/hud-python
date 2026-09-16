@@ -83,7 +83,7 @@ judge in the same source) is two deploys: `hud deploy --name workspace` and
 ```bash
 hud deploy
 hud deploy --name judge
-hud deploy --project <project-id>
+hud deploy --project <name-or-id>
 ```
 
 | Option | Description |
@@ -214,8 +214,8 @@ hud project                              # resolved Project for the current dire
 hud project list                         # visible Projects and access
 hud project create browser-evals         # create and use a Project (team admins)
 hud project create browser-evals --no-use
-hud project use <project-id>            # save project_id to .hud/config.json
-hud project use <project-id> -C ./my-env
+hud project use browser-evals           # name or ID; save project_id to .hud/config.json
+hud project use browser-evals -C ./my-env
 ```
 
 | Command or option | Description |
@@ -223,7 +223,7 @@ hud project use <project-id> -C ./my-env
 | `hud project [--directory PATH]` | Show where new resources from a directory will be created. `-C` is an alias. |
 | `hud project list` | List visible Projects, marking the team default and read-only entries. |
 | `hud project create <name>` | Create and pin a Project. Accepts `--description`, `--directory`/`-C`, and `--no-use`. |
-| `hud project use <project-id>` | Pin a directory to an existing writable Project. Accepts `--directory`/`-C`. |
+| `hud project use <name-or-id>` | Pin a directory to an existing writable Project. Names are normalized (`My Project` = `my-project`). Accepts `--directory`/`-C`. |
 
 #### Project selection
 
@@ -231,14 +231,14 @@ hud project use <project-id> -C ./my-env
 
 | Priority | Source | Scope |
 |----------|--------|-------|
-| 1 | `--project <project-id>` | Current command |
+| 1 | `--project <name-or-id>` | Current command |
 | 2 | `.hud/config.json` → `project_id` | Current directory |
 | 3 | `HUD_DEFAULT_PROJECT` | Machine-wide fallback |
 | 4 | Team default Project | Zero-configuration fallback |
 
-`--project` does not change `.hud/config.json`. Use `hud project use <project-id>` when later deploys
+`--project` does not change `.hud/config.json`. Use `hud project use <name-or-id>` when later deploys
 and task syncs from the directory should use that Project. Set a fallback for unconfigured
-directories with `hud set HUD_DEFAULT_PROJECT=<project-id>`.
+directories with `hud set HUD_DEFAULT_PROJECT=<name-or-id>`.
 
 `.hud/config.json` is CLI-owned workspace state (gitignored). It stores the Project, environment, and
 taskset ids for this working copy, plus the API origin, user, and team that created the link.
@@ -261,12 +261,15 @@ Publish task definitions or link a local directory to a deployed environment:
 
 ```bash
 hud sync tasks my-taskset                          # publish using resolved Project
-hud sync tasks my-taskset --project <project-id> # override by Project ID
-hud sync env                                       # link environment metadata
+hud sync tasks my-taskset --project browser-evals  # override the Project (name or ID)
+hud sync tasks my-taskset --link                   # also make my-taskset this directory's default
+hud sync env                                       # pick a deployed environment to link
+hud sync env my-env                                # link by environment name or ID
 ```
 
 `hud sync tasks --project` is a one-command override, like `hud deploy --project`. Existing resources
-remain in their original Project. See
+remain in their original Project. The first upload from a directory records the taskset in
+`.hud/config.json`; later explicit targets only replace it with `--link`. See
 [Projects](/v6/reference/projects) for the conceptual overview.
 
 External benchmark formats can be adapted into runnable `Taskset`s through the

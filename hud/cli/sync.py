@@ -27,6 +27,7 @@ from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 
@@ -44,11 +45,31 @@ class RegistryEnvironment:
         )
 
     @classmethod
-    def resolve(cls, platform: PlatformClient, registry_id: str) -> RegistryEnvironment:
+    def resolve(cls, platform: PlatformClient, ref: str) -> RegistryEnvironment:
+        """The deployed environment with this ID or (normalized) name."""
         try:
-            registry_id = str(UUID(registry_id))
-        except ValueError as exc:
-            raise ValueError("Pass an environment ID, or omit it to select interactively") from exc
+            registry_id = str(UUID(ref))
+        except ValueError:
+            registry_id = None
+        if registry_id is None:
+            name = normalize_environment_name(ref, default="")
+            data = platform.get("/registry", params={"search": name, "limit": 500})
+            matches = [cls.from_record(item) for item in data["items"] if item["name"] == name]
+            if not matches:
+                raise CliError(
+                    "not_found",
+                    f"No environment named {ref!r}.",
+                    suggestion="Run 'hud sync env' to pick from your environments.",
+                    input={"environment": ref},
+                )
+            if len(matches) > 1:
+                raise CliError(
+                    "usage",
+                    f"{len(matches)} environments are named {name!r}; pass an ID instead: "
+                    + ", ".join(env.id for env in matches),
+                    input={"environment": ref},
+                )
+            return matches[0]
         try:
             return cls.from_record(platform.get(f"/registry/{registry_id}"))
         except HudRequestError as exc:
@@ -57,7 +78,7 @@ class RegistryEnvironment:
             raise CliError(
                 "not_found",
                 f"Environment {registry_id} is inaccessible or deleted.",
-                suggestion="Run 'hud sync env <id>' to link an accessible environment.",
+                suggestion="Run 'hud sync env <name-or-id>' to link an accessible environment.",
             ) from exc
 
 
@@ -292,7 +313,7 @@ def sync_tasks_command(
 def sync_env_command(
     name: str | None = typer.Argument(
         None,
-        help="Environment ID to link to (interactive if omitted)",
+        help="Environment name or ID to link to (interactive if omitted)",
     ),
     directory: str = typer.Argument(
         ".",
@@ -310,11 +331,11 @@ def sync_env_command(
 ) -> Any:
     """Link local directory to a platform environment.
 
-    [not dim]Validates an environment ID, verifies it exists, and stores
+    [not dim]Resolves an environment by name or ID, verifies it exists, and stores
     the registry ID in .hud/config.json for task sync checks.
 
     Examples:
-        hud sync env <environment-id>           # link cwd to '<environment-id>'
+        hud sync env my-env               # link cwd to the environment named my-env
         hud sync env <environment-id> ./my-env  # link specific directory
         hud sync env                      # interactive: pick from your envs[/not dim]
     """
@@ -322,7 +343,9 @@ def sync_env_command(
     hud_console.header("Sync Environment", icon="")
 
     if name is None and (dry_run or not sys.stdin.isatty()):
-        raise CliError("usage", "Pass an environment ID for a dry run or noninteractive link.")
+        raise CliError(
+            "usage", "Pass an environment name or ID for a dry run or noninteractive link."
+        )
 
     platform = PlatformClient.from_settings()
     state = DirectoryState(AuthScope.resolve(platform), Path(directory).resolve())
@@ -395,7 +418,7 @@ def sync_callback(ctx: typer.Context) -> Any:
     Examples:
         hud sync                         # sync tasks using .hud/config.json
         hud sync tasks my-taskset        # sync tasks to specific taskset
-        hud sync env <environment-id>    # link to environment[/not dim]
+        hud sync env my-env              # link to a deployed environment[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return

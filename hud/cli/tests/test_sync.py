@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from typer.testing import CliRunner
@@ -366,10 +367,24 @@ def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.Monk
     assert error.value.exit_code == 1
 
 
-def test_name_resolution_requires_selection(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unexpected(*args: object, **kwargs: object) -> None:
-        pytest.fail("Names must not trigger substring search")
+def test_resolve_matches_a_name_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
+    records = [
+        {"id": "12345678-1234-5678-1234-567812345678", "name": "browser"},
+        {"id": "87654321-4321-8765-4321-876543218765", "name": "browser-anchor"},
+    ]
 
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", unexpected)
-    with pytest.raises(ValueError, match="environment ID"):
-        RegistryEnvironment.resolve(PlatformClient("https://api.example", "key"), "browser")
+    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        parts = urlsplit(url)
+        assert parts.path.endswith("/registry")
+        search = parse_qs(parts.query)["search"][0]
+        items = [record for record in records if search in record["name"]]
+        return {"items": items, "total": len(items)}
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
+    platform = PlatformClient("https://api.example", "key")
+
+    assert RegistryEnvironment.resolve(platform, "Browser").id == records[0]["id"]
+    assert RegistryEnvironment.resolve(platform, "browser_anchor").id == records[1]["id"]
+    with pytest.raises(CliError, match="No environment named 'anchor'") as error:
+        RegistryEnvironment.resolve(platform, "anchor")
+    assert error.value.error == "not_found"

@@ -19,10 +19,11 @@ from hud.cli import (
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
+from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 PROJECT_OPTION_HELP = (
-    "Project ID for this command. Defaults to the directory's saved "
+    "Project name or ID for this command. Defaults to the directory's saved "
     "project, HUD_DEFAULT_PROJECT, then your team default. Does not change "
     "directory configuration."
 )
@@ -46,13 +47,34 @@ class Project:
 
     @classmethod
     def resolve(cls, platform: PlatformClient, ref: str) -> Project:
-        """The Project with this canonical ID, within the authenticated scope."""
+        """The Project with this ID or name, within the authenticated scope.
+
+        Names are normalized the way the platform normalizes them on create, so
+        ``My Project`` and ``my-project`` resolve to the same row.
+        """
         try:
             project_id = str(uuid.UUID(ref))
-        except ValueError as exc:
-            raise ValueError(
-                "Pass a Project ID from 'hud project list'; name lookup is not supported"
-            ) from exc
+        except ValueError:
+            project_id = None
+        if project_id is None:
+            name = normalize_environment_name(ref, default="")
+            data = platform.get("/projects", params={"search": name, "limit": 500})
+            matches = [cls.from_record(item) for item in data["items"] if item["name"] == name]
+            if not matches:
+                raise CliError(
+                    "not_found",
+                    f"No Project named {ref!r}.",
+                    suggestion="Run 'hud project list' to see visible Projects.",
+                    input={"project": ref},
+                )
+            if len(matches) > 1:
+                raise CliError(
+                    "usage",
+                    f"{len(matches)} Projects are named {name!r}; pass an ID instead: "
+                    + ", ".join(project.id for project in matches),
+                    input={"project": ref},
+                )
+            return matches[0]
         try:
             return cls.from_record(platform.get(f"/projects/{project_id}"))
         except HudRequestError as exc:
@@ -179,7 +201,7 @@ def create_command(
 @project_app.command("use")
 def use_command(
     ctx: typer.Context,
-    ref: str = typer.Argument(..., help="Project ID from hud project list"),
+    ref: str = typer.Argument(..., help="Project name or ID (see hud project list)"),
     directory: str | None = typer.Option(None, "--directory", "-C"),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
