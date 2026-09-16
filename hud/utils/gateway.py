@@ -57,7 +57,7 @@ class GatewayModelsResponse(BaseModel):
 
 
 async def _inject_trace_id(request: httpx.Request) -> None:
-    """httpx request hook: the async clients need a coroutine function here."""
+    """httpx request hook."""
     request.headers.update(get_trace_headers())
 
 

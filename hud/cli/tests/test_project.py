@@ -10,12 +10,10 @@ from uuid import UUID
 import pytest
 from typer.testing import CliRunner
 
-from hud.cli import AuthScope, DirectoryLink, DirectoryState
+from hud.cli import AuthScope, CliError, DirectoryLink, DirectoryState
 from hud.cli.__main__ import app
 from hud.cli.project import (
     Project,
-    ProjectNotWritable,
-    ProjectSource,
     list_projects,
     require_writable_placement,
     resolve_placement,
@@ -106,7 +104,7 @@ def test_flag_outranks_directory_config(
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
-    assert placement.source is ProjectSource.FLAG
+    assert placement.source == "--project"
 
 
 def test_directory_config_applies_without_a_flag(
@@ -122,7 +120,7 @@ def test_directory_config_applies_without_a_flag(
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
-    assert placement.source is ProjectSource.CONFIG
+    assert placement.source == ".hud/config.json"
 
 
 def test_global_default_applies_to_an_unpinned_directory(
@@ -136,7 +134,7 @@ def test_global_default_applies_to_an_unpinned_directory(
 
     assert placement.project is not None
     assert placement.project.id == _BROWSER_ID
-    assert placement.source is ProjectSource.GLOBAL_DEFAULT
+    assert placement.source == "HUD_DEFAULT_PROJECT"
 
 
 def test_unconfigured_placement_sends_no_project_and_makes_no_call(
@@ -150,7 +148,7 @@ def test_unconfigured_placement_sends_no_project_and_makes_no_call(
     placement = resolve_placement(platform, DirectoryLink(), flag=None)
 
     assert placement.project_id is None
-    assert placement.source is ProjectSource.TEAM_DEFAULT
+    assert placement.source == "team default"
     assert placement.label == "team default Project"
     assert calls == []
 
@@ -166,8 +164,9 @@ def test_placement_resolves_a_project_the_caller_cannot_create_in(
     assert placement.project is not None
     assert placement.project.id == _READONLY_ID
 
-    with pytest.raises(ProjectNotWritable):
+    with pytest.raises(CliError, match="permission") as info:
         require_writable_placement(placement)
+    assert info.value.error == "permission_denied"
 
 
 def test_from_record_defaults_capabilities_to_read_only() -> None:

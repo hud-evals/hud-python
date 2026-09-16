@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import asdict, dataclass
-from enum import Enum
 from typing import Any
 
 import typer
@@ -13,6 +12,7 @@ from hud.cli import (
     CLI,
     CONFIG_PATH,
     AuthScope,
+    CliError,
     DirectoryLink,
     DirectoryState,
 )
@@ -20,16 +20,6 @@ from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
-
-
-class ProjectSource(Enum):
-    """Where a resolved Project came from, most specific first."""
-
-    FLAG = "--project"
-    CONFIG = str(CONFIG_PATH)
-    GLOBAL_DEFAULT = "HUD_DEFAULT_PROJECT"
-    TEAM_DEFAULT = "team default"
-
 
 PROJECT_OPTION_HELP = (
     "Project ID for this command. Defaults to the directory's saved "
@@ -47,23 +37,21 @@ class Project:
 
     @classmethod
     def from_record(cls, data: dict[str, Any]) -> Project:
-        capabilities = data.get("capabilities")
         return cls(
             id=str(data["id"]),
-            name=str(data.get("name") or "unnamed"),
+            name=data["name"],
             is_default=bool(data.get("is_default")),
-            can_create=bool(capabilities.get("create"))
-            if isinstance(capabilities, dict)
-            else False,
+            can_create=bool(data.get("capabilities", {}).get("create")),
         )
 
 
 @dataclass(frozen=True)
 class Placement:
-    """The Project selected for the current directory."""
+    """The Project selected for the current directory, and what selected it."""
 
     project: Project | None
-    source: ProjectSource
+    #: ``--project``, ``.hud/config.json``, ``HUD_DEFAULT_PROJECT``, or ``team default``.
+    source: str
 
     @property
     def project_id(self) -> str | None:
@@ -74,52 +62,24 @@ class Placement:
     def label(self) -> str:
         if self.project is None:
             return "team default Project"
-        return f"{self.project.name} (via {self.source.value})"
-
-
-class ProjectNotFound(LookupError):
-    """No visible Project matches the given reference."""
-
-    def __init__(self, ref: str) -> None:
-        self.ref = ref
-        super().__init__(f"No project found matching '{ref}'")
-
-
-class ProjectNotWritable(PermissionError):
-    """The caller may see the Project but may not create resources in it."""
-
-    def __init__(self, project: Project) -> None:
-        self.project = project
-        super().__init__(
-            f"You do not have permission to create environments or tasksets in "
-            f"project '{project.name}'"
-        )
+        return f"{self.project.name} (via {self.source})"
 
 
 def list_projects(platform: PlatformClient) -> list[Project]:
     """Every Project visible to the caller."""
     projects: list[Project] = []
-    offset = 0
     while True:
-        data = platform.get("/projects", params={"limit": 500, "offset": offset})
-        page = _projects_from_page(data)
+        data = platform.get("/projects", params={"limit": 500, "offset": len(projects)})
+        page = [Project.from_record(item) for item in data["items"]]
         projects.extend(page)
-        offset += len(page)
-        if offset >= data["total"]:
+        if len(projects) >= data["total"]:
             return projects
         if not page:
             raise ValueError("Projects API returned an empty page before the reported total")
 
 
-def _projects_from_page(data: Any) -> list[Project]:
-    records = data.get("items") if isinstance(data, dict) else None
-    if not isinstance(records, list):
-        return []
-    return [Project.from_record(item) for item in records if isinstance(item, dict)]
-
-
 def resolve_project(platform: PlatformClient, ref: str) -> Project:
-    """Resolve a canonical Project ID within the authenticated scope."""
+    """The Project with this canonical ID, within the authenticated scope."""
     try:
         project_id = str(uuid.UUID(ref))
     except ValueError as exc:
@@ -129,33 +89,31 @@ def resolve_project(platform: PlatformClient, ref: str) -> Project:
     try:
         return Project.from_record(platform.get(f"/projects/{project_id}"))
     except HudRequestError as exc:
-        if exc.status_code != 404:
-            raise
-        raise ProjectNotFound(ref) from exc
+        raise CliError.from_http(exc, resource="Project", input={"project": ref}) from exc
 
 
 def resolve_placement(
-    platform: PlatformClient,
-    link: DirectoryLink,
-    *,
-    flag: str | None,
+    platform: PlatformClient, link: DirectoryLink, *, flag: str | None
 ) -> Placement:
-    """Resolve the configured Project."""
+    """The configured Project, most specific source first."""
     for ref, source in (
-        (flag, ProjectSource.FLAG),
-        (str(link.project_id) if link.project_id else None, ProjectSource.CONFIG),
-        (settings.default_project, ProjectSource.GLOBAL_DEFAULT),
+        (flag, "--project"),
+        (str(link.project_id) if link.project_id else None, str(CONFIG_PATH)),
+        (settings.default_project, "HUD_DEFAULT_PROJECT"),
     ):
         if ref:
-            project = resolve_project(platform, ref)
-            return Placement(project=project, source=source)
-
-    return Placement(project=None, source=ProjectSource.TEAM_DEFAULT)
+            return Placement(resolve_project(platform, ref), source)
+    return Placement(None, "team default")
 
 
 def require_writable_placement(placement: Placement) -> None:
     if placement.project is not None and not placement.project.can_create:
-        raise ProjectNotWritable(placement.project)
+        raise CliError(
+            error="permission_denied",
+            message="You do not have permission to create environments or tasksets in "
+            f"project '{placement.project.name}'",
+            input={"project": placement.project.id},
+        )
 
 
 project_app = CLI(
@@ -173,23 +131,19 @@ def list_command(
     ),
 ) -> Any:
     """List all visible Projects and their canonical IDs."""
-    rows = [asdict(project) for project in list_projects(PlatformClient.from_settings())]
-
-    def _render(projects: list[dict[str, Any]]) -> None:
-        console = HUDConsole()
-        for project in projects:
-            tags = " (default)" if project["is_default"] else ""
-            tags += " (read-only)" if not project["can_create"] else ""
-            console.info(f"{project['name']}  {project['id']}{tags}")
-        if not projects:
-            console.info("No projects found")
-
+    projects = list_projects(PlatformClient.from_settings())
     if quiet:
-        for project in rows:
-            typer.echo(project["id"])
-    else:
-        _render(rows)
-    return rows
+        for project in projects:
+            typer.echo(project.id)
+        return [asdict(project) for project in projects]
+    console = HUDConsole()
+    for project in projects:
+        tags = " (default)" if project.is_default else ""
+        tags += " (read-only)" if not project.can_create else ""
+        console.info(f"{project.name}  {project.id}{tags}")
+    if not projects:
+        console.info("No projects found")
+    return [asdict(project) for project in projects]
 
 
 @project_app.command("create")
@@ -209,9 +163,8 @@ def create_command(
     if description:
         payload["description"] = description
     if dry_run:
-        plan = {"dry_run": True, "action": "create_project", **payload}
-        HUDConsole().info(f"Would create Project {plan['name']}")
-        return plan
+        HUDConsole().info(f"Would create Project {name}")
+        return {"dry_run": True, "action": "create_project", **payload}
     state = (
         None
         if no_use
@@ -220,13 +173,12 @@ def create_command(
         )
     )
     if state is not None:
-        state.load()
+        state.load()  # a config written under other credentials fails before we create anything
     created = Project.from_record(platform.post("/projects", json=payload))
     if state is not None:
         state.update(DirectoryLink(project_id=created.id))
-    saved = asdict(created)
-    HUDConsole().success(f"Created Project: {saved['name']} ({saved['id']})")
-    return saved
+    HUDConsole().success(f"Created Project: {created.name} ({created.id})")
+    return asdict(created)
 
 
 @project_app.command("use")
@@ -245,14 +197,13 @@ def use_command(
     )
     state.load()
     project = resolve_project(platform, ref)
-    require_writable_placement(Placement(project, ProjectSource.FLAG))
+    require_writable_placement(Placement(project, "--project"))
     if not dry_run:
         state.update(DirectoryLink(project_id=project.id))
-    saved = {**asdict(project), "dry_run": dry_run}
     HUDConsole().success(
-        f"{'Would use' if saved['dry_run'] else 'Using'} Project: {saved['name']} ({saved['id']})"
+        f"{'Would use' if dry_run else 'Using'} Project: {project.name} ({project.id})"
     )
-    return saved
+    return {**asdict(project), "dry_run": dry_run}
 
 
 @project_app.callback(invoke_without_command=True)
@@ -265,13 +216,13 @@ def project_callback(
     if ctx.invoked_subcommand is not None:
         return
     platform = PlatformClient.from_settings()
+    # Projects are feature-gated per team; surface that before reading the directory.
     platform.get("/projects", params={"limit": 1})
     state = DirectoryState(AuthScope.resolve(platform), directory)
     placement = resolve_placement(platform, state.load(), flag=None)
-    saved = {
+    HUDConsole().info(f"Project: {placement.label}")
+    return {
         "project": asdict(placement.project) if placement.project else None,
-        "source": placement.source.value,
+        "source": placement.source,
         "label": placement.label,
     }
-    HUDConsole().info(f"Project: {saved['label']}")
-    return saved
