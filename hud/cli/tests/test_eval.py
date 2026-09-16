@@ -299,7 +299,7 @@ def test_gateway_model_alias_selects_agent_and_model(eval_cli: _EvalCli, monkeyp
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
     eval_cli.invoke("tasks.py", "glm-5.2", "--yes")
     assert type(eval_cli.agent).__name__ == "OpenAIChatAgent"
     assert eval_cli.agent.config.model == "z-ai/glm-5.2"
@@ -518,6 +518,7 @@ def test_interactive_picker_offers_current_catalog_models_newest_first(
     )
     catalog.append(
         GatewayModelInfo(
+            id="old",
             name="Old",
             model_name="old",
             sdk_agent_type="openai_compatible",

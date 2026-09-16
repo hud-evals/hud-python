@@ -155,10 +155,10 @@ def test_list_gateway_models_reads_every_page(monkeypatch: pytest.MonkeyPatch) -
 
 def test_model_recency_prefers_release_over_catalog_date() -> None:
     released = gateway.GatewayModelInfo(
-        created_at="2026-09-01T00:00:00Z", released_at="2026-01-01T00:00:00Z"
+        id="released", created_at="2026-09-01T00:00:00Z", released_at="2026-01-01T00:00:00Z"
     )
-    added = gateway.GatewayModelInfo(created_at="2026-06-01T00:00:00Z")
-    undated = gateway.GatewayModelInfo()
+    added = gateway.GatewayModelInfo(id="added", created_at="2026-06-01T00:00:00Z")
+    undated = gateway.GatewayModelInfo(id="undated")
     assert sorted([added, released, undated], key=lambda m: m.recency) == [
         undated,
         released,

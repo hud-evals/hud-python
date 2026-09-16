@@ -15,7 +15,7 @@ from hud.cli import (
 )
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
-from hud.utils.gateway import list_gateway_models
+from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -31,15 +31,11 @@ models_app = CLI(
 
 
 def _resolve_model_id(model: str) -> str:
-    """Map a model slug to its id (an id passes straight through)."""
+    """Map a model slug or display name to its id (an id passes straight through)."""
     try:
         return str(UUID(model))
     except ValueError:
-        try:
-            data = PlatformClient.from_settings().get("/models/resolve", params={"model": model})
-        except HudRequestError as exc:
-            raise CliError.from_http(exc, resource="Model", input={"model": model}) from exc
-        return str(data["id"])
+        return resolve_gateway_model(model).id
 
 
 def _get_checkpoints(model_id: str) -> list[dict[str, Any]]:

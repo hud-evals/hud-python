@@ -133,7 +133,7 @@ def test_create_agent_hosted_spec_preserves_training_config(
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.agents.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
     monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
     monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda _provider: client)
 

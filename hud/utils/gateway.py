@@ -7,6 +7,7 @@ gateway lives in :func:`hud.agents.create_agent`.
 
 from __future__ import annotations
 
+import difflib
 import re
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -35,7 +36,7 @@ class GatewayProviderInfo(BaseModel):
 
 
 class GatewayModelInfo(BaseModel):
-    id: str | None = None
+    id: str
     name: str | None = None
     model_name: str | None = None
     sdk_agent_type: str | None = None
@@ -84,11 +85,6 @@ async def _inject_trace_id_async(request: httpx.Request) -> None:
 def normalize_gateway_model_id(model: str) -> str:
     """Return the canonical HUD gateway model slug for known short aliases."""
     return _MODEL_ALIASES.get(model.lower(), model)
-
-
-def gateway_model_aliases() -> tuple[str, ...]:
-    """Return accepted short aliases for HUD gateway model slugs."""
-    return tuple(_MODEL_ALIASES)
 
 
 def _is_bedrock_arn(model: str | None) -> bool:
@@ -210,3 +206,16 @@ def list_gateway_models() -> list[GatewayModelInfo]:
             return models
         if not page.items:
             raise ValueError("Models API returned an empty page before the reported total")
+
+
+def resolve_gateway_model(model: str) -> GatewayModelInfo:
+    """The catalog entry for a model id, slug, or display name (short aliases accepted)."""
+    wanted = normalize_gateway_model_id(model)
+    catalog = list_gateway_models()
+    for entry in catalog:
+        if wanted in (entry.id, entry.name, entry.model_name):
+            return entry
+    known = [name for entry in catalog for name in (entry.id, entry.name, entry.model_name) if name]
+    near = difflib.get_close_matches(model, [*known, *_MODEL_ALIASES], n=3, cutoff=0.5)
+    hint = f" Did you mean: {', '.join(near)}?" if near else " Run `hud models` to list them."
+    raise ValueError(f"Model {model!r} not found in the HUD gateway registry.{hint}")

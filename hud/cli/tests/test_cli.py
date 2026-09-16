@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -30,6 +30,7 @@ from hud.cli import (
 )
 from hud.cli.__main__ import app, main, notify_if_outdated, recorded_invocation, version
 from hud.utils.exceptions import HudException, HudRequestError
+from hud.utils.gateway import list_gateway_models
 from hud.utils.platform import PlatformClient
 
 runner = CliRunner()
@@ -559,9 +560,8 @@ def test_model_commands_share_platform_transport(monkeypatch):
         requests.append((method, url, kwargs))
         assert url.startswith("https://api.example/v2/")
         assert kwargs["api_key"] == "test-key"
-        if urlsplit(url).path == "/v2/models/resolve":
-            assert parse_qs(urlsplit(url).query) == {"model": ["owner/model + version"]}
-            return {"id": model_id}
+        if urlsplit(url).path == "/v2/models":
+            return {"items": [{"id": model_id, "name": "owner/model + version"}], "total": 1}
         return [] if method == "GET" else {"id": model_id, "model_name": "forked"}
 
     monkeypatch.setattr(settings, "api_key", "test-key")
@@ -573,6 +573,7 @@ def test_model_commands_share_platform_transport(monkeypatch):
         ("fork", ["--name", "forked"], "POST", "/models/fork"),
     ]:
         requests.clear()
+        list_gateway_models.cache_clear()
         result = runner.invoke(app, ["models", command, "owner/model + version", *extra, "--json"])
         assert result.exit_code == 0, result.output
         assert len(requests) == 2
