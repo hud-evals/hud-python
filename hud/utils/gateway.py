@@ -56,12 +56,9 @@ class GatewayModelsResponse(BaseModel):
     total: int
 
 
-def _inject_trace_id(request: httpx.Request) -> None:
+async def _inject_trace_id(request: httpx.Request) -> None:
+    """httpx request hook: the async clients need a coroutine function here."""
     request.headers.update(get_trace_headers())
-
-
-async def _inject_trace_id_async(request: httpx.Request) -> None:
-    _inject_trace_id(request)
 
 
 def build_model_client(provider: str, *, model: str | None = None) -> GatewayClient:
@@ -127,7 +124,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
             api_key=settings.api_key,
             base_url=settings.hud_gateway_url,
             http_client=AnthropicHttpClient(
-                event_hooks={"request": [_inject_trace_id_async]},
+                event_hooks={"request": [_inject_trace_id]},
             ),
         )
 
@@ -140,10 +137,14 @@ def build_gateway_client(provider: str) -> GatewayClient:
             http_options=HttpOptions(
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
-                client_args={"event_hooks": {"request": [_inject_trace_id]}},
+                client_args={
+                    "event_hooks": {
+                        "request": [lambda request: request.headers.update(get_trace_headers())]
+                    }
+                },
                 async_client_args={
                     "transport": httpx.AsyncHTTPTransport(),
-                    "event_hooks": {"request": [_inject_trace_id_async]},
+                    "event_hooks": {"request": [_inject_trace_id]},
                 },
             ),
         )
@@ -153,7 +154,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
         api_key=settings.api_key,
         base_url=settings.hud_gateway_url,
         http_client=DefaultAsyncHttpxClient(
-            event_hooks={"request": [_inject_trace_id_async]},
+            event_hooks={"request": [_inject_trace_id]},
         ),
     )
 
