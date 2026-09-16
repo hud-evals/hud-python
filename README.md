@@ -148,17 +148,7 @@ A **capability** is a connection the environment exposes; a **harness** attaches
 
 From the [platform UI](https://hud.ai) you can run batches, compare models on the same taskset, and inspect every trace.
 
-A **project** holds the environments and tasksets a team creates and decides who can see them. Deploying without one uses your team's default project, so nothing here is required to get started. To put an environment somewhere else, pin the directory once and every later `hud deploy` and `hud sync tasks` follows it:
-
-```bash
-hud project list                   # projects you can see
-hud project use browser-evals     # name or ID; writes project_id to .hud/config.json
-hud project                        # where does a deploy here land?
-```
-
-Use `--project <name-or-id>` for a single command or `hud set HUD_DEFAULT_PROJECT=<name-or-id>` for unlinked directories. Directory links live in `.hud/config.json` and are scoped to the API origin, account, and team. See the [CLI reference](https://docs.hud.ai/v6/reference/cli#hud-project) for selection rules.
-
-→ [Projects](https://docs.hud.ai/v6/reference/projects) · [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
+→ [Run & deploy](https://docs.hud.ai/v6/reference/runtime)
 
 ## Train on rewards
 

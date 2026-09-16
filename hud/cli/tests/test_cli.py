@@ -587,6 +587,7 @@ def test_model_commands_share_platform_transport(monkeypatch):
     monkeypatch.setattr("hud.train.base.make_request", async_request)  # TrainingClient
     for command, extra, method, endpoint in [
         ("checkpoints", [], "GET", f"/models/{model_id}/checkpoints"),
+        ("head", [], "GET", f"/models/{model_id}/checkpoints"),
         ("head", ["--set", "checkpoint"], "PUT", f"/models/{model_id}/head"),
         ("fork", ["--name", "forked"], "POST", "/models/fork"),
     ]:
@@ -596,6 +597,9 @@ def test_model_commands_share_platform_transport(monkeypatch):
         assert result.exit_code == 0, result.output
         assert len(requests) == 2
         assert requests[-1][:2] == (method, f"https://api.example/v2{endpoint}")
+        if command == "head" and not extra:
+            # No active checkpoint is a valid state and still a JSON payload.
+            assert json.loads(result.stdout) == {"model_id": model_id, "head": None}
 
 
 def test_task_rejects_non_object_args_before_connecting():

@@ -193,6 +193,20 @@ def test_bedrock_arn_model_requires_aws_credentials(monkeypatch: pytest.MonkeyPa
         gateway.build_model_client("anthropic", model=_BEDROCK_ARN)
 
 
+def test_bedrock_arn_model_cannot_be_forced_through_the_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "aws_access_key_id", "AKIATEST")
+    monkeypatch.setattr(settings, "aws_secret_access_key", "secret")
+    monkeypatch.setattr(settings, "aws_region", "us-east-1")
+    bedrock = MagicMock()
+    monkeypatch.setattr("anthropic.AsyncAnthropicBedrock", bedrock)
+
+    with pytest.raises(ValueError, match="cannot use the HUD gateway"):
+        gateway.build_model_client("anthropic", model=_BEDROCK_ARN, gateway=True)
+    bedrock.assert_not_called()
+
+
 def test_provider_key_wins_over_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     direct = MagicMock(return_value=object())

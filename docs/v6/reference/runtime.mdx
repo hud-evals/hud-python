@@ -133,7 +133,7 @@ that `LocalRuntime` are serialized. Env hooks share this process and event loop;
 SubprocessRuntime(source, *, env=None, ready_timeout=120.0)
 ```
 
-- **`source`** - `.py` file (or directory) that declares the env, or a live `Environment`, which is served from the file its `@env.template` declarations live in. The child's working directory is the source's directory, so sibling imports and relative data paths resolve.
+- **`source`** - `.py` file (or directory) that declares the env, or a live `Environment`, which is served from the file its `@env.template` declarations live in (or their directory, when they span several files). The child's working directory is the source's directory, so sibling imports and relative data paths resolve.
 - **`env`** - pin a specific env name when a source path declares more than one. Defaults to the placed task's env.
 - **`ready_timeout`** - seconds to wait for the child to start serving.
 

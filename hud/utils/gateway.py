@@ -66,9 +66,12 @@ def build_model_client(
 ) -> GatewayClient:
     """The provider's own key when set, otherwise the HUD gateway; *gateway* skips the
     provider key. A Bedrock inference-profile ARN as the Anthropic *model* is only
-    reachable through Bedrock.
+    reachable through Bedrock, so it cannot be combined with *gateway*.
     """
-    if provider == "anthropic" and model and model.startswith("arn:aws:bedrock:"):
+    bedrock = provider == "anthropic" and model is not None and model.startswith("arn:aws:bedrock:")
+    if bedrock and gateway:
+        raise ValueError(f"{model} is a Bedrock inference profile; it cannot use the HUD gateway")
+    if bedrock:
         if not (
             settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_region
         ):

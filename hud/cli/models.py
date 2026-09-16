@@ -259,4 +259,4 @@ def show_head(
             )
         )
     hud_console.stdout.print(f"[dim]View: {view}[/dim]")
-    return head.model_dump() if head is not None else None
+    return {"model_id": model_id, "head": head.model_dump() if head is not None else None}
