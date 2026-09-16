@@ -35,10 +35,11 @@ HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.e
 **You can usually omit `runtime=`.** A run without one uses its known placement:
 
 - a platform taskset (`Taskset.from_api`) runs on the platform
-- a task created by `@env.template` runs against that environment
+- a row whose `runtime_config` names an image or Compose project starts it under `DockerRuntime`
+- a task created by `@env.template` runs against that environment, in this process
 
 When none of these apply, `run` raises and lists the runtimes you can pass — it never silently picks
-one. For example, a task loaded from JSON needs `runtime=LocalRuntime(env)` or another runtime.
+one. For example, a JSON row with no image needs `runtime=LocalRuntime(env)` or another runtime.
 </Note>
 
 To deploy an environment to the platform and run against it, see

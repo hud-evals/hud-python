@@ -12,7 +12,7 @@ import pytest
 import hud.eval.runtime.local as local_runtime_module
 from hud.agents.base import Agent
 from hud.environment import Environment
-from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset
+from hud.eval import LocalRuntime, RuntimeConfig, SubprocessRuntime, Task, Taskset
 
 _SUMS_ENV = """\
 from hud import Environment
@@ -288,6 +288,28 @@ async def test_tasks_module_uses_factory_environment(tmp_path, request) -> None:
 async def test_ad_hoc_taskset_requires_explicit_placement() -> None:
     with pytest.raises(ValueError, match="no placement: pass runtime="):
         await Taskset("sums", [Task(env="sums", id="add")]).run(_FnAgent(_solve_add))
+
+
+async def test_container_rows_start_their_image_by_default(monkeypatch) -> None:
+    """A row that names an image is placeable without ``runtime=``: it gets DockerRuntime."""
+    import hud.eval.taskset as taskset_module
+
+    live = LocalRuntime(_sums_env())
+    monkeypatch.setattr(
+        taskset_module,
+        "DockerRuntime",
+        lambda: lambda task: live(task.model_copy(update={"runtime_config": None})),
+    )
+    portable = Task(env="sums", id="add", args={"a": 2, "b": 3})
+    container = Task(
+        env="sums", id="add", args={"a": 4, "b": 5}, runtime_config=RuntimeConfig(image="sums")
+    )
+
+    job = await Taskset("sums", [container]).run(_FnAgent(_solve_add))
+    assert [run.reward for run in job.runs] == [1.0]
+
+    with pytest.raises(ValueError, match="no placement"):
+        await Taskset("sums", [container, portable]).run(_FnAgent(_solve_add))
 
 
 async def test_empty_taskset_needs_no_placement() -> None:

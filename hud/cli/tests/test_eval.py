@@ -455,7 +455,7 @@ def test_bedrock_arn_in_config_selects_bedrock_client(eval_cli: _EvalCli, monkey
     monkeypatch.setattr("anthropic.AsyncAnthropicBedrock", bedrock)
     eval_cli.invoke("tasks.py", "claude", "--config", f"checkpoint_name={_BEDROCK_ARN}", "--yes")
     assert eval_cli.agent.config.model == _BEDROCK_ARN
-    assert eval_cli.agent.config.model_client is bedrock.return_value
+    assert eval_cli.agent.anthropic_client is bedrock.return_value
 
 
 def test_interactive_preset_selects_agent_and_model(eval_cli: _EvalCli, monkeypatch) -> None:

@@ -85,10 +85,13 @@ def _is_bedrock_arn(model: str | None) -> bool:
     return model is not None and _BEDROCK_ARN_PATTERN.match(model) is not None
 
 
-def build_model_client(
-    provider: str, *, model: str | None = None, prefer_provider: bool = False
-) -> GatewayClient:
-    """Resolve configured credentials; explicit client overrides belong to the caller."""
+def build_model_client(provider: str, *, model: str | None = None) -> GatewayClient:
+    """The provider's own key when set, otherwise the HUD gateway.
+
+    ``create_agent`` is the always-gateway path; this is what provider agents
+    constructed directly use. A Bedrock inference-profile ARN as the Anthropic
+    *model* is only reachable through Bedrock.
+    """
     if provider == "anthropic" and _is_bedrock_arn(model):
         if not (
             settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_region
@@ -110,9 +113,9 @@ def build_model_client(
         "openai": settings.openai_api_key,
     }
     key = keys[provider]
-    if settings.api_key and not (prefer_provider and key):
-        return build_gateway_client(provider)
     if not key:
+        if settings.api_key:
+            return build_gateway_client(provider)
         raise HudAuthenticationError(
             f"No API key for {provider}. Set its provider key or HUD_API_KEY."
         )

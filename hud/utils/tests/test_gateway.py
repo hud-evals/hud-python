@@ -159,13 +159,36 @@ def test_bedrock_arn_model_requires_aws_credentials(monkeypatch: pytest.MonkeyPa
         gateway.build_model_client("anthropic", model=_BEDROCK_ARN)
 
 
-def test_plain_anthropic_model_ignores_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_provider_key_wins_over_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    direct = MagicMock(return_value=object())
+    monkeypatch.setattr("anthropic.AsyncAnthropic", direct)
+    gateway_client = MagicMock()
+    monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
+
+    client = gateway.build_model_client("anthropic", model="claude-sonnet-4-6")
+
+    assert client is direct.return_value
+    direct.assert_called_once_with(api_key="sk-ant-test")
+    gateway_client.assert_not_called()
+
+
+def test_hud_key_alone_routes_through_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
     gateway_client = MagicMock(return_value=object())
     monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
 
     client = gateway.build_model_client("anthropic", model="claude-sonnet-4-6")
 
     assert client is gateway_client.return_value
+    gateway_client.assert_called_once_with("anthropic")
+
+
+def test_no_key_at_all_is_an_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "api_key", None)
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    with pytest.raises(HudAuthenticationError, match="No API key for openai"):
+        gateway.build_model_client("openai")
 
 
 @pytest.mark.asyncio

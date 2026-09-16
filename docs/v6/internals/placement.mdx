@@ -83,12 +83,15 @@ When `runtime=` is omitted, `_resolve_placement` uses what the process already k
 
 <div className="step-list">
 
-- A taskset loaded from `.py` source serves that source fresh per rollout (a `LocalRuntime` on the
-  file), provided the source actually declares the rows' envs.
 - A platform taskset runs against the platform (`HUDRuntime`).
-- Rows naming envs declared in already-imported modules serve each env fresh from its declaring
-  file.
+- A row whose `runtime_config` names an image or Compose project starts it (`DockerRuntime`).
+- A row minted by a live `@env.template` runs against that environment in this process
+  (`LocalRuntime(env)`), so envs that exist only in memory still have a placement.
 - Anything else raises, naming the forms to pass.
+
+`hud eval` chooses differently on purpose: it always starts from a file, so it isolates each
+rollout — container rows in Docker, bound rows in a child process serving the env's source
+(`SubprocessRuntime`) — instead of serving a live env in-process.
 
 </div>
 

@@ -123,7 +123,7 @@ hud eval env.py claude --full                     # every task, auto-respond, 10
 ```
 
 <Note>
-`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). Rows created from `@env.template` already carry that Environment; the CLI serves its defining file in a subprocess — the same inference `Taskset.run()` uses when you omit `runtime=`.
+`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). Rows created from `@env.template` already carry that Environment; the CLI serves its defining file in a fresh subprocess per rollout, and rows whose `runtime_config` names an image start a container. (`Taskset.run()` without `runtime=` serves a live env in-process instead — see [placement](/v6/internals/placement#resolution).)
 </Note>
 
 **What you don't need for a local run:**
@@ -141,7 +141,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |
 | `--all` | Run every task instead of just the first. |
 | `--model`, `-m` | Model id. |
-| `--gateway`, `-g` | Force LLM calls through the HUD gateway. Implied when only `HUD_API_KEY` is set (no provider key); pass it to force the gateway when a provider key is also present. |
+| `--gateway`, `-g` | Force LLM calls through the HUD gateway. Agents use a provider key when one is set and the gateway otherwise; pass this to use the gateway even when a provider key is present. |
 | `--group` (alias `--group-size`) | Runs per task - a group of repeats whose reward spread you can inspect. |
 | `--max-concurrent` | Cap parallel rollouts. |
 | `--max-steps` | Cap steps per task (default 10). |
@@ -157,7 +157,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 
 ## Run a packaged image
 
-`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD serves the Environment bound on that task (the same inference as `Taskset.run()` with no `runtime=`). With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`).
+`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source`. Without `--url`, HUD serves the Environment bound on that task from its source in a subprocess. With `--url`, it runs the resolved task against the already-served environment instead. Omit `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source (default `.`).
 
 ```bash
 hud task list

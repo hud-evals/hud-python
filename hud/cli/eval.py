@@ -25,7 +25,8 @@ from hud.cli import CLI, CliError, parse_key_value
 from hud.eval import DockerRuntime, HostedRuntime, HUDRuntime, Runtime, SubprocessRuntime, Taskset
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.gateway import build_model_client, normalize_gateway_model_id
+from hud.utils import gateway
+from hud.utils.gateway import normalize_gateway_model_id
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient, canonical_record_id
 
@@ -267,16 +268,12 @@ class EvalConfig(BaseModel):
 
 
 def _build_agent(cfg: EvalConfig) -> Agent:
+    """The agent picks its own client (provider key, else gateway); ``--gateway``
+    overrides that. Hosted rollouts keep the client unset so the platform builds it."""
     assert cfg.agent_type is not None
     config = cfg.agent_type.config_cls(**cfg.agent_kwargs())
-    if (
-        cfg.runtime != "hosted"
-        and config.model_client is None
-        and cfg.agent_type != AgentType.OPENAI_COMPATIBLE
-    ):
-        config.model_client = build_model_client(
-            cfg.agent_type.gateway_provider, model=config.model, prefer_provider=not cfg.gateway
-        )
+    if cfg.gateway and cfg.runtime != "hosted" and cfg.agent_type != AgentType.OPENAI_COMPATIBLE:
+        config.model_client = gateway.build_gateway_client(cfg.agent_type.gateway_provider)
     # cls/config_cls are matched unions; the pairing is correct by construction.
     return cast("Any", cfg.agent_type.cls)(config=config)
 
@@ -287,8 +284,8 @@ def _is_container_row(task: Task) -> bool:
 
 
 def _local_placement(taskset: Taskset) -> Provider:
-    """Spawn each row's own substrate: a container for container rows, a
-    subprocess serving the bound env's source otherwise."""
+    """Isolate each row: its container, or a subprocess serving the bound env's
+    source (``Taskset.run`` alone would serve a live env in-process)."""
     portable = [
         slug for slug, task in taskset.items() if task._env is None and not _is_container_row(task)
     ]

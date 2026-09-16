@@ -25,6 +25,7 @@ from hud.utils.platform import PlatformClient
 from .job import Job, job_enter
 from .run import rollout, validate_rollout_timeouts
 from .runtime import (
+    DockerRuntime,
     HostedRuntime,
     HUDRuntime,
     LocalRuntime,
@@ -34,14 +35,20 @@ from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+    from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
 
     from .run import Run
-    from .runtime import Provider
+    from .runtime import Provider, Runtime
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
+
+
+def _is_container_row(task: Task) -> bool:
+    config = task.runtime_config
+    return config is not None and (config.image is not None or config.compose is not None)
 
 
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
@@ -203,24 +210,30 @@ class Taskset:
         }
 
     def _resolve_placement(self) -> Provider:
+        """Container rows start their image; rows minted by a live env run against it."""
         if self.taskset_id is not None:
             return HUDRuntime()
         rows = list(self)
         rows.extend(task.verifier for task in self if task.verifier is not None)
-        if rows and all(task._env is not None for task in rows):
-            providers: dict[int, LocalRuntime] = {}
-            for task in rows:
-                env = task._env
-                assert env is not None
-                if id(env) not in providers:
-                    providers[id(env)] = LocalRuntime(env)
-            return lambda task: providers[id(task._env)](task)
-        raise ValueError(
-            "no placement: pass runtime= — "
-            'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
-            "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
-            "(a served substrate), or HUDRuntime() (your deployed env)"
-        )
+        placeable = [_is_container_row(task) or task._env is not None for task in rows]
+        if not rows or not all(placeable):
+            raise ValueError(
+                "no placement: pass runtime= — "
+                'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
+                "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
+                "(a served substrate), or HUDRuntime() (your deployed env)"
+            )
+        docker = DockerRuntime()
+        live: dict[int, LocalRuntime] = {}
+        for task in rows:
+            if not _is_container_row(task) and id(task._env) not in live:
+                assert task._env is not None
+                live[id(task._env)] = LocalRuntime(task._env)
+
+        def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
+            return docker(task) if _is_container_row(task) else live[id(task._env)](task)
+
+        return place
 
     async def run(
         self,
@@ -239,9 +252,11 @@ class Taskset:
         somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
         or :class:`~hud.eval.runtime.HostedRuntime` to run each rollout remotely
         on the platform. Left unset, a platform taskset runs on the platform,
-        tasks created by a live environment run against that environment, and
-        portable rows require an explicit placement. One provider serves a
-        mixed-env taskset and can size each substrate per row.
+        rows whose ``runtime_config`` names an image or Compose project start
+        it under ``DockerRuntime``, tasks created by a live environment run
+        against that environment, and other portable rows require an explicit
+        placement. One provider serves a mixed-env taskset and can size each
+        substrate per row.
         Registers one HUD job as the platform receipt and reports each run's
         trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
