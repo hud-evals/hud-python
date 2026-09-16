@@ -8,8 +8,8 @@ import sys
 import tarfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -18,6 +18,9 @@ from hud.cli import AuthScope, DirectoryState
 from hud.cli.__main__ import app
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _PROJECT_ID = "44444444-4444-4444-8444-444444444444"
 _REGISTRY_ID = "55555555-5555-4555-8555-555555555555"
@@ -36,8 +39,9 @@ class _FakeHttpxClient:
         return None
 
     async def put(self, *args: object, **kwargs: object) -> MagicMock:
-        content = kwargs.get("content", b"")
-        type(self).uploaded = content if isinstance(content, bytes) else bytes(content)
+        content = kwargs["content"]
+        assert isinstance(content, bytes)
+        type(self).uploaded = content
         response = MagicMock()
         response.raise_for_status = MagicMock()
         return response
@@ -47,9 +51,11 @@ class _TtyCliRunner(CliRunner):
     """CliRunner replaces stdin with a pipe; this one still reports a TTY."""
 
     @contextmanager
-    def isolation(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-        with super().isolation(*args, **kwargs) as streams:
-            sys.stdin.isatty = lambda: True  # type: ignore[method-assign]
+    def isolation(self, *args: Any, **kwargs: Any) -> Iterator[Any]:
+        with (
+            super().isolation(*args, **kwargs) as streams,
+            patch.object(sys.stdin, "isatty", return_value=True),
+        ):
             yield streams
 
 

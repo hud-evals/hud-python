@@ -16,6 +16,7 @@ import httpx
 import pytest
 import typer
 from dotenv import dotenv_values
+from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -353,7 +354,7 @@ def _event(
 ) -> dict[str, Any] | None:
     sent: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        httpx, "post", lambda _url, json=None, **_k: sent.append(json) or httpx.Response(204)
+        httpx, "post", lambda _url, json, **_k: sent.append(json) or httpx.Response(204)
     )
     try:
         with recorded_invocation(argv, app):
@@ -397,10 +398,14 @@ class TestUsage:
         assert (jobs["command"], jobs["subcommand"]) == ("jobs", None)
 
     def test_jobs_verbs_are_captured(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        assert _event(["hud", "jobs", "list"], monkeypatch)["subcommand"] == "list"
-        assert _event(["hud", "jobs", "cancel"], monkeypatch)["subcommand"] == "cancel"
-        assert _event(["hud", "trace", "get"], monkeypatch)["subcommand"] == "get"
-        assert _event(["hud", "qa", "list"], monkeypatch)["subcommand"] == "list"
+        for argv, verb in [
+            (["hud", "jobs", "list"], "list"),
+            (["hud", "jobs", "cancel"], "cancel"),
+            (["hud", "trace", "get"], "get"),
+            (["hud", "qa", "list"], "list"),
+        ]:
+            event = _event(argv, monkeypatch)
+            assert event is not None and event["subcommand"] == verb
 
     def test_unregistered_command_is_other(self, monkeypatch: pytest.MonkeyPatch) -> None:
         event = _event(["hud", "secret-name"], monkeypatch)
@@ -476,7 +481,7 @@ class TestUsage:
         monkeypatch.setattr(
             httpx,
             "post",
-            lambda url, json=None, **_k: sent.append((url, json)) or httpx.Response(204),
+            lambda url, json, **_k: sent.append((url, json)) or httpx.Response(204),
         )
         with recorded_invocation(["hud", "serve", "my_env.py"], app):
             pass
@@ -617,7 +622,9 @@ def test_root_help_lists_nouns() -> None:
     assert text.index("--help") < text.index("--version")
     assert "Show help." in text
     assert "Show this message and exit." not in text
-    assert get_command(app).list_commands(None) == [
+    group = get_command(app)
+    assert isinstance(group, TyperGroup)
+    assert group.list_commands(typer.Context(group)) == [
         "init",
         "serve",
         "deploy",
