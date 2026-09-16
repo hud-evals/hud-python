@@ -21,7 +21,6 @@ from rich.table import Table
 from hud.cli import (
     CLI,
     CliError,
-    IdGetGroup,
     map_exception,
 )
 from hud.settings import settings
@@ -32,7 +31,6 @@ from hud.utils.platform import PlatformClient
 hud_console = HUDConsole()
 
 jobs_app = CLI(
-    cls=IdGetGroup,
     name="jobs",
     help="List jobs, inspect their traces, and cancel rollouts.",
     add_completion=False,

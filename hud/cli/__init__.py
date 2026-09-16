@@ -315,6 +315,17 @@ class CLIGroup(TyperGroup):
         rank = {name: index for index, name in enumerate(self.command_order)}
         return sorted(names, key=lambda name: (rank.get(name, len(rank)), name))
 
+    def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
+        if self.name in {"jobs", "trace"} and args:
+            try:
+                UUID(args[0])
+            except ValueError:
+                pass
+            else:
+                ctx.default_map = {**(ctx.default_map or {}), "get": ctx.params}
+                args = ["get", *args]
+        return super().resolve_command(ctx, args)
+
     def get_help_option_names(self, ctx: Any) -> list[str]:
         if ctx.parent is None:
             return []
@@ -369,21 +380,6 @@ class CLIGroup(TyperGroup):
                     sys.stderr.write(f"Hint: {error.suggestion}\n")
                 sys.stderr.flush()
             raise typer.Exit(error.exit_code) from exc
-
-
-class IdGetGroup(CLIGroup):
-    """Accept a UUID in place of ``get <id>``, including preceding options."""
-
-    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        _, remaining, _ = self.make_parser(ctx).parse_args(args.copy())
-        if remaining:
-            try:
-                UUID(remaining[0])
-            except ValueError:
-                pass
-            else:
-                args = ["get", *args]
-        return super().parse_args(ctx, args)
 
 
 class CLI(typer.Typer):

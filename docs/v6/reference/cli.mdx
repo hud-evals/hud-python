@@ -28,7 +28,7 @@ List, get, create, and status commands accept `--json`. JSON is written to **std
 
 Commands that support `--dry-run` describe the action without performing it or prompting. Commands with confirmation prompts, such as eval and job cancellation, accept `--yes` / `-y`; without it, a required prompt exits `2` in a non-interactive terminal. Commands without confirmation prompts do not require `--yes`. Deploy handles local `.env` selection separately with `--env-file` or `--no-env`.
 
-Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). `hud jobs <id>` and `hud trace <id>` are shorthands for `get`. Bare `hud jobs` and `hud qa` list. `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
+Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Bare `hud jobs` and `hud qa` list. `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
 
 ## Build & iterate
 
@@ -309,7 +309,6 @@ hud jobs list                 # recent jobs
 hud jobs list --json          # raw JSON array on stdout
 hud jobs list --quiet         # job ids, one per line
 hud jobs get <job-id>         # traces for one job
-hud jobs <job-id>             # shorthand for get
 hud jobs cancel <job-id> --yes
 hud jobs                      # alias for list
 ```
@@ -331,7 +330,6 @@ back to the platform API.
 ```bash
 hud trace get <trace-id>          # rendered view: agent turns, tool calls, tool results
 hud trace get <trace-id> --json   # raw event list
-hud trace <trace-id> --json       # shorthand for get
 ```
 
 Set `HUD_TELEMETRY_ENABLED=0` to keep spans on disk at `~/.hud/spans`, or set
