@@ -52,7 +52,6 @@ if TYPE_CHECKING:
 hud_console = HUDConsole()
 
 _CONFIG_PATH = Path(".hud_eval.toml")
-_SECRET_MARKERS = ("key", "secret", "token", "password")
 
 
 class Placement(StrEnum):
@@ -485,10 +484,7 @@ def eval_command(
     for name, value in agent_kwargs.items():
         if name in ("max_steps", "auto_respond"):
             continue
-        shown = str(value)
-        if any(marker in name for marker in _SECRET_MARKERS) and shown:
-            shown = f"{shown[:4]}****" if len(shown) > 4 else "****"
-        table.add_row(f"  {name}", shown)
+        table.add_row(f"  {name}", "****" if name == "api_key" else str(value))
     hud_console.print(table)
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
 
