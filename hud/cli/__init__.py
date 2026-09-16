@@ -20,7 +20,7 @@ from uuid import UUID
 
 import typer
 from dotenv import set_key
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from typer.core import TyperCommand, TyperGroup, TyperOption
 
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
@@ -55,15 +55,27 @@ class AuthScope(BaseModel):
 
 
 class DirectoryLink(BaseModel):
-    """``.hud/config.json``: platform ids plus the credentials that wrote them."""
+    """``.hud/config.json``: platform ids plus the credentials that wrote them.
 
-    model_config = ConfigDict(extra="forbid")
+    Releases before the scoped schema wrote camelCase ids (``registryId``,
+    ``tasksetId``, ``projectId``) alongside keys no longer kept (``registryName``,
+    ``syncEnv``); those files read as an unscoped link and are rewritten in this
+    schema on the next update.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     version: Literal[1] = 1
     scope: AuthScope | None = None
-    registry_id: UUID | None = None
-    taskset_id: UUID | None = None
-    project_id: UUID | None = None
+    registry_id: UUID | None = Field(
+        default=None, validation_alias=AliasChoices("registry_id", "registryId")
+    )
+    taskset_id: UUID | None = Field(
+        default=None, validation_alias=AliasChoices("taskset_id", "tasksetId")
+    )
+    project_id: UUID | None = Field(
+        default=None, validation_alias=AliasChoices("project_id", "projectId")
+    )
 
 
 class DirectoryState:
@@ -110,8 +122,8 @@ class DirectoryState:
                 f"{path} is not a valid HUD workspace config.",
                 suggestion="Delete the file and run the command again.",
             ) from exc
-        if stored.scope != self.scope:
-            if stored.scope is not None and stored.scope.origin != self.scope.origin:
+        if stored.scope is not None and stored.scope != self.scope:
+            if stored.scope.origin != self.scope.origin:
                 detail = (
                     f"{path} was linked against {stored.scope.origin}, not {self.scope.origin}."
                 )

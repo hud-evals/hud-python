@@ -214,10 +214,11 @@ taskset ids for this working copy, plus the API origin, user, and team that crea
 A worktree or copy of the directory keeps the file; credentials that do not match the stored
 scope fail instead of using the ids. Existing resources remain in their original Project.
 
-Legacy `.hud/deploy.json` is left unread. A `.hud/config.json` that is not this schema, or that was
-written under different credentials, fails instead of being imported. Delete the file; the next
-deploy, project, or sync command writes a new one. The first successful task upload records its canonical
-ID; later explicit targets only replace it with `--link`.
+Legacy `.hud/deploy.json` is left unread. A `.hud/config.json` written by an earlier release (camelCase
+`registryId`/`tasksetId`, no credential scope) still links the directory and is rewritten in the current
+schema, with the scope recorded, by the next deploy, project, or sync command. A config written under
+*different* credentials fails instead of being imported; switch credentials or delete the file. The first
+successful task upload records its canonical ID; later explicit targets only replace it with `--link`.
 
 Credentials remain in `~/.hud/.env`, cache in `~/.hud/.cache`, and authored source and
 `.hud_eval.toml` remain in the project. Missing evaluation configuration uses defaults without

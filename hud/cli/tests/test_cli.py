@@ -88,6 +88,41 @@ def test_scoped_links_do_not_cross_origins_users_teams_or_directories(tmp_path: 
     assert state.path == directory / ".hud" / "config.json"
 
 
+def test_released_camelcase_config_reads_and_migrates_on_write(tmp_path: Path) -> None:
+    """A config written by hud 0.6.x (camelCase ids, cached name, .env preference, no
+    scope) still links the directory, and the next write rewrites it in this schema."""
+    directory = tmp_path / "environment"
+    path = directory / ".hud" / "config.json"
+    path.parent.mkdir(parents=True)
+    registry, taskset = UUID(int=10), UUID(int=11)
+    path.write_text(
+        json.dumps(
+            {
+                "registryId": str(registry),
+                "registryName": "browser-env",
+                "tasksetId": str(taskset),
+                "syncEnv": True,
+            }
+        )
+    )
+    state = DirectoryState(AuthScope.model_validate(SCOPE), directory)
+
+    link = state.load()
+    assert (link.registry_id, link.taskset_id, link.scope) == (registry, taskset, None)
+
+    assert state.update(DirectoryLink(project_id=UUID(int=12))) is True
+    written = json.loads(path.read_text())
+    assert written["scope"] == SCOPE
+    assert written["registry_id"] == str(registry)
+    assert written["taskset_id"] == str(taskset)
+    assert written["project_id"] == str(UUID(int=12))
+    assert not {"registryId", "registryName", "tasksetId", "syncEnv"} & written.keys()
+    with pytest.raises(CliError, match="different HUD credentials"):
+        DirectoryState(
+            AuthScope.model_validate({**SCOPE, "user_id": str(UUID(int=3))}), directory
+        ).load()
+
+
 def test_read_leaves_legacy_files_and_home_untouched(tmp_path: Path) -> None:
     directory = tmp_path / "environment"
     legacy = directory / ".hud" / "deploy.json"
