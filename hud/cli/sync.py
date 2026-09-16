@@ -174,7 +174,6 @@ def sync_tasks_command(
         remote = Taskset.from_api(target_ref)
         if not remote:
             hud_console.warning("No tasks found in taskset")
-            return None
         out = Path(export)
         if out.suffix.lower() == ".csv":
             # Spreadsheet view: one ``arg:`` column per key; nested values as JSON.
@@ -204,7 +203,12 @@ def sync_tasks_command(
         else:
             out = remote.to_file(out)
         hud_console.success(f"Exported {len(remote)} tasks to {out}")
-        return None
+        return {
+            "action": "export",
+            "taskset": target_ref,
+            "path": str(out),
+            "task_count": len(remote),
+        }
 
     hud_console.progress_message(f"Collecting tasks from {source}...")
     local_taskset = Taskset.from_file(source)

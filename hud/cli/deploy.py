@@ -70,6 +70,9 @@ _UNSEARCHED_DIRS = {
 }
 """Directories skipped when looking for ``Environment(...)`` declarations."""
 
+_REGISTRY_RUNTIMES = ("hud", "modal")
+"""Default runtimes a registry accepts (the platform's ``RequestedRuntimeProvider``)."""
+
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
     """Compile one ``.dockerignore`` glob: ``*`` is one segment, ``**`` is any depth."""
@@ -252,6 +255,12 @@ async def deploy_command(
         (env_dir / ".env").is_file() and not no_env and env_file_path is None and first_deploy
     )
     resolved_runtime = runtime.lower() if runtime is not None else None
+    if resolved_runtime is not None and resolved_runtime not in _REGISTRY_RUNTIMES:
+        raise CliError(
+            "usage",
+            f"Unknown runtime {runtime!r}. Choose one of: {', '.join(_REGISTRY_RUNTIMES)}.",
+            input={"runtime": runtime},
+        )
     config_path = Path(runtime_config).expanduser() if runtime_config else None  # noqa: ASYNC240
     if config_path is None:
         resolved_runtime_config = None

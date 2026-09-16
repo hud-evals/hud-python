@@ -120,6 +120,14 @@ def test_runtime_flag_is_case_insensitive(tmp_path: Path) -> None:
     assert _dry_run(tmp_path, "--runtime", "HUD")["runtime"] == "hud"
 
 
+def test_unknown_runtime_is_a_usage_error_before_upload(tmp_path: Path) -> None:
+    _write_env(tmp_path)
+
+    message = _deploy_name_error(tmp_path, "--runtime", "moddal")
+    assert "Unknown runtime 'moddal'" in message
+    assert "hud, modal" in message
+
+
 def _deploy_name_error(tmp_path: Path, *args: str) -> str:
     result = CliRunner().invoke(
         app, ["deploy", str(tmp_path), "--dry-run", "--json", "--no-env", *args]

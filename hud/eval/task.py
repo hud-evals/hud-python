@@ -77,6 +77,15 @@ class Task(BaseModel):
             raise ValueError("nested verifier tasks are not supported")
         return verifier
 
+    @property
+    def shares_verifier_runtime(self) -> bool:
+        """The verifier runs on this task's substrate: same env, no runtime of its own."""
+        return (
+            self.verifier is not None
+            and self.verifier.env == self.env
+            and self.verifier.runtime_config is None
+        )
+
     @field_serializer("runtime_config")
     def _serialize_runtime_config(
         self,

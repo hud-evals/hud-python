@@ -312,6 +312,38 @@ async def test_container_rows_start_their_image_by_default(monkeypatch) -> None:
         await Taskset("sums", [container, portable]).run(_FnAgent(_solve_add))
 
 
+async def test_container_row_with_shared_verifier_is_placeable(monkeypatch) -> None:
+    """A verifier on the same env with no runtime of its own rides the actor's container."""
+    import hud.eval.taskset as taskset_module
+
+    env = _sums_env()
+
+    @env.template(id="verify")
+    async def verify() -> AsyncGenerator[Any, Any]:
+        actor_grade = yield ""
+        yield 1.0 if actor_grade["score"] == 1.0 else 0.0
+
+    live = LocalRuntime(env)
+    starts: list[str] = []
+
+    def docker(task: Task) -> Any:
+        starts.append(task.id)
+        return live(task.model_copy(update={"runtime_config": None}))
+
+    monkeypatch.setattr(taskset_module, "DockerRuntime", lambda: docker)
+    container = Task(
+        env="sums",
+        id="add",
+        args={"a": 4, "b": 5},
+        runtime_config=RuntimeConfig(image="sums"),
+        verifier=Task(env="sums", id="verify"),
+    )
+
+    job = await Taskset("sums", [container]).run(_FnAgent(_solve_add))
+    assert [run.reward for run in job.runs] == [1.0]
+    assert starts == ["add"]  # one container for actor and verifier
+
+
 async def test_empty_taskset_needs_no_placement() -> None:
     job = await Taskset("empty", []).run(_FnAgent(_solve_add))
 

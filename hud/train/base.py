@@ -5,12 +5,15 @@ modality-independent ``optim_step``. Modality clients (e.g.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
 from hud.settings import settings
 from hud.train.types import CheckpointResponse, OptimStepRequest, OptimStepResult
+from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.gateway import resolve_gateway_model
+from hud.utils.platform import PlatformClient
 from hud.utils.requests import make_request
 
 
@@ -43,7 +46,13 @@ class BaseTrainingClient:
             try:
                 self._model_id = str(UUID(self.model))
             except ValueError:
-                self._model_id = resolve_gateway_model(self.model).id
+                if not self._api_key:
+                    raise HudAuthenticationError(
+                        "HUD_API_KEY is required to resolve a model slug"
+                    ) from None
+                platform = PlatformClient(self._api_url, self._api_key)
+                entry = await asyncio.to_thread(resolve_gateway_model, self.model, platform)
+                self._model_id = entry.id
         return self._model_id
 
     async def _train_url(self, suffix: str) -> str:

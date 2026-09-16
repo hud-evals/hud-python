@@ -160,9 +160,11 @@ def build_gateway_client(provider: str) -> GatewayClient:
 
 
 @lru_cache(maxsize=1)
-def list_gateway_models() -> list[GatewayModelInfo]:
-    """Models available through the HUD gateway (the whole platform model catalog)."""
-    platform = PlatformClient.from_settings()
+def list_gateway_models(platform: PlatformClient | None = None) -> list[GatewayModelInfo]:
+    """Models available through the HUD gateway (the whole platform model catalog),
+    as seen by *platform* (the settings' client when omitted)."""
+    if platform is None:
+        platform = PlatformClient.from_settings()
     models: list[GatewayModelInfo] = []
     while True:
         page = GatewayModelsResponse.model_validate(
@@ -175,12 +177,12 @@ def list_gateway_models() -> list[GatewayModelInfo]:
             raise ValueError("Models API returned an empty page before the reported total")
 
 
-def resolve_gateway_model(model: str) -> GatewayModelInfo:
+def resolve_gateway_model(model: str, platform: PlatformClient | None = None) -> GatewayModelInfo:
     """The catalog entry for a model id, display name, or slug (case-insensitive;
     a slug's provider prefix is optional)."""
     names = [
         (name, entry)
-        for entry in list_gateway_models()
+        for entry in list_gateway_models(platform)
         for name in (
             entry.id,
             entry.name,

@@ -155,6 +155,17 @@ def test_load_rejects_unset_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         EvalConfig.load(path)
 
 
+def test_load_treats_unset_settings_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    path = tmp_path / ".hud_eval.toml"
+    path.write_text('[openai_compatible]\napi_key = "${openai_api_key}"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\$\{openai_api_key\} is not set"):
+        EvalConfig.load(path)
+
+
 @pytest.mark.parametrize(
     "contents, match",
     [
@@ -304,7 +315,7 @@ def test_gateway_model_alias_selects_agent_and_model(eval_cli: _EvalCli, monkeyp
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda *_: [model])
     eval_cli.invoke("tasks.py", "glm-5.2", "--yes")
     assert type(eval_cli.agent).__name__ == "OpenAIChatAgent"
     assert eval_cli.agent.config.model == "z-ai/glm-5.2"
@@ -488,11 +499,14 @@ def test_openai_compatible_routes_through_gateway_despite_openai_key(
     assert eval_cli.agent.config.base_url is None
 
 
-def test_openai_compatible_custom_endpoint_is_used_directly(
-    eval_cli: _EvalCli, monkeypatch
+@pytest.mark.parametrize("force_gateway", [False, True])
+def test_openai_compatible_custom_endpoint_is_used_unless_gateway_is_forced(
+    eval_cli: _EvalCli, monkeypatch, force_gateway
 ) -> None:
     client = MagicMock(return_value=object())
+    gateway = MagicMock(return_value=object())
     monkeypatch.setattr("hud.agents.openai_compatible.agent.AsyncOpenAI", client)
+    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", gateway)
     eval_cli.invoke(
         "tasks.py",
         "openai_compatible",
@@ -502,11 +516,17 @@ def test_openai_compatible_custom_endpoint_is_used_directly(
         "api_key=custom-key",
         "-c",
         "base_url=https://custom.example",
-        "--gateway",
+        *(["--gateway"] if force_gateway else []),
         "--yes",
     )
-    client.assert_called_once_with(api_key="custom-key", base_url="https://custom.example")
-    assert eval_cli.agent.oai is client.return_value
+    if force_gateway:
+        gateway.assert_called_once_with("openai")
+        client.assert_not_called()
+        assert eval_cli.agent.oai is gateway.return_value
+    else:
+        client.assert_called_once_with(api_key="custom-key", base_url="https://custom.example")
+        gateway.assert_not_called()
+        assert eval_cli.agent.oai is client.return_value
 
 
 def test_bedrock_arn_in_config_selects_bedrock_client(eval_cli: _EvalCli, monkeypatch) -> None:

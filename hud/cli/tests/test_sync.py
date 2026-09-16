@@ -264,9 +264,15 @@ def test_export_csv_flattens_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         },
     )
 
-    result = CliRunner().invoke(app, ["sync", "tasks", "demo", "--export", "tasks.csv"])
+    result = CliRunner().invoke(app, ["sync", "tasks", "demo", "--export", "tasks.csv", "--json"])
 
     assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {
+        "action": "export",
+        "taskset": "demo",
+        "path": "tasks.csv",
+        "task_count": 2,
+    }
     csv_text = (tmp_path / "tasks.csv").read_text()
     assert "slug,id,env,arg:n" in csv_text
     assert "one,solve,e,1" in csv_text

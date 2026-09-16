@@ -71,7 +71,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         self.oai: AsyncOpenAI
         if config.model_client is not None:
             self.oai = config.model_client
-        elif config.api_key is not None or config.base_url is not None:
+        elif not config.gateway and (config.api_key is not None or config.base_url is not None):
             self.oai = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
         elif settings.api_key:
             self.oai = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))

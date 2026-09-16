@@ -214,7 +214,12 @@ class Taskset:
         if self.taskset_id is not None:
             return HUDRuntime()
         rows = list(self)
-        rows.extend(task.verifier for task in self if task.verifier is not None)
+        # A verifier sharing its task's substrate is placed with that task, not on its own.
+        rows.extend(
+            task.verifier
+            for task in self
+            if task.verifier is not None and not task.shares_verifier_runtime
+        )
         placeable = [_is_container_row(task) or task._env is not None for task in rows]
         if not rows or not all(placeable):
             raise ValueError(

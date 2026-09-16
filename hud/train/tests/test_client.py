@@ -7,6 +7,7 @@ import pytest
 
 from hud.eval.run import Run
 from hud.train import TrainingClient
+from hud.utils.gateway import list_gateway_models
 
 _MODEL_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -27,6 +28,31 @@ async def test_training_rejects_incomplete_run_groups() -> None:
 
     with pytest.raises(ValueError, match="incomplete GRPO groups"):
         await TrainingClient("test-model").forward_backward(runs, group_size=2)
+
+
+async def test_slug_resolves_through_the_clients_own_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hud.settings.settings.api_key", None)
+    list_gateway_models.cache_clear()
+    seen: list[tuple[str, str | None]] = []
+
+    def catalog(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        seen.append((url, kwargs.get("api_key")))
+        return {
+            "items": [{"id": _MODEL_ID, "model_name": "owner/model"}],
+            "total": 1,
+        }
+
+    monkeypatch.setattr("hud.utils.platform.make_request_sync", catalog)
+    client = TrainingClient("owner/model", api_key="team-key", api_url="https://api.example")
+    try:
+        url = await client._train_url("optim_step")
+    finally:
+        list_gateway_models.cache_clear()
+    assert url.startswith(f"{client._base_url}/v1/models/{_MODEL_ID}/")
+    assert seen and seen[0][0].startswith("https://api.example/v2/models")
+    assert seen[0][1] == "team-key"
 
 
 def _grpo_runs(groups: list[str], rewards: list[float]) -> list[Run]:

@@ -87,7 +87,7 @@ def gateway_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_create_agent_unknown_model_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     # No gateway models available -> a bare unknown model can't be resolved.
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", list)
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda *_: [])
     with pytest.raises(ValueError, match="not found"):
         create_agent("totally-unknown-model-xyz")
 
@@ -141,7 +141,7 @@ def test_create_agent_resolves_gateway_model_metadata(
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda *_: [model])
 
     def _build_client(_provider: str) -> object:
         return object()
@@ -177,7 +177,7 @@ def test_create_agent_accepts_gateway_model_aliases(
         sdk_agent_type="openai_compatible",
         provider=GatewayProviderInfo(name="openai"),
     )
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda: [model])
+    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda *_: [model])
 
     def _build_client(_provider: str) -> object:
         return object()

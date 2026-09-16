@@ -522,11 +522,7 @@ async def rollout(
             actor_result: dict[str, Any] = {}
             actor_session_id: str | None = None
             verifier = task.verifier
-            shared_verifier = (
-                verifier is not None
-                and verifier.env == task.env
-                and verifier.runtime_config is None
-            )
+            shared_verifier = task.shares_verifier_runtime
             async with contextlib.AsyncExitStack() as scope:
                 actor = contextlib.AsyncExitStack()
                 await actor.__aenter__()

@@ -112,7 +112,7 @@ class EvalConfig(BaseModel):
     def load(cls, path: Path = _CONFIG_PATH) -> EvalConfig:
         if not path.exists():
             return cls()
-        fields = settings.model_dump()
+        fields = {key: value for key, value in settings.model_dump().items() if value is not None}
         mapping: dict[str, Any] = {**os.environ, **fields}
         mapping.update({key.upper(): value for key, value in fields.items()})
         if settings.api_key:
