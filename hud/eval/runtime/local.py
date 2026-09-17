@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import os
 import sys
 from collections import deque
 from contextlib import asynccontextmanager
@@ -153,10 +154,10 @@ class SubprocessRuntime:
     unless *env* pins one explicitly; placing a row whose env the source does
     not define fails loudly in the child.
 
-    Set *task_source* when the path authors task rows: the child reloads their
-    imports and serves the bound environment, including multi-file registrations
-    and independent verifiers. Its working directory is the placed template's
-    directory when the task carries a bound environment.
+    Set *task_source* when the path authors task rows: the child reloads them in
+    the caller's working directory, then serves the bound environment, including
+    multi-file registrations and independent verifiers. Before initialization,
+    it switches to the placed template's directory for a task with a bound env.
 
     Otherwise the child's working directory is the source's directory, so sibling
     imports and relative data paths resolve; ``@env.initialize`` daemons start
@@ -199,8 +200,10 @@ class SubprocessRuntime:
             raise ValueError("SubprocessRuntime does not support task runtime_config")
         if not self.source.exists():
             raise FileNotFoundError(f"SubprocessRuntime: source not found: {self.source}")
-        cwd = self.source if self.source.is_dir() else self.source.parent
+        cwd: Path | None = self.source if self.source.is_dir() else self.source.parent
         if self.task_source:
+            if task._env is not None:
+                cwd = Path(inspect.getabsfile(task._env.tasks[task.id].func)).parent
             cmd = [
                 sys.executable,
                 "-c",
@@ -208,9 +211,9 @@ class SubprocessRuntime:
                 "_serve_task_source(*sys.argv[1:])",
                 str(self.source),
                 self.env or task.env,
+                str(cwd),
             ]
-            if task._env is not None:
-                cwd = Path(inspect.getabsfile(task._env.tasks[task.id].func)).parent
+            cwd = None
         else:
             cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
             cmd += ["--env", self.env or task.env]
@@ -289,7 +292,7 @@ class SubprocessRuntime:
             )
 
 
-def _serve_task_source(source: str, name: str) -> None:
+def _serve_task_source(source: str, name: str, directory: str) -> None:
     from hud.environment.server import _serve_until_terminated
     from hud.eval.taskset import Taskset
 
@@ -305,4 +308,5 @@ def _serve_task_source(source: str, name: str) -> None:
         raise ValueError(f"no bound Environment named {name!r} found in {path}")
     if len(matched) > 1:
         raise ValueError(f"multiple bound Environments named {name!r} found in {path}")
+    os.chdir(directory)
     asyncio.run(_serve_until_terminated(next(iter(matched.values())), "127.0.0.1", 0))

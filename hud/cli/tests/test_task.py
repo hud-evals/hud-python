@@ -78,8 +78,9 @@ async def test_task_source_uses_sibling_environment_for_start_and_grade(tmp_path
 @pytest.mark.parametrize("command", ["task", "eval"])
 @pytest.mark.parametrize("expose_env", [False, True])
 @pytest.mark.parametrize("directory", [False, True])
+@pytest.mark.parametrize("outside_source", [False, True])
 def test_multifile_source_replays_all_registrations(
-    tmp_path, monkeypatch, command, expose_env, directory
+    tmp_path, monkeypatch, command, expose_env, directory, outside_source
 ):
     import sys
 
@@ -90,10 +91,17 @@ def test_multifile_source_replays_all_registrations(
     monkeypatch.setattr(settings, "api_key", "test-key")
     monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
     monkeypatch.chdir(tmp_path)
-    package = tmp_path / "split_example"
+    (tmp_path / "rows.json").write_text('["first", "second"]')
+    source_dir = tmp_path / "project" if outside_source else tmp_path
+    source_dir.mkdir(exist_ok=True)
+    package = source_dir / "split_example"
     package.mkdir()
     (package / "__init__.py").write_text("")
-    (package / "core.py").write_text('from hud import Environment\nenv = Environment("split")\n')
+    (package / "core.py").write_text(
+        'from pathlib import Path\nfrom hud import Environment\nenv = Environment("split")\n'
+        "@env.initialize\nasync def initialize():\n"
+        '    assert Path("fixture.txt").read_text() == "answer"\n'
+    )
     (package / "fixture.txt").write_text("answer")
     for name in ("first", "second"):
         (package / f"{name}.py").write_text(
@@ -104,16 +112,18 @@ def test_multifile_source_replays_all_registrations(
             '    yield 1.0 if answer == Path("fixture.txt").read_text() '
             "and len(env.tasks) == 2 else 0.0\n"
         )
-    source = tmp_path / "tasks.py"
+    source = source_dir / "tasks.py"
     source.write_text(
+        "import json\nfrom pathlib import Path\n"
         "from split_example.first import first\n"
         "from split_example.second import second\n"
         + ("from split_example.core import env\n" if expose_env else "")
-        + "tasks = [first(), second()]\n"
+        + 'factories = {"first": first, "second": second}\n'
+        + 'tasks = [factories[name]() for name in json.loads(Path("rows.json").read_text())]\n'
     )
     if directory:
-        (tmp_path / "env.py").write_text("from split_example.core import env\n")
-        source = tmp_path
+        (source_dir / "env.py").write_text("from split_example.core import env\n")
+        source = source_dir
     scores = []
 
     async def run(self, agent, *, runtime, **kwargs):
