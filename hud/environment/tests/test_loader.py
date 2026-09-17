@@ -31,19 +31,6 @@ second = Environment("env-two")
     assert load_environment(single).name == "only"
 
 
-def test_task_source_requires_unambiguous_bound_environment(tmp_path):
-    source = tmp_path / "tasks.py"
-    source.write_text(
-        "from hud import Environment\n"
-        'first = Environment("same")\nsecond = Environment("same")\n'
-        '@first.template()\nasync def one():\n    yield "one"\n'
-        '@second.template()\nasync def two():\n    yield "two"\n'
-        "tasks = [one(), two()]\n"
-    )
-    with pytest.raises(ValueError, match="multiple Environments"):
-        load_environment(source, name="same", task_source=True)
-
-
 @pytest.fixture
 def factory_module(request):
     """An importable module exposing an env and a factory, cleaned up after."""

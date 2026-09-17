@@ -94,12 +94,15 @@ def test_multifile_source_replays_all_registrations(
     package.mkdir()
     (package / "__init__.py").write_text("")
     (package / "core.py").write_text('from hud import Environment\nenv = Environment("split")\n')
+    (package / "fixture.txt").write_text("answer")
     for name in ("first", "second"):
         (package / f"{name}.py").write_text(
+            "from pathlib import Path\n"
             "from .core import env\n"
             f'@env.template(id="{name}")\nasync def {name}():\n'
             '    answer = yield "question"\n'
-            '    yield 1.0 if answer == "answer" and len(env.tasks) == 2 else 0.0\n'
+            '    yield 1.0 if answer == Path("fixture.txt").read_text() '
+            "and len(env.tasks) == 2 else 0.0\n"
         )
     source = tmp_path / "tasks.py"
     source.write_text(
@@ -136,6 +139,53 @@ def test_multifile_source_replays_all_registrations(
         assert scores == [1.0, 1.0]
     else:
         assert json.loads(result.stdout)["score"] == 1.0
+
+
+def test_eval_runs_verifier_imported_only_through_task_source(tmp_path, monkeypatch):
+    import sys
+
+    from hud.agents.openai import OpenAIAgent
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    monkeypatch.chdir(tmp_path)
+    package = tmp_path / "verifier_example"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "fixture.txt").write_text("answer")
+    (package / "actor.py").write_text(
+        'from hud import Environment\nenv = Environment("actor")\n'
+        "@env.template()\nasync def solve():\n"
+        '    yield "question"\n    yield 0.0\n'
+    )
+    (package / "judge.py").write_text(
+        'from pathlib import Path\nfrom hud import Environment\nenv = Environment("judge")\n'
+        "@env.initialize\nasync def initialize():\n"
+        '    assert Path("fixture.txt").read_text() == "answer"\n'
+        "@env.template()\nasync def verify():\n"
+        '    result = yield "verify"\n'
+        '    yield 1.0 if result["score"] == 0.0 else 0.0\n'
+    )
+    source = tmp_path / "tasks.py"
+    source.write_text(
+        "from verifier_example.actor import solve\n"
+        "from verifier_example.judge import verify\n"
+        "tasks = [solve()]\ntasks[0].verifier = verify()\n"
+    )
+
+    async def answer(self, run):
+        run.trace.content = "answer"
+
+    monkeypatch.setattr(OpenAIAgent, "__call__", answer)
+    try:
+        result = CliRunner().invoke(app, ["eval", str(source), "openai", "--yes", "--json"])
+    finally:
+        for name in list(sys.modules):
+            if name == "verifier_example" or name.startswith("verifier_example."):
+                sys.modules.pop(name)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["mean_reward"] == 1.0
 
 
 @pytest.mark.parametrize("mode", ["empty", "parked", "failed_grade", "ambiguous"])
