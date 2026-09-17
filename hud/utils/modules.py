@@ -28,6 +28,20 @@ def _module_name(file: Path) -> tuple[str, Path]:
     while (directory / "__init__.py").is_file():
         parts.insert(0, directory.name)
         directory = directory.parent
+    if file.parent != directory:
+        package_root = directory / parts[0]
+        for name, module in tuple(sys.modules.items()):
+            if name != parts[0] and not name.startswith(f"{parts[0]}."):
+                continue
+            locations = (*getattr(module, "__path__", ()), getattr(module, "__file__", None))
+            if any(
+                location and not Path(location).resolve().is_relative_to(package_root)
+                for location in locations
+            ):
+                raise ValueError(
+                    f"cannot load {file}: package {parts[0]!r} is already imported from "
+                    "a different source root; load this source in a separate process"
+                )
     return ".".join(parts), directory
 
 
@@ -48,9 +62,7 @@ def load_module(path: str | Path) -> ModuleType:
         raise ImportError(f"cannot import module: {file}")
 
     parent = str(import_root)
-    inserted = parent not in sys.path
-    if inserted:
-        sys.path.insert(0, parent)
+    sys.path.insert(0, parent)
     previous = sys.modules.get(mod_name)
     try:
         package = mod_name.rpartition(".")[0]
@@ -64,9 +76,8 @@ def load_module(path: str | Path) -> ModuleType:
         spec.loader.exec_module(module)
         return module
     finally:
-        if inserted:
-            with contextlib.suppress(ValueError):
-                sys.path.remove(parent)
+        with contextlib.suppress(ValueError):
+            sys.path.remove(parent)
         if previous is None:
             sys.modules.pop(mod_name, None)
         else:

@@ -113,21 +113,17 @@ The constructor for each built-in runtime:
 LocalRuntime(source, *, env=None, ready_timeout=120.0)
 ```
 
-Runs an environment in this process. `source` can be:
+Runs an environment in the current Python process. `source` can be:
 
-- **a `.py` file or directory** that declares it, loaded per rollout (sibling and package-relative
-  imports resolve). **`env`** pins one name when the source declares several; it defaults to the placed
-  task's env.
-- **a live `Environment`** - served directly.
-- **a `(task) -> Environment` constructor** for envs built in code (integrations, parameterized
-  envs), called fresh per rollout with the placed row.
+- **A `.py` file or directory:** load the environment from that source.
+- **An `Environment`:** reuse that instance. This runtime runs one rollout at a time.
+- **A `(task) -> Environment` function:** call it for each rollout.
 
-`ready_timeout` bounds `@env.initialize` startup. Loading a source retains imported dependencies
-in this process, so acquisitions can share environment objects and module state.
-Constructors are called per acquisition and can build a new environment each time. A live
-`Environment` instance is shared and guarded by a lock, so acquisitions through that `LocalRuntime`
-are serialized. Env hooks share this process and event loop; use `SubprocessRuntime` or
-`DockerRuntime` when rollouts need process isolation.
+`env` selects an environment by name when loading a source; it defaults to the task's
+environment. `ready_timeout` limits how long initialization can take.
+
+Imported modules share state between runs. Loading a second copy of a package from
+another directory raises an error. Use `SubprocessRuntime` for separate Python processes.
 
 ### `SubprocessRuntime`
 
@@ -135,9 +131,16 @@ are serialized. Env hooks share this process and event loop; use `SubprocessRunt
 SubprocessRuntime(source, *, env=None, ready_timeout=120.0)
 ```
 
-- **`source`** - `.py` file (or directory) that declares or imports the complete environment. Pass the assembly file, such as `env.py`, when templates and hooks span modules. A live `Environment` is also accepted when all its templates live in one file; that file is served. The child's working directory is the source's directory, so sibling imports and relative data paths resolve.
-- **`env`** - pin a specific env name when a source path declares more than one. Defaults to the placed task's env.
-- **`ready_timeout`** - seconds to wait for the child to start serving.
+Starts a new process for each rollout and stops it afterward.
+
+- **`source`** - a `.py` file or directory that exports the environment. For a split
+  environment, pass `env.py` and import all templates and hooks there.
+- **`env`** - the environment name to serve. Defaults to the task's environment.
+- **`ready_timeout`** - seconds to wait for the process to start serving.
+
+You can also pass an `Environment` whose templates all live in one file; the runtime
+serves that file. Each process runs from its source directory and shares host files
+and ports.
 
 ### `DockerRuntime`
 

@@ -106,7 +106,7 @@ hud deploy --project <name-or-id>
 
 ### `hud eval`
 
-Run an agent over a task source (`.py`, a directory, or JSON/JSONL), grade the result, and print the reward. Local Python environments run in a **fresh subprocess per rollout**. Rows whose `runtime_config` specifies an image or Compose project use Docker. To use a deployed environment, pass `--remote`, `--runtime hud`, or a `tcp://` address.
+Run and grade tasks from a Python file, a directory, JSON/JSONL, or a platform taskset.
 
 ```bash
 # Split layout (hud init): templates in env.py, task rows in tasks.py
@@ -121,20 +121,30 @@ hud eval env.py claude --all                      # every task, not just the fir
 hud eval env.py claude --full                     # every task, auto-respond, 100 steps
 ```
 
-<Note>
-`hud eval` loads tasks from the path you pass. In a split project, use `tasks.py` (or `.` to scan the directory) and keep an `env.py` beside it that imports the environment's templates and startup hooks. Templates and hooks can live in multiple modules. JSON/JSONL rows use the same `env.py`. A Python task source that defines templates itself is served directly.
+Local Python environments run in a new process for each rollout:
 
-Without `env.py`, bound Python tasks use their template source file, which must contain all templates for that environment; unbound data rows scan the source directory. For other layouts, serve an explicit source with `hud serve` and attach with `--runtime tcp://host:port`, or pass `SubprocessRuntime(path)` in Python. See [runtimes](/v6/reference/runtime#subprocessruntime).
-</Note>
+| Task source | Environment served |
+|-------------|--------------------|
+| A Python file that defines templates | That file |
+| A separate task file beside `env.py` | `env.py` |
+| A directory containing `env.py` | `env.py` |
 
-For a local run, `hud eval` starts the environment subprocess. Tasks with an image
-or Compose runtime configuration require Docker. Use a HUD API key for gateway
-inference and platform reporting, or a direct provider key with HUD telemetry
-uploads disabled. Each child starts in its source directory. Processes share the
-host filesystem and network; allocate separate workspaces and ports for concurrent
-rollouts, or use containers for isolation.
+`env.py` can import templates and hooks from other modules. Without `env.py`, tasks
+created by templates use the single file containing all of their environment's
+templates. Rows that only name an environment scan the task source's directory.
+To choose another source, use `hud serve path` with `--runtime tcp://host:port`, or
+[`SubprocessRuntime(path)`](/v6/reference/runtime#subprocessruntime) in Python.
 
-For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claude`. The tasks are fetched from the platform and the rollouts run remotely by default. Use `--runtime local` when every task and separately placed verifier supplies an image or Compose runtime configuration.
+Each process runs from its source directory and shares host files and ports.
+Use separate workspaces and ports for concurrent runs. Tasks configured with an
+image or Compose project run in Docker.
+
+Use a HUD API key for gateway inference and platform reporting, or a direct
+provider key with HUD telemetry uploads disabled.
+
+Platform tasksets run remotely by default: `hud eval "My Tasks" claude`. To run
+them locally, pass `--runtime local`; each task and any verifier running in its
+own environment must include an image or Compose configuration.
 
 **Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
 
@@ -151,7 +161,7 @@ For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claud
 | `--config`, `-c` | Agent config `key=value` (repeatable). |
 | `--verbose`, `-v` | Show agent logs (step progress, tool calls) for batch runs too. |
 | `--very-verbose`, `-vv` | Debug-level logs. |
-| `--runtime` | Placement: `local` (a child process per rollout serving the env source — `SubprocessRuntime` — or `DockerRuntime` for rows with an image or Compose project), `hud` (HUD runtime tunnel — `HUDRuntime`), `hosted` (whole rollout on the platform — `HostedRuntime`), `docker`, `modal`, or `daytona` (each row's `runtime_config` handed to that provider), or `tcp://host:port`. Defaults to `local` for a tasks file and `hosted` for a platform taskset. |
+| `--runtime` | `local`: a Python process or Docker container per rollout. `hud`: local agent, deployed environment. `hosted`: agent and environment on HUD. `docker`, `modal`, `daytona`: run using the task's container configuration. `tcp://host:port`: connect to a running environment. Defaults to `local` for files and `hosted` for platform tasksets. |
 | `--remote` | Alias for `--runtime hosted`. |
 | `--yes`, `-y` | Skip confirmation prompt (required when stdin is not a TTY). |
 | `--json` | Structured results on stdout. |

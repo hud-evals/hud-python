@@ -420,10 +420,9 @@ straight off the socket.
 
 ### The provider
 
-`LocalRuntime` serves an environment in *this* process: `env.start()`, `bind` on an ephemeral
-loopback port, and a `Runtime` pointing at it. It loads a source, calls a constructor, or serves
-a supplied live environment. Imported dependencies retain their Python module state. Exiting
-cancels the server and runs `env.stop()`.
+`LocalRuntime` calls `env.start()`, opens a local TCP server, and yields its address.
+On exit, it stops the server and calls `env.stop()`. The environment runs in the same
+Python process as the agent.
 
 ```python hud/eval/runtime/local.py · LocalRuntime.__call__
 started = env.start()
@@ -439,10 +438,9 @@ finally:
     await env.stop()                               # @env.shutdown
 ```
 
-In-process means the initialize hooks share the caller's event loop, so blocking env code stalls
-concurrent rollouts. `SubprocessRuntime` is the isolation step: it spawns the serve entry point
-above as a child (`python -m hud.environment.server <path> --env name`), reads the announced
-`HUD_SERVE_PORT=` from its stdout, and terminates the child on exit.
+Blocking environment code stalls other rollouts on the same event loop.
+`SubprocessRuntime` starts `python -m hud.environment.server <path> --env name` in a
+child process, reads `HUD_SERVE_PORT=` from its output, and stops the process on exit.
 
 Every other provider runs that same serve entry point inside a different substrate and reaches its
 port a different way:

@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import sys
+from typing import TYPE_CHECKING
+
 import pytest
 
 from hud.environment import load_environment
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 
 def test_load_environment_selects_by_attr_or_env_name(tmp_path) -> None:
@@ -219,3 +226,44 @@ def test_package_init_can_reexport_its_environment(tmp_path) -> None:
     )
     (package / "env.py").write_text("from .core import env\n")
     assert load_environment(package / "env.py").name == "reexported"
+
+
+@pytest.fixture
+def package_sources(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
+    packages = tuple(tmp_path / label / "source_root_package" for label in ("first", "second"))
+    for package in packages:
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("from .env import env\n")
+        (package / "core.py").write_text(
+            f"from hud import Environment\nenv = Environment({package.parent.name!r})\n"
+        )
+        (package / "env.py").write_text("from .core import env\n")
+    try:
+        yield packages[0], packages[1]
+    finally:
+        for name in list(sys.modules):
+            if name == "source_root_package" or name.startswith("source_root_package."):
+                del sys.modules[name]
+
+
+@pytest.mark.parametrize("source", ["env.py", "__init__.py", "."])
+def test_package_sources_reject_a_cached_namespace_from_another_root(
+    package_sources: tuple[Path, Path], source: str
+) -> None:
+    first, second = (package / source for package in package_sources)
+    assert load_environment(first).name == "first"
+
+    with pytest.raises(ValueError, match="already imported from a different source root"):
+        load_environment(second)
+
+    assert load_environment(package_sources[0] / "env.py").name == "first"
+
+
+def test_package_source_takes_precedence_over_other_import_roots(
+    package_sources: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = package_sources
+    monkeypatch.syspath_prepend(str(second.parent))
+    monkeypatch.syspath_prepend(str(first.parent))
+
+    assert load_environment(second / "env.py").name == "second"
