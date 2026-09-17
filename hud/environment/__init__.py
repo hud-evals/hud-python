@@ -37,8 +37,9 @@ def load_environment(
     """Resolve an environment reference to the one :class:`Environment` it names.
 
     A source path (``.py`` file or directory) is scanned for ``Environment``
-    instances; *name* selects among several, matching the module attribute or
-    ``Environment.name``. A dotted importable module reads attribute *name*
+    instances and environments bound to exported tasks; *name* selects among
+    them, matching the module attribute or ``Environment.name``.
+    A dotted importable module reads attribute *name*
     (default ``env``): an ``Environment`` directly, or a factory called with
     *args* to build one — how programmatic envs (integrations, adapted
     images) are served without a source file. Raises when nothing resolves.
@@ -63,14 +64,27 @@ def load_environment(
         and (path / "__init__.py").is_file()
     )
     if path.exists() and not package_attribute:
+        # Avoid the environment -> eval -> runtime import cycle.
+        from hud.eval.taskset import Taskset
+
         if args:
             raise ValueError(f"args= applies to factory targets, not source path {target}")
+        modules = list(iter_modules(path))
         matched = {
             id(env): env
-            for module in iter_modules(path)
+            for module in modules
             for attr, env in vars(module).items()
             if isinstance(env, Environment) and (name is None or name in (attr, env.name))
         }
+        for module in modules:
+            for task in Taskset._scan_tasks(module):
+                for row in (task, task.verifier):
+                    if (
+                        row is not None
+                        and (env := row._env) is not None
+                        and (name is None or name == env.name)
+                    ):
+                        matched[id(env)] = env
         if not matched:
             raise ValueError(f"no Environment{f' named {name!r}' if name else ''} found in {path}")
         if len(matched) > 1:

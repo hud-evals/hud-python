@@ -133,8 +133,8 @@ SubprocessRuntime(source, *, env=None, ready_timeout=120.0)
 
 Starts a new process for each rollout and stops it afterward.
 
-- **`source`** - a `.py` file or directory that exports the environment. For a split
-  environment, pass `env.py` and import all templates and hooks there.
+- **`source`** - a `.py` file or directory exporting environments or tasks created by
+  `@env.template`. The source must import all templates and hooks needed for the run.
 - **`env`** - the environment name to serve. Defaults to the task's environment.
 - **`ready_timeout`** - seconds to wait for the process to start serving.
 

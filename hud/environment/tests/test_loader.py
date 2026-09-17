@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import json
 import sys
 from typing import TYPE_CHECKING
 
@@ -214,7 +216,40 @@ def test_directory_imports_each_module_once(tmp_path) -> None:
     (tmp_path / "assembly.py").write_text(
         "from scan_core import env\nfrom scan_templates import solve\n"
     )
-    assert set(load_environment(tmp_path, name="scanned").tasks) == {"solve"}
+    env = load_environment(tmp_path, name="scanned")
+    assert set(env.tasks) == {"solve"}
+    assert load_environment(tmp_path, name="scanned") is env
+
+
+@pytest.mark.parametrize("export", ["task", "list", "tuple", "taskset"])
+def test_source_resolves_environments_from_exported_tasks(tmp_path, request, export) -> None:
+    name = f"bound_source_{export}"
+    (tmp_path / f"{name}.py").write_text(
+        'from hud import Environment\nenv = Environment("bound")\n'
+        '@env.template(id="solve")\nasync def solve():\n    yield "ok"\n    yield 1.0\n'
+        "def make_task():\n    return solve()\n"
+    )
+    request.addfinalizer(lambda: sys.modules.pop(name, None))
+    expression = {
+        "task": "make_task()",
+        "list": "[make_task()]",
+        "tuple": "(make_task(),)",
+        "taskset": 'Taskset("rows", [make_task()])',
+    }[export]
+    source = tmp_path / "tasks.py"
+    source.write_text(
+        f"from {name} import make_task\nfrom hud.eval import Taskset\nrows = {expression}\n"
+    )
+    assert set(load_environment(source, name="bound").tasks) == {"solve"}
+
+
+@pytest.mark.parametrize("source", ["json.py", "."])
+def test_source_does_not_replace_an_imported_module(tmp_path, source) -> None:
+    (tmp_path / "json.py").write_text(
+        "import json\nfrom hud import Environment\nenv = Environment(json.loads('\"local\"'))\n"
+    )
+    assert load_environment(tmp_path / source).name == "local"
+    assert importlib.import_module("json") is json
 
 
 def test_package_init_can_reexport_its_environment(tmp_path) -> None:
@@ -224,8 +259,13 @@ def test_package_init_can_reexport_its_environment(tmp_path) -> None:
     (package / "core.py").write_text(
         'from hud import Environment\nenv = Environment("reexported")\n'
     )
-    (package / "env.py").write_text("from .core import env\n")
-    assert load_environment(package / "env.py").name == "reexported"
+    (package / "env.py").write_text(
+        'from .core import env\n@env.template(id="solve")\n'
+        'async def solve():\n    yield "ok"\n    yield 1.0\n'
+    )
+    env = load_environment(package / "env.py")
+    assert env.name == "reexported"
+    assert load_environment(package, name="reexported") is env
 
 
 @pytest.fixture

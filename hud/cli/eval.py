@@ -6,10 +6,8 @@ Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import os
-import sys
 import time
 import tomllib
 from enum import StrEnum
@@ -25,7 +23,6 @@ from rich.table import Table
 
 from hud.agents import resolve_agent_model
 from hud.cli import CLI, CliError, parse_key_value
-from hud.environment import Environment
 from hud.eval import (
     DaytonaRuntime,
     DockerRuntime,
@@ -105,7 +102,7 @@ class EvalConfig(BaseModel):
     group_size: int = 1
     gateway: bool = False
     #: ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
-    #: serving the bound env's source otherwise); other names hand rows to that
+    #: loading the task source otherwise); other names hand rows to that
     #: provider; a ``tcp://`` url attaches to an already-served env. ``None``
     #: infers from the source: a file on disk runs locally, a platform taskset hosted.
     runtime: Placement | TcpUrl | None = None
@@ -439,30 +436,14 @@ def eval_command(
                 )
             docker = DockerRuntime()
             source_path = Path(source).resolve()
-            directory = source_path if source_path.is_dir() else source_path.parent
-            entrypoint = directory / "env.py"
-            beside = SubprocessRuntime(entrypoint if entrypoint.is_file() else directory)
-            assembled_envs = {
-                id(value)
-                for module in tuple(sys.modules.values())
-                if (module_file := getattr(module, "__file__", None))
-                and Path(module_file).resolve() == entrypoint
-                for value in vars(module).values()
-                if isinstance(value, Environment)
-            }
+            beside = SubprocessRuntime(source_path if source_path.is_dir() else source_path.parent)
 
             def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
                 config = task.runtime_config
                 if config and (config.image or config.compose):
                     return docker(task)
                 if task._env is not None:
-                    if any(
-                        Path(inspect.getfile(template.func)).resolve() == source_path
-                        for template in task._env.tasks.values()
-                    ):
-                        return SubprocessRuntime(source_path)(task)
-                    if id(task._env) not in assembled_envs:
-                        return SubprocessRuntime(task._env)(task)
+                    return SubprocessRuntime(source_path)(task)
                 return beside(task)
 
             placement = spawn

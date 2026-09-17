@@ -125,15 +125,12 @@ Local Python environments run in a new process for each rollout:
 
 | Task source | Environment served |
 |-------------|--------------------|
-| A Python file that defines templates | That file |
-| A Python task file importing its environment from `env.py` | `env.py` |
-| JSON/JSONL beside `env.py` | `env.py` |
-| A directory | Use these rules for each task |
+| Python tasks created by `@env.template` | The original task file or directory |
+| JSON/JSONL or Python rows that only name an environment | The task source's directory |
 
-`env.py` can import templates and hooks from other modules. Tasks imported from
-other environments use their template file, which must contain all of that
-environment's templates. Rows that only name an environment use `env.py` when
-present, or scan the task source's directory.
+Python sources can export environments directly or through their tasks. Import
+all templates and hooks needed by those tasks. Environment names must be unique
+within the source being loaded; re-exporting the same environment is fine.
 To choose another source, use `hud serve path` with `--runtime tcp://host:port`, or
 [`SubprocessRuntime(path)`](/v6/reference/runtime#subprocessruntime) in Python.
 

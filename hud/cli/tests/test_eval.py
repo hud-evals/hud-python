@@ -729,9 +729,12 @@ def local_eval(
         "standalone",
         "split",
         "hooks",
+        "hooks_source",
         "assembled",
+        "assembled_source",
         "json",
         "jsonl",
+        "data_python",
         "directory",
         "assembled_directory",
         "package",
@@ -750,9 +753,6 @@ def test_local_eval_project_layouts(
     prefix = "." if package else ""
     if package:
         (project / "__init__.py").write_text("")
-    (project / "local_core.py").write_text(
-        'from hud import Environment\nenv = Environment("local-test")\n'
-    )
     template = (
         "from pathlib import Path\n"
         '@env.template(id="solve")\n'
@@ -775,7 +775,17 @@ def test_local_eval_project_layouts(
             '    answer = yield "answer ok"\n',
             '    from .expected import expected\n    answer = yield "answer ok"\n',
         ).replace('Path("asset.txt").read_text()', "expected")
-    if layout in {"hooks", "assembled", "assembled_directory", "package"}:
+    if layout in {
+        "hooks",
+        "hooks_source",
+        "assembled",
+        "assembled_source",
+        "assembled_directory",
+        "package",
+    }:
+        (project / "local_core.py").write_text(
+            'from hud import Environment\nenv = Environment("local-test")\n'
+        )
         (project / "local_templates.py").write_text(
             f"from {prefix}local_core import env\n" + template
         )
@@ -786,14 +796,14 @@ def test_local_eval_project_layouts(
         env_source = (
             f"from {prefix}local_core import env\n"
             f"from {prefix}local_templates import solve\n"
-            + (f"from {prefix}local_extra import extra\n" if layout != "hooks" else "")
+            + (f"from {prefix}local_extra import extra\n" if not layout.startswith("hooks") else "")
             + hooks
         )
     else:
         env_source = (
             'from hud import Environment\nenv = Environment("local-test")\n' + template + hooks
         )
-    if layout in {"single", "standalone", "lazy_package"}:
+    if layout in {"single", "standalone", "lazy_package", "hooks_source", "assembled_source"}:
         env_source += "tasks = [solve()]\n"
         source = project / "env.py"
     else:
@@ -812,6 +822,10 @@ def test_local_eval_project_layouts(
         source = project / f"tasks.{layout}"
         row = {"env": "local-test", "id": "solve"}
         source.write_text(json.dumps([row] if layout == "json" else row))
+    if layout == "data_python":
+        source.write_text(
+            'from hud.eval import Task\ntasks = [Task(env="local-test", id="solve")]\n'
+        )
     if layout in {"directory", "assembled_directory"}:
         source = project
     payload = local_eval(source, "--group", "2", "--max-concurrent", "2")
@@ -820,9 +834,19 @@ def test_local_eval_project_layouts(
     assert {event.read_text() for event in events.iterdir()} == {"stopped"}
 
 
-@pytest.mark.parametrize("source", ["tasks.py", "."])
-@pytest.mark.parametrize("same_name", [False, True])
-def test_local_eval_uses_imported_environment_beside_unrelated_env_py(
+@pytest.mark.parametrize(
+    "source,same_name",
+    [
+        ("tasks.py", False),
+        ("tasks.py", True),
+        (".", False),
+        (".", True),
+        ("rows.json", False),
+        ("rows.json", True),
+        ("rows.jsonl", False),
+    ],
+)
+def test_local_eval_environment_selection(
     local_eval: Callable[..., dict[str, Any]], tmp_path: Path, source: str, same_name: bool
 ) -> None:
     project = tmp_path / "project"
@@ -839,8 +863,17 @@ def test_local_eval_uses_imported_environment_beside_unrelated_env_py(
         '    yield "unrelated"\n    yield 0.0\n'
     )
     (project / "tasks.py").write_text("from bound_env import solve\ntasks = [solve()]\n")
-
-    assert local_eval(project / source)["run_count"] == 1
+    if source in {"rows.json", "rows.jsonl"}:
+        (project / source).write_text('{"env": "bound", "id": "solve"}\n')
+    if same_name and source != "tasks.py":
+        result = CliRunner().invoke(
+            app, ["eval", str(project / source), "openai", "--all", "--yes", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["error_count"] == 1
+        assert "multiple Environments" in result.output
+    else:
+        assert local_eval(project / source)["run_count"] == 1
 
 
 @pytest.mark.parametrize("shared", [True, False])

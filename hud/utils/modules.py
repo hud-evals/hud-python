@@ -42,15 +42,20 @@ def _module_name(file: Path) -> tuple[str, Path]:
                     f"cannot load {file}: package {parts[0]!r} is already imported from "
                     "a different source root; load this source in a separate process"
                 )
+    else:
+        module = sys.modules.get(file.stem)
+        if module is not None and getattr(module, "__file__", None) != str(file):
+            return f"_hud_mod_{file.stem}_{abs(hash(str(file)))}", directory
     return ".".join(parts), directory
 
 
 def load_module(path: str | Path) -> ModuleType:
     """Import a Python file as a throwaway module and return it.
 
-    The import root is on ``sys.path`` during import. Package sources keep
-    their qualified name so relative imports resolve. The source module entry
-    is restored afterward; imported dependencies use normal Python caching.
+    The import root is on ``sys.path`` during import. Packages keep their
+    qualified names; standalone files use a private name when theirs is taken.
+    The source module entry is restored afterward; imported dependencies use
+    normal Python caching.
     """
     file = Path(path).resolve()
     if not file.is_file():
@@ -63,25 +68,27 @@ def load_module(path: str | Path) -> ModuleType:
 
     parent = str(import_root)
     sys.path.insert(0, parent)
-    previous = sys.modules.get(mod_name)
     try:
         package = mod_name.rpartition(".")[0]
         if package:
             importlib.import_module(package)
             imported = sys.modules.get(mod_name)
-            if imported is not None and imported is not previous:
+            if imported is not None:
                 return imported
+        previous = sys.modules.get(mod_name)
         module = importlib.util.module_from_spec(spec)
         sys.modules[mod_name] = module
-        spec.loader.exec_module(module)
-        return module
+        try:
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            if previous is None:
+                sys.modules.pop(mod_name, None)
+            else:
+                sys.modules[mod_name] = previous
     finally:
         with contextlib.suppress(ValueError):
             sys.path.remove(parent)
-        if previous is None:
-            sys.modules.pop(mod_name, None)
-        else:
-            sys.modules[mod_name] = previous
 
 
 def iter_modules(path: str | Path) -> Iterator[ModuleType]:
