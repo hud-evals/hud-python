@@ -28,14 +28,11 @@ hud_console = HUDConsole()
 
 class _TraceGroup(CLIGroup):
     def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
-        if args:
-            try:
-                UUID(args[0])
-            except ValueError:
-                pass
-            else:
-                args = ["get", *args]
-        return super().resolve_command(ctx, args)
+        try:
+            UUID(args[0])
+        except ValueError:
+            return super().resolve_command(ctx, args)
+        return "get", self.commands["get"], args
 
 
 trace_app = CLI(

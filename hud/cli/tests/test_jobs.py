@@ -39,14 +39,19 @@ def test_job_detail_accepts_compact_id_and_prints_canonical_link(
 
 
 @pytest.mark.parametrize("verb", [[], ["get"]])
-@pytest.mark.parametrize("options_first", [False, True])
-def test_job_detail_shorthand_preserves_options(monkeypatch, verb, options_first):
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ([], ["--json", "--limit", "7", "--quiet"]),
+        (["--json", "--limit", "7", "--quiet"], []),
+        (["--json", "--limit", "5", "--quiet"], ["--limit", "7"]),
+    ],
+)
+def test_job_detail_shorthand_preserves_options(monkeypatch, verb, before, after):
     job_id = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
     client = _Client()
     monkeypatch.setattr(PlatformClient, "from_settings", classmethod(lambda cls: client))
-    options = ["--json", "--limit", "7", "--quiet"]
-    args = [*options, job_id] if options_first else [job_id, *options]
-    result = CliRunner().invoke(app, ["jobs", *verb, *args])
+    result = CliRunner().invoke(app, ["jobs", *verb, *before, job_id, *after])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == []
     assert client.calls == [(f"/jobs/{job_id}/traces", {"limit": 7})]

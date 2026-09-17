@@ -34,15 +34,12 @@ hud_console = HUDConsole()
 
 class _JobsGroup(CLIGroup):
     def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
-        if args:
-            try:
-                UUID(args[0])
-            except ValueError:
-                pass
-            else:
-                ctx.default_map = {**(ctx.default_map or {}), "get": ctx.params}
-                args = ["get", *args]
-        return super().resolve_command(ctx, args)
+        try:
+            UUID(args[0])
+        except ValueError:
+            return super().resolve_command(ctx, args)
+        ctx.default_map = {"get": ctx.params}
+        return "get", self.commands["get"], args
 
 
 jobs_app = CLI(
