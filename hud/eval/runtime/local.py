@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-import os
 import sys
 from collections import deque
 from contextlib import asynccontextmanager
@@ -145,7 +144,8 @@ class LocalRuntime:
 class SubprocessRuntime:
     """The child-process provider: serve the placed row's env from *source*.
 
-    Each acquisition serves an environment in a child process on an
+    Each acquisition runs ``python -m hud.environment.server <path> --env
+    name`` — the same serving entry point a container CMD runs — on an
     ephemeral loopback port, yields its :class:`Runtime`, and terminates the
     child on exit. *source* is a ``.py`` file, a directory of them, or a live
     :class:`~hud.environment.Environment`, which is served from the file its
@@ -154,12 +154,7 @@ class SubprocessRuntime:
     unless *env* pins one explicitly; placing a row whose env the source does
     not define fails loudly in the child.
 
-    Set *task_source* when the path authors task rows: the child reloads them in
-    the caller's working directory, then serves the bound environment, including
-    multi-file registrations and independent verifiers. Before initialization,
-    it switches to the placed template's directory for a task with a bound env.
-
-    Otherwise the child's working directory is the source's directory, so sibling
+    The child's working directory is the source's directory, so sibling
     imports and relative data paths resolve; ``@env.initialize`` daemons start
     in the child and die with it. Because the source is re-imported in the
     child, a script spawning itself (``SubprocessRuntime(__file__)``) must keep
@@ -172,7 +167,6 @@ class SubprocessRuntime:
         *,
         env: str | None = None,
         ready_timeout: float = 120.0,
-        task_source: bool = False,
     ) -> None:
         from hud.environment.env import Environment as _Environment
 
@@ -192,7 +186,6 @@ class SubprocessRuntime:
             self.source = Path(source).resolve()
             self.env = env
         self.ready_timeout = ready_timeout
-        self.task_source = task_source
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
@@ -200,29 +193,14 @@ class SubprocessRuntime:
             raise ValueError("SubprocessRuntime does not support task runtime_config")
         if not self.source.exists():
             raise FileNotFoundError(f"SubprocessRuntime: source not found: {self.source}")
-        cwd: Path | None = self.source if self.source.is_dir() else self.source.parent
-        if self.task_source:
-            if task._env is not None:
-                cwd = Path(inspect.getabsfile(task._env.tasks[task.id].func)).parent
-            cmd = [
-                sys.executable,
-                "-c",
-                "import sys; from hud.eval.runtime.local import _serve_task_source; "
-                "_serve_task_source(*sys.argv[1:])",
-                str(self.source),
-                self.env or task.env,
-                str(cwd),
-            ]
-            cwd = None
-        else:
-            cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
-            cmd += ["--env", self.env or task.env]
+        cmd = [sys.executable, "-m", "hud.environment.server", str(self.source)]
+        cmd += ["--env", self.env or task.env]
         proc = await create_process_group_exec(
             *cmd,
             term_timeout=10.0,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
+            cwd=self.source if self.source.is_dir() else self.source.parent,
         )
         output = proc.stdout
         error = proc.stderr
@@ -290,23 +268,3 @@ class SubprocessRuntime:
             await finish_output(
                 *(task for task in (stdout_drain, stderr_drain) if task is not None)
             )
-
-
-def _serve_task_source(source: str, name: str, directory: str) -> None:
-    from hud.environment.server import _serve_until_terminated
-    from hud.eval.taskset import Taskset
-
-    path = Path(source).resolve()
-    sys.path.insert(0, str(path if path.is_dir() else path.parent))
-    matched = {
-        id(candidate._env): candidate._env
-        for task in Taskset.from_file(path)
-        for candidate in (task, task.verifier)
-        if candidate is not None and candidate._env is not None and candidate.env == name
-    }
-    if not matched:
-        raise ValueError(f"no bound Environment named {name!r} found in {path}")
-    if len(matched) > 1:
-        raise ValueError(f"multiple bound Environments named {name!r} found in {path}")
-    os.chdir(directory)
-    asyncio.run(_serve_until_terminated(next(iter(matched.values())), "127.0.0.1", 0))

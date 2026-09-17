@@ -26,7 +26,7 @@ List, get, create, and status commands accept `--json`. JSON is written to **std
 | `1` | Failure |
 | `2` | Usage error (bad arguments, or a prompt needed in a non-interactive terminal) |
 
-Commands that support `--dry-run` describe the action without performing it or prompting. Commands with confirmation prompts, such as eval and job cancellation, accept `--yes` / `-y`; without it, a required prompt exits `2` in a non-interactive terminal. Commands without confirmation prompts do not require `--yes`. Deploy handles local `.env` selection separately with `--env-file` or `--no-env`.
+Use `--dry-run` to preview supported commands without performing the action or prompting. Pass `--yes` / `-y` to skip confirmation where supported; a required prompt exits `2` in a non-interactive terminal. For deployment, select local secrets with `--env-file` or skip them with `--no-env`.
 
 Resource commands use noun-verb grammar (`hud jobs list`, `hud models fork`, `hud task start`). Bare `hud jobs` and `hud qa` list. `hud cancel` is a hidden, deprecated alias for `hud jobs cancel`.
 
@@ -76,9 +76,8 @@ hud serve env.py -p 9000
 
 Build **and** publish to HUD infra in one step. The environment's name comes
 from the `Environment(...)` declaration in code; deploying the same name again
-rebuilds that environment. `--name` selects the registry identity; it does not
-change the image's entrypoint. For multiple environments, each build must serve
-the selected name through its Dockerfile or build configuration.
+rebuilds that environment. Use `--name` to select the registry identity and
+configure the image's entrypoint to serve that environment.
 
 ```bash
 hud deploy
@@ -123,14 +122,13 @@ hud eval env.py claude --full                     # every task, auto-respond, 10
 ```
 
 <Note>
-`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). The CLI reloads that source in a fresh subprocess and serves the Environment bound to the selected task, preserving registrations across imported modules. Rows whose `runtime_config` specifies an image or Compose project use Docker. (`Taskset.run()` without `runtime=` serves a live env in-process instead — see [placement](/v6/internals/placement#resolution).)
+`hud eval` loads tasks from the path you pass. In a split project, point it at `tasks.py` (or `.` to scan the directory). For local Python execution, keep the environment's templates in one source file; the CLI serves that file in a fresh subprocess per rollout. Rows whose `runtime_config` specifies an image or Compose project use Docker. See [placement](/v6/internals/placement#resolution) for programmatic runtime options.
 </Note>
 
-**What you don't need for a local run:**
-- A HUD API key when using a direct provider key with HUD telemetry uploads disabled. Gateway inference and platform reporting require HUD credentials.
-- `hud serve` running - `hud eval` spawns the env subprocess for you
-- Docker - unless a task's runtime configuration specifies an image or Compose project
-- An SSH connection - the gateway timeout only applies when `env.workspace()` is declared
+For a local run, `hud eval` starts the environment subprocess. Tasks with an image
+or Compose runtime configuration require Docker. Use a HUD API key for gateway
+inference and platform reporting, or a direct provider key with HUD telemetry
+uploads disabled.
 
 For a platform taskset, pass its name or id directly: `hud eval "My Tasks" claude`. The tasks are fetched from the platform and the rollouts run remotely by default, since the env source is not on disk.
 
@@ -184,11 +182,11 @@ base_url = "http://localhost:8000/v1"
 api_key = "${MY_PROVIDER_API_KEY}"
 ```
 
-Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown `[eval]` keys, unknown sections, and a file that does not parse. Agent-specific sections follow the selected agent's configuration model; they do not all reject unknown keys. `--config key=value` layers onto the selected agent's section. Use `runtime = "hosted"` for hosted execution.
+Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown `[eval]` keys, unknown sections, and a file that does not parse. Agent-specific keys are validated by the selected agent's configuration model. `--config key=value` layers onto the selected agent's section. Use `runtime = "hosted"` for hosted execution.
 
 ## Run a packaged image
 
-`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source` (default `.`). Without `--url`, HUD reloads the source and serves the task's Environment in a subprocess. With both `--source` and `--url`, it runs the resolved task against the already-served environment. Pass `--url` without `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source.
+`hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source` (default `.`). Without `--url`, HUD serves the bound environment's template file in a subprocess. With both `--source` and `--url`, it runs the resolved task against the already-served environment. Pass `--url` without `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source.
 
 ```bash
 hud task list

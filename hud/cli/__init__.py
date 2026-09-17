@@ -315,17 +315,6 @@ class CLIGroup(TyperGroup):
         rank = {name: index for index, name in enumerate(self.command_order)}
         return sorted(names, key=lambda name: (rank.get(name, len(rank)), name))
 
-    def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
-        if self.name in {"jobs", "trace"} and args:
-            try:
-                UUID(args[0])
-            except ValueError:
-                pass
-            else:
-                ctx.default_map = {**(ctx.default_map or {}), "get": ctx.params}
-                args = ["get", *args]
-        return super().resolve_command(ctx, args)
-
     def get_help_option_names(self, ctx: Any) -> list[str]:
         if ctx.parent is None:
             return []

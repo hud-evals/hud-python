@@ -15,6 +15,7 @@ from rich.text import Text
 from hud.cli import (
     CLI,
     CliError,
+    CLIGroup,
 )
 from hud.settings import settings
 from hud.telemetry.span import normalize_trace_id
@@ -24,7 +25,21 @@ from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
 
+
+class _TraceGroup(CLIGroup):
+    def resolve_command(self, ctx: Any, args: list[str]) -> tuple[Any, Any, list[str]]:
+        if args:
+            try:
+                UUID(args[0])
+            except ValueError:
+                pass
+            else:
+                args = ["get", *args]
+        return super().resolve_command(ctx, args)
+
+
 trace_app = CLI(
+    cls=_TraceGroup,
     name="trace",
     help="Inspect a rollout trace.",
     add_completion=False,

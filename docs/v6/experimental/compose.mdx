@@ -161,8 +161,7 @@ returns the published control-channel address, and removes the project and its v
 rollout ends.
 
 **Hosted execution** uses `HostedRuntime`. Pass a JSON `RuntimeConfig` containing the Compose
-project with `hud deploy --runtime-config runtime.json`; a Compose filename alone does not
-select the build recipe. The command uploads the project root and supplies the explicit
+project with `hud deploy --runtime-config runtime.json`. The command uploads the project root and supplies the
 configuration to the builder. See the [Harbor deployment example](/v6/experimental/harbor#deploy-and-sync)
 for a file-backed Compose configuration. Declared `RuntimeResources` apply.
 
