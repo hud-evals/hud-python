@@ -733,6 +733,7 @@ def local_eval(
         "json",
         "jsonl",
         "directory",
+        "assembled_directory",
         "package",
         "lazy_package",
     ],
@@ -774,7 +775,7 @@ def test_local_eval_project_layouts(
             '    answer = yield "answer ok"\n',
             '    from .expected import expected\n    answer = yield "answer ok"\n',
         ).replace('Path("asset.txt").read_text()', "expected")
-    if layout in {"hooks", "assembled", "package"}:
+    if layout in {"hooks", "assembled", "assembled_directory", "package"}:
         (project / "local_templates.py").write_text(
             f"from {prefix}local_core import env\n" + template
         )
@@ -811,12 +812,35 @@ def test_local_eval_project_layouts(
         source = project / f"tasks.{layout}"
         row = {"env": "local-test", "id": "solve"}
         source.write_text(json.dumps([row] if layout == "json" else row))
-    if layout == "directory":
+    if layout in {"directory", "assembled_directory"}:
         source = project
     payload = local_eval(source, "--group", "2", "--max-concurrent", "2")
     assert payload["run_count"] == 2
     assert len(list(events.iterdir())) == 2
     assert {event.read_text() for event in events.iterdir()} == {"stopped"}
+
+
+@pytest.mark.parametrize("source", ["tasks.py", "."])
+@pytest.mark.parametrize("same_name", [False, True])
+def test_local_eval_uses_imported_environment_beside_unrelated_env_py(
+    local_eval: Callable[..., dict[str, Any]], tmp_path: Path, source: str, same_name: bool
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "bound_env.py").write_text(
+        'from hud import Environment\nenv = Environment("bound")\n'
+        '@env.template(id="solve")\nasync def solve():\n'
+        '    answer = yield "answer ok"\n    yield float(answer == "ok")\n'
+    )
+    name = "bound" if same_name else "unrelated"
+    (project / "env.py").write_text(
+        f"from hud import Environment\nenv = Environment({name!r})\n"
+        '@env.template(id="solve")\nasync def solve():\n'
+        '    yield "unrelated"\n    yield 0.0\n'
+    )
+    (project / "tasks.py").write_text("from bound_env import solve\ntasks = [solve()]\n")
+
+    assert local_eval(project / source)["run_count"] == 1
 
 
 @pytest.mark.parametrize("shared", [True, False])

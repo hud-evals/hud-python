@@ -256,7 +256,7 @@ def test_package_sources_reject_a_cached_namespace_from_another_root(
     with pytest.raises(ValueError, match="already imported from a different source root"):
         load_environment(second)
 
-    assert load_environment(package_sources[0] / "env.py").name == "first"
+    assert load_environment(first).name == "first"
 
 
 def test_package_source_takes_precedence_over_other_import_roots(

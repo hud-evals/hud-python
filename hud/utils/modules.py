@@ -1,4 +1,4 @@
-"""Import authored ``.py`` source as throwaway modules.
+"""Load authored Python source files and directories.
 
 The one source-import path: env loading (``hud.environment.load_environment``)
 and CLI task collection both walk modules through here.
@@ -89,7 +89,7 @@ def iter_modules(path: str | Path) -> Iterator[ModuleType]:
 
     A file import fails loudly. Directory scans skip packaging/test scaffolding
     and files that fail to import (a source dir may contain unrelated files).
-    Modules imported by another file in the scan are reused.
+    Directory imports use Python's module cache.
     """
     target = Path(path).resolve()
     if target.is_file():
@@ -97,28 +97,19 @@ def iter_modules(path: str | Path) -> Iterator[ModuleType]:
         return
     if not target.is_dir():
         raise FileNotFoundError(f"module not found: {path}")
-    previous: dict[str, ModuleType | None] = {}
-    try:
-        for file in sorted(target.glob("*.py")):
-            if file.stem in _SKIP_STEMS:
+    for file in sorted(target.glob("*.py")):
+        if file.stem in _SKIP_STEMS:
+            continue
+        name, _ = _module_name(file)
+        module = sys.modules.get(name)
+        if module is None or getattr(module, "__file__", None) != str(file):
+            try:
+                module = load_module(file)
+            except ImportError:
+                LOGGER.debug("skipping %s (failed to import)", file.name)
                 continue
-            name, _ = _module_name(file)
-            module = sys.modules.get(name)
-            if module is None or getattr(module, "__file__", None) != str(file):
-                try:
-                    module = load_module(file)
-                except ImportError:
-                    LOGGER.debug("skipping %s (failed to import)", file.name)
-                    continue
-                previous[name] = sys.modules.get(name)
-                sys.modules[name] = module
-            yield module
-    finally:
-        for name, module in previous.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
+            sys.modules[name] = module
+        yield module
 
 
 __all__ = ["iter_modules", "load_module"]

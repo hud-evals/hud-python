@@ -9,6 +9,7 @@ import asyncio
 import inspect
 import logging
 import os
+import sys
 import time
 import tomllib
 from enum import StrEnum
@@ -24,6 +25,7 @@ from rich.table import Table
 
 from hud.agents import resolve_agent_model
 from hud.cli import CLI, CliError, parse_key_value
+from hud.environment import Environment
 from hud.eval import (
     DaytonaRuntime,
     DockerRuntime,
@@ -440,6 +442,14 @@ def eval_command(
             directory = source_path if source_path.is_dir() else source_path.parent
             entrypoint = directory / "env.py"
             beside = SubprocessRuntime(entrypoint if entrypoint.is_file() else directory)
+            assembled_envs = {
+                id(value)
+                for module in tuple(sys.modules.values())
+                if (module_file := getattr(module, "__file__", None))
+                and Path(module_file).resolve() == entrypoint
+                for value in vars(module).values()
+                if isinstance(value, Environment)
+            }
 
             def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
                 config = task.runtime_config
@@ -451,7 +461,7 @@ def eval_command(
                         for template in task._env.tasks.values()
                     ):
                         return SubprocessRuntime(source_path)(task)
-                    if not entrypoint.is_file():
+                    if id(task._env) not in assembled_envs:
                         return SubprocessRuntime(task._env)(task)
                 return beside(task)
 
