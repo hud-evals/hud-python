@@ -10,6 +10,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
+from weakref import WeakValueDictionary
 
 from hud.utils.process import (
     create_process_group_exec,
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 
     from hud.environment.env import Environment
     from hud.eval.task import Task
+
+
+# Acquisitions hold their locks; completed environments are not retained here.
+_ENVIRONMENT_LOCKS: WeakValueDictionary[Environment, asyncio.Lock] = WeakValueDictionary()
 
 
 class LocalRuntime:
@@ -48,6 +53,8 @@ class LocalRuntime:
 
     ``ready_timeout`` bounds ``@env.initialize`` startup. Source imports share
     cached dependencies; constructors can return a new environment per acquisition.
+    Acquisitions of the same environment instance are serialized, including when
+    sources or constructors reuse it. Distinct instances can run concurrently.
     Hooks share this process's event loop, so blocking env code stalls concurrent rollouts —
     use :class:`SubprocessRuntime` or :class:`DockerRuntime` for process
     isolation, and ``Runtime(url)`` to attach to a substrate served elsewhere.
@@ -64,12 +71,10 @@ class LocalRuntime:
 
         self.ready_timeout = ready_timeout
         self._source_dir: Path | None = None
-        self._live_lock: asyncio.Lock | None = None
         if isinstance(source, _Environment):
             if env is not None:
                 raise TypeError("LocalRuntime: env= applies only to source paths")
             self._build: Callable[[Task], Environment] = lambda _task: source
-            self._live_lock = asyncio.Lock()
         elif isinstance(source, (str, Path)):
             path, pinned = Path(source).resolve(), env
             self._source_dir = path if path.is_dir() else path.parent
@@ -99,8 +104,6 @@ class LocalRuntime:
         # the initial import, so a template can lazily import a sibling
         # module at run time (as it could under the child-process runtime).
         # Always insert-and-remove one entry: balanced under concurrency.
-        if self._live_lock is not None:
-            await self._live_lock.acquire()
         if self._source_dir is not None:
             sys.path.insert(0, str(self._source_dir))
         try:
@@ -119,26 +122,25 @@ class LocalRuntime:
                 raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
             from hud.environment.server import _shutdown, bind
 
-            try:
-                await asyncio.wait_for(env.start(), self.ready_timeout)
-                server = await bind(env, "127.0.0.1", 0)
-                host, port = server.sockets[0].getsockname()[:2]
-                serve_task = asyncio.create_task(server.serve_forever())
+            async with _ENVIRONMENT_LOCKS.setdefault(env, asyncio.Lock()):
                 try:
-                    yield Runtime(f"tcp://{host}:{port}")
+                    await asyncio.wait_for(env.start(), self.ready_timeout)
+                    server = await bind(env, "127.0.0.1", 0)
+                    host, port = server.sockets[0].getsockname()[:2]
+                    serve_task = asyncio.create_task(server.serve_forever())
+                    try:
+                        yield Runtime(f"tcp://{host}:{port}")
+                    finally:
+                        serve_task.cancel()
+                        await _shutdown(server)
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await serve_task
                 finally:
-                    serve_task.cancel()
-                    await _shutdown(server)
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await serve_task
-            finally:
-                await env.stop()
+                    await env.stop()
         finally:
             if self._source_dir is not None:
                 with contextlib.suppress(ValueError):
                     sys.path.remove(str(self._source_dir))
-            if self._live_lock is not None:
-                self._live_lock.release()
 
 
 class SubprocessRuntime:

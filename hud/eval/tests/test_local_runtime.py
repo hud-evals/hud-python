@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 import hud.eval.runtime.local as local_runtime_module
 from hud.agents.base import Agent
-from hud.environment import Environment
+from hud.environment import Environment, load_environment
 from hud.eval import LocalRuntime, RuntimeConfig, SubprocessRuntime, Task, Taskset
 
 _SUMS_ENV = """\
@@ -181,14 +182,26 @@ async def test_subprocess_runtime_fails_when_stdout_closes_before_serving(
 
 async def test_constructor_builds_fresh_per_rollout_from_the_row() -> None:
     built: list[str] = []
+    started = 0
+    all_started = asyncio.Event()
 
     def env_for(task: Task) -> Environment:
         built.append(task.env)
-        return _sums_env(task.env)
+        env = _sums_env(task.env)
+
+        @env.initialize
+        async def start() -> None:
+            nonlocal started
+            started += 1
+            if started == 3:
+                all_started.set()
+            await all_started.wait()
+
+        return env
 
     job = await Task(env="sums", id="add", args={"a": 1, "b": 2}).run(
         _FnAgent(_solve_add),
-        runtime=LocalRuntime(env_for),
+        runtime=LocalRuntime(env_for, ready_timeout=2),
         group=3,
         max_concurrent=3,
     )
@@ -226,6 +239,104 @@ async def test_live_environment_is_served_serially() -> None:
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
     assert active == 0
+
+
+@pytest.mark.parametrize(
+    "source", ["directory", "split_file", "package", "factory", "separate_providers"]
+)
+async def test_cached_environment_lifecycle_is_serialized(tmp_path, request, source) -> None:
+    module_name = f"cached_lifecycle_{source}"
+    project = tmp_path / module_name
+    project.mkdir()
+    if source == "package":
+        (project / "__init__.py").write_text("from .env import env\n")
+    events = tmp_path / "lifecycle.txt"
+    (project / f"{module_name}.py").write_text(
+        _SUMS_ENV.format(name="sums")
+        + f"""
+import asyncio
+from pathlib import Path
+events = Path({str(events)!r})
+
+@env.initialize
+async def start():
+    with events.open("a") as log:
+        log.write("start\\n")
+    await asyncio.sleep(0)
+
+@env.shutdown
+async def stop():
+    with events.open("a") as log:
+        log.write("stop\\n")
+"""
+    )
+    prefix = "." if source == "package" else ""
+    entrypoint = project / "env.py"
+    entrypoint.write_text(f"from {prefix}{module_name} import env\n")
+
+    def cleanup() -> None:
+        for name, module in tuple(sys.modules.items()):
+            file = getattr(module, "__file__", None)
+            if file and Path(file).is_relative_to(project):
+                del sys.modules[name]
+
+    request.addfinalizer(cleanup)
+    if source in {"factory", "separate_providers"}:
+        env = load_environment(entrypoint)
+        runtime = LocalRuntime(lambda _task: env)
+        if source == "separate_providers":
+            runtime = lambda task: LocalRuntime(env)(task)
+    else:
+        runtime = LocalRuntime(project if source == "directory" else entrypoint)
+    job = await Task(env="sums", id="add", args={"a": 2, "b": 3}).run(
+        _FnAgent(_solve_add), runtime=runtime, group=2, max_concurrent=2
+    )
+
+    assert [run.reward for run in job.runs] == [1.0, 1.0]
+    assert events.read_text().splitlines() == ["start", "stop", "start", "stop"]
+
+
+async def test_cancelling_a_waiting_acquisition_preserves_the_running_environment() -> None:
+    env = _sums_env()
+    active = False
+
+    @env.initialize
+    async def start() -> None:
+        nonlocal active
+        active = True
+
+    @env.shutdown
+    async def stop() -> None:
+        nonlocal active
+        active = False
+
+    runtime = LocalRuntime(lambda _task: env)
+    task = Task(env="sums", id="add")
+
+    async def acquire() -> None:
+        async with runtime(task):
+            pytest.fail("the environment already has an active acquisition")
+
+    async with runtime(task):
+        waiter = asyncio.create_task(acquire())
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert active
+
+    assert not active
+
+
+def test_local_environment_can_run_in_successive_event_loops() -> None:
+    env = _sums_env()
+    task = Task(env="sums", id="add", args={"a": 2, "b": 3})
+
+    for _ in range(2):
+        job = asyncio.run(
+            task.run(_FnAgent(_solve_add), runtime=LocalRuntime(env), group=2, max_concurrent=2)
+        )
+        assert [run.reward for run in job.runs] == [1.0, 1.0]
 
 
 async def test_serialized_task_does_not_retain_local_placement() -> None:

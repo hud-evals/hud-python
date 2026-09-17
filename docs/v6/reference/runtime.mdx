@@ -116,11 +116,14 @@ LocalRuntime(source, *, env=None, ready_timeout=120.0)
 Runs an environment in the current Python process. `source` can be:
 
 - **A `.py` file or directory:** load the environment from that source.
-- **An `Environment`:** reuse that instance. This runtime runs one rollout at a time.
+- **An `Environment`:** reuse that instance.
 - **A `(task) -> Environment` function:** call it for each rollout.
 
 `env` selects an environment by name when loading a source; it defaults to the task's
 environment. `ready_timeout` limits how long initialization can take.
+
+Rollouts using the same environment instance run one at a time, including when a
+source or function returns a cached instance. Distinct instances can run concurrently.
 
 Imported modules share state between runs. Loading a second copy of a package from
 another directory raises an error. Use `SubprocessRuntime` for separate Python processes.
