@@ -22,26 +22,43 @@ LOGGER = logging.getLogger(__name__)
 _SKIP_STEMS = {"conftest", "setup", "__init__", "__main__"}
 
 
+def _module_name(file: Path) -> tuple[str, Path]:
+    parts = [] if file.name == "__init__.py" else [file.stem]
+    directory = file.parent
+    while (directory / "__init__.py").is_file():
+        parts.insert(0, directory.name)
+        directory = directory.parent
+    return ".".join(parts), directory
+
+
 def load_module(path: str | Path) -> ModuleType:
     """Import a Python file as a throwaway module and return it.
 
-    The file's directory is on ``sys.path`` during import so sibling imports
-    resolve; the temporary module name is cleaned up afterward.
+    The import root is on ``sys.path`` during import. Package sources keep
+    their qualified name so relative imports resolve. The source module entry
+    is restored afterward; imported dependencies use normal Python caching.
     """
     file = Path(path).resolve()
     if not file.is_file():
         raise FileNotFoundError(f"module not found: {path}")
 
-    mod_name = f"_hud_mod_{file.stem}_{abs(hash(str(file)))}"
+    mod_name, import_root = _module_name(file)
     spec = importlib.util.spec_from_file_location(mod_name, file)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot import module: {file}")
 
-    parent = str(file.parent)
+    parent = str(import_root)
     inserted = parent not in sys.path
     if inserted:
         sys.path.insert(0, parent)
+    previous = sys.modules.get(mod_name)
     try:
+        package = mod_name.rpartition(".")[0]
+        if package:
+            importlib.import_module(package)
+            imported = sys.modules.get(mod_name)
+            if imported is not None and imported is not previous:
+                return imported
         module = importlib.util.module_from_spec(spec)
         sys.modules[mod_name] = module
         spec.loader.exec_module(module)
@@ -50,7 +67,10 @@ def load_module(path: str | Path) -> ModuleType:
         if inserted:
             with contextlib.suppress(ValueError):
                 sys.path.remove(parent)
-        sys.modules.pop(mod_name, None)
+        if previous is None:
+            sys.modules.pop(mod_name, None)
+        else:
+            sys.modules[mod_name] = previous
 
 
 def iter_modules(path: str | Path) -> Iterator[ModuleType]:
@@ -58,6 +78,7 @@ def iter_modules(path: str | Path) -> Iterator[ModuleType]:
 
     A file import fails loudly. Directory scans skip packaging/test scaffolding
     and files that fail to import (a source dir may contain unrelated files).
+    Modules imported by another file in the scan are reused.
     """
     target = Path(path).resolve()
     if target.is_file():
@@ -65,15 +86,28 @@ def iter_modules(path: str | Path) -> Iterator[ModuleType]:
         return
     if not target.is_dir():
         raise FileNotFoundError(f"module not found: {path}")
-    for file in sorted(target.glob("*.py")):
-        if file.stem in _SKIP_STEMS:
-            continue
-        try:
-            module = load_module(file)
-        except ImportError:
-            LOGGER.debug("skipping %s (failed to import)", file.name)
-            continue
-        yield module
+    previous: dict[str, ModuleType | None] = {}
+    try:
+        for file in sorted(target.glob("*.py")):
+            if file.stem in _SKIP_STEMS:
+                continue
+            name, _ = _module_name(file)
+            module = sys.modules.get(name)
+            if module is None or getattr(module, "__file__", None) != str(file):
+                try:
+                    module = load_module(file)
+                except ImportError:
+                    LOGGER.debug("skipping %s (failed to import)", file.name)
+                    continue
+                previous[name] = sys.modules.get(name)
+                sys.modules[name] = module
+            yield module
+    finally:
+        for name, module in previous.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 __all__ = ["iter_modules", "load_module"]

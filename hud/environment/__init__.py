@@ -65,17 +65,17 @@ def load_environment(
     if path.exists() and not package_attribute:
         if args:
             raise ValueError(f"args= applies to factory targets, not source path {target}")
-        matched = [
-            env
+        matched = {
+            id(env): env
             for module in iter_modules(path)
             for attr, env in vars(module).items()
             if isinstance(env, Environment) and (name is None or name in (attr, env.name))
-        ]
+        }
         if not matched:
             raise ValueError(f"no Environment{f' named {name!r}' if name else ''} found in {path}")
         if len(matched) > 1:
             raise ValueError(f"multiple Environments in {path}; select one by name")
-        return matched[0]
+        return next(iter(matched.values()))
 
     if path.is_file() or "/" in str(target):
         raise FileNotFoundError(f"no environment source at {target}")

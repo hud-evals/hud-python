@@ -28,11 +28,11 @@ if TYPE_CHECKING:
 
 
 class LocalRuntime:
-    """The local provider: serve a fresh env per rollout, in this process.
+    """The local provider: serve an environment in this process.
 
     *source* points at the env in whatever form you have:
 
-    - a ``.py`` file or directory — imported fresh per acquisition (sibling
+    - a ``.py`` file or directory — loaded per acquisition (sibling
       imports resolve); *env* pins one name when several are declared,
       defaulting to the placed task's env
     - a live :class:`~hud.environment.Environment` — served directly, one
@@ -46,9 +46,9 @@ class LocalRuntime:
         runtime = LocalRuntime(env)
         runtime = LocalRuntime(lambda task: build_env(task.env))
 
-    ``ready_timeout`` bounds ``@env.initialize`` startup. Source paths and
-    constructors create a fresh environment per acquisition. Hooks share this
-    process's event loop, so blocking env code stalls concurrent rollouts —
+    ``ready_timeout`` bounds ``@env.initialize`` startup. Source imports share
+    cached dependencies; constructors can return a new environment per acquisition.
+    Hooks share this process's event loop, so blocking env code stalls concurrent rollouts —
     use :class:`SubprocessRuntime` or :class:`DockerRuntime` for process
     isolation, and ``Runtime(url)`` to attach to a substrate served elsewhere.
     """

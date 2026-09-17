@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
+from hud.agents import OpenAIAgent
 from hud.agents.types import ClaudeConfig
 from hud.cli import eval as eval_mod
 from hud.cli.__main__ import app
@@ -34,8 +36,7 @@ from hud.utils.gateway import GatewayModelInfo
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
+    from collections.abc import Callable, Iterator
 
 _TASKS_PY = """\
 from hud import Environment
@@ -405,7 +406,7 @@ def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, mon
     assert eval_cli.taskset is not None
     bound = next(iter(eval_cli.taskset))
 
-    assert placement(bound) is subprocesses[bound._env].return_value
+    assert placement(bound) is subprocesses[(tmp_path / "mixed.py").resolve()].return_value
     assert placement(image) is docker.return_value
     # A row without a bound env is served from the tasks file's directory.
     assert placement(data_row) is subprocesses[tmp_path.resolve()].return_value
@@ -685,3 +686,211 @@ def test_result_payload_uses_job_metrics(eval_cli: _EvalCli) -> None:
     assert payload["error_count"] == 1
     assert [run["slug"] for run in payload["runs"]] == ["solve", None]
     assert [run["is_error"] for run in payload["runs"]] == [False, False]
+
+
+@pytest.fixture
+def local_eval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[Callable[..., dict[str, Any]]]:
+    async def answer(self: OpenAIAgent, run: Run) -> None:
+        run.trace.content = "ok"
+
+    monkeypatch.setattr(OpenAIAgent, "__call__", answer)
+    monkeypatch.setattr(settings, "openai_api_key", "test-provider-key")
+    monkeypatch.setenv("HUD_API_KEY", "")
+    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
+    monkeypatch.chdir(tmp_path)
+    original = dict(sys.modules)
+
+    def invoke(source: Path | str, *flags: str) -> dict[str, Any]:
+        result = CliRunner().invoke(
+            app, ["eval", str(source), "openai", "--all", "--yes", "--json", *flags]
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["error_count"] == 0, result.output
+        assert payload["mean_reward"] == 1.0, result.output
+        return payload
+
+    yield invoke
+    for name, module in list(sys.modules.items()):
+        file = getattr(module, "__file__", None)
+        if file and Path(file).is_relative_to(tmp_path):
+            if name in original:
+                sys.modules[name] = original[name]
+            else:
+                sys.modules.pop(name, None)
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "single",
+        "standalone",
+        "split",
+        "hooks",
+        "assembled",
+        "json",
+        "jsonl",
+        "directory",
+        "package",
+        "lazy_package",
+    ],
+)
+def test_local_eval_project_layouts(
+    local_eval: Callable[..., dict[str, Any]], tmp_path: Path, layout: str
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    events = project / "events"
+    events.mkdir()
+    (project / "asset.txt").write_text("ok")
+    package = layout in {"package", "lazy_package"}
+    prefix = "." if package else ""
+    if package:
+        (project / "__init__.py").write_text("")
+    (project / "local_core.py").write_text(
+        'from hud import Environment\nenv = Environment("local-test")\n'
+    )
+    template = (
+        "from pathlib import Path\n"
+        '@env.template(id="solve")\n'
+        "async def solve():\n"
+        '    answer = yield "answer ok"\n'
+        '    yield 1.0 if answer == Path("asset.txt").read_text() else 0.0\n'
+    )
+    hooks = (
+        "import os\nfrom pathlib import Path\n"
+        "@env.initialize\nasync def start():\n"
+        '    Path(f"events/{os.getpid()}").write_text("started")\n'
+        "@env.shutdown\nasync def stop():\n"
+        '    Path(f"events/{os.getpid()}").write_text("stopped")\n'
+    )
+    if layout == "lazy_package":
+        (project / "expected.py").write_text(
+            'from pathlib import Path\nexpected = Path("asset.txt").read_text()\n'
+        )
+        template = template.replace(
+            '    answer = yield "answer ok"\n',
+            '    from .expected import expected\n    answer = yield "answer ok"\n',
+        ).replace('Path("asset.txt").read_text()', "expected")
+    if layout in {"hooks", "assembled", "package"}:
+        (project / "local_templates.py").write_text(
+            f"from {prefix}local_core import env\n" + template
+        )
+        (project / "local_extra.py").write_text(
+            f"from {prefix}local_core import env\n"
+            '@env.template(id="extra")\nasync def extra():\n    yield "extra"\n    yield 1.0\n'
+        )
+        env_source = (
+            f"from {prefix}local_core import env\n"
+            f"from {prefix}local_templates import solve\n"
+            + (f"from {prefix}local_extra import extra\n" if layout != "hooks" else "")
+            + hooks
+        )
+    else:
+        env_source = (
+            'from hud import Environment\nenv = Environment("local-test")\n' + template + hooks
+        )
+    if layout in {"single", "standalone", "lazy_package"}:
+        env_source += "tasks = [solve()]\n"
+        source = project / "env.py"
+    else:
+        (project / "tasks.py").write_text(
+            f"from {prefix}env import env, solve\ntasks = [solve()]\n"
+        )
+        source = project / "tasks.py"
+    (project / "env.py").write_text(env_source)
+    if layout == "standalone":
+        source = project / "standalone.py"
+        source.write_text(env_source)
+        (project / "env.py").write_text(
+            'from hud import Environment\nenv = Environment("unrelated")\n'
+        )
+    if layout in {"json", "jsonl"}:
+        source = project / f"tasks.{layout}"
+        row = {"env": "local-test", "id": "solve"}
+        source.write_text(json.dumps([row] if layout == "json" else row))
+    if layout == "directory":
+        source = project
+    payload = local_eval(source, "--group", "2", "--max-concurrent", "2")
+    assert payload["run_count"] == 2
+    assert len(list(events.iterdir())) == 2
+    assert {event.read_text() for event in events.iterdir()} == {"stopped"}
+
+
+@pytest.mark.parametrize("shared", [True, False])
+def test_local_eval_places_nested_verifier(
+    local_eval: Callable[..., dict[str, Any]], tmp_path: Path, shared: bool
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "local_core.py").write_text(
+        'from hud import Environment\nactor = Environment("actor")\n'
+        + ("judge = actor\n" if shared else 'judge = Environment("judge")\n')
+    )
+    (project / "local_actor.py").write_text(
+        "from local_core import actor\n"
+        '@actor.template(id="solve")\nasync def solve():\n'
+        '    answer = yield "answer ok"\n    yield {"score": 0.0, "answer": answer}\n'
+    )
+    (project / "local_judge.py").write_text(
+        "from local_core import judge\n"
+        '@judge.template(id="verify")\nasync def verify():\n'
+        '    result = yield ""\n    yield 1.0 if result["answer"] == "ok" else 0.0\n'
+    )
+    (project / "env.py").write_text(
+        "from local_core import actor, judge\n"
+        "from local_actor import solve\nfrom local_judge import verify\n"
+    )
+    (project / "tasks.py").write_text(
+        "from env import solve, verify\ntasks = [solve()]\ntasks[0].verifier = verify()\n"
+    )
+    assert local_eval(project / "tasks.py")["run_count"] == 1
+
+
+@pytest.mark.parametrize("container", ["image", "compose"])
+def test_platform_container_rows_can_use_local_placement(
+    eval_cli: _EvalCli, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, container: str
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: example:latest\n")
+    config = (
+        RuntimeConfig(image="example:latest")
+        if container == "image"
+        else RuntimeConfig.model_validate(
+            {"compose": {"document": str(compose), "root": str(tmp_path)}}
+        )
+    )
+    task = Task(env="demo", id="solve", runtime_config=config)
+    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda cls, name: Taskset(name, [task])))
+    docker = MagicMock()
+    monkeypatch.setattr(eval_mod, "DockerRuntime", lambda: docker)
+    eval_cli.invoke("Platform Tasks", "openai", "--runtime", "local", "--yes")
+    assert eval_cli.kwargs["runtime"](task) is docker.return_value
+    docker.assert_called_once_with(task)
+
+
+@pytest.mark.parametrize("shared,configured", [(True, False), (False, True), (False, False)])
+def test_platform_local_placement_checks_separate_verifier(
+    eval_cli: _EvalCli, monkeypatch: pytest.MonkeyPatch, shared: bool, configured: bool
+) -> None:
+    config = RuntimeConfig(image="example:latest")
+    verifier = Task(
+        env="actor" if shared else "judge",
+        id="verify",
+        runtime_config=config if configured else None,
+    )
+    task = Task(env="actor", id="solve", runtime_config=config, verifier=verifier)
+    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda cls, name: Taskset(name, [task])))
+    payload = eval_cli.invoke(
+        "Platform Tasks",
+        "openai",
+        "--runtime",
+        "local",
+        "--yes",
+        exit_code=0 if shared or configured else 2,
+    )
+    if not shared and not configured:
+        assert "no env source to spawn locally" in payload["message"]
+        assert eval_cli.taskset is None

@@ -167,3 +167,55 @@ def test_every_reference_form_resolves(tmp_path, monkeypatch) -> None:
     assert load_environment("pkg", name="make_env", args={"name": "x"}).name == "x"
     # ...while a bare reference to the same package still scans its source
     assert load_environment("pkg").name == "from-pkg-source"
+
+
+def test_environment_reexports_are_not_ambiguous(tmp_path) -> None:
+    source = tmp_path / "env.py"
+    source.write_text('from hud import Environment\nenv = Environment("shared")\nalias = env\n')
+    assert load_environment(source, name="shared").name == "shared"
+    assert load_environment(source).name == "shared"
+
+
+def test_distinct_environments_with_the_same_name_are_ambiguous(tmp_path) -> None:
+    source = tmp_path / "env.py"
+    source.write_text(
+        'from hud import Environment\none = Environment("shared")\ntwo = Environment("shared")\n'
+    )
+    with pytest.raises(ValueError, match="multiple Environments"):
+        load_environment(source, name="shared")
+
+
+def test_source_supports_package_relative_imports(tmp_path) -> None:
+    package = tmp_path / "relative_env_package"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "world.py").write_text(
+        'from hud import Environment\nenv = Environment("relative")\n'
+    )
+    (package / "env.py").write_text("from .world import env\n")
+    assert load_environment(package / "env.py").name == "relative"
+
+
+def test_directory_imports_each_module_once(tmp_path) -> None:
+    (tmp_path / "scan_core.py").write_text(
+        'from hud import Environment\nenv = Environment("scanned")\n'
+    )
+    (tmp_path / "scan_templates.py").write_text(
+        "from scan_core import env\n"
+        '@env.template(id="solve")\nasync def solve():\n    yield "ok"\n    yield 1.0\n'
+    )
+    (tmp_path / "assembly.py").write_text(
+        "from scan_core import env\nfrom scan_templates import solve\n"
+    )
+    assert set(load_environment(tmp_path, name="scanned").tasks) == {"solve"}
+
+
+def test_package_init_can_reexport_its_environment(tmp_path) -> None:
+    package = tmp_path / "reexported_env_package"
+    package.mkdir()
+    (package / "__init__.py").write_text("from .env import env\n")
+    (package / "core.py").write_text(
+        'from hud import Environment\nenv = Environment("reexported")\n'
+    )
+    (package / "env.py").write_text("from .core import env\n")
+    assert load_environment(package / "env.py").name == "reexported"

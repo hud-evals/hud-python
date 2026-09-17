@@ -420,12 +420,12 @@ straight off the socket.
 
 ### The provider
 
-The default, `LocalRuntime`, is the smallest provider: it rebuilds the env fresh from its source
-and serves it in *this* process, through the `_local` helper - `env.start()`, `bind` on an
-ephemeral loopback port, and a `Runtime` pointing at it. Exiting cancels the server and runs
-`env.stop()`.
+`LocalRuntime` serves an environment in *this* process: `env.start()`, `bind` on an ephemeral
+loopback port, and a `Runtime` pointing at it. It loads a source, calls a constructor, or serves
+a supplied live environment. Imported dependencies retain their Python module state. Exiting
+cancels the server and runs `env.stop()`.
 
-```python hud/eval/runtime.py · _local (entered by LocalRuntime per acquisition)
+```python hud/eval/runtime/local.py · LocalRuntime.__call__
 started = env.start()
 await asyncio.wait_for(started, ready_timeout)     # @env.initialize, bounded
 server = await bind(env, "127.0.0.1", 0)           # in-process control channel

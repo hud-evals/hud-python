@@ -6,6 +6,7 @@ Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import time
@@ -417,24 +418,41 @@ def eval_command(
         case AnyUrl():
             placement = Runtime(str(cfg.runtime))
         case Placement.LOCAL:
-            # Isolate each row: its container, or a subprocess serving the bound env's
-            # source (``Taskset.run`` alone would serve a live env in-process). Data
-            # rows (JSON/JSONL) only name their env; its source lives beside the file.
-            if not Path(source).exists():
+            rows = list(taskset)
+            rows.extend(
+                task.verifier
+                for task in taskset
+                if task.verifier is not None and not task.shares_verifier_runtime
+            )
+            if not Path(source).exists() and any(
+                not (
+                    task.runtime_config
+                    and (task.runtime_config.image or task.runtime_config.compose)
+                )
+                for task in rows
+            ):
                 raise ValueError(
                     f"{source} is a platform taskset, so there is no env source to spawn "
                     "locally. Run it with --remote, --runtime hud, or --runtime tcp://host:port."
                 )
             docker = DockerRuntime()
-            source_dir = Path(source).resolve()
-            beside = SubprocessRuntime(source_dir if source_dir.is_dir() else source_dir.parent)
+            source_path = Path(source).resolve()
+            directory = source_path if source_path.is_dir() else source_path.parent
+            entrypoint = directory / "env.py"
+            beside = SubprocessRuntime(entrypoint if entrypoint.is_file() else directory)
 
             def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
                 config = task.runtime_config
                 if config and (config.image or config.compose):
                     return docker(task)
                 if task._env is not None:
-                    return SubprocessRuntime(task._env)(task)
+                    if any(
+                        Path(inspect.getfile(template.func)).resolve() == source_path
+                        for template in task._env.tasks.values()
+                    ):
+                        return SubprocessRuntime(source_path)(task)
+                    if not entrypoint.is_file():
+                        return SubprocessRuntime(task._env)(task)
                 return beside(task)
 
             placement = spawn
