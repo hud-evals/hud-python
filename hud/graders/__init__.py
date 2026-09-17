@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from .base import Grader
 from .bash import BashGrader
+from .code import ASTCodeGrader, is_valid_python
 from .combine import _combine_subscores, combine, combine_all, combine_any
 from .judge import LLMJudgeGrader
 from .results import EvaluationResult, SubScore
@@ -39,6 +40,7 @@ from .text import (
 )
 
 __all__ = [
+    "ASTCodeGrader",
     "BashGrader",
     "EvaluationResult",
     "Grader",
@@ -53,6 +55,7 @@ __all__ = [
     "contains_any",
     "exact_match",
     "f1_score",
+    "is_valid_python",
     "normalize",
     "numeric_match",
 ]

@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hud.graders import (
+    ASTCodeGrader,
     BashGrader,
     EvaluationResult,
     Grader,
@@ -25,6 +26,7 @@ from hud.graders import (
     contains_any,
     exact_match,
     f1_score,
+    is_valid_python,
     normalize,
     numeric_match,
 )
@@ -646,3 +648,82 @@ class TestBashGrader:
         assert by_name["BashGrader-2"].info is not None
         assert by_name["BashGrader-2"].info["exit_code"] != 0
         assert result.info == {}
+
+
+class TestASTCodeGrader:
+    def test_is_valid_python_helper(self) -> None:
+        assert is_valid_python("def add(a, b):\n    return a + b\n") == 1.0
+        assert is_valid_python("def broken(: return") == 0.0
+
+    async def test_ast_grader_valid_code(self) -> None:
+        code = "def solve(x):\n    return x * 2\n"
+        subscore = await ASTCodeGrader.compute_score(code=code)
+        assert subscore.value == 1.0
+        assert subscore.info is not None
+        assert subscore.info["valid_syntax"] is True
+        assert subscore.info["passed"] is True
+        assert "solve" in subscore.info["defined_functions"]
+
+    async def test_ast_grader_syntax_error(self) -> None:
+        bad_code = "def incomplete("
+        subscore = await ASTCodeGrader.compute_score(code=bad_code)
+        assert subscore.value == 0.0
+        assert subscore.info is not None
+        assert subscore.info["valid_syntax"] is False
+        assert "error" in subscore.info
+
+    async def test_ast_grader_required_definitions(self) -> None:
+        code = "class AgentRunner:\n    def run(self):\n        pass\n"
+        # Passing case
+        subscore = await ASTCodeGrader.compute_score(
+            code=code,
+            required_classes=["AgentRunner"],
+            required_functions=["run"],
+        )
+        assert subscore.value == 1.0
+        assert subscore.info is not None
+        assert subscore.info["passed"] is True
+
+        # Missing function
+        subscore_missing = await ASTCodeGrader.compute_score(
+            code=code,
+            required_functions=["evaluate"],
+        )
+        assert subscore_missing.value == 0.0
+        assert subscore_missing.info is not None
+        assert any(
+            "Missing required function: evaluate" in msg
+            for msg in subscore_missing.info["missing_definitions"]
+        )
+
+    async def test_ast_grader_anti_cheat_disallowed_imports(self) -> None:
+        cheating_code = "import os\nfrom subprocess import Popen\ndef hack():\n    pass\n"
+        subscore = await ASTCodeGrader.compute_score(
+            code=cheating_code,
+            disallowed_imports=["os", "subprocess"],
+        )
+        assert subscore.value == 0.0
+        assert subscore.info is not None
+        assert subscore.info["passed"] is False
+        assert len(subscore.info["violations"]) == 2
+        assert any("os" in v for v in subscore.info["violations"])
+        assert any("subprocess" in v for v in subscore.info["violations"])
+
+    async def test_ast_grader_anti_cheat_disallowed_calls(self) -> None:
+        risky_code = "def run(x):\n    return eval(x)\n"
+        subscore = await ASTCodeGrader.compute_score(
+            code=risky_code,
+            disallowed_calls=["eval", "exec"],
+        )
+        assert subscore.value == 0.0
+        assert subscore.info is not None
+        assert any("eval" in v for v in subscore.info["violations"])
+
+    async def test_ast_grader_grade_in_combine(self) -> None:
+        code = "def valid(): return True"
+        result = await combine(
+            ASTCodeGrader.grade(weight=1.0, code=code, required_functions=["valid"])
+        )
+        assert result.reward == 1.0
+        assert result.subscores is not None
+        assert result.subscores[0].name == "ASTCodeGrader"
