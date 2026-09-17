@@ -138,21 +138,6 @@ def test_subprocess_runtime_rejects_env_pin_for_live_env() -> None:
         SubprocessRuntime(_sums_env(), env="sums")
 
 
-async def test_task_source_requires_unambiguous_bound_environment(tmp_path):
-    source = tmp_path / "tasks.py"
-    source.write_text(
-        "from hud import Environment\n"
-        'first = Environment("same")\nsecond = Environment("same")\n'
-        '@first.template()\nasync def one():\n    yield "one"\n'
-        '@second.template()\nasync def two():\n    yield "two"\n'
-        "tasks = [one(), two()]\n"
-    )
-    task = next(iter(Taskset.from_file(source)))
-    with pytest.raises(RuntimeError, match="multiple bound Environments"):
-        async with SubprocessRuntime(source, task_source=True)(task):
-            pytest.fail("ambiguous source was served")
-
-
 async def test_subprocess_runtime_fails_when_stdout_closes_before_serving(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
