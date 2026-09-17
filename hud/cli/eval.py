@@ -123,6 +123,11 @@ class EvalConfig(BaseModel):
         eval_section = data.pop("eval", {})
         if data:
             raise ValueError(f"{path}: unknown sections: {', '.join(sorted(data))}")
+        remote = eval_section.pop("remote", False)
+        if not isinstance(remote, bool):
+            raise ValueError(f"{path}: remote must be a boolean")
+        if remote:
+            eval_section.setdefault("runtime", Placement.HOSTED)
         return cls.model_validate({**eval_section, "agent_config": agent_config})
 
     def merge(self, overrides: dict[str, Any]) -> EvalConfig:

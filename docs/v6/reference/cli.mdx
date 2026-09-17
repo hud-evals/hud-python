@@ -184,7 +184,7 @@ base_url = "http://localhost:8000/v1"
 api_key = "${MY_PROVIDER_API_KEY}"
 ```
 
-Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown `[eval]` keys, unknown sections, and a file that does not parse. Agent-specific sections follow the selected agent's configuration model; they do not all reject unknown keys. `--config key=value` layers onto the selected agent's section. There is no `remote` key: use `runtime = "hosted"`.
+Every key is optional. `${VAR}` expands from the environment and HUD settings (`${HUD_API_KEY}`, `${api_key}`); an unset variable is an error, as are unknown `[eval]` keys, unknown sections, and a file that does not parse. Agent-specific sections follow the selected agent's configuration model; they do not all reject unknown keys. `--config key=value` layers onto the selected agent's section. Use `runtime = "hosted"` for hosted execution.
 
 ## Run a packaged image
 

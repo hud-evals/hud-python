@@ -138,6 +138,39 @@ def test_load_parses_eval_and_agent_sections(tmp_path: Path) -> None:
     assert cfg.agent_config == {"openai": {"model": "gpt-4o"}}
 
 
+@pytest.mark.parametrize(
+    "contents, source, flags, expected",
+    [
+        ("remote = true", "tasks.py", [], "hosted"),
+        ("remote = false", "tasks.py", [], "local"),
+        ("remote = false", "My Tasks", [], "hosted"),
+        ('remote = true\nruntime = "local"', "tasks.py", [], "local"),
+        ('remote = false\nruntime = "hud"', "tasks.py", [], "hud"),
+        ("remote = true", "tasks.py", ["--runtime", "local"], "local"),
+        ("remote = false", "tasks.py", ["--remote"], "hosted"),
+    ],
+)
+def test_legacy_remote_config_resolves_placement(
+    eval_cli: _EvalCli,
+    tmp_path: Path,
+    contents: str,
+    source: str,
+    flags: list[str],
+    expected: str,
+) -> None:
+    path = tmp_path / ".hud_eval.toml"
+    path.write_text(f"[eval]\n{contents}\n")
+    result = eval_cli.invoke(source, "openai", *flags, "--dry-run")
+    assert result["runtime"] == expected
+    assert "remote" not in EvalConfig.load(path).model_dump()
+
+
+def test_legacy_remote_config_uses_hosted_runtime(eval_cli: _EvalCli, tmp_path: Path) -> None:
+    (tmp_path / ".hud_eval.toml").write_text("[eval]\nremote = true\n")
+    eval_cli.invoke("tasks.py", "openai", "--yes")
+    assert isinstance(eval_cli.kwargs["runtime"], HostedRuntime)
+
+
 def test_load_resolves_env_var_placeholders(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,6 +203,7 @@ def test_load_treats_unset_settings_as_unset(
     "contents, match",
     [
         ('[eval]\nmodle = "x"\n', "modle"),
+        ('[eval]\nremote = "false"\n', "remote must be a boolean"),
         ('[eval]\nagent = "not-an-agent"\n', "claude"),
         ('[eval]\nruntime = "cloud"\n', "'local', 'hud', 'hosted', 'docker', 'modal' or 'daytona'"),
         ("[other]\nx = 1\n", "unknown sections: other"),
