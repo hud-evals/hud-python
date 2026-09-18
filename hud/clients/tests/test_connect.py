@@ -17,12 +17,92 @@ from urllib.parse import urlsplit
 import pytest
 
 import hud.clients.client as client_module
-from hud.capabilities import Capability, CapabilityClient
+from hud.capabilities import Capability, CapabilityClient, Connection
 from hud.clients import HudProtocolError, connect
+from hud.environment import WorkspaceRoute
 from hud.environment.utils import read_frame, send_frame
 from hud.eval.runtime import Runtime
 
 HELLO_RESULT = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
+
+
+def test_workspace_route_from_url_extracts_transport_address() -> None:
+    assert WorkspaceRoute.from_url("ssh", "https://inference.hud.so/v1") == WorkspaceRoute(
+        "ssh",
+        "inference.hud.so",
+        443,
+    )
+    assert WorkspaceRoute.from_url("shell", "http://gateway.test:8080") == WorkspaceRoute(
+        "shell",
+        "gateway.test",
+        8080,
+    )
+
+
+async def test_connect_sends_workspace_routes_in_hello() -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            requests.append(hello)
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    runtime = Runtime(f"tcp://127.0.0.1:{port}")
+    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
+    try:
+        async with connect(runtime, workspace_routes=(route,)):
+            pass
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert [request["method"] for request in requests] == ["hello"]
+    params = requests[0]["params"]
+    assert isinstance(params, dict)
+    assert params == {"workspace_routes": [route.to_wire()]}
+
+
+async def test_connect_sends_controller_connections_in_hello() -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            requests.append(hello)
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer secret"},
+    )
+    try:
+        async with connect(
+            Runtime(f"tcp://127.0.0.1:{port}"),
+            connections=(connection,),
+        ):
+            pass
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    params = requests[0]["params"]
+    assert isinstance(params, dict)
+    assert params == {"connections": [connection.to_wire()]}
 
 
 async def test_open_retries_transient_capability_connection_failures(
@@ -288,11 +368,15 @@ async def test_connect_uses_runtime_ready_timeout_param(
         port: int,
         *,
         ready_timeout: float,
+        workspace_routes: tuple[WorkspaceRoute, ...],
+        connections: tuple[Connection, ...],
         interval: float = 0.5,
     ) -> _FakeClient:
         seen["host"] = host
         seen["port"] = port
         seen["ready_timeout"] = ready_timeout
+        assert workspace_routes == ()
+        assert connections == ()
         seen["interval"] = interval
         return _FakeClient()
 

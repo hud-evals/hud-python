@@ -1,5 +1,7 @@
-"""Claude Agent SDK agent."""
+"""Agent that runs the ``claude`` CLI over SSH."""
 
-from .agent import ClaudeSDKAgent, ClaudeSDKConfig
+from hud.agents.types import ClaudeCLIConfig
 
-__all__ = ["ClaudeSDKAgent", "ClaudeSDKConfig"]
+from .agent import ClaudeCLIAgent
+
+__all__ = ["ClaudeCLIAgent", "ClaudeCLIConfig"]

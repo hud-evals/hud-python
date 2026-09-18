@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from hud.agents.registry import dump_agent, load_agent
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
@@ -15,7 +16,8 @@ from hud.utils.gateway import resolve_gateway_model
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from hud.agents.claude import ClaudeAgent, ClaudeSDKAgent, ClaudeSDKConfig
+    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent, ClaudeCLIConfig
+    from hud.agents.codex import CodexCLIAgent, CodexCLIConfig
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
@@ -47,11 +49,15 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
         raise HudAuthenticationError("HUD_API_KEY is required to create a gateway agent")
 
     agent_type, model_id = resolve_agent_model(model)
+    if agent_type.is_cli:
+        raise ValueError(
+            f"create_agent only constructs provider API agents; instantiate "
+            f"{agent_type.cls.__name__} directly"
+        )
     kwargs.setdefault("model", model_id)
     kwargs["gateway"] = True
-    # cls/config_cls are matched unions; the pairing is correct by construction.
     config = agent_type.config_cls(**kwargs)
-    return agent_type.cls(cast("Any", config))
+    return cast("GatewayAgent", agent_type.instantiate(config))
 
 
 def resolve_agent_model(model: str) -> tuple[AgentType, str]:
@@ -82,8 +88,10 @@ def resolve_agent_model(model: str) -> tuple[AgentType, str]:
 
 _LAZY_EXPORTS = {
     "ClaudeAgent": ("hud.agents.claude", "ClaudeAgent"),
-    "ClaudeSDKAgent": ("hud.agents.claude", "ClaudeSDKAgent"),
-    "ClaudeSDKConfig": ("hud.agents.claude", "ClaudeSDKConfig"),
+    "ClaudeCLIAgent": ("hud.agents.claude", "ClaudeCLIAgent"),
+    "ClaudeCLIConfig": ("hud.agents.claude", "ClaudeCLIConfig"),
+    "CodexCLIAgent": ("hud.agents.codex", "CodexCLIAgent"),
+    "CodexCLIConfig": ("hud.agents.codex", "CodexCLIConfig"),
     "GeminiAgent": ("hud.agents.gemini", "GeminiAgent"),
     "MCPAgent": ("hud.agents.tool_agent", "ToolAgent"),
     "OpenAIAgent": ("hud.agents.openai", "OpenAIAgent"),
@@ -92,13 +100,17 @@ _LAZY_EXPORTS = {
 
 __all__ = [
     "ClaudeAgent",
-    "ClaudeSDKAgent",
-    "ClaudeSDKConfig",
+    "ClaudeCLIAgent",
+    "ClaudeCLIConfig",
+    "CodexCLIAgent",
+    "CodexCLIConfig",
     "GeminiAgent",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
     "create_agent",
+    "dump_agent",
+    "load_agent",
     "resolve_agent_model",
 ]
 

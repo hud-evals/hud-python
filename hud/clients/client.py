@@ -23,6 +23,7 @@ from hud.capabilities import (
     Capability,
     CapabilityClient,
     CDPClient,
+    Connection,
     MCPClient,
     RFBClient,
     SSHClient,
@@ -36,8 +37,9 @@ from hud.environment.utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
+    from hud.environment.egress import WorkspaceRoute
     from hud.eval.runtime import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
@@ -161,14 +163,26 @@ class HudClient:
 
     # ─── handshake ────────────────────────────────────────────────────
 
-    async def hello(self, session_id: str | None = None) -> Manifest:
+    async def hello(
+        self,
+        session_id: str | None = None,
+        *,
+        workspace_routes: Sequence[WorkspaceRoute] = (),
+        connections: Sequence[Connection] = (),
+    ) -> Manifest:
         """Send ``hello``; cache and return the parsed ``Manifest``.
 
         ``session_id`` resumes that parked session on the env — its suspended
         task, e.g. one a prior connection started — instead of minting a
         fresh session.
         """
-        params: dict[str, Any] = {} if session_id is None else {"session_id": session_id}
+        params: dict[str, Any] = {}
+        if workspace_routes:
+            params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
+        if connections:
+            params["connections"] = [connection.to_wire() for connection in connections]
+        if session_id is not None:
+            params["session_id"] = session_id
         result = await self._call("hello", params)
         env = result["env"]
         bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
@@ -383,6 +397,8 @@ async def _connect_ready(
     port: int,
     *,
     ready_timeout: float,
+    workspace_routes: Sequence[WorkspaceRoute],
+    connections: Sequence[Connection],
     interval: float = 0.5,
 ) -> HudClient:
     """Connect and complete ``hello``, retrying until the env is ready.
@@ -406,7 +422,7 @@ async def _connect_ready(
 
         client = HudClient(reader, writer, endpoint=(host, port))
         try:
-            await client.hello()
+            await client.hello(workspace_routes=workspace_routes, connections=connections)
         except asyncio.CancelledError:
             client.abort()
             raise
@@ -439,7 +455,13 @@ def _runtime_ready_timeout(runtime: Runtime, default: float) -> float:
 
 
 @asynccontextmanager
-async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIterator[HudClient]:
+async def connect(
+    runtime: Runtime,
+    *,
+    ready_timeout: float = 240.0,
+    workspace_routes: Sequence[WorkspaceRoute] = (),
+    connections: Sequence[Connection] = (),
+) -> AsyncIterator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
 
     Takes the :class:`~hud.eval.runtime.Runtime` a provider yielded (or
@@ -456,6 +478,8 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIte
         parts.hostname or "127.0.0.1",
         parts.port or 0,
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
+        workspace_routes=workspace_routes,
+        connections=connections,
     )
     owner = asyncio.current_task()
     assert owner is not None
@@ -467,9 +491,14 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIte
             await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
             assert client.manifest is not None
             try:
+                params: dict[str, Any] = {"session_id": client.manifest.session_id}
+                if workspace_routes:
+                    params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
+                if connections:
+                    params["connections"] = [connection.to_wire() for connection in connections]
                 await client._call(
                     "hello",
-                    {"session_id": client.manifest.session_id},
+                    params,
                     reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS,
                 )
             except HudProtocolError as exc:
@@ -495,4 +524,10 @@ async def connect(runtime: Runtime, *, ready_timeout: float = 240.0) -> AsyncIte
         raise
 
 
-__all__ = ["HudClient", "HudProtocolError", "Manifest", "ServerInfo", "connect"]
+__all__ = [
+    "HudClient",
+    "HudProtocolError",
+    "Manifest",
+    "ServerInfo",
+    "connect",
+]

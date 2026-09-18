@@ -1,6 +1,6 @@
 """Runtime placement and provider configuration."""
 
-from .compose import ComposeProject
+from .compose import ComposeProject, DockerBindMount
 from .core import (
     Provider,
     Runtime,
@@ -21,6 +21,7 @@ from .modal import ModalRuntime
 __all__ = [
     "ComposeProject",
     "DaytonaRuntime",
+    "DockerBindMount",
     "DockerRuntime",
     "HUDRuntime",
     "HostedRuntime",

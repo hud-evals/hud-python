@@ -25,7 +25,13 @@ from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
-from hud.agents.types import AgentConfig, AgentStep, ClaudeConfig, ClaudeSDKConfig, ToolStep
+from hud.agents.types import (
+    AgentStep,
+    ClaudeCLIConfig,
+    ClaudeConfig,
+    ToolAgentConfig,
+    ToolStep,
+)
 from hud.capabilities import (
     Capability,
     CapabilityClient,
@@ -55,11 +61,11 @@ class _FakeRun:
         self.trace.record(step)
 
 
-class DictAgent(ToolAgent[_Msg, AgentConfig]):
+class DictAgent(ToolAgent[_Msg, ToolAgentConfig]):
     """Minimal concrete ToolAgent over plain-dict messages."""
 
     def __init__(self, turns: list[AgentStep], **config: Any) -> None:
-        self.config = AgentConfig(model="test-model", **config)
+        self.config = ToolAgentConfig(model="test-model", **config)
         self._turns = list(turns)
 
     async def _initialize_state(self, *, prompt: Any) -> RunState[_Msg]:
@@ -90,9 +96,9 @@ def test_init_subclass_derives_clients_from_catalog() -> None:
 
 
 def test_claude_defaults_to_configurable_webp_screenshots() -> None:
-    assert AgentConfig().screenshot_encoding == PngScreenshotEncoding()
+    assert ToolAgentConfig().screenshot_encoding == PngScreenshotEncoding()
     assert ClaudeConfig().screenshot_encoding == WebPScreenshotEncoding()
-    assert ClaudeSDKConfig().screenshot_encoding == WebPScreenshotEncoding()
+    assert ClaudeCLIConfig().screenshot_encoding == WebPScreenshotEncoding()
 
     configured = ClaudeConfig.model_validate(
         {"screenshot_encoding": {"mime_type": "image/webp", "quality": 42}},
@@ -111,8 +117,7 @@ def test_only_claude_provider_has_a_default_tool_timeout() -> None:
     assert config.timeout_seconds == 600
     assert config.tool_timeout_seconds == 120
     assert ClaudeConfig(tool_timeout_seconds=None).tool_timeout_seconds is None
-    assert AgentConfig().tool_timeout_seconds is None
-    assert ClaudeSDKConfig().tool_timeout_seconds is None
+    assert ToolAgentConfig().tool_timeout_seconds is None
 
 
 async def test_agent_passes_screenshot_encoding_to_rfb_tools() -> None:
@@ -521,7 +526,8 @@ async def test_claude_bash_timeout_terminates_process_and_continues_loop(
     state = RunState(messages=[], tools={"bash": tool})
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, state, max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, state)
 
     assert started.is_set()
     process.terminate.assert_called_once_with()
@@ -576,7 +582,8 @@ async def test_loop_finishes_on_done_response() -> None:
     agent = DictAgent([AgentStep(content="final answer", done=True)])
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, RunState())
 
     assert run.trace.status == "completed"
     assert run.trace.content == "final answer"
@@ -618,7 +625,8 @@ async def test_loop_discards_degenerate_turn_and_resamples() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, RunState())
 
     # The degenerate turn is discarded (consuming a step) and never recorded.
     assert run.trace.status == "completed"
@@ -630,7 +638,8 @@ async def test_loop_fails_when_degenerate_turn_exhausts_steps() -> None:
     agent = _DegenerateDictAgent([DegenerateTurnError("empty shell_call")] * 2)
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=2)
+    agent.config.max_steps = 2
+    await agent._loop(run, RunState())
 
     assert run.trace.status == "error"
     assert run.trace.error == "empty shell_call"
@@ -645,7 +654,8 @@ async def test_loop_dispatches_tool_calls_then_finishes() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, RunState())
 
     assert run.trace.content == "done now"
     assert [step.source for step in run.trace.steps] == ["agent", "tool", "agent"]
@@ -679,7 +689,8 @@ async def test_loop_resets_infrastructure_error_count_after_other_result(
     monkeypatch.setattr(agent, "_dispatch_call", dispatch)
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=10)
+    agent.config.max_steps = 10
+    await agent._loop(run, RunState())
 
     assert dispatch.await_count == 5
     assert run.trace.status == "error"
@@ -697,7 +708,8 @@ async def test_loop_max_steps_is_normal_termination() -> None:
     agent = DictAgent(never_done)
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=2)
+    agent.config.max_steps = 2
+    await agent._loop(run, RunState())
 
     assert run.trace.is_error is False
     assert run.trace.status == "completed"
@@ -715,7 +727,8 @@ async def test_loop_marks_length_finish_as_truncated() -> None:
         agent = DictAgent([AgentStep(content="partial", done=True, finish_reason=finish_reason)])
         run = cast("Run", _FakeRun())
 
-        await agent._loop(run, RunState(), max_steps=3)
+        agent.config.max_steps = 3
+        await agent._loop(run, RunState())
 
         assert run.trace.status == "completed"
         assert run.trace.stop_reason == "length"
@@ -736,7 +749,8 @@ async def test_loop_answers_malformed_call_by_default() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, RunState())
 
     assert run.trace.content == "recovered"
     tool_step = run.trace.steps[1]
@@ -760,7 +774,8 @@ async def test_loop_stops_on_malformed_call_when_configured() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, RunState())
 
     assert run.trace.status == "completed"
     assert run.trace.stop_reason == "malformed_tool_call"
@@ -783,7 +798,8 @@ async def test_loop_stops_on_length_when_configured() -> None:
     )
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(), max_steps=3)
+    agent.config.max_steps = 3
+    await agent._loop(run, RunState())
 
     assert run.trace.stop_reason == "length"
     assert run.trace.is_truncated is True
