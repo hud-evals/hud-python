@@ -17,8 +17,7 @@ from hud.agents.codex.agent import codex_command, run_codex
 from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
-from hud.capabilities import Capability, SSHClient
-from hud.eval import InferenceConnection
+from hud.capabilities import Capability, Connection, SSHClient
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -45,7 +44,9 @@ class _FakeSSH:
         )
         self.commands: list[str] = []
 
-    async def create_process(self, command: str) -> _FakeProcess:
+    async def create_process(
+        self, command: str, *, connections: tuple[Connection, ...] = ()
+    ) -> _FakeProcess:
         self.commands.append(command)
         return self.process
 
@@ -105,19 +106,23 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert command.endswith(" -")
 
 
-def test_command_prefers_rollout_inference_connection() -> None:
-    inference = InferenceConnection(
-        base_url="https://inference.hud.so",
-        credential="scoped-runtime-token",
+def test_command_uses_process_bound_connection_without_its_credential() -> None:
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
     )
 
-    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", inference=inference)
+    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", connection=connection)
 
-    assert "HUD_RUNTIME_INFERENCE_TOKEN=scoped-runtime-token" in command
-    assert 'model_providers.hud.env_key="HUD_RUNTIME_INFERENCE_TOKEN"' in command
+    assert "scoped-runtime-token" not in command
+    assert "HUD_CONNECTION_CREDENTIAL=hud-process-bound" in command
+    assert 'model_providers.hud.env_key="HUD_CONNECTION_CREDENTIAL"' in command
     assert "HUD_API_KEY" not in command
-    assert 'model_providers.hud.base_url="https://inference.hud.so"' in command
+    assert f'model_providers.hud.base_url="{connection.client_url}"' in command
     assert "Trace-Id" not in command
+    assert "exec env" in command
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
@@ -319,7 +324,7 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
     execute = AsyncMock()
     monkeypatch.setattr("hud.agents.codex.agent.run_codex", execute)
     run = SimpleNamespace(
-        client=Client(), prompt_text="Fix it", runtime_config=None, inference=None
+        client=Client(), prompt_text="Fix it", runtime_config=None, connections={}
     )
 
     await agent(cast("Any", run))
@@ -331,7 +336,7 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
         shell="powershell",
         prompt="Fix it",
         executable="codex",
-        inference=None,
+        connection=None,
     )
 
 
