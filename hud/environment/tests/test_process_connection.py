@@ -18,6 +18,7 @@ from hud.clients import connect
 from hud.environment import Environment, Peer
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
+from hud.environment.workspace import usable_bwrap
 from hud.eval import LocalRuntime, Task
 
 pytestmark = pytest.mark.skipif(
@@ -141,7 +142,7 @@ async def test_ptrace_backend_emulates_connects_and_blocks_descendants(tmp_path:
         f"thread=threading.Thread(target=lambda:threaded.append(urllib.request.urlopen({protected_url!r},timeout=5).read().decode()));"
         "thread.start();thread.join();print(threaded[0]);"
         "blocked=subprocess.run([sys.executable,'-c',protected]);"
-        "print(f'blocked={blocked.returncode}');"
+        "print(f'blocked={blocked.returncode}',flush=True);"
         "permitted=subprocess.run([sys.executable,'-c',ordinary]);"
         "print(f'ordinary={permitted.returncode}')"
     )
@@ -184,6 +185,7 @@ async def test_ptrace_backend_emulates_connects_and_blocks_descendants(tmp_path:
             thread.join()
 
 
+@pytest.mark.skipif(usable_bwrap() is None, reason="bubblewrap isolation is unavailable")
 async def test_only_bound_process_reaches_controller_connection(tmp_path: Path) -> None:
     protected, protected_thread = _server(_ProtectedUpstream)
     ordinary, ordinary_thread = _server(_OrdinaryUpstream)
