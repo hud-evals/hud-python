@@ -34,7 +34,15 @@ from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.clients.client import HudClient
 from hud.environment import Answer, Environment
-from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
+from hud.eval import (
+    InferenceConnection,
+    Job,
+    LocalRuntime,
+    Runtime,
+    SubprocessRuntime,
+    Task,
+    Taskset,
+)
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 
@@ -173,6 +181,29 @@ async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     # The factual placement record: the runtime this run executed against.
     assert run.runtime is not None
     assert run.runtime.startswith("tcp://127.0.0.1:")
+
+
+async def test_inference_connection_exists_only_during_agent_execution(env_file: Path) -> None:
+    connection = InferenceConnection(
+        base_url="https://inference.hud.so",
+        credential="scoped-runtime-token",
+    )
+    observed: list[InferenceConnection | None] = []
+
+    class InspectingAgent(Agent):
+        async def __call__(self, run: Run) -> None:
+            observed.append(run.inference)
+            run.trace.content = _solve_add(run.prompt_text)
+
+    run = await rollout(
+        _add_task(2, 3),
+        InspectingAgent(),
+        runtime=SubprocessRuntime(env_file),
+        inference=connection,
+    )
+
+    assert observed == [connection]
+    assert run.inference is None
 
 
 async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> None:

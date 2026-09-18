@@ -32,7 +32,7 @@ from hud.types import Trace
 
 from .chat import Chat
 from .job import Job
-from .run import Grade, Run, rollout
+from .run import Grade, InferenceConnection, Run, rollout
 from .runtime import (
     ComposeProject,
     DaytonaRuntime,
@@ -63,6 +63,7 @@ __all__ = [
     "Grade",
     "HUDRuntime",
     "HostedRuntime",
+    "InferenceConnection",
     "Job",
     "LocalRuntime",
     "ModalRuntime",

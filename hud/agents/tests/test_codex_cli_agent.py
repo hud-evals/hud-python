@@ -18,6 +18,7 @@ from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
+from hud.eval import InferenceConnection
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -102,6 +103,38 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert "--sandbox workspace-write" in command
         assert "--model gpt-5.6-sol" in command
         assert command.endswith(" -")
+
+
+def test_command_prefers_rollout_inference_connection() -> None:
+    inference = InferenceConnection(
+        base_url="https://inference.hud.so",
+        credential="scoped-runtime-token",
+    )
+
+    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", inference=inference)
+
+    assert "HUD_RUNTIME_INFERENCE_TOKEN=scoped-runtime-token" in command
+    assert 'model_providers.hud.env_key="HUD_RUNTIME_INFERENCE_TOKEN"' in command
+    assert "HUD_API_KEY" not in command
+    assert 'model_providers.hud.base_url="https://inference.hud.so"' in command
+    assert "Trace-Id" not in command
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_command_preserves_ambient_codex_login_without_explicit_credentials(shell: str) -> None:
+    command = codex_command(CodexCLIConfig(use_hud_gateway=False), shell)
+    script = (
+        base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+        if shell == "powershell"
+        else command
+    )
+
+    assert "CODEX_HOME" not in script
+    assert "CODEX_API_KEY" not in script
+    assert "HUD_API_KEY" not in script
+    assert "HUD_RUNTIME_INFERENCE_TOKEN" not in script
+    assert "mktemp" not in script
+    assert "codex exec" in script or "& 'codex' 'exec'" in script
 
 
 def test_windows_command_encodes_environment_and_arguments(
@@ -276,6 +309,8 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
     ssh = _FakeSSH(_FakeProcess(_STREAM_JSON), shell="powershell")
 
     class Client:
+        inference = None
+
         async def open(self, ref: str) -> _FakeSSH:
             assert ref == "ssh"
             return ssh
@@ -283,7 +318,9 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
     agent = CodexCLIAgent()
     execute = AsyncMock()
     monkeypatch.setattr("hud.agents.codex.agent.run_codex", execute)
-    run = SimpleNamespace(client=Client(), prompt_text="Fix it", runtime_config=None)
+    run = SimpleNamespace(
+        client=Client(), prompt_text="Fix it", runtime_config=None, inference=None
+    )
 
     await agent(cast("Any", run))
 
@@ -294,6 +331,7 @@ async def test_agent_opens_ssh_and_uses_workspace_prompt(monkeypatch: pytest.Mon
         shell="powershell",
         prompt="Fix it",
         executable="codex",
+        inference=None,
     )
 
 
@@ -311,11 +349,11 @@ async def test_executable_resolution_prefers_matching_managed_bundle() -> None:
     executable = await resolve_executable(
         cast("Any", ssh),
         "codex",
-        {"linux-x64": "/media/hud/bin/codex/bin/codex"},
+        {"linux-x64": "/usr/local/lib/agents/codex/bin/codex"},
         RuntimeConfig(resources=RuntimeResources(os="linux")),
     )
 
-    assert executable == "/media/hud/bin/codex/bin/codex"
+    assert executable == "/usr/local/lib/agents/codex/bin/codex"
     assert ssh.run.await_count == 2
 
 

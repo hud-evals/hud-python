@@ -30,6 +30,7 @@ from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
+from hud.eval import InferenceConnection
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolResult
@@ -66,6 +67,32 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
     assert "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS" not in provider
     assert "DISABLE_AUTO_COMPACT" not in provider
     assert "ANTHROPIC_MODEL=claude-sonnet-5" in provider
+
+
+def test_command_prefers_rollout_inference_connection() -> None:
+    inference = InferenceConnection(
+        base_url="https://inference.hud.so",
+        credential="scoped-runtime-token",
+    )
+
+    gateway = ClaudeCLIAgent(ClaudeCLIConfig(use_hud_gateway=True))._build_cli_command(
+        shell="bash",
+        inference=inference,
+    )
+
+    assert "ANTHROPIC_BASE_URL=https://inference.hud.so" in gateway
+    assert "ANTHROPIC_API_KEY=scoped-runtime-token" in gateway
+    assert "HUD_API_KEY" not in gateway
+    assert "Trace-Id" not in gateway
+    for name in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert f"{name}=claude-sonnet-5" in gateway
 
 
 def test_windows_command_encodes_environment_and_arguments(
@@ -458,6 +485,7 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
     ssh = SSHClient(shell, cast("Any", object()))
 
     class Client:
+        inference = None
         manifest = SimpleNamespace(bindings=[shell, mcp])
 
         async def open(self, ref: str) -> SSHClient:
@@ -471,7 +499,9 @@ async def test_manifest_mcp_capability_is_written_for_remote_claude(
     await agent(
         cast(
             "Any",
-            SimpleNamespace(client=Client(), prompt_text="call the tool", runtime_config=None),
+            SimpleNamespace(
+                client=Client(), prompt_text="call the tool", runtime_config=None, inference=None
+            ),
         )
     )
 
@@ -499,6 +529,7 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     bridge_active = False
 
     class Client:
+        inference = None
         manifest = SimpleNamespace(bindings=[shell, screen])
 
         async def open(self, ref: str) -> SSHClient:
@@ -542,7 +573,9 @@ async def test_remote_claude_passes_screenshot_encoding_to_computer_mcp(
     await agent(
         cast(
             "Any",
-            SimpleNamespace(client=Client(), prompt_text="use the computer", runtime_config=None),
+            SimpleNamespace(
+                client=Client(), prompt_text="use the computer", runtime_config=None, inference=None
+            ),
         )
     )
 
@@ -583,6 +616,7 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
     bridged: list[str] = []
 
     class Client:
+        inference = None
         manifest = SimpleNamespace(bindings=[shell, *screens])
 
         async def open(self, ref: str) -> SSHClient:
@@ -633,6 +667,7 @@ async def test_remote_claude_preserves_multiple_rfb_bindings(
                 client=Client(),
                 prompt_text="use both screens",
                 runtime_config=None,
+                inference=None,
             ),
         )
     )
@@ -870,6 +905,7 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
 
     class Client:
         def __init__(self, shell: Capability, ssh: SSHClient) -> None:
+            self.inference = None
             self.manifest = SimpleNamespace(bindings=[shell])
             self.ssh = ssh
 
@@ -897,9 +933,14 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated(
 
     agent = ClaudeCLIAgent()
     monkeypatch.setattr(agent, "_exec", execute)
-    run_a = SimpleNamespace(client=Client(shell_a, ssh_a), prompt_text="first", runtime_config=None)
+    run_a = SimpleNamespace(
+        client=Client(shell_a, ssh_a), prompt_text="first", runtime_config=None, inference=None
+    )
     run_b = SimpleNamespace(
-        client=Client(shell_b, ssh_b), prompt_text="second", runtime_config=None
+        client=Client(shell_b, ssh_b),
+        prompt_text="second",
+        runtime_config=None,
+        inference=None,
     )
 
     first = asyncio.create_task(agent(cast("Any", run_a)))
