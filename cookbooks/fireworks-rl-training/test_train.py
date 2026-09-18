@@ -180,6 +180,10 @@ def test_default_rollout_source_has_disjoint_evaluation_tasks() -> None:
 def fireworks_service(tokenizer: PreTrainedTokenizerFast) -> MagicMock:
     service = MagicMock()
     client = service.create_lora_training_client.return_value
+    service.create_training_client_from_state_with_optimizer.return_value = client
+    service.create_rest_client.return_value.get_weights_info_by_tinker_path.return_value = resolved(
+        SimpleNamespace(base_model=training.DEFAULT_BASE_MODEL)
+    )
     client.save_weights_for_sampler.side_effect = lambda name: resolved(
         SimpleNamespace(path=f"test/run/{name}")
     )
@@ -237,11 +241,12 @@ def test_training_lifecycle_with_mocked_fireworks(
         + (["--calibrate"] if calibrate else []),
     )
     args = training.parse_args()
+
+    asyncio.run(training.train(args))
+
     assert args.base_model == "accounts/fireworks/models/qwen3p8-27b"
     assert args.tokenizer_model == "Qwen/Qwen3.8-27B"
     assert args.renderer == "qwen3_8_disable_thinking"
-
-    asyncio.run(training.train(args))
 
     client = fireworks_service.create_lora_training_client.return_value
     fireworks_service.create_lora_training_client.assert_called_once_with(
@@ -269,6 +274,141 @@ def test_training_lifecycle_with_mocked_fireworks(
         2 if calibrate else 3
     )
     fireworks_service.close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("model", "tokenizer_model", "renderer_name"),
+    [
+        (training.DEFAULT_BASE_MODEL, None, None),
+        ("accounts/fireworks/models/qwen3-8b", "Qwen/Qwen3-8B", "qwen3_disable_thinking"),
+    ],
+)
+def test_resume_uses_checkpoint_model_and_matching_rendering(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    tokenizer,
+    fireworks_service,
+    model,
+    tokenizer_model,
+    renderer_name,
+) -> None:
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+    load_tokenizer = MagicMock(return_value=tokenizer)
+    load_renderer = MagicMock(wraps=training.get_renderer)
+    monkeypatch.setattr(training, "get_tokenizer", load_tokenizer)
+    monkeypatch.setattr(training, "get_renderer", load_renderer)
+    monkeypatch.setattr(training, "FiretitanServiceClient", lambda **kwargs: fireworks_service)
+    weights_info = fireworks_service.create_rest_client.return_value.get_weights_info_by_tinker_path
+    weights_info.return_value = resolved(SimpleNamespace(base_model=model))
+    checkpoint = "test/previous-run/final-state"
+    argv = [
+        "train.py",
+        f"--resume-from={checkpoint}",
+        "--base-model=accounts/fireworks/models/ignored-cli-model",
+        "--steps=1",
+        "--tasks-per-step=1",
+        "--group-size=2",
+        "--eval-tasks=1",
+        "--max-concurrent=1",
+        f"--output-dir={tmp_path}",
+    ]
+    if tokenizer_model:
+        argv.extend(["--tokenizer-model", tokenizer_model, "--renderer", renderer_name])
+    monkeypatch.setattr("sys.argv", argv)
+
+    asyncio.run(training.train(training.parse_args()))
+
+    weights_info.assert_called_once_with(checkpoint)
+    load_tokenizer.assert_called_once_with(tokenizer_model or training.DEFAULT_TOKENIZER_MODEL)
+    load_renderer.assert_called_once_with(renderer_name or training.DEFAULT_RENDERER, tokenizer)
+    fireworks_service.create_training_client_from_state_with_optimizer.assert_called_once_with(
+        checkpoint
+    )
+    fireworks_service.create_lora_training_client.assert_not_called()
+    config = json.loads((tmp_path / "config.json").read_text())
+    assert config["base_model"] == model
+    assert config["tokenizer_model"] == (tokenizer_model or training.DEFAULT_TOKENIZER_MODEL)
+    assert config["renderer"] == (renderer_name or training.DEFAULT_RENDERER)
+    assert f"model={model}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize(
+    "rendering_args",
+    [[], ["--tokenizer-model", "Qwen/Qwen3-8B"], ["--renderer", "qwen3_disable_thinking"]],
+)
+def test_nondefault_models_require_explicit_tokenizer_and_renderer(
+    monkeypatch, tmp_path, fireworks_service, resume, rendering_args
+) -> None:
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+    load_tokenizer = MagicMock()
+    monkeypatch.setattr(training, "get_tokenizer", load_tokenizer)
+    monkeypatch.setattr(training, "FiretitanServiceClient", lambda **kwargs: fireworks_service)
+    model = "accounts/fireworks/models/qwen3-8b"
+    fireworks_service.create_rest_client.return_value.get_weights_info_by_tinker_path.return_value = resolved(
+        SimpleNamespace(base_model=model)
+    )
+    model_args = (
+        ["--resume-from", "test/previous-run/final-state"] if resume else ["--base-model", model]
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["train.py", "--output-dir", str(tmp_path), *model_args, *rendering_args]
+    )
+
+    with pytest.raises(SystemExit, match=r"qwen3-8b.*--tokenizer-model and --renderer"):
+        asyncio.run(training.train(training.parse_args()))
+
+    load_tokenizer.assert_not_called()
+    fireworks_service.create_lora_training_client.assert_not_called()
+    fireworks_service.create_training_client_from_state_with_optimizer.assert_not_called()
+    fireworks_service.close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("steps", "checkpoint_every", "checkpoint_name"),
+    [(2, 1, "state-0001"), (1, 2, "final-state")],
+)
+def test_prints_training_checkpoint_before_later_sampling_failure(
+    monkeypatch,
+    tmp_path,
+    capsys,
+    tokenizer,
+    fireworks_service,
+    steps,
+    checkpoint_every,
+    checkpoint_name,
+) -> None:
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+    monkeypatch.setattr(training, "get_tokenizer", lambda model: tokenizer)
+    monkeypatch.setattr(training, "FiretitanServiceClient", lambda **kwargs: fireworks_service)
+    client = fireworks_service.create_lora_training_client.return_value
+    checkpoint_path = f"checkpoint-account/opaque-run/{checkpoint_name}"
+    client.save_state.return_value = resolved(SimpleNamespace(path=checkpoint_path))
+    client.save_state.side_effect = None
+    fireworks_service.create_sampling_client.side_effect = [
+        fireworks_service.create_sampling_client.return_value,
+        RuntimeError("sampler unavailable"),
+    ]
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "train.py",
+            f"--steps={steps}",
+            f"--checkpoint-every={checkpoint_every}",
+            "--tasks-per-step=1",
+            "--group-size=2",
+            "--eval-tasks=1",
+            "--max-concurrent=1",
+            f"--output-dir={tmp_path}",
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="sampler unavailable"):
+        asyncio.run(training.train(training.parse_args()))
+
+    client.save_state.assert_called_once_with(checkpoint_name)
+    assert f"Training checkpoint: {checkpoint_path}\n" in capsys.readouterr().out
 
 
 def test_evaluates_same_held_out_tasks_before_and_after_training(

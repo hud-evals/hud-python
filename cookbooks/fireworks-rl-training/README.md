@@ -251,15 +251,21 @@ The script writes separate checkpoints for sampling and training:
 | `state-*`, `final-state` | Adapter weights and optimizer state | Resume training |
 
 `--checkpoint-every N` controls the training-state checkpoint interval.
-Resume a previous run with a fully qualified training checkpoint:
+Each saved training checkpoint prints its full path immediately, including
+numbered `state-NNNN` checkpoints and `final-state`. Pass that path to resume:
 
 ```bash
 uv run train.py --resume-from "<account>/<run-id>/state-0005"
 ```
 
-Resume restores the checkpoint's original base model; it does not migrate
-an older Qwen adapter to Qwen 3.8. Start a new run when changing base models.
-For a supported non-default checkpoint, pass its matching tokenizer and renderer.
+Resume reads the checkpoint's base model before loading the tokenizer and
+restores its optimizer state in a new run. The checkpoint's model overrides
+`--base-model`; the startup banner and `config.json` record the resolved model,
+tokenizer, and renderer. Defaults apply to Qwen 3.8 27B. For another model,
+both `--tokenizer-model` and `--renderer` are required before sampling or training.
+Checkpoint metadata does not specify these settings, so pass values matching
+that model. Resuming does not migrate an older adapter to Qwen 3.8; start a new
+run when changing base models.
 
 Resume creates a new Fireworks run, appends metrics to the existing
 `metrics.jsonl`, and restarts local step numbering at 1. Sampler checkpoints

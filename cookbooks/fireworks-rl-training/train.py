@@ -493,43 +493,60 @@ async def train(args: argparse.Namespace) -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = output_dir / "metrics.jsonl"
-    if not args.calibrate:
-        for name in ("eval-before.json", "eval-after.json"):
-            (output_dir / name).unlink(missing_ok=True)
-        (output_dir / "config.json").write_text(
-            json.dumps(vars(args), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        if not args.resume_from:
-            metrics_path.write_text("", encoding="utf-8")
-
-    tokenizer = get_tokenizer(args.tokenizer_model)
-    renderer = get_renderer(args.renderer, tokenizer)
     service = FiretitanServiceClient(
         api_key=api_key,
         base_url=serverless_url(args.base_url),
     )
-    training_client = (
-        service.create_training_client_from_state_with_optimizer(args.resume_from)
-        if args.resume_from
-        else service.create_lora_training_client(
-            base_model=args.base_model,
-            rank=args.lora_rank,
-        )
-    )
-
-    session = getattr(service, "training_session_id", None)
-    print(
-        f"Connected to Fireworks serverless training: session={session} "
-        f"run={getattr(training_client, 'run_id', None)}\n"
-        f"steps={args.steps} tasks={args.tasks_per_step} "
-        f"group={args.group_size} model={args.base_model}",
-        flush=True,
-    )
-
     try:
+        if args.resume_from:
+            weights_info = (
+                service.create_rest_client()
+                .get_weights_info_by_tinker_path(args.resume_from)
+                .result()
+            )
+            args.base_model = weights_info.base_model
+        if args.base_model != DEFAULT_BASE_MODEL and (
+            not args.tokenizer_model or not args.renderer
+        ):
+            raise SystemExit(
+                f"Model {args.base_model!r} requires explicit --tokenizer-model and --renderer; "
+                "pass values matching the model before sampling or training."
+            )
+        args.tokenizer_model = args.tokenizer_model or DEFAULT_TOKENIZER_MODEL
+        args.renderer = args.renderer or DEFAULT_RENDERER
+        tokenizer = get_tokenizer(args.tokenizer_model)
+        renderer = get_renderer(args.renderer, tokenizer)
+        training_client = (
+            service.create_training_client_from_state_with_optimizer(args.resume_from)
+            if args.resume_from
+            else service.create_lora_training_client(
+                base_model=args.base_model,
+                rank=args.lora_rank,
+            )
+        )
+
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        metrics_path = output_dir / "metrics.jsonl"
+        if not args.calibrate:
+            for name in ("eval-before.json", "eval-after.json"):
+                (output_dir / name).unlink(missing_ok=True)
+            (output_dir / "config.json").write_text(
+                json.dumps(vars(args), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            if not args.resume_from:
+                metrics_path.write_text("", encoding="utf-8")
+
+        session = getattr(service, "training_session_id", None)
+        print(
+            f"Connected to Fireworks serverless training: session={session} "
+            f"run={getattr(training_client, 'run_id', None)}\n"
+            f"steps={args.steps} tasks={args.tasks_per_step} "
+            f"group={args.group_size} model={args.base_model}\n"
+            f"tokenizer={args.tokenizer_model} renderer={args.renderer}",
+            flush=True,
+        )
+
         if args.calibrate:
             runs, _ = await run_rollouts(
                 service=service,
@@ -606,7 +623,8 @@ async def train(args: argparse.Namespace) -> None:
                 )
 
             if step % args.checkpoint_every == 0:
-                training_client.save_state(f"state-{step:04d}").result()
+                state = training_client.save_state(f"state-{step:04d}").result()
+                print(f"Training checkpoint: {state.path}", flush=True)
 
             completed = [run for run in runs if _sample(run) is not None]
             mean_reward = (
@@ -636,6 +654,7 @@ async def train(args: argparse.Namespace) -> None:
             )
 
         final_state = training_client.save_state("final-state").result()
+        print(f"Training checkpoint: {final_state.path}", flush=True)
         eval_reward, final_snapshot = await evaluate_policy(
             service=service,
             training_client=training_client,
@@ -650,7 +669,6 @@ async def train(args: argparse.Namespace) -> None:
         print(
             f"Evaluation reward={eval_reward:.3f} on {len(eval_taskset)} held-out tasks\n"
             f"Sampler checkpoint: {final_snapshot}\n"
-            f"Training checkpoint: {getattr(final_state, 'path', 'final-state')}\n"
             f"Metrics: {metrics_path}",
             flush=True,
         )
@@ -671,17 +689,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-model",
         default=DEFAULT_BASE_MODEL,
-        help="Fireworks base model enabled for serverless training on your account",
+        help="Fireworks base model for a new run; --resume-from uses the checkpoint's model",
     )
     parser.add_argument(
         "--tokenizer-model",
-        default=DEFAULT_TOKENIZER_MODEL,
-        help="Hugging Face tokenizer matching --base-model",
+        help=(
+            "Hugging Face tokenizer matching the effective base model; "
+            f"defaults to {DEFAULT_TOKENIZER_MODEL} for {DEFAULT_BASE_MODEL}"
+        ),
     )
     parser.add_argument(
         "--renderer",
-        default=DEFAULT_RENDERER,
-        help="tinker-cookbook renderer name; change it together with --base-model",
+        help=(
+            "tinker-cookbook renderer matching the effective base model; "
+            f"defaults to {DEFAULT_RENDERER} for {DEFAULT_BASE_MODEL}"
+        ),
     )
     parser.add_argument("--lora-rank", type=int, default=8, help="LoRA adapter rank")
     parser.add_argument(
@@ -707,7 +729,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resume-from",
         default=None,
-        help="resume from a training checkpoint: <account>/<run-id>/state-NNNN",
+        help="resume from a printed training checkpoint path (state-NNNN or final-state)",
     )
     parser.add_argument("--seed", type=int, default=0, help="task generation seed")
     parser.add_argument(
