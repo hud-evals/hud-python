@@ -10,9 +10,7 @@ rejected by the remote shell (and silently fails under PowerShell), so the
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
-import re
 import sys
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -76,7 +74,6 @@ class _FakeConn:
         self._sink = sink
         self._result = result
         self.ran: list[str] = []
-        self.write_commands: list[str] = []
 
     def is_closed(self) -> bool:
         return False
@@ -89,23 +86,6 @@ class _FakeConn:
         check: bool = True,
         encoding: str | None = "utf-8",
     ) -> Any:
-        if input is not None or cmd.startswith("powershell "):
-            self.write_commands.append(cmd)
-            script = cmd
-            if match := re.search(r"-EncodedCommand (\S+)", cmd):
-                script = base64.b64decode(match.group(1)).decode("utf-16-le")
-            name = next(
-                path
-                for path in (".hud_prompt.txt", ".hud_run.bat", ".hud_mcp_config.json")
-                if path in script
-            )
-            if input is not None:
-                self._sink[name] = input.encode()
-            elif match := re.search(r"FromBase64String\('([^']+)'\)", script):
-                self._sink[name] += base64.b64decode(match.group(1))
-            else:
-                self._sink[name] = b""
-            return SimpleNamespace(stdout="", stderr="", exit_status=0, returncode=0)
         self.ran.append(cmd)
         return self._result
 
@@ -145,6 +125,12 @@ _STREAM_JSON = (
 )
 
 
+class _FileSSH(SSHClient):
+    async def write_text(self, path: str, content: str, *, timeout_s: float | None = None) -> None:
+        del timeout_s
+        cast("_FakeConn", self.conn)._sink[path] = content.encode()
+
+
 def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
     capability = Capability(
         name="shell",
@@ -152,7 +138,7 @@ def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
         url="ssh://localhost:22",
         params={"shell": shell},
     )
-    return SSHClient(capability, cast("Any", conn))
+    return _FileSSH(capability, cast("Any", conn))
 
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
@@ -168,7 +154,6 @@ async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     await agent._exec(run, ssh=ssh, shell="cmd", mcp_servers={}, prompt="build it", max_steps=5)
 
     assert conn.ran == ["cmd /c .hud_run.bat"]
-    assert all(command.startswith("powershell ") for command in conn.write_commands)
     assert sink[".hud_run.bat"].startswith(b"@echo off\r\n")
     assert sink[".hud_prompt.txt"] == b"build it"
     assert run.trace.status == "completed"
@@ -188,7 +173,7 @@ async def test_exec_on_bash_runs_inline_without_batch() -> None:
     await agent._exec(run, ssh=ssh, shell="bash", mcp_servers={}, prompt="build it", max_steps=5)
 
     assert ".hud_run.bat" not in sink
-    assert conn.write_commands == ["cat > .hud_prompt.txt"]
+    assert sink[".hud_prompt.txt"] == b"build it"
     assert len(conn.ran) == 1
     assert "install.sh" in conn.ran[0]
     assert "claude" in conn.ran[0]

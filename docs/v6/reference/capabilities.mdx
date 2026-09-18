@@ -271,6 +271,13 @@ Spinning up a capability is the environment side. The harness side is the mirror
 | `RFBClient` | `rfb/3.8` |
 | `RobotClient` | `openpi/0` - joins the registry on first open (the `robot` extra: numpy/openpi-client) |
 
+`SSHClient.read_text()` checks a SHA-256 digest before returning file contents. A truncated or
+inconsistent read raises `SSHFileIntegrityError`. `write_text()` stages and verifies UTF-8 bytes
+before replacing the destination, preserving the original on a failed transfer. Replacement requires
+write access to the destination directory. On POSIX hosts, existing file permissions are retained,
+symlinks are followed, and hard links to the old inode retain their old contents. POSIX file helpers
+require `sha256sum` or `shasum`; writing through a symlink also requires `realpath`.
+
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 
 ## Workspace

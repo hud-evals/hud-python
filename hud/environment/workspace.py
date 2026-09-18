@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
+import errno
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ import asyncssh
 
 from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
 from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
-from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import fcntl
@@ -407,25 +408,17 @@ def _ctty_argv() -> list[str]:
     return [setsid, "--wait", "-c"] if setsid else []
 
 
-async def _pty_streams(master_fd: int) -> tuple[Any, asyncio.StreamReader]:
-    """Async ends of the terminal: something to write keystrokes to, and the
-    screen output to read.
-
-    Both sides go through the event loop rather than blocking reads, so one
-    talkative program cannot stall the server, and ``drain`` gives the same
-    backpressure the pipe path has.
-    """
+async def _pty_streams(
+    master_fd: int, writer: asyncssh.SSHWriter[bytes]
+) -> tuple[asyncio.StreamWriter, ProcessOutput]:
+    """Async input and bounded output capture for a terminal."""
     loop = asyncio.get_running_loop()
-    reader = asyncio.StreamReader()
-    await loop.connect_read_pipe(
-        lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(master_fd, "rb", 0)
-    )
-    # A dup so the read and write ends own their own file objects; closing one
-    # must not pull the terminal out from under the other.
+    output = ProcessOutput(master_fd, writer)
+    await output.start()
     transport, protocol = await loop.connect_write_pipe(
         asyncio.streams.FlowControlMixin, os.fdopen(os.dup(master_fd), "wb", 0)
     )
-    return asyncio.StreamWriter(transport, protocol, None, loop), reader
+    return asyncio.StreamWriter(transport, protocol, None, loop), output
 
 
 def _payload_argv(
@@ -1746,20 +1739,40 @@ class Workspace:
             return
 
         pty_pair = _open_pty(process) if wants_tty and pid is None else None
+        local_outputs: list[ProcessOutput] = []
+        sub: ProcessGroup | NamespaceProcess | None = None
         try:
             if pid is None:
-                child_fds: dict[str, Any] = (
-                    {
-                        "stdin": asyncio.subprocess.PIPE,
-                        "stdout": asyncio.subprocess.PIPE,
-                        "stderr": asyncio.subprocess.PIPE,
-                    }
-                    if pty_pair is None
-                    else {"stdin": pty_pair[1], "stdout": pty_pair[1], "stderr": pty_pair[1]}
-                )
-                sub: ProcessGroup | NamespaceProcess = await create_process_group_exec(
-                    *argv, **child_fds, cwd=str(self.root), env=proc_env
-                )
+                if pty_pair is None:
+                    stdout_read, stdout_write = os.pipe()
+                    stderr_read, stderr_write = os.pipe()
+                    local_outputs = [
+                        ProcessOutput(stdout_read, process.stdout),
+                        ProcessOutput(stderr_read, process.stderr),
+                    ]
+                    try:
+                        sub = await create_process_group_exec(
+                            *argv,
+                            stdin=asyncio.subprocess.PIPE,
+                            stdout=stdout_write,
+                            stderr=stderr_write,
+                            cwd=str(self.root),
+                            env=proc_env,
+                        )
+                        for output in local_outputs:
+                            await output.start()
+                    finally:
+                        os.close(stdout_write)
+                        os.close(stderr_write)
+                else:
+                    sub = await create_process_group_exec(
+                        *argv,
+                        stdin=pty_pair[1],
+                        stdout=pty_pair[1],
+                        stderr=pty_pair[1],
+                        cwd=str(self.root),
+                        env=proc_env,
+                    )
             else:
                 assert self._namespace is not None
                 sub = await self._namespace.spawn(
@@ -1770,18 +1783,28 @@ class Workspace:
                     terminal_size=process.get_terminal_size() if wants_tty else (80, 24, 0, 0),
                     persistent=True,
                 )
-        except FileNotFoundError as exc:
+        except BaseException as exc:
+            for output in local_outputs:
+                output.finish()
+            if sub is not None:
+                await sub.terminate()
             if pty_pair is not None:
                 os.close(pty_pair[0])
                 os.close(pty_pair[1])
+            if not isinstance(exc, FileNotFoundError):
+                raise
             process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
             process.exit(127)
             return
 
+        assert sub is not None
+
         if pty_pair is not None:
             # The child holds the terminal now; this side keeps only the master.
             os.close(pty_pair[1])
-            stdin_writer, stdout_reader = await _pty_streams(pty_pair[0])
+            stdin_writer, output = await _pty_streams(pty_pair[0], process.stdout)
+            local_outputs.append(output)
+            stdout_reader = output.reader
             stderr_reader = None
         elif isinstance(sub, NamespaceProcess):
             stdin_writer = sub.stdin
@@ -1789,8 +1812,8 @@ class Workspace:
             stderr_reader = sub.stderr
         else:
             stdin_writer = sub.process.stdin
-            stdout_reader = sub.stdout
-            stderr_reader = sub.stderr
+            stdout_reader = local_outputs[0].reader
+            stderr_reader = local_outputs[1].reader
         assert stdin_writer is not None
         assert stdout_reader is not None
 
@@ -1849,10 +1872,9 @@ class Workspace:
                 while chunk := await reader.read(65536):
                     writer.write(chunk)
                     await writer.drain()
-            except (asyncssh.Error, BrokenPipeError, ConnectionResetError, OSError):
-                # A pty master reads EIO once the child is gone: end of output,
-                # not a failure.
-                pass
+            except OSError as exc:
+                if pty_pair is None or exc.errno != errno.EIO:
+                    raise
 
         stdin_task = asyncio.create_task(relay_stdin())
         # One stream on a terminal, where stderr shares the tty, two otherwise.
@@ -1891,10 +1913,14 @@ class Workspace:
                 channel_closed_task,
                 return_exceptions=True,
             )
-            _, output_pending = await asyncio.wait(output_tasks, timeout=1.0)
-            for task in output_pending:
-                task.cancel()
-            await asyncio.gather(*output_tasks, return_exceptions=True)
+            for output in local_outputs:
+                output.finish()
+            if process.channel.is_closing():
+                for task in output_tasks:
+                    task.cancel()
+                await asyncio.gather(*output_tasks, return_exceptions=True)
+            else:
+                await asyncio.gather(*output_tasks)
 
         if process.channel.is_closing():
             return

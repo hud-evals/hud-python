@@ -79,6 +79,11 @@ agent = OpenAIChatAgent(
 )
 ```
 
+A provider `MALFORMED_FUNCTION_CALL` response ends the run with status `error` and stop reason
+`malformed_tool_call`. It is recorded as a failed provider turn and is not automatically retried.
+This differs from a returned tool call with invalid arguments, which can receive a tool error that
+the agent corrects on a later turn.
+
 ## Create agent
 
 ```python

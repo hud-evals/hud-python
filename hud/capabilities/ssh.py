@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import shlex
 from typing import Any, ClassVar, Self
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import asyncssh
 
@@ -16,6 +18,11 @@ from .base import Capability, CapabilityClient
 SSH_RECONNECT_ATTEMPTS = 3
 SSH_RECONNECT_BASE_DELAY_S = 0.25
 SSH_SESSION_CLOSE_TIMEOUT_S = 5.0
+_SHA256_COMMAND = "if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi"
+
+
+class SSHFileIntegrityError(OSError):
+    """A file transfer did not match its content digest."""
 
 
 class SSHConnectionError(ConnectionError):
@@ -169,21 +176,31 @@ class SSHClient(CapabilityClient):
             ) from last_error
 
     async def read_text(self, path: str, *, timeout_s: float | None = None) -> str:
-        """Read a UTF-8 text file through the exec channel."""
+        """Read verified UTF-8 file contents through the exec channel."""
         if self._is_windows:
             quoted = _powershell_quote(path)
-            script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
+            script = (
+                f"$b=[IO.File]::ReadAllBytes({quoted});"
+                "$h=[Security.Cryptography.SHA256]::Create();"
+                "[BitConverter]::ToString($h.ComputeHash($b)).Replace('-','').ToLower();"
+                "[Convert]::ToBase64String($b)"
+            )
             result = await self.run(_powershell(script), check=True, timeout=timeout_s)
-            return base64.b64decode(_stdout(result)).decode("utf-8", errors="replace")
-        # encoding=None transports raw bytes: a strict connection-level UTF-8
-        # decode would raise on files with invalid UTF-8 instead of replacing.
-        result = await self.run(
-            f"cat -- {shlex.quote(path)}",
-            check=True,
-            encoding=None,
-            timeout=timeout_s,
-        )
-        return _decode(result.stdout)
+            digest, _, encoded = _stdout(result).strip().partition("\n")
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except ValueError as exc:
+                raise SSHFileIntegrityError(f"Invalid file transfer encoding: {path}") from exc
+        else:
+            quoted = shlex.quote(path)
+            script = f"set -eu\n{_SHA256_COMMAND} < {quoted}\ncat -- {quoted}"
+            result = await self.run(script, check=True, encoding=None, timeout=timeout_s)
+            assert isinstance(result.stdout, bytes)
+            header, separator, content = result.stdout.partition(b"\n")
+            digest = header.split(b" ", 1)[0].decode("ascii", errors="replace") if separator else ""
+        if hashlib.sha256(content).hexdigest() != digest.strip():
+            raise SSHFileIntegrityError(f"File read failed integrity verification: {path}")
+        return content.decode("utf-8", errors="replace")
 
     async def write_text(
         self,
@@ -192,7 +209,9 @@ class SSHClient(CapabilityClient):
         *,
         timeout_s: float | None = None,
     ) -> None:
-        """Write UTF-8 text through the exec channel without command interpolation."""
+        """Verify staged UTF-8 bytes before atomically replacing a file."""
+        raw = content.encode("utf-8")
+        digest = hashlib.sha256(raw).hexdigest()
         if self._is_windows:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout_s if timeout_s is not None else None
@@ -201,24 +220,60 @@ class SSHClient(CapabilityClient):
                 return None if deadline is None else max(0.0, deadline - loop.time())
 
             quoted = _powershell_quote(path)
-            truncate = f"[IO.File]::WriteAllBytes({quoted},[byte[]]@())"
-            await self.run(_powershell(truncate), check=True, timeout=remaining_timeout())
-            raw = content.encode("utf-8")
-            for offset in range(0, len(raw), 6144):
-                payload = base64.b64encode(raw[offset : offset + 6144]).decode("ascii")
+            staging = _powershell_quote(f"{path}.hud-{uuid4().hex}")
+            try:
+                await self.run(
+                    _powershell(f"[IO.File]::WriteAllBytes({staging},[byte[]]@())"),
+                    check=True,
+                    timeout=remaining_timeout(),
+                )
+                for offset in range(0, len(raw), 6144):
+                    payload = base64.b64encode(raw[offset : offset + 6144]).decode("ascii")
+                    script = (
+                        f"$b=[Convert]::FromBase64String('{payload}');"
+                        f"$f=[IO.File]::Open({staging},[IO.FileMode]::Append,"
+                        "[IO.FileAccess]::Write,[IO.FileShare]::Read);"
+                        "try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"
+                    )
+                    await self.run(_powershell(script), check=True, timeout=remaining_timeout())
                 script = (
-                    f"$b=[Convert]::FromBase64String('{payload}');"
-                    f"$f=[IO.File]::Open({quoted},[IO.FileMode]::Append,"
-                    "[IO.FileAccess]::Write,[IO.FileShare]::Read);"
-                    "try{$f.Write($b,0,$b.Length)}finally{$f.Dispose()}"
+                    f"$b=[IO.File]::ReadAllBytes({staging});"
+                    "$h=[Security.Cryptography.SHA256]::Create();"
+                    "$actual=[BitConverter]::ToString($h.ComputeHash($b)).Replace('-','').ToLower();"
+                    f"if($actual -ne '{digest}')"
+                    "{throw 'File write failed integrity verification'};"
+                    f"if([IO.File]::Exists({quoted})){{[IO.File]::Replace({staging},{quoted},$null)}}"
+                    f"else{{[IO.File]::Move({staging},{quoted})}}"
                 )
                 await self.run(_powershell(script), check=True, timeout=remaining_timeout())
+            finally:
+                await self.run(
+                    _powershell(f"[IO.File]::Delete({staging})"), check=True, timeout=5.0
+                )
             return
-        run_kwargs: dict[str, Any] = {"input": content}
-        if not content:
-            # AsyncSSH treats empty input as absent; DEVNULL still delivers EOF.
-            run_kwargs["stdin"] = asyncssh.DEVNULL
-        await self.run(f"cat > {shlex.quote(path)}", check=True, timeout=timeout_s, **run_kwargs)
+        script = (
+            "set -eu\n"
+            f"dest={shlex.quote(path)}\n"
+            'if [ -L "$dest" ]; then dest=$(realpath -- "$dest"); fi\n'
+            'if [ -e "$dest" ]; then test -f "$dest"; test -w "$dest"; fi\n'
+            'tmp=$(mktemp -- "${dest}.hud-XXXXXX")\n'
+            "trap 'rm -f -- \"$tmp\"' 0\n"
+            "trap 'exit 1' 1 2 15\n"
+            'if [ -e "$dest" ]; then cp -p -- "$dest" "$tmp"; else chmod =rw "$tmp"; fi\n'
+            'cat > "$tmp"\n'
+            f'actual=$({_SHA256_COMMAND} < "$tmp")\n'
+            f'test "${{actual%% *}}" = {digest} || '
+            '{ echo "File write failed integrity verification" >&2; exit 1; }\n'
+            'mv -f -- "$tmp" "$dest"'
+        )
+        await self.run(
+            script,
+            input=raw,
+            stdin=asyncssh.PIPE if raw else asyncssh.DEVNULL,
+            encoding=None,
+            check=True,
+            timeout=timeout_s,
+        )
 
     async def listdir(self, path: str, *, timeout_s: float | None = None) -> list[str]:
         """List direct children through the exec channel."""

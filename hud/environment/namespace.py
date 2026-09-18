@@ -19,7 +19,7 @@ from typing import Any, Literal
 import asyncssh
 
 from hud.environment.utils import splice
-from hud.utils.process import ProcessGroup, ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import pty
@@ -119,8 +119,8 @@ class NamespaceProcess:
         return self._process.returncode
 
     async def wait(self) -> int:
-        result = await self._process.wait()
-        return result.returncode if result.returncode is not None else 255
+        await self._process.wait_closed()
+        return self._process.returncode if self._process.returncode is not None else 255
 
     async def terminate(self) -> None:
         self._process.channel.close()
@@ -141,6 +141,15 @@ class NamespaceProcess:
 
     async def resize(self, width: int, height: int, pixwidth: int, pixheight: int) -> None:
         self._process.change_terminal_size(width, height, pixwidth, pixheight)
+
+
+async def _relay_stdin(reader: asyncssh.SSHReader[bytes], writer: asyncio.StreamWriter) -> None:
+    try:
+        while chunk := await reader.read(65536):
+            writer.write(chunk)
+            await writer.drain()
+    finally:
+        writer.close()
 
 
 class NamespaceHost:
@@ -397,8 +406,9 @@ class _NamespaceHost:
             else:
                 process.exit(await self._spawn(request, process))
         except Exception as exc:
-            process.stderr.write(f"{type(exc).__name__}: {exc}".encode())
-            process.exit(1)
+            if not process.channel.is_closing():
+                process.stderr.write(f"{type(exc).__name__}: {exc}".encode())
+                process.exit(1)
         await process.wait_closed()
 
     async def _start_holder(self) -> tuple[ProcessGroup, int]:
@@ -538,6 +548,9 @@ class _NamespaceHost:
             *request["argv"],
         ]
         process: ProcessGroup | None = None
+        outputs: list[ProcessOutput] = []
+        output_tasks: list[asyncio.Task[None]] = []
+        stdin_task: asyncio.Task[None] | None = None
         if channel.term_type:
             master_fd = slave_fd = stdin_fd = stdout_fd = -1
             try:
@@ -560,8 +573,16 @@ class _NamespaceHost:
                 descriptor, stdin_fd = stdin_fd, -1
                 await channel.redirect_stdin(descriptor)
                 descriptor, stdout_fd = stdout_fd, -1
-                await channel.redirect_stdout(descriptor, send_eof=False)
+                output = ProcessOutput(descriptor, channel.stdout)
+                outputs.append(output)
+                await output.start()
+                output_tasks.append(asyncio.create_task(output.relay()))
             except BaseException as exc:
+                for output in outputs:
+                    output.finish()
+                for task in output_tasks:
+                    task.cancel()
+                await asyncio.gather(*output_tasks, return_exceptions=True)
                 if process is not None:
                     try:
                         await process.terminate()
@@ -573,38 +594,42 @@ class _NamespaceHost:
                     if descriptor != -1:
                         os.close(descriptor)
         else:
-            stdin_read = stdin_write = -1
             stdout_read = stdout_write = -1
             stderr_read = stderr_write = -1
             try:
-                # AsyncSSH closes raw pipe transports with the channel, even
-                # when a background descendant retains the child end.
-                stdin_read, stdin_write = os.pipe()
                 stdout_read, stdout_write = os.pipe()
                 stderr_read, stderr_write = os.pipe()
                 process = await create_process_group_exec(
                     *argv,
-                    stdin=stdin_read,
+                    stdin=asyncio.subprocess.PIPE,
                     stdout=stdout_write,
                     stderr=stderr_write,
                     cwd=request["cwd"],
                     env=request["env"],
                 )
 
-                os.close(stdin_read)
-                stdin_read = -1
                 os.close(stdout_write)
                 stdout_write = -1
                 os.close(stderr_write)
                 stderr_write = -1
 
-                descriptor, stdin_write = stdin_write, -1
-                await channel.redirect_stdin(descriptor)
-                descriptor, stdout_read = stdout_read, -1
-                await channel.redirect_stdout(descriptor, send_eof=False)
-                descriptor, stderr_read = stderr_read, -1
-                await channel.redirect_stderr(descriptor, send_eof=False)
+                assert process.process.stdin is not None
+                stdin_task = asyncio.create_task(_relay_stdin(channel.stdin, process.process.stdin))
+                outputs = [
+                    ProcessOutput(stdout_read, channel.stdout),
+                    ProcessOutput(stderr_read, channel.stderr),
+                ]
+                stdout_read = stderr_read = -1
+                for output in outputs:
+                    await output.start()
+                    output_tasks.append(asyncio.create_task(output.relay()))
             except BaseException as exc:
+                for output in outputs:
+                    output.finish()
+                stream_tasks = [*output_tasks, *([stdin_task] if stdin_task is not None else [])]
+                for task in stream_tasks:
+                    task.cancel()
+                await asyncio.gather(*stream_tasks, return_exceptions=True)
                 if process is not None:
                     try:
                         await process.terminate()
@@ -613,8 +638,6 @@ class _NamespaceHost:
                 raise
             finally:
                 for descriptor in (
-                    stdin_read,
-                    stdin_write,
                     stdout_read,
                     stdout_write,
                     stderr_read,
@@ -628,15 +651,27 @@ class _NamespaceHost:
         wait_task = asyncio.create_task(process.wait())
         closed_task = asyncio.create_task(channel.channel.wait_closed())
         try:
-            done, _ = await asyncio.wait(
-                (wait_task, closed_task),
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if closed_task in done and not wait_task.done():
-                await process.terminate()
+            pending = {wait_task, closed_task, *output_tasks}
+            if stdin_task is not None:
+                pending.add(stdin_task)
+            while True:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done - {wait_task, closed_task}:
+                    with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                        task.result()
+                if closed_task in done and not wait_task.done():
+                    await process.terminate()
+                if wait_task.done() or closed_task in done:
+                    break
             returncode = await wait_task
             if not request["persistent"]:
                 await process.terminate()
+            for output in outputs:
+                output.finish()
+            await asyncio.gather(*output_tasks)
+            if stdin_task is not None and stdin_task.done():
+                with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                    stdin_task.result()
             return returncode
         except BaseException as exc:
             try:
@@ -645,9 +680,14 @@ class _NamespaceHost:
                 exc.add_note(f"failed to terminate spawned process: {cleanup_exc}")
             raise
         finally:
-            wait_task.cancel()
-            closed_task.cancel()
-            await asyncio.gather(wait_task, closed_task, return_exceptions=True)
+            for output in outputs:
+                output.finish()
+            tasks = [wait_task, closed_task, *output_tasks]
+            if stdin_task is not None:
+                tasks.append(stdin_task)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     @staticmethod
     def _enable_loopback() -> None:

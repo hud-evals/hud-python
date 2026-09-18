@@ -252,6 +252,11 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     continue
                 step.started_at = step.started_at or started_at
                 step.model = step.model or self.config.model
+                if step.finish_reason == "MALFORMED_FUNCTION_CALL":
+                    step.error = "Provider returned a malformed function call"
+                    run.record(step)
+                    stopped = "malformed_tool_call"
+                    break
                 run.record(step)
 
                 if step.tool_calls:

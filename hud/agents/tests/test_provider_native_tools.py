@@ -55,27 +55,6 @@ class _Conn:
     ) -> _Completed:
         self.commands.append(command)
         parts = shlex.split(command)
-        if len(parts) == 3 and parts[:2] == ["cat", "--"]:
-            if parts[2] not in self._store:
-                if check:
-                    raise asyncssh.ProcessError(
-                        env=None,
-                        command=command,
-                        subsystem=None,
-                        exit_status=1,
-                        exit_signal=None,
-                        returncode=1,
-                        stdout="",
-                        stderr=f"cat: {parts[2]}: No such file or directory",
-                    )
-                return _Completed(
-                    stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1
-                )
-            return _Completed(stdout=self._store[parts[2]].decode())
-        if len(parts) == 3 and parts[:2] == ["cat", ">"]:
-            assert input is not None
-            self._store[parts[2]] = input.encode()
-            return _Completed()
         if len(parts) == 4 and parts[:3] == ["ls", "-1A", "--"]:
             prefix = parts[3].rstrip("/")
             prefix = "/" if not prefix else prefix + "/"
@@ -134,7 +113,7 @@ class _Process:
 
 
 class _FakeSSH(SSHClient):
-    """SSH client with an in-memory exec-channel filesystem."""
+    """SSH client with an in-memory filesystem."""
 
     def __init__(
         self,
@@ -157,6 +136,25 @@ class _FakeSSH(SSHClient):
                 ),
             ),
         )
+
+    async def read_text(self, path: str, *, timeout_s: float | None = None) -> str:
+        del timeout_s
+        if path not in self.files:
+            raise asyncssh.ProcessError(
+                env=None,
+                command=None,
+                subsystem=None,
+                exit_status=1,
+                exit_signal=None,
+                returncode=1,
+                stdout="",
+                stderr=f"cat: {path}: No such file or directory",
+            )
+        return self.files[path].decode()
+
+    async def write_text(self, path: str, content: str, *, timeout_s: float | None = None) -> None:
+        del timeout_s
+        self.files[path] = content.encode()
 
 
 def _ssh(**kwargs: Any) -> SSHClient:
