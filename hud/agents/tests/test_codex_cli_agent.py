@@ -106,7 +106,10 @@ def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatc
         assert command.endswith(" -")
 
 
-def test_command_uses_process_bound_connection_without_its_credential() -> None:
+@pytest.mark.parametrize("sandbox", ["read-only", "workspace-write", "danger-full-access"])
+def test_command_uses_process_bound_connection_without_its_credential(
+    sandbox: str,
+) -> None:
     connection = Connection(
         name="inference",
         capability="ssh",
@@ -114,7 +117,11 @@ def test_command_uses_process_bound_connection_without_its_credential() -> None:
         headers={"Authorization": "Bearer scoped-runtime-token"},
     )
 
-    command = codex_command(CodexCLIConfig(use_hud_gateway=True), "bash", connection=connection)
+    command = codex_command(
+        CodexCLIConfig.model_validate({"use_hud_gateway": True, "sandbox": sandbox}),
+        "bash",
+        connection=connection,
+    )
 
     assert "scoped-runtime-token" not in command
     assert "HUD_CONNECTION_CREDENTIAL=hud-process-bound" in command
@@ -123,6 +130,9 @@ def test_command_uses_process_bound_connection_without_its_credential() -> None:
     assert f'model_providers.hud.base_url="{connection.client_url}"' in command
     assert "Trace-Id" not in command
     assert "exec env" in command
+    assert "--sandbox danger-full-access" in command
+    assert "--sandbox workspace-write" not in command
+    assert "--sandbox read-only" not in command
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
