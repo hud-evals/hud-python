@@ -465,10 +465,13 @@ def eval_command(
     if cfg.model:
         agent_kwargs["model"] = cfg.model
     agent_kwargs["max_steps"] = cfg.max_steps
-    if cfg.auto_respond:
+    if cfg.auto_respond and not agent_type.is_cli:
         agent_kwargs["auto_respond"] = True
     if cfg.gateway:
-        agent_kwargs["gateway"] = True
+        if agent_type.is_cli:
+            agent_kwargs["use_hud_gateway"] = True
+        else:
+            agent_kwargs["gateway"] = True
 
     table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
     table.add_column("Setting", style="yellow")

@@ -114,7 +114,6 @@ class RobotAgent(Agent):
                     writer.end_episode()
         finally:
             await robot.close()
-        run.trace.status = "completed"
         run.trace.content = "done"
 
     async def _loop(

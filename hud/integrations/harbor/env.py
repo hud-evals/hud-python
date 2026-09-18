@@ -260,6 +260,7 @@ harness_mounts = (
 )
 agent_mounts = (
     *harness_mounts,
+    Mount("ro", src=str(ROOT / "bin"), dst=str(ROOT / "bin")),
     Mount("tmpfs", dst=str(TESTS)),
     Mount("tmpfs", dst=str(VERIFIER_LOGS)),
     Mount("ro", src="/dev/null", dst=str(AGENT_ANSWER)),

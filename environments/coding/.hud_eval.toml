@@ -4,7 +4,7 @@
 
 [eval]
 # source = "tasks.py"           # tasks file, or a platform taskset name / id
-# agent = "claude"              # claude, openai, gemini, openai_compatible
+# agent = "claude"              # claude, claude_cli, codex_cli, openai, gemini, openai_compatible
 # model = "claude-sonnet-4-6"
 # all = false                   # run every task instead of just the first
 # task_ids = ["fix_bug", "0"]   # slugs or 0-based indices
@@ -20,6 +20,10 @@
 # Per-agent sections are passed to that agent's config.
 [claude]
 # max_tokens = 16384
+
+[claude_cli]
+
+[codex_cli]
 
 [openai]
 # temperature = 0.7
