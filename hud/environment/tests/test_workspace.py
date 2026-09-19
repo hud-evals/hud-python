@@ -2262,7 +2262,7 @@ async def test_namespace_preserves_large_streams_and_status(
         )
         stdout = asyncio.create_task(process.stdout.read())
         stderr = asyncio.create_task(process.stderr.read())
-        status = asyncio.create_task(process.wait())
+        status = asyncio.create_task(process.wait_status())
         process.stdin.write(payload)
         await process.stdin.drain()
         process.stdin.write_eof()
@@ -2326,3 +2326,18 @@ async def test_command_timeout_keeps_connection_usable(tmp_path: Path) -> None:
             assert result.stdout == "ready"
     finally:
         await ws.stop()
+
+
+@pytest.mark.asyncio
+async def test_namespace_wait_drains_unread_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        process = await namespace.spawn(
+            ["sh", "-c", "head -c 8388608 /dev/zero; head -c 8388608 /dev/zero >&2; exit 7"],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        process.stdin.write_eof()
+        assert await asyncio.wait_for(process.wait(), 5) == 7

@@ -1861,7 +1861,9 @@ class Workspace:
         output_tasks = [asyncio.create_task(forward_output(stdout_reader, process.stdout))]
         if stderr_reader is not None:
             output_tasks.append(asyncio.create_task(forward_output(stderr_reader, process.stderr)))
-        wait_task = asyncio.create_task(sub.wait())
+        wait_task = asyncio.create_task(
+            sub.wait_status() if isinstance(sub, NamespaceProcess) else sub.wait()
+        )
         channel_closed_task = asyncio.create_task(process.channel.wait_closed())
         returncode: int | None = None
         try:

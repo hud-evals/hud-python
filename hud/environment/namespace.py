@@ -119,6 +119,12 @@ class NamespaceProcess:
         return self._process.returncode
 
     async def wait(self) -> int:
+        """Drain stdout and stderr and return the process exit code."""
+        result = await self._process.wait()
+        return result.returncode if result.returncode is not None else 255
+
+    async def wait_status(self) -> int:
+        """Wait for exit while the caller consumes stdout and stderr."""
         await self._process.wait_closed()
         return self._process.returncode if self._process.returncode is not None else 255
 
