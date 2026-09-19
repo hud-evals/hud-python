@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 import asyncssh
 
-from hud.environment.utils import splice
+from hud.environment.utils import forward_output, splice
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -573,10 +573,12 @@ class _NamespaceHost:
                 descriptor, stdin_fd = stdin_fd, -1
                 await channel.redirect_stdin(descriptor)
                 descriptor, stdout_fd = stdout_fd, -1
-                output = ProcessOutput(descriptor, channel.stdout)
+                output = ProcessOutput(descriptor)
                 outputs.append(output)
                 await output.start()
-                output_tasks.append(asyncio.create_task(output.relay()))
+                output_tasks.append(
+                    asyncio.create_task(forward_output(output.reader, channel.stdout))
+                )
             except BaseException as exc:
                 for output in outputs:
                     output.finish()
@@ -616,13 +618,13 @@ class _NamespaceHost:
                 assert process.process.stdin is not None
                 stdin_task = asyncio.create_task(_relay_stdin(channel.stdin, process.process.stdin))
                 outputs = [
-                    ProcessOutput(stdout_read, channel.stdout),
-                    ProcessOutput(stderr_read, channel.stderr),
+                    ProcessOutput(stdout_read),
+                    ProcessOutput(stderr_read),
                 ]
                 stdout_read = stderr_read = -1
-                for output in outputs:
+                for output, writer in zip(outputs, (channel.stdout, channel.stderr), strict=True):
                     await output.start()
-                    output_tasks.append(asyncio.create_task(output.relay()))
+                    output_tasks.append(asyncio.create_task(forward_output(output.reader, writer)))
             except BaseException as exc:
                 for output in outputs:
                     output.finish()

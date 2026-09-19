@@ -224,6 +224,9 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
         if candidate.finish_reason is not None:
             result.finish_reason = candidate.finish_reason.name
+            if result.finish_reason == "MALFORMED_FUNCTION_CALL":
+                result.error = "Provider returned a malformed function call"
+                result.stop_reason = "malformed_tool_call"
 
         return result
 

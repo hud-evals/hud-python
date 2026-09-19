@@ -22,8 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterable, Callable
     from typing import TextIO
 
-    import asyncssh
-
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
 OUTPUT_DRAIN_TIMEOUT = 1.0
 
@@ -109,12 +107,11 @@ class _OutputProtocol(asyncio.StreamReaderProtocol):
 
 
 class ProcessOutput:
-    """Forward a command's pipe, retaining bytes pending when its leader exits."""
+    """Capture a command's pipe, retaining bytes pending when its leader exits."""
 
-    def __init__(self, fd: int, writer: asyncssh.SSHWriter[bytes]) -> None:
+    def __init__(self, fd: int) -> None:
         self.file = os.fdopen(fd, "rb", buffering=0)
         self.reader = asyncio.StreamReader()
-        self.writer = writer
         self.transport: asyncio.ReadTransport | None = None
 
     async def start(self) -> None:
@@ -123,11 +120,6 @@ class ProcessOutput:
             lambda: _OutputProtocol(self.reader, terminal=self.file.isatty()), self.file
         )
         self.transport = transport
-
-    async def relay(self) -> None:
-        while chunk := await self.reader.read(65536):
-            self.writer.write(chunk)
-            await self.writer.drain()
 
     def finish(self) -> None:
         transport = self.transport

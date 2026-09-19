@@ -791,14 +791,17 @@ async def test_loop_stops_on_length_when_configured() -> None:
 
 
 @pytest.mark.parametrize("auto_respond", [False, True])
-async def test_provider_malformed_finish_is_an_error(auto_respond: bool) -> None:
+@pytest.mark.parametrize("reason", [None, "malformed_tool_call"])
+async def test_provider_error_stops_without_auto_response(
+    auto_respond: bool, reason: Literal["malformed_tool_call"] | None
+) -> None:
     agent = DictAgent(
-        [AgentStep(content="", done=True, finish_reason="MALFORMED_FUNCTION_CALL")],
+        [AgentStep(error="provider failure", stop_reason=reason)],
         auto_respond=auto_respond,
     )
     run = cast("Run", _FakeRun())
     await agent._loop(run, RunState(), max_steps=3)
     assert run.trace.status == "error"
-    assert run.trace.stop_reason == "malformed_tool_call"
+    assert run.trace.stop_reason == reason
     assert len(run.trace.steps) == 1
-    assert run.trace.steps[0].error == "Provider returned a malformed function call"
+    assert run.trace.steps[0].error == "provider failure"

@@ -12,7 +12,6 @@ import mcp.types as mcp_types
 
 from hud.agents.tools.base import AgentTool, tool_err, tool_ok
 from hud.capabilities import SSHClient
-from hud.capabilities.ssh import SSHFileIntegrityError
 from hud.types import MCPToolResult
 
 MAX_SHELL_OUTPUT_LENGTH = 10 * 1024 * 1024
@@ -57,8 +56,6 @@ class SSHTool(AgentTool[SSHClient]):
         """Read a text file through SSH exec."""
         try:
             return tool_ok(await self.client.read_text(path))
-        except SSHFileIntegrityError as e:
-            return tool_err(str(e))
         except asyncssh.ProcessError as e:
             return tool_err(_remote_error(e))
 
@@ -66,8 +63,6 @@ class SSHTool(AgentTool[SSHClient]):
         """Write a text file through SSH exec."""
         try:
             await self.client.write_text(path, content)
-        except SSHFileIntegrityError as e:
-            return tool_err(str(e))
         except asyncssh.ProcessError as e:
             return tool_err(_remote_error(e))
         return tool_ok(f"wrote {len(content.encode('utf-8'))} bytes to {path}")

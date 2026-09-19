@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncssh
+
 
 CONTROL_FRAME_LIMIT_BYTES = 16 * 1024 * 1024
 
@@ -131,4 +135,14 @@ async def splice(
         await _drain_close()
 
 
-__all__ = ["encode_frame", "error", "read_frame", "reply", "send_frame", "splice"]
+async def forward_output(
+    reader: asyncio.StreamReader | asyncssh.SSHReader[bytes],
+    writer: asyncssh.SSHWriter[bytes],
+) -> None:
+    """Forward command output with SSH backpressure."""
+    while chunk := await reader.read(65536):
+        writer.write(chunk)
+        await writer.drain()
+
+
+__all__ = ["encode_frame", "error", "forward_output", "read_frame", "reply", "send_frame", "splice"]

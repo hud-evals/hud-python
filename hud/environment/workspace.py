@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
-import errno
 import json
 import logging
 import os
@@ -24,6 +23,7 @@ import asyncssh
 
 from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
 from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
+from hud.environment.utils import forward_output
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
@@ -408,12 +408,10 @@ def _ctty_argv() -> list[str]:
     return [setsid, "--wait", "-c"] if setsid else []
 
 
-async def _pty_streams(
-    master_fd: int, writer: asyncssh.SSHWriter[bytes]
-) -> tuple[asyncio.StreamWriter, ProcessOutput]:
+async def _pty_streams(master_fd: int) -> tuple[asyncio.StreamWriter, ProcessOutput]:
     """Async input and bounded output capture for a terminal."""
     loop = asyncio.get_running_loop()
-    output = ProcessOutput(master_fd, writer)
+    output = ProcessOutput(master_fd)
     await output.start()
     transport, protocol = await loop.connect_write_pipe(
         asyncio.streams.FlowControlMixin, os.fdopen(os.dup(master_fd), "wb", 0)
@@ -1747,8 +1745,8 @@ class Workspace:
                     stdout_read, stdout_write = os.pipe()
                     stderr_read, stderr_write = os.pipe()
                     local_outputs = [
-                        ProcessOutput(stdout_read, process.stdout),
-                        ProcessOutput(stderr_read, process.stderr),
+                        ProcessOutput(stdout_read),
+                        ProcessOutput(stderr_read),
                     ]
                     try:
                         sub = await create_process_group_exec(
@@ -1802,7 +1800,7 @@ class Workspace:
         if pty_pair is not None:
             # The child holds the terminal now; this side keeps only the master.
             os.close(pty_pair[1])
-            stdin_writer, output = await _pty_streams(pty_pair[0], process.stdout)
+            stdin_writer, output = await _pty_streams(pty_pair[0])
             local_outputs.append(output)
             stdout_reader = output.reader
             stderr_reader = None
@@ -1858,29 +1856,11 @@ class Workspace:
                     else:
                         stdin_writer.close()
 
-        async def relay_output(
-            reader: asyncio.StreamReader | asyncssh.SSHReader[bytes],
-            writer: asyncssh.SSHWriter[bytes],
-        ) -> None:
-            """Forward the child's output as it is produced.
-
-            Streamed, not accumulated: an agent watching a build wants the
-            lines while it runs, and a session that never exits would otherwise
-            say nothing at all.
-            """
-            try:
-                while chunk := await reader.read(65536):
-                    writer.write(chunk)
-                    await writer.drain()
-            except OSError as exc:
-                if pty_pair is None or exc.errno != errno.EIO:
-                    raise
-
         stdin_task = asyncio.create_task(relay_stdin())
         # One stream on a terminal, where stderr shares the tty, two otherwise.
-        output_tasks = [asyncio.create_task(relay_output(stdout_reader, process.stdout))]
+        output_tasks = [asyncio.create_task(forward_output(stdout_reader, process.stdout))]
         if stderr_reader is not None:
-            output_tasks.append(asyncio.create_task(relay_output(stderr_reader, process.stderr)))
+            output_tasks.append(asyncio.create_task(forward_output(stderr_reader, process.stderr)))
         wait_task = asyncio.create_task(sub.wait())
         channel_closed_task = asyncio.create_task(process.channel.wait_closed())
         returncode: int | None = None

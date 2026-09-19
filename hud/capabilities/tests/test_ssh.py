@@ -321,9 +321,8 @@ async def test_windows_write_uses_one_timeout_budget(
 
     await client.write_text("C:\\file.txt", "x" * 7000, timeout_s=1)
 
-    assert len(timeouts) == 5
-    assert timeouts[0] > timeouts[1] > timeouts[2] > timeouts[3]
-    assert timeouts[4] == 5.0
+    assert len(timeouts) == 3
+    assert timeouts[0] > timeouts[1] > timeouts[2]
 
 
 async def test_posix_empty_write_supplies_eof(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -333,9 +332,13 @@ async def test_posix_empty_write_supplies_eof(monkeypatch: pytest.MonkeyPatch) -
 
     await client.write_text("empty.txt", "")
 
-    run.assert_awaited_once()
-    assert run.call_args.kwargs["stdin"] == asyncssh.DEVNULL
-    assert run.call_args.kwargs["input"] == b""
+    run.assert_awaited_once_with(
+        "cat > empty.txt",
+        check=True,
+        timeout=None,
+        input="",
+        stdin=asyncssh.DEVNULL,
+    )
 
 
 async def test_close_during_reconnect_discards_the_replacement(

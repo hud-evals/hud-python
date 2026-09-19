@@ -28,7 +28,6 @@ import asyncssh
 import pytest
 
 from hud.capabilities import SSHClient
-from hud.capabilities.ssh import SSHFileIntegrityError
 from hud.environment import namespace as namespace_mod
 from hud.environment import workspace as workspace_mod
 from hud.environment.egress import Peer, _field, _Unrelayable
@@ -2273,79 +2272,6 @@ async def test_namespace_preserves_large_streams_and_status(
             assert await stderr == b"stderr-tail"
 
 
-@pytest.mark.parametrize("truncate", [False, True])
-@pytest.mark.asyncio
-async def test_failed_file_transfer_preserves_original(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, truncate: bool
-) -> None:
-    ws = Workspace(tmp_path / "root")
-    await ws.start()
-    try:
-        async with await _connect(ws) as conn:
-            client = SSHClient(ws.capability(), conn)
-            await client.write_text("file.txt", "original")
-            original_create = conn.create_process
-
-            async def corrupt_input(*args: Any, **kwargs: Any) -> Any:
-                raw = kwargs.get("input")
-                if isinstance(raw, bytes) and raw:
-                    kwargs["input"] = raw[:-1] if truncate else b"X" + raw[1:]
-                return await original_create(*args, **kwargs)
-
-            monkeypatch.setattr(conn, "create_process", corrupt_input)
-            with pytest.raises(asyncssh.ProcessError) as error:
-                await client.write_text("file.txt", "replacement")
-            assert isinstance(error.value.stderr, bytes)
-            assert b"integrity verification" in error.value.stderr
-            assert await client.read_text("file.txt") == "original"
-            assert await client.listdir(".") == ["file.txt"]
-    finally:
-        await ws.stop()
-
-
-@pytest.mark.asyncio
-async def test_file_reads_reject_incomplete_transport(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = Workspace(tmp_path / "root")
-    await ws.start()
-    try:
-        async with await _connect(ws) as conn:
-            client = SSHClient(ws.capability(), conn)
-            await client.write_text("file.txt", "original")
-            run = client.run
-
-            async def truncate_output(*args: Any, **kwargs: Any) -> Any:
-                result = await run(*args, **kwargs)
-                assert isinstance(result.stdout, bytes)
-                result.stdout = result.stdout[:-1]
-                return result
-
-            monkeypatch.setattr(client, "run", truncate_output)
-            with pytest.raises(SSHFileIntegrityError):
-                await client.read_text("file.txt")
-    finally:
-        await ws.stop()
-
-
-@pytest.mark.asyncio
-async def test_atomic_file_write_preserves_mode_and_follows_symlink(tmp_path: Path) -> None:
-    ws = Workspace(tmp_path / "root")
-    await ws.start()
-    try:
-        async with await _connect(ws) as conn:
-            client = SSHClient(ws.capability(), conn)
-            await client.run(
-                "printf original > target; chmod 750 target; ln -s target link", check=True
-            )
-            await client.write_text("link", "replacement é")
-            assert await client.read_text("link") == "replacement é"
-            await client.run("test -L link && test -x target", check=True)
-            assert await client.listdir(".") == ["link", "target"]
-    finally:
-        await ws.stop()
-
-
 @pytest.mark.asyncio
 async def test_namespace_large_input_to_early_exit_does_not_hang(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2362,30 +2288,6 @@ async def test_namespace_large_input_to_early_exit_does_not_hang(
         result = await asyncio.wait_for(process.complete(), 5)
         assert result.returncode == 0
         assert result.stdout == b"done"
-
-
-@pytest.mark.asyncio
-async def test_interrupted_write_preserves_original(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = Workspace(tmp_path / "root")
-    await ws.start()
-    try:
-        async with await _connect(ws) as conn:
-            client = SSHClient(ws.capability(), conn)
-            await client.write_text("file.txt", "original")
-            create = conn.create_process
-
-            async def delay_commit(command: str, **kwargs: Any) -> Any:
-                return await create(command.replace("actual=$(", "sleep 120\nactual=$("), **kwargs)
-
-            monkeypatch.setattr(conn, "create_process", delay_commit)
-            with pytest.raises(TimeoutError):
-                await client.write_text("file.txt", "replacement", timeout_s=0.2)
-            assert await client.read_text("file.txt") == "original"
-            assert await client.listdir(".") == ["file.txt"]
-    finally:
-        await ws.stop()
 
 
 @pytest.mark.asyncio
@@ -2409,3 +2311,18 @@ async def test_namespace_terminal_output_survives_backpressure(
         result = await asyncio.wait_for(process.complete(), 5)
         assert result.returncode == 0
         assert result.stdout == b"x" * 500000
+
+
+@pytest.mark.asyncio
+async def test_command_timeout_keeps_connection_usable(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            client = SSHClient(ws.capability(), conn)
+            with pytest.raises(TimeoutError):
+                await client.run("sleep 120", timeout=0.2)
+            result = await client.run("printf ready", check=True, timeout=5)
+            assert result.stdout == "ready"
+    finally:
+        await ws.stop()
