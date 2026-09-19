@@ -288,6 +288,7 @@ class AgentStep(Step):
     #: No further tool calls expected — the loop's stop signal.
     done: bool = False
     finish_reason: str | None = None
+    stop_reason: StopCondition | None = None
     refusal: str | None = None
     citations: list[Citation] = Field(default_factory=list[Citation])
     raw: Any | None = None

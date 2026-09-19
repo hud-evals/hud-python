@@ -145,3 +145,19 @@ def test_grounding_citations() -> None:
     assert len(cites) == 1
     assert cites[0].source == "http://x"
     assert cites[0].type == "grounding"
+
+
+async def test_malformed_function_call_is_a_normalized_error() -> None:
+    response = _api_response(
+        SimpleNamespace(
+            content=None,
+            grounding_metadata=None,
+            finish_reason=SimpleNamespace(name="MALFORMED_FUNCTION_CALL"),
+        )
+    )
+    agent = _agent(response)
+    result = await agent.get_response(_state(agent))
+    assert result.error == "Provider returned a malformed function call"
+    assert result.stop_reason == "malformed_tool_call"
+    assert result.finish_reason == "MALFORMED_FUNCTION_CALL"
+    assert result.usage is not None

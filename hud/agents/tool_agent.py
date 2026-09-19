@@ -253,6 +253,9 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 step.started_at = step.started_at or started_at
                 step.model = step.model or self.config.model
                 run.record(step)
+                if step.error:
+                    stopped = step.stop_reason
+                    break
 
                 if step.tool_calls:
                     logger.info("  → %s", ", ".join(c.name for c in step.tool_calls))
@@ -304,6 +307,8 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             trace.status = "error" if step is not None and step.error else "completed"
             if stopped is not None:
                 trace.stop_reason = stopped
+            elif step is not None and step.error:
+                trace.stop_reason = None
             elif hit_max:
                 trace.stop_reason = "max_steps"
             elif step is not None and step.finish_reason in TRUNCATION_FINISH_REASONS:

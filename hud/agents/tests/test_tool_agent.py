@@ -788,3 +788,20 @@ async def test_loop_stops_on_length_when_configured() -> None:
     assert run.trace.stop_reason == "length"
     assert run.trace.is_truncated is True
     assert all(not isinstance(step, ToolStep) for step in run.trace.steps)
+
+
+@pytest.mark.parametrize("auto_respond", [False, True])
+@pytest.mark.parametrize("reason", [None, "malformed_tool_call"])
+async def test_provider_error_stops_without_auto_response(
+    auto_respond: bool, reason: Literal["malformed_tool_call"] | None
+) -> None:
+    agent = DictAgent(
+        [AgentStep(error="provider failure", stop_reason=reason)],
+        auto_respond=auto_respond,
+    )
+    run = cast("Run", _FakeRun())
+    await agent._loop(run, RunState(), max_steps=3)
+    assert run.trace.status == "error"
+    assert run.trace.stop_reason == reason
+    assert len(run.trace.steps) == 1
+    assert run.trace.steps[0].error == "provider failure"

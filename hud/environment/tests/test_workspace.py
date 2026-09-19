@@ -1867,7 +1867,7 @@ async def test_namespace_wait_status_is_forwarded_to_ssh_client(
         stdin=SimpleNamespace(write_eof=Mock()),
         stdout=empty_reader(),
         stderr=empty_reader(),
-        wait=AsyncMock(return_value=SimpleNamespace(returncode=None)),
+        wait_closed=AsyncMock(),
         returncode=None,
         channel=child_channel,
     )
@@ -2246,3 +2246,98 @@ def test_child_pid_discovery_falls_back_to_proc_stat(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(Path, "read_text", read_text)
 
     assert namespace_mod._child_pids(100) == [101]
+
+
+@pytest.mark.asyncio
+async def test_namespace_preserves_large_streams_and_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"0123456789abcdef" * 131072 + b"tail"
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        process = await namespace.spawn(
+            ["sh", "-c", "cat; printf stderr-tail >&2"],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        stdout = asyncio.create_task(process.stdout.read())
+        stderr = asyncio.create_task(process.stderr.read())
+        status = asyncio.create_task(process.wait_status())
+        process.stdin.write(payload)
+        await process.stdin.drain()
+        process.stdin.write_eof()
+        async with asyncio.timeout(10):
+            assert await status == 0
+            assert await stdout == payload
+            assert await stderr == b"stderr-tail"
+
+
+@pytest.mark.asyncio
+async def test_namespace_large_input_to_early_exit_does_not_hang(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        process = await namespace.spawn(
+            ["sh", "-c", "printf done"],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        process.stdin.write(b"x" * 500_000)
+        process.stdin.write_eof()
+        result = await asyncio.wait_for(process.complete(), 5)
+        assert result.returncode == 0
+        assert result.stdout == b"done"
+
+
+@pytest.mark.asyncio
+async def test_namespace_terminal_output_survives_backpressure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connect = asyncssh.connect
+
+    async def small_window(*args: Any, **kwargs: Any) -> asyncssh.SSHClientConnection:
+        return await connect(*args, **kwargs, window=32768)
+
+    monkeypatch.setattr(asyncssh, "connect", small_window)
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        process = await namespace.spawn(
+            ["sh", "-c", "head -c 500000 /dev/zero | tr '\\000' x"],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+            tty=True,
+        )
+        result = await asyncio.wait_for(process.complete(), 5)
+        assert result.returncode == 0
+        assert result.stdout == b"x" * 500000
+
+
+@pytest.mark.asyncio
+async def test_command_timeout_keeps_connection_usable(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path / "root")
+    await ws.start()
+    try:
+        async with await _connect(ws) as conn:
+            client = SSHClient(ws.capability(), conn)
+            with pytest.raises(TimeoutError):
+                await client.run("sleep 120", timeout=0.2)
+            result = await client.run("printf ready", check=True, timeout=5)
+            assert result.stdout == "ready"
+    finally:
+        await ws.stop()
+
+
+@pytest.mark.asyncio
+async def test_namespace_wait_drains_unread_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with _connected_namespace_host(monkeypatch) as namespace:
+        process = await namespace.spawn(
+            ["sh", "-c", "head -c 8388608 /dev/zero; head -c 8388608 /dev/zero >&2; exit 7"],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            persistent=True,
+        )
+        process.stdin.write_eof()
+        assert await asyncio.wait_for(process.wait(), 5) == 7

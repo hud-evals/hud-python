@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import array
 import asyncio
 import codecs
 import contextlib
+import errno
 import io
 import os
 import signal
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
+
+if sys.platform != "win32":
+    import fcntl
+    import termios
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterable, Callable
@@ -86,6 +93,56 @@ async def finish_output(*tasks: asyncio.Task[None]) -> None:
     for task in pending:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class _OutputProtocol(asyncio.StreamReaderProtocol):
+    def __init__(self, reader: asyncio.StreamReader, *, terminal: bool) -> None:
+        super().__init__(reader)
+        self.terminal = terminal
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        if self.terminal and isinstance(exc, OSError) and exc.errno == errno.EIO:
+            exc = None
+        super().connection_lost(exc)
+
+
+class ProcessOutput:
+    """Capture a command's pipe, retaining bytes pending when its leader exits."""
+
+    def __init__(self, fd: int) -> None:
+        self.file = os.fdopen(fd, "rb", buffering=0)
+        self.reader = asyncio.StreamReader()
+        self.transport: asyncio.ReadTransport | None = None
+
+    async def start(self) -> None:
+        loop = asyncio.get_running_loop()
+        transport, _ = await loop.connect_read_pipe(
+            lambda: _OutputProtocol(self.reader, terminal=self.file.isatty()), self.file
+        )
+        self.transport = transport
+
+    def finish(self) -> None:
+        transport = self.transport
+        if transport is None:
+            self.file.close()
+            return
+        if transport.is_closing():
+            return
+        transport.pause_reading()
+        try:
+            # Descendants may retain the write end. Capture bytes already in
+            # the pipe without waiting for those descendants to exit.
+            available = array.array("i", [0])
+            fcntl.ioctl(self.file.fileno(), termios.FIONREAD, available, True)
+            remaining = available[0]
+            while remaining:
+                chunk = os.read(self.file.fileno(), min(remaining, 65536))
+                if not chunk:
+                    break
+                self.reader.feed_data(chunk)
+                remaining -= len(chunk)
+        finally:
+            transport.close()
 
 
 @dataclass(frozen=True, slots=True)

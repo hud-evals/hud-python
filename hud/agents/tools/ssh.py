@@ -65,7 +65,7 @@ class SSHTool(AgentTool[SSHClient]):
             await self.client.write_text(path, content)
         except asyncssh.ProcessError as e:
             return tool_err(_remote_error(e))
-        return tool_ok(f"wrote {len(content)} bytes to {path}")
+        return tool_ok(f"wrote {len(content.encode('utf-8'))} bytes to {path}")
 
     async def file_list(self, path: str = "/") -> MCPToolResult:
         """List directory entries through SSH exec."""
