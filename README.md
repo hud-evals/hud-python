@@ -113,19 +113,6 @@ Each graded evaluation is a **trace** (the SDK's live handle is a `Run`). With `
 
 → [Quickstart](https://docs.hud.ai/v6/start/quickstart) · [Tasks & tasksets](https://docs.hud.ai/v6/reference/tasks)
 
-## Existing benchmarks
-
-The experimental `hud.integrations.harbor` adapter turns Harbor task directories into runnable HUD
-tasksets and can export authored HUD tasks back to Harbor folders.
-
-```python
-from hud.integrations import harbor
-
-taskset = await harbor.adapt("./benchmark")
-```
-
-→ [Harbor interop](https://docs.hud.ai/v6/advanced/harbor-convert)
-
 ## Capabilities & harnesses
 
 A **capability** is a connection the environment exposes; a **harness** attaches its own tools to it. The same environment serves a one-shot Q&A or a full computer-use rollout, depending on which capabilities the harness opens.
