@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from functools import partial
 from typing import TYPE_CHECKING, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -255,14 +255,24 @@ async def test_anthropic_client_receives_trace_aware_http_client(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("initial_status", [200, 429, 503])
 async def test_gemini_async_request_includes_trace_id(
     monkeypatch: pytest.MonkeyPatch,
+    initial_status: int,
 ) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr(asyncio, "sleep", sleep)
     seen_trace_id: str | None = None
+    attempts = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal seen_trace_id
+        nonlocal seen_trace_id, attempts
         seen_trace_id = request.headers["Trace-Id"]
+        attempts += 1
+        if attempts == 1 and initial_status != 200:
+            return httpx.Response(
+                initial_status, json={"error": {"code": initial_status, "message": "busy"}}
+            )
         return httpx.Response(
             200,
             json={
@@ -301,3 +311,9 @@ async def test_gemini_async_request_includes_trace_id(
 
     assert response.text == "ok"
     assert seen_trace_id == trace_id
+    assert attempts == (1 if initial_status == 200 else 2)
+    if initial_status != 200:
+        sleep.assert_awaited_once()
+        assert 10 <= sleep.await_args_list[0].args[0] <= 11
+    else:
+        sleep.assert_not_awaited()

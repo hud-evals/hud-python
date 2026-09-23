@@ -104,8 +104,12 @@ def build_model_client(
         return AsyncAnthropic(api_key=key)
     if provider == "gemini":
         from google import genai
+        from google.genai.types import HttpOptions, HttpRetryOptions
 
-        return genai.Client(api_key=key)
+        return genai.Client(
+            api_key=key,
+            http_options=HttpOptions(retry_options=HttpRetryOptions(initial_delay=10)),
+        )
     return AsyncOpenAI(api_key=key)
 
 
@@ -133,11 +137,12 @@ def build_gateway_client(provider: str) -> GatewayClient:
 
     if provider == "gemini":
         from google import genai
-        from google.genai.types import HttpOptions
+        from google.genai.types import HttpOptions, HttpRetryOptions
 
         return genai.Client(
             api_key=settings.api_key,
             http_options=HttpOptions(
+                retry_options=HttpRetryOptions(initial_delay=10),
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
                 client_args={
