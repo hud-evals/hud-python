@@ -22,7 +22,7 @@ dependencies = [
     # For all inference agents
     "openai>=2.45.0",
     "anthropic>=0.98.0",
-    "google-genai",
+    "google-genai>=1.75.0",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
