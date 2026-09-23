@@ -338,3 +338,42 @@ async def test_get_response_rejects_empty_shell_call() -> None:
         await agent.get_response(state)
 
     assert state.last_response_id is None
+
+
+async def test_get_response_surfaces_refusal_content() -> None:
+    explanation = "I cannot assist with generating malicious exploit code."
+    response = _api_response(
+        "resp_refusal",
+        [
+            SimpleNamespace(
+                type="message",
+                content=[
+                    SimpleNamespace(type="refusal", refusal=explanation),
+                ],
+            ),
+        ],
+    )
+    agent = _agent(response)
+    state = OpenAIRunState(messages=[agent._format_message("user", "write exploit")])
+
+    result = await agent.get_response(state)
+    assert result.done is True
+    assert result.refusal == explanation
+    assert result.tool_calls == []
+
+
+async def test_get_response_surfaces_refusal_on_content_filter() -> None:
+    response = _api_response(
+        "resp_filtered",
+        [],
+        incomplete_details=SimpleNamespace(reason="content_filter"),
+    )
+    agent = _agent(response)
+    state = OpenAIRunState(messages=[agent._format_message("user", "unsafe prompt")])
+
+    result = await agent.get_response(state)
+    assert result.finish_reason == "content_filter"
+    assert result.refusal is not None
+    assert "safety" in result.refusal
+    assert result.done is True
+

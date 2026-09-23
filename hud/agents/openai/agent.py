@@ -12,6 +12,7 @@ from openai.types.responses import (
     ResponseIncludable,
     ResponseInputParam,
     ResponseInputTextParam,
+    ResponseOutputRefusal,
     ResponseOutputText,
     ToolParam,
 )
@@ -260,11 +261,17 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         reasoning_chunks: list[str] = []
         citations: list[Citation] = []
         tool_calls: list[MCPToolCall] = []
+        refusal: str | None = None
 
         for item in response.output:
             match item.type:
                 case "message":
                     for content_block in item.content:
+                        if isinstance(content_block, ResponseOutputRefusal) or getattr(
+                            content_block, "type", None
+                        ) == "refusal":
+                            refusal = getattr(content_block, "refusal", None)
+                            continue
                         if not isinstance(content_block, ResponseOutputText):
                             continue
                         if content_block.text:
@@ -349,13 +356,17 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         # The Responses API has no finish_reason; truncation surfaces as
         # incomplete_details.reason ("max_output_tokens" / "content_filter").
         incomplete = response.incomplete_details
+        finish_reason = incomplete.reason if incomplete is not None else None
+        if finish_reason == "content_filter" and not refusal:
+            refusal = "The request was rejected due to OpenAI content safety filters."
         return AgentStep(
             content="".join(text_chunks),
             reasoning="\n".join(reasoning_chunks) if reasoning_chunks else None,
             citations=citations,
             tool_calls=tool_calls,
             done=not tool_calls,
-            finish_reason=incomplete.reason if incomplete is not None else None,
+            finish_reason=finish_reason,
+            refusal=refusal,
             model=response.model,
             usage=usage,
         )
