@@ -502,7 +502,8 @@ def test_provider_key_wins_unless_gateway_is_forced(
     flags = ["--gateway"] if force_gateway else []
     eval_cli.invoke("tasks.py", agent_type, *flags, "--yes")
     if provider_key and not force_gateway:
-        direct.assert_called_once_with(api_key=provider_key)
+        direct.assert_called_once()
+        assert direct.call_args.kwargs["api_key"] == provider_key
         gateway.assert_not_called()
         assert getattr(eval_cli.agent, client_attr) is direct.return_value
     else:
