@@ -98,7 +98,7 @@ class GeminiConfig(AgentConfig):
     """Configuration for GeminiAgent."""
 
     model_name: str = "Gemini"
-    model: str = Field(default="gemini-3-pro-preview", validation_alias=_model_alias)
+    model: str = Field(default="gemini-3.1-pro-preview", validation_alias=_model_alias)
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 40
@@ -229,10 +229,12 @@ class Citation(BaseModel):
     source: str = Field(default="", description="URL, file ID, or document identifier")
     title: str | None = Field(default=None, description="Title of the source")
     start_index: int | None = Field(
-        default=None, description="Start character index in the agent's output text"
+        default=None,
+        description="Start character index in the agent's output text",
     )
     end_index: int | None = Field(
-        default=None, description="End character index in the agent's output text"
+        default=None,
+        description="End character index in the agent's output text",
     )
 
 
@@ -406,7 +408,12 @@ class ObservationStep(Step):
                 if order is not None:
                     bounds = str(order).split("-")
                     slices.append(
-                        (int(bounds[0]), int(bounds[-1]), feature_key.split(".")[-1], labels)
+                        (
+                            int(bounds[0]),
+                            int(bounds[-1]),
+                            feature_key.split(".")[-1],
+                            labels,
+                        )
                     )
                 elif feature_key.split(".")[-1] == name and len(labels) == len(vec):
                     direct = labels
