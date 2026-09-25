@@ -7,13 +7,17 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
+import base64
+import random
 import shlex
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
 
 import asyncssh
 import mcp.types as mcp_types
 import pytest
+from PIL import Image
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
@@ -29,7 +33,7 @@ from hud.types import MCPToolCall
 
 
 class _Completed:
-    def __init__(self, *, stdout: str = "", stderr: str = "", exit_status: int = 0) -> None:
+    def __init__(self, *, stdout: str | bytes = "", stderr: str = "", exit_status: int = 0) -> None:
         self.stdout = stdout
         self.stderr = stderr
         self.exit_status = exit_status
@@ -71,7 +75,8 @@ class _Conn:
                 return _Completed(
                     stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1
                 )
-            return _Completed(stdout=self._store[parts[2]].decode())
+            data = self._store[parts[2]]
+            return _Completed(stdout=data if encoding is None else data.decode(encoding))
         if len(parts) == 3 and parts[:2] == ["cat", ">"]:
             assert input is not None
             self._store[parts[2]] = input.encode()
@@ -645,3 +650,139 @@ async def test_reading_a_missing_file_is_a_tool_error_not_a_raised_traceback() -
 
     assert result.isError is True
     assert "No such file or directory" in result_text(result)
+
+
+@pytest.mark.parametrize("image_format", ["PNG", "JPEG", "GIF", "WEBP"])
+@pytest.mark.parametrize("tool_class", [ClaudeTextEditorTool, ReadTool])
+async def test_file_view_returns_images_as_image_content(
+    image_format: str, tool_class: type[ClaudeTextEditorTool] | type[ReadTool]
+) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (32, 24), "red").save(buffer, format=image_format)
+    data = buffer.getvalue()
+    ssh = _FakeSSH(files={"/image with no extension": data})
+    tool = tool_class(spec=tool_class.default_spec("claude"), client=ssh)
+
+    result = await tool.execute(
+        {
+            "command": "view",
+            "path": "/image with no extension",
+            "filePath": "/image with no extension",
+        }
+    )
+
+    assert not result.isError
+    assert len(result.content) == 1
+    content = result.content[0]
+    assert isinstance(content, mcp_types.ImageContent)
+    assert content.mimeType == "image/png"
+    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
+        assert viewed.size == (32, 24)
+        pixel = viewed.convert("RGB").getpixel((0, 0))
+        assert isinstance(pixel, tuple)
+        assert pixel[0] >= 250
+
+
+@pytest.mark.parametrize("data", [b"\x00binary", b"\xff\xfeinvalid"])
+async def test_file_view_rejects_non_image_binary(data: bytes) -> None:
+    ssh = _FakeSSH(files={"/binary": data})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/binary"})
+
+    assert result.isError
+    assert "expected UTF-8 text or an image" in result_text(result)
+
+
+async def test_file_view_preserves_unicode_text() -> None:
+    text = "Hello, 世界\n"
+    ssh = _FakeSSH(files={"/text.png": text.encode()})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/text.png"})
+
+    assert not result.isError
+    assert result_text(result) == text
+
+
+@pytest.mark.parametrize("size", [(4000, 2000), (2000, 4000), (2000, 2000)])
+async def test_file_view_resizes_large_images(size: tuple[int, int]) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", size, "white").save(buffer, format="PNG")
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"),
+        client=_FakeSSH(files={"/image.png": buffer.getvalue()}),
+    )
+
+    result = await tool.execute({"command": "view", "path": "/image.png"})
+
+    assert not result.isError
+    content = result.content[0]
+    assert isinstance(content, mcp_types.ImageContent)
+    assert len(content.data) <= 5_000_000
+    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
+        assert max(viewed.size) <= 1568
+        assert viewed.width * viewed.height <= 1_150_000
+        assert viewed.width / viewed.height == pytest.approx(size[0] / size[1], rel=0.005)
+
+
+async def test_file_view_compresses_noisy_transparent_images() -> None:
+    size = (1072, 1072)
+    image = Image.frombytes("RGBA", size, random.Random(0).randbytes(size[0] * size[1] * 4))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    assert len(base64.b64encode(buffer.getvalue())) > 5_000_000
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"),
+        client=_FakeSSH(files={"/image.png": buffer.getvalue()}),
+    )
+
+    result = await tool.execute({"command": "view", "path": "/image.png"})
+
+    assert not result.isError
+    content = result.content[0]
+    assert isinstance(content, mcp_types.ImageContent)
+    assert content.mimeType == "image/jpeg"
+    assert len(content.data) <= 5_000_000
+    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
+        assert viewed.size == size
+        assert viewed.mode == "RGB"
+
+
+async def test_file_view_applies_image_orientation() -> None:
+    image = Image.new("RGB", (40, 20), "red")
+    exif = Image.Exif()
+    exif[274] = 6
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"),
+        client=_FakeSSH(files={"/image.jpg": buffer.getvalue()}),
+    )
+
+    result = await tool.execute({"command": "view", "path": "/image.jpg"})
+
+    assert not result.isError
+    content = result.content[0]
+    assert isinstance(content, mcp_types.ImageContent)
+    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
+        assert viewed.size == (20, 40)
+        assert viewed.getexif().get(274, 1) == 1
+
+
+async def test_file_view_preserves_png_transparency() -> None:
+    buffer = BytesIO()
+    Image.new("RGBA", (32, 24), (255, 0, 0, 128)).save(buffer, format="PNG")
+    tool = ClaudeTextEditorTool(
+        spec=ClaudeTextEditorTool.default_spec("claude"),
+        client=_FakeSSH(files={"/image.png": buffer.getvalue()}),
+    )
+
+    result = await tool.execute({"command": "view", "path": "/image.png"})
+
+    assert not result.isError
+    content = result.content[0]
+    assert isinstance(content, mcp_types.ImageContent)
+    assert content.mimeType == "image/png"
+    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
+        assert viewed.getpixel((0, 0)) == (255, 0, 0, 128)

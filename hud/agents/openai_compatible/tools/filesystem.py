@@ -39,7 +39,8 @@ class _FilesystemTool(SSHTool):
 class ReadTool(_FilesystemTool):
     name = "read"
     description = (
-        "Reads a file or directory from the workspace. Use offset and limit for pagination."
+        "Reads text, images, or directories from the workspace. "
+        "Use offset and limit for text pagination."
     )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -70,8 +71,8 @@ class ReadTool(_FilesystemTool):
         limit = _positive_int(arguments.get("limit"), default=DEFAULT_READ_LIMIT, name="limit")
         if not (await self.bash(f"test -d {shlex.quote(path)}")).isError:
             return await self._read_directory(path, offset=offset, limit=limit)
-        result = await self.file_read(path)
-        if result.isError:
+        result = await self.file_view(path)
+        if result.isError or any(isinstance(c, mcp_types.ImageContent) for c in result.content):
             return result
         text = result_text(result)
         lines = text.splitlines()

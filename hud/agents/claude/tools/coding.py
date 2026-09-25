@@ -171,7 +171,7 @@ class ClaudeTextEditorTool(SSHTool):
 
         match command:
             case "view":
-                return await self.file_read(path)
+                return await self.file_view(path)
             case "create":
                 content = arguments.get("file_text", "")
                 return await self.file_write(path, str(content))

@@ -7,7 +7,7 @@ import base64
 import contextlib
 import json
 import shlex
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 from urllib.parse import urlsplit
 
 import asyncssh
@@ -204,20 +204,22 @@ class SSHClient(CapabilityClient):
 
     async def read_text(self, path: str, *, timeout_s: float | None = None) -> str:
         """Read a UTF-8 text file through the exec channel."""
+        return _decode(await self.read_bytes(path, timeout_s=timeout_s))
+
+    async def read_bytes(self, path: str, *, timeout_s: float | None = None) -> bytes:
+        """Read a file through the exec channel without decoding it."""
         if self._is_windows:
             quoted = _powershell_quote(path)
             script = f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({quoted}))"
             result = await self.run(_powershell(script), check=True, timeout=timeout_s)
-            return base64.b64decode(_stdout(result)).decode("utf-8", errors="replace")
-        # encoding=None transports raw bytes: a strict connection-level UTF-8
-        # decode would raise on files with invalid UTF-8 instead of replacing.
+            return base64.b64decode(_stdout(result))
         result = await self.run(
             f"cat -- {shlex.quote(path)}",
             check=True,
             encoding=None,
             timeout=timeout_s,
         )
-        return _decode(result.stdout)
+        return cast("bytes", result.stdout)
 
     async def write_text(
         self,

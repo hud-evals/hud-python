@@ -265,13 +265,15 @@ Spinning up a capability is the environment side. The harness side is the mirror
 
 | Client | Protocol |
 |--------|----------|
-| `SSHClient` | `ssh/2` (`.conn` for commands/forwarding; `.read_text()`, `.write_text()`, and `.listdir()` for files) |
+| `SSHClient` | `ssh/2` (`.conn` for commands/forwarding; `.read_bytes()`, `.read_text()`, `.write_text()`, and `.listdir()` for files) |
 | `MCPClient` | `mcp/2025-11-25` |
 | `CDPClient` | `cdp/1.3` |
 | `RFBClient` | `rfb/3.8` |
 | `RobotClient` | `openpi/0` - joins the registry on first open (the `robot` extra: numpy/openpi-client) |
 
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
+
+SSH-backed file-view tools return PNG, JPEG, GIF, and WebP files as image content. Views preserve aspect ratio, fit within 1,568 pixels per edge and 1.15 megapixels, and use PNG encoding. Images exceeding 5 MB after base64 encoding use JPEG quality 85 with transparency flattened onto white. Animated images use the first frame. To inspect small details, crop the relevant region before viewing it. Text-edit operations use text reads.
 
 ## Workspace
 
