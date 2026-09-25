@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from hud.agents.openai_compatible.agent import OpenAIChatAgent, OpenAIChatRunState
 from hud.agents.types import OpenAIChatConfig
 
@@ -87,9 +89,8 @@ async def test_get_response_with_tool_call() -> None:
 
 async def test_get_response_error_path() -> None:
     agent = _agent(None, error=RuntimeError("boom"))
-    result = await agent.get_response(_state(agent))
-    assert result.done is True
-    assert result.error is not None and "boom" in result.error
+    with pytest.raises(RuntimeError, match="boom"):
+        await agent.get_response(_state(agent))
 
 
 async def test_get_response_malformed_tool_args() -> None:

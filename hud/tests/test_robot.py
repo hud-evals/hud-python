@@ -169,6 +169,7 @@ class _EchoAgent(RobotAgent):
     max_steps = EPISODE_TICKS + 2  # the env must end the episode, not this cap
 
     def __init__(self, adapter: _EchoAdapter, *, action_dim: int = 2) -> None:
+        super().__init__()
         self.model = _EchoModel(action_dim)
         self.adapter = adapter
 

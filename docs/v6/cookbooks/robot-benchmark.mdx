@@ -71,6 +71,7 @@ CHECKPOINT = "lerobot/pi05_libero_finetuned"
 
 class PI05Agent(RobotAgent):
     def __init__(self):
+        super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         policy = PI05Policy.from_pretrained(CHECKPOINT).to(device).eval()
         pre, post = make_pre_post_processors(

@@ -201,6 +201,7 @@ class FireworksAgent(Agent):
         timeout: float,
         max_seq_len: int,
     ) -> None:
+        super().__init__()
         self.sampler = sampler
         self.renderer = renderer
         self.model = model

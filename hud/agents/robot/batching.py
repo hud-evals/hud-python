@@ -112,6 +112,7 @@ class BatchedAgent(Agent):
     ) -> None:
         if agent.model is None:
             raise RuntimeError("BatchedAgent needs agent.model set")
+        super().__init__(agent.config)
         self._template = agent
         # Wrap once, in place: the passed-in agent is now permanently batched (see class doc).
         # Every per-run clone shares this batcher by reference.

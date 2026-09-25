@@ -373,6 +373,7 @@ from hud.agents.robot import RobotAgent, LeRobotModel, LeRobotAdapter
 
 class PI05Agent(RobotAgent):
     def __init__(self):
+        super().__init__()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         policy = PI05Policy.from_pretrained("lerobot/pi05_libero_finetuned").to(device).eval()
         pre, post = make_pre_post_processors(policy.config, "lerobot/pi05_libero_finetuned",

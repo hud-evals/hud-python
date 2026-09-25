@@ -17,6 +17,7 @@ from hud.utils import gateway
 if TYPE_CHECKING:
     from google import genai
 
+
 from .settings import gemini_agent_settings
 from .tools import (
     PREDEFINED_COMPUTER_USE_FUNCTIONS,
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     """Gemini agent. Drives SSH (coding/filesystem), RFB (computer), and MCP capabilities."""
 
+    config_cls = GeminiConfig
     tool_catalog = (
         GeminiShellTool,
         GeminiEditTool,
@@ -50,8 +52,8 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     )
 
     def __init__(self, config: GeminiConfig | None = None) -> None:
-        config = config or GeminiConfig()
-        self.config = config
+        super().__init__(config)
+        config = self.config
 
         model_client = config.model_client
         if model_client is None:

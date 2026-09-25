@@ -10,10 +10,11 @@ portable rows require a provider or source placement.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
+from hud.agents.base import Agent
 from hud.environment import Environment
 from hud.eval import (
     HUDRuntime,
@@ -29,8 +30,6 @@ from hud.eval.runtime.compose import ComposeConfig, ComposeProject, ComposeProje
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from hud.agents.base import Agent
 
 
 def test_env_task_call_returns_public_task() -> None:
@@ -331,6 +330,11 @@ def test_row_validation_rejects_malformed_entries() -> None:
 # ─── placement ─────────────────────────────────────────────────────────
 
 
+class _NoopAgent(Agent):
+    async def __call__(self, run: Run) -> None:
+        run.trace.content = ""
+
+
 async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     import hud.eval.taskset as taskset_mod
 
@@ -346,7 +350,7 @@ async def test_platform_taskset_defaults_to_hud_runtime(monkeypatch: pytest.Monk
 
     task = Task(env="hosted-env", id="solve", args={"n": 1})
     taskset = taskset_mod.Taskset("hosted", [task], taskset_id="ts_123")
-    job = await taskset.run(cast("Agent", object()))
+    job = await taskset.run(_NoopAgent())
 
     (run,) = job.runs
     assert run.trace.status == "completed"

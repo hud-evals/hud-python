@@ -24,7 +24,6 @@ from urllib.parse import urlsplit, urlunsplit
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, BrowserUseConfig
 from hud.settings import settings
-from hud.types import Step
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
@@ -72,13 +71,10 @@ class _BrowserUseModule(Protocol):
     Agent: _AgentFactory
 
 
-class BrowserUseAgent(Agent):
+class BrowserUseAgent(Agent[BrowserUseConfig]):
     """Run the ``browser-use`` agent against an env's ``cdp/1.3`` capability."""
 
-    config: BrowserUseConfig
-
-    def __init__(self, config: BrowserUseConfig | None = None) -> None:
-        self.config = config or BrowserUseConfig()
+    config_cls = BrowserUseConfig
 
     async def __call__(self, run: Run) -> None:
         """Drive browser-use over the run's CDP capability, filling ``run.trace``.
@@ -107,18 +103,12 @@ class BrowserUseAgent(Agent):
 
         try:
             history = await sdk_agent.run(max_steps=self.config.max_steps)
-        except Exception as exc:
-            LOGGER.exception("browser-use run failed")
-            trace.status = "error"
-            run.record(Step(source="system", error=str(exc)))
-            return
         finally:
             with contextlib.suppress(Exception):
                 await browser.stop()
 
         successful = history.is_successful()
         content = history.final_result() or ""
-        trace.status = "error" if successful is False else "completed"
         trace.content = content
         trace.extra.update(
             {
@@ -133,7 +123,6 @@ class BrowserUseAgent(Agent):
             AgentStep(
                 content=content,
                 done=history.is_done(),
-                error=content if successful is False else None,
             ),
         )
 

@@ -61,6 +61,22 @@ async def _inject_trace_id(request: httpx.Request) -> None:
     request.headers.update(get_trace_headers())
 
 
+def provider_api_key(provider: str) -> str | None:
+    keys = {
+        "anthropic": settings.anthropic_api_key,
+        "gemini": settings.gemini_api_key,
+        "openai": settings.openai_api_key,
+    }
+    return keys[provider]
+
+
+def routes_to_gateway(provider: str, *, gateway: bool) -> bool:
+    """Whether *provider* traffic goes through the HUD gateway: when *gateway* forces it,
+    or when the provider has no key of its own and ``HUD_API_KEY`` is set.
+    """
+    return gateway or (not provider_api_key(provider) and bool(settings.api_key))
+
+
 def build_model_client(
     provider: str, *, model: str | None = None, gateway: bool = False
 ) -> GatewayClient:
@@ -86,15 +102,10 @@ def build_model_client(
             aws_secret_key=settings.aws_secret_access_key,
             aws_region=settings.aws_region,
         )
-    keys = {
-        "anthropic": settings.anthropic_api_key,
-        "gemini": settings.gemini_api_key,
-        "openai": settings.openai_api_key,
-    }
-    key = keys[provider]
-    if gateway or not key:
-        if settings.api_key:
-            return build_gateway_client(provider)
+    if routes_to_gateway(provider, gateway=gateway):
+        return build_gateway_client(provider)
+    key = provider_api_key(provider)
+    if not key:
         raise HudAuthenticationError(
             f"No API key for {provider}. Set its provider key or HUD_API_KEY."
         )

@@ -38,6 +38,7 @@ from .tools.computer import last_image_content
 if TYPE_CHECKING:
     import mcp.types as mcp_types
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +61,7 @@ class OpenAIRunState(RunState[ResponseInputItemParam]):
 class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
     """OpenAI agent using the Responses API. Drives SSH, RFB, and MCP capabilities."""
 
+    config_cls = OpenAIConfig
     tool_catalog = (
         OpenAIShellTool,
         OpenAIComputerTool,
@@ -67,8 +69,8 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
     )
 
     def __init__(self, config: OpenAIConfig | None = None) -> None:
-        config = config or OpenAIConfig()
-        self.config = config
+        super().__init__(config)
+        config = self.config
 
         model_client = config.model_client
         if model_client is None:

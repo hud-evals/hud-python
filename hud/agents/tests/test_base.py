@@ -12,9 +12,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
+from hud.agents import (
+    ClaudeCLIAgent,
+    CodexCLIAgent,
+    OpenAIAgent,
+    OpenAIChatAgent,
+    create_agent,
+)
 from hud.agents.base import Agent
-from hud.agents.types import OpenAIConfig
+from hud.agents.types import AgentConfig, OpenAIConfig
 from hud.types import AgentType
 from hud.utils.exceptions import HudAuthenticationError
 
@@ -22,9 +28,6 @@ from hud.utils.exceptions import HudAuthenticationError
 class _FillingAgent(Agent):
     async def __call__(self, run: Any) -> None:
         run.trace.content = "done"
-
-
-# ─── the ABC contract ─────────────────────────────────────────────────
 
 
 def test_agent_requires_call_implementation() -> None:
@@ -40,13 +43,33 @@ async def test_agent_call_fills_trace() -> None:
     assert run.trace.content == "done"
 
 
-# ─── AgentType resolution ─────────────────────────────────────────────
-
-
 def test_agent_type_maps_value_to_class_and_provider() -> None:
     assert AgentType("openai").cls is OpenAIAgent
     assert AgentType("openai_compatible").cls is OpenAIChatAgent
     assert isinstance(AgentType("openai").gateway_provider, str)
+
+
+def test_agent_type_registers_cli_agent() -> None:
+    assert AgentType("claude_cli").cls is ClaudeCLIAgent
+    assert AgentType.of(ClaudeCLIAgent()) == AgentType.CLAUDE_CLI
+    assert AgentType("codex_cli").cls is CodexCLIAgent
+    assert AgentType.of(CodexCLIAgent()) == AgentType.CODEX_CLI
+
+
+@pytest.mark.parametrize("agent", [ClaudeCLIAgent(), CodexCLIAgent()])
+def test_cli_agent_load_rebuilds_dumped_config(agent: ClaudeCLIAgent | CodexCLIAgent) -> None:
+    loaded = type(agent).load(agent.dump())
+
+    assert type(loaded) is type(agent)
+    assert loaded.config == agent.config
+
+
+def test_custom_agent_round_trips_base_config() -> None:
+    agent = _FillingAgent(AgentConfig(model="custom", timeout_seconds=30))
+
+    loaded = _FillingAgent.load(agent.dump())
+
+    assert loaded.config == agent.config
 
 
 def test_missing_provider_dependency_points_at_agents_extra(
@@ -77,9 +100,6 @@ def test_missing_provider_dependency_points_at_agents_extra(
         _ = AgentType.CLAUDE.cls
 
 
-# ─── create_agent routing ─────────────────────────────────────────────
-
-
 @pytest.fixture(autouse=True)
 def gateway_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
@@ -105,9 +125,10 @@ def test_create_agent_value_shortcut_leaves_client_out_of_config(
     agent = create_agent("openai")  # AgentType.OPENAI shortcut
 
     assert isinstance(agent, OpenAIAgent)
+    assert agent.config.model == OpenAIConfig().model
     assert agent.config.model_client is None
     assert agent.openai_client is sentinel
-    assert agent.hosted_spec()["config"]["prompt_cache_key"] == agent.config.prompt_cache_key
+    assert agent.dump()["prompt_cache_key"] == agent.config.prompt_cache_key
 
 
 def test_create_agent_uses_the_gateway_even_with_a_provider_key(
@@ -126,8 +147,10 @@ def test_create_agent_uses_the_gateway_even_with_a_provider_key(
     direct.assert_not_called()
     # The same config built directly honours the provider key.
     assert OpenAIAgent(OpenAIConfig()).openai_client is direct.return_value
-    # Routing is config, not a client, so the agent stays hosted-serializable.
-    assert "gateway" not in agent.hosted_spec()["config"]
+    # Routing is config, not a client, so it survives serialization.
+    reloaded = OpenAIAgent.load(agent.dump())
+    assert reloaded.config.gateway is True
+    assert reloaded.openai_client is via_gateway.return_value
 
 
 def test_create_agent_resolves_gateway_model_metadata(

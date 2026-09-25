@@ -59,19 +59,21 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
 | `OpenAIAgent` | `OpenAIConfig` | `gpt-5.6` |
 | `GeminiAgent` | `GeminiConfig` | `gemini-3-pro-preview` |
 | `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5.4-mini` |
-| `ClaudeSDKAgent` | `ClaudeSDKConfig` | `claude-sonnet-4-6` |
+| `ClaudeCLIAgent` | `ClaudeCLIConfig` | `claude-sonnet-5` |
+| `CodexCLIAgent` | `CodexCLIConfig` | `gpt-5.6-sol` |
 
 Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Chat Completions API, so it
-points at any compatible server (vLLM, a local model) via `base_url`; `ClaudeSDKAgent` runs the `claude`
-CLI over an `ssh` capability, against the env's filesystem. SSH-only runs support POSIX and Windows
-workspaces; computer use over an `rfb` capability currently requires a POSIX workspace. Every knob
+points at any compatible server (vLLM, a local model) via `base_url`. `ClaudeCLIAgent` and
+`CodexCLIAgent` run the `claude` and `codex exec` CLIs over an `ssh` capability, against the env's
+filesystem. SSH-only runs support POSIX and Windows workspaces; `ClaudeCLIAgent` computer use over an
+`rfb` capability currently requires a POSIX workspace. Every knob
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 
 `OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
 request. Pass your own key when multiple agent instances should share the same cached prompt prefix.
 
-`timeout_seconds` bounds the complete agent phase. For provider tool agents, `tool_timeout_seconds` bounds each complete SSH-backed tool call, including multi-operation editor calls. It is unset by default except on `ClaudeConfig`, where it defaults to 120 seconds. A timeout is returned to the model as a tool error so the agent can continue. `ClaudeSDKAgent` does not apply this setting because its SSH process is the complete Claude Code agent, not one tool call.
+`timeout_seconds` bounds the complete agent phase. For provider tool agents, `tool_timeout_seconds` bounds each complete SSH-backed tool call, including multi-operation editor calls. It is unset by default except on `ClaudeConfig`, where it defaults to 120 seconds. A timeout is returned to the model as a tool error so the agent can continue. The CLI agents do not apply this setting because each SSH process is the complete CLI agent, not one tool call.
 
 ```python
 agent = OpenAIChatAgent(
@@ -86,9 +88,10 @@ create_agent(model: str, **kwargs) -> GatewayAgent
 ```
 
 The `create_agent` function resolves `model` to a gateway agent type and returns that provider agent
-wired to the gateway. Extra `kwargs` forward to the matched provider config (the `*Config` for the
-resolved type), with `model` filled in, `gateway=True` set, and `model_client` left unset; the provider
-constructor builds the gateway client at runtime, even when that provider's own key is also set. This
+wired to the gateway. Extra `kwargs` forward to the matched config (the `*Config` for the resolved
+type), with `model` filled in, `gateway=True` set, and `model_client` left unset; the agent routes
+through the gateway at runtime, even when that provider's own key is also set. Passing an agent type
+itself (`create_agent("claude_cli")`) keeps that config's default model. This
 keeps the config serializable for [`HostedRuntime`](/v6/reference/runtime#hostedruntime). Constructed
 directly (`ClaudeAgent(ClaudeConfig(...))`), an agent uses the provider key when one is set and the
 gateway otherwise; `gateway=True` on the config forces the gateway there too. `api_key` and `base_url` are rejected here;
@@ -96,17 +99,18 @@ instantiate the provider agent directly for custom/BYOK credentials. Passing `co
 works when `model` resolves to `OpenAIChatAgent`, since `completion_kwargs` lives only on
 `OpenAIChatConfig`.
 
-A model id maps to one of four gateway agent types (`AgentType`), each a provider agent:
+A model id or agent type name maps to one of the registered agent types (`AgentType`):
 
 | `AgentType` | Agent class |
 |-------------|-------------|
 | `claude` | `ClaudeAgent` |
+| `claude_cli` | `ClaudeCLIAgent` |
+| `codex_cli` | `CodexCLIAgent` |
 | `openai` | `OpenAIAgent` |
 | `gemini` | `GeminiAgent` |
 | `openai_compatible` | `OpenAIChatAgent` |
 
-For a provider key instead of the gateway, or for `ClaudeSDKAgent` (not a gateway type), construct the
-provider agent directly.
+For a provider key instead of the gateway, construct the agent directly.
 
 ## Agent
 
@@ -114,6 +118,12 @@ Every agent implements the `Agent` base class (`hud.agents.base`): one abstract 
 `__call__(run: Run) -> None`. An agent drives the live [`Run`](/v6/reference/types#run) to completion,
 filling `run.trace` in place; the graded answer is `run.trace.content`. An agent is stateless per run -
 everything comes from `run` - so one instance drives many concurrent rollouts.
+
+Every agent also carries an `AgentConfig` as `agent.config` (`timeout_seconds`, `model`, ...), typed by
+its parameter: `Agent[CodexCLIConfig]`. `agent.dump()` serializes that config to JSON and
+`AgentClass.load(data)` rebuilds the agent from it; [`HostedRuntime`](/v6/reference/runtime#hostedruntime)
+sends the registered agent type plus `dump()`. A subclass that overrides `__init__` calls
+`super().__init__(config)`.
 
 ## Running an agent
 
@@ -130,8 +140,8 @@ job = await taskset.run(agent, runtime=LocalRuntime("env.py"))
 print(job.reward)
 ```
 
-**From the CLI**, `hud eval` takes a task source and an agent name (`claude`, `openai`, `gemini`,
-`openai_compatible`); see [running an eval](/v6/guides/running-an-eval) for the walkthrough and the
+**From the CLI**, `hud eval` takes a task source and an agent name (`claude`, `claude_cli`,
+`codex_cli`, `openai`, `gemini`, `openai_compatible`); see [running an eval](/v6/guides/running-an-eval) for the walkthrough and the
 [CLI reference](/v6/reference/cli#hud-eval) for the full flag set.
 
 ## Bring your own harness

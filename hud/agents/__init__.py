@@ -1,7 +1,4 @@
-"""Agent implementations.
-
-The robot policy harness lives in :mod:`hud.agents.robot` (requires the ``robot`` extra).
-"""
+"""Agent implementations."""
 
 from __future__ import annotations
 
@@ -15,13 +12,16 @@ from hud.utils.gateway import resolve_gateway_model
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from hud.agents.claude import ClaudeAgent, ClaudeSDKAgent, ClaudeSDKConfig
+    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent, ClaudeCLIConfig
+    from hud.agents.codex import CodexCLIAgent, CodexCLIConfig
     from hud.agents.gemini import GeminiAgent
     from hud.agents.openai import OpenAIAgent
     from hud.agents.openai_compatible import OpenAIChatAgent
     from hud.agents.tool_agent import ToolAgent as MCPAgent
 
-    GatewayAgent: TypeAlias = ClaudeAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
+    GatewayAgent: TypeAlias = (
+        ClaudeAgent | ClaudeCLIAgent | CodexCLIAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
+    )
 
 
 def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
@@ -46,44 +46,22 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     if not settings.api_key:
         raise HudAuthenticationError("HUD_API_KEY is required to create a gateway agent")
 
-    agent_type, model_id = resolve_agent_model(model)
-    kwargs.setdefault("model", model_id)
-    kwargs["gateway"] = True
-    # cls/config_cls are matched unions; the pairing is correct by construction.
-    config = agent_type.config_cls(**kwargs)
-    return agent_type.cls(cast("Any", config))
-
-
-def resolve_agent_model(model: str) -> tuple[AgentType, str]:
-    """Resolve a catalog id/name/slug or an agent type without constructing a client."""
-    agent_type = next((candidate for candidate in AgentType if candidate.value == model), None)
-    if agent_type is not None:
-        return agent_type, model
-    try:
+    if model in {member.value for member in AgentType}:
+        agent_type = AgentType(model)
+    else:
         entry = resolve_gateway_model(model)
-    except HudAuthenticationError:
-        types = ", ".join(candidate.value for candidate in AgentType)
-        raise ValueError(
-            f"Resolving {model!r} needs the HUD model catalog; set HUD_API_KEY, or pass an "
-            f"agent type ({types}) and choose the model with its config."
-        ) from None
-    if entry.sdk_agent_type in ("operator", "gemini_cua"):
-        replacement = "openai" if entry.sdk_agent_type == "operator" else "gemini"
-        raise ValueError(
-            f"The {entry.sdk_agent_type} agent is no longer supported; use {replacement} with a "
-            "supported computer-use model."
-        )
-    try:
         agent_type = AgentType(entry.sdk_agent_type)
-    except ValueError as exc:
-        raise ValueError(f"Model {model!r} has invalid agent type metadata") from exc
-    return agent_type, entry.model_name or model
+        kwargs.setdefault("model", entry.model_name or model)
+    kwargs["gateway"] = True
+    return cast("GatewayAgent", agent_type.cls.load(kwargs))
 
 
 _LAZY_EXPORTS = {
     "ClaudeAgent": ("hud.agents.claude", "ClaudeAgent"),
-    "ClaudeSDKAgent": ("hud.agents.claude", "ClaudeSDKAgent"),
-    "ClaudeSDKConfig": ("hud.agents.claude", "ClaudeSDKConfig"),
+    "ClaudeCLIAgent": ("hud.agents.claude", "ClaudeCLIAgent"),
+    "ClaudeCLIConfig": ("hud.agents.claude", "ClaudeCLIConfig"),
+    "CodexCLIAgent": ("hud.agents.codex", "CodexCLIAgent"),
+    "CodexCLIConfig": ("hud.agents.codex", "CodexCLIConfig"),
     "GeminiAgent": ("hud.agents.gemini", "GeminiAgent"),
     "MCPAgent": ("hud.agents.tool_agent", "ToolAgent"),
     "OpenAIAgent": ("hud.agents.openai", "OpenAIAgent"),
@@ -92,14 +70,15 @@ _LAZY_EXPORTS = {
 
 __all__ = [
     "ClaudeAgent",
-    "ClaudeSDKAgent",
-    "ClaudeSDKConfig",
+    "ClaudeCLIAgent",
+    "ClaudeCLIConfig",
+    "CodexCLIAgent",
+    "CodexCLIConfig",
     "GeminiAgent",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
     "create_agent",
-    "resolve_agent_model",
 ]
 
 

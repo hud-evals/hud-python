@@ -12,7 +12,7 @@ from hud.capabilities.mcp import get_mcp_trace_id
 from hud.eval.run import Grade, Run, validate_rollout_timeouts
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.span import normalize_trace_id
-from hud.types import Step
+from hud.types import AgentType, Step
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ class HostedRuntime:
     agent runs alongside the task environment. This process only submits the
     rollout and polls the trace to completion, folding the result into a
     :class:`~hud.eval.run.Run`. Because the agent runs remotely, its identity
-    travels via :func:`_agent_spec`.
+    travels as its registered type plus :meth:`~hud.agents.base.Agent.dump`.
 
     ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
     A local cancel (Ctrl-C) requests remote cancellation before propagating.
@@ -143,19 +143,13 @@ class HostedRuntime:
         trace_id: str,
         parent_trace_id: str | None,
     ) -> dict[str, Any]:
-        from hud.agents.tool_agent import ToolAgent
-
-        if not isinstance(agent, ToolAgent):
+        agent_type = AgentType.of(agent)
+        if agent_type is None:
             raise ValueError(
-                f"hosted execution requires a gateway agent that can serialize its "
-                f"identity (Claude/OpenAI/Gemini/OpenAIChat); got {type(agent).__name__}"
+                f"hosted execution supports the registered agent types "
+                f"({', '.join(member.value for member in AgentType)}); got {type(agent).__name__}"
             )
-        spec = agent.hosted_spec()
-        if task.agent_config:
-            spec = {
-                **spec,
-                "config": {**spec.get("config", {}), **task.agent_config},
-            }
+        spec = {"type": agent_type.value, "config": {**agent.dump(), **(task.agent_config or {})}}
         platform = PlatformClient.from_settings()
         if not platform.api_key:
             raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
