@@ -42,10 +42,13 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
+    from hud.capabilities import Connection
     from hud.clients.client import HudClient
+    from hud.environment import WorkspaceRoute
 
     from .runtime import Provider
     from .runtime.core import RuntimeConfig
@@ -199,12 +202,14 @@ class Run:
         *,
         best_effort_grade: bool = False,
         runtime_config: RuntimeConfig | None = None,
+        connections: Sequence[Connection] = (),
     ) -> None:
         self._client = client
         self._task_id = task_id
         self._args = args
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
+        self.connections = {connection.name: connection for connection in connections}
         #: The task's opening prompt as ``tasks.start`` returned it: plain
         #: text, or a list of message dicts (``{"role", "content"}``) for
         #: chat-style / multi-turn prompts. Agents consume the normalized
@@ -444,6 +449,8 @@ async def rollout(
     group_id: str | None = None,
     trace_id: str | None = None,
     rollout_timeout: float | None = None,
+    connections: Sequence[Connection] = (),
+    workspace_routes: Sequence[WorkspaceRoute] = (),
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
@@ -537,7 +544,11 @@ async def rollout(
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
                 _phase = "starting task"
-                async with connect(addr) as actor_client:
+                async with connect(
+                    addr,
+                    workspace_routes=workspace_routes,
+                    connections=connections,
+                ) as actor_client:
                     client = actor_client
                     live = Run(
                         actor_client,
@@ -545,35 +556,39 @@ async def rollout(
                         task.args,
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
+                        connections=connections,
                     )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
                         try:
-                            async with file_tracking_observer(actor_client):
-                                if agent_timeout is None:
-                                    await agent(run)
-                                else:
-                                    deadline = asyncio.timeout(agent_timeout)
-                                    try:
-                                        async with deadline:
-                                            await agent(run)
-                                    except TimeoutError:
-                                        if not deadline.expired():
-                                            raise
-                                        detail = f"agent timed out after {agent_timeout:g}s"
-                                        logger.warning(detail)
-                                        run.trace.status = "error"
-                                        run.trace.stop_reason = "timeout"
-                                        run.record(Step(source="system", error=detail))
-                        except Exception as exc:
-                            if task.verifier is None:
-                                raise
-                            detail = "".join(traceback.format_exception_only(exc)).strip()
-                            logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
-                            run.trace.status = "error"
-                            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                            try:
+                                async with file_tracking_observer(actor_client):
+                                    if agent_timeout is None:
+                                        await agent(run)
+                                    else:
+                                        deadline = asyncio.timeout(agent_timeout)
+                                        try:
+                                            async with deadline:
+                                                await agent(run)
+                                        except TimeoutError:
+                                            if not deadline.expired():
+                                                raise
+                                            detail = f"agent timed out after {agent_timeout:g}s"
+                                            logger.warning(detail)
+                                            run.trace.status = "error"
+                                            run.trace.stop_reason = "timeout"
+                                            run.record(Step(source="system", error=detail))
+                            except Exception as exc:
+                                if task.verifier is None:
+                                    raise
+                                detail = "".join(traceback.format_exception_only(exc)).strip()
+                                logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
+                                run.trace.status = "error"
+                                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                        finally:
+                            run.connections.clear()
                         _phase = "grading"
 
                     if verifier is not None:
@@ -673,6 +688,7 @@ async def rollout(
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
         assert run is not None  # the body bound it, or the handler synthesized it
+        run.connections.clear()
         run.trace.trace_id = trace_id
         run.job_id = job_id
         run.group_id = group_id

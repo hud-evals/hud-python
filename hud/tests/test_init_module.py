@@ -20,6 +20,7 @@ class TestInitModule:
         expected = [
             "Chat",
             "ComposeProject",
+            "Connection",
             "DockerRuntime",
             "Environment",
             "Grade",

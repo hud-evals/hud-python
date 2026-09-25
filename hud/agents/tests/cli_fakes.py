@@ -93,7 +93,11 @@ class FakeClient:
         return self.routed[ref]
 
 
-def fake_run(client: FakeClient | None = None, prompt_text: str = "") -> Any:
+def fake_run(
+    client: FakeClient | None = None,
+    prompt_text: str = "",
+    connections: dict[str, Any] | None = None,
+) -> Any:
     trace = SimpleNamespace(status=None, content="", extra={})
     steps: list[Any] = []
     return SimpleNamespace(
@@ -103,4 +107,5 @@ def fake_run(client: FakeClient | None = None, prompt_text: str = "") -> Any:
         client=client,
         prompt_text=prompt_text,
         runtime_config=None,
+        connections=connections or {},
     )

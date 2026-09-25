@@ -15,14 +15,23 @@ import struct
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
-from hud.environment.egress import VISITOR_PORT, Egress, Peer, hosts_text, proxy_environment
+from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
+from hud.environment.egress import (
+    VISITOR_PORT,
+    Egress,
+    Peer,
+    bind_addresses,
+    hosts_text,
+    proxy_environment,
+)
 from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
+from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.utils import forward_output
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
 
@@ -47,6 +56,40 @@ _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 _THREAD_SUSPEND_RESUME = 0x0002
 _TH32CS_SNAPTHREAD = 0x00000004
 _INVALID_DWORD = 0xFFFFFFFF
+
+
+def _process_guard_interpreter() -> str | None:
+    candidates = (
+        Path("/usr/bin/python3"),
+        Path("/usr/local/bin/python3"),
+        Path(sys.executable).resolve(),
+    )
+    return next(
+        (
+            str(candidate)
+            for candidate in dict.fromkeys(candidates)
+            if candidate.is_file()
+            and os.access(candidate, os.X_OK)
+            and candidate.is_relative_to("/usr")
+        ),
+        None,
+    )
+
+
+def _guarded_process_argv(
+    interpreter: str,
+    guard: ProcessConnectionGuard,
+    argv: Sequence[str],
+) -> list[str]:
+    return [
+        interpreter,
+        guard.sandbox_helper,
+        "--backend",
+        guard.backend,
+        guard.sandbox_socket,
+        "--",
+        *argv,
+    ]
 
 
 class _WindowsJob:
@@ -193,6 +236,8 @@ class _WindowsJob:
 class Bubblewrap:
     path: str
     pid_unshare: str | None = None
+    #: Whether ``--perms`` can set a tmpfs mode (bubblewrap 0.5+).
+    tmpfs_modes: bool = False
 
 
 # Set once the first Workspace probes the substrate (avoid per-instance work).
@@ -263,8 +308,21 @@ def usable_bwrap() -> Bubblewrap | None:
                 check=False,
             )
             if probe.returncode == 0:
-                _bwrap_usable = launch
-                return launch
+                separator = argv.index("--")
+                mode_probe = [*argv[:separator], "--perms", "1777", "--tmpfs", "/tmp"]  # noqa: S108
+                modes = subprocess.run(
+                    [*mode_probe, *argv[separator:]],
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+                _bwrap_usable = replace(launch, tmpfs_modes=modes.returncode == 0)
+                if not _bwrap_usable.tmpfs_modes:
+                    LOGGER.warning(
+                        "bwrap cannot set tmpfs modes (bubblewrap 0.5+ is required); "
+                        "the sandbox /tmp is not writable by unprivileged agent sessions."
+                    )
+                return _bwrap_usable
             failure = probe.stderr.decode("utf-8", "replace").strip()[:120]
         except (OSError, subprocess.SubprocessError):
             continue
@@ -309,10 +367,14 @@ class Mount:
     src: str = ""
     dst: str = ""
     optional: bool = False
+    #: Permission bits for a ``tmpfs`` mount, applied where bwrap supports ``--perms``.
+    mode: int | None = None
 
-    def to_bwrap_args(self, *, bind_devices: bool = False) -> list[str]:
+    def to_bwrap_args(self, *, bind_devices: bool = False, tmpfs_modes: bool = False) -> list[str]:
         if self.kind == "dev" and bind_devices:
             return ["--dev-bind", "/dev", self.dst]
+        if self.kind == "tmpfs" and self.mode is not None and tmpfs_modes:
+            return ["--perms", f"{self.mode:04o}", "--tmpfs", self.dst]
         normal, optional_flag, takes_src = _MOUNT_FLAGS[self.kind]
         flag = optional_flag if (self.optional and optional_flag) else normal
         return [flag, self.src, self.dst] if takes_src else [flag, self.dst]
@@ -329,7 +391,8 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
     Mount("symlink", src="usr/sbin", dst="/sbin"),
     Mount("proc", dst="/proc"),
     Mount("dev", dst="/dev"),
-    Mount("tmpfs", dst="/tmp"),  # noqa: S108 — namespace-local tmpfs, not a host tempdir
+    # World-writable like a host /tmp, so unprivileged sessions get scratch space.
+    Mount("tmpfs", dst="/tmp", mode=0o1777),  # noqa: S108 — namespace-local tmpfs, not a host tempdir
 )
 
 
@@ -507,6 +570,9 @@ class Workspace:
         #: named here to exist for it. Nothing to do where sessions share the
         #: substrate's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
+        #: Peers removed while a sandbox ran; that sandbox keeps them until it is discarded.
+        self._retired_peers: list[Peer] = []
+        self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
         self.ports = frozenset(ports)
         self._egress: Egress | None = None
@@ -533,13 +599,7 @@ class Workspace:
         # Whether the root is chowned to the shell identity at start. Off where the
         # image staged it already: whose it is, is the image's statement.
         self._hand_over_root = hand_over_root
-        if require_isolation and self._bwrap is None:
-            raise RuntimeError(
-                "isolation was required but bwrap cannot sandbox here: install "
-                "bubblewrap and use a container runtime that allows unprivileged "
-                "user namespaces. Refusing to serve sessions that would silently "
-                "run unisolated."
-            )
+        self._require_isolation = require_isolation
         self._ssh_host_key_path = host_key_path
         self._ssh_authorized_client_keys = list(authorized_client_keys or [])
         self._acceptor: asyncssh.SSHAcceptor | None = None
@@ -623,6 +683,51 @@ class Workspace:
         else is listening on it.
         """
         return not self.network or self.allowed_hosts is not None
+
+    def add_peer(self, peer: Peer, *, first: bool = False) -> None:
+        """Add a substrate service before the workspace accepts sessions."""
+        if self._sandbox is not None:
+            raise RuntimeError("workspace peers must be bound before its sandbox starts")
+        self.peers = (peer, *self.peers) if first else (*self.peers, peer)
+        if self._hosts_path is not None:
+            self._hosts_path = self._write_hosts()
+
+    def remove_peer(self, peer: Peer) -> None:
+        """Remove a substrate service, from the next sandbox if one is running now.
+
+        A running sandbox resolved its peers when it started, so it keeps this one
+        until :meth:`discard_sandbox`; the next sandbox starts without it.
+        """
+        if self._sandbox is not None:
+            self._retired_peers.append(peer)
+            return
+        self._drop_peers([peer])
+
+    def _drop_peers(self, peers: Sequence[Peer]) -> None:
+        self.peers = tuple(candidate for candidate in self.peers if candidate not in peers)
+        if self._hosts_path is not None:
+            self._hosts_path = self._write_hosts()
+
+    @property
+    def supports_process_connections(self) -> bool:
+        return (
+            self.bwrap_available
+            and self.owns_netns
+            and _process_guard_interpreter() is not None
+            and process_connections_supported()
+        )
+
+    def add_process_connection(self, name: str, peer: Peer) -> None:
+        if name in self._process_connections:
+            raise RuntimeError(f"process connection {name!r} was already bound")
+        if peer not in self.peers:
+            raise RuntimeError("process connection peer must be installed first")
+        self._process_connections[name] = peer
+
+    def remove_process_connection(self, name: str, peer: Peer) -> None:
+        if self._process_connections.get(name) != peer:
+            raise RuntimeError(f"process connection {name!r} is not bound to that peer")
+        del self._process_connections[name]
 
     def _setpriv(self) -> str | None:
         """Absolute path to ``setpriv``, resolved via the *server's* PATH.
@@ -708,6 +813,13 @@ class Workspace:
 
         Returns only after every published workspace service is accepting clients.
         """
+        if self._require_isolation and self._bwrap is None:
+            raise RuntimeError(
+                "isolation was required but bwrap cannot sandbox here: install "
+                "bubblewrap and use a container runtime that allows unprivileged "
+                "user namespaces. Refusing to serve sessions that would silently "
+                "run unisolated."
+            )
         try:
             self._prepare_runtime()
             if self._acceptor is None:
@@ -821,6 +933,7 @@ class Workspace:
             client_key_path=key_path,
             cwd=self._guest_path,
             isolation="bwrap" if self.bwrap_available else "none",
+            process_connections=self.supports_process_connections,
         )
 
     @property
@@ -1105,14 +1218,17 @@ class Workspace:
         if userns_block_fd is not None:
             argv.extend(["--userns-block-fd", str(userns_block_fd)])
         bind_host_devices = not isolate_users if bind_devices is None else bind_devices
+        tmpfs_modes = self._bwrap.tmpfs_modes
         for mount in self._system_mounts:
-            argv.extend(mount.to_bwrap_args(bind_devices=bind_host_devices))
+            argv.extend(
+                mount.to_bwrap_args(bind_devices=bind_host_devices, tmpfs_modes=tmpfs_modes)
+            )
         # Implicit bind-mount parents are root-only in bubblewrap.
         argv.extend(["--dir", str(PurePosixPath(self._guest_path).parent)])
         argv.extend(["--bind", str(self.root), self._guest_path])
         selected_mounts = self.mounts if mounts is None else mounts
         for m in selected_mounts:
-            argv.extend(m.to_bwrap_args(bind_devices=bind_host_devices))
+            argv.extend(m.to_bwrap_args(bind_devices=bind_host_devices, tmpfs_modes=tmpfs_modes))
         if (
             mount_hosts
             and self._hosts_path is not None
@@ -1392,6 +1508,9 @@ class Workspace:
             self._egress.stop()
             self._egress = None
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
+        if self._retired_peers:
+            self._drop_peers(self._retired_peers)
+            self._retired_peers.clear()
         if sandbox is None or sandbox.returncode is not None:
             return
         sandbox.kill()
@@ -1590,7 +1709,35 @@ class Workspace:
             return {**base, **self.env}
         return {**os.environ, **self.env} if self.env else None
 
+    def _requested_process_connections(
+        self,
+        process: asyncssh.SSHServerProcess[bytes],
+    ) -> tuple[str, ...]:
+        raw = getattr(process, "env", {}).get(PROCESS_CONNECTIONS_REQUEST)
+        if raw is None:
+            return ()
+        try:
+            requested = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid process connection request") from exc
+        if not isinstance(requested, list) or not all(isinstance(name, str) for name in requested):
+            raise ValueError("process connection request must be a list of names")
+        names = tuple(dict.fromkeys(str(name) for name in requested))
+        missing = [name for name in names if name not in self._process_connections]
+        if missing:
+            raise ValueError(f"process connection is not bound: {', '.join(missing)}")
+        return names
+
+    def _process_connection_targets(self, names: Sequence[str]) -> frozenset[tuple[str, int]]:
+        addresses = bind_addresses(self.peers, reserved_ports=self.ports)
+        return frozenset(
+            (addresses[peer.name], peer.port)
+            for name in names
+            for peer in (self._process_connections[name],)
+        )
+
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
+        guard: ProcessConnectionGuard | None = None
         try:
             pid = await self.sandbox_pid()
             # Sessions start from an exact environment, so a terminal's TERM has to
@@ -1599,11 +1746,59 @@ class Workspace:
             term_type = process.term_type
             wants_tty = bool(term_type)
             session_env = {"TERM": term_type} if term_type else None
-            argv = (
-                self.shell_argv(process.command, env=session_env, tty=wants_tty)
-                if pid is None
-                else self.session_argv(process.command, env=session_env, tty=wants_tty)
-            )
+            requested_connections = self._requested_process_connections(process)
+            if self._process_connections:
+                guard_interpreter = _process_guard_interpreter()
+                if (
+                    pid is None
+                    or not self.supports_process_connections
+                    or guard_interpreter is None
+                ):
+                    raise RuntimeError("process-bound connections require an isolated workspace")
+                guard_directory = Path(
+                    tempfile.mkdtemp(prefix="process-connection-", dir=self._credentials_dir())
+                )
+                guard = ProcessConnectionGuard(
+                    guard_directory,
+                    self._process_connection_targets(tuple(self._process_connections)),
+                    self._process_connection_targets(requested_connections),
+                )
+                guard.start()
+                sandbox_directory = str(Path(guard.sandbox_socket).parent)
+                shell_command = (
+                    ["bash", "-lc", process.command]
+                    if process.command is not None
+                    else ["bash", "-l"]
+                )
+                guarded_command = _guarded_process_argv(
+                    guard_interpreter,
+                    guard,
+                    [
+                        *self._drop_argv(),
+                        *shell_command,
+                    ],
+                )
+                argv = self.bwrap_argv(
+                    guarded_command,
+                    env=self._full_env(session_env),
+                    inherit_host_env=False,
+                    inherit_workspace_env=False,
+                    network=True,
+                    isolate_processes=False,
+                    isolate_users=False,
+                    bind_devices=True,
+                    mounts=(
+                        *self.mounts,
+                        Mount("ro", src=str(guard.directory), dst=sandbox_directory),
+                    ),
+                    tty=wants_tty,
+                )
+            else:
+                argv = (
+                    self.shell_argv(process.command, env=session_env, tty=wants_tty)
+                    if pid is None
+                    else self.session_argv(process.command, env=session_env, tty=wants_tty)
+                )
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
                 # loader variables or server secrets. The inner payload injects
@@ -1614,6 +1809,8 @@ class Workspace:
             else:
                 proc_env = self._session_env()
         except Exception as exc:
+            if guard is not None:
+                guard.close()
             LOGGER.warning("workspace session setup failed: %s", exc)
             if not process.channel.is_closing():
                 process.stderr.write(f"workspace: cannot prepare shell: {exc}\n".encode())
@@ -1777,26 +1974,34 @@ class Workspace:
                     argv,
                     cwd=self.root,
                     env=proc_env,
+                    mount_view="host" if guard is not None else "workspace",
                     tty=wants_tty,
                     terminal_size=process.get_terminal_size() if wants_tty else (80, 24, 0, 0),
-                    persistent=True,
+                    persistent=guard is None,
                 )
+                if guard is not None:
+                    await guard.wait_ready()
         except BaseException as exc:
             for output in local_outputs:
                 output.finish()
             if sub is not None:
                 await sub.terminate()
+            if guard is not None:
+                guard.close()
             if pty_pair is not None:
                 os.close(pty_pair[0])
                 os.close(pty_pair[1])
-            if not isinstance(exc, FileNotFoundError):
-                raise
-            process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
-            process.exit(127)
-            return
+            if isinstance(exc, FileNotFoundError):
+                process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
+                process.exit(127)
+                return
+            if isinstance(exc, (OSError, RuntimeError)):
+                process.stderr.write(f"workspace: cannot spawn shell: {exc}\n".encode())
+                process.exit(1)
+                return
+            raise
 
         assert sub is not None
-
         if pty_pair is not None:
             # The child holds the terminal now; this side keeps only the master.
             os.close(pty_pair[1])
@@ -1895,6 +2100,8 @@ class Workspace:
                 channel_closed_task,
                 return_exceptions=True,
             )
+            if guard is not None:
+                guard.close()
             for output in local_outputs:
                 output.finish()
             if process.channel.is_closing():

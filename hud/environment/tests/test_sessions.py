@@ -10,12 +10,17 @@ split ``hud task start`` / ``hud task grade`` flow).
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import pytest
 
+from hud.capabilities import Connection
 from hud.clients import HudProtocolError, connect
-from hud.environment import Environment
+from hud.environment import Environment, Workspace, WorkspaceRoute
 from hud.eval import LocalRuntime, Task
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SESSION = Task(env="sessions", id="echo")
 
@@ -122,3 +127,70 @@ async def test_hello_cannot_resume_a_live_session() -> None:
         await a.start_task("echo", {"tag": "a"})
         with pytest.raises(HudProtocolError, match="live connection"):
             await b.hello(session_id=a.manifest.session_id)
+
+
+async def test_a_finished_session_releases_its_connection_for_the_next_rollout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Workspace, "supports_process_connections", property(lambda _self: True))
+    env = _env()
+    workspace = env.workspace(tmp_path / "root")
+    first, second = (
+        Connection(
+            name="inference",
+            capability="ssh",
+            url="https://inference.hud.so",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        for token in ("first-rollout", "rotated")
+    )
+
+    async with LocalRuntime(env)(_SESSION) as runtime:
+        async with connect(runtime, connections=[first]) as a:
+            await a.start_task("echo", {"tag": "a"})
+            assert (await a.grade({"answer": "x"}))["tag"] == "a"
+        async with connect(runtime, connections=[second]) as b:
+            await b.start_task("echo", {"tag": "b"})
+            assert [peer.name for peer in workspace.peers].count(second.host) == 1
+            assert (await b.grade({"answer": "x"}))["tag"] == "b"
+
+
+async def test_a_live_session_keeps_its_connection_name_from_other_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Workspace, "supports_process_connections", property(lambda _self: True))
+    env = _env()
+    env.workspace(tmp_path / "root")
+    first, second = (
+        Connection(
+            name="inference",
+            capability="ssh",
+            url="https://inference.hud.so",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        for token in ("first", "second")
+    )
+
+    async with LocalRuntime(env)(_SESSION) as runtime, connect(runtime, connections=[first]):
+        with pytest.raises(HudProtocolError, match="bound to another control session"):
+            async with connect(runtime, connections=[second]):
+                pass
+
+
+async def test_a_finished_session_takes_its_workspace_route_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Workspace, "bwrap_available", property(lambda _self: True))
+    env = _env()
+    workspace = env.workspace(tmp_path / "root", network=False)
+    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
+
+    async with LocalRuntime(env)(_SESSION) as runtime:
+        async with connect(runtime, workspace_routes=[route]) as a:
+            await a.start_task("echo", {"tag": "a"})
+            assert [peer.name for peer in workspace.peers] == ["inference.hud.so"]
+            await a.grade({"answer": "x"})
+        async with connect(runtime) as later:
+            await later.start_task("echo", {"tag": "later"})
+            assert workspace.peers == ()
+            await later.grade({"answer": "x"})

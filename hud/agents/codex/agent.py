@@ -11,6 +11,7 @@ import mcp.types as mcp_types
 
 from hud.agents.base import Agent
 from hud.agents.cli import (
+    PROCESS_BOUND_CREDENTIAL,
     WINDOWS_SHELLS,
     powershell,
     powershell_quote,
@@ -25,14 +26,14 @@ from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
+    from hud.capabilities import Connection, SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
 
 _MANAGED_CODEX_PATHS = {
-    "linux-x64": "/media/hud/bin/codex/bin/codex",
-    "linux-x64-musl": "/media/hud/bin/codex/bin/codex",
+    "linux-x64": "/usr/local/lib/agents/codex/bin/codex",
+    "linux-x64-musl": "/usr/local/lib/agents/codex/bin/codex",
 }
 
 
@@ -213,9 +214,22 @@ class CodexCLIAgent(Agent[CodexCLIConfig]):
 
     async def __call__(self, run: Run) -> None:
         ssh = cast("SSHClient", await run.client.open("ssh"))
+        connection: Connection | None = run.connections.get("inference")
         executable = await resolve_executable(
             ssh, "codex", _MANAGED_CODEX_PATHS, run.runtime_config
         )
+        if connection is not None:
+            # A launcher script (the npm package's Node shim) runs the real client as a
+            # child, which the connection refuses; without this Codex retries silently.
+            head = await ssh.run(
+                f"head -c 2 -- {shlex.quote(executable)}", check=True, encoding=None
+            )
+            if head.stdout == b"#!":
+                raise RuntimeError(
+                    f"{executable} is a launcher script, but a process-bound inference "
+                    "connection only reaches the launched process; put the native codex "
+                    "binary on PATH or provide the managed runtime bundle"
+                )
         env: dict[str, str] = {}
         args = [
             executable,
@@ -226,25 +240,33 @@ class CodexCLIAgent(Agent[CodexCLIConfig]):
             "--color",
             "never",
             "--sandbox",
-            self.config.sandbox,
+            # The workspace already isolates a guarded process; Codex's inner sandbox would
+            # block the relay socket it needs.
+            "danger-full-access" if connection is not None else self.config.sandbox,
             "--model",
             self.config.model,
         ]
 
-        if routes_to_gateway("openai", gateway=self.config.gateway):
-            if not settings.api_key:
+        if connection is not None or routes_to_gateway("openai", gateway=self.config.gateway):
+            if connection is not None:
+                # The relay injects the scoped credential; the process never sees it.
+                base_url, credential_env = connection.client_url, "HUD_CONNECTION_CREDENTIAL"
+                env[credential_env] = PROCESS_BOUND_CREDENTIAL
+            elif settings.api_key:
+                base_url, credential_env = settings.hud_gateway_url, "HUD_API_KEY"
+                env[credential_env] = settings.api_key
+            else:
                 raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-            env["HUD_API_KEY"] = settings.api_key
             overrides = {
                 "model_provider": "hud",
                 "model_providers.hud.name": "HUD",
-                "model_providers.hud.base_url": settings.hud_gateway_url,
-                "model_providers.hud.env_key": "HUD_API_KEY",
+                "model_providers.hud.base_url": base_url,
+                "model_providers.hud.env_key": credential_env,
                 "model_providers.hud.wire_api": "responses",
             }
             for key, value in overrides.items():
                 args.extend(["-c", f"{key}={json.dumps(value)}"])
-            if trace_id := get_current_trace_id():
+            if connection is None and (trace_id := get_current_trace_id()):
                 args.extend(
                     [
                         "-c",
@@ -255,39 +277,57 @@ class CodexCLIAgent(Agent[CodexCLIConfig]):
             env["CODEX_API_KEY"] = settings.openai_api_key
 
         args.append("-")
+        # Injected credentials get a throwaway CODEX_HOME; otherwise an ambient login applies.
         if ssh.capability.params.get("shell", "bash") in WINDOWS_SHELLS:
-            script = ";".join(
-                [
+            invocation = (
+                f"& {powershell_quote(executable)} "
+                f"{' '.join(powershell_quote(arg) for arg in args[1:])}; "
+                "$hudExitCode=$LASTEXITCODE"
+            )
+            statements = [
+                *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
+                invocation,
+            ]
+            if env:
+                statements = [
                     "$codexHome=Join-Path ([System.IO.Path]::GetTempPath()) "
                     "('hud-codex-' + [System.Guid]::NewGuid())",
                     "New-Item -ItemType Directory -Force -Path $codexHome | Out-Null",
                     "$env:CODEX_HOME=$codexHome",
-                    *(f"$env:{key}={powershell_quote(value)}" for key, value in env.items()),
-                    f"try {{ & {powershell_quote(executable)} "
-                    f"{' '.join(powershell_quote(arg) for arg in args[1:])}; "
-                    "$hudExitCode=$LASTEXITCODE } finally { Remove-Item -Recurse -Force "
-                    "$codexHome }",
-                    "exit $hudExitCode",
+                    *statements[:-1],
+                    f"try {{ {invocation} }} finally {{ Remove-Item -Recurse -Force $codexHome }}",
                 ]
-            )
-            command = powershell(script)
+            command = powershell(";".join([*statements, "exit $hudExitCode"]))
         else:
             env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
             cli = " ".join(shlex.quote(arg) for arg in args)
-            command = "; ".join(
-                [
+            statements = ['export PATH="$HOME/.local/bin:$PATH"', f"{env_prefix} {cli}".strip()]
+            if connection is not None:
+                # A guarded connection is bound to the launched process, so exec the CLI itself;
+                # the sandbox is discarded after the rollout, so its CODEX_HOME needs no trap.
+                statements = [
+                    'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
+                    'export CODEX_HOME="$codex_home"',
+                    statements[0],
+                    f"exec env {env_prefix} {cli}",
+                ]
+            elif env:
+                statements = [
                     'codex_home=$(mktemp -d "${TMPDIR:-/tmp}/hud-codex.XXXXXX") || exit 1',
                     "trap 'rm -rf -- \"$codex_home\"' EXIT",
                     'export CODEX_HOME="$codex_home"',
-                    'export PATH="$HOME/.local/bin:$PATH"',
-                    f"{env_prefix} {cli}" if env_prefix else cli,
+                    *statements,
                 ]
-            )
+            command = "; ".join(statements)
 
         logger.info("SSH exec codex CLI (%d chars)", len(command))
         events = CodexEvents(run, model=self.config.model, started_at=now_iso())
         returncode, stderr = await run_jsonl(
-            ssh, command, events.consume, input_text=run.prompt_text
+            ssh,
+            command,
+            events.consume,
+            input_text=run.prompt_text,
+            connections=(connection,) if connection is not None else (),
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)

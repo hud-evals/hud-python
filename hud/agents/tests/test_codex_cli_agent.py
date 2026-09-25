@@ -17,7 +17,7 @@ from hud.agents.tests.cli_fakes import FakeClient as _FakeClient
 from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
-from hud.capabilities import Capability
+from hud.capabilities import Capability, Connection
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -34,8 +34,11 @@ def _clear_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _FakeSSH:
-    def __init__(self, process: _FakeProcess, *, shell: str = "bash") -> None:
+    def __init__(
+        self, process: _FakeProcess, *, shell: str = "bash", executable_head: bytes = b"\x7fE"
+    ) -> None:
         self.process = process
+        self.executable_head = executable_head
         self.capability = Capability(
             name="shell",
             protocol="ssh/2",
@@ -44,14 +47,23 @@ class _FakeSSH:
         )
         self.commands: list[str] = []
 
-    async def create_process(self, command: str) -> _FakeProcess:
+    async def run(self, command: str, **_: Any) -> SimpleNamespace:
+        assert command.startswith("head -c 2 -- ")
+        return SimpleNamespace(returncode=0, stdout=self.executable_head)
+
+    async def create_process(
+        self, command: str, *, connections: tuple[Connection, ...] = ()
+    ) -> _FakeProcess:
         self.commands.append(command)
         return self.process
 
 
-async def _sent_command(config: CodexCLIConfig, shell: str = "bash") -> str:
+async def _sent_command(
+    config: CodexCLIConfig, shell: str = "bash", connection: Connection | None = None
+) -> str:
     ssh = _FakeSSH(_FakeProcess(_STREAM_JSON), shell=shell)
-    await CodexCLIAgent(config)(_fake_run(_FakeClient(ssh), "Fix it"))
+    connections = {"inference": connection} if connection is not None else None
+    await CodexCLIAgent(config)(_fake_run(_FakeClient(ssh), "Fix it", connections))
     (command,) = ssh.commands
     return command
 
@@ -109,6 +121,66 @@ async def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.Monk
         assert "--sandbox workspace-write" in command
         assert "--model gpt-5.6-sol" in command
         assert command.endswith(" -")
+
+
+@pytest.mark.parametrize("sandbox", ["read-only", "workspace-write", "danger-full-access"])
+async def test_command_uses_process_bound_connection_without_its_credential(
+    monkeypatch: pytest.MonkeyPatch, sandbox: str
+) -> None:
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
+    )
+
+    with set_trace_context("trace-123"):
+        command = await _sent_command(
+            CodexCLIConfig.model_validate({"sandbox": sandbox}), connection=connection
+        )
+
+    assert "scoped-runtime-token" not in command
+    assert "hud-key" not in command
+    assert "HUD_CONNECTION_CREDENTIAL=hud-process-bound" in command
+    assert 'model_providers.hud.env_key="HUD_CONNECTION_CREDENTIAL"' in command
+    assert f'model_providers.hud.base_url="{connection.client_url}"' in command
+    assert "Trace-Id" not in command
+    assert "exec env" in command
+    assert "--sandbox danger-full-access" in command
+
+
+async def test_process_bound_connection_rejects_a_launcher_script_before_starting() -> None:
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
+    )
+    ssh = _FakeSSH(_FakeProcess(_STREAM_JSON), executable_head=b"#!")
+
+    with pytest.raises(RuntimeError, match="launcher script"):
+        await CodexCLIAgent()(_fake_run(_FakeClient(ssh), "Fix it", {"inference": connection}))
+
+    assert ssh.commands == []
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+async def test_command_preserves_ambient_codex_login_without_explicit_credentials(
+    shell: str,
+) -> None:
+    command = await _sent_command(CodexCLIConfig(), shell)
+    script = (
+        base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+        if shell == "powershell"
+        else command
+    )
+
+    assert "CODEX_HOME" not in script
+    assert "CODEX_API_KEY" not in script
+    assert "HUD_API_KEY" not in script
+    assert "mktemp" not in script
+    assert "codex exec" in script or "& 'codex' 'exec'" in script
 
 
 async def test_windows_command_encodes_environment_and_arguments(
@@ -261,11 +333,11 @@ async def test_executable_resolution_prefers_matching_managed_bundle() -> None:
     executable = await resolve_executable(
         cast("Any", ssh),
         "codex",
-        {"linux-x64": "/media/hud/bin/codex/bin/codex"},
+        {"linux-x64": "/usr/local/lib/agents/codex/bin/codex"},
         RuntimeConfig(resources=RuntimeResources(os="linux")),
     )
 
-    assert executable == "/media/hud/bin/codex/bin/codex"
+    assert executable == "/usr/local/lib/agents/codex/bin/codex"
     assert ssh.run.await_count == 2
 
 

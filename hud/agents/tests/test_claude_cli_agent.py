@@ -30,7 +30,7 @@ from hud.agents.tests.cli_fakes import FakeClient as _FakeClient
 from hud.agents.tests.cli_fakes import FakeProcess as _FakeStreamProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
-from hud.capabilities import Capability, SSHClient
+from hud.capabilities import Capability, Connection, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
@@ -92,6 +92,38 @@ async def test_create_agent_routes_cli_agent_through_gateway(
     command = await _sent_command(agent)
     assert f"ANTHROPIC_BASE_URL={settings.hud_gateway_url}" in command
     assert "ANTHROPIC_API_KEY=hud-key" in command
+
+
+async def test_command_uses_process_bound_connection_without_its_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
+    )
+
+    with set_trace_context("trace-123"):
+        command = await _sent_command(ClaudeCLIAgent(), connection=connection)
+
+    assert f"ANTHROPIC_BASE_URL={connection.client_url}" in command
+    assert "ANTHROPIC_AUTH_TOKEN=hud-process-bound" in command
+    assert "ANTHROPIC_API_KEY" not in command
+    assert "scoped-runtime-token" not in command
+    assert "hud-key" not in command
+    assert "Trace-Id" not in command
+    assert "exec env" in command
+    for name in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert f"{name}=claude-sonnet-5" in command
 
 
 async def test_windows_command_encodes_environment_and_arguments(
@@ -170,7 +202,8 @@ class _FakeConn:
                 self._sink[name] = b""
             self.written[name] = self._sink[name]
             return _FakeCompletedProcess()
-        assert kwargs == {"encoding": None}
+        assert kwargs["encoding"] is None
+        self.env = kwargs.get("env")
         self.ran.append(cmd)
         return self._process
 
@@ -213,15 +246,18 @@ def _ssh_with_conn(shell: str, conn: _FakeConn) -> SSHClient:
         name="shell",
         protocol="ssh/2",
         url="ssh://localhost:22",
-        params={"shell": shell},
+        params={"shell": shell, "process_connections": True},
     )
     return SSHClient(capability, cast("Any", conn))
 
 
-async def _sent_command(agent: ClaudeCLIAgent, shell: str = "bash") -> str:
+async def _sent_command(
+    agent: ClaudeCLIAgent, shell: str = "bash", connection: Connection | None = None
+) -> str:
     """The CLI command the agent sends over SSH (unwrapped from the batch file on Windows)."""
     conn = _FakeConn({}, _FakeStreamProcess(_STREAM_JSON))
-    await agent(_fake_run(_FakeClient(_ssh_with_conn(shell, conn)), "x"))
+    connections = {"inference": connection} if connection is not None else None
+    await agent(_fake_run(_FakeClient(_ssh_with_conn(shell, conn)), "x", connections))
     if shell in ("cmd", "powershell"):
         return conn.written[".hud_run.bat"].decode().split("\r\n")[1]
     (command,) = conn.ran

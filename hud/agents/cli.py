@@ -11,12 +11,15 @@ from typing import TYPE_CHECKING
 import asyncssh
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
-    from hud.capabilities import SSHClient
+    from hud.capabilities import Connection, SSHClient
     from hud.eval.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
+#: What a CLI is given as its credential on a process-bound connection; the relay
+#: replaces it with the scoped credential, so it never needs to be secret.
+PROCESS_BOUND_CREDENTIAL = "hud-process-bound"
 PROCESS_CLOSE_TIMEOUT_S = 5.0
 _DECLARED_OS = {"darwin": "darwin", "linux": "linux", "macos": "darwin", "windows": "windows"}
 
@@ -110,9 +113,10 @@ async def run_jsonl(
     consume: Callable[[str], None],
     *,
     input_text: str | None = None,
+    connections: Sequence[Connection] = (),
 ) -> tuple[int, str]:
     """Stream one remote JSONL process and own its cancellation cleanup."""
-    process = await ssh.create_process(command)
+    process = await ssh.create_process(command, connections=connections)
     stderr_task = asyncio.create_task(process.stderr.read())
     try:
         if input_text is not None:

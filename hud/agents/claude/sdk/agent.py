@@ -18,6 +18,7 @@ import asyncssh
 
 from hud.agents.base import Agent
 from hud.agents.cli import (
+    PROCESS_BOUND_CREDENTIAL,
     WINDOWS_SHELLS,
     powershell,
     powershell_quote,
@@ -34,7 +35,7 @@ from . import computer_mcp
 from .events import ClaudeEvents
 
 if TYPE_CHECKING:
-    from hud.capabilities import SSHClient
+    from hud.capabilities import Connection, SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
@@ -44,8 +45,8 @@ MCP_CONFIG_PATH = ".hud_mcp_config.json"
 RUN_SCRIPT_PATH = ".hud_run.bat"
 
 _MANAGED_CLAUDE_PATHS = {
-    "linux-x64": "/media/hud/bin/claude/linux-x64/claude",
-    "linux-x64-musl": "/media/hud/bin/claude/linux-x64-musl/claude",
+    "linux-x64": "/usr/local/lib/agents/claude/linux-x64/claude",
+    "linux-x64-musl": "/usr/local/lib/agents/claude/linux-x64-musl/claude",
 }
 
 
@@ -65,6 +66,7 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
         assert manifest is not None
         shell = ssh.capability.params.get("shell", "bash")
         windows = shell in WINDOWS_SHELLS
+        connection: Connection | None = run.connections.get("inference")
         executable = await resolve_executable(
             ssh, "claude", _MANAGED_CLAUDE_PATHS, run.runtime_config
         )
@@ -103,11 +105,19 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                 "DISABLE_AUTOUPDATER": "1",
                 "IS_SANDBOX": "1",
             }
-            if routes_to_gateway("anthropic", gateway=self.config.gateway):
-                if not settings.api_key:
+            if connection is not None or routes_to_gateway(
+                "anthropic", gateway=self.config.gateway
+            ):
+                if connection is not None:
+                    # The relay injects the scoped credential; the process never sees it.
+                    # AUTH_TOKEN sends Authorization: Bearer, the header Codex uses too.
+                    env["ANTHROPIC_BASE_URL"] = connection.client_url
+                    env["ANTHROPIC_AUTH_TOKEN"] = PROCESS_BOUND_CREDENTIAL
+                elif settings.api_key:
+                    env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
+                    env["ANTHROPIC_API_KEY"] = settings.api_key
+                else:
                     raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-                env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
-                env["ANTHROPIC_API_KEY"] = settings.api_key
                 env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
                 env["DISABLE_AUTO_COMPACT"] = "1"
                 # Alias every model tier so background requests never bypass the gateway.
@@ -115,7 +125,7 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                 env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
                 env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
                 env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
-                if trace_headers := get_trace_headers():
+                if connection is None and (trace_headers := get_trace_headers()):
                     env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
                         f"{name}: {value}" for name, value in trace_headers.items()
                     )
@@ -152,7 +162,11 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
             else:
                 env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
                 cli = " ".join(shlex.quote(arg) for arg in [executable, *args])
-                command = f'export PATH="$HOME/.local/bin:$PATH"; {env_prefix} {cli}'
+                invocation = f"{env_prefix} {cli}"
+                if connection is not None:
+                    # A guarded connection is bound to the launched process, so exec the CLI itself.
+                    invocation = f"exec env {invocation}"
+                command = f'export PATH="$HOME/.local/bin:$PATH"; {invocation}'
 
             input_text = (
                 json.dumps(
@@ -186,6 +200,7 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                     command,
                     events.consume,
                     input_text=None if windows else input_text,
+                    connections=(connection,) if connection is not None else (),
                 )
                 logger.info("exit=%s stderr=%d", returncode, len(stderr))
                 events.finish(returncode=returncode, stderr=stderr)

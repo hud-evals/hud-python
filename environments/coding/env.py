@@ -33,14 +33,13 @@ else:
 REPO_SOURCE = os.environ.get("REPO_URL") or str(Path(__file__).with_name("flask.bundle"))
 TEST_TIMEOUT = float(os.environ.get("GRADING_TIMEOUT", "3600"))
 AGENT_UID = 1000
-AGENT_HOME = Path("/tmp/agent-home")  # noqa: S108 - container-local
+AGENT_HOME = Path("/tmp/agent-home")  # noqa: S108 - inside the sandbox's own writable /tmp
 AGENT_ENV = {"HOME": str(AGENT_HOME)}
 VENV_ACTIVATE = Path(sys.executable).with_name("activate")
 if VENV_ACTIVATE.is_file():
     os.environ["BASH_ENV"] = AGENT_ENV["BASH_ENV"] = str(VENV_ACTIVATE)
 
 env = Environment(name="coding")
-workspace: Workspace | None = None
 _GIT = (
     "git",
     "-c",
@@ -54,31 +53,25 @@ _GIT = (
 
 @env.initialize
 async def _initialize() -> None:
-    global workspace
     REPO_DIR.mkdir(parents=True, exist_ok=True)
-    workspace = Workspace(
-        REPO_DIR,
-        guest_path=str(REPO_DIR),
-        network=False,
-        env=AGENT_ENV,
-        track_files=settings.file_tracking_enabled,
-        shell_uid=AGENT_UID,
-        require_isolation=True,
-    )
-    await workspace.start()
-    env.add_capability(workspace.capability("shell"))
-    if workspace.tracks_files:
-        env.add_capability(workspace.file_tracking_capability())
 
 
 @env.shutdown
 async def _shutdown() -> None:
-    global workspace
-    if workspace is not None:
-        await workspace.stop()
-        workspace = None
     if _LOCAL:
         shutil.rmtree(_LOCAL_ROOT, ignore_errors=True)
+
+
+# Attached through the env so controller connections (e.g. hosted CLI inference) can bind to it.
+workspace: Workspace = env.workspace(
+    REPO_DIR,
+    guest_path=str(REPO_DIR),
+    network=False,
+    env=AGENT_ENV,
+    track_files=settings.file_tracking_enabled,
+    shell_uid=AGENT_UID,
+    require_isolation=True,
+)
 
 
 async def _setup(base_ref: str) -> None:
@@ -112,10 +105,9 @@ async def _setup(base_ref: str) -> None:
     subprocess.run([*_GIT, "commit", "-qm", "baseline"], cwd=REPO_DIR, check=True)
 
     if hasattr(os, "geteuid") and os.geteuid() == 0:
-        AGENT_HOME.mkdir(parents=True, exist_ok=True)
         agent_paths = [path for path in REPO_DIR.iterdir() if path.name != ".hud"]
         subprocess.run(
-            ["chown", "-R", f"{AGENT_UID}:{AGENT_UID}", *agent_paths, AGENT_HOME],
+            ["chown", "-R", f"{AGENT_UID}:{AGENT_UID}", *agent_paths],
             check=True,
         )
 
@@ -128,7 +120,6 @@ async def _grade(
     pass_to_pass: list[str] | None,
     binary: bool,
 ) -> EvaluationResult:
-    assert workspace is not None
     await workspace.terminate_sessions()
     agent_git = REPO_DIR / ".git"
     if agent_git.is_symlink() or agent_git.is_file():
@@ -205,6 +196,5 @@ async def coding_task(
             binary,
         )
     finally:
-        assert workspace is not None
         await workspace.discard_sandbox()
     yield result
