@@ -30,6 +30,7 @@ from .tools.base import format_chat_result
 if TYPE_CHECKING:
     import mcp.types as mcp_types
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +43,7 @@ class OpenAIChatRunState(RunState[ChatCompletionMessageParam]):
 class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
     """OpenAI-compatible agent using the chat.completions protocol."""
 
+    config_cls = OpenAIChatConfig
     tool_catalog = (
         BashTool,
         ReadTool,
@@ -53,8 +55,8 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
     )
 
     def __init__(self, config: OpenAIChatConfig | None = None) -> None:
-        config = config or OpenAIChatConfig()
-        self.config = config
+        super().__init__(config)
+        config = self.config
 
         if (
             config.api_key
@@ -149,23 +151,16 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         if return_token_ids:
             request_kwargs.setdefault("logprobs", True)
 
-        try:
-            response: ChatCompletion = await self.oai.chat.completions.create(
-                model=self.config.model,
-                messages=(
-                    [{"role": "system", "content": system_prompt}, *messages]
-                    if system_prompt is not None
-                    else messages
-                ),
-                stream=False,
-                **request_kwargs,
-            )
-        except Exception as e:
-            error_content = f"Error getting response {e}"
-            if "Invalid JSON" in str(e):
-                error_content = "Invalid JSON, response was truncated"
-            logger.warning(error_content)
-            return AgentStep(error=error_content, done=True)
+        response: ChatCompletion = await self.oai.chat.completions.create(
+            model=self.config.model,
+            messages=(
+                [{"role": "system", "content": system_prompt}, *messages]
+                if system_prompt is not None
+                else messages
+            ),
+            stream=False,
+            **request_kwargs,
+        )
 
         choice = response.choices[0]
         message = choice.message

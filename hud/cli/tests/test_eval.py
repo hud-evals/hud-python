@@ -519,7 +519,7 @@ def test_hosted_agent_keeps_client_out_of_serialized_config(
     monkeypatch.setattr("hud.utils.gateway.build_gateway_client", MagicMock(return_value=object()))
     eval_cli.invoke("tasks.py", "openai", "--remote", "--yes")
     assert eval_cli.agent.config.model_client is None
-    assert "model_client" not in eval_cli.agent.hosted_spec()["config"]
+    assert "model_client" not in eval_cli.agent.dump()
 
 
 def test_openai_compatible_routes_through_gateway_despite_openai_key(

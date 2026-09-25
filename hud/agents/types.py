@@ -51,28 +51,28 @@ _model_alias = AliasChoices("model", "checkpoint_name")
 
 
 class AgentConfig(BaseModel):
+    timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    model_name: str = "Agent"
+    model: str = Field(default="unknown", validation_alias=_model_alias)
+    gateway: bool = False
+
+
+class ToolAgentConfig(AgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     auto_respond: bool = False
     max_steps: int = 10
-    timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     tool_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     system_prompt: str | None = None
     citations_enabled: bool = False
     #: Conditions that end the rollout instead of being answered with an error
     #: result the model can react to; training configs typically stop on both.
     stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
-    hosted_tools: list[HostedTool[object]] = Field(default_factory=list[HostedTool[object]])
+    hosted_tools: list[HostedTool[object]] = Field(
+        default_factory=list[HostedTool[object]], exclude=True
+    )
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=PngScreenshotEncoding)
-
-    model_name: str = "Agent"
-    model: str = Field(default="unknown", validation_alias=_model_alias)
-    #: Provider client (AsyncAnthropic, AsyncOpenAI, genai.Client, ...). When unset,
-    #: agents build one: the provider's own key when set, otherwise the HUD gateway.
-    model_client: Any = None
-    #: Use the HUD gateway even when the provider's own key is set. ``create_agent``
-    #: turns this on; hosted execution always routes through the gateway.
-    gateway: bool = False
+    model_client: Any = Field(default=None, exclude=True)
 
 
 # -----------------------------------------------------------------------------
@@ -80,7 +80,7 @@ class AgentConfig(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class ClaudeConfig(AgentConfig):
+class ClaudeConfig(ToolAgentConfig):
     model_name: str = "Claude"
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
     tool_timeout_seconds: float | None = Field(default=120, gt=0, allow_inf_nan=False)
@@ -94,7 +94,7 @@ class ClaudeConfig(AgentConfig):
 # -----------------------------------------------------------------------------
 
 
-class GeminiConfig(AgentConfig):
+class GeminiConfig(ToolAgentConfig):
     """Configuration for GeminiAgent."""
 
     model_name: str = "Gemini"
@@ -113,7 +113,7 @@ class GeminiConfig(AgentConfig):
 # -----------------------------------------------------------------------------
 
 
-class OpenAIConfig(AgentConfig):
+class OpenAIConfig(ToolAgentConfig):
     """Configuration for OpenAIAgent."""
 
     model_name: str = "OpenAI"
@@ -132,7 +132,7 @@ class OpenAIConfig(AgentConfig):
     )
 
 
-class OpenAIChatConfig(AgentConfig):
+class OpenAIChatConfig(ToolAgentConfig):
     """Configuration for OpenAIChatAgent."""
 
     model_name: str = "OpenAI Chat"
@@ -144,25 +144,26 @@ class OpenAIChatConfig(AgentConfig):
         "the model's current active checkpoint. Passed as 'checkpoint' in the "
         "request body's extra_body.",
     )
-    api_key: str | None = None
-    base_url: str | None = None
+    api_key: str | None = Field(default=None, exclude=True)
+    base_url: str | None = Field(default=None, exclude=True)
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 # -----------------------------------------------------------------------------
-# Claude Code (CLI over SSH)
+# Claude CLI (over SSH)
 # -----------------------------------------------------------------------------
 
 
-class ClaudeSDKConfig(AgentConfig):
-    """Configuration for ClaudeSDKAgent (runs the ``claude`` CLI over SSH).
+class ClaudeCLIConfig(AgentConfig):
+    """Configuration for ClaudeCLIAgent (runs the ``claude`` CLI over SSH).
 
-    ``system_prompt`` is inherited from ``AgentConfig``. ``max_steps`` maps to the
-    CLI's ``--max-turns``; values <= 0 leave the turn budget to the CLI (unlimited).
+    ``max_steps`` maps to the CLI's ``--max-turns``; values <= 0 leave the turn
+    budget to the CLI (unlimited).
     """
 
-    model_name: str = "Claude Code"
-    model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
+    system_prompt: str | None = None
+    model_name: str = "Claude CLI"
+    model: str = Field(default="claude-sonnet-5", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
@@ -181,6 +182,25 @@ class ClaudeSDKConfig(AgentConfig):
 
 
 # -----------------------------------------------------------------------------
+# Codex CLI (over SSH)
+# -----------------------------------------------------------------------------
+
+
+class CodexCLIConfig(AgentConfig):
+    """Configuration for CodexCLIAgent (runs ``codex exec`` over SSH).
+
+    Without an explicit inference connection or API key, the agent leaves
+    ``CODEX_HOME`` unchanged so a login in that execution environment can apply.
+    A process-bound inference connection runs Codex without its inner sandbox;
+    the connection is available only inside the environment's isolated workspace.
+    """
+
+    model_name: str = "Codex CLI"
+    model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+
+
+# -----------------------------------------------------------------------------
 # Browser Use
 # -----------------------------------------------------------------------------
 
@@ -189,15 +209,13 @@ class BrowserUseConfig(AgentConfig):
     """Configuration for BrowserUseAgent.
 
     Lives here (not in the agent module) so it can be imported and serialized
-    without the optional ``browser-use`` dependency installed. The ``auto_respond``
-    / ``system_prompt`` / ``hosted_tools`` fields from ``AgentConfig`` do not apply
-    — browser-use runs its own agent loop.
+    without the optional ``browser-use`` dependency installed.
     """
 
     model_name: str = "Browser Use"
     model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
-    api_key: str | None = None
-    base_url: str | None = None
+    api_key: str | None = Field(default=None, exclude=True)
+    base_url: str | None = Field(default=None, exclude=True)
     max_steps: int = 25
 
 

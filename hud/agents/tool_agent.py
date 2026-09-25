@@ -1,19 +1,4 @@
-"""ToolAgent: catalog-driven provider tool-call loop.
-
-Subclass contract::
-
-    class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
-        tool_catalog = (ClaudeBashTool, ClaudeTextEditorTool, ClaudeMCPProxyTool)
-
-        async def _initialize_state(self, *, prompt) -> RunState[BetaMessageParam]: ...
-        async def get_response(self, state, *, system_prompt, citations_enabled): ...
-        def _format_message(self, role, text) -> BetaMessageParam: ...
-        def _format_result(self, call, result) -> BetaMessageParam | None: ...
-
-``RunState`` carries the messages *and* the tools/params built for one run, so a
-single agent instance can drive many concurrent ``rollout`` calls with no shared
-mutable state.
-"""
+"""Catalog-driven provider tool-call agents."""
 
 from __future__ import annotations
 
@@ -34,13 +19,14 @@ from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient, RFBClient
 from hud.capabilities.ssh import SSHConnectionError
-from hud.types import AgentType, MCPToolCall, MCPToolResult, Step, StopCondition
+from hud.types import MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.agents.types import AgentConfig
+    from hud.agents.types import ToolAgentConfig
     from hud.capabilities import CapabilityClient
     from hud.eval.run import Run
+    from hud.utils.serialization import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +36,7 @@ TRUNCATION_FINISH_REASONS = frozenset({"length", "max_output_tokens", "max_token
 MAX_CONSECUTIVE_SSH_FAILURES = 3
 
 MessageT = TypeVar("MessageT")
-ConfigT = TypeVar("ConfigT", bound="AgentConfig")
+ConfigT = TypeVar("ConfigT", bound="ToolAgentConfig")
 
 
 class DegenerateTurnError(Exception):
@@ -64,35 +50,25 @@ class DegenerateTurnError(Exception):
 
 
 def _message_text(message: mcp_types.PromptMessage) -> str:
-    """Best-effort plain text for a prompt message (text content only for now)."""
     content = message.content
-    if isinstance(content, mcp_types.TextContent):
-        return content.text
-    return getattr(content, "text", "") or ""
+    return content.text if isinstance(content, mcp_types.TextContent) else ""
 
 
 @dataclass
 class RunState(Generic[MessageT]):
-    """Mutable per-run state: messages + the tools/params built for this run.
-
-    Created fresh per ``rollout`` (or ``run``) call, so one agent instance can
-    drive many concurrent rollouts without shared mutable state.
-    """
+    """Provider messages and tools for one run."""
 
     messages: list[MessageT] = field(default_factory=list[MessageT])
     tools: dict[str, AgentTool[Any]] = field(default_factory=dict[str, AgentTool[Any]])
     params: list[Any] = field(default_factory=list[Any])
 
 
-class ToolAgent(Agent, Generic[MessageT, ConfigT]):
+class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     """Catalog-driven provider tool-call loop."""
 
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
     #: Capability-client types this agent can drive (derived from the catalog).
     clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
-
-    #: The agent's typed config; set by subclass __init__.
-    config: ConfigT
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -102,47 +78,21 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 seen.setdefault(t.client_type, None)
             cls.clients = tuple(seen.keys())
 
-    def hosted_spec(self) -> dict[str, Any]:
-        """HUD-hosted execution runs the agent remotely, so it is
-        reconstructed there from this identity (type, model, step budget, system
-        prompt, provider kwargs) with the model resolved through the HUD gateway.
-        """
+    def dump(self) -> JsonObject:
         if self.config.model_client is not None:
             raise ValueError(
-                "hosted execution cannot serialize a custom model_client; "
-                "use create_agent(model, ...) so the hosted runner rebuilds the "
-                "gateway client, or run the agent loop locally with HUDRuntime() "
-                "/ LocalRuntime (recommended for TrainingClient workflows that "
-                "attach a BYOK client)"
+                "a custom model_client cannot be serialized; use create_agent(model, ...) "
+                "so the agent rebuilds the gateway client, or run the agent loop locally "
+                "with HUDRuntime() / LocalRuntime"
             )
-        agent_type = AgentType.of(self)
-        if agent_type is None:
-            raise ValueError(
-                f"hosted execution supports the gateway agent types "
-                f"({', '.join(at.value for at in AgentType)}); got {type(self).__name__}"
-            )
-        config = self.config.model_dump(
-            mode="json",
-            exclude={"model_client", "gateway", "api_key", "base_url", "hosted_tools"},
-        )
-        return {"type": agent_type.value, "config": config}
+        return super().dump()
 
     async def __call__(self, run: Run) -> None:
-        """Drive this (stateless) agent over a live ``Run``, filling ``run.trace``.
-
-        Opens the capabilities this agent's catalog supports off the connection,
-        builds the tools into a fresh ``RunState``,
-        then runs the loop against ``run.prompt_messages``, accumulating the
-        trajectory onto ``run.trace``. Loop budget and prompting come from the agent's config
-        (``max_steps``, ``system_prompt``, ``citations_enabled``). No per-rollout
-        state is stored on ``self``, so one instance may drive many concurrent
-        rollouts.
-        """
         connections: dict[str, CapabilityClient] = {}
         opened_protocols: set[str] = set()
         manifest = run.client.manifest
         if manifest is not None:
-            wanted = {cls.protocol for cls in type(self).clients}
+            wanted = {client.protocol for client in type(self).clients}
             for cap in manifest.bindings:
                 if cap.protocol not in wanted:
                     continue
@@ -152,13 +102,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
-        await self._loop(
-            run,
-            state,
-            max_steps=self.config.max_steps,
-            system_prompt=self.config.system_prompt,
-            citations_enabled=self.config.citations_enabled,
-        )
+        await self._loop(run, state)
 
     async def _build_tools(
         self,
@@ -168,12 +112,11 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         tools: dict[str, AgentTool[Any]] = {}
         params: list[Any] = []
         model = self.config.model
-        hosted_tools = self.config.hosted_tools
 
         mcp_clients = [c for c in connections.values() if isinstance(c, MCPClient)]
         mcp_lists = await asyncio.gather(*(c.list_tools() for c in mcp_clients))
         mcp_by_client: dict[MCPClient, list[mcp_types.Tool]] = dict(
-            zip(mcp_clients, mcp_lists, strict=False),
+            zip(mcp_clients, mcp_lists, strict=True),
         )
         qualify_mcp_names = len(mcp_clients) > 1
 
@@ -216,7 +159,11 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                     tools[tool.provider_name] = tool
                     params.append(tool.to_params())
 
-        params.extend(hosted.to_params() for hosted in hosted_tools if hosted.supports_model(model))
+        params.extend(
+            hosted.to_params()
+            for hosted in self.config.hosted_tools
+            if hosted.supports_model(model)
+        )
 
         return tools, params
 
@@ -224,10 +171,6 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
         self,
         run: Run,
         state: RunState[MessageT],
-        *,
-        max_steps: int = 10,
-        system_prompt: str | None = None,
-        citations_enabled: bool = False,
     ) -> None:
         trace = run.trace
         try:
@@ -236,17 +179,17 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
             stopped: StopCondition | None = None
             consecutive_ssh_failures = 0
 
-            for turn in range(1, max_steps + 1):
-                logger.info("step %d/%d", turn, max_steps)
+            for turn in range(1, self.config.max_steps + 1):
+                logger.info("step %d/%d", turn, self.config.max_steps)
                 started_at = now_iso()
                 try:
                     step = await self.get_response(
                         state,
-                        system_prompt=system_prompt,
-                        citations_enabled=citations_enabled,
+                        system_prompt=self.config.system_prompt,
+                        citations_enabled=self.config.citations_enabled,
                     )
                 except DegenerateTurnError as exc:
-                    if turn == max_steps:
+                    if turn == self.config.max_steps:
                         raise
                     logger.warning("Discarded degenerate turn: %s", exc)
                     continue
@@ -300,7 +243,7 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                         run.record(Step(source="system", error=error))
                         return
 
-                if turn == max_steps:
+                if turn == self.config.max_steps:
                     hit_max = True
 
             trace.content = step.content if step else None
@@ -397,11 +340,13 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
                 isError=True,
             )
 
-    # ─── provider hooks ───────────────────────────────────────────────
-
     def _initial_messages(self, prompt: list[mcp_types.PromptMessage]) -> list[MessageT]:
         """Map normalized prompt turns onto provider messages."""
         return [self._format_message(message.role, _message_text(message)) for message in prompt]
+
+    def _format_user_text(self, text: str) -> MessageT:
+        """Wrap a plain text string as a provider user message."""
+        return self._format_message("user", text)
 
     @abstractmethod
     async def _initialize_state(
@@ -419,13 +364,9 @@ class ToolAgent(Agent, Generic[MessageT, ConfigT]):
     ) -> AgentStep:
         """Call the provider API and return the model's turn as an ``AgentStep``.
 
-        The loop stamps ``started_at``/``model`` fallbacks and records it;
-        a failed call is an ``AgentStep`` with ``error`` set and ``done=True``.
+        The loop stamps ``started_at``/``model`` fallbacks, records the step,
+        and raises its error if present.
         """
-
-    def _format_user_text(self, text: str) -> MessageT:
-        """Wrap a plain text string as a provider user message."""
-        return self._format_message("user", text)
 
     @abstractmethod
     def _format_message(self, role: str, text: str) -> MessageT:

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
-from .compose import ComposeConfig
+from .compose import ComposeConfig, DockerBindMount
 from .core import Runtime, RuntimeConfig, validate_session_id
 
 if TYPE_CHECKING:
@@ -134,12 +134,14 @@ class DockerRuntime:
         *,
         port: int = 8765,
         run_args: Sequence[str] = (),
+        bind_mounts: Sequence[DockerBindMount] = (),
         compose_service_socket: str | Path | None = None,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
     ) -> None:
         self.port = port
         self.run_args = tuple(run_args)
+        self.bind_mounts = tuple(bind_mounts)
         self.env_vars = dict(env_vars or {})
         self.compose_service_socket = (
             str(Path(compose_service_socket)) if compose_service_socket is not None else None
@@ -204,6 +206,7 @@ class DockerRuntime:
                 port_service=port_service,
                 seccomp=_DOCKER_SECCOMP_PROFILE,
                 service_socket=service_socket,
+                bind_mounts=self.bind_mounts,
                 env_vars=self.env_vars,
                 cpu=resources.cpu if resources is not None else None,
                 memory_mb=resources.memory_mb if resources is not None else None,
@@ -296,12 +299,16 @@ class DockerRuntime:
         env_args: list[str] = []
         for key, value in self.env_vars.items():
             env_args.extend(("--env", f"{key}={value}"))
+        mount_args: list[str] = []
+        for mount in self.bind_mounts:
+            mount_args.extend(("--mount", mount.docker_argument()))
         out, _ = await _docker(
             "run",
             "--detach",
             *self.run_args,
             *env_args,
             *resource_args,
+            *mount_args,
             *_DOCKER_SECURITY_ARGS,
             "--publish",
             f"127.0.0.1::{self.port}",

@@ -43,6 +43,7 @@ class _FnAgent(Agent):
     """Stateless agent: answers each run by applying ``fn`` to ``run.prompt``."""
 
     def __init__(self, fn: Any) -> None:
+        super().__init__()
         self._fn = fn
 
     async def __call__(self, run: Any) -> None:

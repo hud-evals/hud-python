@@ -34,7 +34,8 @@ class MyHarness(Agent):
 ```
 
 That is the whole seam. An agent keeps no per-run state - everything comes from the `run` - so one
-instance drives many concurrent rollouts.
+instance drives many concurrent rollouts. Every agent carries an `AgentConfig` (`agent.config`, e.g.
+`timeout_seconds`); if you override `__init__`, call `super().__init__()` (or pass your own config).
 
 ### The Run you drive
 

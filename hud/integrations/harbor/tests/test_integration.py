@@ -57,6 +57,7 @@ class Oracle(Agent):
     """Run each fixture's reference solution."""
 
     def __init__(self, solutions: dict[str, str]) -> None:
+        super().__init__()
         self.solutions = solutions
 
     async def __call__(self, run: Run) -> None:

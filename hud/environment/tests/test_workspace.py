@@ -27,10 +27,18 @@ from unittest.mock import AsyncMock, Mock
 import asyncssh
 import pytest
 
-from hud.capabilities import SSHClient
+from hud.capabilities import Connection, SSHClient
+from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
 from hud.environment import namespace as namespace_mod
+from hud.environment import process_guard as process_guard_mod
 from hud.environment import workspace as workspace_mod
-from hud.environment.egress import Peer, _field, _Unrelayable
+from hud.environment.egress import (
+    ConnectionRelay,
+    Peer,
+    WorkspaceRoute,
+    _field,
+    _Unrelayable,
+)
 from hud.environment.workspace import Bubblewrap, Mount, Workspace
 from hud.utils.process import ProcessGroup, ProcessResult
 
@@ -443,6 +451,22 @@ def test_bwrap_drops_host_env_when_walled(tmp_path: Path, monkeypatch: pytest.Mo
     assert sandbox_env["CUSTOM"] == "1"
     assert "PATH" in sandbox_env
     assert sandbox_env["PER_CALL"] == "1"
+
+
+@pytest.mark.parametrize("tmpfs_modes", [True, False])
+def test_sandbox_tmp_is_world_writable_where_bwrap_can_set_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tmpfs_modes: bool
+) -> None:
+    ws = Workspace(tmp_path / "root", shell_uid=1000)
+    monkeypatch.setattr(ws, "_bwrap", Bubblewrap("/usr/bin/bwrap", tmpfs_modes=tmpfs_modes))
+
+    argv = ws.bwrap_argv(["true"])
+
+    tmp = next(i for i in range(len(argv) - 1) if argv[i : i + 2] == ["--tmpfs", "/tmp"])
+    if tmpfs_modes:
+        assert argv[tmp - 2 : tmp] == ["--perms", "1777"]
+    else:
+        assert "--perms" not in argv
 
 
 def test_bwrap_inherits_host_env_when_not_walled(
@@ -932,6 +956,54 @@ async def test_namespace_management_does_not_share_process_connections(
     management.wait_closed.assert_awaited_once_with()
 
 
+def test_process_guard_executes_projected_file_without_module_reentry() -> None:
+    guard = cast(
+        "Any",
+        SimpleNamespace(
+            backend="ptrace",
+            sandbox_helper="/tmp/.hud-process-connection/process_guard.py",
+            sandbox_socket="/tmp/.hud-process-connection/control.sock",
+        ),
+    )
+    argv = workspace_mod._guarded_process_argv(
+        "/usr/bin/python3",
+        guard,
+        ["bash", "-lc", "true"],
+    )
+
+    assert argv == [
+        "/usr/bin/python3",
+        "/tmp/.hud-process-connection/process_guard.py",
+        "--backend",
+        "ptrace",
+        "/tmp/.hud-process-connection/control.sock",
+        "--",
+        "bash",
+        "-lc",
+        "true",
+    ]
+    result = subprocess.run(
+        [sys.executable, str(Path(workspace_mod.__file__).with_name("process_guard.py")), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_process_guard_selects_probed_ptrace_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(process_guard_mod, "_backend", None)
+    monkeypatch.setattr(process_guard_mod, "_backend_probed", False)
+    monkeypatch.setattr(process_guard_mod.sys, "platform", "linux")
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="ptrace\n"))
+    monkeypatch.setattr(process_guard_mod.subprocess, "run", run)
+
+    assert process_guard_mod._detected_backend() == "ptrace"
+    assert process_guard_mod._detected_backend() == "ptrace"
+    run.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_namespace_host_only_terminates_a_used_session_holder(
     tmp_path: Path,
@@ -1163,6 +1235,28 @@ def test_a_peer_answers_at_the_address_the_task_expects() -> None:
 
     with pytest.raises(ValueError, match="declares port 5432 twice"):
         bind_addresses([Peer("db", 5432), Peer("db", 5432)])
+
+
+async def test_workspace_route_is_bound_once_and_removed_on_stop(tmp_path: Path) -> None:
+    from hud.environment import Environment
+
+    env = Environment()
+    workspace = env.workspace(tmp_path / "root", track_files=False)
+    workspace._bwrap = cast("Any", object())
+    env._started = True
+    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
+
+    env.bind_workspace_routes([route, route], session="a")
+    env.bind_workspace_routes([route], session="a")
+
+    assert workspace.peers == (Peer("inference.hud.so", 443, target=("inference.hud.so", 443)),)
+    await env.stop()
+    assert workspace.peers == ()
+
+
+def test_workspace_route_rejects_ip_literals() -> None:
+    with pytest.raises(ValueError, match="hostname"):
+        WorkspaceRoute("ssh", "127.0.0.1", 443)
 
 
 def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
@@ -1607,6 +1701,164 @@ def test_the_proxy_normalizes_http_framing_in_both_directions(
     assert Chunked.request_transfer is None
 
 
+def test_connection_relay_replaces_credentials_and_preserves_streaming() -> None:
+    import http.client
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Upstream(BaseHTTPRequestHandler):
+        authorization: str | None = None
+        api_key: str | None = None
+        body = b""
+
+        def do_POST(self) -> None:
+            type(self).authorization = self.headers.get("Authorization")
+            type(self).api_key = self.headers.get("X-Api-Key")
+            type(self).body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            self.wfile.write(b"5\r\nfirst\r\n6\r\nsecond\r\n0\r\n\r\n")
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    upstream = HTTPServer(("127.0.0.1", 0), Upstream)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    token = "scoped-runtime-token"
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url=f"http://127.0.0.1:{upstream.server_address[1]}/v1",
+        headers={"Authorization": f"Bearer {token}", "X-Api-Key": token},
+    )
+    relay = ConnectionRelay(connection)
+    relay.start()
+    try:
+        client = http.client.HTTPConnection("127.0.0.1", relay.port, timeout=5)
+        client.request(
+            "POST",
+            "/v1/messages",
+            body=b"request",
+            headers={
+                "Authorization": "Bearer model-visible",
+                "X-Api-Key": "model-visible",
+            },
+        )
+        response = client.getresponse()
+        assert response.status == 200
+        assert response.read() == b"firstsecond"
+        client.close()
+    finally:
+        relay.stop()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join()
+
+    assert Upstream.authorization == f"Bearer {token}"
+    assert Upstream.api_key == token
+    assert Upstream.body == b"request"
+
+
+def test_connection_relay_refuses_paths_that_could_leave_its_prefix() -> None:
+    import http.client
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    forwarded: list[str] = []
+
+    class Upstream(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            forwarded.append(self.path)
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    upstream = HTTPServer(("127.0.0.1", 0), Upstream)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url=f"http://127.0.0.1:{upstream.server_address[1]}/v1",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
+    )
+    relay = ConnectionRelay(connection)
+    relay.start()
+    refused: dict[str, tuple[int, str | None]] = {}
+    try:
+        for path in (
+            "/v1/../admin",
+            "/v1/./models",
+            "/v1/%2e%2e/admin",
+            "/v1/%2E%2E/admin",
+            "/v1/..%2fadmin",
+            "/v1/..%5cadmin",
+            "/v1/models",
+        ):
+            client = http.client.HTTPConnection("127.0.0.1", relay.port, timeout=5)
+            client.request("GET", path)
+            response = client.getresponse()
+            response.read()
+            refused[path] = (response.status, response.getheader("X-Connection-Error"))
+            client.close()
+    finally:
+        relay.stop()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join()
+
+    assert forwarded == ["/v1/models"]
+    assert refused.pop("/v1/models") == (204, None)
+    assert set(refused.values()) == {(400, "non-canonical-path")}
+
+
+@pytest.mark.parametrize("placeholder", ["X-Api-Key", "Api-Key", "X-Goog-Api-Key"])
+def test_connection_relay_drops_process_credentials_the_connection_does_not_set(
+    placeholder: str,
+) -> None:
+    import http.client
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    received: dict[str, str] = {}
+
+    class Upstream(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            received.update({key.casefold(): value for key, value in self.headers.items()})
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    upstream = HTTPServer(("127.0.0.1", 0), Upstream)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url=f"http://127.0.0.1:{upstream.server_address[1]}",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
+    )
+    relay = ConnectionRelay(connection)
+    relay.start()
+    try:
+        client = http.client.HTTPConnection("127.0.0.1", relay.port, timeout=5)
+        client.request("POST", "/v1/messages", body=b"{}", headers={placeholder: "model-visible"})
+        assert client.getresponse().status == 204
+        client.close()
+    finally:
+        relay.stop()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join()
+
+    assert received["authorization"] == "Bearer scoped-runtime-token"
+    assert placeholder.casefold() not in received
+    assert "model-visible" not in received.values()
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -1842,12 +2094,72 @@ async def test_session_wrapper_environment_contains_no_server_secrets(
     ws = Workspace(tmp_path / "root")
     monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
     ws._namespace = cast("Any", SimpleNamespace(spawn=capture_spawn))
-    process = SimpleNamespace(term_type=None, command="true")
+    process = SimpleNamespace(term_type=None, command="true", env={})
 
     with pytest.raises(SpawnCaptured) as captured:
         await ws._handle_process(cast("Any", process))
 
     assert captured.value.env == {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+
+
+@pytest.mark.asyncio
+async def test_process_guard_preserves_session_proxy_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    class Guard:
+        sandbox_helper = "/run/hud/process_guard.py"
+        sandbox_socket = "/run/hud/process_guard.sock"
+        backend = "notify"
+
+        def __init__(self, directory: Path, *_args: object) -> None:
+            self.directory = directory
+
+        def start(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def capture_bwrap(*_args: object, **kwargs: Any) -> list[str]:
+        captured.append(kwargs)
+        raise RuntimeError("captured")
+
+    proxy = {
+        "http_proxy": "http://127.0.0.1:3128",
+        "https_proxy": "http://127.0.0.1:3128",
+        "no_proxy": "127.0.0.1,localhost,main",
+    }
+    monkeypatch.setenv("HUD_API_KEY", "server-secret")
+    monkeypatch.setattr(workspace_mod, "_process_guard_interpreter", lambda: "/usr/bin/python3")
+    monkeypatch.setattr(workspace_mod, "ProcessConnectionGuard", Guard)
+    monkeypatch.setattr(Workspace, "supports_process_connections", True)
+    ws = Workspace(tmp_path / "root", env={"WORKSPACE_ENV": "present"})
+    ws._process_connections["inference"] = cast("Any", object())
+    ws._egress = cast("Any", SimpleNamespace(environment=lambda: proxy))
+    monkeypatch.setattr(ws, "sandbox_pid", AsyncMock(return_value=7))
+    monkeypatch.setattr(ws, "_process_connection_targets", lambda _names: frozenset())
+    monkeypatch.setattr(ws, "bwrap_argv", capture_bwrap)
+    process = SimpleNamespace(
+        term_type="xterm-256color",
+        command="true",
+        env={PROCESS_CONNECTIONS_REQUEST: '["inference"]'},
+        channel=SimpleNamespace(is_closing=Mock(return_value=False)),
+        stderr=SimpleNamespace(write=Mock()),
+        exit=Mock(),
+    )
+
+    await ws._handle_process(cast("Any", process))
+
+    assert len(captured) == 1
+    session_env = captured[0]["env"]
+    assert {name: session_env[name] for name in proxy} == proxy
+    assert session_env["WORKSPACE_ENV"] == "present"
+    assert session_env["TERM"] == "xterm-256color"
+    assert "HUD_API_KEY" not in session_env
+    assert captured[0]["inherit_host_env"] is False
+    assert captured[0]["inherit_workspace_env"] is False
 
 
 @pytest.mark.asyncio
@@ -2053,7 +2365,9 @@ def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
 
     monkeypatch.setattr(ws.subprocess, "run", run)
 
-    assert ws.usable_bwrap() == Bubblewrap("/usr/bin/bwrap", pid_unshare="/usr/bin/unshare")
+    assert ws.usable_bwrap() == Bubblewrap(
+        "/usr/bin/bwrap", pid_unshare="/usr/bin/unshare", tmpfs_modes=True
+    )
     assert "--unshare-pid" in calls[0]
     assert calls[1][:4] == [
         "/usr/bin/unshare",
@@ -2062,6 +2376,8 @@ def test_usable_bwrap_stages_pid_creation_when_direct_mounting_is_blocked(
         "--mount-proc",
     ]
     assert "--unshare-pid" not in calls[1]
+    assert calls[2][:4] == calls[1][:4]
+    assert calls[2][-6:-2] == ["--perms", "1777", "--tmpfs", "/tmp"]
 
 
 def test_staged_bwrap_keeps_user_isolation_and_uses_the_staged_proc(
@@ -2095,13 +2411,14 @@ def test_staged_bwrap_keeps_user_isolation_and_uses_the_staged_proc(
     assert joined[dev : dev + 3] == ["--dev-bind", "/dev", "/dev"]
 
 
-def test_required_isolation_refuses_when_unavailable(monkeypatch, tmp_path) -> None:
+async def test_required_isolation_refuses_to_start_when_unavailable(monkeypatch, tmp_path) -> None:
     from hud.environment import workspace as ws
 
     monkeypatch.setattr(ws, "usable_bwrap", lambda: None)
+    workspace = ws.Workspace(tmp_path, require_isolation=True)
 
     with pytest.raises(RuntimeError, match="isolation was required"):
-        ws.Workspace(tmp_path, require_isolation=True)
+        await workspace.start()
 
 
 @pytest.mark.asyncio

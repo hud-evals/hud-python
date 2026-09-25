@@ -32,9 +32,17 @@ import hud.eval.run as run_module
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
+from hud.capabilities import Connection
 from hud.clients.client import HudClient
 from hud.environment import Answer, Environment
-from hud.eval import Job, LocalRuntime, Runtime, SubprocessRuntime, Task, Taskset
+from hud.eval import (
+    Job,
+    LocalRuntime,
+    Runtime,
+    SubprocessRuntime,
+    Task,
+    Taskset,
+)
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 
@@ -74,6 +82,7 @@ class _FnAgent(Agent):
     """Stateless agent: answers each run by applying ``fn`` to ``run.prompt``."""
 
     def __init__(self, fn: Any) -> None:
+        super().__init__()
         self._fn = fn
 
     async def __call__(self, run: Any) -> None:
@@ -173,6 +182,19 @@ async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
     # The factual placement record: the runtime this run executed against.
     assert run.runtime is not None
     assert run.runtime.startswith("tcp://127.0.0.1:")
+
+
+def test_run_owns_named_controller_connections() -> None:
+    connection = Connection(
+        name="inference",
+        capability="ssh",
+        url="https://inference.hud.so",
+        headers={"Authorization": "Bearer scoped-runtime-token"},
+    )
+    run = Run(None, "task", {}, connections=(connection,))
+
+    assert run.connections == {"inference": connection}
+    assert "scoped-runtime-token" not in repr(connection)
 
 
 async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> None:
@@ -847,6 +869,7 @@ class _AnswerThenBoomAgent(Agent):
     already has a gradable answer in hand."""
 
     def __init__(self, fn: Any) -> None:
+        super().__init__()
         self._fn = fn
 
     async def __call__(self, run: Any) -> None:
@@ -871,6 +894,7 @@ class _SlowAgent(Agent):
     """Answers, then hangs — to exercise the agent-loop timeout."""
 
     def __init__(self, fn: Any) -> None:
+        super().__init__()
         self._fn = fn
         self.cancelled = asyncio.Event()
 

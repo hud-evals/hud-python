@@ -11,12 +11,14 @@ import contextlib
 import functools
 import inspect
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
 
-from hud.capabilities import Capability
+from hud.capabilities import Capability, Connection
 
+from .egress import ConnectionRelay, Peer, WorkspaceRoute
 from .workspace import Workspace
 
 if TYPE_CHECKING:
@@ -132,6 +134,22 @@ class _TaskFactory(Generic[P]):
         return task
 
 
+@dataclass(frozen=True, slots=True)
+class _BoundConnection:
+    """A controller connection relayed into one workspace for one control session."""
+
+    connection: Connection
+    workspace: Workspace
+    peer: Peer
+    relay: ConnectionRelay
+    session: str
+
+    def release(self) -> None:
+        self.workspace.remove_process_connection(self.connection.name, self.peer)
+        self.workspace.remove_peer(self.peer)
+        self.relay.stop()
+
+
 class Environment:
     """Capabilities + tasks dispatched over the HUD wire protocol."""
 
@@ -162,6 +180,11 @@ class Environment:
         self._on_stop: list[Callable[[], Awaitable[None]]] = []
         # Per task-session end (cancel / bye / post-grade cleanup).
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
+        self._workspaces: dict[str, Workspace] = {}
+        #: Controller routes by the control sessions holding them; ``None`` peer when
+        #: an authored peer already provides the route.
+        self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None, set[str]]] = {}
+        self._connections: dict[str, _BoundConnection] = {}
 
     # ─── task registration ───────────────────────────────────────────
 
@@ -284,7 +307,10 @@ class Environment:
             from hud.settings import settings
 
             track_files = settings.file_tracking_enabled
+        if name in self._workspaces:
+            raise ValueError(f"workspace capability {name!r} is already attached")
         ws = Workspace(root, track_files=track_files, **kwargs)
+        self._workspaces[name] = ws
 
         @self.initialize
         async def _up() -> None:
@@ -349,5 +375,146 @@ class Environment:
         for hook in reversed(self._on_stop):
             with contextlib.suppress(Exception):
                 await hook()
+        for workspace, peer, _sessions in reversed(self._workspace_routes.values()):
+            if peer is not None:
+                workspace.remove_peer(peer)
+        self._workspace_routes.clear()
+        for bound in reversed(self._connections.values()):
+            bound.release()
+        self._connections.clear()
         self._started = False
         self._hooks_done = False
+
+    def _workspace_for(self, capability: str) -> Workspace:
+        workspace = self._workspaces.get(capability)
+        if workspace is None and capability in {"ssh", "ssh/2"}:
+            if len(self._workspaces) > 1:
+                names = ", ".join(sorted(self._workspaces))
+                raise RuntimeError(f"workspace capability {capability!r} is ambiguous: {names}")
+            workspace = next(iter(self._workspaces.values()), None)
+        if workspace is None:
+            raise RuntimeError(f"workspace capability {capability!r} does not exist")
+        return workspace
+
+    def bind_connections(self, connections: Sequence[Connection], *, session: str) -> None:
+        """Install one control session's controller connections into their workspaces.
+
+        A connection belongs to the session that supplied it until
+        :meth:`release_session`; a resumed session rebinds its own, replacing a
+        rotated credential, and no session can take a name another one holds.
+        """
+        if not self._started:
+            raise RuntimeError("environment must be started before connections are bound")
+        owned = [
+            bound.connection for bound in self._connections.values() if bound.session == session
+        ]
+        if owned == list(connections):
+            return
+        for connection in connections:
+            holder = self._connections.get(connection.name)
+            if holder is not None and holder.session != session:
+                raise RuntimeError(
+                    f"connection {connection.name!r} is bound to another control session"
+                )
+        for name, held in reversed(list(self._connections.items())):
+            if held.session == session:
+                held.release()
+                del self._connections[name]
+
+        bound: list[_BoundConnection] = []
+        try:
+            for connection in connections:
+                workspace = self._workspace_for(connection.capability)
+                if not workspace.supports_process_connections:
+                    raise RuntimeError(
+                        f"workspace capability {connection.capability!r} does not support "
+                        "process-bound connections"
+                    )
+                if any(
+                    peer.name == connection.host and peer.port == connection.port
+                    for peer in workspace.peers
+                ):
+                    raise RuntimeError(
+                        f"connection endpoint {connection.host}:{connection.port} conflicts with "
+                        "an authored peer"
+                    )
+                relay = ConnectionRelay(connection)
+                relay.start()
+                peer = Peer(
+                    connection.host,
+                    connection.port,
+                    target=("127.0.0.1", relay.port),
+                )
+                workspace.add_peer(peer, first=True)
+                workspace.add_process_connection(connection.name, peer)
+                record = _BoundConnection(connection, workspace, peer, relay, session)
+                self._connections[connection.name] = record
+                bound.append(record)
+        except BaseException:
+            for record in reversed(bound):
+                record.release()
+                self._connections.pop(record.connection.name, None)
+            raise
+
+    def release_session(self, session: str) -> None:
+        """Release what a control session bound: its relays close and its routes go
+        once no other session holds them, so a later session inherits neither."""
+        for name, bound in reversed(list(self._connections.items())):
+            if bound.session == session:
+                bound.release()
+                del self._connections[name]
+        for route, (workspace, peer, sessions) in reversed(list(self._workspace_routes.items())):
+            sessions.discard(session)
+            if not sessions:
+                if peer is not None:
+                    workspace.remove_peer(peer)
+                del self._workspace_routes[route]
+
+    def bind_workspace_routes(self, routes: Sequence[WorkspaceRoute], *, session: str) -> None:
+        """Install a control session's routes before a workspace starts its sandbox."""
+        if not self._started:
+            raise RuntimeError("environment must be started before workspace routes are bound")
+
+        planned: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+        for route in dict.fromkeys(routes):
+            if (held := self._workspace_routes.get(route)) is not None:
+                held[2].add(session)
+                continue
+            workspace = self._workspace_for(route.capability)
+            if not workspace.bwrap_available or not workspace.owns_netns:
+                raise RuntimeError(
+                    f"workspace route for {route.capability!r} requires an isolated network"
+                )
+            matching = [
+                peer
+                for peer in workspace.peers
+                if peer.name == route.host and peer.port == route.port
+            ]
+            if matching:
+                if any(peer.address != (route.host, route.port) for peer in matching):
+                    raise RuntimeError(
+                        f"workspace route {route.host}:{route.port} conflicts with an authored peer"
+                    )
+                planned.append((route, workspace, None))
+                continue
+            planned.append(
+                (
+                    route,
+                    workspace,
+                    Peer(route.host, route.port, target=(route.host, route.port)),
+                )
+            )
+
+        bound: list[tuple[WorkspaceRoute, Workspace, Peer | None]] = []
+        try:
+            for route, workspace, peer in planned:
+                if peer is not None:
+                    workspace.add_peer(peer, first=True)
+                self._workspace_routes[route] = (workspace, peer, {session})
+                bound.append((route, workspace, peer))
+        except BaseException:
+            for route, workspace, peer in reversed(bound):
+                if peer is not None:
+                    workspace.remove_peer(peer)
+                self._workspace_routes.pop(route, None)
+            raise

@@ -11,7 +11,7 @@ import shlex
 import tarfile
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -29,7 +29,7 @@ from pydantic import (
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
 
 _COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -443,6 +443,47 @@ class ComposeLaunchFiles:
     archive: Path | None
 
 
+@dataclass(frozen=True, slots=True)
+class DockerBindMount:
+    """A provider-owned bind mount injected into a Docker environment."""
+
+    source: Path
+    target: PurePosixPath
+    read_only: bool = True
+
+    def __init__(
+        self,
+        source: str | Path,
+        target: str | PurePosixPath,
+        read_only: bool = True,
+    ) -> None:
+        resolved_source = Path(source)
+        resolved_target = PurePosixPath(target)
+        if not resolved_source.is_absolute():
+            raise ValueError("Docker bind mount source must be absolute")
+        if not resolved_target.is_absolute():
+            raise ValueError("Docker bind mount target must be absolute")
+        if "," in str(resolved_source) or "," in str(resolved_target):
+            raise ValueError("Docker bind mount paths cannot contain commas")
+        object.__setattr__(self, "source", resolved_source)
+        object.__setattr__(self, "target", resolved_target)
+        object.__setattr__(self, "read_only", read_only)
+
+    def docker_argument(self) -> str:
+        argument = f"type=bind,source={self.source},target={self.target}"
+        return f"{argument},readonly" if self.read_only else argument
+
+    def compose_volume(self) -> dict[str, str | bool]:
+        volume: dict[str, str | bool] = {
+            "type": "bind",
+            "source": str(self.source),
+            "target": str(self.target),
+        }
+        if self.read_only:
+            volume["read_only"] = True
+        return volume
+
+
 class ComposeProject(BaseModel):
     """A Compose recipe and the project data it may need at runtime."""
 
@@ -512,6 +553,7 @@ class ComposeProject(BaseModel):
         port_service: str = "main",
         seccomp: str | Path,
         service_socket: str | None = None,
+        bind_mounts: Sequence[DockerBindMount] = (),
         env_vars: Mapping[str, str] | None = None,
         cpu: float | None = None,
         memory_mb: int | None = None,
@@ -528,14 +570,17 @@ class ComposeProject(BaseModel):
                 "apparmor=unconfined",
             ],
         }
+        volumes = [mount.compose_volume() for mount in bind_mounts]
         if service_socket is not None:
-            main["volumes"] = [
+            volumes.append(
                 {
                     "type": "bind",
                     "source": service_socket,
                     "target": "/media/hud/docker.sock",
                 }
-            ]
+            )
+        if volumes:
+            main["volumes"] = volumes
         if env_vars:
             main["environment"] = dict(env_vars)
         if cpu is not None:

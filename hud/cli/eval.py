@@ -21,7 +21,6 @@ from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlCons
 from rich import box
 from rich.table import Table
 
-from hud.agents import resolve_agent_model
 from hud.cli import CLI, CliError, parse_key_value
 from hud.eval import (
     DaytonaRuntime,
@@ -35,7 +34,7 @@ from hud.eval import (
 )
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.gateway import list_gateway_models
+from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
@@ -246,11 +245,12 @@ def eval_command(
     )
     if full:
         overrides.setdefault("max_steps", 100)
-    if agent is not None:
-        agent_type, model_id = resolve_agent_model(agent)
-        overrides["agent_type"] = agent_type
-        if model_id != agent_type.value:
-            overrides.setdefault("model", model_id)
+    if agent in {member.value for member in AgentType}:
+        overrides["agent_type"] = AgentType(agent)
+    elif agent is not None:
+        entry = resolve_gateway_model(agent)
+        overrides["agent_type"] = AgentType(entry.sdk_agent_type)
+        overrides.setdefault("model", entry.model_name or agent)
     if task_ids is not None:
         overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
     if config:
@@ -465,7 +465,7 @@ def eval_command(
     if cfg.model:
         agent_kwargs["model"] = cfg.model
     agent_kwargs["max_steps"] = cfg.max_steps
-    if cfg.auto_respond:
+    if cfg.auto_respond and not agent_type.is_cli:
         agent_kwargs["auto_respond"] = True
     if cfg.gateway:
         agent_kwargs["gateway"] = True
@@ -510,8 +510,7 @@ def eval_command(
             f"group_size: {cfg.group_size})"
         )
 
-    # cls/config_cls are matched unions; the pairing is correct by construction.
-    agent_instance = cast("Any", agent_type.cls)(config=agent_type.config_cls(**agent_kwargs))
+    agent_instance = agent_type.cls.load(agent_kwargs)
 
     started = time.monotonic()
     job = asyncio.run(

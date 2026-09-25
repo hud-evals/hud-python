@@ -19,17 +19,20 @@ from typing import TYPE_CHECKING, Any
 
 import asyncssh
 import fastmcp
+from fastmcp.exceptions import ToolError
 from pydantic import TypeAdapter
 
+from hud.agents.claude.tools.computer import ClaudeComputerTool
+from hud.agents.cli import WINDOWS_SHELLS
+from hud.agents.tools.base import AgentToolSpec, result_text
 from hud.capabilities import Capability
-from hud.capabilities.rfb import RFBClient, ScreenshotEncoding, WebPScreenshotEncoding
+from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
 
     from hud.capabilities import SSHClient
 
-_DEFAULT_SCREENSHOT_ENCODING = WebPScreenshotEncoding()
 RFB_CAPABILITY_ENV = "HUD_RFB_CAPABILITY"
 SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
@@ -39,25 +42,27 @@ _REMOTE_TMP = PurePosixPath("/") / "tmp"
 logger = logging.getLogger(__name__)
 
 
-def create_computer_mcp(
-    rfb: RFBClient,
-    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
-) -> fastmcp.FastMCP:
+def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding) -> fastmcp.FastMCP:
     """Build a FastMCP server with one ``computer`` tool backed by ``rfb``."""
 
     mcp = fastmcp.FastMCP("computer-use")
+    tool = ClaudeComputerTool(
+        spec=AgentToolSpec(api_type="computer", api_name="computer"),
+        client=rfb,
+        screenshot_encoding=screenshot_encoding,
+    )
 
     @mcp.tool()
     async def computer(
         action: str,
-        coordinate: str | None = None,
+        coordinate: list[int] | None = None,
         text: str | None = None,
         scroll_direction: str | None = None,
         scroll_amount: int | None = None,
-        start_coordinate: str | None = None,
+        start_coordinate: list[int] | None = None,
         duration: float | None = None,
         repeat: int | None = None,
-        region: str | None = None,
+        region: list[int] | None = None,
     ) -> list[Any]:
         """Control a remote screen — screenshot, click, type, key, scroll, move, drag, wait, zoom.
 
@@ -67,85 +72,34 @@ def create_computer_mcp(
 
         Returns the resulting screenshot image so you can see the screen state.
         """
-        import mcp.types as mcp_types
-
-        from hud.agents.claude.tools.computer import ClaudeComputerTool
-        from hud.agents.tools.base import AgentToolSpec
-
-        arguments: dict[str, Any] = {"action": action}
-        if coordinate is not None:
-            try:
-                arguments["coordinate"] = json.loads(coordinate)
-            except json.JSONDecodeError:
-                arguments["coordinate"] = coordinate
-        if text is not None:
-            arguments["text"] = text
-        if scroll_direction is not None:
-            arguments["scroll_direction"] = scroll_direction
-        if scroll_amount is not None:
-            arguments["scroll_amount"] = scroll_amount
-        if start_coordinate is not None:
-            try:
-                arguments["start_coordinate"] = json.loads(start_coordinate)
-            except json.JSONDecodeError:
-                arguments["start_coordinate"] = start_coordinate
-        if duration is not None:
-            arguments["duration"] = duration
-        if repeat is not None:
-            arguments["repeat"] = repeat
-        if region is not None:
-            try:
-                arguments["region"] = json.loads(region)
-            except json.JSONDecodeError:
-                arguments["region"] = region
-
-        spec = AgentToolSpec(api_type="computer", api_name="computer")
-        tool = ClaudeComputerTool(
-            spec=spec,
-            client=rfb,
-            screenshot_encoding=screenshot_encoding,
-        )
+        arguments = {
+            name: value
+            for name, value in {
+                "action": action,
+                "coordinate": coordinate,
+                "text": text,
+                "scroll_direction": scroll_direction,
+                "scroll_amount": scroll_amount,
+                "start_coordinate": start_coordinate,
+                "duration": duration,
+                "repeat": repeat,
+                "region": region,
+            }.items()
+            if value is not None
+        }
         result = await tool.execute(arguments)
-
-        # Return content blocks directly so the CLI/model sees real images.
-        blocks: list[Any] = []
-        for block in result.content:
-            if isinstance(block, mcp_types.ImageContent):
-                blocks.append(
-                    mcp_types.ImageContent(
-                        type="image",
-                        data=block.data,
-                        mimeType=block.mimeType,
-                    ),
-                )
-            elif isinstance(block, mcp_types.TextContent):
-                blocks.append(mcp_types.TextContent(type="text", text=block.text))
-        if not blocks:
-            blocks.append(mcp_types.TextContent(type="text", text="ok"))
         if result.isError:
-            blocks.insert(0, mcp_types.TextContent(type="text", text="ERROR"))
-        return blocks
+            raise ToolError(result_text(result) or "computer action failed")
+        return result.content
 
     return mcp
 
 
-def _required_env(environ: Mapping[str, str], name: str) -> str:
-    try:
-        return environ[name]
-    except KeyError as exc:
-        raise RuntimeError(f"missing required environment variable {name}") from exc
-
-
 async def run_computer_mcp(environ: Mapping[str, str] = os.environ) -> None:
     """Run computer-use over stdio in a controller-side child process."""
-    raw_manifest = json.loads(_required_env(environ, RFB_CAPABILITY_ENV))
-    if not isinstance(raw_manifest, dict):
-        raise ValueError(f"{RFB_CAPABILITY_ENV} must contain a JSON object")
-    capability = Capability.from_manifest(raw_manifest)
-    if capability.protocol.split("/", 1)[0] != "rfb":
-        raise ValueError(f"{RFB_CAPABILITY_ENV} must describe an RFB capability")
+    capability = Capability.from_manifest(json.loads(environ[RFB_CAPABILITY_ENV]))
     screenshot_encoding = TypeAdapter(ScreenshotEncoding).validate_json(
-        _required_env(environ, SCREENSHOT_ENCODING_ENV)
+        environ[SCREENSHOT_ENCODING_ENV]
     )
 
     rfb = await RFBClient.connect(capability)
@@ -162,18 +116,25 @@ async def run_computer_mcp(environ: Mapping[str, str] = os.environ) -> None:
 async def bridge_computer_mcp(
     ssh: SSHClient,
     capability: Capability,
-    screenshot_encoding: ScreenshotEncoding = _DEFAULT_SCREENSHOT_ENCODING,
+    screenshot_encoding: ScreenshotEncoding,
     *,
     shell: str,
 ) -> AsyncIterator[dict[str, Any]]:
     """Bridge a controller-side computer MCP process into a remote POSIX shell."""
-    if shell in {"cmd", "powershell"}:
-        raise RuntimeError("ClaudeSDKAgent computer use requires a POSIX workspace")
+    if shell in WINDOWS_SHELLS:
+        raise RuntimeError("ClaudeCLIAgent computer use requires a POSIX workspace")
 
     token = secrets.token_hex(16)
-    request_path = str(_REMOTE_TMP / f"hud-computer-{token}.request")
-    response_path = str(_REMOTE_TMP / f"hud-computer-{token}.response")
-    bridge = await ssh.create_process(_bridge_command(request_path, response_path))
+    request = shlex.quote(str(_REMOTE_TMP / f"hud-computer-{token}.request"))
+    response = shlex.quote(str(_REMOTE_TMP / f"hud-computer-{token}.response"))
+    cleanup = shlex.quote(f"rm -f -- {request} {response}")
+    bridge = await ssh.create_process(
+        "set -eu; umask 077; "
+        f"rm -f -- {request} {response}; mkfifo -- {request} {response}; "
+        f"trap {cleanup} EXIT HUP INT TERM; "
+        "printf 'ready\\n' >&2; "
+        f"cat {request} & reader=$!; cat > {response}; wait $reader"
+    )
     local: asyncio.subprocess.Process | None = None
     tasks: list[asyncio.Task[None]] = []
     try:
@@ -205,7 +166,8 @@ async def bridge_computer_mcp(
             asyncio.create_task(_log_stream(bridge.stderr, "SSH bridge")),
             asyncio.create_task(_log_stream(local.stderr, "computer MCP")),
         ]
-        yield _relay_config(request_path, response_path)
+        relay = f"cat {response} & reader=$!; cat > {request}; wait $reader"
+        yield {"type": "stdio", "command": "sh", "args": ["-c", relay]}
     finally:
         for task in tasks:
             task.cancel()
@@ -215,8 +177,8 @@ async def bridge_computer_mcp(
         with contextlib.suppress(OSError, TimeoutError, asyncssh.Error):
             await asyncio.wait_for(bridge.wait_closed(), _PROCESS_CLOSE_TIMEOUT_S)
         if local is not None:
-            if local.stdin is not None:
-                local.stdin.close()
+            assert local.stdin is not None
+            local.stdin.close()
             if local.returncode is None:
                 with contextlib.suppress(ProcessLookupError):
                     local.terminate()
@@ -227,26 +189,6 @@ async def bridge_computer_mcp(
                     local.kill()
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(local.wait(), _PROCESS_CLOSE_TIMEOUT_S)
-
-
-def _bridge_command(request_path: str, response_path: str) -> str:
-    request = shlex.quote(request_path)
-    response = shlex.quote(response_path)
-    cleanup = shlex.quote(f"rm -f -- {request} {response}")
-    return (
-        "set -eu; umask 077; "
-        f"rm -f -- {request} {response}; mkfifo -- {request} {response}; "
-        f"trap {cleanup} EXIT HUP INT TERM; "
-        "printf 'ready\\n' >&2; "
-        f"cat {request} & reader=$!; cat > {response}; wait $reader"
-    )
-
-
-def _relay_config(request_path: str, response_path: str) -> dict[str, Any]:
-    request = shlex.quote(request_path)
-    response = shlex.quote(response_path)
-    script = f"cat {response} & reader=$!; cat > {request}; wait $reader"
-    return {"type": "stdio", "command": "sh", "args": ["-c", script]}
 
 
 async def _copy_stream(
