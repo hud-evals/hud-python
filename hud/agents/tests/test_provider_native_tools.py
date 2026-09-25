@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 import random
 import shlex
+import struct
+import zlib
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
@@ -786,3 +788,27 @@ async def test_file_view_preserves_png_transparency() -> None:
     assert content.mimeType == "image/png"
     with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
         assert viewed.getpixel((0, 0)) == (255, 0, 0, 128)
+
+
+@pytest.mark.filterwarnings("ignore:Image size.*:PIL.Image.DecompressionBombWarning")
+@pytest.mark.parametrize("size", [(4001, 4000), (10000, 10000)])
+@pytest.mark.parametrize("tool_class", [ClaudeTextEditorTool, ReadTool])
+async def test_file_view_rejects_oversized_source_before_decoding(
+    size: tuple[int, int], tool_class: type[ClaudeTextEditorTool] | type[ReadTool]
+) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (1, 1)).save(buffer, format="PNG")
+    data = bytearray(buffer.getvalue())
+    data[16:24] = struct.pack(">II", *size)
+    data[29:33] = struct.pack(">I", zlib.crc32(data[12:29]))
+    tool = tool_class(
+        spec=tool_class.default_spec("claude"),
+        client=_FakeSSH(files={"/oversized.png": bytes(data)}),
+    )
+
+    result = await tool.execute(
+        {"command": "view", "path": "/oversized.png", "filePath": "/oversized.png"}
+    )
+
+    assert result.isError
+    assert "16,000,000-pixel source limit" in result_text(result)
