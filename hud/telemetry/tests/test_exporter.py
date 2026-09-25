@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from typing import Any
 from unittest.mock import patch
 
@@ -156,3 +158,25 @@ class TestFlush:
             assert flush(timeout=1.0)
 
         assert [span["name"] for _, spans, _ in upload.calls for span in spans] == ["final-span"]
+
+    def test_interpreter_exit_uploads_spans_queued_without_a_flush(self, tmp_path):
+        uploads = tmp_path / "uploads.jsonl"
+        script = f"""
+import json
+from hud.settings import settings
+from hud.telemetry import exporter
+
+def record(**kwargs):
+    with open({str(uploads)!r}, "a") as out:
+        out.write(json.dumps(kwargs["json"]) + "\\n")
+
+settings.api_key = "test-key"
+settings.telemetry_enabled = True
+settings.telemetry_local_dir = None
+exporter.make_request_sync = record
+exporter.queue_span({{"name": "last-span", "attributes": {{"hud.task_run_id": "task-1"}}}})
+"""
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=60)
+
+        uploaded = [json.loads(line) for line in uploads.read_text().splitlines()]
+        assert [span["name"] for body in uploaded for span in body["telemetry"]] == ["last-span"]
