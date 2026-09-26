@@ -583,6 +583,7 @@ def test_claude_editor_generic_spec_for_non_anthropic_model() -> None:
     assert "type" not in params
     assert params["name"] == "str_replace_based_edit_tool"
     assert params["input_schema"]["required"] == ["command", "path"]
+    assert params["input_schema"]["properties"]["view_range"]["maxItems"] == 2
 
 
 # ─── editor tools over SSH exec ───────────────────────────────────────
@@ -697,4 +698,74 @@ async def test_file_view_preserves_unicode_text() -> None:
     result = await tool.execute({"command": "view", "path": "/text.png"})
 
     assert not result.isError
-    assert result_text(result) == text
+    assert result_text(result) == "     1\tHello, 世界\n\n(End of file - total 1 lines)"
+
+
+async def test_claude_editor_view_shows_first_window_with_continuation() -> None:
+    lines = [f"row {n}" for n in range(1, 2501)]
+    ssh = _FakeSSH(files={"/rows.txt": "\n".join(lines).encode()})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/rows.txt"})
+
+    assert not result.isError
+    shown, footer = result_text(result).split("\n\n")
+    assert shown.splitlines()[0] == "     1\trow 1"
+    assert shown.splitlines()[-1] == "  2000\trow 2000"
+    assert footer == "(Showing lines 1-2000 of 2500. Use view_range [2001, 2500] to continue.)"
+
+
+@pytest.mark.parametrize(
+    ("view_range", "expected_lines", "footer"),
+    [
+        ([3, 5], ["     3\trow 3", "     4\trow 4", "     5\trow 5"], "Use view_range [6, 10]"),
+        ([9, -1], ["     9\trow 9", "    10\trow 10"], "(End of file - total 10 lines)"),
+        ([9, 400], ["     9\trow 9", "    10\trow 10"], "(End of file - total 10 lines)"),
+    ],
+)
+async def test_claude_editor_view_range_selects_lines(
+    view_range: list[int],
+    expected_lines: list[str],
+    footer: str,
+) -> None:
+    text = "\n".join(f"row {n}" for n in range(1, 11))
+    ssh = _FakeSSH(files={"/rows.txt": text.encode()})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/rows.txt", "view_range": view_range})
+
+    assert not result.isError
+    shown, shown_footer = result_text(result).split("\n\n")
+    assert shown.splitlines() == expected_lines
+    assert footer in shown_footer
+
+
+@pytest.mark.parametrize("view_range", [[0, 5], [5, 4], [1], [1, 2, 3], "1-5", [True, 2]])
+async def test_claude_editor_view_rejects_malformed_range(view_range: Any) -> None:
+    ssh = _FakeSSH(files={"/rows.txt": b"row 1\n"})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    with pytest.raises(ValueError, match="view_range"):
+        await tool.execute({"command": "view", "path": "/rows.txt", "view_range": view_range})
+
+    assert _commands(tool) == []
+
+
+async def test_claude_editor_view_range_past_end_is_a_tool_error() -> None:
+    ssh = _FakeSSH(files={"/rows.txt": b"row 1\nrow 2\n"})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/rows.txt", "view_range": [3, -1]})
+
+    assert result.isError
+    assert result_text(result) == "view_range start 3 is past the end of /rows.txt (2 lines)"
+
+
+async def test_claude_editor_view_of_empty_file_reports_zero_lines() -> None:
+    ssh = _FakeSSH(files={"/empty.txt": b""})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/empty.txt"})
+
+    assert not result.isError
+    assert result_text(result) == "(End of file - total 0 lines)"
