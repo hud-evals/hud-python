@@ -4,6 +4,11 @@ plus the pure ``_citation`` / ``_cache_last_user_block`` helpers.
 
 from __future__ import annotations
 
+import base64
+import random
+import struct
+import zlib
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, call
@@ -12,8 +17,14 @@ import httpx
 import httpx2
 import pytest
 from anthropic import APIStatusError
+from mcp.types import ImageContent
+from PIL import Image
 
 from hud.agents.claude.agent import ClaudeAgent
+from hud.agents.claude.tools.computer import ClaudeComputerTool
+from hud.agents.tool_agent import RunState
+from hud.capabilities import RFBClient
+from hud.types import MCPToolCall, MCPToolResult
 
 
 class FakeStream:
@@ -344,3 +355,109 @@ def test_cache_last_user_block_marks_content() -> None:
     content = cast("list[Any]", out[-1]["content"])
     block = cast("dict[str, Any]", content[0])
     assert block.get("cache_control") == {"type": "ephemeral"}
+
+
+def _image_result(data: bytes, *, computer: bool = False) -> Any:
+    agent = _agent()
+    state = RunState()
+    if computer:
+        spec = ClaudeComputerTool.default_spec("claude")
+        assert spec is not None
+        tool = ClaudeComputerTool(spec=spec, client=Mock(spec=RFBClient))
+        state.tools[tool.provider_name] = tool
+        name = tool.provider_name
+    else:
+        name = "read_file"
+    content = ImageContent(type="image", mimeType="image/png", data=base64.b64encode(data).decode())
+    result = MCPToolResult(content=[content])
+    original = result.model_dump()
+    message = agent._format_result(
+        MCPToolCall(id="image-call", name=name, arguments={}), result, state
+    )
+    assert result.model_dump() == original
+    assert isinstance(message, dict)
+    return next(iter(message["content"]))
+
+
+@pytest.mark.parametrize("size", [(4000, 2000), (2000, 4000), (2000, 2000), (32, 24)])
+def test_tool_images_fit_claude_limits_without_upscaling(size: tuple[int, int]) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", size, "white").save(buffer, format="PNG")
+    result = _image_result(buffer.getvalue())
+    assert not result["is_error"]
+    source = result["content"][0]["source"]
+    assert len(source["data"]) <= 5_000_000
+    with Image.open(BytesIO(base64.b64decode(source["data"]))) as image:
+        assert max(image.size) <= 1568
+        assert image.width * image.height <= 1_150_000
+        assert image.width <= size[0] and image.height <= size[1]
+        assert image.width / image.height == pytest.approx(size[0] / size[1], rel=0.005)
+
+
+def test_claude_compresses_noisy_transparent_tool_images() -> None:
+    size = (1072, 1072)
+    image = Image.frombytes("RGBA", size, random.Random(0).randbytes(size[0] * size[1] * 4))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    assert len(base64.b64encode(buffer.getvalue())) > 5_000_000
+    result = _image_result(buffer.getvalue())
+    assert not result["is_error"]
+    source = result["content"][0]["source"]
+    assert source["media_type"] == "image/jpeg"
+    assert len(source["data"]) <= 5_000_000
+    with Image.open(BytesIO(base64.b64decode(source["data"]))) as viewed:
+        assert viewed.size == size
+        assert viewed.mode == "RGB"
+
+
+def test_claude_applies_image_orientation() -> None:
+    image = Image.new("RGB", (40, 20), "red")
+    exif = Image.Exif()
+    exif[274] = 6
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    source = _image_result(buffer.getvalue())["content"][0]["source"]
+    with Image.open(BytesIO(base64.b64decode(source["data"]))) as viewed:
+        assert viewed.size == (20, 40)
+        assert viewed.getexif().get(274, 1) == 1
+
+
+def test_claude_preserves_small_png_transparency() -> None:
+    buffer = BytesIO()
+    Image.new("RGBA", (32, 24), (255, 0, 0, 128)).save(buffer, format="PNG")
+    source = _image_result(buffer.getvalue())["content"][0]["source"]
+    assert source["media_type"] == "image/png"
+    with Image.open(BytesIO(base64.b64decode(source["data"]))) as viewed:
+        assert viewed.getpixel((0, 0)) == (255, 0, 0, 128)
+
+
+@pytest.mark.filterwarnings("ignore:Image size.*:PIL.Image.DecompressionBombWarning")
+@pytest.mark.parametrize("size", [(4001, 4000), (10000, 10000)])
+def test_claude_rejects_oversized_source_before_decoding(size: tuple[int, int]) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (1, 1)).save(buffer, format="PNG")
+    data = bytearray(buffer.getvalue())
+    data[16:24] = struct.pack(">II", *size)
+    data[29:33] = struct.pack(">I", zlib.crc32(data[12:29]))
+    result = _image_result(bytes(data))
+    assert result["is_error"]
+    assert result["content"][0]["type"] == "text"
+    assert "16,000,000-pixel source limit" in result["content"][0]["text"]
+
+
+def test_claude_returns_invalid_image_as_tool_error() -> None:
+    result = _image_result(b"invalid image")
+    assert result["is_error"]
+    assert result["content"][0]["type"] == "text"
+    assert "Cannot view image" in result["content"][0]["text"]
+
+
+def test_claude_preserves_computer_screenshot_coordinate_space() -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (2000, 1000), "white").save(buffer, format="PNG")
+    data = buffer.getvalue()
+    result = _image_result(data, computer=True)
+    assert not result["is_error"]
+    source = result["content"][0]["source"]
+    assert source["media_type"] == "image/png"
+    assert base64.b64decode(source["data"]) == data

@@ -7,13 +7,16 @@ client and assert the command translation + result shape, fully offline.
 
 from __future__ import annotations
 
+import base64
 import shlex
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
 
 import asyncssh
 import mcp.types as mcp_types
 import pytest
+from PIL import Image
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
@@ -29,7 +32,7 @@ from hud.types import MCPToolCall
 
 
 class _Completed:
-    def __init__(self, *, stdout: str = "", stderr: str = "", exit_status: int = 0) -> None:
+    def __init__(self, *, stdout: str | bytes = "", stderr: str = "", exit_status: int = 0) -> None:
         self.stdout = stdout
         self.stderr = stderr
         self.exit_status = exit_status
@@ -71,7 +74,8 @@ class _Conn:
                 return _Completed(
                     stderr=f"cat: {parts[2]}: No such file or directory", exit_status=1
                 )
-            return _Completed(stdout=self._store[parts[2]].decode())
+            data = self._store[parts[2]]
+            return _Completed(stdout=data if encoding is None else data.decode(encoding))
         if len(parts) == 3 and parts[:2] == ["cat", ">"]:
             assert input is not None
             self._store[parts[2]] = input.encode()
@@ -645,3 +649,52 @@ async def test_reading_a_missing_file_is_a_tool_error_not_a_raised_traceback() -
 
     assert result.isError is True
     assert "No such file or directory" in result_text(result)
+
+
+@pytest.mark.parametrize("image_format", ["PNG", "JPEG", "GIF", "WEBP"])
+@pytest.mark.parametrize("tool_class", [ClaudeTextEditorTool, ReadTool])
+async def test_file_view_returns_images_as_image_content(
+    image_format: str, tool_class: type[ClaudeTextEditorTool] | type[ReadTool]
+) -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (32, 24), "red").save(buffer, format=image_format)
+    data = buffer.getvalue()
+    ssh = _FakeSSH(files={"/image with no extension": data})
+    tool = tool_class(spec=tool_class.default_spec("claude"), client=ssh)
+
+    result = await tool.execute(
+        {
+            "command": "view",
+            "path": "/image with no extension",
+            "filePath": "/image with no extension",
+        }
+    )
+
+    assert not result.isError
+    assert len(result.content) == 1
+    content = result.content[0]
+    assert isinstance(content, mcp_types.ImageContent)
+    assert content.mimeType == Image.MIME[image_format]
+    assert base64.b64decode(content.data) == data
+
+
+@pytest.mark.parametrize("data", [b"\x00binary", b"\xff\xfeinvalid"])
+async def test_file_view_rejects_non_image_binary(data: bytes) -> None:
+    ssh = _FakeSSH(files={"/binary": data})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/binary"})
+
+    assert result.isError
+    assert "expected UTF-8 text or an image" in result_text(result)
+
+
+async def test_file_view_preserves_unicode_text() -> None:
+    text = "Hello, 世界\n"
+    ssh = _FakeSSH(files={"/text.png": text.encode()})
+    tool = ClaudeTextEditorTool(spec=ClaudeTextEditorTool.default_spec("claude"), client=ssh)
+
+    result = await tool.execute({"command": "view", "path": "/text.png"})
+
+    assert not result.isError
+    assert result_text(result) == text

@@ -11,6 +11,7 @@ import asyncssh
 import mcp.types as mcp_types
 
 from hud.agents.tools.base import AgentTool, tool_err, tool_ok
+from hud.agents.tools.file_view import view_file
 from hud.capabilities import SSHClient
 from hud.types import MCPToolResult
 
@@ -58,6 +59,14 @@ class SSHTool(AgentTool[SSHClient]):
             return tool_ok(await self.client.read_text(path))
         except asyncssh.ProcessError as e:
             return tool_err(_remote_error(e))
+
+    async def file_view(self, path: str) -> MCPToolResult:
+        """Read a file as text or image content through SSH exec."""
+        try:
+            data = await self.client.read_bytes(path)
+        except asyncssh.ProcessError as e:
+            return tool_err(_remote_error(e))
+        return view_file(data)
 
     async def file_write(self, path: str, content: str) -> MCPToolResult:
         """Write a text file through SSH exec."""
