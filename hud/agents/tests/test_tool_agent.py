@@ -7,6 +7,8 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 from __future__ import annotations
 
 import asyncio
+import random
+import sys
 from contextlib import AsyncExitStack
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -16,6 +18,7 @@ import fastmcp
 import mcp.types as mcp_types
 import pytest
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from pydantic import ValidationError
 
 from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
@@ -42,10 +45,13 @@ from hud.capabilities import (
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.capabilities.rfb import PngScreenshotEncoding, WebPScreenshotEncoding
 from hud.capabilities.ssh import SSHConnectionError
+from hud.environment.workspace import Workspace
 from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolCall, MCPToolResult, Step, Trace
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from hud.eval.run import Run
 
 _Msg = dict[str, Any]
@@ -824,3 +830,218 @@ async def test_provider_error_stops_without_auto_response(
     assert run.trace.stop_reason == reason
     assert len(run.trace.steps) == 1
     assert run.trace.steps[0].error == "provider failure"
+
+
+# ─── tool result size limit ───────────────────────────────────────────
+
+
+async def _loop_one_call(result: MCPToolResult, **config: Any) -> MCPToolResult:
+    """Run one scripted tool call through the loop; return the recorded result."""
+    agent = DictAgent(
+        [
+            AgentStep(content="", done=False, tool_calls=[MCPToolCall(name="probe")]),
+            AgentStep(content="done", done=True),
+        ],
+        **config,
+    )
+    tool = SimpleNamespace(execute=AsyncMock(return_value=result))
+    run = cast("Run", _FakeRun())
+
+    await agent._loop(run, RunState(tools={"probe": cast("Any", tool)}))
+
+    tool_step = run.trace.steps[1]
+    assert isinstance(tool_step, ToolStep)
+    assert tool_step.result is not None
+    return tool_step.result
+
+
+def _texts(result: MCPToolResult) -> list[str]:
+    texts: list[str] = []
+    for block in result.content:
+        if isinstance(block, mcp_types.TextContent):
+            texts.append(block.text)
+        elif isinstance(block, mcp_types.EmbeddedResource) and isinstance(
+            block.resource, mcp_types.TextResourceContents
+        ):
+            texts.append(block.resource.text)
+    return texts
+
+
+def test_tool_result_limit_defaults_and_rejects_values_too_small_for_the_notice() -> None:
+    assert ToolAgentConfig().max_tool_result_chars == 30_000
+    assert ClaudeConfig().max_tool_result_chars == 30_000
+    assert ToolAgentConfig(max_tool_result_chars=5_000).max_tool_result_chars == 5_000
+    with pytest.raises(ValidationError):
+        ToolAgentConfig(max_tool_result_chars=999)
+
+
+async def test_loop_passes_tool_results_within_the_limit_unchanged() -> None:
+    result = MCPToolResult(
+        content=[mcp_types.TextContent(type="text", text="x" * 900)],
+        structuredContent={"ok": True},
+    )
+
+    recorded = await _loop_one_call(result, max_tool_result_chars=1_000)
+
+    assert recorded == result
+
+
+async def test_loop_keeps_head_and_tail_of_an_oversized_tool_result() -> None:
+    text = "HEAD-" + "x" * 50_000 + "-TAIL"
+    result = MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)], isError=True)
+
+    recorded = await _loop_one_call(result, max_tool_result_chars=2_000)
+
+    (bounded,) = _texts(recorded)
+    assert len(bounded) <= 2_000
+    assert bounded.startswith("HEAD-")
+    assert bounded.endswith("-TAIL")
+    assert "characters omitted" in bounded
+    assert "grep" in bounded
+    assert recorded.isError is True
+
+
+async def test_loop_bounds_text_across_blocks_and_keeps_images() -> None:
+    image = mcp_types.ImageContent(type="image", data="aW1n", mimeType="image/png")
+    result = MCPToolResult(
+        content=[
+            mcp_types.TextContent(type="text", text="A" * 3_000),
+            image,
+            mcp_types.TextContent(type="text", text="B" * 3_000),
+            mcp_types.EmbeddedResource(
+                type="resource",
+                resource=mcp_types.TextResourceContents(uri="file:///c.txt", text="C" * 3_000),
+            ),
+        ]
+    )
+
+    recorded = await _loop_one_call(result, max_tool_result_chars=2_000)
+
+    texts = _texts(recorded)
+    assert sum(len(text) for text in texts) <= 2_000
+    assert recorded.content[1] == image
+    assert texts[0].startswith("A")
+    assert "characters omitted" in texts[0]
+    assert texts[-1] == "C" * len(texts[-1])
+    assert all("B" not in text for text in texts)
+
+
+async def test_loop_turns_an_oversized_structured_only_result_into_bounded_text() -> None:
+    result = MCPToolResult(content=[], structuredContent={"rows": ["r" * 10] * 1_000})
+
+    recorded = await _loop_one_call(result, max_tool_result_chars=2_000)
+
+    assert recorded.structuredContent is None
+    (bounded,) = _texts(recorded)
+    assert len(bounded) <= 2_000
+    assert bounded.startswith('{"rows": ["rrrrrrrrrr"')
+    assert bounded.endswith('"rrrrrrrrrr"]}')
+
+
+async def test_loop_drops_oversized_structured_content_and_keeps_its_text() -> None:
+    result = MCPToolResult(
+        content=[mcp_types.TextContent(type="text", text="summary")],
+        structuredContent={"rows": ["r" * 10] * 1_000},
+    )
+
+    recorded = await _loop_one_call(result, max_tool_result_chars=2_000)
+
+    assert recorded.structuredContent is None
+    assert _texts(recorded) == ["summary"]
+
+
+async def test_bounded_infrastructure_errors_still_trip_the_ssh_failure_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turns = [
+        AgentStep(content="", done=False, tool_calls=[MCPToolCall(name="bash")]) for _ in range(3)
+    ]
+    agent = DictAgent(turns, max_tool_result_chars=1_000)
+    oversized = SSHInfrastructureErrorResult(
+        content=[mcp_types.TextContent(type="text", text="lost " * 10_000)], isError=True
+    )
+    monkeypatch.setattr(agent, "_dispatch_call", AsyncMock(return_value=oversized))
+    run = cast("Run", _FakeRun())
+
+    await agent._loop(run, RunState())
+
+    assert run.trace.error == "SSH tool failure limit reached after 3 consecutive errors"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX workspace semantics")
+async def test_claude_agent_bounds_whole_file_reads_from_a_large_case_room(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A multi-MB attachment read whole (cat of a binary, a full CSV view) once
+    # became a single ~918K-token tool result and overflowed the model's context.
+    root = tmp_path / "case-room"
+    root.mkdir()
+    rng = random.Random(677)
+    (root / "Annual_Report.pdf").write_bytes(b"%PDF-1.7\n" + rng.randbytes(1_500_000))
+    rows = [
+        f"{n},chat,{n % 10}.5,{n % 5 + 1},customer asked about a refund for order {n}"
+        for n in range(30_000)
+    ]
+    (root / "Tickets.csv").write_text(
+        "\n".join(["ticket_id,channel,minutes,csat,summary", *rows]) + "\n"
+    )
+    workspace = Workspace(root)
+    await workspace.start()
+    try:
+        ssh = await SSHClient.connect(workspace.capability())
+        try:
+            bash = ClaudeBashTool(spec=ClaudeBashTool.default_spec("claude-test"), client=ssh)
+            editor = ClaudeTextEditorTool(
+                spec=ClaudeTextEditorTool.default_spec("claude-test"), client=ssh
+            )
+            agent = ClaudeAgent(
+                ClaudeConfig(model="claude-test", model_client=cast("Any", object()))
+            )
+            calls = [
+                MCPToolCall(
+                    id="cat-pdf", name="bash", arguments={"command": "cat Annual_Report.pdf"}
+                ),
+                MCPToolCall(
+                    id="view-csv",
+                    name=editor.provider_name,
+                    arguments={"command": "view", "path": "Tickets.csv"},
+                ),
+                MCPToolCall(
+                    id="view-whole-csv",
+                    name=editor.provider_name,
+                    arguments={"command": "view", "path": "Tickets.csv", "view_range": [1, -1]},
+                ),
+            ]
+            responses = AsyncMock(
+                side_effect=[
+                    AgentStep(content="", done=False, tool_calls=calls),
+                    AgentStep(content="done", done=True),
+                ]
+            )
+            monkeypatch.setattr(agent, "get_response", responses)
+            state = RunState(messages=[], tools={"bash": bash, editor.provider_name: editor})
+            run = cast("Run", _FakeRun())
+
+            await agent._loop(run, state)
+        finally:
+            await ssh.close()
+    finally:
+        await workspace.stop()
+
+    assert run.trace.status == "completed"
+    sent: dict[str, str] = {}
+    for message in state.messages:
+        for block in cast("list[Any]", message["content"]):
+            if block["type"] == "tool_result":
+                sent[block["tool_use_id"]] = "".join(part["text"] for part in block["content"])
+    assert set(sent) == {"cat-pdf", "view-csv", "view-whole-csv"}
+    assert all(len(text) <= 30_000 for text in sent.values())
+    assert sent["cat-pdf"].startswith("$ cat Annual_Report.pdf\n%PDF-1.7")
+    assert sent["cat-pdf"].endswith("(exit 0)")
+    assert sent["view-csv"].startswith("     1\tticket_id,channel")
+    assert sent["view-csv"].endswith(
+        "(Showing lines 1-2000 of 30001. Use view_range [2001, 4000] to continue.)"
+    )
+    assert sent["view-whole-csv"].endswith("(End of file - total 30001 lines)")
+    assert all("characters omitted" in text for text in sent.values())

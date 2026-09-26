@@ -20,12 +20,11 @@ from PIL import Image
 
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from hud.agents.gemini.tools.coding import GeminiEditTool, GeminiShellTool
-from hud.agents.openai.tools.coding import OpenAIShellTool
+from hud.agents.openai.tools.coding import OpenAIShellTool, bound_shell_output
 from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
 from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
-from hud.agents.tools.ssh import bound_shell_output
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, SSHClient
 from hud.types import MCPToolCall
@@ -388,29 +387,6 @@ async def test_shared_ssh_tool_reports_a_signal_returncode(
 
     assert result.isError is True
     assert result_text(result).endswith("(exit -15)")
-
-
-async def test_shared_ssh_tool_bounds_combined_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("hud.agents.tools.ssh.MAX_SHELL_OUTPUT_LENGTH", 80)
-    tool = BashTool(
-        spec=BashTool.default_spec("qwen"),
-        client=_ssh(
-            stdout="stdout-start-" + "a" * 100,
-            stderr="b" * 100 + "-stderr-end",
-        ),
-    )
-
-    result = await tool.execute({"command": "noisy"})
-
-    text = result_text(result)
-    output = text.split("\n", 1)[1].rsplit("\n(exit 0)", 1)[0]
-    stdout, stderr = output.split("\nstderr:\n", 1)
-    assert len(stdout) + len(stderr) == 80
-    assert stdout.startswith("stdout-start-")
-    assert stderr.endswith("-stderr-end")
-    assert "[truncated]" in output
 
 
 async def test_openai_compatible_write_stores_file_via_ssh_exec() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -52,6 +53,93 @@ class DegenerateTurnError(Exception):
 def _message_text(message: mcp_types.PromptMessage) -> str:
     content = message.content
     return content.text if isinstance(content, mcp_types.TextContent) else ""
+
+
+def _block_text(block: mcp_types.ContentBlock) -> str | None:
+    match block:
+        case mcp_types.TextContent():
+            return block.text
+        case mcp_types.EmbeddedResource(resource=mcp_types.TextResourceContents() as resource):
+            return resource.text
+        case _:
+            return None
+
+
+def _with_text(block: mcp_types.ContentBlock, text: str) -> mcp_types.ContentBlock:
+    match block:
+        case mcp_types.TextContent():
+            return block.model_copy(update={"text": text})
+        case mcp_types.EmbeddedResource(resource=mcp_types.TextResourceContents() as resource):
+            return block.model_copy(update={"resource": resource.model_copy(update={"text": text})})
+        case _:
+            raise TypeError(f"{type(block).__name__} carries no text")
+
+
+def _truncation_notice(omitted: int, total: int, limit: int) -> str:
+    return (
+        f"\n\n[... {omitted:,} of {total:,} characters omitted: this tool result exceeded the "
+        f"{limit:,}-character limit. Read large files in smaller line ranges, or narrow "
+        f"command output with grep, head, tail, or sed -n ...]\n\n"
+    )
+
+
+def _bound_tool_result(result: MCPToolResult, limit: int) -> MCPToolResult:
+    """Fit a tool result's model-visible text within ``limit`` characters.
+
+    Text blocks and embedded text resources count toward the limit, as does
+    ``structuredContent`` (providers serialize it to JSON for the model). An
+    oversized result drops ``structuredContent``, keeping its JSON as text only
+    when the result has no text of its own, then keeps the head and tail of the
+    text around a truncation notice. Images and binary resources pass through.
+    """
+    texts = [_block_text(block) for block in result.content]
+    structured = (
+        None
+        if result.structuredContent is None
+        else json.dumps(result.structuredContent, default=str)
+    )
+    total = sum(len(text) for text in texts if text is not None) + len(structured or "")
+    if total <= limit:
+        return result
+
+    content: list[mcp_types.ContentBlock] = list(result.content)
+    if structured is not None and all(text is None for text in texts):
+        content.append(mcp_types.TextContent(type="text", text=structured))
+        texts.append(structured)
+    total = sum(len(text) for text in texts if text is not None)
+    if total <= limit:
+        return result.model_copy(update={"content": content, "structuredContent": None})
+
+    keep = limit - len(_truncation_notice(total, total, limit))
+    head_left, tail_left = (keep + 1) // 2, keep // 2
+    heads: list[int] = []
+    for text in texts:
+        taken = min(len(text or ""), head_left)
+        heads.append(taken)
+        head_left -= taken
+    tails = [0] * len(texts)
+    for index in reversed(range(len(texts))):
+        taken = min(len(texts[index] or "") - heads[index], tail_left)
+        tails[index] = taken
+        tail_left -= taken
+    cut = next(
+        index for index, text in enumerate(texts) if text is not None and heads[index] < len(text)
+    )
+    notice = _truncation_notice(total - keep, total, limit)
+
+    bounded: list[mcp_types.ContentBlock] = []
+    for index, (block, text) in enumerate(zip(content, texts, strict=True)):
+        if text is None:
+            bounded.append(block)
+            continue
+        kept = (
+            text[: heads[index]]
+            + (notice if index == cut else "")
+            + text[len(text) - tails[index] :]
+        )
+        if kept:
+            bounded.append(_with_text(block, kept))
+    return result.model_copy(update={"content": bounded, "structuredContent": None})
 
 
 @dataclass
@@ -221,7 +309,10 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
 
                 for call in step.tool_calls:
                     call_started_at = now_iso()
-                    result = await self._dispatch_call(call, state)
+                    result = _bound_tool_result(
+                        await self._dispatch_call(call, state),
+                        self.config.max_tool_result_chars,
+                    )
                     run.record(ToolStep(call=call, result=result, started_at=call_started_at))
                     msg = self._format_result(call, result, state)
                     if isinstance(msg, list):

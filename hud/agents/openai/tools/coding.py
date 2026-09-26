@@ -8,10 +8,12 @@ from typing import Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH, bound_shell_output
 from hud.types import MCPToolResult
 
 from .base import OpenAIToolSpec
+
+MAX_SHELL_OUTPUT_LENGTH = 10 * 1024 * 1024
+TRUNCATION_MARKER = "[truncated]"
 
 OPENAI_SHELL_SPEC = OpenAIToolSpec(
     api_type="shell",
@@ -125,6 +127,30 @@ def shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
         "stderr": stderr,
         "outcome": {"type": "exit", "exit_code": exit_code},
     }
+
+
+def bound_shell_output(stdout: str, stderr: str, limit: int) -> tuple[str, str]:
+    if len(stdout) + len(stderr) <= limit:
+        return stdout, stderr
+
+    marker = TRUNCATION_MARKER[:limit]
+    available = limit - len(marker)
+    prefix_length = (available + 1) // 2
+    suffix_length = available // 2
+
+    stdout_prefix = stdout[:prefix_length]
+    stderr_prefix = stderr[: max(0, prefix_length - len(stdout))]
+    stderr_suffix = stderr[-suffix_length:] if suffix_length else ""
+    stdout_suffix_length = max(0, suffix_length - len(stderr))
+    stdout_suffix = stdout[-stdout_suffix_length:] if stdout_suffix_length else ""
+
+    if len(stdout_prefix) + len(stdout_suffix) < len(stdout):
+        stdout = stdout_prefix + marker + stdout_suffix
+        stderr = stderr_prefix + stderr_suffix
+    else:
+        stdout = stdout_prefix + stdout_suffix
+        stderr = stderr_prefix + marker + stderr_suffix
+    return stdout, stderr
 
 
 __all__ = ["OPENAI_SHELL_SPEC", "OpenAIShellTool"]
