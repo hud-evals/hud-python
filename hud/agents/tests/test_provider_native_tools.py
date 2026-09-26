@@ -8,10 +8,7 @@ client and assert the command translation + result shape, fully offline.
 from __future__ import annotations
 
 import base64
-import random
 import shlex
-import struct
-import zlib
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
@@ -677,12 +674,8 @@ async def test_file_view_returns_images_as_image_content(
     assert len(result.content) == 1
     content = result.content[0]
     assert isinstance(content, mcp_types.ImageContent)
-    assert content.mimeType == "image/png"
-    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
-        assert viewed.size == (32, 24)
-        pixel = viewed.convert("RGB").getpixel((0, 0))
-        assert isinstance(pixel, tuple)
-        assert pixel[0] >= 250
+    assert content.mimeType == Image.MIME[image_format]
+    assert base64.b64decode(content.data) == data
 
 
 @pytest.mark.parametrize("data", [b"\x00binary", b"\xff\xfeinvalid"])
@@ -705,110 +698,3 @@ async def test_file_view_preserves_unicode_text() -> None:
 
     assert not result.isError
     assert result_text(result) == text
-
-
-@pytest.mark.parametrize("size", [(4000, 2000), (2000, 4000), (2000, 2000)])
-async def test_file_view_resizes_large_images(size: tuple[int, int]) -> None:
-    buffer = BytesIO()
-    Image.new("RGB", size, "white").save(buffer, format="PNG")
-    tool = ClaudeTextEditorTool(
-        spec=ClaudeTextEditorTool.default_spec("claude"),
-        client=_FakeSSH(files={"/image.png": buffer.getvalue()}),
-    )
-
-    result = await tool.execute({"command": "view", "path": "/image.png"})
-
-    assert not result.isError
-    content = result.content[0]
-    assert isinstance(content, mcp_types.ImageContent)
-    assert len(content.data) <= 5_000_000
-    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
-        assert max(viewed.size) <= 1568
-        assert viewed.width * viewed.height <= 1_150_000
-        assert viewed.width / viewed.height == pytest.approx(size[0] / size[1], rel=0.005)
-
-
-async def test_file_view_compresses_noisy_transparent_images() -> None:
-    size = (1072, 1072)
-    image = Image.frombytes("RGBA", size, random.Random(0).randbytes(size[0] * size[1] * 4))
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    assert len(base64.b64encode(buffer.getvalue())) > 5_000_000
-    tool = ClaudeTextEditorTool(
-        spec=ClaudeTextEditorTool.default_spec("claude"),
-        client=_FakeSSH(files={"/image.png": buffer.getvalue()}),
-    )
-
-    result = await tool.execute({"command": "view", "path": "/image.png"})
-
-    assert not result.isError
-    content = result.content[0]
-    assert isinstance(content, mcp_types.ImageContent)
-    assert content.mimeType == "image/jpeg"
-    assert len(content.data) <= 5_000_000
-    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
-        assert viewed.size == size
-        assert viewed.mode == "RGB"
-
-
-async def test_file_view_applies_image_orientation() -> None:
-    image = Image.new("RGB", (40, 20), "red")
-    exif = Image.Exif()
-    exif[274] = 6
-    buffer = BytesIO()
-    image.save(buffer, format="JPEG", exif=exif)
-    tool = ClaudeTextEditorTool(
-        spec=ClaudeTextEditorTool.default_spec("claude"),
-        client=_FakeSSH(files={"/image.jpg": buffer.getvalue()}),
-    )
-
-    result = await tool.execute({"command": "view", "path": "/image.jpg"})
-
-    assert not result.isError
-    content = result.content[0]
-    assert isinstance(content, mcp_types.ImageContent)
-    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
-        assert viewed.size == (20, 40)
-        assert viewed.getexif().get(274, 1) == 1
-
-
-async def test_file_view_preserves_png_transparency() -> None:
-    buffer = BytesIO()
-    Image.new("RGBA", (32, 24), (255, 0, 0, 128)).save(buffer, format="PNG")
-    tool = ClaudeTextEditorTool(
-        spec=ClaudeTextEditorTool.default_spec("claude"),
-        client=_FakeSSH(files={"/image.png": buffer.getvalue()}),
-    )
-
-    result = await tool.execute({"command": "view", "path": "/image.png"})
-
-    assert not result.isError
-    content = result.content[0]
-    assert isinstance(content, mcp_types.ImageContent)
-    assert content.mimeType == "image/png"
-    with Image.open(BytesIO(base64.b64decode(content.data))) as viewed:
-        assert viewed.getpixel((0, 0)) == (255, 0, 0, 128)
-
-
-@pytest.mark.filterwarnings("ignore:Image size.*:PIL.Image.DecompressionBombWarning")
-@pytest.mark.parametrize("size", [(4001, 4000), (10000, 10000)])
-@pytest.mark.parametrize("tool_class", [ClaudeTextEditorTool, ReadTool])
-async def test_file_view_rejects_oversized_source_before_decoding(
-    size: tuple[int, int], tool_class: type[ClaudeTextEditorTool] | type[ReadTool]
-) -> None:
-    buffer = BytesIO()
-    Image.new("RGB", (1, 1)).save(buffer, format="PNG")
-    data = bytearray(buffer.getvalue())
-    data[16:24] = struct.pack(">II", *size)
-    data[29:33] = struct.pack(">I", zlib.crc32(data[12:29]))
-    tool = tool_class(
-        spec=tool_class.default_spec("claude"),
-        client=_FakeSSH(files={"/oversized.png": bytes(data)}),
-    )
-
-    result = await tool.execute(
-        {"command": "view", "path": "/oversized.png", "filePath": "/oversized.png"}
-    )
-
-    assert result.isError
-    assert "16,000,000-pixel source limit" in result_text(result)

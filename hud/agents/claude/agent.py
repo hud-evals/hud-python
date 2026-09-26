@@ -8,7 +8,7 @@ import json
 import logging
 import math
 from random import SystemRandom
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import httpx2
@@ -23,7 +23,6 @@ from anthropic import (
 )
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
-    BetaBase64ImageSourceParam,
     BetaBase64PDFSourceParam,
     BetaImageBlockParam,
     BetaMessage,
@@ -35,12 +34,14 @@ from anthropic.types.beta import (
     BetaToolResultBlockParam,
     BetaToolUnionParam,
 )
+from PIL import Image
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
+from .images import image_source
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from .tools.computer import ClaudeComputerTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
@@ -51,7 +52,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ClaudeImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
 ClaudeToolResultContent = BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
 
 _RETRYABLE_STREAM_ERROR_TYPES = frozenset(
@@ -140,6 +140,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             return None
 
         result_content = result.content
+        image_error = False
         if result.isError:
             error_msg = next(
                 (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
@@ -168,14 +169,19 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                             citations={"enabled": True},
                         )
                 case mcp_types.ImageContent():
-                    block = BetaImageBlockParam(
-                        type="image",
-                        source=BetaBase64ImageSourceParam(
-                            type="base64",
-                            media_type=cast("ClaudeImageMediaType", content.mimeType),
-                            data=content.data,
-                        ),
-                    )
+                    try:
+                        block = BetaImageBlockParam(
+                            type="image",
+                            source=image_source(
+                                content,
+                                preserve_dimensions=isinstance(
+                                    state.tools.get(call.name), ClaudeComputerTool
+                                ),
+                            ),
+                        )
+                    except (ValueError, OSError, Image.DecompressionBombError) as exc:
+                        image_error = True
+                        block = BetaTextBlockParam(type="text", text=f"Cannot view image: {exc}")
                 case mcp_types.EmbeddedResource(
                     resource=mcp_types.BlobResourceContents(mimeType="application/pdf") as resource,
                 ):
@@ -207,6 +213,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     type="tool_result",
                     tool_use_id=tool_use_id,
                     content=claude_blocks,
+                    is_error=bool(result.isError) or image_error,
                 ),
             ],
         )
