@@ -7,7 +7,6 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import sys
 from contextlib import AsyncExitStack
@@ -898,10 +897,7 @@ def test_tool_result_limit_defaults_and_rejects_values_too_small_for_the_notice(
 
 
 async def test_loop_passes_tool_results_within_the_limit_unchanged() -> None:
-    result = MCPToolResult(
-        content=[mcp_types.TextContent(type="text", text="x" * 900)],
-        structuredContent={"ok": True},
-    )
+    result = MCPToolResult(content=[mcp_types.TextContent(type="text", text="x" * 900)])
 
     recorded = await _loop_one_call(result, max_tool_result_chars=1_000)
 
@@ -960,16 +956,21 @@ async def test_loop_turns_an_oversized_structured_only_result_into_bounded_text(
     assert bounded.endswith('"rrrrrrrrrr"]}')
 
 
-async def test_loop_does_not_count_structured_content_that_mirrors_content() -> None:
-    rows = ["r" * 10] * 1_000
+@pytest.mark.parametrize("text", ["summary", "x" * 50_000])
+async def test_recorded_tool_step_holds_only_what_the_model_receives(text: str) -> None:
+    # Providers send structuredContent only when a result has no content, so a
+    # payload beside content must not reach the trace either.
     result = MCPToolResult(
-        content=[mcp_types.TextContent(type="text", text=json.dumps({"rows": rows[:100]}))],
-        structuredContent={"rows": rows},
+        content=[mcp_types.TextContent(type="text", text=text)],
+        structuredContent={"rows": ["r" * 100] * 50_000},
     )
 
     recorded = await _loop_one_call(result, max_tool_result_chars=2_000)
 
-    assert recorded == result
+    assert recorded.structuredContent is None
+    (sent,) = _texts(recorded)
+    assert sent == text if len(text) <= 2_000 else len(sent) <= 2_000
+    assert len(recorded.model_dump_json()) < 3_000
 
 
 async def _loop_openai_shell(
@@ -1131,6 +1132,13 @@ async def test_claude_agent_bounds_whole_file_reads_from_a_large_case_room(
             if block["type"] == "tool_result":
                 sent[block["tool_use_id"]] = "".join(part["text"] for part in block["content"])
     assert set(sent) == {"cat-pdf", "view-csv", "view-whole-csv"}
+    recorded = {
+        step.call.id: step.result
+        for step in run.trace.steps
+        if isinstance(step, ToolStep) and step.call is not None and step.result is not None
+    }
+    assert {call_id: result_text(result) for call_id, result in recorded.items()} == sent
+    assert all(result.structuredContent is None for result in recorded.values())
     assert all(len(text) <= 30_000 for text in sent.values())
     assert sent["cat-pdf"].startswith("$ cat Annual_Report.pdf\n%PDF-1.7")
     assert sent["cat-pdf"].endswith("(exit 0)")

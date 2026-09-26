@@ -84,13 +84,14 @@ def _with_text(block: mcp_types.ContentBlock, text: str) -> mcp_types.ContentBlo
 
 
 def bound_tool_result(result: MCPToolResult, limit: int) -> MCPToolResult:
-    """Fit the text a tool result shows the model within ``limit`` characters.
+    """The tool result as the model receives it, within ``limit`` characters.
 
     The model sees a result's ``content`` (text blocks and embedded text
     resources count), or its ``structuredContent`` as JSON when ``content`` is
-    empty. An oversized result keeps the head and tail of that text around a
-    :func:`truncation_notice`; a structured-only result becomes one bounded text
-    block. Images and binary resources pass through.
+    empty; ``structuredContent`` beside content is dropped. An oversized result
+    keeps the head and tail of its text around a :func:`truncation_notice`; a
+    structured-only result becomes one bounded text block. Images and binary
+    resources pass through.
     """
     if not result.content and result.structuredContent is not None:
         structured = json.dumps(result.structuredContent, default=str)
@@ -100,6 +101,8 @@ def bound_tool_result(result: MCPToolResult, limit: int) -> MCPToolResult:
         return bound_tool_result(
             result.model_copy(update={"content": [text], "structuredContent": None}), limit
         )
+    if result.structuredContent is not None:
+        result = result.model_copy(update={"structuredContent": None})
 
     texts = [_block_text(block) for block in result.content]
     total = sum(len(text) for text in texts if text is not None)
