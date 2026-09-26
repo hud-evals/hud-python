@@ -11,9 +11,8 @@ import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
+from hud.agents.tools.file_view import DEFAULT_VIEW_LINES
 from hud.types import MCPToolResult
-
-DEFAULT_READ_LIMIT = 2000
 
 
 class _FilesystemTool(SSHTool):
@@ -68,7 +67,7 @@ class ReadTool(_FilesystemTool):
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
         offset = _read_offset(arguments.get("offset"))
-        limit = _positive_int(arguments.get("limit"), default=DEFAULT_READ_LIMIT, name="limit")
+        limit = _positive_int(arguments.get("limit"), default=DEFAULT_VIEW_LINES, name="limit")
         if not (await self.bash(f"test -d {shlex.quote(path)}")).isError:
             return await self._read_directory(path, offset=offset, limit=limit)
         result = await self.file_view(path)

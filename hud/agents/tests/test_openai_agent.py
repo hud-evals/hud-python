@@ -59,6 +59,21 @@ def test_format_openai_result_empty_output_emits_one_text_item() -> None:
     assert formatted["output"] == [{"type": "input_text", "text": ""}]
 
 
+def test_format_openai_result_sends_structured_content_only_without_content() -> None:
+    call = MCPToolCall(id="call_1", name="lookup")
+    mirrored = MCPToolResult(
+        content=[mcp_types.TextContent(type="text", text='{"answer": 42}')],
+        structuredContent={"answer": 42},
+    )
+    structured_only = MCPToolResult(content=[], structuredContent={"answer": 42})
+
+    with_content = cast("dict[str, Any]", format_openai_result(call, mirrored))
+    without_content = cast("dict[str, Any]", format_openai_result(call, structured_only))
+
+    assert with_content["output"] == [{"type": "input_text", "text": '{"answer": 42}'}]
+    assert without_content["output"] == [{"type": "input_text", "text": '{"answer": 42}'}]
+
+
 def test_format_computer_result_preserves_screenshot_mime_type() -> None:
     agent = _agent(SimpleNamespace(id="r", output=[]))
     tool = OpenAIComputerTool(spec=OPENAI_COMPUTER_SPEC, client=cast("Any", object()))
