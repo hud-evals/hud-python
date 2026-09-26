@@ -8,6 +8,7 @@ from typing import Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
+from hud.agents.tools.base import truncation_notice
 from hud.types import MCPToolResult
 
 from .base import OpenAIToolSpec
@@ -106,6 +107,30 @@ class OpenAIShellTool(SSHTool):
             },
         )
 
+    def bound_result(self, result: MCPToolResult, limit: int) -> MCPToolResult:
+        """Bound each command's stdout and stderr, which is what the model receives."""
+        structured = result.structuredContent
+        outputs = structured.get("output") if structured is not None else None
+        if structured is None or not isinstance(outputs, list):
+            return super().bound_result(result, limit)
+        commands = cast("list[dict[str, Any]]", outputs)
+        sizes = [len(command["stdout"]) + len(command["stderr"]) for command in commands]
+        total = sum(sizes)
+        if total <= limit:
+            return result
+        notice = truncation_notice(total, limit)
+        bounded: list[dict[str, Any]] = []
+        for command, share in zip(commands, _fair_shares(sizes, limit), strict=True):
+            stdout, stderr = bound_shell_output(
+                command["stdout"], command["stderr"], share, marker=notice
+            )
+            bounded.append({**command, "stdout": stdout, "stderr": stderr})
+        return _shell_result(
+            [command["stdout"] + command["stderr"] for command in bounded],
+            is_error=bool(result.isError),
+            structured={**structured, "output": bounded},
+        )
+
 
 def _shell_result(
     texts: list[str],
@@ -129,11 +154,24 @@ def shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
     }
 
 
-def bound_shell_output(stdout: str, stderr: str, limit: int) -> tuple[str, str]:
+def _fair_shares(sizes: list[int], limit: int) -> list[int]:
+    """Split ``limit`` across outputs: smaller ones whole, larger ones evenly."""
+    shares = [0] * len(sizes)
+    remaining = limit
+    order = sorted(range(len(sizes)), key=sizes.__getitem__)
+    for position, index in enumerate(order):
+        shares[index] = min(sizes[index], remaining // (len(order) - position))
+        remaining -= shares[index]
+    return shares
+
+
+def bound_shell_output(
+    stdout: str, stderr: str, limit: int, *, marker: str = TRUNCATION_MARKER
+) -> tuple[str, str]:
     if len(stdout) + len(stderr) <= limit:
         return stdout, stderr
 
-    marker = TRUNCATION_MARKER[:limit]
+    marker = marker[:limit]
     available = limit - len(marker)
     prefix_length = (available + 1) // 2
     suffix_length = available // 2

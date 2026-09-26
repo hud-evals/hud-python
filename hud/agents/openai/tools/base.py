@@ -37,7 +37,7 @@ def format_openai_result(call: MCPToolCall, result: MCPToolResult) -> ResponseIn
             ResponseInputTextContentParam(type="input_text", text="[tool_error] true"),
         )
 
-    if result.structuredContent is not None:
+    if result.structuredContent is not None and not result.content:
         output_items.append(
             ResponseInputTextContentParam(
                 type="input_text",

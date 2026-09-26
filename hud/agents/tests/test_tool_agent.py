@@ -7,6 +7,7 @@ scripted ``get_response`` so the loop, dispatch, and message formatting run offl
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import sys
 from contextlib import AsyncExitStack
@@ -22,16 +23,18 @@ from pydantic import ValidationError
 
 from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.claude.tools.coding import ClaudeBashTool, ClaudeTextEditorTool
+from hud.agents.openai.agent import OpenAIAgent
 from hud.agents.openai.tools.coding import OpenAIShellTool
 from hud.agents.openai.tools.mcp_proxy import OpenAIMCPProxyTool
 from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
-from hud.agents.tools.base import AgentToolSpec, result_text
+from hud.agents.tools.base import AgentTool, AgentToolSpec, result_text
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult
 from hud.agents.types import (
     AgentStep,
     ClaudeCLIConfig,
     ClaudeConfig,
+    OpenAIConfig,
     ToolAgentConfig,
     ToolStep,
 )
@@ -835,6 +838,26 @@ async def test_provider_error_stops_without_auto_response(
 # ─── tool result size limit ───────────────────────────────────────────
 
 
+class _ProbeTool(AgentTool[CapabilityClient]):
+    """Tool that returns one fixed result."""
+
+    name = "probe"
+    client_type = CapabilityClient
+
+    def __init__(self, result: MCPToolResult) -> None:
+        super().__init__(
+            spec=AgentToolSpec(api_type="probe", api_name="probe"), client=cast("Any", None)
+        )
+        self._result = result
+
+    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+        del arguments
+        return self._result
+
+    def to_params(self) -> dict[str, str]:
+        return {"name": self.name}
+
+
 async def _loop_one_call(result: MCPToolResult, **config: Any) -> MCPToolResult:
     """Run one scripted tool call through the loop; return the recorded result."""
     agent = DictAgent(
@@ -844,10 +867,9 @@ async def _loop_one_call(result: MCPToolResult, **config: Any) -> MCPToolResult:
         ],
         **config,
     )
-    tool = SimpleNamespace(execute=AsyncMock(return_value=result))
     run = cast("Run", _FakeRun())
 
-    await agent._loop(run, RunState(tools={"probe": cast("Any", tool)}))
+    await agent._loop(run, RunState(tools={"probe": _ProbeTool(result)}))
 
     tool_step = run.trace.steps[1]
     assert isinstance(tool_step, ToolStep)
@@ -896,7 +918,7 @@ async def test_loop_keeps_head_and_tail_of_an_oversized_tool_result() -> None:
     assert len(bounded) <= 2_000
     assert bounded.startswith("HEAD-")
     assert bounded.endswith("-TAIL")
-    assert "characters omitted" in bounded
+    assert "output truncated" in bounded
     assert "grep" in bounded
     assert recorded.isError is True
 
@@ -921,7 +943,7 @@ async def test_loop_bounds_text_across_blocks_and_keeps_images() -> None:
     assert sum(len(text) for text in texts) <= 2_000
     assert recorded.content[1] == image
     assert texts[0].startswith("A")
-    assert "characters omitted" in texts[0]
+    assert "output truncated" in texts[0]
     assert texts[-1] == "C" * len(texts[-1])
     assert all("B" not in text for text in texts)
 
@@ -938,16 +960,89 @@ async def test_loop_turns_an_oversized_structured_only_result_into_bounded_text(
     assert bounded.endswith('"rrrrrrrrrr"]}')
 
 
-async def test_loop_drops_oversized_structured_content_and_keeps_its_text() -> None:
+async def test_loop_does_not_count_structured_content_that_mirrors_content() -> None:
+    rows = ["r" * 10] * 1_000
     result = MCPToolResult(
-        content=[mcp_types.TextContent(type="text", text="summary")],
-        structuredContent={"rows": ["r" * 10] * 1_000},
+        content=[mcp_types.TextContent(type="text", text=json.dumps({"rows": rows[:100]}))],
+        structuredContent={"rows": rows},
     )
 
     recorded = await _loop_one_call(result, max_tool_result_chars=2_000)
 
-    assert recorded.structuredContent is None
-    assert _texts(recorded) == ["summary"]
+    assert recorded == result
+
+
+async def _loop_openai_shell(
+    outputs: list[tuple[str, str, int]], monkeypatch: pytest.MonkeyPatch
+) -> dict[str, Any]:
+    """Run one OpenAI shell call through the loop; return the provider output item."""
+    completed = [
+        SimpleNamespace(stdout=stdout, stderr=stderr, returncode=code)
+        for stdout, stderr, code in outputs
+    ]
+    tool = OpenAIShellTool(
+        spec=OpenAIShellTool.default_spec("gpt-test"),
+        client=cast("Any", SimpleNamespace(run=AsyncMock(side_effect=completed))),
+    )
+    agent = OpenAIAgent(OpenAIConfig(model="gpt-test", model_client=cast("Any", object())))
+    call = MCPToolCall(
+        id="call-1",
+        name="shell",
+        arguments={"commands": [f"step-{n}" for n in range(len(outputs))]},
+    )
+    responses = AsyncMock(
+        side_effect=[
+            AgentStep(content="", done=False, tool_calls=[call]),
+            AgentStep(content="done", done=True),
+        ]
+    )
+    state: RunState[Any] = RunState(messages=[], tools={"shell": tool})
+    monkeypatch.setattr(agent, "get_response", responses)
+
+    await agent._loop(cast("Run", _FakeRun()), state)
+
+    (item,) = state.messages
+    return cast("dict[str, Any]", item)
+
+
+async def test_openai_shell_result_under_the_limit_reaches_the_model_intact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs: list[tuple[str, str, int]] = [("b" * 12_000, "", 0), ("", "t" * 8_000, 2)]
+
+    item = await _loop_openai_shell(outputs, monkeypatch)
+
+    assert item["type"] == "shell_call_output"
+    assert item["output"] == [
+        {"stdout": stdout, "stderr": stderr, "outcome": {"type": "exit", "exit_code": code}}
+        for stdout, stderr, code in outputs
+    ]
+    assert item["max_output_length"] == 10 * 1024 * 1024
+
+
+async def test_openai_shell_result_over_the_limit_keeps_per_command_structure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs: list[tuple[str, str, int]] = [
+        ("ok\n", "", 0),
+        ("START-" + "o" * 60_000 + "-END", "", 1),
+        ("", "E-" + "e" * 40_000 + "-LAST", 3),
+    ]
+
+    item = await _loop_openai_shell(outputs, monkeypatch)
+
+    first, second, third = item["output"]
+    assert [entry["outcome"]["exit_code"] for entry in item["output"]] == [0, 1, 3]
+    assert first == {"stdout": "ok\n", "stderr": "", "outcome": {"type": "exit", "exit_code": 0}}
+    assert sum(len(entry["stdout"]) + len(entry["stderr"]) for entry in item["output"]) <= 30_000
+    assert second["stdout"].startswith("START-")
+    assert second["stdout"].endswith("-END")
+    assert "output truncated" in second["stdout"]
+    assert second["stderr"] == ""
+    assert third["stdout"] == ""
+    assert third["stderr"].startswith("E-")
+    assert third["stderr"].endswith("-LAST")
+    assert item["max_output_length"] == 10 * 1024 * 1024
 
 
 async def test_bounded_infrastructure_errors_still_trip_the_ssh_failure_limit(
@@ -1044,4 +1139,4 @@ async def test_claude_agent_bounds_whole_file_reads_from_a_large_case_room(
         "(Showing lines 1-2000 of 30001. Use view_range [2001, 4000] to continue.)"
     )
     assert sent["view-whole-csv"].endswith("(End of file - total 30001 lines)")
-    assert all("characters omitted" in text for text in sent.values())
+    assert all("output truncated" in text for text in sent.values())
