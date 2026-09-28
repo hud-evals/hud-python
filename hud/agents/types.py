@@ -106,6 +106,7 @@ class GeminiConfig(ToolAgentConfig):
     excluded_predefined_functions: list[str] = Field(default_factory=list)
     thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
     include_thoughts: bool = True
+    max_tool_result_chars: int = 64 * 1024
 
 
 # -----------------------------------------------------------------------------

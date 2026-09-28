@@ -35,6 +35,26 @@ from .tools import (
 logger = logging.getLogger(__name__)
 
 
+def _bound_text(text: str, limit: int) -> str:
+    """Keep ``limit`` characters of ``text``, weighted to its tail.
+
+    The kept span is announced so the model can re-run the call scoped to what
+    it needs rather than treating the remainder as absent.
+    """
+    if limit <= 0 or len(text) <= limit:
+        return text
+    head_chars = limit // 5
+    tail_chars = limit - head_chars
+    omitted = len(text) - limit
+    return (
+        f"Output too large: showing the first {head_chars} and last {tail_chars} "
+        f"characters, {omitted} omitted. Re-run scoped to the part you need.\n"
+        f"{text[:head_chars]}\n\n"
+        f"... [{omitted} characters omitted] ...\n\n"
+        f"{text[-tail_chars:]}"
+    )
+
+
 class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     """Gemini agent. Drives SSH (coding/filesystem), RFB (computer), and MCP capabilities."""
 
@@ -67,6 +87,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         self.thinking_level = config.thinking_level
         self.include_thoughts = config.include_thoughts
         self.excluded_predefined_functions = list(config.excluded_predefined_functions)
+        self.max_tool_result_chars = config.max_tool_result_chars
         self.max_recent_turn_with_screenshots = (
             gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
@@ -95,6 +116,8 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
             (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
             None,
         )
+        if text is not None:
+            text = _bound_text(text, self.max_tool_result_chars)
         response: dict[str, Any] = (
             {"error": text or "Tool execution failed"} if result.isError else {"success": True}
         )
