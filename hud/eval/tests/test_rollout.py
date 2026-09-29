@@ -44,6 +44,7 @@ from hud.eval import (
     Taskset,
 )
 from hud.eval.run import Run, rollout
+from hud.graders import EvaluationResult
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 
 
@@ -297,6 +298,48 @@ async def test_malformed_subscores_fail_inside_the_rollout_boundary(
     assert run.trace.is_error
     assert "value" in (run.trace.error or "")
     assert reported == [{}]
+
+
+async def test_grader_crash_leaves_the_run_ungraded() -> None:
+    env = Environment("crashing-grader")
+
+    @env.template()
+    async def solve():
+        yield "answer"
+        raise RuntimeError("grader crashed")
+
+    run = await rollout(
+        Task(env="crashing-grader", id="solve"),
+        _FnAgent(lambda _prompt: "done"),
+        runtime=LocalRuntime(env),
+    )
+    job = Job(id="grader-crash", name="grader-crash", runs=[run])
+
+    assert run.trace.is_error
+    assert "grader crashed" in (run.trace.error or "")
+    assert not run.graded
+    assert job.errors == [run]
+
+
+async def test_error_evaluation_marks_the_run_errored_and_ungraded() -> None:
+    env = Environment("error-evaluation")
+
+    @env.template()
+    async def solve():
+        yield "answer"
+        yield EvaluationResult(isError=True, content="verifier timed out")
+
+    run = await rollout(
+        Task(env="error-evaluation", id="solve"),
+        _FnAgent(lambda _prompt: "done"),
+        runtime=LocalRuntime(env),
+    )
+    job = Job(id="error-evaluation", name="error-evaluation", runs=[run])
+
+    assert run.trace.is_error
+    assert run.trace.error == "verifier timed out"
+    assert not run.graded
+    assert job.errors == [run]
 
 
 async def test_independent_verifier_receives_runtime_session_files(tmp_path: Path) -> None:

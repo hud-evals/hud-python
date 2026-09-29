@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.eval import job as job_mod
-from hud.eval.run import Run
+from hud.eval.run import Grade, Run
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 class _Recorder:
@@ -109,12 +109,50 @@ async def test_trace_exit_omits_metadata_when_extra_empty(recorder: _Recorder) -
     assert "metadata" not in body
 
 
+def _grading_failed(trace_id: str) -> Run:
+    run = _run_with(trace_id, extra={})
+    run.trace.status = "error"
+    run.grade = Grade(content="grader crashed", is_error=True)
+    return run
+
+
+def _failed_before_launch(trace_id: str) -> Run:
+    run = Run.failed("provisioning never finished")
+    run.trace.trace_id = trace_id
+    return run
+
+
+@pytest.mark.parametrize("make_run", [_grading_failed, _failed_before_launch])
+async def test_trace_exit_omits_reward_for_an_ungraded_run(
+    recorder: _Recorder, make_run: Callable[[str], Run]
+) -> None:
+    await job_mod.trace_exit(make_run("abc"))
+
+    _, body = recorder.calls[0]
+    assert body["status"] == "error"
+    assert "reward" not in body
+
+
+async def test_trace_exit_reports_the_verdict_of_an_errored_but_graded_run(
+    recorder: _Recorder,
+) -> None:
+    run = _run_with("abc", extra={})
+    run.trace.status = "error"
+    run.trace.stop_reason = "timeout"
+    run.grade = Grade.from_dict({"score": 0.0})
+
+    await job_mod.trace_exit(run)
+
+    _, body = recorder.calls[0]
+    assert body["status"] == "error"
+    assert body["reward"] == 0.0
+
+
 def test_errored_runs_do_not_deflate_the_job_reward() -> None:
     """Infrastructure failure is never a score: a run that errored (a launch
     failure, or a hosted trace that ended in error) carries no verdict and
     must not drag the job mean down as a silent zero."""
     from hud.eval.job import Job
-    from hud.eval.run import Grade
 
     graded = _run_with("t1", extra={})
     graded.grade = Grade(reward=1.0)

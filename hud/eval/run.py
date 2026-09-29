@@ -185,6 +185,13 @@ class Grade:
             raw=raw,
         )
 
+    @property
+    def error(self) -> str | None:
+        """Why the evaluation failed; ``None`` when it produced a verdict."""
+        if not self.is_error:
+            return None
+        return self.content or "evaluation failed without detail"
+
 
 class Run:
     """Live handle for one task: the task lifecycle plus the agent's ``Trace``.
@@ -254,6 +261,17 @@ class Run:
     def reward(self) -> float:
         """The graded reward (``grade.reward``)."""
         return self.grade.reward
+
+    @property
+    def graded(self) -> bool:
+        """Whether the environment returned a verdict for this run.
+
+        False when the run failed before grading, grading raised, or the
+        evaluation reported ``isError``; ``reward`` is then a placeholder, not
+        a score. A run that timed out or raised mid-run is still graded when
+        its environment returned a valid grade.
+        """
+        return not self.grade.is_error and (bool(self.grade.raw) or not self.trace.is_error)
 
     @property
     def evaluation(self) -> dict[str, Any]:
@@ -379,10 +397,12 @@ class Run:
                     result=evaluation,
                 ),
                 started_at=started_at,
-                error=self.grade.content if self.grade.is_error else None,
+                error=self.grade.error,
             ),
         )
-        if self.trace.status is None:
+        if self.grade.is_error:
+            self.trace.status = "error"
+        elif self.trace.status is None:
             self.trace.status = "completed"
         return False
 
@@ -435,9 +455,11 @@ async def _verify(
                 result=evaluation,
             ),
             started_at=started_at,
-            error=run.grade.content if run.grade.is_error else None,
+            error=run.grade.error,
         )
     )
+    if run.grade.is_error:
+        run.trace.status = "error"
 
 
 async def rollout(
