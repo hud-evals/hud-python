@@ -58,31 +58,22 @@ class Job:
     def reward(self) -> float:
         """Mean reward across graded runs (0.0 when none were graded).
 
-        Infrastructure failures without a verdict are excluded rather than
-        averaged in as zero. A run that timed out or raised after task start
-        still counts when its environment returned a valid grade.
+        Runs without a verdict (:attr:`Run.graded`) are excluded rather than
+        averaged in as zero.
         """
-        graded = [
-            run.reward
-            for run in self.runs
-            if not run.grade.is_error and (run.grade.raw or not run.trace.is_error)
-        ]
+        graded = [run.reward for run in self.runs if run.graded]
         if not graded:
             return 0.0
         return sum(graded) / len(graded)
 
     @property
     def errors(self) -> list[Run]:
-        """Runs that ended without a valid grade and are excluded from reward.
+        """Runs that ended without a verdict and are excluded from reward.
 
         Trace failures remain visible on each run, but a best-effort grade
         keeps a timed-out or mid-run failure out of this infrastructure list.
         """
-        return [
-            run
-            for run in self.runs
-            if run.grade.is_error or (run.trace.is_error and not run.grade.raw)
-        ]
+        return [run for run in self.runs if not run.graded]
 
     @property
     def results(self) -> dict[str, list[Run]]:
@@ -161,7 +152,9 @@ async def trace_exit(run: Run) -> None:
         f"/trace/{run.trace.trace_id}/exit",
         {
             "status": run.trace.status or "completed",
-            "reward": run.reward,
+            # An ungraded run reports no reward so the platform does not
+            # aggregate an infrastructure failure as a 0.0 score.
+            "reward": run.reward if run.graded else None,
             # Recovered step errors stay on the steps; only an errored run
             # reports a trace-level error.
             "error": run.trace.error if run.trace.is_error else None,

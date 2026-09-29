@@ -26,6 +26,7 @@ The live handle for one task - the lifecycle plus the agent's `Trace`. You get t
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
 | `run.grade` | `Grade` | Structured grade result. |
 | `run.reward` | `float` | The graded reward (`grade.reward`, set on exit). |
+| `run.graded` | `bool` | Whether the environment returned a verdict. False when the run failed before grading, grading raised, or the evaluation reported `isError`; such a run reports no reward to the platform and is excluded from `job.reward`. |
 | `run.evaluation` | `dict` | The raw grade payload (`grade.raw`). |
 | `run.runtime` | `str \| None` | Control-channel url the run executed against (the placement record). |
 | `run.trace_id` | `str \| None` | Keys the trajectory for training. |
@@ -63,12 +64,13 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 | `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
-| `reward` | `float` | Property: mean reward across runs (`0.0` for an empty job). |
+| `reward` | `float` | Property: mean reward across graded runs (`0.0` when none were graded). |
+| `errors` | `list[Run]` | Property: runs without a verdict (`not run.graded`), excluded from `reward`. |
 | `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
 
 ```python
 job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
-print(job.reward)   # mean across every run
+print(job.reward)   # mean across graded runs
 ```
 
 Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
