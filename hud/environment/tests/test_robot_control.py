@@ -147,15 +147,18 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
 
     assert agent.tools == {"observe", "move_to"}  # the ee_abs contract picked the tool
     assert run.reward == 1.0  # graded by the sim, not the tools
-    # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
-    reach_x, close = np.array(sim.actions[:50]), sim.actions[50:]
+    # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference,
+    # then a 0.5 s settle at the target.
+    reach_x, settle, close = np.array(sim.actions[:50]), sim.actions[50:55], sim.actions[55:]
     np.testing.assert_allclose(reach_x[:, 0], np.linspace(0.01, 0.5, 50), rtol=1e-6)
     np.testing.assert_allclose(reach_x[:, 1], 0.0)
-    # max_step lets the gripper switch in one tick while x holds its commanded target.
+    np.testing.assert_allclose(settle, [[0.5, 0.0]] * 5)
+    # max_step lets the gripper switch in one tick while x holds its commanded target;
+    # the sim succeeds on that tick, which ends the episode mid-settle.
     np.testing.assert_allclose(close, [[0.5, 1.0]])
     observed, reached, closed = agent.results
     assert [block.type for block in observed.content] == ["text", "text", "image"]
-    assert "Played 50 steps (5.0 s)." in _text(reached)
+    assert "Played 55 steps (5.5 s)." in _text(reached)
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "The episode has ended" in _text(closed)
 
@@ -168,7 +171,8 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert agent.tools == {"observe", "move_by"}
-    np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4)
+    # Four in-box steps, then the settle holds still with zero displacement.
+    np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4 + [[0.0, 0.0]] * 5)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
 
 
@@ -176,6 +180,7 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
     ("call", "error"),
     [
         (_move("move_to", "targets", z=0.1), "unknown dimension(s) ['z']"),
+        (_move("move_to", "targets", grip=1.0), "unknown dimension(s) ['grip']; valid: x"),
         (_move("move_to", "targets", x=1.5), "x=1.5 is outside [0, 1]"),
         (_move("move_to", "targets", x=1.0), "over the 10 s per-call cap"),
     ],
@@ -186,7 +191,7 @@ async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(call)
 
-    async with _served(sim, DirectControl(speed=0.05)) as env:
+    async with _served(sim, DirectControl(dims=["x"], speed=0.05)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     (result,) = agent.results

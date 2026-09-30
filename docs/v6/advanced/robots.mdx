@@ -601,7 +601,9 @@ A few embodiment facts can't be read off the contract, so the environment states
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
+| `dims` | every action dimension | The dimensions a call may address; the rest hold their commanded value. |
 | `max_step` | `{}` | Per-dimension step override by name, such as a binary gripper that switches in one step. |
+| `settle` | `0.5` | Seconds each move holds its end so the controller and gripper settle before the frames are taken. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
 

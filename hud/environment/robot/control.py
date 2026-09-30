@@ -74,10 +74,14 @@ class DimValue(BaseModel):
 class DirectControl:
     """Serve a ``robot`` capability's action space as MCP motion tools.
 
+    - ``dims`` - the action dimensions a call may address (default: all); the
+      rest hold their commanded value.
     - ``speed`` - absolute moves travel this fraction of each dimension's range
       per second.
     - ``max_step`` - per-dimension step override by action name (e.g. a binary
       gripper that should switch in one step).
+    - ``settle`` - seconds each move holds its end (a zero displacement) so the
+      controller and gripper settle before the frames are taken.
     - ``reference`` - maps observation data to the current action-space vector,
       where an absolute move starts on an episode's first call (later moves
       start from the last commanded target). Default: the one observation
@@ -91,15 +95,19 @@ class DirectControl:
         *,
         robot: str = "robot",
         name: str = "control",
+        dims: list[str] | None = None,
         speed: float = 0.1,
         max_step: dict[str, float] | None = None,
+        settle: float = 0.5,
         reference: Callable[[dict[str, NDArray[Any]]], NDArray[Any]] | None = None,
         notes: str = "",
     ) -> None:
         self.robot = robot
         self.name = name
+        self.dims = dims
         self.speed = speed
         self.max_step = max_step or {}
+        self.settle = settle
         self.reference = reference
         self.notes = notes
         self._lock = asyncio.Lock()  # a slot takes one wire connection at a time
@@ -134,6 +142,9 @@ class DirectControl:
             )
         tool, self._absolute = MOTION_TOOLS[action["type"]]
         self._names: list[str] = list(action["names"])
+        self._dims = self.dims or self._names
+        if unknown := set(self._dims) - set(self._names):
+            raise ValueError(f"dims {sorted(unknown)} are not action dimensions {self._names}")
         bounds = action.get("limits") or action["stats"]
         self._low = np.asarray(bounds["min"], dtype=np.float64)
         self._high = np.asarray(bounds["max"], dtype=np.float64)
@@ -200,8 +211,9 @@ class DirectControl:
 
     def _describe(self) -> str:
         bounds = ", ".join(
-            f"{n} [{lo:.4g}, {hi:.4g}]"
-            for n, lo, hi in zip(self._names, self._low, self._high, strict=True)
+            f"{n} [{self._low[i]:.4g}, {self._high[i]:.4g}]"
+            for i, n in enumerate(self._names)
+            if n in self._dims
         )
         if self._absolute:
             motion = (
@@ -245,9 +257,9 @@ class DirectControl:
         """The ``[ticks, dim]`` action rows that realize *values*."""
         if not values:
             raise ToolError("name at least one action dimension")
-        unknown = [v.name for v in values if v.name not in self._names]
+        unknown = [v.name for v in values if v.name not in self._dims]
         if unknown:
-            raise ToolError(f"unknown dimension(s) {unknown}; valid: {', '.join(self._names)}")
+            raise ToolError(f"unknown dimension(s) {unknown}; valid: {', '.join(self._dims)}")
         # Absolute moves start at the commanded target (the reference on an episode's
         # first move); a displacement starts at zero.
         start = np.zeros(len(self._names))
@@ -271,9 +283,12 @@ class DirectControl:
                 f"that motion needs {ticks / self._rate:.1f} s, over the {MAX_CALL_S:g} s "
                 "per-call cap; split it into smaller moves"
             )
+        hold = round(self.settle * self._rate)
         if self._absolute:
-            return start + span * np.linspace(1 / ticks, 1, ticks)[:, None]
-        return np.repeat((span / ticks)[None], ticks, axis=0)
+            motion = start + span * np.linspace(1 / ticks, 1, ticks)[:, None]
+            return np.vstack([motion, np.repeat(end[None], hold, axis=0)])
+        steps = np.repeat((span / ticks)[None], ticks, axis=0)
+        return np.vstack([steps, np.zeros((hold, len(self._names)))])
 
     def _render(self, obs: dict[str, Any], played: int) -> Content:
         data = obs["data"]
