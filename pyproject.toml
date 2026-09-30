@@ -152,7 +152,9 @@ robot = [
     "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
     "av>=12",  # PyAV (ffmpeg): H.264/CMAF camera-frame video streaming for traces
     "gymnasium>=1.0",  # registry ids and gym-style env bridges
-    "rerun-sdk>=0.24",  # Rerun viewer + .rrd recording (lazy; episode flag is opt-in)
+    # 0.23.2+ requires numpy 2, which openpi-client rejects. 0.23.1 is the
+    # last viewer that installs beside the robot wire codec.
+    "rerun-sdk>=0.23.1,<0.23.2",
     "pillow>=10",  # JPEG camera frames in that recording
 ]
 
