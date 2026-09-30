@@ -20,7 +20,7 @@ import numpy as np
 
 from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
-from hud.telemetry.robot import TraceRecorder
+from hud.telemetry.robot import RerunView, TraceRecorder
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
@@ -47,6 +47,9 @@ class RobotAgent(Agent):
     #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair.
     #: Telemetry streams regardless; see :mod:`.dataset`.
     save: bool = False
+    #: Opt-in Rerun view. ``True`` opens a viewer and writes ``rerun/episode_*.rrd``.
+    #: Pass a :class:`~hud.telemetry.robot.RerunView` for file-only or a remote viewer.
+    rerun: bool | RerunView = False
 
     #: Runs the policy (preprocess -> forward -> postprocess). Subclasses set this.
     model: Model | None = None
@@ -94,6 +97,7 @@ class RobotAgent(Agent):
                 from .dataset import DatasetWriter
 
                 writer = DatasetWriter(robot.contract, fps=fps)
+            view = self._rerun_view(action_space, obs_space)
 
             print(f"[agent] episode started: {prompt!r}", flush=True)
             try:
@@ -103,6 +107,7 @@ class RobotAgent(Agent):
                     prompt,
                     recorder,
                     writer,
+                    view,
                     max_steps=self.max_steps if max_steps is None else max_steps,
                 )
             finally:
@@ -110,11 +115,30 @@ class RobotAgent(Agent):
                 # further actions doesn't stall co-located peers at the barrier.
                 await robot.close()
                 recorder.close()
+                if view is not None:
+                    view.close()
                 if writer is not None:
                     writer.end_episode()
         finally:
             await robot.close()
         run.trace.content = "done"
+
+    def _rerun_view(
+        self, action_space: dict[str, Any], obs_space: dict[str, Any]
+    ) -> RerunView | None:
+        """Start the opt-in view, or return None when this episode is not recording."""
+        if not self.rerun:
+            return None
+        view = RerunView(spawn=True) if self.rerun is True else self.rerun
+        view.bind(obs_space, action_space)
+        view.start()
+        if view.resolved_recording_path is not None:
+            print(f"[agent] rerun: {view.resolved_recording_path}", flush=True)
+        elif view.connect_url is not None:
+            print(f"[agent] rerun: {view.connect_url}", flush=True)
+        else:
+            print("[agent] rerun: live viewer", flush=True)
+        return view
 
     async def _loop(
         self,
@@ -123,6 +147,7 @@ class RobotAgent(Agent):
         prompt: str,
         recorder: TraceRecorder,
         writer: Any,
+        view: RerunView | None,
         *,
         max_steps: int,
     ) -> None:
@@ -137,6 +162,8 @@ class RobotAgent(Agent):
             recorder.record_observation(obs["data"], tick=step)
             # Stop before acting, including on a pre-terminated first observation.
             if self.should_stop(obs, step=step, max_steps=max_steps):
+                if view is not None:
+                    view.log(tick=step, data=obs["data"], terminated=True)
                 if step:
                     print(f"[agent] stopped at step {step}", flush=True)
                 break
@@ -158,13 +185,18 @@ class RobotAgent(Agent):
                 action = adapter.adapt_action(action, obs)
             if writer is not None:
                 writer.add(obs["data"], np.asarray(action), task=prompt)
+            seen = obs["data"]
             await robot.send_action(action)
 
             if self.log_every and step % self.log_every == 0:
                 print(f"[agent] step {step}/{max_steps}", flush=True)
             obs = await robot.get_observation()
             # Env-reported per-step reward (RL wire sibling) → the trace total.
-            if (reward := obs.get("reward")) is not None:
+            reward = obs.get("reward")
+            if view is not None:
+                # Pre-action frame + the action just sent. Reward rides the result obs.
+                view.log(tick=step, data=seen, action=action, reward=reward)
+            if reward is not None:
                 recorder.add_reward(reward)
         else:
             print(f"[agent] reached max_steps={max_steps}", flush=True)
