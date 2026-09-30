@@ -17,12 +17,15 @@ import threading
 from collections import deque
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import numpy as np
 
 from hud.agents.types import ObservationStep
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ class _Step:
     """One control tick, copied so the env can reuse its buffers."""
 
     tick: int
-    images: tuple[tuple[str, np.ndarray], ...]
+    images: tuple[tuple[str, NDArray[Any]], ...]
     state: tuple[tuple[str, tuple[tuple[str, float], ...]], ...]
     action: tuple[tuple[str, float], ...] | None
     reward: float | None
@@ -101,7 +104,9 @@ class RerunView:
         self._failed = False
         self._worker: threading.Thread | None = None
         self._rr: Any = None
-        self._rec: Any = None
+        # One stream per destination. This rerun-sdk has no set_sinks, so a
+        # viewer and a file are two recordings of the same ticks.
+        self._recs: list[Any] = []
         self._blueprint_sent = False
         self._dropped_frames = 0
         self._dropped_steps = 0
@@ -122,7 +127,7 @@ class RerunView:
         self._failed = False
         self._warned = False
         self._blueprint_sent = False
-        self._rec = None
+        self._recs = []
         self._rr = None
         with self._cond:
             self._queue.clear()
@@ -183,8 +188,8 @@ class RerunView:
         self._recording_dir.mkdir(parents=True, exist_ok=True)
         return self._recording_dir / f"episode_{uuid4().hex[:8]}.rrd"
 
-    def _images(self, data: dict[str, Any]) -> tuple[tuple[str, np.ndarray], ...]:
-        frames: list[tuple[str, np.ndarray]] = []
+    def _images(self, data: dict[str, Any]) -> tuple[tuple[str, NDArray[Any]], ...]:
+        frames: list[tuple[str, NDArray[Any]]] = []
         for name, value in data.items():
             feature = self._obs_space.get(name)
             typed = isinstance(feature, dict) and feature.get("type") in _IMAGE_TYPES
@@ -246,7 +251,7 @@ class RerunView:
                 if not self._queue:
                     break
                 step = self._queue.popleft()
-            if self._rec is None:
+            if not self._recs:
                 continue
             try:
                 self._emit(step)
@@ -254,14 +259,12 @@ class RerunView:
                 if not self._warned:
                     self._warned = True
                     logger.warning("RerunView failed to log a step (%s)", exc)
-        rec = self._rec
-        if rec is None:
-            return
-        try:
-            rec.flush(timeout_sec=self._flush_timeout)
-            rec.disconnect()
-        except Exception as exc:
-            logger.warning("RerunView flush failed: %s", exc)
+        for rec in self._recs:
+            try:
+                rec.flush(blocking=True)
+                rec.disconnect()
+            except Exception as exc:
+                logger.warning("RerunView flush failed: %s", exc)
 
     def _open(self) -> None:
         try:
@@ -273,59 +276,61 @@ class RerunView:
             self._failed = True
             return
         try:
-            rec = rr.RecordingStream("hud_robot", make_default=False, make_thread_default=False)
-            self._attach(rr, rec)
+            self._recs = self._open_streams(rr)
         except Exception as exc:
             self._failed = True
+            self._recs = []
             logger.warning("RerunView disabled: %s", exc)
             return
         self._rr = rr
-        self._rec = rec
 
-    def _attach(self, rr: Any, rec: Any) -> None:
+    def _open_streams(self, rr: Any) -> list[Any]:
+        recs: list[Any] = []
         path = self.resolved_recording_path
-        if self.spawn:
+        if path is not None:
+            rec = rr.RecordingStream("hud_robot", make_default=False, make_thread_default=False)
+            rec.save(path)
+            recs.append(rec)
+        if self.spawn or self.connect_url is not None:
+            live = rr.RecordingStream("hud_robot", make_default=False, make_thread_default=False)
             try:
-                # connect=False: the viewer process starts, set_sinks does the tee.
-                rec.spawn(port=self._spawn_port, connect=False, memory_limit="2GiB")
-                sinks: list[Any] = [rr.GrpcSink(f"rerun+http://127.0.0.1:{self._spawn_port}/proxy")]
-                if path is not None:
-                    sinks.append(rr.FileSink(str(path)))
-                rec.set_sinks(*sinks)
-                return
+                if self.spawn:
+                    live.spawn(port=self._spawn_port, memory_limit="2GiB")
+                elif self.connect_url is not None:
+                    live.connect_grpc(self.connect_url)
             except Exception as exc:
-                if path is None:
+                if not recs:
                     raise
                 logger.warning("Rerun viewer did not start (%s); recording %s", exc, path)
-        if self.connect_url is not None:
-            sinks = [rr.GrpcSink(self.connect_url)]
-            if path is not None:
-                sinks.append(rr.FileSink(str(path)))
-            rec.set_sinks(*sinks)
-            return
-        if path is not None:
-            rec.save(path)
+            else:
+                recs.append(live)
+        if not recs:
+            raise RuntimeError("RerunView has no viewer and no file")
+        return recs
 
     def _emit(self, step: _Step) -> None:
-        rr, rec = self._rr, self._rec
+        rr = self._rr
         if not self._blueprint_sent:
             self._blueprint_sent = True
-            self._send_blueprint(rr, rec, step)
-        rec.set_time("step", sequence=step.tick)
-        for name, image in step.images:
-            rec.log(f"camera/{name}", self._encoded(rr, image))
-        for group, rows in step.state:
-            for label, value in rows:
-                rec.log(f"state/{group}/{label}", rr.Scalars(value))
-        if step.action is not None:
-            for label, value in step.action:
-                rec.log(f"action/{label}", rr.Scalars(value))
-        if step.reward is not None:
-            rec.log("reward", rr.Scalars(step.reward))
-        if step.terminated:
-            rec.log("event/terminated", rr.TextLog("terminated"))
+            for rec in self._recs:
+                self._send_blueprint(rr, rec, step)
+        frames = {name: self._encoded(rr, frame) for name, frame in step.images}
+        for rec in self._recs:
+            rec.set_time("step", sequence=step.tick)
+            for name, frame in frames.items():
+                rec.log(f"camera/{name}", frame)
+            for group, rows in step.state:
+                for label, value in rows:
+                    rec.log(f"state/{group}/{label}", rr.Scalars(value))
+            if step.action is not None:
+                for label, value in step.action:
+                    rec.log(f"action/{label}", rr.Scalars(value))
+            if step.reward is not None:
+                rec.log("reward", rr.Scalars(step.reward))
+            if step.terminated:
+                rec.log("event/terminated", rr.TextLog("terminated"))
 
-    def _encoded(self, rr: Any, image: np.ndarray) -> Any:
+    def _encoded(self, rr: Any, image: NDArray[Any]) -> Any:
         logged = rr.Image(np.ascontiguousarray(image))
         if self._jpeg_quality is None:
             return logged
