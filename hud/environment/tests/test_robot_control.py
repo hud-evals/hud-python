@@ -82,11 +82,14 @@ class _ScriptedLLM(Agent):
         super().__init__()
         self.calls = calls
         self.tools: set[str] = set()
+        self.schemas: dict[str, dict[str, Any]] = {}
         self.results: list[MCPToolResult] = []
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))
-        self.tools = {tool.name for tool in await client.list_tools()}
+        listed = await client.list_tools()
+        self.tools = {tool.name for tool in listed}
+        self.schemas = {tool.name: tool.inputSchema for tool in listed}
         for name, arguments in self.calls:
             self.results.append(await client.call_tool(name, arguments))
         run.trace.content = "done"
@@ -99,6 +102,7 @@ async def _served(sim: _Arm, control: DirectControl) -> AsyncIterator[Environmen
     server = await sim.serve_control()
     env = Environment("arm")
     endpoint = RobotEndpoint.remote("127.0.0.1", server.sockets[0].getsockname()[1]).attach(env)
+    control.attach(endpoint)
 
     @env.initialize
     async def _up() -> None:
@@ -109,8 +113,6 @@ async def _served(sim: _Arm, control: DirectControl) -> AsyncIterator[Environmen
     @env.shutdown
     async def _down() -> None:
         await endpoint.stop()
-
-    control.attach(env)
 
     @env.template()
     async def reach() -> AsyncGenerator[Any, Any]:
@@ -131,13 +133,15 @@ def _text(result: MCPToolResult) -> str:
 
 
 def _move(tool: str, key: str, **values: float) -> tuple[str, dict[str, Any]]:
-    return tool, {key: [{"name": name, "value": value} for name, value in values.items()]}
+    return tool, {
+        key: [{"name": name, "value": value} for name, value in values.items()],
+        "note": "move toward the goal",
+    }
 
 
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(
-        ("observe", {}),
         _move("move_to", "targets", x=0.5),
         _move("move_to", "targets", grip=1.0),
     )
@@ -145,7 +149,8 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
         run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert agent.tools == {"observe", "move_to"}  # the ee_abs contract picked the tool
+    assert agent.tools == {"move_to"}  # the ee_abs contract picked the tool; no observe
+    assert set(agent.schemas["move_to"]["required"]) == {"targets", "note"}
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference,
     # then a 0.5 s settle at the target.
@@ -156,8 +161,8 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # max_step lets the gripper switch in one tick while x holds its commanded target;
     # the sim succeeds on that tick, which ends the episode mid-settle.
     np.testing.assert_allclose(close, [[0.5, 1.0]])
-    observed, reached, closed = agent.results
-    assert [block.type for block in observed.content] == ["text", "text", "image"]
+    reached, closed = agent.results
+    assert [block.type for block in reached.content] == ["text", "text", "image"]
     assert "Played 55 steps (5.5 s)." in _text(reached)
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "The episode has ended" in _text(closed)
@@ -170,7 +175,7 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert agent.tools == {"observe", "move_by"}
+    assert agent.tools == {"move_by"}
     # Four in-box steps, then the settle holds still with zero displacement.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4 + [[0.0, 0.0]] * 5)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
@@ -183,6 +188,10 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
         (_move("move_to", "targets", grip=1.0), "unknown dimension(s) ['grip']; valid: x"),
         (_move("move_to", "targets", x=1.5), "x=1.5 is outside [0, 1]"),
         (_move("move_to", "targets", x=1.0), "over the 10 s per-call cap"),
+        (
+            ("move_to", {"targets": [{"name": "x", "value": 0.1}], "note": "  "}),
+            "note must say",
+        ),
     ],
 )
 async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(

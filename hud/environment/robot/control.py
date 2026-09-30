@@ -16,7 +16,7 @@ the playout, and ``rgb`` observations are the frames returned::
 
     env = Environment(name="my-sim")
     sim = env.gym(make_env)
-    DirectControl(notes="Gripper: -1 open, +1 closed.").attach(env)
+    DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
 Single-env sims only: a tool call claims the sole slot (no slot token).
 """
@@ -25,18 +25,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import io
 import math
 import socket
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import numpy as np
-import uvicorn
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from mcp.types import ImageContent, TextContent
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from hud.environment import Environment
+    from hud.environment.robot.endpoint import RobotEndpoint
 
 #: Contract action ``type`` -> (motion tool, whether its values are absolute targets).
 MOTION_TOOLS: dict[str, tuple[str, bool]] = {
@@ -69,6 +69,18 @@ class DimValue(BaseModel):
 
     name: str
     value: float
+
+
+#: Required on every motion call so the transcript records what the model saw and why.
+MotionNote = Annotated[
+    str,
+    Field(
+        description=(
+            "What you observe right now in the frames and state, and why you chose this motion. "
+            "One or two plain sentences."
+        )
+    ),
+]
 
 
 class DirectControl:
@@ -112,25 +124,18 @@ class DirectControl:
         self.notes = notes
         self._lock = asyncio.Lock()  # a slot takes one wire connection at a time
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
-        self._uvicorn: uvicorn.Server | None = None
         self._serving: asyncio.Task[None] | None = None
+        self._capability: Capability | None = None
 
-    def attach(self, env: Environment) -> DirectControl:
-        """Serve alongside *env*'s ``robot`` capability; call after declaring it."""
-
-        @env.initialize
-        async def _up() -> None:
-            env.add_capability(await self.start(env.capability(self.robot)))
-
-        @env.shutdown
-        async def _down() -> None:
-            await self.stop()
-
-        env._on_task_teardown.append(self._end_episode)
+    def attach(self, endpoint: RobotEndpoint) -> DirectControl:
+        """Register with a robotics endpoint, which owns serving and episode lifecycle."""
+        endpoint.add_direct_control(self)
         return self
 
     async def start(self, robot: Capability) -> Capability:
         """Serve the tools derived from *robot*'s contract; returns their ``mcp`` capability."""
+        if self._capability is not None:
+            return self._capability
         self._robot = robot
         contract = robot.params["contract"]
         features: dict[str, dict[str, Any]] = contract["features"]
@@ -176,38 +181,43 @@ class DirectControl:
             self._reference = lambda data: data[wide[0]]
 
         server = FastMCP(name=self.name)
-        server.tool(
-            self.observe,
-            description="Look without moving: the current camera frames and robot state.",
-            output_schema=None,
-        )
         move = self.move_to if self._absolute else self.move_by
         server.tool(move, name=tool, description=self._describe(), output_schema=None)
-        sock = socket.create_server(("127.0.0.1", 0))
-        self._uvicorn = uvicorn.Server(uvicorn.Config(server.http_app(), log_level="warning"))
-        self._serving = asyncio.create_task(self._uvicorn.serve(sockets=[sock]))
-        return Capability.mcp(name=self.name, url=f"http://127.0.0.1:{sock.getsockname()[1]}/mcp")
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        self._serving = asyncio.create_task(
+            server.run_async(
+                transport="http",
+                host="127.0.0.1",
+                port=port,
+                show_banner=False,
+            )
+        )
+        await _wait_until_listening(self._serving, port)
+        self._capability = Capability.mcp(name=self.name, url=f"http://127.0.0.1:{port}/mcp")
+        return self._capability
 
     async def stop(self) -> None:
-        if self._uvicorn is None or self._serving is None:
+        if self._serving is None:
             return
-        self._uvicorn.should_exit = True
-        await self._serving
-        self._uvicorn = self._serving = None
+        self._serving.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._serving
+        self._serving = None
+        self._capability = None
 
-    async def _end_episode(self) -> None:
+    def reset(self) -> None:
+        """Clear the last absolute target before a robotics endpoint starts an episode."""
         self._command = None
 
     # ── tools ──────────────────────────────────────────────────────────────
 
-    async def observe(self) -> Content:
-        return await self._play(None)
+    async def move_to(self, targets: list[DimValue], note: MotionNote) -> Content:
+        return await self._play(targets, note)
 
-    async def move_to(self, targets: list[DimValue]) -> Content:
-        return await self._play(targets)
-
-    async def move_by(self, deltas: list[DimValue]) -> Content:
-        return await self._play(deltas)
+    async def move_by(self, deltas: list[DimValue], note: MotionNote) -> Content:
+        return await self._play(deltas, note)
 
     def _describe(self) -> str:
         bounds = ", ".join(
@@ -227,19 +237,23 @@ class DirectControl:
             )
         return (
             f"{motion} One call plays at most {MAX_CALL_S:g} s; split longer moves. "
-            f"Returns the camera frames and state the motion ends on. "
+            f"Returns the camera frames and state the motion ends on. Include a note saying "
+            f"what you see and why you chose the motion. "
             f"Dimensions and bounds: {bounds}. {self.notes}"
         ).strip()
 
     # ── the wire ───────────────────────────────────────────────────────────
 
-    async def _play(self, values: list[DimValue] | None) -> Content:
+    async def _play(self, values: list[DimValue], note: str) -> Content:
         """Plan *values* against the live observation, play it out, and render the result."""
+        # The note stays on the tool call; an empty one is a correctable miss, not a move.
+        if not note.strip():
+            raise ToolError("note must say what you see and why you chose this motion")
         async with self._lock:
             client = await RobotClient.connect(self._robot)
             try:
                 obs = await client.get_observation()
-                rows = [] if values is None or obs["terminated"] else self._plan(values, obs)
+                rows = [] if obs["terminated"] else self._plan(values, obs)
                 played = 0
                 for row in rows:
                     await client.send_action(row)
@@ -318,6 +332,22 @@ def _png(frame: NDArray[Any]) -> str:
     buffer = io.BytesIO()
     Image.fromarray(np.asarray(frame, dtype=np.uint8)).save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode()
+
+
+async def _wait_until_listening(task: asyncio.Task[None], port: int) -> None:
+    """Wait for FastMCP's loopback listener, surfacing startup failure."""
+    while True:
+        if task.done():
+            await task
+            raise RuntimeError("direct-control MCP server stopped during startup")
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+        except OSError:
+            await asyncio.sleep(0.01)
+            continue
+        writer.close()
+        await writer.wait_closed()
+        return
 
 
 __all__ = ["MOTION_TOOLS", "DimValue", "DirectControl"]

@@ -567,8 +567,8 @@ from hud import Environment
 from hud.environment.robot import DirectControl
 
 env = Environment(name="my-sim")
-sim = env.gym(make_env)
-DirectControl(notes="Gripper: -1 open, +1 closed.").attach(env)  # after the robot capability
+sim = env.gym(make_env)  # a RobotEndpoint
+DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
 
 @env.template()
@@ -582,6 +582,11 @@ async def episode(seed: int = 0):
 hud eval env.py openai --model gpt-6-astra --max-steps 40
 ```
 
+`attach` registers the profile on that endpoint, which is robotics code. Publishing
+`sim.capabilities()` starts the MCP server from the `robot` contract, `reset` clears the
+commanded target for the new episode, and `stop` shuts the server down. Nothing in the generic
+environment, server, or tool loop knows about direct control.
+
 The [contract](#contract) derives the tool surface:
 
 | Contract field | Tool surface |
@@ -592,9 +597,11 @@ The [contract](#contract) derives the tool surface:
 | `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second, at most 10 s per call. |
 | `rgb` observations and the rest | The camera frames and labeled state every call returns. |
 
-An `observe` tool returns the same frames and state without moving. Each call is its own short
-connection on the `robot` wire, so the sim holds still while the model thinks, and the episode ends
-when the model stops calling tools. The template grades it as usual.
+There is no `observe` tool. Every motion call returns the camera frames and labeled state it
+ended on, so the model does not choose whether to look. Each call is its own short connection on
+the `robot` wire, so the sim holds still while the model thinks. A call also takes a required
+`note`: what the model sees and why it chose the motion. The episode ends when the model stops
+calling tools. The template grades it as usual.
 
 A few embodiment facts can't be read off the contract, so the environment states them:
 
@@ -648,7 +655,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
 | `RobotEndpoint.capabilities(...)` | `hud.environment.robot` | Everything the bridge serves after `start()` (the `openpi/0` wire, plus any extras) |
-| `DirectControl(...).attach(env)` | `hud.environment.robot` | The `robot` capability as MCP motion tools, for tool-calling LLM agents |
+| `DirectControl(...).attach(sim)` | `hud.environment.robot` | The `robot` capability as MCP motion tools, for tool-calling LLM agents |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |

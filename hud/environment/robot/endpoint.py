@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from hud.capabilities import Capability
+    from hud.environment.robot.control import DirectControl
     from hud.utils.process import ProcessGroup
 
 
@@ -140,6 +141,7 @@ class RobotEndpoint:
         self._lock = asyncio.Lock()
         # Open slot token per control session; "" = already freed via result().
         self._claims: dict[str, str] = {}
+        self._direct_controls: list[DirectControl] = []
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
@@ -155,6 +157,10 @@ class RobotEndpoint:
         """Hook slot release into *env* task teardown (``env.gym`` does this)."""
         env._on_task_teardown.append(self.release_claim)
         return self
+
+    def add_direct_control(self, control: DirectControl) -> None:
+        """Serve a robotics direct-control profile beside this endpoint's wire."""
+        self._direct_controls.append(control)
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -182,6 +188,8 @@ class RobotEndpoint:
 
     async def stop(self) -> None:
         """Drop the link; tear the sim process down when this endpoint spawned it."""
+        for control in self._direct_controls:
+            await control.stop()
         # Free slots cancel/bye failed to release — while the control link is up.
         await self._release_outstanding_claims()
         if self._forward is not None:
@@ -253,7 +261,19 @@ class RobotEndpoint:
         from hud.capabilities import Capability
 
         published = await self._call("capabilities", {"name": name})
-        return [Capability.from_manifest(c) for c in published["capabilities"]]
+        capabilities = [Capability.from_manifest(c) for c in published["capabilities"]]
+        for control in self._direct_controls:
+            robot = next(
+                (capability for capability in capabilities if capability.name == control.robot),
+                None,
+            )
+            if robot is None:
+                raise ValueError(
+                    f"direct control needs robot capability {control.robot!r}; "
+                    f"available: {[capability.name for capability in capabilities]}"
+                )
+            capabilities.append(await control.start(robot))
+        return capabilities
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
         """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
@@ -269,6 +289,8 @@ class RobotEndpoint:
             session_id, token = current_session_id.get(), ep.get("token")
             if session_id is not None and isinstance(token, str):
                 self._claims[session_id] = token
+            for control in self._direct_controls:
+                control.reset()
             return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
