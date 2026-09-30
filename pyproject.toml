@@ -145,12 +145,15 @@ browseruse = [
     "browser-use>=0.11.13",
 ]
 
-# Robot capability (openpi/0 protocol wire codec + bridges + agent harness)
+# Robot capability (openpi/0 protocol wire codec + bridges + agent harness).
+# rerun-sdk is the optional viewer: RobotAgent.rerun stays off unless set.
 robot = [
     "numpy>=1.24",
     "openpi-client>=0.1.2",  # openpi msgpack-numpy wire codec (the openpi/0 format)
     "av>=12",  # PyAV (ffmpeg): H.264/CMAF camera-frame video streaming for traces
     "gymnasium>=1.0",  # registry ids and gym-style env bridges
+    "rerun-sdk>=0.24",  # Rerun viewer + .rrd recording (lazy; episode flag is opt-in)
+    "pillow>=10",  # JPEG camera frames in that recording
 ]
 
 # Modal placement (ModalRuntime): per-rollout cloud sandboxes from a built image

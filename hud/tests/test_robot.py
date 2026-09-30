@@ -29,6 +29,7 @@ from hud.agents.robot import Adapter, Model, RobotAgent
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
+from hud.telemetry.robot import RerunView
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -210,6 +211,35 @@ async def test_single_env_rollout_drives_the_policy_and_grades_the_episode() -> 
     assert adapter.wired[0]["image"].shape == (16, 16, 3)
     assert adapter.wired[0]["image"].dtype == np.uint8
     assert adapter.wired[0]["state"].tolist() == [1.0, 0.0]  # slot 1, before any step
+
+
+async def test_rerun_records_cameras_state_and_the_executed_action(tmp_path: Path) -> None:
+    """An opted-in episode writes cameras, state, and the action that was sent."""
+    sim = _StubSim()
+    recording = tmp_path / "episode.rrd"
+    agent = _EchoAgent(_EchoAdapter())
+    agent.rerun = RerunView(recording_path=recording)
+
+    async with _sim_env(sim) as (env, endpoint):
+
+        @env.template()
+        async def episode(goal: str = "lift") -> AsyncGenerator[Any, Any]:
+            ep = await endpoint.reset(goal=goal)
+            yield {"prompt": ep["prompt"]}
+            yield await endpoint.result()
+
+        run = await rollout(
+            Task(env="stub-sim", id="episode", args={"goal": "lift"}),
+            agent,
+            runtime=_serving(env),
+        )
+
+    assert run.reward == EPISODE_TICKS  # the view is not on the grade path
+    recorded = recording.read_bytes()
+    assert b"camera/observation/image" in recorded
+    assert b"state/observation/state/slot" in recorded
+    assert b"action/a0" in recorded
+    assert b"event/terminated" in recorded
 
 
 async def test_agent_stop_hook_ends_the_rollout_before_the_env_terminates() -> None:
