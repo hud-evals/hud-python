@@ -145,7 +145,7 @@ class DirectControl:
                 f"direct control needs an action type in {sorted(MOTION_TOOLS)}, "
                 f"got {action.get('type')!r}"
             )
-        tool, self._absolute = MOTION_TOOLS[action["type"]]
+        self._tool, self._absolute = MOTION_TOOLS[action["type"]]
         self._names: list[str] = list(action["names"])
         self._dims = self.dims or self._names
         if unknown := set(self._dims) - set(self._names):
@@ -181,8 +181,7 @@ class DirectControl:
             self._reference = lambda data: data[wide[0]]
 
         server = FastMCP(name=self.name)
-        move = self.move_to if self._absolute else self.move_by
-        server.tool(move, name=tool, description=self._describe(), output_schema=None)
+        self._bind_tools(server)
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -212,6 +211,11 @@ class DirectControl:
         self._command = None
 
     # ── tools ──────────────────────────────────────────────────────────────
+
+    def _bind_tools(self, server: FastMCP) -> None:
+        """Register the contract motion tool. Override to serve an env-specific tool."""
+        move = self.move_to if self._absolute else self.move_by
+        server.tool(move, name=self._tool, description=self._describe(), output_schema=None)
 
     async def move_to(self, targets: list[DimValue], note: MotionNote) -> Content:
         return await self._play(targets, note)

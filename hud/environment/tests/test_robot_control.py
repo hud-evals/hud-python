@@ -209,6 +209,24 @@ async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
     assert sim.actions == []
 
 
+class _GraspTool(DirectControl):
+    """Stands in for an env that serves its own motion tool on this wire."""
+
+    def _bind_tools(self, server) -> None:
+        server.tool(self.move_to, name="move_eef", description="grasp targets", output_schema=None)
+
+
+async def test_an_env_can_replace_the_contract_motion_tool() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_eef", "targets", x=0.5))
+
+    async with _served(sim, _GraspTool(max_step={"grip": 2.0})) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert agent.tools == {"move_eef"}
+    assert sim.actions  # the replacement tool still plays through the shared wire
+
+
 async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     sim.contract["features"]["action"]["type"] = "joint_vel"
