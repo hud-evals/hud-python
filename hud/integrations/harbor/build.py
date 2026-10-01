@@ -84,20 +84,13 @@ def resolve_images(
         override: dict[str, dict[str, Any]] = {"services": {}}
         override_services = override["services"]
         main_service = source.compose.services["main"]
-        if main_service.build is not None:
-            override_services["main"] = {"image": source.base_image}
-        elif main_service.image is None:
-            override_services["main"] = (
-                {
-                    "image": source.base_image,
-                    "build": {
-                        "context": ".",
-                        "dockerfile": source.dockerfile.relative_to(compose_file.parent).as_posix(),
-                    },
-                }
-                if source.dockerfile.is_file()
-                else {"image": source.base_image}
-            )
+        main_override: dict[str, Any] = {"image": source.base_image}
+        if main_service.build is None and source.dockerfile.is_file():
+            main_override["build"] = {
+                "context": ".",
+                "dockerfile": source.dockerfile.relative_to(compose_file.parent).as_posix(),
+            }
+        override_services["main"] = main_override
         for service_name in peer_services:
             service = source.compose.services[service_name]
             target = compose_project.services[service_name].image

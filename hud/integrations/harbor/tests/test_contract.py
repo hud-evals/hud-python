@@ -180,6 +180,46 @@ def test_image_resolution_builds_and_inspects_the_authored_image(
     assert resolved.peers == {}
 
 
+def test_image_resolution_builds_compose_main_from_the_environment_dockerfile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    image: authored/main:latest\n",
+        encoding="utf-8",
+    )
+    source, findings = adapt_module._inspect_task(task)
+    assert findings == ()
+    assert source is not None
+    built: list[dict[str, Any]] = []
+    inspected: list[str] = []
+
+    def docker(*args: str, **_kwargs: Any) -> str:
+        if args[0] == "compose":
+            *_, override_path, operation, service = args
+            assert (operation, service) == ("build", "main")
+            built.append(json.loads(Path(override_path).read_text("utf-8"))["services"]["main"])
+            return ""
+        assert args[:2] == ("image", "inspect")
+        inspected.append(args[2])
+        return json.dumps([{"Config": {"Env": []}}])
+
+    monkeypatch.setattr(build_module, "docker", docker)
+
+    build_module.resolve_images(
+        source,
+        source.compose,
+        verifier_image=source.base_image,
+        peer_services=set(),
+    )
+
+    assert built == [
+        {"image": source.base_image, "build": {"context": ".", "dockerfile": "Dockerfile"}}
+    ]
+    assert inspected == [source.base_image]
+
+
 def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> None:
     task_dir = make_harbor_task(tmp_path, "task-a")
     authored_environment = _tree_snapshot(task_dir / "environment")
