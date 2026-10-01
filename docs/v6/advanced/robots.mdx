@@ -592,25 +592,32 @@ The [contract](#contract) derives the tool surface:
 | Contract field | Tool surface |
 |----------------|--------------|
 | action `type` | The motion tool: `ee_abs` → `move_to` and `joint_pos` → `move_joints` take absolute targets, interpolated at a safe speed; `ee_del` → `move_by` takes a displacement, split into steps within the per-step bounds. |
-| action `names` | The dimensions a call addresses, as `[{"name": ..., "value": ...}]`. Unnamed dimensions hold. |
+| action `names` | The dimensions a call addresses. `target` is one `{name, value}` and is required; `others` is any further ones. Unnamed dimensions hold. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
 | action `limits` (else `stats`) | Per-dimension `min` / `max`: the target range, or the per-step box for a displacement. |
-| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second, at most 10 s per call. |
+| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops, and gives up at `timeout` (default 60 s). |
 | `rgb` observations and the rest | The camera frames and labeled state every call returns. |
 
-There is no `observe` tool. Every motion call returns the camera frames and labeled state it
+There is no `observe` tool. Every motion call returns the camera frames and the pose it
 ended on, so the model does not choose whether to look. Each call is its own short connection on
 the `robot` wire, so the sim holds still while the model thinks. A call also takes a required
 `note`: what the model sees and why it chose the motion. The episode ends when the model stops
 calling tools. The template grades it as usual.
+
+A call steps until the commanded target is reached or the arm
+stops moving, then returns the pose and how far it is from the command. `timeout` (default 60 s)
+is only the safety cap: a full-range move at the default speed is about 10 s, and a longer real
+move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
+(roll, pitch, yaw, radians). The tool slerps that rotation onto the contract, which may store a
+quaternion, an axis-angle, or euler.
 
 A few embodiment facts can't be read off the contract, so the environment states them:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
-| `dims` | every action dimension | The dimensions a call may address; the rest hold their commanded value. |
-| `max_step` | `{}` | Per-dimension step override by name, such as a binary gripper that switches in one step. |
-| `settle` | `0.5` | Seconds each move holds its end so the controller and gripper settle before the frames are taken. |
+| `dims` | every action dimension | The dimensions a call may address; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
+| `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
+| `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
 
