@@ -31,7 +31,6 @@ from hud.eval.runtime.compose import (
 from hud.utils.naming import normalize_environment_name
 
 from .build import (
-    COMPOSE_FILENAME,
     ImageResolutionError,
     image_environment,
     image_ports,
@@ -41,6 +40,7 @@ from .build import (
 
 LOGGER = logging.getLogger(__name__)
 ASSETS = Path(__file__).parent
+COMPOSE_FILENAME = "docker-compose.yaml"
 CONTROLLER_ROOT = Path("/controller")
 MOUNTS_ROOT = Path("/mounts")
 TASK_ROOT = Path("/rootfs")

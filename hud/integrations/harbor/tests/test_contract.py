@@ -221,6 +221,42 @@ def test_image_resolution_builds_compose_main_from_the_environment_dockerfile(
     assert inspected == [source.base_image]
 
 
+def test_image_resolution_builds_the_interpolated_compose_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    build:\n      context: ${CONTEXT_DIR}\n"
+        "    image: ${MAIN_IMAGE_NAME}\n",
+        encoding="utf-8",
+    )
+    source, findings = adapt_module._inspect_task(task)
+    assert findings == ()
+    assert source is not None
+    documents: list[dict[str, Any]] = []
+
+    def docker(*args: str, **_kwargs: Any) -> str:
+        if args[0] == "compose":
+            document = args[args.index("--file") + 1]
+            documents.append(json.loads(Path(document).read_text("utf-8")))
+            return ""
+        return json.dumps([{"Config": {"Env": []}}])
+
+    monkeypatch.setattr(build_module, "docker", docker)
+
+    build_module.resolve_images(
+        source,
+        source.compose,
+        verifier_image=source.base_image,
+        peer_services=set(),
+    )
+
+    (document,) = documents
+    assert document["services"]["main"]["build"] == {"context": "."}
+    assert document["services"]["main"]["image"] == source.base_image
+
+
 def test_adapt_reports_tasks_whose_images_cannot_be_resolved(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

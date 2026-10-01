@@ -15,8 +15,6 @@ if TYPE_CHECKING:
 
     from .adapt import HarborTask
 
-COMPOSE_FILENAME = "docker-compose.yaml"
-
 
 @dataclass(frozen=True, slots=True)
 class ResolvedImages:
@@ -96,7 +94,7 @@ def resolve_images(
         peers: dict[str, dict[str, Any]] = {}
     else:
         assert compose_project is not None
-        compose_file = source.path / "environment" / COMPOSE_FILENAME
+        project_directory = source.path / "environment"
         override: dict[str, dict[str, Any]] = {"services": {}}
         override_services = override["services"]
         main_service = source.compose.services["main"]
@@ -104,7 +102,7 @@ def resolve_images(
         if main_service.build is None and source.dockerfile.is_file():
             main_override["build"] = {
                 "context": ".",
-                "dockerfile": source.dockerfile.relative_to(compose_file.parent).as_posix(),
+                "dockerfile": source.dockerfile.relative_to(project_directory).as_posix(),
             }
         override_services["main"] = main_override
         for service_name in peer_services:
@@ -113,17 +111,24 @@ def resolve_images(
             if service.build is not None and target is not None:
                 override_services[service_name] = {"image": target}
 
+        # Compose resolves the document adaptation interpolated, never the
+        # authored file against the host environment.
         with tempfile.TemporaryDirectory(prefix="hud-harbor-resolve-") as directory:
-            override_path = Path(directory) / "compose.json"
+            document_path = Path(directory) / "compose.json"
+            document_path.write_text(
+                json.dumps(source.compose.model_dump(mode="json", exclude_none=True)),
+                encoding="utf-8",
+            )
+            override_path = Path(directory) / "override.json"
             override_path.write_text(json.dumps(override), encoding="utf-8")
             command = (
                 "compose",
                 "--project-name",
                 f"hud-adapt-{source.environment_hash}",
                 "--project-directory",
-                str(compose_file.parent),
+                str(project_directory),
                 "--file",
-                str(compose_file),
+                str(document_path),
                 "--file",
                 str(override_path),
             )
