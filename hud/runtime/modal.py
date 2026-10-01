@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _MODAL_COMPOSE_CPU = 4.0
 _MODAL_COMPOSE_MEMORY_MB = 8192

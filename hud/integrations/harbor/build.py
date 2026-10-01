@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hud.eval.runtime.compose import ComposeConfig
+    from hud.runtime.compose import ComposeConfig
 
     from .adapt import HarborTask
 

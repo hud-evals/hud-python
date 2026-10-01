@@ -1,7 +1,7 @@
 """Wrap any HUD Provider to record how long acquiring its sandbox took.
 
 A Provider is just ``__call__(task) -> AsyncContextManager[Runtime]``
-(hud/eval/runtime.py:118), so timing one needs no SDK changes.
+(``hud.runtime.Provider``), so timing one needs no SDK changes.
 """
 
 from __future__ import annotations

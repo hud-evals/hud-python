@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
     from hud.environment.egress import WorkspaceRoute
-    from hud.eval.runtime import Runtime
+    from hud.runtime import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
@@ -483,7 +483,7 @@ async def connect(
 ) -> AsyncIterator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
 
-    Takes the :class:`~hud.eval.runtime.Runtime` a provider yielded (or
+    Takes the :class:`~hud.runtime.Runtime` a provider yielded (or
     one constructed directly for a substrate served elsewhere) and retries
     connect + handshake until the channel answers. Does not tear the substrate
     down — lifecycle belongs to whichever provider brought it up.

@@ -424,7 +424,7 @@ straight off the socket.
 On exit, it stops the server and calls `env.stop()`. The environment runs in the same
 Python process as the agent.
 
-```python hud/eval/runtime/local.py · LocalRuntime.__call__
+```python hud/runtime/local.py · LocalRuntime.__call__
 started = env.start()
 await asyncio.wait_for(started, ready_timeout)     # @env.initialize, bounded
 server = await bind(env, "127.0.0.1", 0)           # in-process control channel

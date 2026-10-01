@@ -179,7 +179,7 @@ Building agents at scale? We work with teams on custom environments, benchmarks,
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Key areas: [Agents](hud/agents/) · [Environments](hud/environment/) · [Capabilities](hud/capabilities/) · [Eval](hud/eval/) · [Integrations](hud/integrations/)
+Key areas: [Agents](hud/agents/) · [Environments](hud/environment/) · [Capabilities](hud/capabilities/) · [Eval](hud/eval/) · [Runtimes](hud/runtime/) · [Integrations](hud/integrations/)
 
 <a href="https://github.com/hud-evals/hud-python/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=hud-evals/hud-python&max=50" />

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
@@ -38,7 +38,7 @@ _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 #: provider contract rather than a per-image option. This is intentionally a
 #: default-allow compatibility profile: Workspace's bwrap sessions need the
 #: namespace and mount syscalls, while unrelated kernel interfaces stay denied.
-_DOCKER_SECCOMP_PROFILE = Path(__file__).parent.parent / "docker-seccomp.json"
+_DOCKER_SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
 _DOCKER_SECURITY_ARGS = (
     "--security-opt",
     f"seccomp={_DOCKER_SECCOMP_PROFILE}",

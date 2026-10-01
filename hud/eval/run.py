@@ -8,10 +8,10 @@ grades, and tears down, filling a :class:`Run` along the way::
     run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
 
 It is the *client-here* path: the agent loop runs in this process against a
-:class:`~hud.eval.runtime.Provider`'s channel. The same driver handles hosted
+:class:`~hud.runtime.Provider`'s channel. The same driver handles hosted
 execution once delegated, each ``Chat`` turn, and each ``AgentTool`` invocation.
 Delegated hosted execution is a different act — see
-:class:`hud.eval.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
+:class:`hud.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
 chooses between them; the atom itself never branches on placement.
 
 :class:`Run` is also the receipt a delegated execution folds its platform
@@ -48,9 +48,9 @@ if TYPE_CHECKING:
     from hud.capabilities import Connection
     from hud.clients.client import HudClient
     from hud.environment import WorkspaceRoute
+    from hud.runtime import Provider
+    from hud.runtime.core import RuntimeConfig
 
-    from .runtime import Provider
-    from .runtime.core import RuntimeConfig
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -492,7 +492,7 @@ async def rollout(
     (``run.reward``), tear down. The substrate may be anywhere — a local
     subprocess, a container, a cloud sandbox — the channel bridges it; the
     agent loop always runs in *this* process. Delegated hosted execution
-    does not come through here; see :class:`hud.eval.runtime.HostedRuntime`.
+    does not come through here; see :class:`hud.runtime.HostedRuntime`.
 
     ``job_id``/``group_id`` are batch identities threaded by the scheduler;
     there are no standalone traces, so when no ``job_id`` is given the atom
@@ -515,7 +515,7 @@ async def rollout(
     env's task, lets provider teardown finish in the background, and returns an
     errored run.
     """
-    from .runtime.core import resolve_runtime_config
+    from hud.runtime.core import resolve_runtime_config
 
     actor_runtime_config = resolve_runtime_config(runtime, task)
     agent_timeout = validate_rollout_timeouts(

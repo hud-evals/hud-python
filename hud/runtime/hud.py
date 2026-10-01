@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _RUNTIME_READY_TIMEOUT = 300.0
 

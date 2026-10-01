@@ -15,7 +15,7 @@ callable.
 | Concept | What it is |
 | --- | --- |
 | **Task row** | A `Task` (`hud/eval/task.py`): an env *name*, a task id, bound args. The name is a join key, never a live object - see [what we start with](/v6/internals/walkthrough#what-we-start-with). |
-| **Provider** | Anything callable as `(task) -> async context manager yielding a Runtime` (`hud/eval/runtime.py`). Entering the context provisions; exiting tears down. |
+| **Provider** | Anything callable as `(task) -> async context manager yielding a Runtime` (`hud/runtime/`). Entering the context provisions; exiting tears down. |
 | **Runtime** | Pure data: the connectable address of one substrate (`url`, connection `params`, optional `config`). |
 | **Substrate** | The provisioned instance behind a url - a local env, a subprocess, a container, a cloud sandbox. |
 

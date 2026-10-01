@@ -187,7 +187,7 @@ ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=No
 ```python
 import modal
 from hud.eval import ModalRuntime
-from hud.eval.runtime import RuntimeConfig
+from hud.runtime import RuntimeConfig
 
 ModalRuntime(
     runtime_config=RuntimeConfig(image="ghcr.io/org/private:tag"),

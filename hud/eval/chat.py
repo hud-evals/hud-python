@@ -38,8 +38,8 @@ from .run import rollout
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
+    from hud.runtime import Provider
 
-    from .runtime import Provider
     from .task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ class Chat:
             agent: The :class:`~hud.agents.base.Agent` driving every turn
                 (stateless per run, e.g. ``create_agent("claude-sonnet-4-5")``).
             runtime: The env placement each turn's rollout runs against — a
-                :class:`~hud.eval.runtime.Provider` such as
+                :class:`~hud.runtime.Provider` such as
                 ``LocalRuntime("env.py")`` or ``Runtime("tcp://...")``. Chat is
                 interactive and local: it drives the agent loop in this process,
                 so hosted placement does not apply.

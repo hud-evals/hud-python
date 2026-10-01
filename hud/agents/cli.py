@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from hud.capabilities import Connection, SSHClient
-    from hud.eval.runtime import RuntimeConfig
+    from hud.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 #: What a CLI is given as its credential on a process-bound connection; the relay

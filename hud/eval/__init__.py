@@ -13,7 +13,7 @@ agents see eval only through the ``Run`` handle they are driven with. (Sole
 exception: calling an ``@env.template`` declaration constructs the eval ``Task``
 row.)
 
-Placement is passed at execution time (see :mod:`.runtime`): ``LocalRuntime`` a
+Placement is passed at execution time (see :mod:`hud.runtime`): ``LocalRuntime`` a
 local source served in-process, ``DockerRuntime`` an image,
 ``Runtime(url)`` an env served elsewhere, ``HUDRuntime`` a HUD runtime tunnel,
 or ``HostedRuntime`` to run the whole rollout remotely on the platform::
@@ -28,12 +28,7 @@ or ``HostedRuntime`` to run the whole rollout remotely on the platform::
 
 from __future__ import annotations
 
-from hud.types import Trace
-
-from .chat import Chat
-from .job import Job
-from .run import Grade, Run, rollout
-from .runtime import (
+from hud.runtime import (
     ComposeProject,
     DaytonaRuntime,
     DockerRuntime,
@@ -51,6 +46,11 @@ from .runtime import (
     Shared,
     SubprocessRuntime,
 )
+from hud.types import Trace
+
+from .chat import Chat
+from .job import Job
+from .run import Grade, Run, rollout
 from .sync import SyncPlan
 from .task import Task
 from .taskset import Taskset

@@ -19,18 +19,18 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hud.telemetry import flush
-from hud.utils.platform import PlatformClient
-
-from .job import Job, job_enter
-from .run import rollout, validate_rollout_timeouts
-from .runtime import (
+from hud.runtime import (
     DockerRuntime,
     HostedRuntime,
     HUDRuntime,
     LocalRuntime,
 )
-from .runtime.core import resolve_runtime_config
+from hud.runtime.core import resolve_runtime_config
+from hud.telemetry import flush
+from hud.utils.platform import PlatformClient
+
+from .job import Job, job_enter
+from .run import rollout, validate_rollout_timeouts
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
@@ -38,9 +38,9 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
+    from hud.runtime import Provider, Runtime
 
     from .run import Run
-    from .runtime import Provider, Runtime
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
@@ -260,9 +260,9 @@ class Taskset:
         """Run every task x ``group`` with an optional concurrency cap.
 
         One shared (stateless) ``agent`` drives every run. ``runtime`` is the
-        placement: a :class:`~hud.eval.runtime.Provider` (the env served
+        placement: a :class:`~hud.runtime.Provider` (the env served
         somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
-        or :class:`~hud.eval.runtime.HostedRuntime` to run each rollout remotely
+        or :class:`~hud.runtime.HostedRuntime` to run each rollout remotely
         on the platform. Left unset, a platform taskset runs on the platform,
         rows whose ``runtime_config`` names an image or Compose project start
         it under ``DockerRuntime``, tasks created by a live environment run
@@ -278,7 +278,7 @@ class Taskset:
 
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
         task's repeats), whatever the placement — a placement that pools a
-        substrate (:class:`~hud.eval.runtime.Shared`) bounds its own occupancy
+        substrate (:class:`~hud.runtime.Shared`) bounds its own occupancy
         and is scoped to this call when not already open.
 
         ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for

@@ -115,7 +115,7 @@ docker run -d --name libero-env -p 8765:8765 hud-libero-env
 ```
 
 ```python
-from hud.eval.runtime import Runtime
+from hud.runtime import Runtime
 job = await Taskset("libero-demo", TASKS).run(agent, runtime=Runtime("tcp://127.0.0.1:8765"))
 ```
 
