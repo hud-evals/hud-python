@@ -307,12 +307,16 @@ class ComposeConfig(BaseModel):
             current = mode.removeprefix("service:")
 
     @classmethod
-    def from_file(cls, path: Path) -> ComposeConfig:
-        """Load a self-contained authored Compose document without Docker."""
+    def from_file(cls, path: Path, *, variables: Mapping[str, str] | None = None) -> ComposeConfig:
+        """Load a self-contained authored Compose document without Docker.
+
+        ``variables`` stand in for the process environment, so they take
+        precedence over the project's ``.env``. The host environment is never read.
+        """
         source = path.read_text(encoding="utf-8")
-        environment: dict[str, str] = {}
+        environment: dict[str, str] = dict(variables or {})
         for key, value in dotenv_values(path.parent / ".env", interpolate=False).items():
-            if value is not None:
+            if value is not None and key not in environment:
                 environment[key] = _interpolate_compose_value(
                     value,
                     environment,

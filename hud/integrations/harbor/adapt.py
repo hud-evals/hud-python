@@ -178,7 +178,6 @@ class EnvironmentConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     healthcheck: HealthcheckConfig | None = None
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
-    skills_dir: str | None = None
 
 
 class Phase(BaseModel):
@@ -295,6 +294,28 @@ def _runtime_limits(environment: EnvironmentConfig) -> RuntimeLimits | None:
     return RuntimeLimits(startup_timeout_s=math.ceil(environment.build_timeout_sec))
 
 
+def _harbor_compose_variables(environment: EnvironmentConfig, *, main_image: str) -> dict[str, str]:
+    """Return the variables Harbor defines for a task's Compose file.
+
+    Harbor's infrastructure variables take precedence over literal task
+    ``[environment.env]`` values; variables only a host could supply stay unbound.
+    """
+    variables = {name: value for name, value in environment.env.items() if "$" not in value}
+    variables.update(
+        CONTEXT_DIR=".",
+        MAIN_IMAGE_NAME=main_image,
+        # Harbor's Terminal-Bench converter forwards the tests path through TEST_DIR.
+        TEST_DIR="/tests",
+    )
+    if environment.cpus is not None:
+        variables["CPUS"] = f"{environment.cpus:g}"
+    if environment.memory_mb is not None:
+        variables["MEMORY"] = f"{environment.memory_mb}M"
+    if environment.docker_image is not None:
+        variables["PREBUILT_IMAGE_NAME"] = environment.docker_image
+    return variables
+
+
 def _dockerfile_stages(lines: list[str]) -> list[tuple[int, str | None]]:
     escape = "\\"
     for line in lines:
@@ -382,13 +403,6 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
 
     environment = config.environment
     resources = _runtime_resources(environment)
-    if any(server.transport == "stdio" for server in environment.mcp_servers):
-        add("harbor.unsupported.mcp_stdio", "stdio MCP servers are not supported")
-    if environment.skills_dir:
-        add(
-            "harbor.unsupported.skills_dir",
-            "per-task agent skills are not supported",
-        )
 
     if config.steps:
         add("harbor.unsupported.multi_step", "multi-step tasks are not supported")
@@ -409,6 +423,8 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
             )
 
     environment_dir = task_dir / "environment"
+    environment_hash = _tree_hash(environment_dir) if environment_dir.exists() else "missing"
+    built_base_image = f"hud-harbor-base:{environment_hash}"
     compose_path = environment_dir / COMPOSE_FILENAME
     authored_compose = compose_path if compose_path.is_file() else None
     compose = None
@@ -416,7 +432,10 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
     base_image: str | None = None
     if authored_compose is not None:
         try:
-            compose = ComposeConfig.from_file(authored_compose)
+            compose = ComposeConfig.from_file(
+                authored_compose,
+                variables=_harbor_compose_variables(environment, main_image=built_base_image),
+            )
         except ComposeUnboundVariableError as error:
             add("harbor.unsupported.host_compose_variable", str(error))
         except (OSError, ValueError, ValidationError) as error:
@@ -453,7 +472,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                             "Compose main build escapes environment",
                         )
             if dockerfile.is_file():
-                base_image = f"hud-harbor-base:{_tree_hash(environment_dir)}"
+                base_image = built_base_image
             elif build is not None:
                 add(
                     "harbor.invalid.missing_compose_main_dockerfile",
@@ -465,7 +484,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
                     "Compose main has neither image nor build",
                 )
         elif dockerfile.is_file():
-            base_image = f"hud-harbor-base:{_tree_hash(environment_dir)}"
+            base_image = built_base_image
         elif base_image is None:
             add(
                 "harbor.invalid.environment_recipe",
@@ -545,7 +564,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
             path=task_dir,
             config=config,
             instruction=instruction.read_text("utf-8"),
-            environment_hash=_tree_hash(environment_dir) if environment_dir.exists() else "missing",
+            environment_hash=environment_hash,
             compose=compose,
             dockerfile=dockerfile,
             base_image=base_image,
@@ -608,11 +627,6 @@ def adapt(
             ),
             [],
         ).append(task)
-
-    def fail_group(tasks: list[HarborTask], *findings: AdaptFinding) -> None:
-        failures.extend(
-            AdaptFailure(task=task.path.name, path=task.path, findings=findings) for task in tasks
-        )
 
     if grouped:
         require_docker()
@@ -716,30 +730,14 @@ def adapt(
                 peer_services=peer_services,
             )
         except ImageResolutionError as error:
-            fail_group(
-                group, AdaptFinding(code="harbor.invalid.image", kind="invalid", message=str(error))
+            finding = AdaptFinding(code="harbor.invalid.image", kind="invalid", message=str(error))
+            failures.extend(
+                AdaptFailure(task=task.path.name, path=task.path, findings=(finding,))
+                for task in group
             )
             continue
-        peer_ports = {
-            service_name: image_ports(image_config, image=f"Compose service {service_name!r}")
-            for service_name, image_config in sorted(resolved.peers.items())
-        }
-        portless = [
-            AdaptFinding(
-                code="harbor.unsupported.portless_sidecar",
-                kind="contract",
-                message=(
-                    f"Compose service {service_name!r} declares no TCP ports "
-                    "in Compose or its image"
-                ),
-            )
-            for service_name, service_ports in peer_ports.items()
-            if not service_ports
-        ]
-        if portless:
-            fail_group(group, *portless)
-            continue
-        for service_name, service_ports in peer_ports.items():
+        for service_name, image_config in sorted(resolved.peers.items()):
+            service_ports = image_ports(image_config, image=f"Compose service {service_name!r}")
             peers.extend({"name": service_name, "port": port} for port in sorted(service_ports))
         context = dataset / ".hud-adapt" / name
         if context.exists():
@@ -834,9 +832,10 @@ def adapt(
                 Capability.mcp(
                     name=server.name,
                     url=cast("str", server.url),
-                    transport=cast('Literal["sse", "streamable-http"]', server.transport),
+                    transport=server.transport,
                 ).to_manifest()
                 for server in environment.mcp_servers
+                if server.transport != "stdio"
             ],
             "local_aliases": ["main"],
             "peers": peers,

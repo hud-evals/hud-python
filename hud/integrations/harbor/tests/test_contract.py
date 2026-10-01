@@ -247,16 +247,15 @@ def test_adapt_reports_tasks_whose_images_cannot_be_resolved(
     assert "pull access denied" in failure.findings[0].message
 
 
-def test_adapt_reports_sidecars_without_ports_per_task(
+def test_adapt_runs_sidecars_that_expose_no_ports(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    portless = make_harbor_task(tmp_path, "portless")
-    (portless / "environment" / "docker-compose.yaml").write_text(
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "environment" / "docker-compose.yaml").write_text(
         "services:\n  worker:\n    image: busybox\n",
         encoding="utf-8",
     )
-    make_harbor_task(tmp_path, "working")
     resolve = adapt_module.resolve_images
 
     def without_peer_ports(source: Any, *args: Any, **kwargs: Any) -> Any:
@@ -269,14 +268,50 @@ def test_adapt_reports_sidecars_without_ports_per_task(
 
     monkeypatch.setattr(adapt_module, "resolve_images", without_peer_ports)
 
-    result = harbor.adapt(tmp_path)
+    (row,) = list(_adapt(tmp_path))
 
-    assert [task.slug for task in result.taskset] == ["working"]
-    (failure,) = result.failures
-    assert failure.task == "portless"
-    assert [(finding.code, finding.kind) for finding in failure.findings] == [
-        ("harbor.unsupported.portless_sidecar", "contract")
-    ]
+    assert row.runtime_config is not None
+    assert row.runtime_config.compose is not None
+    assert isinstance(row.runtime_config.compose.document, Path)
+    project = json.loads(row.runtime_config.compose.document.read_text("utf-8"))
+    assert "worker" in project["services"]
+    (context,) = (tmp_path / ".hud-adapt").iterdir()
+    assert _environment_config(context)["peers"] == []
+
+
+def test_adapt_binds_the_compose_variables_harbor_defines(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        "[environment]\ncpus = 2\nmemory_mb = 4096\n",
+        encoding="utf-8",
+    )
+    (task / "environment" / "docker-compose.yaml").write_text(
+        """\
+services:
+  main:
+    build:
+      context: ${CONTEXT_DIR}
+    image: ${MAIN_IMAGE_NAME}
+    environment:
+      - TEST_DIR=${TEST_DIR}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPUS}
+          memory: ${MEMORY}
+""",
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+
+    assert row.runtime_config is not None
+    assert row.runtime_config.compose is not None
+    assert isinstance(row.runtime_config.compose.document, Path)
+    services = json.loads(row.runtime_config.compose.document.read_text("utf-8"))["services"]
+    assert services["main"]["environment"] == {"TEST_DIR": "/tests"}
+    assert services["main"]["deploy"]["resources"]["limits"] == {"cpus": "2", "memory": "4096M"}
+    assert services["hud-base"]["build"] == {"context": "./environment"}
 
 
 def test_adapt_aborts_when_the_docker_daemon_is_unreachable(
@@ -798,7 +833,7 @@ def test_adapt_merges_implicit_main_into_authored_compose(tmp_path: Path) -> Non
     assert _environment_config(context)["peers"] == [{"name": "default", "port": 1234}]
 
 
-def test_network_mcp_servers_become_named_capabilities(
+def test_only_network_mcp_servers_become_capabilities(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "task-a")
@@ -808,11 +843,19 @@ def test_network_mcp_servers_become_named_capabilities(
     )
     (task / "task.toml").write_text(
         """
+[environment]
+skills_dir = "/skills"
+
 [[environment.mcp_servers]]
 name = "redis-tools"
 transport = "streamable-http"
 url = "http://redis:6379/mcp"
 args = []
+
+[[environment.mcp_servers]]
+name = "db"
+transport = "stdio"
+command = "db-mcp"
 """,
         encoding="utf-8",
     )
@@ -1111,17 +1154,15 @@ def test_dataset_adaptation_returns_successes_and_all_detectable_findings(
         """\
 [environment]
 os = "windows"
-skills_dir = "skills"
 
 [[environment.mcp_servers]]
 name = "shell"
 transport = "streamable-http"
-
-[[environment.mcp_servers]]
-name = "db"
-transport = "stdio"
-command = "db-mcp"
 """,
+        encoding="utf-8",
+    )
+    (unsupported / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    image: ${HOST_ONLY_IMAGE}\n",
         encoding="utf-8",
     )
 
@@ -1132,8 +1173,7 @@ command = "db-mcp"
     failure = result.failures[0]
     assert failure.task == "unsupported"
     assert {finding.code for finding in failure.findings} == {
-        "harbor.unsupported.skills_dir",
-        "harbor.unsupported.mcp_stdio",
+        "harbor.unsupported.host_compose_variable",
         "harbor.invalid.reserved_mcp_name",
         "harbor.invalid.mcp_url",
         "harbor.invalid.missing_instruction",
