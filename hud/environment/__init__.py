@@ -5,7 +5,7 @@ protocol); ``load_environment`` resolves an env
 reference (source path, or dotted module attr/factory);
 :mod:`~hud.environment.server` is the serving entry point substrates run.
 How a substrate comes up — placement — belongs to the eval engine: see
-:mod:`hud.eval.runtime` (:class:`~hud.eval.runtime.Runtime`, the ``Provider``
+:mod:`hud.runtime` (:class:`~hud.runtime.Runtime`, the ``Provider``
 contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
 
 The env-side robot runtime (bridges, action providers, sim runners, contract

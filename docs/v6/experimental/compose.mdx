@@ -152,7 +152,7 @@ Two consequences do most of the work:
 
 ## Runtime behavior
 
-**Local `DockerRuntime`** (`hud/eval/runtime/docker.py`) stages override files for `main`'s security
+**Local `DockerRuntime`** (`hud/runtime/docker.py`) stages override files for `main`'s security
 options, resources, and an ephemeral host port, starts the project with `docker compose up --build`,
 returns the published control-channel address, and removes the project and its volumes when the
 rollout ends.
@@ -196,7 +196,7 @@ graph and a Docker builder with BuildKit named context support.
 `docker run` must supply the same seccomp profile and system-path setting:
 
 ```bash
-HUD_SECCOMP=/path/to/site-packages/hud/eval/docker-seccomp.json
+HUD_SECCOMP=/path/to/site-packages/hud/runtime/docker-seccomp.json
 docker run \
   --rm \
   --publish 8765:8765 \
