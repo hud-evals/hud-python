@@ -37,7 +37,7 @@ from hud.cli import (
 )
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.cli.sync import RegistryEnvironment
-from hud.eval.runtime import RuntimeConfig
+from hud.runtime import RuntimeConfig
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
