@@ -18,6 +18,7 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.eval import DockerRuntime, Shared, Taskset
+from hud.eval.runtime import DockerBindMount
 from hud.integrations import harbor
 
 from .conftest import make_harbor_task
@@ -841,3 +842,42 @@ def test_adapter_install_ignores_vendor_uv_configuration(
     assert config_path.read_text(encoding="utf-8") == config
     copied_config = context / "compose-project/environment/pyproject.toml"
     assert copied_config.read_text(encoding="utf-8") == config
+
+
+def test_agent_sessions_run_the_managed_cli_bundle(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    """A CLI bundle the runtime mounts at /usr/local/lib/agents runs in agent sessions."""
+    root = tmp_path_factory.mktemp("harbor-managed-agents")
+    binary = root / "codex" / "bin" / "codex"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\necho managed-codex\n", encoding="utf-8")
+    binary.chmod(0o755)
+    dataset = root / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "managed-agents",
+        dockerfile="FROM python:3.11-slim\nWORKDIR /workspace\n",
+    )
+    (task / "tests/test.sh").write_text(
+        '#!/bin/sh\nset -eu\ntest "$(cat /workspace/result)" = managed-codex\n'
+        "echo 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+
+    async def grade() -> Run:
+        job = await _adapt(dataset, hud_requirement=str(wheel)).run(
+            Oracle({"managed-agents": "/usr/local/lib/agents/codex/bin/codex > result"}),
+            runtime=DockerRuntime(
+                bind_mounts=(DockerBindMount(root / "codex", "/usr/local/lib/agents/codex"),),
+            ),
+            max_concurrent=1,
+        )
+        (run,) = job.runs
+        return run
+
+    run = asyncio.run(grade())
+
+    assert run.trace.content == "solution completed"
+    assert run.reward == 1.0, run.trace.error or run.evaluation

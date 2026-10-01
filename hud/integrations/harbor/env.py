@@ -40,6 +40,9 @@ TASK_ROOT = Path("/rootfs")
 RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
+#: Where hosted runtimes provide managed CLI agent binaries; agent sessions
+#: run inside the authored root, so the bundle is mounted through when present.
+MANAGED_AGENTS = Path("/usr/local/lib/agents")
 
 ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
 
@@ -216,6 +219,7 @@ workspace = env.workspace(
         Mount("dev", dst="/dev"),
         Mount("proc", dst="/proc"),
         *GPU_DRIVER_MOUNTS,
+        Mount("ro", src=str(MANAGED_AGENTS), dst=str(MANAGED_AGENTS), optional=True),
     ),
     mounts=agent_mounts,
     credentials_dir=RUNTIME_ROOT / "session-keys",
