@@ -1462,6 +1462,39 @@ async def test_modal_runtime_attaches_sandbox_secrets(
     assert calls["registry_secret"] is None
 
 
+async def test_modal_runtime_mounts_volumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    volume = object()
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(image="img:tag"),
+        volumes={"/data": cast("Any", volume)},
+    )
+
+    async with provider(_row()):
+        pass
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["volumes"] == {"/data": volume}
+
+
+async def test_modal_runtime_rejects_volumes_for_compose(
+    tmp_path: Path,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
+        volumes={"/data": cast("Any", object())},
+    )
+
+    with pytest.raises(ValueError, match="volumes require an image runtime"):
+        async with provider(_row()):
+            pass
+
+
 async def test_modal_runtime_passes_registry_secret_to_from_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

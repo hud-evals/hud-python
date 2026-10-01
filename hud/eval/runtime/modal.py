@@ -139,6 +139,7 @@ class ModalRuntime:
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
         sandbox_secrets: Sequence[modal.Secret] | None = None,
+        volumes: Mapping[str, modal.Volume] | None = None,
         registry_secret: modal.Secret | None = None,
     ) -> None:
         if app is not None and app_name is not None:
@@ -147,6 +148,8 @@ class ModalRuntime:
         self.port = port
         self.env_vars = dict(env_vars or {})
         self.sandbox_secrets = tuple(sandbox_secrets or ())
+        # Mount path -> Volume. Same Sandbox.create argument as secrets.
+        self.volumes = dict(volumes or {})
         self.registry_secret = registry_secret
         self.workdir = workdir
         # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
@@ -202,6 +205,11 @@ class ModalRuntime:
             raise ValueError(
                 "ModalRuntime sandbox secrets require an image runtime; attaching them to "
                 "the outer Docker-in-Docker sandbox would not expose them to main"
+            )
+        if compose is not None and self.volumes:
+            raise ValueError(
+                "ModalRuntime volumes require an image runtime; attaching them to "
+                "the outer Docker-in-Docker sandbox would not mount them in main"
             )
         port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
         if compose is not None:
@@ -259,6 +267,8 @@ class ModalRuntime:
                 sandbox_kwargs["env"] = self.env_vars
             if self.sandbox_secrets:
                 sandbox_kwargs["secrets"] = self.sandbox_secrets
+            if self.volumes:
+                sandbox_kwargs["volumes"] = self.volumes
         if resources is not None and resources.gpu is not None:
             gpu_types = resources.gpu.acceptable_types
             gpu_type = gpu_types[0] if gpu_types else "any"
