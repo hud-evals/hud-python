@@ -455,6 +455,58 @@ fi
     assert run.reward == 1.0, run.trace.error
 
 
+def test_separate_verifier_collects_artifacts_written_to_authored_volumes(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-volume-artifacts") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    (task / "environment" / "docker-compose.yaml").write_text(
+        """\
+services:
+  main:
+    volumes:
+      - outputs:/app/outputs
+volumes:
+  outputs: {}
+""",
+        encoding="utf-8",
+    )
+    (task / "task.toml").write_text(
+        """\
+artifacts = [{ source = "/app/outputs/result.txt", service = "main" }]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+""",
+        encoding="utf-8",
+    )
+    (task / "solution" / "solve.sh").write_text(
+        "#!/bin/sh\nset -eu\necho from-volume > /app/outputs/result.txt\n",
+        encoding="utf-8",
+    )
+    (task / "tests" / "test.sh").write_text(
+        """\
+#!/bin/sh
+mkdir -p /logs/verifier
+if [ "$(cat /app/outputs/result.txt 2>/dev/null)" = "from-volume" ]; then
+  echo 1 > /logs/verifier/reward.txt
+else
+  echo 0 > /logs/verifier/reward.txt
+fi
+""",
+        encoding="utf-8",
+    )
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 1.0, run.trace.error
+
+
 def test_separate_verifier_rejects_artifacts_beneath_symlinks(
     tmp_path_factory: pytest.TempPathFactory, wheel: Path
 ) -> None:

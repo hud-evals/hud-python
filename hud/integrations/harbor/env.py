@@ -14,7 +14,7 @@ import shutil
 import socket
 import tempfile
 from collections.abc import AsyncGenerator, Iterator  # noqa: TC003
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
@@ -419,6 +419,19 @@ def copy_artifact(source: Path, target: Path, exclude: list[str], *, name: str) 
         shutil.copy2(source, target, follow_symlinks=False)
 
 
+def task_path(guest: str) -> Path:
+    """Return the controller path behind ``guest`` as the agent sees it.
+
+    Authored volumes live under their task mount rather than the authored root.
+    """
+    path = PurePosixPath("/", guest)
+    mounts = [mount for mount in task_mounts if path.is_relative_to(mount.dst)]
+    if not mounts:
+        return TASK_ROOT / path.relative_to("/")
+    mount = max(mounts, key=lambda mount: len(PurePosixPath(mount.dst).parts))
+    return Path(mount.src, path.relative_to(mount.dst))
+
+
 def artifact_path(artifact: dict[str, Any], artifacts: Path) -> Path:
     relative = artifact.get("destination") or artifact["source"].lstrip("/").rstrip("/")
     return artifacts / relative
@@ -490,7 +503,7 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
                 continue
             exclude_artifact_paths(target, exclude)
         else:
-            copy_artifact(TASK_ROOT / source.lstrip("/"), target, exclude, name=source)
+            copy_artifact(task_path(source), target, exclude, name=source)
         if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
             raise RuntimeError(f"artifact {source} contains a symbolic link")
 
