@@ -30,7 +30,14 @@ from hud.eval.runtime.compose import (
 )
 from hud.utils.naming import normalize_environment_name
 
-from .build import COMPOSE_FILENAME, image_environment, image_ports, resolve_images
+from .build import (
+    COMPOSE_FILENAME,
+    ImageResolutionError,
+    image_environment,
+    image_ports,
+    require_docker,
+    resolve_images,
+)
 
 LOGGER = logging.getLogger(__name__)
 ASSETS = Path(__file__).parent
@@ -602,6 +609,13 @@ def adapt(
             [],
         ).append(task)
 
+    def fail_group(tasks: list[HarborTask], *findings: AdaptFinding) -> None:
+        failures.extend(
+            AdaptFailure(task=task.path.name, path=task.path, findings=findings) for task in tasks
+        )
+
+    if grouped:
+        require_docker()
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
     for group_key, group in sorted(grouped.items()):
@@ -694,19 +708,38 @@ def adapt(
                     )
                 else:
                     peer_services.add(service_name)
-        resolved = resolve_images(
-            source,
-            compose_project,
-            verifier_image=verifier_image,
-            peer_services=peer_services,
-        )
-        for service_name, image_config in resolved.peers.items():
-            service_ports = image_ports(image_config, image=f"Compose service {service_name!r}")
-            if not service_ports:
-                raise ValueError(
+        try:
+            resolved = resolve_images(
+                source,
+                compose_project,
+                verifier_image=verifier_image,
+                peer_services=peer_services,
+            )
+        except ImageResolutionError as error:
+            fail_group(
+                group, AdaptFinding(code="harbor.invalid.image", kind="invalid", message=str(error))
+            )
+            continue
+        peer_ports = {
+            service_name: image_ports(image_config, image=f"Compose service {service_name!r}")
+            for service_name, image_config in sorted(resolved.peers.items())
+        }
+        portless = [
+            AdaptFinding(
+                code="harbor.unsupported.portless_sidecar",
+                kind="contract",
+                message=(
                     f"Compose service {service_name!r} declares no TCP ports "
                     "in Compose or its image"
-                )
+                ),
+            )
+            for service_name, service_ports in peer_ports.items()
+            if not service_ports
+        ]
+        if portless:
+            fail_group(group, *portless)
+            continue
+        for service_name, service_ports in peer_ports.items():
             peers.extend({"name": service_name, "port": port} for port in sorted(service_ports))
         context = dataset / ".hud-adapt" / name
         if context.exists():

@@ -60,6 +60,7 @@ def resolved_images(monkeypatch: pytest.MonkeyPatch) -> None:
         }
         return build_module.ResolvedImages(main=main, verifier=main, peers=peers)
 
+    monkeypatch.setattr(adapt_module, "require_docker", lambda: None)
     monkeypatch.setattr(adapt_module, "resolve_images", resolve)
 
 
@@ -218,6 +219,84 @@ def test_image_resolution_builds_compose_main_from_the_environment_dockerfile(
         {"image": source.base_image, "build": {"context": ".", "dockerfile": "Dockerfile"}}
     ]
     assert inspected == [source.base_image]
+
+
+def test_adapt_reports_tasks_whose_images_cannot_be_resolved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_harbor_task(tmp_path, "broken", dockerfile="FROM registry.invalid/missing\n")
+    make_harbor_task(tmp_path, "working")
+    resolve = adapt_module.resolve_images
+
+    def fail_broken(source: Any, *args: Any, **kwargs: Any) -> Any:
+        if source.path.name == "broken":
+            raise build_module.ImageResolutionError("docker build failed: pull access denied")
+        return resolve(source, *args, **kwargs)
+
+    monkeypatch.setattr(adapt_module, "resolve_images", fail_broken)
+
+    result = harbor.adapt(tmp_path)
+
+    assert [task.slug for task in result.taskset] == ["working"]
+    (failure,) = result.failures
+    assert failure.task == "broken"
+    assert [(finding.code, finding.kind) for finding in failure.findings] == [
+        ("harbor.invalid.image", "invalid")
+    ]
+    assert "pull access denied" in failure.findings[0].message
+
+
+def test_adapt_reports_sidecars_without_ports_per_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    portless = make_harbor_task(tmp_path, "portless")
+    (portless / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  worker:\n    image: busybox\n",
+        encoding="utf-8",
+    )
+    make_harbor_task(tmp_path, "working")
+    resolve = adapt_module.resolve_images
+
+    def without_peer_ports(source: Any, *args: Any, **kwargs: Any) -> Any:
+        resolved = resolve(source, *args, **kwargs)
+        return build_module.ResolvedImages(
+            main=resolved.main,
+            verifier=resolved.verifier,
+            peers={name: {**config, "ExposedPorts": {}} for name, config in resolved.peers.items()},
+        )
+
+    monkeypatch.setattr(adapt_module, "resolve_images", without_peer_ports)
+
+    result = harbor.adapt(tmp_path)
+
+    assert [task.slug for task in result.taskset] == ["working"]
+    (failure,) = result.failures
+    assert failure.task == "portless"
+    assert [(finding.code, finding.kind) for finding in failure.findings] == [
+        ("harbor.unsupported.portless_sidecar", "contract")
+    ]
+
+
+def test_adapt_aborts_when_the_docker_daemon_is_unreachable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_harbor_task(tmp_path / "dataset", "task-a")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        "#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(adapt_module, "require_docker", build_module.require_docker)
+
+    with pytest.raises(RuntimeError, match="requires a reachable Docker daemon"):
+        harbor.adapt(tmp_path / "dataset")
 
 
 def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> None:

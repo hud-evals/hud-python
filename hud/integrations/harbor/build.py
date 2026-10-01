@@ -25,6 +25,10 @@ class ResolvedImages:
     peers: dict[str, dict[str, Any]]
 
 
+class ImageResolutionError(RuntimeError):
+    """A Docker command for one environment's images failed or timed out."""
+
+
 def docker(*args: str, timeout: float | None = None) -> str:
     executable = shutil.which("docker")
     if executable is None:
@@ -38,11 +42,23 @@ def docker(*args: str, timeout: float | None = None) -> str:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        raise TimeoutError(f"Docker command timed out after {timeout:g} seconds") from None
+        raise ImageResolutionError(
+            f"docker {' '.join(args)} timed out after {timeout:g} seconds"
+        ) from None
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"docker {' '.join(args)} failed: {detail}")
+        raise ImageResolutionError(f"docker {' '.join(args)} failed: {detail}")
     return result.stdout.strip()
+
+
+def require_docker() -> None:
+    """Fail when no Docker daemon is reachable, so outages are not blamed on tasks."""
+    try:
+        docker("version", "--format", "{{.Server.Version}}", timeout=60)
+    except ImageResolutionError as error:
+        raise RuntimeError(
+            f"Harbor adaptation requires a reachable Docker daemon: {error}"
+        ) from error
 
 
 def inspect_image(image: str) -> dict[str, Any]:
