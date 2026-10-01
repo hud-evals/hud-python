@@ -129,8 +129,9 @@ uv run ty check
 ## Repository map
 
 - Core flow: `hud/environment/` (spec: capabilities, tasks, serving) →
-  `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
-  connected by `hud/capabilities/` and `hud/clients/`.
+  `hud/eval/` (engine: rollout, jobs) placing work through `hud/runtime/`
+  (providers) → `hud/agents/` (harnesses), connected by `hud/capabilities/`
+  and `hud/clients/`.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` holds adapters for external task formats.
 - `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture

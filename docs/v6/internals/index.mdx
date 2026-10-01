@@ -33,7 +33,7 @@ between them at rest, and a TCP control channel is the only thing that connects 
 | `hud/environment/env.py` | The `Environment` declaration - capabilities, task templates, lifecycle hooks. Pure data, no runtime state. |
 | `hud/environment/server.py` | Puts one declaration on the wire: the JSON-RPC control channel and the per-task suspended generator. |
 | `hud/eval/task.py` | The `Task` row - an env name, a task id, bound args. Plain pydantic. |
-| `hud/eval/runtime.py` | Placement: the `Provider` contract and every built-in (`LocalRuntime`, `DockerRuntime`, hosted, ...). |
+| `hud/runtime/` | Placement: the `Provider` contract and every built-in (`LocalRuntime`, `DockerRuntime`, hosted, ...). |
 | `hud/eval/run.py` | The `rollout` atom and the `Run` handle - one task driven to a graded result. |
 | `hud/eval/taskset.py` | The scheduler: expand tasks, pick placement once, gather rollouts into a `Job`. |
 | `hud/clients/client.py` | `connect` and `HudClient` - the client side of the protocol, plus capability tunneling. |

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from hud.eval.task import Task
     from hud.types import TraceStatus
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
 _CANCEL_TIMEOUT_SECONDS = 5.0

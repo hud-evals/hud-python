@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from hud.environment import Mount, Peer
 
 if TYPE_CHECKING:
-    from hud.eval.runtime.compose import ComposeHealthcheck
+    from hud.runtime.compose import ComposeHealthcheck
 
 
 class Artifact(BaseModel):

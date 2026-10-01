@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 
 async def _snapshot_is_current(

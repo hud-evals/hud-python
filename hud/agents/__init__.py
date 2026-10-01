@@ -29,7 +29,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
     Sets ``gateway=True`` on the config instead of attaching a client, so the
     provider agent builds the gateway client locally and
-    :class:`~hud.eval.runtime.HostedRuntime` can serialize the config and rebuild
+    :class:`~hud.runtime.HostedRuntime` can serialize the config and rebuild
     it remotely. Explicitly supplied clients remain custom/BYOK and are not
     serializable.
 
