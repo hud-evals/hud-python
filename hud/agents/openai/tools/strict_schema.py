@@ -1,8 +1,7 @@
 """Ensure JSON schemas conform to OpenAI's strict structured outputs format.
 
 Adapted from https://github.com/openai/openai-agents-python/blob/main/src/agents/strict_schema.py
-with additional handling for MCP tool schemas (prefixItems, additionalProperties: true,
-and comprehensive unsupported keyword stripping).
+for MCP tool schemas.
 """
 
 from __future__ import annotations
@@ -70,10 +69,7 @@ _UNSUPPORTED_KEYWORDS = frozenset(
 
 
 def ensure_strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Mutate a JSON schema so it conforms to OpenAI's strict structured outputs.
-
-    Returns the (mutated) schema for convenience.
-    """
+    """Mutate ``schema`` to conform to OpenAI's strict structured outputs, and return it."""
     if schema == {}:
         return _EMPTY_SCHEMA.copy()
     return _ensure_strict_json_schema(schema, path=(), root=schema)
@@ -88,7 +84,6 @@ def _ensure_strict_json_schema(
     if not _is_dict(json_schema):
         raise TypeError(f"Expected {json_schema} to be a dictionary; path={path}")
 
-    # --- $defs / definitions ---
     defs = json_schema.get("$defs")
     if _is_dict(defs):
         for def_name, def_schema in defs.items():
@@ -101,7 +96,6 @@ def _ensure_strict_json_schema(
                 definition_schema, path=(*path, "definitions", definition_name), root=root
             )
 
-    # --- object: additionalProperties ---
     typ = json_schema.get("type")
     if typ == "object":
         if "additionalProperties" not in json_schema:
@@ -120,7 +114,6 @@ def _ensure_strict_json_schema(
                 "tool to not use a strict schema."
             )
 
-    # --- object: properties → required ---
     properties = json_schema.get("properties")
     if _is_dict(properties):
         json_schema["required"] = list(properties.keys())
@@ -129,13 +122,11 @@ def _ensure_strict_json_schema(
             for key, prop_schema in properties.items()
         }
 
-    # --- array: items ---
     items = json_schema.get("items")
     if _is_dict(items):
         json_schema["items"] = _ensure_strict_json_schema(items, path=(*path, "items"), root=root)
 
-    # --- prefixItems (tuple schemas) → plain array ---
-    # prefixItems, minItems, maxItems are NOT supported in strict mode.
+    # Strict mode has no tuple schemas (prefixItems), so they become plain arrays.
     prefix_items = json_schema.get("prefixItems")
     if _is_list(prefix_items) and prefix_items:
         item_types: set[Any] = set()
@@ -151,7 +142,6 @@ def _ensure_strict_json_schema(
 
         json_schema.pop("prefixItems")
 
-    # --- anyOf ---
     any_of = json_schema.get("anyOf")
     if _is_list(any_of):
         json_schema["anyOf"] = [
@@ -159,7 +149,7 @@ def _ensure_strict_json_schema(
             for i, option in enumerate(any_of)
         ]
 
-    # --- oneOf → anyOf (oneOf unsupported in nested contexts) ---
+    # oneOf is unsupported in nested contexts, so its options join anyOf.
     one_of = json_schema.get("oneOf")
     if _is_list(one_of):
         existing_any_of = json_schema.get("anyOf", [])
@@ -171,7 +161,6 @@ def _ensure_strict_json_schema(
         ]
         json_schema.pop("oneOf")
 
-    # --- allOf ---
     all_of = json_schema.get("allOf")
     if _is_list(all_of):
         if len(all_of) == 1:
@@ -185,14 +174,11 @@ def _ensure_strict_json_schema(
                 for i, entry in enumerate(all_of)
             ]
 
-    # --- Strip defaults (not supported in strict mode) ---
-    json_schema.pop("default", None)
-
-    # --- Strip unsupported keywords ---
+    json_schema.pop("default", None)  # unsupported in strict mode
     for keyword in _UNSUPPORTED_KEYWORDS:
         json_schema.pop(keyword, None)
 
-    # --- Unravel $ref when mixed with other keys ---
+    # A $ref can't sit beside other keys, so inline the schema it points to.
     ref = json_schema.get("$ref")
     if ref and _has_more_than_n_keys(json_schema, 1):
         assert isinstance(ref, str), f"Received non-string $ref - {ref}"

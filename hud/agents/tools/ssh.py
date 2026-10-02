@@ -1,9 +1,4 @@
-"""SSHTool: capability base for tools driven by an ``SSHClient``.
-
-Provider tools (``ClaudeBashTool``, ``GeminiShellTool``, …) extend this and
-use ``self.bash`` / ``self.file_*`` for execution; only the LLM-facing schema
-differs between providers.
-"""
+"""SSHTool: capability base for tools driven by an ``SSHClient``."""
 
 from __future__ import annotations
 
@@ -23,9 +18,7 @@ class SSHInfrastructureErrorResult(ToolResult):
 
 
 def _remote_error(exc: asyncssh.ProcessError) -> str:
-    """What the remote command printed to stderr — a failed file op is an
-    ordinary tool outcome, so the agent gets the shell's message, not the
-    exception's repr."""
+    """The remote command's stderr: a failed file op is a tool outcome, not an exception."""
     stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else exc.stderr
     return (stderr or "").strip() or f"exit {exc.exit_status}"
 
@@ -34,8 +27,6 @@ class SSHTool(AgentTool[SSHClient]):
     """Capability base: tool driven by an ``SSHClient``."""
 
     client_type = SSHClient
-
-    # ─── action helpers ───────────────────────────────────────────────
 
     async def bash(self, command: str) -> ToolResult:
         """Run a shell command. Returns combined stdout/stderr + exit code."""
@@ -53,7 +44,6 @@ class SSHTool(AgentTool[SSHClient]):
         )
 
     async def file_read(self, path: str) -> ToolResult:
-        """Read a text file through SSH exec."""
         try:
             return tool_ok(await self.client.read_text(path))
         except asyncssh.ProcessError as e:
@@ -68,7 +58,6 @@ class SSHTool(AgentTool[SSHClient]):
         return view_file(data)
 
     async def file_write(self, path: str, content: str) -> ToolResult:
-        """Write a text file through SSH exec."""
         try:
             await self.client.write_text(path, content)
         except asyncssh.ProcessError as e:
@@ -76,7 +65,6 @@ class SSHTool(AgentTool[SSHClient]):
         return tool_ok(f"wrote {len(content.encode('utf-8'))} bytes to {path}")
 
     async def file_list(self, path: str = "/") -> ToolResult:
-        """List directory entries through SSH exec."""
         try:
             names = await self.client.listdir(path)
         except asyncssh.ProcessError as e:

@@ -1,10 +1,4 @@
-"""``LLMJudgeGrader`` — per-criterion LLM evaluation.
-
-A self-contained implementation of weighted per-criterion judging: each criterion
-is graded ``MET``/``UNMET`` by an LLM in parallel, and the verdicts are combined
-by weight into a 0-1 score. No third-party dependency — it talks to the HUD
-inference gateway directly.
-"""
+"""``LLMJudgeGrader``: per-criterion LLM evaluation through the HUD inference gateway."""
 
 from __future__ import annotations
 
@@ -56,21 +50,10 @@ class _Criterion:
 
 
 class LLMJudgeGrader(Grader):
-    """Grade an answer against weighted criteria using an LLM judge.
+    """Grade an answer against weighted criteria with an LLM judge on the HUD gateway.
 
-    Uses the HUD inference gateway by default.
-
-    Example:
-
-        yield await combine(
-            BashGrader.grade(weight=0.4, command="pytest -q"),
-            LLMJudgeGrader.grade(
-                weight=0.6,
-                answer=answer,
-                criteria=["Correct", ("Well-reasoned", 2.0)],
-                question=prompt,
-            ),
-        )
+    Criteria are judged concurrently, one call each. A negative weight marks an error the
+    answer must not make, and counts as a penalty when the judge finds it.
     """
 
     name = "LLMJudgeGrader"

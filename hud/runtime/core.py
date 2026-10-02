@@ -83,11 +83,7 @@ class RuntimeLimits(BaseModel):
 class RuntimeConfig(BaseModel):
     """Typed task-environment launch requirements.
 
-    ``Task.runtime_config`` is requested construction input. ``Runtime.config``
-    is the effective config used to construct a runtime.
-
-    A Compose project uses local paths while authored and serialized project
-    data in platform records.
+    ``Task.runtime_config`` is the requested config; ``Runtime.config`` is the one applied.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -131,15 +127,7 @@ class RuntimeConfig(BaseModel):
 
 
 class Provider(Protocol):
-    """Server placement: called with the task row being placed, acquire one
-    fresh env substrate for it and yield its connectable ``Runtime``.
-
-    A provider brings up the *server* (the env's control channel) wherever it
-    lives — a local subprocess, a container, a cloud sandbox — and the agent
-    loop drives it from this process (``hud.eval.run.rollout``). The
-    channel is location-transparent, so "co-located" (loopback) and "split"
-    (agent here, env elsewhere) are the same code, differing only in the url.
-    """
+    """Acquires one fresh env substrate for a task and yields its connectable ``Runtime``."""
 
     def __call__(self, task: Task, /) -> AbstractAsyncContextManager[Runtime]: ...
 
@@ -156,15 +144,10 @@ def validate_session_id(session_id: str) -> None:
 
 @dataclass(frozen=True)
 class Runtime:
-    """The connectable address of a provisioned substrate.
+    """A provisioned substrate's control-channel ``url`` plus connection-time ``params``.
 
-    ``url`` is the control-channel address (``tcp://127.0.0.1:7000`` for a
-    local process, ``tcp://sandbox-abc.hud.so:443`` for a hosted box).
-    ``params`` carries connection-time data a transport may need (auth token,
-    sandbox id). ``config`` is the effective runtime configuration used to
-    construct the runtime. Constructed directly, it is also a provider — the
-    borrowed, shared case: it yields itself with a no-op lifecycle, since
-    whoever provisioned the substrate owns its teardown.
+    Constructed directly, it is also a provider that yields itself and leaves teardown
+    to whoever provisioned the substrate.
     """
 
     url: str
@@ -195,19 +178,10 @@ class Runtime:
 class Shared:
     """Lease provider: at most ``width`` rollouts share each task placement.
 
-    Each environment and runtime configuration boots lazily on its first lease.
-    It lives for the enclosing ``async with`` scope unless its run timeout
-    expires, in which case the next lease boots a fresh substrate. ``width`` is
-    a substrate's capacity (e.g. a vectorized sim's slot count): an excess lease
-    waits for a slot instead of erroring, so the scheduler needs no pairing —
-    ``group`` and ``max_concurrent`` keep their ordinary meanings.
-
-    ``Taskset.run`` scopes a context-manager placement to the call, so
-    ``runtime=Shared(DockerRuntime(...), width=8)`` works bare; open the scope
-    yourself to keep the substrate warm across several calls:
-
-        async with Shared(DockerRuntime("hud-isaac-env"), width=8) as rt:
-            await taskset.run(agent, runtime=rt, group=8)
+    One substrate per environment and runtime config boots on its first lease and
+    lives for the ``async with`` scope, or until its run timeout, when the next lease
+    boots a fresh one. Excess leases wait for a slot. ``Taskset.run`` opens the scope
+    for one call; open it yourself to keep the substrate warm across calls.
     """
 
     def __init__(self, inner: Provider, *, width: int) -> None:
@@ -264,8 +238,8 @@ class Shared:
                     self._deadlines.pop(key)
                     await self._contexts.pop(key).aclose()
                 if key not in self._addresses:
-                    # First leaseholder boots. A failed boot fails only its own
-                    # rollout (nothing is retained); the next lease retries.
+                    # A failed boot retains nothing: it fails only its own rollout,
+                    # and the next lease retries.
                     config = resolve_runtime_config(self.inner, task)
                     run_timeout = (
                         config.limits.run_timeout_s

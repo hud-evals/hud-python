@@ -1,6 +1,4 @@
-"""
-Version information for the HUD SDK.
-"""
+"""Version information for the HUD SDK."""
 
 from __future__ import annotations
 

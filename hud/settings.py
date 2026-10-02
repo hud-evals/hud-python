@@ -8,12 +8,7 @@ from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettings
 
 
 class Settings(BaseSettings):
-    """
-    Global settings for the HUD SDK.
-
-    This class manages configuration values loaded from environment variables
-    and provides global access to settings throughout the application.
-    """
+    """Global settings for the HUD SDK."""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="allow")
 
@@ -26,16 +21,7 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """
-        Customize settings source precedence.
-
-        Precedence (highest to lowest):
-        - init_settings (explicit kwargs)
-        - env_settings (process environment)
-        - dotenv_settings (.env in CWD)
-        - user_dotenv_settings (~/.hud/.env, written by `hud set`)
-        - file_secret_settings
-        """
+        """Layer ``~/.hud/.env`` (from ``hud set``) under the process env and the CWD ``.env``."""
         user_dotenv_settings = DotEnvSettingsSource(
             settings_cls,
             env_file=Path.home() / ".hud" / ".env",
@@ -179,11 +165,8 @@ class Settings(BaseSettings):
         return None
 
 
-# Create a singleton instance
 settings = Settings()
 
 
-# Add utility functions for backwards compatibility
 def get_settings() -> Settings:
-    """Get the global settings instance."""
     return settings

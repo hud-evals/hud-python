@@ -25,16 +25,10 @@ if TYPE_CHECKING:
 
 
 def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
-    """Create an agent routed through the HUD gateway.
+    """Create an agent routed through the HUD gateway; requires ``HUD_API_KEY``.
 
-    Sets ``gateway=True`` on the config instead of attaching a client, so the
-    provider agent builds the gateway client locally and
-    ``HostedRuntime`` can serialize the config and rebuild
-    it remotely. Explicitly supplied clients remain custom/BYOK and are not
-    serializable.
-
-    For direct API access with provider API keys, instantiate the agent classes
-    directly.
+    The agent stays serializable, so ``HostedRuntime`` can rebuild it remotely. For your own
+    provider keys, instantiate the agent class directly.
     """
     direct_credentials = [name for name in ("api_key", "base_url") if name in kwargs]
     if direct_credentials:

@@ -126,8 +126,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             ),
         )
 
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
-
     async def _initialize_state(self, *, prompt: list[PromptMessage]) -> RunState[BetaMessageParam]:
         return RunState(messages=self._initial_messages(prompt))
 
@@ -226,8 +224,6 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         if sibling_docs:
             return [tool_result_msg, {"role": "user", "content": sibling_docs}]
         return tool_result_msg
-
-    # ─── Anthropic call ───────────────────────────────────────────────
 
     async def _stream_response(
         self,

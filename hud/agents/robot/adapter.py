@@ -1,9 +1,4 @@
-"""Translate observations and actions between env and policy spaces.
-
-The loop calls ``bind``, ``reset``, ``adapt_observation``, and the action hooks.
-Use ``LeRobotAdapter`` for LeRobot models; subclass for custom wiring;
-``adapter=None`` for pass-through.
-"""
+"""Translate observations and actions between env and policy spaces."""
 
 from __future__ import annotations
 
@@ -38,10 +33,8 @@ class _TorchModule(Protocol):
 class Adapter:
     """Translate between an env's observation/action spaces and a policy's.
 
-    Driven by ``RobotAgent``: ``bind`` once
-    after connect, ``reset`` once per episode, then ``adapt_observation``
-    per inference and the action hooks per chunk/step. Construct with the
-    policy's image-slot names; everything env-side is learned in ``bind``.
+    ``RobotAgent`` calls ``bind`` once after connecting, ``reset`` once per episode, then
+    ``adapt_observation`` per inference, ``adapt_chunk`` per chunk and ``adapt_action`` per step.
     """
 
     def __init__(
@@ -52,9 +45,8 @@ class Adapter:
     ) -> None:
         # The policy's ordered image-slot names (model side; known at load time).
         self.model_image_keys: list[str] = list(model_image_keys or [])
-        # Open-loop horizon: how many predicted actions to execute before re-querying.
-        # ``None`` = full model chunk. Applied by ``RobotAgent``, not here —
-        # so subclass ``adapt_chunk`` overrides stay free of truncation duty.
+        # Open-loop horizon: actions to execute before re-querying (``None``: the whole chunk).
+        # ``RobotAgent`` applies it, so ``adapt_chunk`` overrides need not truncate.
         self.chunk_size: int | None = chunk_size
         # The env's action feature and observation layout (set in ``bind``).
         self.action_space: dict[str, Any] = {}
@@ -62,9 +54,7 @@ class Adapter:
         self.state_key: str | None = None
 
     def bind(self, action_space: dict[str, Any], observation_space: dict[str, Any]) -> None:
-        """Learn the env's layout from the contract (``client.spaces()``): image
-        features become the camera keys (in contract order), the first non-image
-        feature is the state. Override to derive extra env-side parameters."""
+        """Learn the env's cameras (image features, in order) and state (first other feature)."""
         self.action_space = action_space or {}
         self.image_keys = [n for n, f in observation_space.items() if f.get("type") in IMAGE_TYPES]
         self.state_key = next(
@@ -79,12 +69,9 @@ class Adapter:
         raise NotImplementedError
 
     def adapt_chunk(self, chunk: ActionArray, obs: dict[str, Any]) -> ActionArray:
-        """Translate a freshly-inferred ``[T, A]`` chunk to env space, given the
-        (per-slot) query-time observation it was inferred from (default identity).
+        """Map a freshly inferred ``[T, A]`` chunk to env space.
 
-        Called once per slot at inference time, so a chunk expressed relative to
-        the query state — e.g. joint *deltas* to be added to the query-time
-        joints — converts in one shot.
+        ``obs`` is the observation it was inferred from, so relative actions convert in one shot.
         """
         return chunk
 
@@ -94,13 +81,10 @@ class Adapter:
 
 
 class LeRobotAdapter(Adapter):
-    """Vanilla LeRobot adapter for a standard image/state env, single or batched.
+    """LeRobot adapter for an image-and-state env, single or batched (state ``[N, S]``).
 
-    Maps env cameras onto the model's image slots in order and converts HWC
-    ``uint8`` to CHW ``float`` in ``[0, 1]``; state and prompt pass through.
-    A batched observation (state ``[N, S]``) maps in one go — cameras become
-    ``[N, C, H, W]`` and the shared task is repeated to ``N``. Actions are
-    identity (postprocess already returns env-space actions).
+    Cameras fill the model's image slots in order, as CHW floats in ``[0, 1]``; actions pass
+    through, since LeRobot's postprocessor already returns env-space actions.
     """
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
@@ -120,8 +104,7 @@ class LeRobotAdapter(Adapter):
 
 
 class OpenPIAdapter(Adapter):
-    """Unwraps ``obs['data']`` to OpenPI wire keys and attaches the prompt;
-    actions are pass-through."""
+    """Unwraps ``obs['data']`` to OpenPI wire keys and adds the prompt; actions pass through."""
 
     def adapt_observation(self, obs: dict[str, Any], prompt: str) -> dict[str, Any]:
         out = dict(obs["data"])

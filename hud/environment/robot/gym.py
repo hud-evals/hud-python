@@ -1,27 +1,4 @@
-"""Gym-style env integration: introspection, the served path, and ``wrap``.
-
-Two consumers share the introspection here (split observations, probe success,
-derive a minimal contract) and stay in lockstep because of it:
-
-- ``GymBridge`` - the served path (``env.gym(...)``): a generic
-  ``RobotBridge`` over any gym-style target, spawned as
-  ``python -m hud.environment.robot.gym <target>``. This module is that sim
-  program; ``gym_command`` builds the argv, so both ends of the format
-  live here.
-- ``wrap`` / ``TracedEnv`` - the loop-owning path: wrap any
-  ``gym.Env``, ``gym.vector.VectorEnv``, or batched-tensor Isaac env you drive
-  yourself and every episode streams to the platform as a trace (numeric
-  state, per-camera H.264 video, actions, reward/success) under one job:
-
-      from hud.environment.robot import wrap
-
-      env = wrap(make_env(...), job="chess-eval")
-
-If no contract file exists, ``GymBridge.start`` builds the env once (factory
-defaults) and writes a minimal ``contract.json`` before the capability is
-published — the agent binds from that manifest. Edit ``names`` to relabel
-plots; an existing file is loaded instead, so edits stick.
-"""
+"""Gym-style env integration: introspection, the served path, and ``wrap``."""
 
 from __future__ import annotations
 
@@ -54,12 +31,8 @@ class _TorchModule(Protocol):
     def as_tensor(self, data: object, *, device: object = None) -> object: ...
 
 
-# ── env introspection (pure; no telemetry, no wrapper state) ──────────────────
-
-
 def num_envs_of(env: Any) -> int | None:
-    """``num_envs`` from the env or its unwrapped core (gymnasium 1.x wrappers
-    no longer forward attributes, so an Isaac env inside ``gym.make`` hides it)."""
+    """``num_envs`` from the env or its unwrapped core (gymnasium 1.x wrappers don't forward it)."""
     for obj in (env, getattr(env, "unwrapped", env)):
         n = getattr(obj, "num_envs", None)
         if n is not None:
@@ -68,10 +41,9 @@ def num_envs_of(env: Any) -> int | None:
 
 
 def is_batched(env: Any) -> bool:
-    """Vectorized (gym VectorEnv) or batched-tensor (Isaac) envs carry a leading [N] dim.
+    """Whether the env carries a leading ``[N]`` dim, as vector and Isaac envs do.
 
-    Any env exposing ``num_envs`` is batched - Isaac keeps batch semantics even at
-    ``num_envs == 1``; plain ``gym.Env``s don't have the attribute at all.
+    Any env exposing ``num_envs`` is batched, even at ``num_envs == 1``.
     """
     if num_envs_of(env) is not None:
         return True
@@ -97,9 +69,8 @@ def flatten_observation(obs: Any, prefix: str = "") -> dict[str, Any]:
 def split_observation(obs: Any, *, batched: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split an observation into ``(state, frames)``, both name -> array.
 
-    A camera frame is a channel-last image (rank 3, or rank 4 when batched); state is
-    any flat numeric vector. Anything else is dropped. Batched arrays keep their
-    leading ``[N]`` dim - the recorder slices per slot.
+    Frames are channel-last images and state is flat numeric vectors; anything else is
+    dropped. Batched arrays keep their leading ``[N]`` dim.
     """
     state: dict[str, Any] = {}
     frames: dict[str, Any] = {}
@@ -184,12 +155,9 @@ def load_or_write_contract(
     action_dim: int,
     fps: int,
 ) -> dict[str, Any]:
-    """The contract round-trip: load the user-edited file if present, else derive a
-    minimal contract from one (per-env) sample observation and write it once.
+    """Load the contract file if present, else derive a minimal one from a sample and write it.
 
-    Derived: just enough to structure the spaces and label plots - cameras as rgb
-    observations, state vectors with positional names, one action feature. Users
-    edit the written file to rename dimensions; nothing else is derived on purpose.
+    Users edit the written file to relabel dimensions; an existing file always wins.
     """
     file = Path(path) if path else None
     if file is not None and file.exists():
@@ -208,27 +176,13 @@ def load_or_write_contract(
     return contract
 
 
-# ── GymBridge: the served path (what env.gym() spawns) ────────────────────────
-
-
 class GymBridge(RobotBridge):
-    """Serve any gym-style env over the ``robot`` protocol, generically.
+    """Serve any gym-style env over the ``robot`` protocol.
 
-    ``target`` is how this process builds the env: a factory callable, or a
-    string — a gymnasium registry id, or a declared env's spec as JSON
-    (``gym_command`` reduces an env instance to the latter).
-
-    Task args are partitioned into env-defining **build args** (a change
-    rebuilds the env) and episodic args flowing to ``env.reset(seed=...,
-    options=...)``. For a factory, its signature is the partition — so
-    ``num_envs`` in the signature is the vectorization declaration; for a
-    registry target, ``num_envs`` is the one build arg (``gym.make_vec``).
-    Default build kwargs (e.g. ``num_envs=8`` from ``env.gym(..., num_envs=8)``)
-    fill in when the task does not pass them.
-
-    ``fps`` overrides the detected control rate; ``contract`` is the
-    ``contract.json`` round-trip path (load beats derive, so user edits stick;
-    ``None`` disables the file).
+    ``target`` is a factory, a gymnasium registry id, or a declared env's spec as JSON. Task
+    args the factory's signature names (only ``num_envs`` for a registry target) rebuild the
+    env when they change; the rest go to ``env.reset`` as ``seed`` and ``options``. Extra
+    keyword arguments fill in task args a task omits.
     """
 
     def __init__(
@@ -280,8 +234,6 @@ class GymBridge(RobotBridge):
         """The env's unwrapped core (gymnasium wrappers hide Isaac attributes)."""
         return getattr(self.env, "unwrapped", self.env)
 
-    # ── env lifecycle (all sim touches on the sim thread) ───────────────────────
-
     def _load_contract_if_present(self) -> None:
         """Load a pre-written contract.json when present (skips the start-time probe)."""
         if self.contract or self._contract_path is None:
@@ -308,22 +260,13 @@ class GymBridge(RobotBridge):
             print(f"[env] wrote {self._contract_path} (edit names to relabel plots)", flush=True)
 
     async def ensure_contract(self) -> dict[str, Any]:
-        """Return the wire contract, probing the env when start() did not already.
-
-        ``start()`` mints the contract for ``env.gym`` publish; this covers a
-        bare ``contract`` RPC (tests / custom callers) that skips that path.
-        """
+        """Return the wire contract, probing the env when ``start`` has not."""
         if not self.contract:
             await self._run_on_sim(self.reset)
         return self.contract
 
     async def start(self) -> None:
-        """Bind the wire with a complete contract so ``env.initialize`` can publish it.
-
-        A contract file is loaded when present. Otherwise the env is built with
-        factory defaults and probed here — ``@env.initialize`` awaits this — so
-        the capability manifest is never empty when the agent binds.
-        """
+        """Bind the wire with a complete contract, probing a built env when no file is loaded."""
         self._load_contract_if_present()
         if "num_envs" in self._defaults:
             self.num_envs = int(self._defaults["num_envs"])
@@ -408,8 +351,6 @@ class GymBridge(RobotBridge):
             frames = {k: to_numpy(v)[0] for k, v in frames.items()}
         return state, frames
 
-    # ── bridge protocol ──────────────────────────────────────────────────────────
-
     def step(self, action: NDArray[Any]) -> None:
         act = np.array(action, dtype=np.float32)  # wire buffer is read-only
         if not self.batched:
@@ -474,7 +415,6 @@ class GymBridge(RobotBridge):
 
     def result_slots(self) -> list[dict[str, Any]]:
         """Per-slot grades: env-reported success when available, else accumulated reward."""
-        # The env's own success check outranks accumulated shaped reward.
         scores = self._success if self._seen_success else self._acc_reward
         return [
             {
@@ -492,21 +432,12 @@ def _first_leaf(obs: Any) -> Any:
     return obs
 
 
-# ── wrap: trace streaming for a loop you own ──────────────────────────────────
-
-
 class TracedEnv:
     """The observing wrapper: same ``reset``/``step``/``close`` surface, plus telemetry.
 
-    Plain envs are recorded as a batch of one; vectorized/batched envs fan out into one
-    trace per episode per slot (``done[i]`` closes slot ``i``'s trace and opens the next).
-
-    - ``job`` - job name on the platform (default: the env's spec id / class name).
-    - ``job_id`` - existing HUD Job UUID shared across wrapped envs; omitted to mint one.
-    - ``task`` - optional instruction/label shown on each trace's timeline.
-    - ``fps`` - control rate override (default: detected from the env).
-    - ``contract`` - path for the derived contract round-trip; ``None`` disables it.
-    - ``record_indices`` - which env slots get rich traces (default: first 4).
+    Plain envs record as a batch of one; batched envs get one trace per episode per slot.
+    ``task`` is the instruction shown on each trace, ``job_id`` joins an existing HUD job,
+    and ``record_indices`` picks the slots that get rich traces (the first 4 by default).
     """
 
     def __init__(
@@ -536,8 +467,6 @@ class TracedEnv:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.env, name)
 
-    # ── the observed surface ──────────────────────────────────────────────────
-
     def reset(self, **kwargs: Any) -> Any:
         result = self.env.reset(**kwargs)
         obs = result[0] if isinstance(result, tuple) else result
@@ -557,7 +486,6 @@ class TracedEnv:
         obs, reward, terminated, truncated = result[:4]
         info = result[4] if len(result) > 4 else {}
         if self._rec is not None:
-            # Episode ends on either gym flag; coerce to a 1-D bool mask.
             done = np.atleast_1d(to_numpy(terminated) | to_numpy(truncated)).astype(bool)
             state, frames = split_observation(
                 _with_final_obs(obs, info, done), batched=self._batched
@@ -626,11 +554,8 @@ class TracedEnv:
         self.close()
 
 
-# The public verb: ``from hud.environment.robot import wrap`` - construction is the wrapping.
+# The public verb: constructing a ``TracedEnv`` is the wrapping.
 wrap = TracedEnv
-
-
-# ── the sim program (python -m hud.environment.robot.gym) ─────────────────────
 
 
 def gym_command(
@@ -641,17 +566,11 @@ def gym_command(
     bridge: type[GymBridge] | None = None,
     **defaults: Any,
 ) -> list[str]:
-    """Build the command line that spawns *target* as a sim process (what ``env.gym`` runs).
+    """Build the command line that spawns ``target`` as a sim process (what ``env.gym`` runs).
 
-    ``env.py`` only declares the sim, it never runs it — this builds the argv
-    for the child process that will. A live env object can't cross that
-    boundary, only text can, so *target* is reduced to something the child can
-    rebuild itself: a factory's source path, a registry id as-is, or a
-    constructed env's spec (id + kwargs) — closed here since only the spec
-    crosses over; the child calls ``gym.make`` again for its own instance.
-    ``fps`` / ``contract`` / build defaults (e.g. ``num_envs=``) flow through
-    to the ``GymBridge`` the CLI builds. ``bridge`` swaps in a subclass
-    (same way: by source path), for a sim process that serves more than the wire.
+    Only text crosses into the child, so ``target`` is reduced to what it can rebuild: a
+    factory's source path, a registry id, or a constructed env's spec, closing that env
+    here. ``bridge`` swaps in a ``GymBridge`` subclass, also by source path.
     """
     if callable(target):
         name = getattr(target, "__qualname__", "")
@@ -674,8 +593,7 @@ def gym_command(
         cmd += ["--contract", str(contract)]
     if bridge is not None:
         cmd += ["--bridge", f"{inspect.getfile(bridge)}:{bridge.__qualname__}"]
-    # Build defaults (num_envs, etc.) as --key value pairs the CLI re-applies.
-    # JSON-encoded so the child gets real bools/ints/strings back (see main()).
+    # Build defaults as JSON-encoded ``--key value`` pairs, so ``main`` gets real types back.
     for key, value in defaults.items():
         cmd += [f"--{key.replace('_', '-')}", json.dumps(value)]
     return cmd

@@ -32,10 +32,8 @@ class SSHConnectionError(ConnectionError):
 class SSHClient(CapabilityClient):
     """Thin asyncssh wrapper. Exposes the raw connection via ``conn``.
 
-    File helpers pass paths to the session verbatim: relative paths resolve
-    against the session cwd, absolute paths mean what they say. The namespace
-    the session runs in is the only path truth — file helpers and shell
-    commands must never disagree about what a path names.
+    File helpers pass paths verbatim, so a path names what it would in a shell
+    command: relative paths resolve against the session cwd.
     """
 
     protocol: ClassVar[str] = "ssh/2"
@@ -284,13 +282,11 @@ def _is_closed(conn: asyncssh.SSHClientConnection) -> bool:
 
 
 def _powershell(script: str) -> str:
-    """Wrap a script for remote execution with no quoting at all.
+    """Wrap a script as ``-EncodedCommand``, which leaves no quotes to mangle.
 
-    ``-Command "..."`` breaks against the built-in Windows workspace: its exec
-    handler splits with ``shlex.split(posix=False)`` (quotes retained) and
-    ``subprocess`` re-quotes, so PowerShell sees a string literal instead of a
-    script. ``-EncodedCommand`` carries the script as base64 UTF-16LE — no
-    quotes to mangle anywhere.
+    The built-in Windows workspace splits exec commands with
+    ``shlex.split(posix=False)`` and ``subprocess`` re-quotes them, so a
+    ``-Command "..."`` script would arrive as a string literal.
     """
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"

@@ -1,17 +1,4 @@
-"""HUD Telemetry - Lightweight telemetry for HUD SDK.
-
-This module provides:
-- The OTel-shaped ``Span`` wire format (``hud.telemetry.span``)
-- ``@instrument`` debug spans for any function
-- High-performance batched span export to the HUD platform
-
-Usage:
-    from hud.telemetry import instrument
-
-    @instrument
-    async def my_function():
-        ...
-"""
+"""HUD telemetry: OTel-shaped spans, ``@instrument`` debug spans, and batched export."""
 
 from __future__ import annotations
 

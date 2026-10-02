@@ -10,9 +10,8 @@ from hud.utils.process import create_process_group_exec
 async def docker(*args: str, check: bool = True, deadline: float | None = None) -> tuple[str, str]:
     """Run a docker command and return decoded ``(stdout, stderr)``.
 
-    *deadline* bounds it and tears down the process group: a build or pull
-    that hangs must not hang its caller, and killing only the CLI leaves its
-    children behind.
+    Past ``deadline`` the whole process group is torn down, since killing only the
+    CLI leaves its children behind.
     """
     group = await create_process_group_exec(
         "docker",

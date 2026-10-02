@@ -1,13 +1,4 @@
-"""``hud task`` — start a task (get its prompt) or grade an answer.
-
-The task source resolves an authored slug to its template id and bound args.
-Without ``--url`` that source is also spawned locally; with ``--url`` the task
-runs against the already-served control channel instead.
-
-    hud task list                          # what tasks this source exposes
-    hud task start fix_config              # -> the task's prompt (stdout)
-    hud task grade fix_config --answer "…" # -> the reward (stdout); --json for the frame
-"""
+"""``hud task`` — start a task (get its prompt) or grade an answer."""
 
 from __future__ import annotations
 

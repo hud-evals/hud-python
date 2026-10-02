@@ -1,10 +1,4 @@
-"""MCPTool: capability base for tools that pipe one upstream MCP tool through an ``MCPClient``.
-
-``ToolAgent`` enumerates ``client.list_tools()`` after the MCP handshake and
-constructs one instance of every ``MCPTool`` subclass in its catalog per
-discovered upstream tool. ``execute`` forwards straight through
-``client.call_tool``.
-"""
+"""MCPTool: capability base for tools that proxy one upstream MCP tool."""
 
 from __future__ import annotations
 

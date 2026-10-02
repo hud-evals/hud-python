@@ -65,7 +65,7 @@ class SubScore(BaseModel):
 
     @property
     def metadata(self) -> dict[str, Any] | None:
-        """Compatibility alias for ``info``."""
+        """Alias for ``info``."""
         return self.info
 
     @metadata.setter
@@ -74,16 +74,12 @@ class SubScore(BaseModel):
 
     @property
     def score(self) -> float:
-        """Alias for value. Deprecated — use .value instead."""
+        """Deprecated alias for ``value``."""
         return self.value
 
 
 class EvaluationResult(BaseModel):
-    """Result of a task's evaluate phase.
-
-    In eval mode, populate reward and subscores for scoring.
-    In production, use content and info for diagnostics and stats.
-    """
+    """The grade a task yields: a reward and an optional ``subscores`` breakdown."""
 
     reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
     done: bool = Field(default=True, description="Whether the task/episode is complete")
@@ -123,5 +119,4 @@ class EvaluationResult(BaseModel):
 
     @classmethod
     def from_float(cls, value: float) -> EvaluationResult:
-        """Create an EvaluationResult from a simple float reward."""
         return cls(reward=value, done=True)

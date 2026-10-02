@@ -1,9 +1,4 @@
-"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC.
-
-Translates Claude's computer-use action vocabulary into ``RFBTool`` primitive
-calls. The same RFBTool helpers will back the future Gemini/OpenAI computer
-tools — only the LLM-facing schema differs.
-"""
+"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC."""
 
 from __future__ import annotations
 
@@ -42,8 +37,6 @@ def _hold_keys(text: str | None) -> list[str] | None:
     keys = _split_keys(text)
     return keys or None
 
-
-# ─── Claude tool specs (per-model gating) ───────────────────────────
 
 # Current Claude models take the computer toolset; only the older models listed in
 # ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
@@ -238,8 +231,6 @@ class ClaudeComputerTool(RFBTool):
             logger.exception("ClaudeComputerTool action %s failed", action)
             return tool_err(f"computer action {action!r} failed: {exc}")
 
-    # ─── action dispatch ──────────────────────────────────────────────
-
     async def _dispatch(self, action: str | None, arguments: dict[str, Any]) -> ToolResult:
         match action:
             case "screenshot":
@@ -354,8 +345,6 @@ class ClaudeComputerTool(RFBTool):
         # Most actions return the post-action screenshot so the model can verify.
         return await self.screenshot()
 
-    # ─── zoom ────────────────────────────────────────────────────────
-
     async def _zoom(self, arguments: dict[str, Any]) -> ToolResult:
         region = arguments.get("region")
         if not isinstance(region, (list, tuple)):
@@ -378,9 +367,6 @@ class ClaudeComputerTool(RFBTool):
                 )
             ],
         )
-
-
-# ─── helpers ─────────────────────────────────────────────────────────
 
 
 def _xy(coordinate: Any) -> tuple[int | None, int | None]:
