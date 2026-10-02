@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 CONTROL_FRAME_LIMIT_BYTES = 16 * 1024 * 1024
+# A ``files.flush`` reply can carry a 50 MiB diff plus base64 artifacts and JSON escaping.
+FILE_TRACKING_FRAME_LIMIT_BYTES = 160 * 1024 * 1024
 
 
 class FrameTooLargeError(ValueError):

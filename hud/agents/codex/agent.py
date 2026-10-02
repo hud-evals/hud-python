@@ -210,7 +210,7 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
 
     async def __call__(self, run: Run) -> None:
         endpoint = model_endpoint(run, self.provider, gateway=self.config.gateway)
-        ssh = cast("SSHClient", await run.client.open("ssh"))
+        ssh = cast("SSHClient", await run.open("ssh"))
         connection = endpoint.connection if endpoint is not None else None
         executable = await resolve_executable(
             ssh, "codex", _MANAGED_CODEX_PATHS, run.runtime_config

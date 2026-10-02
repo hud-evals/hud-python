@@ -253,7 +253,7 @@ async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
                 addr   = await stack.enter_async_context(runtime(task))    # 1. provider -> Runtime
                 client = await stack.enter_async_context(connect(addr))    # 2. connect -> HudClient
                 live = Run(client, task.id, task.args)
-                live._runtime = addr.url
+                live.trace.runtime = addr.url
                 async with live:              # 3. Run.__aenter__ = tasks.start
                     run = live
                     _phase = "agent loop"
@@ -578,8 +578,9 @@ The pointer is inside `async with live:`, just before `await agent(run)`. At thi
 
 <div className="step-list">
 
-- an attached `client` (`run.client`), which already has the `manifest` and whose server has a
-  `TaskRunner` suspended at the task's first yield,
+- the session it was started on - here the `HudClient`, which already has the `manifest` and
+  whose server has a `TaskRunner` suspended at the task's first yield,
+- `run.capabilities`, the environment's capabilities for this task,
 - the `prompt` the env returned, on `run.prompt`,
 - a `run.trace` containing the task setup step and, when a prompt was returned, its opening user
   step.
@@ -593,7 +594,10 @@ The pointer is inside `async with live:`, just before `await agent(run)`. At thi
 ```python hud/eval/run.py · rollout (agent loop)
 run = live
 async with file_tracking_observer(client):
-    await agent(run)                    # Agent.__call__(run)
+    try:
+        await agent(run)                # Agent.__call__(run)
+    finally:
+        await run.revoke()              # access ends before the final capture and grading
 ```
 
 ```python hud/agents/base.py · Agent
@@ -603,18 +607,19 @@ class Agent(ABC):
         """Drive run to completion, filling run.trace (answer is trace.content)."""
 ```
 
-Inside, the agent reads the manifest through the run's client and opens the capabilities it needs,
-then loops - acting, observing, recording steps - until it has an answer. Everything it does lands
-on `run.trace`; the final answer is `run.trace.content`.
+Inside, the agent looks through `run.capabilities` and opens the ones it needs, then loops -
+acting, observing, recording steps - until it has an answer. Everything it does lands on
+`run.trace`; the final answer is `run.trace.content`.
 
 ```python
-shell = await run.client.open("shell")   # live CapabilityClient (ssh/cdp/mcp/...)
-cdp   = run.client.binding("cdp")        # or raw wire data for something else to dial
+shell = await run.open("shell")   # live CapabilityClient (ssh/cdp/mcp/...)
+cdp   = run.binding("cdp")        # or wire data for something else to dial
 # ... agent loop: append steps to run.trace; final answer -> run.trace.content ...
 ```
 
-When `__call__` returns, the pointer leaves the `async with live:` block, which triggers
-`Run.__aexit__`.
+When `__call__` returns, `run.revoke()` closes what the agent opened and the session cuts its
+routes; file tracking takes its final capture; then the pointer leaves the `async with live:` block,
+which triggers `Run.__aexit__`.
 
 ## Grading and teardown
 
@@ -689,8 +694,8 @@ Every hop above, in order:
 4. `serve` (in the substrate) - `env.start()` (initialize hooks), `bind()` a TCP server, `serve_forever()`; the provider yields a `Runtime(url)`.
 5. `connect(addr)` - retry until ready, `HudClient.hello()` -> server returns the `manifest`.
 6. `Run.__aenter__` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> `prompt` back on `run.prompt`.
-7. **Checkpoint** - `run` holds a live client (manifest + suspended runner) and the prompt.
-8. `await agent(run)` - agent opens capabilities via `run.client`, loops, fills `run.trace` (answer on `trace.content`).
+7. **Checkpoint** - `run` holds its session (manifest + suspended runner), the capabilities, and the prompt.
+8. `await agent(run)` - agent opens capabilities via `run.open`, loops, fills `run.trace` (answer on `trace.content`); `run.revoke()` then ends its access.
 9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
 10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with the actor result; replace the actor grade.
 11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded trace to `Taskset.run`.

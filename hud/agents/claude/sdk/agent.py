@@ -52,20 +52,18 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
 
     async def __call__(self, run: Run) -> None:
         endpoint = model_endpoint(run, self.provider, gateway=self.config.gateway)
-        ssh = cast("SSHClient", await run.client.open("ssh"))
-        manifest = run.client.manifest
-        assert manifest is not None
+        ssh = cast("SSHClient", await run.open("ssh"))
         shell = ssh.capability.params.get("shell", "bash")
         windows = shell in WINDOWS_SHELLS
         connection = endpoint.connection if endpoint is not None else None
         executable = await resolve_executable(
             ssh, "claude", _MANAGED_CLAUDE_PATHS, run.runtime_config
         )
-        rfb_count = sum(cap.protocol.partition("/")[0] == "rfb" for cap in manifest.bindings)
+        rfb_count = sum(cap.protocol.partition("/")[0] == "rfb" for cap in run.capabilities)
 
         async with AsyncExitStack() as resources:
             mcp_servers: dict[str, dict[str, Any]] = {}
-            for cap in manifest.bindings:
+            for cap in run.capabilities:
                 family = cap.protocol.partition("/")[0]
                 if family == "mcp":
                     name = cap.name
@@ -78,7 +76,7 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                     server = await resources.enter_async_context(
                         computer_mcp.bridge_computer_mcp(
                             ssh,
-                            run.client.binding(cap.name),
+                            run.binding(cap.name),
                             self.config.screenshot_encoding,
                             shell=shell,
                         )

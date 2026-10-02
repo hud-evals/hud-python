@@ -749,7 +749,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotEndpoint.capabilities(...)` | `hud.environment.robot` | Everything the bridge serves after `start()` (the `openpi/0` wire, plus any extras) |
 | `DirectControl(...).attach(sim)` | `hud.environment.robot` | The `robot` capability as MCP motion tools, for tool-calling LLM agents |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
-| `RobotClient` | `hud.capabilities` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
+| `RobotClient` | `hud.capabilities` | Agent-side wire client (`connect(capability)` claims the slot its `params["token"]` names; `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `BatchedAgent` / `BatchedModel` | `hud.agents.robot` | Many concurrent rollouts against one shared, batched model |

@@ -68,7 +68,7 @@ def model_endpoint(run: Run, provider: str, *, gateway: bool) -> ModelEndpoint |
         endpoint = ModelEndpoint(os.environ.get(variable) or default, key, {}, False, None)
     else:
         return None
-    shell = run.client.binding("ssh")
+    shell = run.binding("ssh")
     if shell.params.get("isolation") != "none":
         raise RuntimeError(
             f"the {shell.name!r} workspace is sandboxed, so it isn't given the agent's model "

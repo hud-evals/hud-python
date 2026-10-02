@@ -18,7 +18,7 @@ protocol work: you get a [`Run`](/v6/reference/types#run), drive the environment
 
 ### The Agent seam
 
-Subclass `Agent` and implement `__call__`. Open the capabilities you need off `run.client`, do your
+Subclass `Agent` and implement `__call__`. Open the capabilities you need off the `run`, do your
 work, and write the answer to `run.trace.content` (graded on exit):
 
 ```python harness.py
@@ -48,12 +48,16 @@ The `run` is the one object you work with for the whole task. Three things you d
 | `run.prompt_messages` | The prompt as normalized user/assistant turns - what most agents consume. |
 | `run.prompt_text` | The same flattened to plain text, for string-only backends. |
 
-**Drive the environment** - `run.client` is the live connection to the served environment.
+**Drive the environment** - the run holds the environment's capabilities until your agent returns.
 
-| Call | Description |
+| Member | Description |
 |------|-------------|
-| `run.client.open(protocol)` | Open a managed [capability](/v6/reference/capabilities) client (shell, browser, ...) to act through. |
-| `run.client.binding(protocol)` | Get a capability's raw wire address, to hand to an external SDK. |
+| `run.capabilities` | Every [capability](/v6/reference/capabilities) the environment published, at the environment's own addresses - what a harness running inside the environment dials. |
+| `await run.open(ref)` | Open a managed capability client (shell, browser, ...) by name or protocol, to act through. |
+| `run.binding(ref)` | Get a capability's wire data where your process reaches it, to hand to an external SDK. |
+
+When `__call__` returns, your access ends: clients you opened are closed and the routes to the
+environment are cut before grading.
 
 **Record the result** - `run.trace` is the [`Trace`](/v6/reference/types#trace) you fill.
 
