@@ -18,18 +18,19 @@ protocol work: you get a [`Run`](/v6/reference/types#run), drive the environment
 
 ### The Agent seam
 
-Subclass `Agent` and implement `__call__`. Open the capabilities you need off the `run`, do your
+Subclass `Agent` and implement `__call__`. Pick the capabilities you need off the `run`, do your
 work, and write the answer to `run.trace.content` (graded on exit):
 
 ```python harness.py
 from hud import Run
 from hud.agents.base import Agent
+from hud.types import text_of
 
 class MyHarness(Agent):
     async def __call__(self, run: Run) -> None:
-        prompt = run.prompt_text          # or run.prompt_messages for structured turns
+        prompt = text_of(run.prompt)      # or run.prompt itself for structured turns
         # ... drive your framework against a capability ...
-        run.record(...)                   # stream steps to the platform live (optional)
+        run.trace.record(...)             # stream steps to the platform live (optional)
         run.trace.content = "the final answer"
 ```
 
@@ -45,25 +46,27 @@ The `run` is the one object you work with for the whole task. Three things you d
 
 | Member | Description |
 |--------|-------------|
-| `run.prompt_messages` | The prompt as normalized user/assistant turns - what most agents consume. |
-| `run.prompt_text` | The same flattened to plain text, for string-only backends. |
+| `run.prompt` | The prompt as normalized user/assistant turns - what most agents consume. |
+| `text_of(run.prompt)` | The same flattened to plain text (`hud.types`), for string-only backends. |
 
-**Drive the environment** - the run holds the environment's capabilities until your agent returns.
+**Drive the environment** - `run.capabilities` lists every [capability](/v6/reference/capabilities)
+the environment published. Each one's `url` is where your process reaches it; `env_url` is where
+code running inside the environment does.
 
-| Member | Description |
+| Call | Description |
 |------|-------------|
-| `run.capabilities` | Every [capability](/v6/reference/capabilities) the environment published, at the environment's own addresses - what a harness running inside the environment dials. |
-| `await run.open(ref)` | Open a managed capability client (shell, browser, ...) by name or protocol, to act through. |
-| `run.binding(ref)` | Get a capability's wire data where your process reaches it, to hand to an external SDK. |
+| `find_capability(run.capabilities, ref)` | Pick one by name, protocol, or protocol family. |
+| `async with open_client(cap) as client:` | A connected client (shell, browser, ...) to act through, closed on exit. |
+| `cap.url` | The wire address to hand to an external SDK that connects itself. |
 
-When `__call__` returns, your access ends: clients you opened are closed and the routes to the
-environment are cut before grading.
+Both functions come from `hud.capabilities`. When `__call__` returns, your access ends: the routes
+to the environment are cut before grading.
 
 **Record the result** - `run.trace` is the [`Trace`](/v6/reference/types#trace) you fill.
 
 | Call | Description |
 |------|-------------|
-| `run.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/reference/types)). |
+| `run.trace.record(step)` | Append a step and stream it to the platform live (step types in [Types](/v6/reference/types)). |
 | `run.trace.content = ...` | Set the final answer, graded when the run ends. |
 
 ### Reusing HUD's loop: `ToolAgent`
@@ -315,8 +318,7 @@ async def assistant(messages: list[PromptMessage]):
     yield 1.0 if answer else 0.0     # grade the final turn however you like
 ```
 
-`run.prompt` becomes the message list, and agents consume it as normalized turns through
-`run.prompt_messages`.
+`run.prompt` holds the conversation as normalized turns.
 
 ### Driving it with `Chat`
 
