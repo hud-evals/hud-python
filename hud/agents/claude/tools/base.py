@@ -21,6 +21,3 @@ def is_anthropic_model(model: str | None) -> bool:
     reject those shorthands, so tools fall back to plain ``input_schema`` definitions.
     """
     return bool(model) and "claude" in model.lower()
-
-
-__all__ = ["ClaudeToolSpec", "is_anthropic_model"]

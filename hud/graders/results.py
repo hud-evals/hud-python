@@ -125,6 +125,3 @@ class EvaluationResult(BaseModel):
     def from_float(cls, value: float) -> EvaluationResult:
         """Create an EvaluationResult from a simple float reward."""
         return cls(reward=value, done=True)
-
-
-__all__ = ["EvaluationResult", "SubScore"]

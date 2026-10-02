@@ -321,6 +321,3 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
         )
         logger.info("exit=%s stderr=%d", returncode, len(stderr))
         events.finish(returncode=returncode, stderr=stderr)
-
-
-__all__ = ["CodexCLIAgent"]

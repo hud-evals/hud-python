@@ -127,6 +127,3 @@ class OpenPIAdapter(Adapter):
         out = dict(obs["data"])
         out.setdefault("prompt", prompt)
         return out
-
-
-__all__ = ["ActionArray", "Adapter", "LeRobotAdapter", "OpenPIAdapter"]

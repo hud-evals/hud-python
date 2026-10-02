@@ -171,6 +171,3 @@ async def _report(path: str, payload: dict[str, Any]) -> None:
                 logger.warning("platform report %s failed: %s", path, exc)
             else:
                 await asyncio.sleep(0.5)
-
-
-__all__ = ["Job"]

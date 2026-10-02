@@ -206,13 +206,3 @@ def _task_signature(task: Task) -> str:
         default=str,
         separators=(",", ":"),
     )
-
-
-__all__ = [
-    "SyncPlan",
-    "diff",
-    "fetch_taskset_tasks",
-    "resolve_taskset_id",
-    "task_upload_payload",
-    "upload_taskset",
-]

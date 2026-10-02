@@ -164,12 +164,3 @@ class RFBClient(CapabilityClient):
 
     async def close(self) -> None:
         await self._exit_stack.aclose()
-
-
-__all__ = [
-    "PngScreenshotEncoding",
-    "RFBClient",
-    "ScreenshotEncoding",
-    "ScreenshotMimeType",
-    "WebPScreenshotEncoding",
-]

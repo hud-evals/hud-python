@@ -245,6 +245,3 @@ class DatasetWriter:
             DatasetWriter._atexit_registered = True
         print(f"[agent] recording LeRobot dataset -> {root}", flush=True)
         return ds
-
-
-__all__ = ["DatasetWriter"]

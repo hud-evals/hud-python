@@ -38,6 +38,3 @@ class ClaudeMCPProxyTool(MCPTool):
                 "eager_input_streaming": True,
             },
         )
-
-
-__all__ = ["ClaudeMCPProxyTool"]
