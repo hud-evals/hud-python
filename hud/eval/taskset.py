@@ -1,13 +1,4 @@
-"""Taskset: a named, ordered collection of concrete tasks.
-
-Loads rows from authored Python sources, JSON/JSONL data, or the platform, and
-schedules the rollout engine over them. HUD job/trace reporting lives in
-:mod:`hud.eval.job`; platform persistence in :mod:`hud.eval.sync`::
-
-    job = await Taskset("bugs", [fix_bug(difficulty=d) for d in range(5)]).run(
-        agent, runtime=LocalRuntime("env.py")
-    )
-"""
+"""Task collections and the scheduler that runs them."""
 
 from __future__ import annotations
 
@@ -59,7 +50,7 @@ def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
 
 
 class Taskset:
-    """A named, ordered collection of :class:`~hud.Task`s."""
+    """A named, ordered collection of tasks, keyed by slug."""
 
     def __init__(
         self,
@@ -74,11 +65,7 @@ class Taskset:
 
     @classmethod
     def from_file(cls, path: str | Path) -> Taskset:
-        """Load a taskset from ``.py`` source, a directory, or JSON/JSONL data.
-
-        Data rows reference envs by bare name and are runnable as-is —
-        placement is an execution-time concern (``run(agent, runtime=...)``).
-        """
+        """Load a taskset from Python source, a directory, or JSON/JSONL rows."""
         source = Path(path)
         if source.suffix in {".json", ".jsonl"}:
             return cls(source.stem, cls._load_tasks_json(source))
@@ -98,7 +85,7 @@ class Taskset:
 
     @classmethod
     def from_api(cls, name: str) -> Taskset:
-        """Load a platform taskset by name or id (uses ``HUD_API_KEY`` settings)."""
+        """Load a platform taskset by name or id."""
         platform = PlatformClient.from_settings()
         taskset_id, display = resolve_taskset_id(platform, name)
         if not taskset_id:
@@ -107,11 +94,10 @@ class Taskset:
         return cls(fetched_display or display, tasks, taskset_id=taskset_id)
 
     def to_file(self, path: str | Path) -> Path:
-        """Write this taskset's portable rows to JSON or JSONL."""
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         suffix = target.suffix.lower()
-        # Compact rows: unset metadata is omitted (defaults restore it on load).
+        # Unset fields are omitted; defaults restore them on load.
         context = {"base_path": target.parent.resolve()}
         data = [task.model_dump(mode="json", exclude_none=True, context=context) for task in self]
 
@@ -211,7 +197,6 @@ class Taskset:
         )
 
     def environment_names(self) -> set[str]:
-        """Return env names referenced by tasks in this taskset."""
         return {task.env for task in self} | {
             task.verifier.env for task in self if task.verifier is not None
         }
@@ -257,35 +242,11 @@ class Taskset:
         job: Job | None = None,
         rollout_timeout: float | None = None,
     ) -> Job:
-        """Run every task x ``group`` with an optional concurrency cap.
+        """Run each task ``group`` times and return the job holding their traces.
 
-        One shared (stateless) ``agent`` drives every run. ``runtime`` is the
-        placement: a :class:`~hud.runtime.Provider` (the env served
-        somewhere, the agent loop driven here by :func:`~hud.eval.run.rollout`),
-        or :class:`~hud.runtime.HostedRuntime` to run each rollout remotely
-        on the platform. Left unset, a platform taskset runs on the platform,
-        rows whose ``runtime_config`` names an image or Compose project start
-        it under ``DockerRuntime``, tasks created by a live environment run
-        against that environment, and other portable rows require an explicit
-        placement. One provider serves a mixed-env taskset and can size each
-        substrate per row.
-        Registers one HUD job as the platform receipt and reports each run's
-        trace under it — or, given
-        an open ``job`` (:meth:`Job.start`), accumulates this batch into it
-        instead, so a longer arc (a training session) spans many calls under
-        one id. Returned ``job.traces`` preserves expansion order (task-major,
-        then group).
-
-        ``group`` is the statistical-repeat multiplier (one GRPO group_id per
-        task's repeats), whatever the placement — a placement that pools a
-        substrate (:class:`~hud.runtime.Shared`) bounds its own occupancy
-        and is scoped to this call when not already open.
-
-        ``rollout_timeout`` is a hard per-rollout wall-clock cap (seconds) for
-        every placement: a rollout that exceeds it is cancelled and recorded as
-        a failed/errored run so one wedged rollout (e.g. a stuck sampling stream)
-        cannot stall the whole batch. When omitted, the SDK adds no overall
-        deadline; configured phase and runtime limits still apply.
+        Without ``runtime``, a platform taskset runs on HUD, image or Compose rows
+        run under Docker, and rows made by a live environment run against it.
+        ``job.traces`` is in task order with each task's repeats together.
         """
         if max_concurrent is not None and max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
@@ -320,8 +281,7 @@ class Taskset:
                 verifier_runtime_config=verifier_runtime_config,
             )
 
-        # Tasks are pure rows, shared across rollouts; the ``group`` repeats of
-        # one task share a group_id (the GRPO group).
+        # A task's repeats share a group_id (the GRPO group).
         expanded: list[tuple[Task, str]] = []
         for task in task_list:
             group_id = uuid.uuid4().hex
@@ -339,7 +299,7 @@ class Taskset:
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
         async def _run(task: Task, group_id: str) -> list[Trace]:
-            assert placement is not None  # only reached when tasks were expanded
+            assert placement is not None
             if isinstance(placement, HostedRuntime):
                 return [
                     await placement.run(
@@ -375,16 +335,12 @@ class Taskset:
             f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
         async with contextlib.AsyncExitStack() as stack:
-            # A placement may own pooled resources across rollouts (e.g.
-            # Shared's one substrate for many leases); a context-manager
-            # placement is scoped to this call unless already open.
+            # A pooled placement such as Shared lives for this call unless already open.
             if isinstance(placement, contextlib.AbstractAsyncContextManager):
                 await stack.enter_async_context(placement)
             parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
         job.traces.extend(trace for part in parts for trace in part)
-        # Drain telemetry before returning. The exporter uploads in parallel and
-        # flush is completion-based (waits for in-flight uploads, not a fixed
-        # sleep), so the timeout is only a safety cap for a wedged network.
+        # flush waits for in-flight uploads; the timeout only caps a wedged network.
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
         return job

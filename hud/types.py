@@ -456,11 +456,7 @@ StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 
 class Grade(BaseModel):
-    """The environment's verdict on one evaluation.
-
-    ``raw`` is the grade frame as the environment returned it; ``content`` is
-    the grader's message (the agent's answer is ``Trace.content``).
-    """
+    """The environment's verdict: ``raw`` is its grade frame, ``content`` its message."""
 
     reward: float = 0.0
     done: bool = True
@@ -494,24 +490,9 @@ class Grade(BaseModel):
 
 
 class Trace(BaseModel):
-    """The record of one graded evaluation — ordered ``Step``s that ship as spans.
+    """The record of one evaluation: its ordered steps, the agent's answer and the grade.
 
-    A serializable list of ordered ``Step``s plus the outcome: ``status``, the
-    final ``content`` (the agent's answer), the environment's ``grade``, and
-    the identity the platform keys it by. Everything else the summary exposes
-    is *derived* from the steps — the steps are the record, the summary is a
-    view. :meth:`final` and :meth:`collect` are the two derivation shapes
-    (newest answer wins / every answer in order); ``error`` is a view built on
-    them, and family-specific reads use the same queries with family
-    vocabulary at the call site (e.g. the tool-agent family's reply citations,
-    or its token samples for an external trainer). The unit of training
-    data — family payloads on the steps carry the trainable record.
-    :meth:`record` is the single write path: it appends *and* streams the
-    step to the platform. A live :class:`~hud.Run` writes one while its agent
-    runs; :func:`~hud.eval.run.rollout` returns it graded.
-
-    ``steps`` hold family subclasses at runtime; dumps serialize each step by
-    its runtime type so family payloads survive serialization.
+    Summaries such as ``error`` derive from the steps through ``final`` and ``collect``.
     """
 
     steps: list[SerializeAsAny[Step]] = Field(default_factory=list[Step])
@@ -519,67 +500,42 @@ class Trace(BaseModel):
     status: TraceStatus | None = None
     stop_reason: StopReason | None = None
     content: str | None = Field(default=None)
-    #: The environment's verdict; :meth:`Grade.ungraded` until graded.
     grade: Grade = Field(default_factory=Grade.ungraded)
 
-    # Trajectory metadata that has no structured home (provider session info,
-    # external-SDK run stats). Never load-bearing for the platform.
+    # Metadata with no structured home, such as provider session info.
     extra: JsonObject = Field(default_factory=dict)
 
-    # Keys the server-side-collected trajectory; None for eval-only runs.
     trace_id: str | None = Field(default=None)
-    #: The job and GRPO group this trace reports under, and the slug of the
-    #: task it came from (set when the evaluation finishes).
     job_id: str | None = None
     group_id: str | None = None
     slug: str | None = None
-    #: Where the evaluation ran: the control-channel url it was driven over,
-    #: or ``hud://trace/<id>`` when it ran hosted.
+    # The control-channel url the evaluation ran over, or hud://trace/<id> when hosted.
     runtime: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
     @classmethod
     def failed(cls, error: str) -> Trace:
-        """The trace of an evaluation that failed before it started.
-
-        A rollout that fails *mid-run* keeps its real trace instead, with the
-        error recorded on it.
-        """
+        """The trace of an evaluation that failed before it started."""
         return cls(status="error", steps=[Step(source="system", error=error)])
 
     @property
     def reward(self) -> float:
-        """The graded reward (``grade.reward``)."""
         return self.grade.reward
 
     @property
     def evaluation(self) -> dict[str, Any]:
-        """A persistence-safe view of the environment's evaluation."""
         return self.grade.evaluation
 
     def final(self, get: Callable[[Step], T | None]) -> T | None:
-        """The newest step's answer to *get* — the finalized-field query.
-
-        Asks steps newest-first and returns the first non-``None`` answer
-        (``None`` from a step means "no answer here", so falsy answers like
-        ``""`` or ``[]`` still win). ``None`` when no step answers. Derived
-        summary fields are views on this — see ``error``.
-        """
+        """The newest step's non-``None`` answer to ``get``; falsy answers count."""
         return next(
             (value for step in reversed(self.steps) if (value := get(step)) is not None),
             None,
         )
 
     def collect(self, get: Callable[[Step], T | None]) -> list[T]:
-        """Every step's answer to *get*, in step order — the gathering query.
-
-        Steps answering ``None`` are skipped. Family-specific reads keep
-        their vocabulary at the call site, e.g. the tool-agent family's
-        training samples::
-
-            trace.collect(lambda s: s.sample if isinstance(s, AgentStep) else None)
-        """
+        """Every step's non-``None`` answer to ``get``, in step order."""
         return [value for step in self.steps if (value := get(step)) is not None]
 
     @property
@@ -593,15 +549,12 @@ class Trace(BaseModel):
 
     @property
     def error(self) -> str | None:
-        """The most recent step error, if any (errors live on steps)."""
+        """The most recent step error."""
         return self.final(lambda step: step.error)
 
     @property
     def prompt_text(self) -> str | None:
-        """The prompt the agent was given, as its opening user step recorded it.
-
-        Text turns joined by blank lines; ``None`` when no task ever started.
-        """
+        """The opening user step's text turns, or ``None`` when no task started."""
         user = next((step for step in self.steps if step.source == "user"), None)
         if user is None:
             return None
@@ -618,14 +571,7 @@ class Trace(BaseModel):
         return self
 
     def record(self, step: Step) -> None:
-        """Append one step and stream it to the platform — the single write path.
-
-        Numbers the step, stamps ``ended_at`` when unset (a step ends when
-        it's recorded), appends it, and emits it as a span (a no-op without
-        an ambient trace context). Callers stamp ``started_at`` themselves
-        when the step wraps awaited work — only the call site knows when
-        that began.
-        """
+        """Number, append and stream one step; callers stamp its ``started_at``."""
         step.step_id = len(self.steps) + 1
         if step.ended_at is None:
             step.ended_at = now_iso()
