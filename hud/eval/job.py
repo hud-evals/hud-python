@@ -1,17 +1,4 @@
-"""Job: the platform receipt for one execution — there are no standalone traces.
-
-A ``Job`` collects the graded traces (:class:`~hud.types.Trace`) of one batch
-under one platform job id. Every trace reports under a job: the scheduler's batch
-job, or the single-run job :func:`rollout` registers when called bare.
-
-Backend reporting contract:
-- ``POST /trace/job/{job_id}/enter`` — register the batch job.
-- ``POST /trace/{trace_id}/enter``   — a rollout started.
-- ``POST /trace/{trace_id}/exit``    — a rollout finished (reward / success).
-
-All three are best-effort no-ops without telemetry + an API key, so local runs
-never depend on the platform.
-"""
+"""Jobs and their platform reporting, a no-op without telemetry and an API key."""
 
 from __future__ import annotations
 
@@ -31,31 +18,24 @@ logger = logging.getLogger("hud.eval.job")
 
 @dataclass(slots=True)
 class Job:
-    """Platform receipt for one execution: the graded traces under one job id."""
+    """The graded traces reported under one platform job id."""
 
     id: str
     name: str
     traces: list[Trace] = field(default_factory=list)
     group: int = 1
-    #: Platform taskset id this job runs, when it's a synced taskset
-    #: (``Taskset.from_api``). Links the job to that taskset on the platform.
     taskset_id: str | None = None
 
     @classmethod
     async def start(cls, name: str, *, group: int = 1, taskset_id: str | None = None) -> Job:
-        """Open a job spanning multiple scheduler calls.
-
-        A scheduler call mints its own job by default; pass a started job as
-        ``job=`` to ``Task.run`` / ``Taskset.run`` to accumulate every trace of a
-        longer arc — a training session, a chat conversation — under one id.
-        """
+        """Open a job that several ``run`` calls share through ``job=``."""
         job = cls(id=uuid.uuid4().hex, name=name, group=group, taskset_id=taskset_id)
         await job_enter(job.id, name=name, group=group, taskset_id=taskset_id)
         return job
 
     @property
     def reward(self) -> float:
-        """Mean reward across traces whose grade is not an error (0.0 when there are none)."""
+        """Mean reward over traces whose grade is not an error (0.0 when there are none)."""
         graded = [trace.reward for trace in self.traces if not trace.grade.is_error]
         if not graded:
             return 0.0
@@ -63,18 +43,12 @@ class Job:
 
     @property
     def errors(self) -> list[Trace]:
-        """Traces whose grade is an error, excluded from :attr:`reward`."""
+        """Traces whose grade is an error, which ``reward`` excludes."""
         return [trace for trace in self.traces if trace.grade.is_error]
 
     @property
     def results(self) -> dict[str, list[Trace]]:
-        """Traces grouped by task slug — the safe alternative to positional zip.
-
-        List-valued because ``group > 1`` produces several traces per task, and
-        in slug order within each group. Use this instead of ``zip(tasks,
-        job.traces)``, which silently misaligns once grouping or task ordering
-        changes.
-        """
+        """Traces by task slug, a list per slug since ``group`` repeats each task."""
         out: dict[str, list[Trace]] = {}
         for trace in self.traces:
             out.setdefault(trace.slug or "", []).append(trace)
@@ -88,12 +62,6 @@ def _reporting_enabled() -> bool:
 
 
 async def job_enter(job_id: str, *, name: str, group: int, taskset_id: str | None = None) -> None:
-    """Register a batch job with the platform.
-
-    ``taskset_id`` links the job to a synced taskset (set when running
-    ``Taskset.from_api``); ``None`` for ad-hoc/local tasksets. The platform
-    creates no taskset on its own — remote rollouts carry the scenario inline.
-    """
     if not _reporting_enabled():
         return
     await _report(
@@ -114,13 +82,6 @@ async def trace_enter(
     model: str | None = None,
     parent_trace_id: str | None = None,
 ) -> None:
-    """Report that one rollout started.
-
-    ``task_slug`` identifies the logical task independently of the execution
-    environment. ``model`` is the model string the agent will sample (when
-    known); the platform resolves it and attributes the trace immediately on
-    enter.
-    """
     if not _reporting_enabled():
         return
     await _report(
@@ -136,7 +97,6 @@ async def trace_enter(
 
 
 async def trace_exit(trace: Trace) -> None:
-    """Report one finished rollout (status / reward / error / metadata) from its trace."""
     if not _reporting_enabled() or trace.trace_id is None:
         return
     await _report(
@@ -144,13 +104,10 @@ async def trace_exit(trace: Trace) -> None:
         {
             "status": trace.status or "completed",
             "reward": trace.reward,
-            # Recovered step errors stay on the steps; only an errored trace
-            # reports a trace-level error.
+            # A step error the agent recovered from isn't a trace error.
             "error": trace.error if trace.is_error else None,
             "evaluation_result": trace.evaluation or None,
             "stop_reason": trace.stop_reason,
-            # Trajectory metadata the platform stores on the trace for display;
-            # never load-bearing.
             "metadata": trace.extra or None,
         },
     )
@@ -158,9 +115,7 @@ async def trace_exit(trace: Trace) -> None:
 
 async def _report(path: str, payload: dict[str, Any]) -> None:
     body = {k: v for k, v in payload.items() if v is not None}
-    # One bounded retry: reporting is fire-and-forget, and concurrent rollout
-    # bursts have been observed to draw transient rejections (including
-    # spurious 401s) from the platform that succeed moments later.
+    # One retry: bursts of concurrent rollouts draw transient rejections, even 401s.
     for attempt in (1, 2):
         try:
             await PlatformClient.from_settings().apost(path, json=body)

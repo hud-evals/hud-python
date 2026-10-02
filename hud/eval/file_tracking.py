@@ -1,11 +1,4 @@
-"""Rollout-level file-tracking observer.
-
-Wraps the agent loop: if the env published a ``filetracking/1`` capability and
-file tracking is on, capture scenario setup when the server advertises support,
-then sample agent diffs on a fixed interval. On teardown it flushes the trailing
-diff plus changed deliverable artifacts. Decoupled from the tool loop — spans
-are self-timestamped and the viewer correlates them to steps by time.
-"""
+"""Workspace diffs from an env's filetracking capability, streamed as spans."""
 
 from __future__ import annotations
 
@@ -104,13 +97,10 @@ class FileTrackingClient:
 
 @asynccontextmanager
 async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
-    """Stream workspace diffs and final artifacts during the ``with`` block.
+    """Stream workspace diffs and final artifacts during the block.
 
-    A no-op unless telemetry is enabled and the manifest has a ``filetracking``
-    binding. The binding's presence is the authoritative opt-in: it is published
-    iff the workspace was served with ``track_files=True`` (which itself defaults
-    to ``HUD_FILE_TRACKING_ENABLED``), so honoring it here means an explicit
-    ``track_files=True`` streams even when the global setting is off.
+    The env's ``filetracking`` binding is the opt-in, so ``track_files=True``
+    streams even when ``HUD_FILE_TRACKING_ENABLED`` is off.
     """
     from hud.settings import settings
 
@@ -123,8 +113,7 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         yield
         return
 
-    # New servers expose setup changes; legacy filetracking/1 servers only know
-    # how to advance past setup. Both establish the same agent-edit baseline.
+    # Older servers can only advance past setup; both set the agent-edit baseline.
     ft: FileTrackingClient | None = None
     try:
         ft = await FileTrackingClient.connect(cap)
@@ -172,16 +161,14 @@ async def file_tracking_observer(client: HudClient) -> AsyncIterator[None]:
         yield
     finally:
         stop.set()
-        # Let the current iteration finish cleanly (never cancel mid-request, which
-        # would desync the connection); fall back to cancel only if it wedges.
+        # Cancelling mid-request would desync the connection: let the poll finish first.
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(task), _DRAIN_TIMEOUT)
         if not task.done():
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        # Trailing diff + artifacts since the last successful sample. Bound it so
-        # a connection desynced by the cancel above can't wedge teardown.
+        # Bounded: a cancel above may have desynced the connection.
         try:
             flush = await asyncio.wait_for(ft.call("flush"), _DRAIN_TIMEOUT)
         except TimeoutError:
