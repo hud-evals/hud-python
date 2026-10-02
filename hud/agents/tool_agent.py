@@ -12,7 +12,7 @@ import mcp.types as mcp_types
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
-from hud.agents.tools.base import AgentTool, provider_tool_name
+from hud.agents.tools.base import AgentTool, bound_tool_result, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
@@ -222,6 +222,13 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                 for call in step.tool_calls:
                     call_started_at = now_iso()
                     result = await self._dispatch_call(call, state)
+                    tool = state.tools.get(call.name)
+                    limit = self.config.max_tool_result_chars
+                    result = (
+                        tool.bound_result(result, limit)
+                        if tool is not None
+                        else bound_tool_result(result, limit)
+                    )
                     run.record(ToolStep(call=call, result=result, started_at=call_started_at))
                     msg = self._format_result(call, result, state)
                     if isinstance(msg, list):

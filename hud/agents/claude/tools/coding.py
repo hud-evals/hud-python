@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.base import result_text, tool_err
+from hud.agents.tools.base import result_text, tool_err, tool_ok
+from hud.agents.tools.file_view import DEFAULT_VIEW_LINES
 from hud.types import MCPToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
@@ -78,6 +79,16 @@ _TEXT_EDITOR_INPUT_SCHEMA: dict[str, Any] = {
         "insert_line": {
             "type": "integer",
             "description": "Line number after which to insert for `insert` (0 = top of file).",
+        },
+        "view_range": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 2,
+            "maxItems": 2,
+            "description": (
+                "Optional [start_line, end_line] for `view`, 1-indexed; end_line -1 reads to "
+                f"the end. Without it, `view` shows the first {DEFAULT_VIEW_LINES} lines."
+            ),
         },
     },
     "required": ["command", "path"],
@@ -171,7 +182,7 @@ class ClaudeTextEditorTool(SSHTool):
 
         match command:
             case "view":
-                return await self.file_view(path)
+                return await self._view(path, arguments.get("view_range"))
             case "create":
                 content = arguments.get("file_text", "")
                 return await self.file_write(path, str(content))
@@ -189,6 +200,31 @@ class ClaudeTextEditorTool(SSHTool):
                 return await self._insert(path, line, str(text))
             case _:
                 return tool_err(f"unknown editor command: {command!r}")
+
+    async def _view(self, path: str, view_range: object) -> MCPToolResult:
+        """Show a text file as ``cat -n`` lines, one window at a time."""
+        start, end = _view_window(view_range)
+        result = await self.file_view(path)
+        if result.isError or any(isinstance(c, mcp_types.ImageContent) for c in result.content):
+            return result
+        lines = result_text(result).splitlines()
+        if start > len(lines) and not (start == 1 and not lines):
+            return tool_err(
+                f"view_range start {start} is past the end of {path} ({len(lines)} lines)"
+            )
+        shown = lines[start - 1 : len(lines) if end == -1 else end]
+        last = start + len(shown) - 1
+        numbered = [f"{start + i:6}\t{line}" for i, line in enumerate(shown)]
+        if last < len(lines):
+            next_end = min(last + DEFAULT_VIEW_LINES, len(lines))
+            footer = (
+                f"(Showing lines {start}-{last} of {len(lines)}. "
+                f"Use view_range [{last + 1}, {next_end}] to continue.)"
+            )
+        else:
+            footer = f"(End of file - total {len(lines)} lines)"
+        body = "\n".join(numbered)
+        return tool_ok(f"{body}\n\n{footer}" if body else footer)
 
     async def _str_replace(self, path: str, old: str, new: str) -> MCPToolResult:
         existing = await self.file_read(path)
@@ -213,6 +249,25 @@ class ClaudeTextEditorTool(SSHTool):
             text += "\n"
         lines.insert(line, text)
         return await self.file_write(path, "".join(lines))
+
+
+def _view_window(view_range: object) -> tuple[int, int]:
+    """The first and last line a ``view`` shows; a last line of -1 means end of file."""
+    if view_range is None:
+        return 1, DEFAULT_VIEW_LINES
+    match view_range:
+        case [int() as start, int() as end] if (
+            not isinstance(start, bool)
+            and not isinstance(end, bool)
+            and start >= 1
+            and (end == -1 or end >= start)
+        ):
+            return start, end
+        case _:
+            raise ValueError(
+                "view_range must be [start_line, end_line] with start_line >= 1 and "
+                "end_line -1 or >= start_line"
+            )
 
 
 __all__ = [

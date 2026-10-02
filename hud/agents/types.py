@@ -63,6 +63,10 @@ class ToolAgentConfig(AgentConfig):
     auto_respond: bool = False
     max_steps: int = 10
     tool_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    #: Largest tool result, in characters, fed back to the model. Binary output decoded
+    #: as text costs about one token per character, so the default stays a small share
+    #: of a 128K-token context window even in that worst case.
+    max_tool_result_chars: int = Field(default=30_000, ge=1_000)
     system_prompt: str | None = None
     citations_enabled: bool = False
     #: Conditions that end the rollout instead of being answered with an error

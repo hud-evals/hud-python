@@ -9,6 +9,9 @@ from mcp.types import ImageContent
 from hud.agents.tools.base import tool_err, tool_ok
 from hud.types import MCPToolResult
 
+#: Lines a file view shows when the model does not ask for a range.
+DEFAULT_VIEW_LINES = 2000
+
 
 def view_file(data: bytes) -> MCPToolResult:
     """Identify supported images by signature and preserve their encoded bytes."""
