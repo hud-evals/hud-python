@@ -78,10 +78,10 @@ class HUDConsole:
         console.print(message, **kwargs)
 
     def dim_info(self, label: str, value: str, stderr: bool = True) -> None:
-        """Print ``label`` and ``value`` on one line."""
+        """Print a dimmed ``label`` and its ``value`` on one line."""
         console = self._stderr_console if stderr else self._stdout_console
         console.print(
-            f"[{DIM} not bold][default]{escape(label)}[/default][/{DIM} not bold] [default]{escape(value)}[/default]"  # noqa: E501
+            f"[{DIM} not bold]{escape(label)}[/{DIM} not bold] [default]{escape(value)}[/default]"
         )
 
     def link(self, url: str, stderr: bool = True) -> None:
@@ -204,7 +204,6 @@ class HUDConsole:
         self,
         message: str,
         choices: list[str | dict[str, Any]] | list[str],
-        default: int | None = None,
         spaced: bool = False,
     ) -> str:
         """Prompt for one of ``choices`` and return its value; Esc or Ctrl+C raises ``typer.Exit``.
