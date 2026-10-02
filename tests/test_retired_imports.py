@@ -42,6 +42,7 @@ RETIRED = [
     *[("hud", name, "hud.runtime") for name in ROOT_RUNTIME_NAMES],
     ("hud", "Connection", "hud.capabilities"),
     ("hud", "connect", "hud.clients"),
+    ("hud.clients", "register_client", "hud.capabilities"),
     ("hud", "SyncPlan", "hud.cli.tasksets"),
     ("hud", "instrument", "hud.telemetry"),
     ("hud", "TrainingClient", "hud.train"),

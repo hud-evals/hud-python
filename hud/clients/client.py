@@ -10,13 +10,10 @@ import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
-from hud.capabilities.base import Capability, CapabilityClient
-from hud.capabilities.mcp import MCPClient
-from hud.capabilities.rfb import RFBClient
-from hud.capabilities.ssh import SSHClient
+from hud.capabilities.base import Capability
 from hud.clients.dial import dialer
 from hud.environment.utils import (
     CONTROL_FRAME_LIMIT_BYTES,
@@ -42,30 +39,6 @@ _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 _ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
 # How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
-
-ClientT = TypeVar("ClientT", bound=type[CapabilityClient])
-
-_CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {}
-
-
-def register_client(cls: ClientT) -> ClientT:
-    """Make ``HudClient.open`` use ``cls`` for bindings whose protocol is ``cls.protocol``.
-
-    Returns ``cls``, so it also works as a class decorator. Raises ``ValueError`` when
-    another class is already registered for the protocol.
-    """
-    registered = _CLIENT_REGISTRY.setdefault(cls.protocol, cls)
-    if registered is not cls:
-        raise ValueError(
-            f"protocol {cls.protocol!r} is already registered to "
-            f"{registered.__module__}.{registered.__qualname__}; "
-            f"cannot register {cls.__module__}.{cls.__qualname__}"
-        )
-    return cls
-
-
-for _client in (SSHClient, RFBClient, MCPClient):
-    register_client(_client)
 
 _LEGACY_FILE_TRACKING = "filetracking/1"
 _METHOD_NOT_FOUND = -32601

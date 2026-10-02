@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from hud.capabilities import Capability, CapabilityClient
-from hud.clients import connect, register_client
+from hud.capabilities import Capability, CapabilityClient, open_client, register_client
+from hud.clients import connect
 from hud.runtime import Runtime
 from tests.clients.conftest import Action, control_peer
 
@@ -153,15 +153,12 @@ async def test_a_stream_the_env_refuses_ends_the_local_connection() -> None:
     assert received == b""
 
 
-async def test_a_registered_client_class_opens_its_protocols_bindings() -> None:
-    echo = {"name": "echo", "protocol": "echo/1", "url": "tcp://environment:7100"}
-    async with (
-        control_peer([Action("answer", result={**HELLO, "bindings": [echo]})]) as peer,
-        connect(Runtime(peer.url)) as client,
-    ):
-        opened = await client.open("echo")
+async def test_a_registered_client_class_opens_its_protocols_capabilities() -> None:
+    echo = Capability(name="echo", protocol="echo/1", url="tcp://environment:7100")
+    async with open_client(echo) as opened:
+        assert isinstance(opened, EchoClient)
+        assert not opened.closed
 
-    assert isinstance(opened, EchoClient)
     assert (opened.capability.name, opened.closed) == ("echo", True)
 
 
