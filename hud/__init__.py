@@ -8,10 +8,10 @@ from __future__ import annotations
 from .environment.env import Environment
 from .eval.chat import Chat
 from .eval.job import Job
-from .eval.run import Grade, Run
+from .eval.run import Run
 from .eval.task import Task
 from .eval.taskset import Taskset
-from .types import Trace
+from .types import Grade, Trace
 from .version import __version__
 
 __all__ = [

@@ -20,7 +20,7 @@ The agent loop and grading happen in the gap between the generator's two yields,
 | **Template** | The async generator you author with `@env.template`. Callable; calling it mints a task without running anything. |
 | **Task** | A filled-in template: one set of arguments bound into a single runnable [row](#task). |
 | **Taskset** | A named, ordered collection of tasks - a table of those rows. |
-| [**Job**](/v6/reference/types#job) | The receipt a run produces: the graded runs and their mean reward. |
+| [**Job**](/v6/reference/types#job) | The receipt a run produces: the graded traces and their mean reward. |
 
 ## Defining a task
 
@@ -174,7 +174,7 @@ set, the agent timeout must be less than the rollout timeout and any explicit ac
 `run_timeout_s`. Limits imposed by the selected runtime still apply when `rollout_timeout` is
 omitted. Grader-specific limits, such as `BashGrader.timeout_seconds`, remain local to that grader.
 
-A crashed rollout comes back as a failed [`Run`](/v6/reference/types#run) inside the job rather than
+A crashed rollout comes back as a failed [`Trace`](/v6/reference/types#trace) inside the job rather than
 raising, so one bad rollout never collapses a batch. For the end-to-end workflow see
 [running an eval](/v6/guides/running-an-eval).
 

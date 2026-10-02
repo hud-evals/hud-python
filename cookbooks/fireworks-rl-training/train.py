@@ -15,7 +15,7 @@ from typing import Any
 import tinker
 from dotenv import load_dotenv
 from fireworks.training.sdk import FiretitanServiceClient
-from hud import Run, Taskset
+from hud import Run, Taskset, Trace
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, Sample, Usage
 from hud.runtime import HUDRuntime, LocalRuntime, Provider
@@ -53,7 +53,7 @@ def group_relative_advantages(rewards: list[float]) -> list[float]:
     return [(reward - mean) / std for reward in rewards]
 
 
-def within_group_reward_std(runs: list[Run]) -> float:
+def within_group_reward_std(traces: list[Trace]) -> float:
     """Mean per-group reward std: the spread GRPO actually trains on.
 
     Advantages are computed within each group, so a group whose rollouts all
@@ -61,9 +61,9 @@ def within_group_reward_std(runs: list[Run]) -> float:
     healthy.
     """
     grouped: dict[str, list[float]] = {}
-    for run in runs:
-        if run.group_id:
-            grouped.setdefault(run.group_id, []).append(run.reward)
+    for trace in traces:
+        if trace.group_id:
+            grouped.setdefault(trace.group_id, []).append(trace.reward)
     stds = []
     for rewards in grouped.values():
         if len(rewards) < 2:
@@ -74,22 +74,22 @@ def within_group_reward_std(runs: list[Run]) -> float:
     return sum(stds) / len(stds) if stds else 0.0
 
 
-def report_calibration(runs: list[Run], *, debug_samples: int) -> None:
-    completed = [run for run in runs if _sample(run) is not None]
-    rewards = [run.reward for run in completed]
+def report_calibration(traces: list[Trace], *, debug_samples: int) -> None:
+    completed = [trace for trace in traces if _sample(trace) is not None]
+    rewards = [trace.reward for trace in completed]
     mean_reward = sum(rewards) / len(rewards) if rewards else 0.0
     print(
-        f"calibration: {len(completed)}/{len(runs)} rollouts completed "
+        f"calibration: {len(completed)}/{len(traces)} rollouts completed "
         f"reward_mean={mean_reward:.3f} "
         f"within_group_reward_std={within_group_reward_std(completed):.3f}",
         flush=True,
     )
-    for run in completed[:debug_samples]:
-        sample = _sample(run)
+    for trace in completed[:debug_samples]:
+        sample = _sample(trace)
         assert sample is not None
-        text = (run.trace.content or "").strip()
+        text = (trace.content or "").strip()
         print(
-            f"--- reward={run.reward:.2f} output_tokens={len(sample.output_token_ids)}\n{text}",
+            f"--- reward={trace.reward:.2f} output_tokens={len(sample.output_token_ids)}\n{text}",
             flush=True,
         )
 
@@ -262,30 +262,30 @@ class FireworksAgent(Agent):
         run.trace.stop_reason = "done"
 
 
-def _sample(run: Run) -> Sample | None:
-    return run.trace.final(
+def _sample(trace: Trace) -> Sample | None:
+    return trace.final(
         lambda step: step.sample if isinstance(step, AgentStep) and step.sample else None
     )
 
 
-def make_training_batch(runs: list[Run]) -> tuple[list[tinker.Datum], int]:
+def make_training_batch(traces: list[Trace]) -> tuple[list[tinker.Datum], int]:
     """Convert valid HUD rollout groups into Fireworks importance-sampling datums."""
-    grouped: dict[str, list[Run]] = {}
-    for run in runs:
-        if run.group_id and _sample(run) is not None:
-            grouped.setdefault(run.group_id, []).append(run)
+    grouped: dict[str, list[Trace]] = {}
+    for trace in traces:
+        if trace.group_id and _sample(trace) is not None:
+            grouped.setdefault(trace.group_id, []).append(trace)
 
     datums: list[tinker.Datum] = []
     kept_groups = 0
-    for group_runs in grouped.values():
-        rewards = [run.reward for run in group_runs]
+    for group_traces in grouped.values():
+        rewards = [trace.reward for trace in group_traces]
         advantages = group_relative_advantages(rewards)
         if not any(advantages):
             continue
         kept_groups += 1
 
-        for run, advantage in zip(group_runs, advantages, strict=True):
-            sample = _sample(run)
+        for trace, advantage in zip(group_traces, advantages, strict=True):
+            sample = _sample(trace)
             assert sample is not None
             if not sample.prompt_token_ids or not sample.output_token_ids:
                 continue
@@ -359,7 +359,7 @@ async def run_rollouts(
     temperature: float,
     timeout: float,
     max_seq_len: int,
-) -> tuple[list[Run], str]:
+) -> tuple[list[Trace], str]:
     snapshot = training_client.save_weights_for_sampler(snapshot_name).result()
     if not snapshot.path:
         raise RuntimeError(f"sampler checkpoint {snapshot_name!r} returned no path")
@@ -382,17 +382,17 @@ async def run_rollouts(
             max_concurrent=max_concurrent,
         )
         failed = [
-            run
-            for run in job.runs
-            if run.trace.status != "completed" or run.grade.is_error or _sample(run) is None
+            trace
+            for trace in job.traces
+            if trace.status != "completed" or trace.grade.is_error or _sample(trace) is None
         ]
         if failed:
             first = failed[0]
             detail = first.trace.error or first.grade.content or "missing completed sample"
             raise RuntimeError(
-                f"{len(failed)}/{len(job.runs)} rollouts failed during {snapshot_name}: {detail}"
+                f"{len(failed)}/{len(job.traces)} rollouts failed during {snapshot_name}: {detail}"
             )
-        return job.runs, snapshot.path
+        return job.traces, snapshot.path
     finally:
         sampler.close()
 
@@ -410,7 +410,7 @@ async def evaluate_policy(
     output_path: Path,
 ) -> tuple[float, str]:
     print(f"Evaluating {snapshot_name}: {len(taskset)} held-out tasks", flush=True)
-    runs, snapshot = await run_rollouts(
+    traces, snapshot = await run_rollouts(
         service=service,
         training_client=training_client,
         tokenizer=tokenizer,
@@ -426,16 +426,16 @@ async def evaluate_policy(
         max_seq_len=args.max_seq_len,
     )
     samples = []
-    for run in runs:
-        sample = _sample(run)
+    for trace in traces:
+        sample = _sample(trace)
         assert sample is not None
         output_tokens = len(sample.output_token_ids)
         samples.append(
             {
-                "prompt": run.prompt_text,
-                "reward": run.reward,
-                "info": run.grade.info,
-                "answer": run.trace.content,
+                "prompt": trace.prompt_text,
+                "reward": trace.reward,
+                "info": trace.grade.info,
+                "answer": trace.content,
                 "output_tokens": output_tokens,
                 "at_token_limit": output_tokens == args.max_tokens,
             }
@@ -453,7 +453,7 @@ async def evaluate_policy(
         + "\n",
         encoding="utf-8",
     )
-    return sum(run.reward for run in runs) / len(runs), snapshot
+    return sum(trace.reward for trace in traces) / len(traces), snapshot
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -549,7 +549,7 @@ async def train(args: argparse.Namespace) -> None:
         )
 
         if args.calibrate:
-            runs, _ = await run_rollouts(
+            traces, _ = await run_rollouts(
                 service=service,
                 training_client=training_client,
                 tokenizer=tokenizer,
@@ -564,7 +564,7 @@ async def train(args: argparse.Namespace) -> None:
                 timeout=args.sampling_timeout,
                 max_seq_len=args.max_seq_len,
             )
-            report_calibration(runs, debug_samples=args.debug_samples)
+            report_calibration(traces, debug_samples=args.debug_samples)
             return
 
         if args.eval_before:
@@ -586,7 +586,7 @@ async def train(args: argparse.Namespace) -> None:
 
         for step in range(1, args.steps + 1):
             started = time.perf_counter()
-            runs, snapshot = await run_rollouts(
+            traces, snapshot = await run_rollouts(
                 service=service,
                 training_client=training_client,
                 tokenizer=tokenizer,
@@ -601,7 +601,7 @@ async def train(args: argparse.Namespace) -> None:
                 timeout=args.sampling_timeout,
                 max_seq_len=args.max_seq_len,
             )
-            datums, kept_groups = make_training_batch(runs)
+            datums, kept_groups = make_training_batch(traces)
             loss = None
             updated = False
             if datums:
@@ -627,15 +627,15 @@ async def train(args: argparse.Namespace) -> None:
                 state = training_client.save_state(f"state-{step:04d}").result()
                 print(f"Training checkpoint: {state.path}", flush=True)
 
-            completed = [run for run in runs if _sample(run) is not None]
+            completed = [trace for trace in traces if _sample(trace) is not None]
             mean_reward = (
-                sum(run.reward for run in completed) / len(completed) if completed else 0.0
+                sum(trace.reward for trace in completed) / len(completed) if completed else 0.0
             )
             metric = {
                 "step": step,
                 "reward": mean_reward,
                 "reward_std_within_group": within_group_reward_std(completed),
-                "rollouts": len(runs),
+                "rollouts": len(traces),
                 "valid_rollouts": len(completed),
                 "kept_groups": kept_groups,
                 "training_datums": len(datums),

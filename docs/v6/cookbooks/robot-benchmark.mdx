@@ -90,7 +90,7 @@ async def main():
         PI05Agent(), runtime=DockerRuntime("robot-libero", env_vars={"LIBERO_CONTROL": "delta"}),
         max_concurrent=1,
     )
-    rewards = [run.reward for run in job.runs]
+    rewards = [trace.reward for trace in job.traces]
     print(f"success_rate={sum(rewards) / len(rewards):.2f}")
 
 asyncio.run(main())

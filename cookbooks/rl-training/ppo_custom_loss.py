@@ -108,15 +108,15 @@ async def main(*, steps: int, group: int, learning_rate: float, max_concurrent: 
 
     session = await Job.start("arith-rl-ppo", group=group)
     for step in range(steps):
-        batch_start = len(session.runs)
+        batch_start = len(session.traces)
         await taskset.run(agent, runtime=runtime, job=session, max_concurrent=max_concurrent)
-        batch = session.runs[batch_start:]
+        batch = session.traces[batch_start:]
 
         # forward (server) -> glm loss (here, torch) -> backward (server)
         fb = await trainer.forward_backward_custom(batch, glm_double_sided_is, group_size=group)
         result = await trainer.optim_step(learning_rate=learning_rate)
 
-        mean_reward = sum(run.reward for run in batch) / len(batch)
+        mean_reward = sum(trace.reward for trace in batch) / len(batch)
         print(
             f"step {step}: mean_reward={mean_reward:.3f} "
             f"masked_tokens={fb.metrics.get('masked_tokens', 0.0):.0f} "

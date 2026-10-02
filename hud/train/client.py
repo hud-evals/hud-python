@@ -5,8 +5,8 @@ instance targets one model string (the same string used for inference through th
 HUD gateway); training advances the weights behind that string in place.
 
 Every training call takes a sequence of trajectories, each either a ``trace_id``
-string (the service resolves recorded tokens + reward) or a :class:`hud.Run`
-(its trajectory + reward are extracted and sent inline). The two can be mixed.
+string (the service resolves recorded tokens + reward) or a graded
+:class:`hud.Trace` (its samples + reward are sent inline). The two can be mixed.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     import torch
 
-    from hud.eval.run import Run
+    from hud.types import Trace
 
     # A custom loss over a forward pass: given the per-datum tensors and the
     # current-policy logprobs as differentiable leaves, return (loss, metrics).
@@ -48,18 +48,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.train.client")
 
 
-def _run_to_input(run: Run) -> TrainInput:
-    """Turn a graded :class:`hud.Run` into a training input: inline payload when
-    the run carries token-level samples (local rollout), else its ``trace_id``
+def _trace_to_input(trace: Trace) -> TrainInput:
+    """Turn a graded :class:`hud.Trace` into a training input: inline payload when
+    it carries token-level samples (local rollout), else its ``trace_id``
     (remote rollout, resolved server-side)."""
-    if run.trace.stop_reason == "timeout":
+    if trace.stop_reason == "timeout":
         raise ValueError("timed-out runs require an explicit training reward")
-    if run.grade.is_error:
+    if trace.grade.is_error:
         raise ValueError(
-            f"run {run.trace_id} has no valid grade, so its reward is not a training signal; "
+            f"trace {trace.trace_id} has no valid grade, so its reward is not a training signal; "
             "leave out its GRPO group or pass a TrajectoryPayload with an explicit reward"
         )
-    samples = run.trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
+    samples = trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
     turns = [
         TrajectorySample(
             prompt_token_ids=sample.prompt_token_ids or None,
@@ -71,31 +71,31 @@ def _run_to_input(run: Run) -> TrainInput:
         if sample.output_token_ids
     ]
     if turns:
-        return TrajectoryPayload(samples=turns, reward=run.reward, trace_id=run.trace_id)
-    if run.trace_id is not None:
-        return run.trace_id
+        return TrajectoryPayload(samples=turns, reward=trace.reward, trace_id=trace.trace_id)
+    if trace.trace_id is not None:
+        return trace.trace_id
     raise ValueError(
-        "run carries neither token-level samples nor a trace_id to train on; "
+        "trace carries neither token-level samples nor a trace_id to train on; "
         "it must come from a trainable-model rollout (local) or a reported trace (remote)"
     )
 
 
-def _to_inputs(trajectories: Sequence[str | Run | TrajectoryPayload]) -> list[TrainInput]:
+def _to_inputs(trajectories: Sequence[str | Trace | TrajectoryPayload]) -> list[TrainInput]:
     """Normalize a mix of ``trace_id`` strings, inline ``TrajectoryPayload``s, and
-    ``Run``s to wire inputs. The first two pass through; a ``Run`` is converted."""
+    traces to wire inputs. The first two pass through; a trace is converted."""
     return [
-        item if isinstance(item, str | TrajectoryPayload) else _run_to_input(item)
+        item if isinstance(item, str | TrajectoryPayload) else _trace_to_input(item)
         for item in trajectories
     ]
 
 
 def _check_groups(
-    trajectories: Sequence[str | Run | TrajectoryPayload],
+    trajectories: Sequence[str | Trace | TrajectoryPayload],
     group_size: int | None,
 ) -> None:
     """Validate the batch's GRPO group structure client-side, before the round
     trip. The service groups contiguous slices of ``group_size`` (the whole batch
-    when ``None``); when every item is a ``Run`` carrying a ``group_id``, each
+    when ``None``); when every item is a trace carrying a ``group_id``, each
     slice must be exactly one of those groups. An incomplete or interleaved group
     is an error: its advantage baseline is skewed. A batch where no group has any
     reward spread only warns: every advantage normalizes to zero, which is a
@@ -152,7 +152,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def forward_backward(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         *,
         loss_fn: LossFn = "importance_sampling",
         loss_fn_config: dict[str, float] | None = None,
@@ -162,7 +162,7 @@ class TrainingClient(BaseTrainingClient):
     ) -> ForwardBackwardResult:
         """Accumulate gradients for a batch of trajectories with a built-in loss.
 
-        Each trajectory is a ``trace_id`` (resolved server-side), a ``Run`` (its
+        Each trajectory is a ``trace_id`` (resolved server-side), a graded trace (its
         tokens + reward sent inline), or an inline :class:`TrajectoryPayload`
         (hand-built tokens + reward — e.g. the opponent side of a self-play game).
         Advantages are normalized within contiguous groups of ``group_size`` (all
@@ -188,7 +188,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def forward(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         *,
         group_size: int | None = None,
         reward_scale: float = 1.0,
@@ -227,7 +227,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def forward_backward_custom(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         loss_fn: CustomLossFn,
         *,
         group_size: int | None = None,
@@ -265,7 +265,7 @@ class TrainingClient(BaseTrainingClient):
 
     async def step(
         self,
-        trajectories: Sequence[str | Run | TrajectoryPayload],
+        trajectories: Sequence[str | Trace | TrajectoryPayload],
         *,
         learning_rate: float,
         loss_fn: LossFn = "importance_sampling",
