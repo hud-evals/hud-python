@@ -306,13 +306,33 @@ class ComposeConfig(BaseModel):
                 return current
             current = mode.removeprefix("service:")
 
+    def healthchecked_services(self) -> list[str]:
+        """Services startup waits on: started by default and declaring a live healthcheck.
+
+        Naming a profiled or zero-scale service in ``up`` would start it, and
+        ``up --wait`` fails on a service that exits, so only these are awaited.
+        """
+        return [
+            name
+            for name, service in self.services.items()
+            if service.healthcheck is not None
+            and service.healthcheck.disable is not True
+            and service.healthcheck.test != ["NONE"]
+            and not (service.model_extra or {}).get("profiles")
+            and (service.model_extra or {}).get("scale") != 0
+        ]
+
     @classmethod
-    def from_file(cls, path: Path) -> ComposeConfig:
-        """Load a self-contained authored Compose document without Docker."""
+    def from_file(cls, path: Path, *, variables: Mapping[str, str] | None = None) -> ComposeConfig:
+        """Load a self-contained authored Compose document without Docker.
+
+        ``variables`` stand in for the process environment, so they take
+        precedence over the project's ``.env``. The host environment is never read.
+        """
         source = path.read_text(encoding="utf-8")
-        environment: dict[str, str] = {}
+        environment: dict[str, str] = dict(variables or {})
         for key, value in dotenv_values(path.parent / ".env", interpolate=False).items():
-            if value is not None:
+            if value is not None and key not in environment:
                 environment[key] = _interpolate_compose_value(
                     value,
                     environment,
@@ -563,24 +583,32 @@ class ComposeProject(BaseModel):
         if not isinstance(self.document, Path):
             raise ValueError("Compose project is not available on the local filesystem")
         compose = self.document.resolve()
+        volumes: list[dict[str, str | bool]] = [
+            {
+                "type": "volume",
+                "source": "hud-runtime-sessions",
+                "target": target,
+            }
+            for target in ("/runtime/sessions", "/media/hud/sessions")
+        ]
+        volumes.extend(mount.compose_volume() for mount in bind_mounts)
+        if service_socket is not None:
+            volumes.extend(
+                {
+                    "type": "bind",
+                    "source": service_socket,
+                    "target": target,
+                }
+                for target in ("/var/run/docker.sock", "/media/hud/docker.sock")
+            )
         main: dict[str, Any] = {
             "security_opt": [
                 f"seccomp={seccomp}",
                 "systempaths=unconfined",
                 "apparmor=unconfined",
             ],
+            "volumes": volumes,
         }
-        volumes = [mount.compose_volume() for mount in bind_mounts]
-        if service_socket is not None:
-            volumes.append(
-                {
-                    "type": "bind",
-                    "source": service_socket,
-                    "target": "/media/hud/docker.sock",
-                }
-            )
-        if volumes:
-            main["volumes"] = volumes
         if env_vars:
             main["environment"] = dict(env_vars)
         if cpu is not None:
@@ -601,7 +629,12 @@ class ComposeProject(BaseModel):
             )
             override = root / "override.json"
             override.write_text(
-                json.dumps({"services": {"main": main}}),
+                json.dumps(
+                    {
+                        "services": {"main": main},
+                        "volumes": {"hud-runtime-sessions": {}},
+                    }
+                ),
                 encoding="utf-8",
             )
             ports = root / "ports.yaml"

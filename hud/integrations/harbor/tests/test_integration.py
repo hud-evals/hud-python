@@ -18,6 +18,7 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.eval import DockerRuntime, Shared, Taskset
+from hud.eval.runtime import DockerBindMount
 from hud.integrations import harbor
 
 from .conftest import make_harbor_task
@@ -352,7 +353,7 @@ def test_separate_verifier_rejects_artifact_symlinks(
     solution.write_text(
         solution.read_text("utf-8")
         + "\nrm -f /app/main.html\n"
-        + "ln -s /media/hud/verifier/tests /app/main.html\n",
+        + "ln -s /verifier/tests /app/main.html\n",
         encoding="utf-8",
     )
 
@@ -454,6 +455,58 @@ fi
     assert run.reward == 1.0, run.trace.error
 
 
+def test_separate_verifier_collects_artifacts_written_to_authored_volumes(
+    tmp_path_factory: pytest.TempPathFactory, wheel: Path
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-volume-artifacts") / "harbor-harness"
+    task = dataset / "sidecar-reachability"
+    shutil.copytree(TASKS / "sidecar-reachability", task)
+    (task / "environment" / "docker-compose.yaml").write_text(
+        """\
+services:
+  main:
+    volumes:
+      - outputs:/app/outputs
+volumes:
+  outputs: {}
+""",
+        encoding="utf-8",
+    )
+    (task / "task.toml").write_text(
+        """\
+artifacts = [{ source = "/app/outputs/result.txt", service = "main" }]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+""",
+        encoding="utf-8",
+    )
+    (task / "solution" / "solve.sh").write_text(
+        "#!/bin/sh\nset -eu\necho from-volume > /app/outputs/result.txt\n",
+        encoding="utf-8",
+    )
+    (task / "tests" / "test.sh").write_text(
+        """\
+#!/bin/sh
+mkdir -p /logs/verifier
+if [ "$(cat /app/outputs/result.txt 2>/dev/null)" = "from-volume" ]; then
+  echo 1 > /logs/verifier/reward.txt
+else
+  echo 0 > /logs/verifier/reward.txt
+fi
+""",
+        encoding="utf-8",
+    )
+
+    run = asyncio.run(_grade_every_task(dataset, wheel))["sidecar-reachability"]
+
+    assert run.reward == 1.0, run.trace.error
+
+
 def test_separate_verifier_rejects_artifacts_beneath_symlinks(
     tmp_path_factory: pytest.TempPathFactory, wheel: Path
 ) -> None:
@@ -476,7 +529,7 @@ timeout_sec = 30
     )
     solution = task / "solution" / "solve.sh"
     solution.write_text(
-        "#!/bin/sh\nset -eu\nln -s /media/hud/verifier /app/linked\n",
+        "#!/bin/sh\nset -eu\nln -s /verifier /app/linked\n",
         encoding="utf-8",
     )
 
@@ -665,7 +718,11 @@ timeout_sec = 120
     # process proves itself, so an early abort is only observable from the
     # adapted artifact: run its main service in the foreground.
     subprocess.run(
-        ["sh", "build.sh"], cwd=compose.parent, check=True, capture_output=True, timeout=600
+        ["docker", "compose", "--file", str(compose), "build"],
+        cwd=compose.parent,
+        check=True,
+        capture_output=True,
+        timeout=600,
     )
     command = ["docker", "compose", "--file", str(compose), "run", "--rm", "main"]
     try:
@@ -680,3 +737,199 @@ timeout_sec = 120
         )
     assert serve.returncode != 0
     assert "HARBOR_MISSING_KEY" in serve.stdout + serve.stderr
+
+
+@pytest.mark.parametrize("mode", ["shared", "separate"])
+@pytest.mark.parametrize("credential", ["missing", "provided", "default"])
+def test_verifier_credentials_are_required_only_for_grading(
+    tmp_path: Path, wheel: Path, mode: str, credential: str
+) -> None:
+    dataset = tmp_path / "harbor-harness"
+    template = (
+        "${HARBOR_VERIFIER_KEY:-judge-value}"
+        if credential == "default"
+        else "${HARBOR_VERIFIER_KEY}"
+    )
+    task = make_harbor_task(
+        dataset,
+        "verifier-credentials",
+        task_toml=f"""[verifier]
+environment_mode = "{mode}"
+timeout_sec = 30
+
+[verifier.env]
+JUDGE_KEY = "{template}"
+""",
+        dockerfile="FROM python:3.11-slim\nWORKDIR /workspace\n",
+    )
+    (task / "tests/test.sh").write_text(
+        '#!/bin/sh\nset -eu\n[ "$JUDGE_KEY" = "judge-value" ]\n'
+        "echo 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+    if mode == "separate":
+        (task / "tests/Dockerfile").write_text(
+            "FROM python:3.11-slim\nCOPY . /tests\n", encoding="utf-8"
+        )
+
+    async def grade() -> Run:
+        taskset = _adapt(dataset, hud_requirement=str(wheel))
+        job = await taskset.run(
+            Oracle({"verifier-credentials": '[ "${JUDGE_KEY-unset}" = unset ]'}),
+            runtime=DockerRuntime(
+                env_vars={"HARBOR_VERIFIER_KEY": "judge-value"} if credential == "provided" else {}
+            ),
+            max_concurrent=1,
+        )
+        (run,) = job.runs
+        return run
+
+    run = asyncio.run(grade())
+
+    assert run.trace.content == "solution completed"
+    if credential == "missing":
+        assert run.reward != 1.0
+        assert "HARBOR_VERIFIER_KEY" in (run.trace.error or str(run.evaluation))
+    else:
+        assert run.reward == 1.0, run.trace.error or run.evaluation
+
+
+def test_main_image_ports_preserve_the_outer_control_channel(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    dataset = tmp_path_factory.mktemp("harbor-main-ports") / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "main-ports",
+        dockerfile="""\
+FROM debian:bookworm-slim
+WORKDIR /app
+COPY entrypoint.sh /usr/local/bin/start-environment
+RUN chmod +x /usr/local/bin/start-environment && printf nested > /app/marker
+EXPOSE 3128 3129 8765 8080
+ENTRYPOINT ["/usr/local/bin/start-environment"]
+""",
+        task_toml="""\
+[environment.healthcheck]
+command = "curl -fsS http://127.0.0.1:8765/marker && curl -fsS http://127.0.0.1:8080/marker"
+interval_sec = 0.1
+timeout_sec = 5
+retries = 50
+
+[verifier]
+timeout_sec = 30
+
+[[verifier.collect]]
+service = "observer"
+command = '''
+python - <<'PY'
+from urllib.request import urlopen
+assert urlopen('http://main:8080/marker').read() == b'nested'
+PY
+'''
+timeout_sec = 10
+""",
+    )
+    (task / "environment/entrypoint.sh").write_text(
+        "#!/bin/sh\nset -eu\n"
+        "python3 -m http.server 8765 --directory /app >/tmp/inner.log 2>&1 &\n"
+        "python3 -m http.server 8080 --directory /app >/tmp/app.log 2>&1 &\n"
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    (task / "environment/docker-compose.yaml").write_text(
+        "services:\n  main: {}\n  observer:\n    image: python:3.11-alpine\n"
+        '    command: ["python", "-m", "http.server", "9000"]\n    expose: [9000]\n',
+        encoding="utf-8",
+    )
+    (task / "solution").mkdir()
+    (task / "solution/solve.sh").write_text(
+        "curl -fsS http://127.0.0.1:8765/marker > /app/result\n",
+        encoding="utf-8",
+    )
+    (task / "tests/test.sh").write_text(
+        '#!/bin/sh\nset -eu\ntest "$(cat /app/result)" = nested\n'
+        "echo 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+
+    runs = asyncio.run(_grade_every_task(dataset, wheel))
+
+    test_harbor_phase_behavior(runs, "main-ports")
+
+
+def test_adapter_install_ignores_vendor_uv_configuration(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    """The private HUD install does not consume or rewrite the task's uv settings."""
+    dataset = tmp_path_factory.mktemp("harbor-vendor-uv") / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "vendor-uv",
+        dockerfile="FROM python:3.11-slim\nWORKDIR /workspace\nCOPY pyproject.toml .\n",
+    )
+    config = '[tool.uv]\nrequired-version = "==0.0.0"\n[tool.uv.pip]\nno-index = true\n'
+    config_path = task / "environment/pyproject.toml"
+    config_path.write_text(config, encoding="utf-8")
+    (adapted,) = _adapt(dataset, hud_requirement=str(wheel))
+    assert adapted.runtime_config is not None
+    assert adapted.runtime_config.compose is not None
+    compose = adapted.runtime_config.compose.document
+    context = adapted.runtime_config.compose.root
+    assert isinstance(compose, Path)
+    assert isinstance(context, Path)
+
+    build = subprocess.run(
+        ["docker", "compose", "--file", str(compose), "build"],
+        cwd=compose.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
+    )
+
+    assert build.returncode == 0, build.stdout[-4000:] + build.stderr[-4000:]
+    assert config_path.read_text(encoding="utf-8") == config
+    copied_config = context / "compose-project/environment/pyproject.toml"
+    assert copied_config.read_text(encoding="utf-8") == config
+
+
+def test_agent_sessions_run_the_managed_cli_bundle(
+    tmp_path_factory: pytest.TempPathFactory,
+    wheel: Path,
+) -> None:
+    """A CLI bundle the runtime mounts at /usr/local/lib/agents runs in agent sessions."""
+    root = tmp_path_factory.mktemp("harbor-managed-agents")
+    binary = root / "codex" / "bin" / "codex"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\necho managed-codex\n", encoding="utf-8")
+    binary.chmod(0o755)
+    dataset = root / "harbor-harness"
+    task = make_harbor_task(
+        dataset,
+        "managed-agents",
+        dockerfile="FROM python:3.11-slim\nWORKDIR /workspace\n",
+    )
+    (task / "tests/test.sh").write_text(
+        '#!/bin/sh\nset -eu\ntest "$(cat /workspace/result)" = managed-codex\n'
+        "echo 1 > /logs/verifier/reward.txt\n",
+        encoding="utf-8",
+    )
+
+    async def grade() -> Run:
+        job = await _adapt(dataset, hud_requirement=str(wheel)).run(
+            Oracle({"managed-agents": "/usr/local/lib/agents/codex/bin/codex > result"}),
+            runtime=DockerRuntime(
+                bind_mounts=(DockerBindMount(root / "codex", "/usr/local/lib/agents/codex"),),
+            ),
+            max_concurrent=1,
+        )
+        (run,) = job.runs
+        return run
+
+    run = asyncio.run(grade())
+
+    assert run.trace.content == "solution completed"
+    assert run.reward == 1.0, run.trace.error or run.evaluation

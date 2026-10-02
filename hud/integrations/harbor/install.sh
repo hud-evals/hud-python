@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-requirement="${1:-hud}"
-root=/media/hud
+root=/controller
 python_version=3.12
 
 export UV_PYTHON_INSTALL_DIR="$root/python"
 export UV_PYTHON_BIN_DIR="$root/bin"
 export UV_NO_CACHE=1
+export UV_NO_CONFIG=1
 export XDG_CONFIG_HOME="$root/config"
 export PATH="$root/bin:$PATH"
 
@@ -24,6 +24,12 @@ else
   echo "hud: Harbor environments require an apt-, apk-, or dnf-based image" >&2
   exit 1
 fi
+
+if [ "${1:-}" = "--system-only" ]; then
+  exit 0
+fi
+
+requirement="${1:-hud}"
 
 python="$(command -v python3)"
 if ! "$python" -c 'import sys; raise SystemExit(not ((3, 11) <= sys.version_info[:2] < (3, 13)))'; then

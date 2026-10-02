@@ -99,7 +99,8 @@ def _stub_remote_build(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return captured
 
 
-def _archive(directory: Path, monkeypatch: pytest.MonkeyPatch) -> set[str]:
+def _archive(source: Path, monkeypatch: pytest.MonkeyPatch) -> set[str]:
+    directory = source.parent if source.is_file() else source
     if not any(
         "Environment(" in path.read_text(encoding="utf-8")
         for path in directory.glob("*.py")
@@ -108,7 +109,7 @@ def _archive(directory: Path, monkeypatch: pytest.MonkeyPatch) -> set[str]:
         (directory / "env.py").write_text('env = Environment("e")\n', encoding="utf-8")
     _FakeHttpxClient.uploaded = b""
     _stub_remote_build(monkeypatch)
-    result = CliRunner().invoke(app, ["deploy", str(directory), "--json", "--no-env"])
+    result = CliRunner().invoke(app, ["deploy", str(source), "--json", "--no-env"])
     assert result.exit_code == 0, result.output
     with tarfile.open(fileobj=io.BytesIO(_FakeHttpxClient.uploaded), mode="r:gz") as tar:
         return set(tar.getnames())
@@ -163,6 +164,25 @@ class TestResolveEnvironmentName:
         (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
 
         assert _dry_run(tmp_path)["name"] == "nested"
+
+    def test_explicit_file_disambiguates_nested_environment(self, tmp_path: Path) -> None:
+        selected = tmp_path / "env.py"
+        selected.write_text('env = Environment("adapter")\n', encoding="utf-8")
+        nested = tmp_path / "source"
+        nested.mkdir()
+        (nested / "env.py").write_text('env = Environment("original")\n', encoding="utf-8")
+
+        assert _dry_run(selected)["name"] == "adapter"
+        assert "Pass --name" in _deploy_name_error(tmp_path)
+
+    def test_explicit_file_without_declaration_does_not_select_another_file(
+        self, tmp_path: Path
+    ) -> None:
+        selected = tmp_path / "selected.py"
+        selected.write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / "env.py").write_text('env = Environment("other")\n', encoding="utf-8")
+
+        assert "No environment found" in _deploy_name_error(selected)
 
     def test_ignores_calls_without_a_literal(self, tmp_path: Path) -> None:
         (tmp_path / "env.py").write_text(
@@ -234,6 +254,19 @@ class TestBuildContext:
         assert "env.py" in names
         assert ".env" not in names
         assert not any(name == ".git" or name.startswith(".git/") for name in names)
+
+    def test_explicit_file_uploads_its_parent_tree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        selected = tmp_path / "env.py"
+        selected.write_text('env = Environment("selected")\n', encoding="utf-8")
+        nested = tmp_path / "source"
+        nested.mkdir()
+        (nested / "env.py").write_text('env = Environment("original")\n', encoding="utf-8")
+        (tmp_path / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+
+        names = _archive(selected, monkeypatch)
+        assert {"env.py", "compose.yaml", "source/env.py"} <= names
 
     def test_preserves_empty_directories(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

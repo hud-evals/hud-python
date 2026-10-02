@@ -16,7 +16,7 @@ case ",${NO_PROXY:-}," in
   *) echo "main is absent from NO_PROXY" >&2; exit 1 ;;
 esac
 curl -fsS --max-time 10 http://main:8080/ > /app/main.html
-protected=/media/hud/session-"keys"
+protected=/runtime/session-"keys"
 [ ! -e "$protected" ]
 (while :; do sleep 1; done) >/tmp/actor-background.log 2>&1 &
 printf '%s\n' "$!" > /app/actor.pid
@@ -28,8 +28,8 @@ for pid in $(pgrep -x python3); do
     break
   fi
 done
-if [ "$entrypoint_visible" = true ]; then
-  echo "the environment entrypoint process is visible in the agent process namespace" >&2
+if [ "$entrypoint_visible" = false ]; then
+  echo "the environment entrypoint process is absent from the agent process namespace" >&2
   exit 1
 fi
 processes=$(ps -ef)

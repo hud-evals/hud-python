@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.eval.runtime")
 
+_SESSION_ROOT = "/runtime/sessions"
+_SESSION_ALIAS_ROOT = "/media/hud/sessions"
+
 #: DockerRuntime always serves HUD environments, so this is part of the
 #: provider contract rather than a per-image option. This is intentionally a
 #: default-allow compatibility profile: Workspace's bwrap sessions need the
@@ -56,26 +59,6 @@ def _require_free_disk(output: str, storage_mb: int) -> None:
             f"DockerRuntime requires {storage_mb} MB of free disk; "
             f"the environment has {available_mb} MB"
         )
-
-
-async def _prepare_compose_project(compose: Path, max_wait: float | None) -> bool:
-    script = compose.parent / "build.sh"
-    if not script.is_file():
-        return False
-    process = await create_process_group_exec(
-        "sh",
-        str(script),
-        cwd=str(compose.parent),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    result = await process.complete(max_wait=max_wait)
-    if result.timed_out:
-        raise TimeoutError(f"Compose project build timed out after {max_wait:g} seconds")
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
-        raise RuntimeError(f"Compose project build failed: {detail}")
-    return True
 
 
 @asynccontextmanager
@@ -150,7 +133,6 @@ class DockerRuntime:
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
         self.runtime_config = config if config.model_dump(exclude_none=True) else None
-        self._compose_preparation_locks: dict[Path, asyncio.Lock] = {}
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
@@ -169,7 +151,8 @@ class DockerRuntime:
             compose = compose.resolve()
             if self.run_args:
                 raise ValueError("DockerRuntime run_args apply only to image environments")
-            port_service = ComposeConfig.from_file(compose).network_owner("main")
+            compose_config = ComposeConfig.from_file(compose)
+            port_service = compose_config.network_owner("main")
             resources = config.resources
             if (
                 resources is not None
@@ -198,9 +181,6 @@ class DockerRuntime:
                         )
                     service_socket = parsed.path
             project = f"hud-{uuid.uuid4().hex[:12]}"
-            lock = self._compose_preparation_locks.setdefault(compose, asyncio.Lock())
-            async with lock:
-                prepared = await _prepare_compose_project(compose, startup_timeout)
             with compose_project.stage(
                 f"127.0.0.1::{self.port}",
                 port_service=port_service,
@@ -230,15 +210,32 @@ class DockerRuntime:
                     str(files.ports),
                 )
                 teardown = (*command, "down", "--volumes", "--remove-orphans")
+                loop = asyncio.get_running_loop()
+                startup_deadline = (
+                    None if startup_timeout is None else loop.time() + startup_timeout
+                )
                 try:
                     await _docker(
                         *command,
                         "up",
                         "--detach",
-                        "--no-build" if prepared else "--build",
+                        "--build",
                         "--remove-orphans",
                         deadline=startup_timeout,
                     )
+                    if awaited := compose_config.healthchecked_services():
+                        await _docker(
+                            *command,
+                            "up",
+                            "--wait",
+                            "--no-deps",
+                            "--no-recreate",
+                            "--no-build",
+                            *awaited,
+                            deadline=(
+                                None if startup_deadline is None else startup_deadline - loop.time()
+                            ),
+                        )
                     if resources is not None and resources.storage_mb is not None:
                         free_disk, _ = await _docker(
                             *command, "exec", "-T", "main", "df", "-Pk", "/"
@@ -302,22 +299,29 @@ class DockerRuntime:
         mount_args: list[str] = []
         for mount in self.bind_mounts:
             mount_args.extend(("--mount", mount.docker_argument()))
-        out, _ = await _docker(
-            "run",
-            "--detach",
-            *self.run_args,
-            *env_args,
-            *resource_args,
-            *mount_args,
-            *_DOCKER_SECURITY_ARGS,
-            "--publish",
-            f"127.0.0.1::{self.port}",
-            config.image,
-            deadline=startup_timeout,
-        )
-        container = out.strip()
-        teardown = ("rm", "--force", container)
+        session_volume = f"hud-runtime-sessions-{uuid.uuid4().hex}"
+        container = ""
         try:
+            await _docker("volume", "create", session_volume, deadline=startup_timeout)
+            out, _ = await _docker(
+                "run",
+                "--detach",
+                *self.run_args,
+                *env_args,
+                *resource_args,
+                *mount_args,
+                *_DOCKER_SECURITY_ARGS,
+                "--mount",
+                f"type=volume,source={session_volume},target={_SESSION_ROOT}",
+                "--mount",
+                f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
+                "--publish",
+                f"127.0.0.1::{self.port}",
+                config.image,
+                deadline=startup_timeout,
+            )
+            container = out.strip()
+            teardown = ("rm", "--force", container)
             if resources is not None and resources.storage_mb is not None:
                 free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
                 _require_free_disk(free_disk, resources.storage_mb)
@@ -346,7 +350,9 @@ class DockerRuntime:
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.
-            await _docker(*teardown, check=False)
+            if container:
+                await _docker("rm", "--force", container, check=False)
+            await _docker("volume", "rm", "--force", session_volume, check=False)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -358,7 +364,7 @@ class DockerEndpoint(Runtime):
         validate_session_id(session_id)
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            root = f"/media/hud/sessions/{session_id}"
+            root = f"{_SESSION_ROOT}/{session_id}"
             exists, _ = await _docker(
                 "exec",
                 self.container,
@@ -371,7 +377,7 @@ class DockerEndpoint(Runtime):
             if not exists:
                 yield None
                 return
-            archive = f"/media/hud/session-export-{uuid.uuid4().hex}.tar.gz"
+            archive = f"/runtime/session-export-{uuid.uuid4().hex}.tar.gz"
             script = """
 import sys
 import tarfile
@@ -408,7 +414,7 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
 
     async def restore_session(self, session_id: str, source: Path) -> None:
         validate_session_id(session_id)
-        target = f"/media/hud/sessions/{session_id}"
+        target = f"{_SESSION_ROOT}/{session_id}"
         with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
             root = Path(directory)
             _extract_session_archive(source, root)

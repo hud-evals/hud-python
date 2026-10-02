@@ -30,6 +30,8 @@ logger = logging.getLogger("hud.eval.runtime")
 
 _MODAL_COMPOSE_CPU = 4.0
 _MODAL_COMPOSE_MEMORY_MB = 8192
+_SESSION_ROOT = "/runtime/sessions"
+_SESSION_ARCHIVE = "/runtime/session.tar.gz"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -61,13 +63,13 @@ class ModalEndpoint(Runtime):
         validate_session_id(session_id)
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            session = f"/media/hud/sessions/{session_id}"
+            session = f"{_SESSION_ROOT}/{session_id}"
             if self.compose is None:
                 root = session
                 command = ""
                 check = f"if [ -d {root} ]; then printf 1; fi"
             else:
-                root = "/media/hud/session-export"
+                root = "/runtime/session-export"
                 command = (
                     self._container()
                     + f"rm -rf {root} && mkdir -p {root} && "
@@ -83,30 +85,28 @@ class ModalEndpoint(Runtime):
             command += (
                 f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
                 "then echo 'runtime session contains an unsupported entry' >&2; exit 1; fi; "
-                f"tar -czf /media/hud/session.tar.gz -C {root} ."
+                f"tar -czf {_SESSION_ARCHIVE} -C {root} ."
             )
             await self._exec(command)
-            await self.sandbox.filesystem.copy_to_local.aio(
-                "/media/hud/session.tar.gz", destination
-            )
+            await self.sandbox.filesystem.copy_to_local.aio(_SESSION_ARCHIVE, destination)
             yield destination
 
     async def restore_session(self, session_id: str, source: Path) -> None:
         validate_session_id(session_id)
-        session = f"/media/hud/sessions/{session_id}"
-        await self.sandbox.filesystem.copy_from_local.aio(source, "/media/hud/session.tar.gz")
+        session = f"{_SESSION_ROOT}/{session_id}"
+        await self.sandbox.filesystem.copy_from_local.aio(source, _SESSION_ARCHIVE)
         if self.compose is None:
             command = (
                 f"rm -rf {session} && mkdir -p {session} && "
-                f"tar -xzf /media/hud/session.tar.gz -C {session}"
+                f"tar -xzf {_SESSION_ARCHIVE} -C {session}"
             )
         else:
             command = (
                 self._container()
-                + "rm -rf /tmp/hud-session && mkdir -p /tmp/hud-session && "
-                + "tar -xzf /media/hud/session.tar.gz -C /tmp/hud-session && "
+                + "rm -rf /runtime/session-import && mkdir -p /runtime/session-import && "
+                + f"tar -xzf {_SESSION_ARCHIVE} -C /runtime/session-import && "
                 + f'docker exec "$CONTAINER" sh -c "rm -rf {session} && mkdir -p {session}" && '
-                + f'docker cp /tmp/hud-session/. "$CONTAINER":{session}'
+                + f'docker cp /runtime/session-import/. "$CONTAINER":{session}'
             )
         await self._exec(command)
 
@@ -203,7 +203,8 @@ class ModalRuntime:
                 "ModalRuntime sandbox secrets require an image runtime; attaching them to "
                 "the outer Docker-in-Docker sandbox would not expose them to main"
             )
-        port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
+        compose_config = ComposeConfig.from_file(compose) if compose is not None else None
+        port_service = compose_config.network_owner("main") if compose_config else "main"
         if compose is not None:
             image = modal.Image.from_registry("docker:28.3.3-dind")
         elif config.image is not None:
@@ -271,8 +272,22 @@ class ModalRuntime:
             run_timeout = config.limits.run_timeout_s or run_timeout
             ready_timeout = config.limits.startup_timeout_s or ready_timeout
 
+        command = (
+            ()
+            if compose is not None
+            else (
+                "sh",
+                "-c",
+                "mkdir -p /runtime/sessions /media/hud && "
+                "rm -rf /media/hud/sessions && "
+                "ln -s /runtime/sessions /media/hud/sessions && "
+                'exec "$@"',
+                "hud-runtime",
+                *self.command,
+            )
+        )
         sb = await modal.Sandbox.create.aio(
-            *(() if compose is not None else self.command),
+            *command,
             app=app,
             image=image,
             workdir=None if compose is not None else self.workdir,
@@ -323,17 +338,23 @@ class ModalRuntime:
                     await sb.filesystem.copy_from_local.aio(
                         _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
                     )
-                command = (
-                    "mkdir -p /hud/project && "
-                    "tar -xzf /hud/project.tar.gz -C /hud/project && "
-                    "until docker info >/dev/null 2>&1; do sleep 1; done && "
-                    "BUILD_FLAG=--build && "
-                    "if [ -f /hud/project/build.sh ]; then "
-                    "sh /hud/project/build.sh && BUILD_FLAG=--no-build; fi && "
+                compose_command = (
                     f"docker compose --project-directory {shlex.quote(project_directory)} "
                     f"--file {shlex.quote(compose_path)} "
-                    "--file /hud/override.json --file /hud/ports.yaml "
-                    'up --detach "$BUILD_FLAG" --remove-orphans'
+                    "--file /hud/override.json --file /hud/ports.yaml"
+                )
+                assert compose_config is not None
+                awaited = compose_config.healthchecked_services()
+                command = (
+                    "mkdir -p /hud/project /runtime && "
+                    "tar -xzf /hud/project.tar.gz -C /hud/project && "
+                    "until docker info >/dev/null 2>&1; do sleep 1; done && "
+                    f"{compose_command} up --detach --build --remove-orphans"
+                ) + (
+                    f" && {compose_command} up --wait --no-deps --no-recreate --no-build "
+                    f"{shlex.join(awaited)}"
+                    if awaited
+                    else ""
                 )
                 try:
                     async with asyncio.timeout(ready_timeout):

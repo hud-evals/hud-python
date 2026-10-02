@@ -32,7 +32,11 @@ fi
   fi
   [ -e /tests/test.sh ] && echo "tests=present" || echo "tests=absent"
   [ -e /logs/verifier/reward.txt ] && echo "verdict=present" || echo "verdict=absent"
-  [ -e /media/hud ] && echo "harness=present" || echo "harness=absent"
+  if [ -e /controller ] || [ -e /runtime ] || [ -e /mounts ] || [ -e /verifier ]; then
+    echo "harness=present"
+  else
+    echo "harness=absent"
+  fi
 } > /app/probe.txt
 
 # Continue probing verifier-only routes after this command returns.
