@@ -49,10 +49,3 @@ def set_trace_context(
         yield
     finally:
         _current_trace_headers.reset(token)
-
-
-__all__ = [
-    "get_current_trace_id",
-    "get_trace_headers",
-    "set_trace_context",
-]

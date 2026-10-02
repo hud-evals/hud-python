@@ -744,6 +744,3 @@ async def rollout(
 def _consume_task_result(task: asyncio.Future[Any]) -> None:
     with contextlib.suppress(asyncio.CancelledError, Exception):
         task.result()
-
-
-__all__ = ["Grade", "Run", "rollout"]

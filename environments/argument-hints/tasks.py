@@ -1,6 +1,6 @@
 """Example tasks for the argument-hints environment."""
 
-from env import env, review_files
+from env import review_files
 
 tasks = [
     review_files(
@@ -13,5 +13,3 @@ tasks = [
         ],
     ),
 ]
-
-__all__ = ["env", "tasks"]

@@ -29,6 +29,3 @@ class GeminiMCPProxyTool(MCPTool):
                 ),
             ],
         )
-
-
-__all__ = ["GeminiMCPProxyTool"]

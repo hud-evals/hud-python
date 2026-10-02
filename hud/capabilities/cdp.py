@@ -143,6 +143,3 @@ class CDPClient(CapabilityClient):
                 await self._reader
         with contextlib.suppress(Exception):
             await self._ws.close()
-
-
-__all__ = ["CDPClient", "CDPError"]

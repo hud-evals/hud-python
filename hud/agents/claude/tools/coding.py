@@ -211,13 +211,3 @@ class ClaudeTextEditorTool(SSHTool):
             text += "\n"
         lines.insert(line, text)
         return await self.file_write(path, "".join(lines))
-
-
-__all__ = [
-    "CLAUDE_BASH_SPEC",
-    "CLAUDE_TEXT_EDITOR_SPEC",
-    "GENERIC_BASH_SPEC",
-    "GENERIC_TEXT_EDITOR_SPEC",
-    "ClaudeBashTool",
-    "ClaudeTextEditorTool",
-]

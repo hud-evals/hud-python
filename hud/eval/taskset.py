@@ -388,6 +388,3 @@ class Taskset:
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
         return job
-
-
-__all__ = ["Job", "Taskset"]

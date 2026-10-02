@@ -253,6 +253,3 @@ def _span_bytes(span: dict[str, Any]) -> int:
 
 
 atexit.register(lambda: flush(timeout=30.0))
-
-
-__all__ = ["flush", "queue_span", "reset"]

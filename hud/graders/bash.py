@@ -80,6 +80,3 @@ class BashGrader(Grader):
             value=1.0 if returncode == 0 else 0.0,
             info={"exit_code": returncode, "stdout": stdout, "stderr": stderr},
         )
-
-
-__all__ = ["BashGrader"]

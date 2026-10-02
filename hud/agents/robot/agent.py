@@ -168,6 +168,3 @@ class RobotAgent(Agent):
                 recorder.add_reward(reward)
         else:
             print(f"[agent] reached max_steps={max_steps}", flush=True)
-
-
-__all__ = ["ROBOT_PROTOCOL", "RobotAgent"]

@@ -124,6 +124,3 @@ def shell_output(stdout: str, stderr: str, exit_code: int) -> dict[str, Any]:
         "stderr": stderr,
         "outcome": {"type": "exit", "exit_code": exit_code},
     }
-
-
-__all__ = ["OPENAI_SHELL_SPEC", "OpenAIShellTool"]

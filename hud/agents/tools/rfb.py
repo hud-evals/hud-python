@@ -296,6 +296,3 @@ class RFBTool(AgentTool[RFBClient]):
             return
         with self.client.conn.keyboard.hold(*keys):
             yield
-
-
-__all__ = ["Button", "RFBTool", "keysym"]

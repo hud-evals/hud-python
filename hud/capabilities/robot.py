@@ -172,6 +172,3 @@ class RobotClient(CapabilityClient):
             print(f"[agent] robot recv loop crashed: {exc!r}", flush=True)
             traceback.print_exc()
             raise
-
-
-__all__ = ["RobotClient"]

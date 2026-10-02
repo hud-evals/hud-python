@@ -372,6 +372,3 @@ class RobotEndpoint:
 async def _forward_lines(stream: asyncio.StreamReader) -> None:
     while line := await stream.readline():
         print(line.decode("utf-8", "replace").rstrip(), flush=True)
-
-
-__all__ = ["RobotEndpoint"]

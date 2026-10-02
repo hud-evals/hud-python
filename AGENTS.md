@@ -119,6 +119,9 @@ Python `>=3.11, <3.13`.
   lazy optional-dependency pattern or a documented circular-import constraint.
 - Use `TYPE_CHECKING` imports for type-only imports that would otherwise add
   runtime dependency cost or cycles.
+- Declare `__all__` only in package `__init__.py` files, where it lists the
+  names the package re-exports. Ordinary modules leave it out; their names
+  without a leading underscore are already public.
 
 ## Testing
 

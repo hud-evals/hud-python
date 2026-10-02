@@ -123,6 +123,3 @@ class BatchedAgent(Agent):
         if worker.adapter is not None:  # defensive: a stateful custom adapter must be per-run
             worker.adapter = copy.copy(worker.adapter)
         await worker(run, **kwargs)
-
-
-__all__ = ["BatchedAgent", "BatchedModel"]

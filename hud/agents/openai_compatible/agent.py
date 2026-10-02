@@ -234,6 +234,3 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             model=response.model,
             usage=usage,
         )
-
-
-__all__ = ["OpenAIChatAgent"]

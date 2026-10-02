@@ -242,6 +242,3 @@ def _hold_keys(keys: Any) -> list[str] | None:
     if not isinstance(keys, list) or not all(isinstance(key, str) and key for key in keys):
         raise ValueError("keys must be a list of non-empty strings")
     return [_map_key(key) for key in cast("list[str]", keys)]
-
-
-__all__ = ["OPENAI_COMPUTER_SPEC", "OpenAIComputerTool"]

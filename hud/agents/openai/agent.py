@@ -359,6 +359,3 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             model=response.model,
             usage=usage,
         )
-
-
-__all__ = ["EmptyShellCallError", "OpenAIAgent"]

@@ -146,14 +146,3 @@ def f1_score(
     recall = num_common / len(ref_tokens)
 
     return 2 * precision * recall / (precision + recall)
-
-
-__all__ = [
-    "contains",
-    "contains_all",
-    "contains_any",
-    "exact_match",
-    "f1_score",
-    "normalize",
-    "numeric_match",
-]

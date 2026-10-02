@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from hud.agents.tools.base import AgentToolSpec
 from hud.agents.tools.base import provider_tool_name as openai_compatible_tool_name
 from hud.types import ImageContent, TextContent, Tool
 
@@ -147,12 +146,3 @@ def openai_compatible_tool_param(
             },
         },
     )
-
-
-__all__ = [
-    "AgentToolSpec",
-    "OpenAICompatibleToolParam",
-    "format_chat_result",
-    "openai_compatible_tool_name",
-    "openai_compatible_tool_param",
-]

@@ -308,6 +308,3 @@ def _decode(raw: object) -> str:
 
 def _powershell_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
-
-
-__all__ = ["PROCESS_CONNECTIONS_REQUEST", "SSHClient"]

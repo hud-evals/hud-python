@@ -175,6 +175,3 @@ def _rubric_value(subscores: list[SubScore]) -> float:
     if total_negative > 0:
         return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative))
     return 0.0
-
-
-__all__ = ["LLMJudgeGrader"]

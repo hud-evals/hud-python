@@ -327,6 +327,3 @@ def _grounding_citations(grounding_meta: genai_types.GroundingMetadata) -> list[
         if idx not in seen_chunk_indices and source:
             citations.append(Citation(type="grounding", text="", source=source, title=title))
     return citations
-
-
-__all__ = ["GeminiAgent"]

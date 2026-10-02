@@ -117,6 +117,3 @@ def iter_modules(path: str | Path) -> Iterator[ModuleType]:
                 continue
             sys.modules[name] = module
         yield module
-
-
-__all__ = ["iter_modules", "load_module"]

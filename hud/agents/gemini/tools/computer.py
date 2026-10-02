@@ -196,6 +196,3 @@ def _keys(names: list[str]) -> list[str]:
     # Gemini names keys as a browser on macOS does, where Meta (Command) chords are
     # Control chords on Linux.
     return [keysym("ctrl" if key.lower() in _MAC_COMMAND else key) for key in keys]
-
-
-__all__ = ["GEMINI_COMPUTER_SPEC", "PREDEFINED_COMPUTER_USE_FUNCTIONS", "GeminiComputerTool"]

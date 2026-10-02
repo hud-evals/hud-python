@@ -670,13 +670,3 @@ class ComposeProject(BaseModel):
                 ports=ports,
                 archive=archive_path,
             )
-
-
-__all__ = [
-    "ComposeConfig",
-    "ComposeHealthcheck",
-    "ComposePort",
-    "ComposeProject",
-    "ComposeProjectRef",
-    "ComposeService",
-]

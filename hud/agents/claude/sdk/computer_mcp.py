@@ -220,12 +220,3 @@ async def _log_stream(
 
 if __name__ == "__main__":
     asyncio.run(run_computer_mcp())
-
-
-__all__ = [
-    "RFB_CAPABILITY_ENV",
-    "SCREENSHOT_ENCODING_ENV",
-    "bridge_computer_mcp",
-    "create_computer_mcp",
-    "run_computer_mcp",
-]

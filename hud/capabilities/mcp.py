@@ -95,6 +95,3 @@ class MCPClient(CapabilityClient):
 
     async def close(self) -> None:
         await self._exit_stack.aclose()
-
-
-__all__ = ["MCPClient", "get_mcp_trace_id"]

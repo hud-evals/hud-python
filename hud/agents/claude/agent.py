@@ -564,6 +564,3 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     start_index=None,
                     end_index=None,
                 )
-
-
-__all__ = ["ClaudeAgent"]

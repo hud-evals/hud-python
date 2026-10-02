@@ -954,18 +954,3 @@ def _close(server: _UnixServer, path: Path) -> None:
     server.server_close()
     with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
-
-
-__all__ = [
-    "ANY_HOST",
-    "BRIDGE_PORT",
-    "VISITOR_PORT",
-    "ConnectionRelay",
-    "Egress",
-    "Peer",
-    "WorkspaceRoute",
-    "bind_addresses",
-    "hosts_text",
-    "permitted",
-    "proxy_environment",
-]

@@ -215,6 +215,3 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                         await ssh.run(cleanup, check=False)
                     except (OSError, asyncssh.Error):
                         logger.warning("Failed to remove Claude CLI runtime files")
-
-
-__all__ = ["ClaudeCLIAgent"]

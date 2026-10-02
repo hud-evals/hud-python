@@ -996,6 +996,3 @@ async def _wait_until_listening(task: asyncio.Task[None], port: int) -> None:
         writer.close()
         await writer.wait_closed()
         return
-
-
-__all__ = ["CONTROL_KINDS", "DEFAULT_TIMEOUT_S", "DirectControl"]

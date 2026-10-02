@@ -541,13 +541,3 @@ async def connect(
         if heartbeat_error is not None:
             raise heartbeat_error from None
         raise
-
-
-__all__ = [
-    "DEFAULT_READY_TIMEOUT",
-    "HudClient",
-    "HudProtocolError",
-    "Manifest",
-    "ServerInfo",
-    "connect",
-]

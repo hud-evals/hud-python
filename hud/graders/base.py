@@ -41,6 +41,3 @@ class Grader:
     async def compute_score(cls, **kwargs: Any) -> SubScore:
         """Compute and describe a score between ``0.0`` and ``1.0``."""
         raise NotImplementedError("Subclasses must implement compute_score")
-
-
-__all__ = ["Grader"]
