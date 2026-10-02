@@ -24,6 +24,7 @@ from .egress import WorkspaceRoute
 from .env import Answer, current_session_id
 from .utils import (
     CONTROL_FRAME_LIMIT_BYTES,
+    FILE_TRACKING_FRAME_LIMIT_BYTES,
     FrameTooLargeError,
     encode_frame,
     error,
@@ -205,6 +206,8 @@ class _ControlChannel:
         # A runner whose session is not in ``_live`` is parked.
         self._runners: dict[str, TaskRunner] = {}
         self._live: set[str] = set()
+        # One tracker per environment, shared by every session.
+        self._files_lock = asyncio.Lock()
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         await self._cancel_runner(session_id)
@@ -393,6 +396,20 @@ class _Session:
                         await self._error(msg_id, -32600, str(exc))
                         return
                     await self._reply(msg_id, evaluation)
+                # An environment without a tracked workspace serves no files.* methods.
+                case _ if (
+                    method.startswith("files.") and (tracker := self.env.file_tracker) is not None
+                ):
+                    async with self.channel._files_lock:
+                        result = await asyncio.get_running_loop().run_in_executor(
+                            None, tracker.call, method.removeprefix("files.")
+                        )
+                    if msg_id is not None:
+                        await send_frame(
+                            self.writer,
+                            reply(msg_id, result),
+                            max_bytes=FILE_TRACKING_FRAME_LIMIT_BYTES,
+                        )
                 case _:
                     await self._error(msg_id, -32601, f"method not found: {method}")
         except Exception as exc:

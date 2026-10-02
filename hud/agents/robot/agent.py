@@ -49,11 +49,7 @@ class RobotAgent(Agent):
         if not isinstance(prompt, str):
             raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
 
-        cap = run.client.binding(self.robot_protocol)
-        # The episode's slot token. Single-env templates may omit it: a ``None`` claim binds the
-        # sole slot, and vectorized bridges reject it at connect.
-        token = run.bindings.get(cap.name, {}).get("token")
-        robot = await RobotClient.connect(cap, token=token)
+        robot = await RobotClient.connect(run.binding(self.robot_protocol))
         try:
             action_space, obs_space = robot.spaces()
             if self.adapter is not None:

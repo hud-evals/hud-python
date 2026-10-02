@@ -252,7 +252,7 @@ See [Robots](/v6/advanced/robots) for the bridge, the endpoint, the harness, and
 
 ## Workspace file tracking
 
-Workspace file tracking records what changed in a [`Workspace`](#workspace) over a run, so HUD can show file diffs in the trace. It runs with the workspace lifecycle and is not a tool the agent calls. `env.workspace(...)` enables it by default (the `HUD_FILE_TRACKING_ENABLED` setting); set `HUD_FILE_TRACKING_ENABLED=false` or pass `track_files=False` to opt out:
+Workspace file tracking records what changed in a [`Workspace`](#workspace) over a run, so HUD can show file diffs in the trace. The rollout reads it over the environment's control channel; it is not a capability the agent sees. `env.workspace(...)` enables it by default (the `HUD_FILE_TRACKING_ENABLED` setting) for the environment's first workspace; set `HUD_FILE_TRACKING_ENABLED=false` or pass `track_files=False` to opt out. One workspace per environment tracks files:
 
 ```python env.py
 env.workspace("workspace")                     # ssh plus file tracking
@@ -315,15 +315,14 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 | `shell_uid` | `int \| None` | When serving as root, run every agent command as this uid/gid with cleared supplementary groups and `no_new_privs`. Only the workspace directory itself is handed to the uid at start (O(1)); own pre-staged content via `COPY --chown` or task setup. Default `None`. |
 | `host_key_path` | `Path \| None` | Reuse a host key instead of generating one. |
 | `authorized_client_keys` | `list[Path] \| None` | Authorize specific client public keys. |
-| `track_files` | `bool` | Serve file-tracking telemetry over the workspace lifecycle. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on). |
+| `track_files` | `bool` | Track file changes under `root` for the rollout to stream. Constructor default `False`; `env.workspace(...)` defaults it to `HUD_FILE_TRACKING_ENABLED` (on) for the first workspace. |
 
 | Member | Description |
 |--------|-------------|
 | `await ws.start()` | Start the SSH accept loop (idempotent). |
 | `await ws.stop()` | Stop accepting sessions and release the socket. |
 | `ws.capability(name="shell")` | The resolved `ssh` `Capability` (materializes keys, binds the socket). |
-| `ws.file_tracking_capability(name="filetracking")` | The `filetracking/1` `Capability` (requires `track_files=True`). |
-| `ws.tracks_files` | Whether this workspace serves a `filetracking/1` capability. |
+| `ws.tracks_files` | Whether this workspace tracks file changes. |
 | `ws.ssh_url` / `ws.ssh_host_pubkey` / `ws.ssh_client_key_path` / `ws.ssh_user` | Connection address, host key, client key path, and username. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
 | `ws.bwrap_argv(...)` / `ws.shell_argv(...)` | Build argv for your own subprocess (bwrap'd / per-session shell). |

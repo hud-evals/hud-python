@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import difflib
 import fnmatch
@@ -13,11 +12,11 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
-
-from .utils import error, read_frame, reply, send_frame
+from typing import Any, Literal, TypeAlias
 
 LOGGER = logging.getLogger("hud.environment.file_tracker")
+
+FileTrackingOp: TypeAlias = Literal["setup", "snapshot", "diff", "flush"]
 
 # Noise paths excluded from tracking entirely (build output, caches, VCS internals).
 DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
@@ -337,6 +336,23 @@ class FileTracker:
                 diff.scan_duration_ms,
             )
         return diff
+
+    def call(self, op: str) -> dict[str, Any]:
+        """Run one ``files.*`` control-channel operation and return its reply."""
+        if op == "setup":
+            return self.take_setup_snapshot().to_dict()
+        if op == "snapshot":
+            manifest = self.current_manifest()
+            return {
+                "root": self._root.as_posix(),
+                "files": manifest,
+                "files_scanned": len(manifest),
+            }
+        if op == "diff":
+            return self.take_snapshot().to_dict()
+        if op == "flush":
+            return self.flush_changes()
+        raise ValueError(f"unknown file tracking operation: {op!r}")
 
     def current_manifest(self) -> list[dict[str, Any]]:
         """The latest snapshot's ``{path, size, content_hash}`` rows, without redacted files."""
@@ -723,61 +739,3 @@ class FileTracker:
                 lineterm="",
             )
         )
-
-
-class _FileTrackingHandler:
-    """Per-server dispatcher; one tracker shared across connections under a lock."""
-
-    def __init__(self, tracker: FileTracker) -> None:
-        self._tracker = tracker
-        self._lock = asyncio.Lock()
-
-    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        loop = asyncio.get_running_loop()
-        try:
-            while (msg := await read_frame(reader)) is not None:
-                msg_id = msg.get("id")
-                method = msg.get("method", "")
-                try:
-                    async with self._lock:
-                        if method == "diff":
-                            diff = await loop.run_in_executor(None, self._tracker.take_snapshot)
-                            result = diff.to_dict()
-                        elif method == "snapshot":
-                            manifest = self._tracker.current_manifest()
-                            result = {"files": manifest, "files_scanned": len(manifest)}
-                        elif method == "setup":
-                            setup = await loop.run_in_executor(
-                                None,
-                                self._tracker.take_setup_snapshot,
-                            )
-                            result = setup.to_dict()
-                        elif method == "advance":
-                            await loop.run_in_executor(None, self._tracker.advance_baseline)
-                            result = {"advanced": True}
-                        elif method == "flush":
-                            result = await loop.run_in_executor(None, self._tracker.flush_changes)
-                        else:
-                            raise ValueError(f"unknown filetracking method: {method!r}")
-                except Exception as exc:  # never tear the connection down on one bad call
-                    LOGGER.debug("filetracking %s failed: %s", method, exc)
-                    if isinstance(msg_id, int):
-                        await send_frame(writer, error(msg_id, -32000, str(exc)))
-                    continue
-                if isinstance(msg_id, int):
-                    await send_frame(writer, reply(msg_id, result))
-        except (ConnectionError, OSError):
-            pass
-        finally:
-            writer.close()
-
-
-async def serve_file_tracking(
-    tracker: FileTracker, host: str = "127.0.0.1", port: int = 0
-) -> asyncio.Server:
-    """Bind a ``filetracking/1`` server for ``tracker``. Caller drives the port."""
-    handler = _FileTrackingHandler(tracker)
-    server = await asyncio.start_server(handler.handle, host, port)
-    sock = server.sockets[0].getsockname()
-    LOGGER.info("filetracking bound on %s:%s", sock[0], sock[1])
-    return server

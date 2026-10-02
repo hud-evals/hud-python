@@ -13,17 +13,10 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
-from hud.capabilities import (
-    Capability,
-    CapabilityClient,
-    CDPClient,
-    Connection,
-    MCPClient,
-    RFBClient,
-    SSHClient,
-)
+from hud.capabilities import Capability, Connection
 from hud.environment.utils import (
     CONTROL_FRAME_LIMIT_BYTES,
+    FILE_TRACKING_FRAME_LIMIT_BYTES,
     encode_frame,
     read_frame,
     send_frame,
@@ -34,35 +27,17 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
     from hud.environment.egress import WorkspaceRoute
+    from hud.environment.file_tracker import FileTrackingOp
     from hud.runtime import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
 _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 _ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
-_CAPABILITY_CONNECT_ATTEMPTS = 3
-_CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 # How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
-
-# protocol -> CapabilityClient subclass, for ``HudClient.open``.
-_CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
-    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
-}
-
-
-async def _connect_capability(
-    client_cls: type[CapabilityClient],
-    capability: Capability,
-) -> CapabilityClient:
-    for attempt in range(_CAPABILITY_CONNECT_ATTEMPTS):
-        try:
-            return await client_cls.connect(capability)
-        except ConnectionError:
-            if attempt + 1 == _CAPABILITY_CONNECT_ATTEMPTS:
-                raise
-            await asyncio.sleep(_CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
-    raise RuntimeError("capability connect attempts must be positive")
+_LEGACY_FILE_TRACKING = "filetracking/1"
+_METHOD_NOT_FOUND = -32601
 
 
 class HudProtocolError(RuntimeError):
@@ -97,7 +72,7 @@ class Manifest:
 
 
 class HudClient:
-    """JSON-RPC client for a served env's control channel.
+    """The session of a served environment: JSON-RPC over its control channel.
 
     Prefer ``connect``, which yields a client with ``manifest`` set and closes it.
     """
@@ -119,20 +94,28 @@ class HudClient:
         self._call_lock = asyncio.Lock()
         self._closed = False
         self.manifest: Manifest | None = None
+        self._legacy_files: _LegacyFileTracking | None = None
         self._routes: dict[str, str] = {}
-        self._opened: dict[str, CapabilityClient] = {}
         self._forwarders: list[asyncio.Server] = []
         self._tunnels: set[asyncio.Task[None]] = set()
+
+    @property
+    def capabilities(self) -> list[Capability]:
+        """The capabilities the environment published, at its own addresses."""
+        if self.manifest is None:
+            raise RuntimeError("call hello() before accessing capabilities")
+        return list(self.manifest.bindings)
+
+    def route(self, capability: Capability) -> Capability:
+        """``capability`` at the local address that tunnels to it, when there is one."""
+        url = self._routes.get(capability.name)
+        return capability if url is None else replace(capability, url=url)
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        opened = list(self._opened.values())
         tunnels = list(self._tunnels)
-        for cap_client in opened:
-            with contextlib.suppress(Exception):
-                await cap_client.close()
         self.abort()
         if tunnels:
             await asyncio.gather(*tunnels, return_exceptions=True)
@@ -142,13 +125,22 @@ class HudClient:
         with contextlib.suppress(Exception):
             await self._writer.wait_closed()
 
+    async def revoke(self) -> None:
+        """Cut the routes to the environment's capabilities; the control channel stays up."""
+        self._cut_routes()
+
     def abort(self) -> None:
         """Close the transport immediately without waiting for the peer."""
+        self._cut_routes()
+        if self._legacy_files is not None:
+            self._legacy_files.close()
+        self._writer.close()
+
+    def _cut_routes(self) -> None:
         for forwarder in self._forwarders:
             forwarder.close()
         for tunnel in list(self._tunnels):
             tunnel.cancel()
-        self._writer.close()
 
     async def hello(
         self,
@@ -172,6 +164,11 @@ class HudClient:
         result = await self._call("hello", params)
         env = result["env"]
         bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
+        legacy = [b for b in bindings if b.protocol == _LEGACY_FILE_TRACKING]
+        if legacy:
+            bindings = [b for b in bindings if b.protocol != _LEGACY_FILE_TRACKING]
+            if self._legacy_files is None:
+                self._legacy_files = _LegacyFileTracking(legacy[0], self._endpoint)
         self.manifest = Manifest(
             session_id=result["session_id"],
             protocol_version=self.PROTOCOL_VERSION,
@@ -242,58 +239,6 @@ class HudClient:
                 )
         return self.manifest
 
-    def binding(self, ref: str) -> Capability:
-        """Find the capability matching ``ref`` (name, protocol family, or protocol).
-
-        Returns the wire data, for when something else owns the connection. Raises
-        ``KeyError`` when ``ref`` matches none or several.
-        """
-        if self.manifest is None:
-            raise RuntimeError("call hello() before accessing bindings")
-        matches = [
-            capability
-            for capability in self.manifest.bindings
-            if ref
-            in (
-                capability.name,
-                capability.protocol,
-                capability.protocol.split("/", 1)[0],
-            )
-        ]
-        if len(matches) == 1:
-            capability = matches[0]
-            if capability.name in self._routes:
-                return replace(capability, url=self._routes[capability.name])
-            return capability
-        if len(matches) > 1:
-            names = ", ".join(f"{c.name} ({c.protocol})" for c in matches)
-            raise KeyError(f"ambiguous capability {ref!r}; matches: {names}")
-        available = ", ".join(f"{c.name} ({c.protocol})" for c in self.manifest.bindings)
-        raise KeyError(f"no capability {ref!r} (available: {available or '<none>'})")
-
-    async def open(self, ref: str) -> CapabilityClient:
-        """Open (and cache) a live ``CapabilityClient`` for ``ref``, resolved like ``binding``.
-
-        This connection owns the client and closes it on ``close()``.
-        """
-        cap = self.binding(ref)
-        cap_client = self._opened.get(cap.name)
-        if cap_client is None:
-            client_cls = _CLIENT_REGISTRY.get(cap.protocol)
-            if client_cls is None and cap.protocol.split("/", 1)[0] == "openpi":
-                # RobotClient needs the robot extra, so it joins the registry on first open.
-                from hud.capabilities.robot import RobotClient
-
-                client_cls = _CLIENT_REGISTRY[RobotClient.protocol] = RobotClient
-            if client_cls is None:
-                raise ValueError(
-                    f"no client registered for protocol {cap.protocol!r}; "
-                    f"use binding({ref!r}) for raw access",
-                )
-            cap_client = await _connect_capability(client_cls, cap)
-            self._opened[cap.name] = cap_client
-        return cap_client
-
     async def list_tasks(self) -> list[dict[str, Any]]:
         """Return ``[{id, description}, ...]`` for every registered task."""
         result = await self._call("tasks.list", {})
@@ -333,12 +278,26 @@ class HudClient:
         finally:
             self.abort()
 
+    async def files(self, op: FileTrackingOp) -> dict[str, Any] | None:
+        """Run one file-tracking operation; ``None`` when the environment tracks no files."""
+        if self._legacy_files is not None:
+            return await self._legacy_files.call(op)
+        try:
+            return await self._call(
+                f"files.{op}", {}, reply_limit_bytes=FILE_TRACKING_FRAME_LIMIT_BYTES
+            )
+        except HudProtocolError as exc:
+            if exc.code == _METHOD_NOT_FOUND:
+                return None
+            raise
+
     async def _call(
         self,
         method: str,
         params: dict[str, Any],
         *,
         reply_timeout: float | None = None,
+        reply_limit_bytes: int = CONTROL_FRAME_LIMIT_BYTES,
     ) -> dict[str, Any]:
         async with self._call_lock:
             msg_id = next(self._ids)
@@ -350,7 +309,7 @@ class HudClient:
                 async with asyncio.timeout(reply_timeout):
                     self._writer.write(frame)
                     await self._writer.drain()
-                    reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                    reply = await read_frame(self._reader, max_bytes=reply_limit_bytes)
                     if reply is None:
                         raise EOFError(f"env closed connection during {method!r}")
                     if reply.get("id") != msg_id:
@@ -375,6 +334,67 @@ class HudClient:
             except BaseException:
                 self.abort()
                 raise
+
+
+class _LegacyFileTracking:
+    """``files`` against images that publish ``filetracking/1`` instead of serving ``files.*``.
+
+    Dialed over a private tunnel, so revoking the agent's routes leaves it up. Remove once
+    images built before the control channel served ``files.*`` are rebuilt.
+    """
+
+    def __init__(self, capability: Capability, endpoint: tuple[str, int] | None) -> None:
+        self._capability = capability
+        self._endpoint = endpoint
+        self._ids = itertools.count(1)
+        self._lock = asyncio.Lock()
+        self._stream: tuple[asyncio.StreamReader, asyncio.StreamWriter] | None = None
+
+    async def call(self, op: FileTrackingOp) -> dict[str, Any]:
+        method: str = op
+        if op == "setup" and self._capability.params.get("setup_diff") is not True:
+            method = "advance"
+        async with self._lock:
+            reader, writer = self._stream or await self._open()
+            await send_frame(
+                writer, {"jsonrpc": "2.0", "id": next(self._ids), "method": method, "params": {}}
+            )
+            reply = await read_frame(reader, max_bytes=FILE_TRACKING_FRAME_LIMIT_BYTES)
+        if reply is None:
+            raise EOFError(f"file tracking closed during {method!r}")
+        if "error" in reply:
+            raise HudProtocolError(-32000, str(reply["error"].get("message", "")))
+        # Servers that cannot report setup changes only advance past them.
+        return {} if method == "advance" else reply["result"]
+
+    async def _open(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        if self._endpoint is None:
+            parts = urlsplit(self._capability.url)
+            assert parts.hostname is not None and parts.port is not None
+            stream = await asyncio.open_connection(parts.hostname, parts.port)
+        else:
+            stream = await asyncio.open_connection(*self._endpoint)
+            await send_frame(
+                stream[1],
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tunnel.open",
+                    "params": {"capability": self._capability.name},
+                },
+                max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+            )
+            opened = await read_frame(stream[0], max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+            if opened is None or "error" in opened:
+                stream[1].close()
+                raise ConnectionError(f"file tracking tunnel refused: {opened}")
+        self._stream = stream
+        return stream
+
+    def close(self) -> None:
+        if self._stream is not None:
+            self._stream[1].close()
+            self._stream = None
 
 
 async def _connect_ready(

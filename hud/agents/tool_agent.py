@@ -88,16 +88,14 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     async def __call__(self, run: Run) -> None:
         connections: dict[str, CapabilityClient] = {}
         opened_protocols: set[str] = set()
-        manifest = run.client.manifest
-        if manifest is not None:
-            wanted = {client.protocol for client in type(self).clients}
-            for cap in manifest.bindings:
-                if cap.protocol not in wanted:
-                    continue
-                if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
-                    continue
-                connections[cap.name] = await run.client.open(cap.name)
-                opened_protocols.add(cap.protocol)
+        wanted = {client.protocol for client in type(self).clients}
+        for cap in run.capabilities:
+            if cap.protocol not in wanted:
+                continue
+            if cap.protocol != MCPClient.protocol and cap.protocol in opened_protocols:
+                continue
+            connections[cap.name] = await run.open(cap.name)
+            opened_protocols.add(cap.protocol)
         state = await self._initialize_state(prompt=run.prompt_messages)
         state.tools, state.params = await self._build_tools(connections)
         await self._loop(run, state)

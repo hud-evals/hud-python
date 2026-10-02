@@ -608,13 +608,8 @@ class Workspace:
         self._sock: socket.socket | None = None
         self._bound_host: str | None = None
         self._bound_port: int | None = None
-        # File tracking: an observation-only filetracking/1 server over the same
-        # root. Materialized at start() when enabled.
         self._track_files = track_files
         self._file_tracker: FileTracker | None = None
-        self._ft_server: asyncio.Server | None = None
-        self._ft_host: str | None = None
-        self._ft_port: int | None = None
         # The sandbox sessions run in, spawned on first use and held until
         # discard_sandbox(). Its namespaces are what makes a process the agent
         # backgrounds outlive the command that started it.
@@ -834,22 +829,19 @@ class Workspace:
                     keepalive_interval=30,
                     encoding=None,
                 )
-            if self._track_files and self._ft_server is None:
+            if self._track_files and self._file_tracker is None:
                 await self._start_file_tracking()
         except BaseException:
             await self.stop()
             raise
 
     async def _start_file_tracking(self) -> None:
-        """Take the baseline snapshot and bind the filetracking/1 server."""
-        from .file_tracker import FileTracker, serve_file_tracking
+        from .file_tracker import FileTracker
 
         tracker = FileTracker(self.root)
         # The baseline walk is CPU-bound; keep it off the event loop.
         await asyncio.get_running_loop().run_in_executor(None, tracker.take_baseline)
         self._file_tracker = tracker
-        self._ft_server = await serve_file_tracking(tracker, host=self._ssh_host)
-        self._ft_host, self._ft_port = self._ft_server.sockets[0].getsockname()[:2]
 
     async def stop(self) -> None:
         """Stop accepting SSH sessions and release the socket.
@@ -858,13 +850,7 @@ class Workspace:
         unless one was pinned) and reuses them.
         """
         await self.discard_sandbox()
-        if self._ft_server is not None:
-            self._ft_server.close()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(self._ft_server.wait_closed(), 5.0)
-            self._ft_server = None
-            self._ft_host = self._ft_port = None
-            self._file_tracker = None
+        self._file_tracker = None
         if self._acceptor is not None:
             self._acceptor.close()
             # close() initiates shutdown; wait_closed() can hang on Windows when a
@@ -937,21 +923,12 @@ class Workspace:
 
     @property
     def tracks_files(self) -> bool:
-        """Whether this workspace serves a ``filetracking/1`` capability."""
         return self._track_files
 
-    def file_tracking_capability(self, name: str = "filetracking") -> Capability:
-        """The concrete ``filetracking/1`` capability (requires ``track_files=True``)."""
-        from hud.capabilities import Capability
-
-        if self._ft_host is None or self._ft_port is None:
-            raise RuntimeError("file tracking not started; call start() with track_files=True")
-        return Capability(
-            name=name,
-            protocol="filetracking/1",
-            url=f"tcp://{self._ft_host}:{self._ft_port}",
-            params={"root": self.root.as_posix(), "setup_diff": True},
-        )
+    @property
+    def file_tracker(self) -> FileTracker | None:
+        """The tracker over ``root``, set while a tracking workspace is started."""
+        return self._file_tracker
 
     async def run(
         self,

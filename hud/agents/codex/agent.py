@@ -211,7 +211,7 @@ class CodexCLIAgent(Agent[CodexCLIConfig]):
     config_cls = CodexCLIConfig
 
     async def __call__(self, run: Run) -> None:
-        ssh = cast("SSHClient", await run.client.open("ssh"))
+        ssh = cast("SSHClient", await run.open("ssh"))
         connection: Connection | None = run.connections.get("inference")
         executable = await resolve_executable(
             ssh, "codex", _MANAGED_CODEX_PATHS, run.runtime_config

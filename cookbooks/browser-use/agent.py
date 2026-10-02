@@ -28,7 +28,7 @@ class BrowserUseAgent(Agent[BrowserUseConfig]):
     config_cls = BrowserUseConfig
 
     async def __call__(self, run: Run) -> None:
-        cdp = urlsplit(run.client.binding("cdp/1.3").url)
+        cdp = urlsplit(run.binding("cdp/1.3").url)
         scheme = {"ws": "http", "wss": "https"}.get(cdp.scheme, cdp.scheme)
         browser = Browser(cdp_url=urlunsplit((scheme, *cdp[1:])))
         llm = ChatAnthropic(model=self.config.model, api_key=os.environ["ANTHROPIC_API_KEY"])

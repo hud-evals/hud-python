@@ -55,13 +55,14 @@ class RobotClient(CapabilityClient):
         return action, observations
 
     @classmethod
-    async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
-        """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
+    async def connect(cls, cap: Capability) -> Self:
+        """Dial the robot WebSocket and claim the sim slot ``cap.params["token"]`` names.
 
-        A ``None`` token binds the sole slot of a single-env bridge; vectorized bridges
-        need the token from ``endpoint.reset()``. A rejected claim raises here rather
-        than hanging the first ``get_observation``.
+        Without a token the sole slot of a single-env bridge is claimed; vectorized bridges
+        need the episode's token from ``endpoint.reset()``. A rejected claim raises here
+        rather than hanging the first ``get_observation``.
         """
+        token = cap.params.get("token")
         # Bounded dial: an undialed claim stalls the bridge's barrier for every peer.
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None, open_timeout=30.0)
         # Consume initial metadata; string means env error.
