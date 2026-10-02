@@ -214,8 +214,11 @@ def _euler_matrix(roll: float, pitch: float, yaw: float) -> NDArray[np.float64]:
 def _matrix_to_euler(rotation: NDArray[np.float64]) -> tuple[float, float, float]:
     pitch = math.asin(float(np.clip(-rotation[2, 0], -1.0, 1.0)))
     if abs(float(rotation[2, 0])) > 0.999999:
-        # Gimbal: yaw is not separate from roll. Report the twist as roll.
-        roll = math.atan2(float(-rotation[0, 1]), float(rotation[1, 1]))
+        # Gimbal: one twist. +pi/2 is roll-yaw; -pi/2 is roll+yaw. Keep it in roll.
+        if float(rotation[2, 0]) < 0.0:
+            roll = math.atan2(float(rotation[0, 1]), float(rotation[1, 1]))
+        else:
+            roll = math.atan2(float(-rotation[0, 1]), float(rotation[1, 1]))
         return roll, pitch, 0.0
     roll = math.atan2(float(rotation[2, 1]), float(rotation[2, 2]))
     yaw = math.atan2(float(rotation[1, 0]), float(rotation[0, 0]))
