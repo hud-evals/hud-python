@@ -142,9 +142,9 @@ From the [platform UI](https://hud.ai) you can run batches, compare models on th
 Every rollout returns a `Run` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and pass the graded runs to `TrainingClient.step()`:
 
 ```python
-from hud import TrainingClient
+from hud import Job
 from hud.agents import create_agent
-from hud.eval import Job
+from hud.train import TrainingClient
 
 agent = create_agent("arith-rl", completion_kwargs={"extra_body": {"return_token_ids": True}})
 trainer = TrainingClient("arith-rl")

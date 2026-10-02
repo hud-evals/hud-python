@@ -21,10 +21,11 @@ import time
 
 from dotenv import load_dotenv
 
-from hud import TrainingClient
+from hud import Job, Taskset
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import Job, LocalRuntime, Taskset
+from hud.runtime import LocalRuntime
+from hud.train import TrainingClient
 
 from game2048_env import play
 

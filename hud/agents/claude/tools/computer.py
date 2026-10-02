@@ -12,9 +12,8 @@ import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
-from hud.agents.tools.rfb import keysym
+from hud.agents.tools.rfb import RFBTool, keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import ImageContent, ToolResult
 

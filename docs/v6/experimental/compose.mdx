@@ -48,7 +48,8 @@ Every runnable service has an `image`, a `build`, or both; paths are relative to
 ```python
 from pathlib import Path
 
-from hud import ComposeProject, DockerRuntime, RuntimeConfig, Task
+from hud import Task
+from hud.runtime import ComposeProject, DockerRuntime, RuntimeConfig
 
 task = Task(
     env="full-stack",

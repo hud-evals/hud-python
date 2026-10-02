@@ -16,16 +16,9 @@ from hud.settings import settings
 from hud.types import ToolCall, ToolResult
 from hud.utils import gateway
 
-from .tools import (
-    BashTool,
-    EditTool,
-    GlobTool,
-    GrepTool,
-    OpenAICompatibleMCPProxyTool,
-    ReadTool,
-    WriteTool,
-)
 from .tools.base import format_chat_result
+from .tools.filesystem import BashTool, EditTool, GlobTool, GrepTool, ReadTool, WriteTool
+from .tools.mcp_proxy import OpenAICompatibleMCPProxyTool
 
 if TYPE_CHECKING:
     from hud.types import PromptMessage

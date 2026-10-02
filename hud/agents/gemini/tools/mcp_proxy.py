@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from google.genai import types as genai_types
 
-from hud.agents.tools import MCPTool
+from hud.agents.tools.mcp import MCPTool
 
 from .base import GeminiToolSpec
 

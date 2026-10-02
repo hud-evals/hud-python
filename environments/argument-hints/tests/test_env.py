@@ -13,8 +13,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from hud import SubprocessRuntime, Task, connect
-from hud.clients import HudProtocolError
+from hud import Task
+from hud.clients import HudProtocolError, connect
+from hud.runtime import SubprocessRuntime
 
 from env import review_files
 

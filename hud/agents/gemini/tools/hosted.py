@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from google.genai import types as genai_types
 
-from hud.agents.tools import HostedTool
+from hud.agents.tools.hosted import HostedTool
 
 
 @dataclass(frozen=True, kw_only=True)

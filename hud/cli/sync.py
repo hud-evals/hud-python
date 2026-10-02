@@ -22,8 +22,8 @@ from hud.cli import (
     DirectoryState,
 )
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
-from hud.eval import Taskset
 from hud.eval.sync import TasksetRecord, diff, resolve_taskset_id, upload_taskset
+from hud.eval.taskset import Taskset
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole

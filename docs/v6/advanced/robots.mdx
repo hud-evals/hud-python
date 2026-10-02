@@ -373,7 +373,7 @@ import torch
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
-from hud.agents.robot import RobotAgent, LeRobotModel, LeRobotAdapter
+from hud.agents.robot import LeRobotAdapter, LeRobotModel, RobotAgent
 
 class PI05Agent(RobotAgent):
     def __init__(self):
@@ -431,7 +431,7 @@ rollout its own episode state, and shares one batched model that coalesces their
 into a single stacked forward.
 
 ```python
-from hud.agents.robot.batching import BatchedAgent
+from hud.agents.robot import BatchedAgent
 
 agent = BatchedAgent(MyRobotAgent())   # sizes itself to the live concurrency
 
@@ -460,7 +460,7 @@ the agent or the env's contract, only to how the eval provisions rollouts: wrap 
 substrate instead of provisioning `N` containers.
 
 ```python
-from hud.eval import Shared, DockerRuntime
+from hud.runtime import DockerRuntime, Shared
 
 job = await taskset.run(
     MyAgent(),
@@ -749,11 +749,11 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotEndpoint.capabilities(...)` | `hud.environment.robot` | Everything the bridge serves after `start()` (the `openpi/0` wire, plus any extras) |
 | `DirectControl(...).attach(sim)` | `hud.environment.robot` | The `robot` capability as MCP motion tools, for tool-calling LLM agents |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
-| `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
+| `RobotClient` | `hud.capabilities` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
-| `BatchedAgent` / `BatchedModel` | `hud.agents.robot.batching` | Many concurrent rollouts against one shared, batched model |
-| `Shared(provider, width=N)` | `hud.eval` | Refcounting provider: N concurrent rollouts share one substrate |
+| `BatchedAgent` / `BatchedModel` | `hud.agents.robot` | Many concurrent rollouts against one shared, batched model |
+| `Shared(provider, width=N)` | `hud.runtime` | Refcounting provider: N concurrent rollouts share one substrate |
 
 ## See also
 

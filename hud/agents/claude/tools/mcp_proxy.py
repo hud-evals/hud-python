@@ -5,7 +5,7 @@ from __future__ import annotations
 from inspect import cleandoc
 from typing import TYPE_CHECKING, cast
 
-from hud.agents.tools import MCPTool
+from hud.agents.tools.mcp import MCPTool
 
 from .base import ClaudeToolSpec
 

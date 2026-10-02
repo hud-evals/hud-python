@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 from hud.types import TextContent, ToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
