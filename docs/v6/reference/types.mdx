@@ -24,6 +24,9 @@ client for manual driving; after the block, `run.trace` holds the graded trace.
 | `run.prompt` | `str \| list \| None` | The task's opening prompt as `tasks.start` returned it (text, or chat-style message list). |
 | `run.prompt_messages` | `list[PromptMessage]` | The prompt as normalized user/assistant turns - what agents consume. |
 | `run.prompt_text` | `str` | The prompt flattened to plain text, for string-only backends. |
+| `run.capabilities` | `list[Capability]` | The environment's capabilities for this task, at its own addresses; per-task data (such as a robot slot token) is in `params`. |
+| `run.binding(ref)` | `Capability` | The capability `ref` names (name, protocol, or protocol family), where this process reaches it. |
+| `await run.open(ref)` | `CapabilityClient` | A live client for `binding(ref)`, cached and closed when the agent's access ends. |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
 
 ## `Grade`
