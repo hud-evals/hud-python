@@ -8,8 +8,13 @@ the ``Chat`` runner:
 
     from hud import Chat
     from hud.agents import create_agent
+    from hud.runtime import LocalRuntime
 
-    chat = Chat(chat_simple(messages=[]), create_agent("claude-sonnet-4-5"))
+    chat = Chat(
+        chat_simple(messages=[]),
+        create_agent("claude-sonnet-4-5"),
+        runtime=LocalRuntime("chat_env.py"),
+    )
     r = await chat.send("What is the capital of France?")
 """
 
