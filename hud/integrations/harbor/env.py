@@ -1,5 +1,3 @@
-"""HUD environment served by every adapted Harbor image."""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,14 +12,16 @@ import shutil
 import socket
 import tempfile
 from collections.abc import AsyncGenerator, Iterator  # noqa: TC003
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
-from hud.environment import Environment, Mount, Peer, Workspace
+from hud.environment import Environment, Mount, Workspace
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import current_session_id
 from hud.graders import EvaluationResult
+from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.utils.process import ProcessResult, create_process_group_exec
 
 if TYPE_CHECKING:
@@ -32,16 +32,12 @@ TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
-SESSION_ANSWER = "agent-answer.txt"
-SESSION_ERROR = "error.txt"
 DOCKER = CONTROLLER_ROOT / "bin" / "docker"
-CONFIG = json.loads((CONTROLLER_ROOT / "config.json").read_text("utf-8"))
+CONFIG = ControllerConfig.model_validate_json((CONTROLLER_ROOT / "config.json").read_text("utf-8"))
 TASK_ROOT = Path("/rootfs")
 RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
-#: Where hosted runtimes provide managed CLI agent binaries; agent sessions
-#: run inside the authored root, so the bundle is mounted through when present.
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
 
 ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
@@ -68,11 +64,11 @@ def resolve_env_templates(env: dict[str, str]) -> dict[str, str]:
     return resolved
 
 
-for policy in (CONFIG["environment"], CONFIG["agent"]):
-    policy["env"] = resolve_env_templates(policy["env"])
-os.environ.update(CONFIG["environment"]["env"])
-TASK_ENV = {**CONFIG["image_env"], **CONFIG["environment"]["env"]}
-WORKDIR = Path(CONFIG["workdir"])
+for policy in (CONFIG.environment, CONFIG.agent):
+    policy.env = resolve_env_templates(policy.env)
+os.environ.update(CONFIG.environment.env)
+TASK_ENV = {**CONFIG.image_env, **CONFIG.environment.env}
+WORKDIR = Path(CONFIG.workdir)
 if not WORKDIR.is_absolute():
     raise ValueError(f"Harbor workdir must be absolute: {WORKDIR}")
 TASK_WORKDIR = TASK_ROOT / WORKDIR.relative_to("/")
@@ -100,101 +96,59 @@ GPU_DRIVER_MOUNTS = tuple(
 )
 
 
-def network(phase: dict[str, Any] | None) -> tuple[bool, frozenset[str]]:
-    baseline = CONFIG["environment"]
-    mode = phase["network_mode"] if phase is not None else baseline["network_mode"]
-    hosts = phase["allowed_hosts"] if phase is not None else baseline["allowed_hosts"]
-    if mode is None:
-        mode = baseline["network_mode"]
-        hosts = baseline["allowed_hosts"]
-    if mode == "no-network":
-        return False, frozenset()
-    if mode == "allowlist":
-        return True, frozenset(hosts or [])
-    return True, frozenset({ANY_HOST})
+@dataclass(frozen=True, slots=True)
+class Account:
+    """A Docker ``USER`` spec resolved against an image's ``/etc/passwd`` and ``/etc/group``."""
+
+    #: The uid and gid to drop to; ``None`` keeps root.
+    identity: tuple[int, int] | None
+    #: ``HOME`` from the passwd entry of a non-root account.
+    env: dict[str, str]
 
 
-def identity(
-    phase: dict[str, Any] | None,
-    *,
-    image_user: str | int | None,
-    root: Path,
-) -> tuple[int, int] | None:
-    declared = phase["user"] if phase is not None else None
-    user = str(declared if declared is not None else image_user or "")
-    if not user:
-        return None
-    user_name, separator, group_name = user.partition(":")
-    passwd = root / "etc/passwd"
-    accounts = {
-        fields[0]: (int(fields[2]), int(fields[3]))
-        for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
-        if len(fields := line.split(":")) >= 4
-    }
+def records(path: Path, width: int) -> list[list[str]]:
+    lines = path.read_text("utf-8").splitlines() if path.is_file() else []
+    return [fields for line in lines if len(fields := line.split(":")) >= width]
+
+
+def account(user: str | int | None, root: Path) -> Account:
+    spec = str(user or "")
+    if not spec:
+        return Account(None, {})
+    user_name, separator, group_name = spec.partition(":")
+    passwd = records(root / "etc/passwd", 6)
     if user_name.isdigit():
-        user_id = int(user_name)
-        primary_group = next(
-            (group_id for uid, group_id in accounts.values() if uid == user_id),
-            0,
-        )
+        uid = int(user_name)
+        entry = next((fields for fields in passwd if int(fields[2]) == uid), None)
     else:
-        try:
-            user_id, primary_group = accounts[user_name]
-        except KeyError as error:
-            raise ValueError(f"Harbor user {user!r} does not exist in this image") from error
-
-    if separator:
-        if group_name.isdigit():
-            group_id = int(group_name)
-        else:
-            group = root / "etc/group"
-            groups = {
-                fields[0]: int(fields[2])
-                for line in (group.read_text("utf-8").splitlines() if group.is_file() else ())
-                if len(fields := line.split(":")) >= 3
-            }
-            try:
-                group_id = groups[group_name]
-            except KeyError as error:
-                raise ValueError(
-                    f"Harbor group {group_name!r} does not exist in this image"
-                ) from error
-    else:
+        entry = next((fields for fields in passwd if fields[0] == user_name), None)
+        if entry is None:
+            raise ValueError(f"Harbor user {spec!r} does not exist in this image")
+        uid = int(entry[2])
+    if not separator:
         # Docker resolves a known account's primary group; a bare numeric uid
         # with no passwd entry keeps the container default group (root).
-        group_id = primary_group
-    return None if (user_id, group_id) == (0, 0) else (user_id, group_id)
+        gid = int(entry[3]) if entry is not None else 0
+    elif group_name.isdigit():
+        gid = int(group_name)
+    else:
+        groups = records(root / "etc/group", 3)
+        group = next((int(fields[2]) for fields in groups if fields[0] == group_name), None)
+        if group is None:
+            raise ValueError(f"Harbor group {group_name!r} does not exist in this image")
+        gid = group
+    if (uid, gid) == (0, 0):
+        return Account(None, {})
+    return Account((uid, gid), {"HOME": entry[5]} if entry is not None and entry[5] else {})
 
 
-def home(user_id: int | None, *, root: Path) -> str | None:
-    if user_id is None:
-        return None
-    passwd = root / "etc/passwd"
-    return next(
-        (
-            fields[5]
-            for line in (passwd.read_text("utf-8").splitlines() if passwd.is_file() else ())
-            if len(fields := line.split(":")) >= 6 and int(fields[2]) == user_id
-        ),
-        None,
-    )
-
-
-agent = CONFIG["agent"]
-image_identity = identity(None, image_user=CONFIG["image_user"], root=TASK_ROOT)
-agent_identity = identity(agent, image_user=CONFIG["image_user"], root=TASK_ROOT)
-agent_uid = agent_identity[0] if agent_identity is not None else None
-agent_network, agent_hosts = network(agent)
-environment_hosts = network(None)[1]
+agent = CONFIG.agent
+image_identity = account(CONFIG.image_user, TASK_ROOT).identity
+agent_account = account(agent.user, TASK_ROOT)
+agent_hosts = frozenset(agent.network.allowed_hosts)
+environment_hosts = frozenset(CONFIG.environment.network.allowed_hosts)
 rooted_at_filesystem = len(WORKDIR.parts) == 1
-task_mounts = tuple(
-    Mount(
-        "ro" if mount["read_only"] else "rw",
-        src=mount["source"],
-        dst=mount["target"],
-    )
-    for mount in CONFIG["mounts"]
-)
+task_mounts = tuple(CONFIG.mounts)
 agent_mounts = (
     *task_mounts,
     Mount("tmpfs", dst=str(TESTS)),
@@ -207,9 +161,9 @@ verifier_mounts = (
     Mount("rw", src=str(LOGS), dst=str(LOGS)),
 )
 
-env = Environment(CONFIG["name"])
+env = Environment(CONFIG.name)
 verifier_lock = asyncio.Lock()
-for capability in CONFIG["capabilities"]:
+for capability in CONFIG.capabilities:
     env.add_capability(Capability.from_manifest(capability))
 workspace = env.workspace(
     TASK_WORKDIR,
@@ -224,29 +178,22 @@ workspace = env.workspace(
     mounts=agent_mounts,
     credentials_dir=RUNTIME_ROOT / "session-keys",
     hosts_path=RUNTIME_ROOT / "hosts",
-    shell_uid=agent_uid,
-    shell_gid=agent_identity[1] if agent_identity is not None else None,
+    shell_uid=agent_account.identity[0] if agent_account.identity else None,
+    shell_gid=agent_account.identity[1] if agent_account.identity else None,
     hand_over_root=False,
     track_files=False if rooted_at_filesystem else None,
-    env={
-        **TASK_ENV,
-        **agent["env"],
-        **({"HOME": agent_home} if (agent_home := home(agent_uid, root=TASK_ROOT)) else {}),
-    },
-    network=agent_network,
+    env={**TASK_ENV, **agent.env, **agent_account.env},
+    network=agent.network.enabled,
     allowed_hosts=agent_hosts,
-    peers=[
-        Peer(peer["name"], peer["port"], target=(peer["name"], peer["port"]))
-        for peer in CONFIG["peers"]
-    ],
-    local_aliases=CONFIG["local_aliases"],
-    ports=CONFIG["ports"],
+    peers=CONFIG.peers,
+    local_aliases=CONFIG.local_aliases,
+    ports=CONFIG.ports,
     require_isolation=True,
 )
 
 
 async def start_entrypoint() -> NamespaceProcess | None:
-    entrypoint = CONFIG["entrypoint"]
+    entrypoint = CONFIG.entrypoint
     if not entrypoint:
         return None
     sandbox = await workspace.sandbox_pid()
@@ -267,75 +214,44 @@ async def start_entrypoint() -> NamespaceProcess | None:
 
 
 async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
-    healthcheck = CONFIG["environment"]["healthcheck"]
-    if healthcheck is not None:
-        loop = asyncio.get_running_loop()
-        start_period = healthcheck["start_period_sec"]
-        start_period_end = loop.time() + start_period
-        delay = (
-            healthcheck["start_interval_sec"] if start_period > 0 else healthcheck["interval_sec"]
-        )
-        failures = 0
-        while True:
-            await asyncio.sleep(delay)
-            in_start_period = loop.time() < start_period_end
-            if entrypoint is not None and entrypoint.returncode is not None:
-                raise RuntimeError(
-                    f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
-                )
-            result = await workspace.run(
-                ["sh", "-c", healthcheck["command"]],
-                env=TASK_ENV,
-                identity=image_identity,
-                inherit_workspace_env=False,
-                allowed_hosts=None if environment_hosts == agent_hosts else environment_hosts,
-                no_new_privs=False,
-                max_wait=healthcheck["timeout_sec"],
-            )
-            if result.returncode == 0 and not result.timed_out:
-                break
-
-            if in_start_period:
-                delay = healthcheck["start_interval_sec"]
-            else:
-                failures += 1
-                if failures >= healthcheck["retries"]:
-                    detail = result.stderr.decode("utf-8", "replace").strip()
-                    raise RuntimeError(
-                        f"Harbor environment healthcheck failed after {failures} attempts"
-                        + (f": {detail}" if detail else "")
-                    )
-                delay = healthcheck["interval_sec"]
-
-    pending = set(CONFIG["healthy_services"])
-    if not pending:
+    healthcheck = CONFIG.environment.healthcheck
+    if healthcheck is None:
         return
-    services = await compose_containers()
-    if missing := pending - services.keys():
-        raise RuntimeError(f"Compose service {min(missing)!r} is not running")
-    while pending:
-        for service in sorted(pending):
-            result = await docker(
-                "inspect",
-                "--format",
-                "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}",
-                services[service],
+    loop = asyncio.get_running_loop()
+    start_period = healthcheck.start_period_sec
+    start_period_end = loop.time() + start_period
+    delay = healthcheck.start_interval_sec if start_period > 0 else healthcheck.interval_sec
+    failures = 0
+    while True:
+        await asyncio.sleep(delay)
+        in_start_period = loop.time() < start_period_end
+        if entrypoint is not None and entrypoint.returncode is not None:
+            raise RuntimeError(
+                f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
             )
-            state, _, health = result.stdout.decode().strip().partition(" ")
-            if health == "healthy":
-                pending.remove(service)
-            elif health == "unhealthy":
-                raise RuntimeError(f"Compose service {service!r} is unhealthy")
-            elif state not in {"running", "restarting"}:
-                raise RuntimeError(f"Compose service {service!r} is {state}")
-            elif not health and state == "running":
-                raise RuntimeError(f"Compose service {service!r} has no health status")
-        if pending:
-            if entrypoint is not None and entrypoint.returncode is not None:
+        result = await workspace.run(
+            ["sh", "-c", healthcheck.command],
+            env=TASK_ENV,
+            identity=image_identity,
+            inherit_workspace_env=False,
+            allowed_hosts=None if environment_hosts == agent_hosts else environment_hosts,
+            no_new_privs=False,
+            max_wait=healthcheck.timeout_sec,
+        )
+        if result.returncode == 0 and not result.timed_out:
+            return
+
+        if in_start_period:
+            delay = healthcheck.start_interval_sec
+        else:
+            failures += 1
+            if failures >= healthcheck.retries:
+                detail = result.stderr.decode("utf-8", "replace").strip()
                 raise RuntimeError(
-                    f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
+                    f"Harbor environment healthcheck failed after {failures} attempts"
+                    + (f": {detail}" if detail else "")
                 )
-            await asyncio.sleep(1.0)
+            delay = healthcheck.interval_sec
 
 
 async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> ProcessResult:
@@ -432,12 +348,12 @@ def task_path(guest: str) -> Path:
     return Path(mount.src, path.relative_to(mount.dst))
 
 
-def artifact_path(artifact: dict[str, Any], artifacts: Path) -> Path:
-    relative = artifact.get("destination") or artifact["source"].lstrip("/").rstrip("/")
+def artifact_path(artifact: Artifact, artifacts: Path) -> Path:
+    relative = artifact.destination or artifact.source.lstrip("/").rstrip("/")
     return artifacts / relative
 
 
-async def collect(task: dict[str, Any], artifacts: Path) -> None:
+async def collect(task: TaskSpec, artifacts: Path) -> None:
     clear(artifacts)
     services: dict[str, str] = {}
 
@@ -453,8 +369,8 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
         except KeyError as error:
             raise RuntimeError(f"Compose service {service!r} is not running") from error
 
-    for hook in task["collect"]:
-        service = hook["service"]
+    for hook in task.collect:
+        service = hook.service
         container_id = await container(service)
         if container_id:
             await docker(
@@ -462,33 +378,33 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
                 container_id,
                 "sh",
                 "-c",
-                hook["command"],
-                max_wait=hook["timeout_sec"],
+                hook.command,
+                max_wait=hook.timeout_sec,
             )
         else:
             execution = await workspace.run(
-                ["sh", "-c", hook["command"]],
+                ["sh", "-c", hook.command],
                 mounts=task_mounts,
                 env=TASK_ENV,
                 identity=image_identity,
                 inherit_workspace_env=False,
                 allowed_hosts=None,
                 no_new_privs=False,
-                max_wait=hook["timeout_sec"],
+                max_wait=hook.timeout_sec,
             )
             if execution.timed_out:
                 raise TimeoutError(
-                    f"collect hook on {service!r} timed out after {hook['timeout_sec']:g}s"
+                    f"collect hook on {service!r} timed out after {hook.timeout_sec:g}s"
                 )
             if execution.returncode != 0:
                 detail = execution.stderr.decode("utf-8", "replace").strip()
                 raise RuntimeError(f"collect hook on {service!r} failed: {detail}")
 
-    for artifact in task["artifacts"]:
-        source = artifact["source"]
+    for artifact in task.artifacts:
+        source = artifact.source
         target = artifact_path(artifact, artifacts)
-        exclude = artifact.get("exclude", [])
-        service = artifact["service"]
+        exclude = artifact.exclude
+        service = artifact.service
         container_id = await container(service)
         if container_id:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -496,7 +412,7 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
                 "cp",
                 f"{container_id}:{source.rstrip('/') or '/'}",
                 str(target),
-                max_wait=task["verifier_timeout"],
+                max_wait=task.verifier_timeout,
                 check=False,
             )
             if copied.returncode != 0:
@@ -509,7 +425,7 @@ async def collect(task: dict[str, Any], artifacts: Path) -> None:
 
 
 @env.template(id="run", description="Run a Harbor task")
-async def run(instruction: str, task: dict[str, Any]) -> AsyncGenerator[Any, Any]:
+async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
     clear_grading_files()
     AGENT_ANSWER.parent.mkdir(parents=True, exist_ok=True)
     AGENT_ANSWER.touch()
@@ -522,33 +438,19 @@ async def run(instruction: str, task: dict[str, Any]) -> AsyncGenerator[Any, Any
             raise RuntimeError(
                 f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
             )
-        if task["separate_verifier"]:
+        if task.separate_verifier:
             session_id = current_session_id.get()
             if session_id is None:
                 raise RuntimeError("Harbor actor is not running in an environment session")
-            session = SESSIONS / session_id
-            clear(session)
-            artifacts = session / "artifacts"
-            (session / SESSION_ANSWER).write_text(
-                "" if answer is None else str(answer),
-                encoding="utf-8",
-            )
             await workspace.terminate_sessions()
             try:
-                await collect(task, artifacts)
+                await collect(task, SESSIONS / session_id / "artifacts")
             except Exception as error:
-                detail = str(error)
-                (session / SESSION_ERROR).write_text(detail, encoding="utf-8")
-                result = {
-                    "score": 0.0,
-                    "content": detail,
-                    "isError": True,
-                }
+                yield EvaluationResult(isError=True, content=str(error))
             else:
-                result = {"score": 0.0}
-            yield result
+                yield EvaluationResult(info={"answer": "" if answer is None else str(answer)})
         else:
-            yield await grade(task["id"], task["verifier_timeout"], answer)
+            yield await grade(task.id, task.verifier_timeout, answer)
     finally:
         clear_grading_files()
         await workspace.discard_sandbox()
@@ -557,11 +459,13 @@ async def run(instruction: str, task: dict[str, Any]) -> AsyncGenerator[Any, Any
                 await asyncio.wait_for(entrypoint.wait(), 10.0)
 
 
-if CONFIG["verifier_root"] is not None:
+if CONFIG.verifier_root is not None:
 
     @env.template(id="verify", description="Verify a Harbor task")
-    async def verify(task: dict[str, Any]) -> AsyncGenerator[Any, Any]:
-        yield ""
+    async def verify(task: TaskSpec) -> AsyncGenerator[Any, Any]:
+        actor = EvaluationResult.model_validate((yield ""))
+        if actor.isError:
+            raise RuntimeError(actor.content)
         session_id = current_session_id.get()
         if session_id is None:
             raise RuntimeError("Harbor verifier is not running in an environment session")
@@ -569,9 +473,7 @@ if CONFIG["verifier_root"] is not None:
         if not session.is_dir():
             raise ValueError("Harbor actor session files are unavailable in this runtime")
         try:
-            if (error := session / SESSION_ERROR).is_file():
-                raise RuntimeError(error.read_text("utf-8"))
-            yield await grade_separate(task, session)
+            yield await grade_separate(task, session / "artifacts", actor.info["answer"])
         finally:
             clear_grading_files()
             shutil.rmtree(session, ignore_errors=True)
@@ -621,30 +523,20 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
     clear(VERIFIER_LOGS)
     AGENT_ANSWER.write_text("" if answer is None else str(answer), encoding="utf-8")
 
-    verifier = CONFIG["verifier"]
-    verifier_identity = identity(
-        verifier,
-        image_user=CONFIG["image_user"],
-        root=TASK_ROOT,
-    )
-    verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-    verifier_env = {**TASK_ENV, **resolve_env_templates(verifier["env"])}
-    if verifier_uid is not None:
-        assert verifier_identity is not None
+    verifier = CONFIG.verifier
+    verifier_account = account(verifier.user, TASK_ROOT)
+    if verifier_account.identity:
         for root in (TESTS, VERIFIER_LOGS):
             for path in (root, *root.rglob("*")):
-                os.lchown(path, *verifier_identity)
-        if verifier_home := home(verifier_uid, root=TASK_ROOT):
-            verifier_env["HOME"] = verifier_home
+                os.lchown(path, *verifier_account.identity)
 
-    verifier_hosts = network(verifier)[1]
     execution = await workspace.run(
         verifier_command(test_script),
         mounts=verifier_mounts,
-        env=verifier_env,
-        identity=verifier_identity,
+        env={**TASK_ENV, **resolve_env_templates(verifier.env), **verifier_account.env},
+        identity=verifier_account.identity,
         inherit_workspace_env=False,
-        allowed_hosts=verifier_hosts,
+        allowed_hosts=verifier.network.allowed_hosts,
         no_new_privs=False,
         max_wait=timeout_sec,
         writable_hosts=True,
@@ -675,17 +567,11 @@ def copy_path(source: Path, target: Path) -> None:
 
 @contextlib.contextmanager
 def materialized_artifacts(
-    task: dict[str, Any],
+    task: TaskSpec,
     verifier_root: Path,
     artifacts: Path,
     verifier_identity: tuple[int, int] | None,
-) -> Iterator[list[Mount]]:
-    mounts = [
-        Mount("dev", dst="/dev"),
-        Mount("proc", dst="/proc"),
-        Mount("rw", src=str(LOGS), dst="/logs"),
-        *GPU_DRIVER_MOUNTS,
-    ]
+) -> Iterator[None]:
     with tempfile.TemporaryDirectory(prefix="verifier-backup-", dir=RUNTIME_ROOT) as directory:
         backup_root = Path(directory)
         replacements: list[tuple[Path, Path | None]] = []
@@ -693,11 +579,11 @@ def materialized_artifacts(
         entries: dict[Path, set[str]] = {}
         created: list[Path] = []
         try:
-            for artifact in task["artifacts"]:
+            for artifact in task.artifacts:
                 staged = artifact_path(artifact, artifacts)
                 if not staged.exists() and not staged.is_symlink():
                     continue
-                destination = artifact["source"].rstrip("/") or "/"
+                destination = artifact.source.rstrip("/") or "/"
                 target = verifier_root / destination.lstrip("/")
                 if target == verifier_root:
                     raise ValueError("the verifier root cannot be replaced by an artifact")
@@ -730,7 +616,7 @@ def materialized_artifacts(
                 if verifier_identity is not None:
                     for path in (target, *target.rglob("*")):
                         os.lchown(path, *verifier_identity)
-            yield mounts
+            yield
         finally:
             for target, backup in reversed(replacements):
                 remove_path(target)
@@ -748,59 +634,51 @@ def materialized_artifacts(
 
 
 async def grade_separate(
-    task: dict[str, Any],
-    session: Path,
+    task: TaskSpec,
+    artifacts: Path,
+    answer: str,
 ) -> EvaluationResult:
+    assert CONFIG.verifier_root is not None
     async with verifier_lock:
-        verifier_root = Path(CONFIG["verifier_root"])
+        verifier_root = Path(CONFIG.verifier_root)
         test_script = verifier_root / "tests/test.sh"
         test_mode = (await asyncio.to_thread(test_script.stat)).st_mode
         await asyncio.to_thread(test_script.chmod, test_mode | 0o111)
         await asyncio.to_thread(clear, VERIFIER_LOGS)
         await asyncio.to_thread(VERIFIER_LOGS.chmod, 0o777)
         await asyncio.to_thread(LOGS.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(
-            AGENT_ANSWER.write_bytes,
-            (session / SESSION_ANSWER).read_bytes(),
-        )
+        await asyncio.to_thread(AGENT_ANSWER.write_text, answer, encoding="utf-8")
 
         try:
-            verifier = CONFIG["verifier"]
-            verifier_network, verifier_hosts = network(verifier)
-            verifier_mode = verifier["network_mode"] or CONFIG["environment"]["network_mode"]
-            verifier_access = None if verifier_mode == "public" else verifier_hosts
-            image = CONFIG["verifier_image"]
-            verifier_identity = identity(
-                verifier,
-                image_user=image["user"],
-                root=verifier_root,
-            )
-            with materialized_artifacts(
-                task,
-                verifier_root,
-                session / "artifacts",
-                verifier_identity,
-            ) as mounts:
-                verifier_mounts = tuple(mounts)
-                if verifier_mode == "public":
-                    verifier_mounts += (
-                        Mount("ro", src="/etc/resolv.conf", dst="/etc/resolv.conf"),
-                    )
-                verifier_uid = verifier_identity[0] if verifier_identity is not None else None
-                verifier_env = {
-                    **CONFIG["environment"]["env"],
-                    **image["env"],
-                    **resolve_env_templates(verifier["env"]),
-                }
-                if verifier_home := home(verifier_uid, root=verifier_root):
-                    verifier_env["HOME"] = verifier_home
+            verifier = CONFIG.verifier
+            public = ANY_HOST in verifier.network.allowed_hosts
+            verifier_access = None if public else verifier.network.allowed_hosts
+            image = CONFIG.verifier_image
+            verifier_account = account(verifier.user, verifier_root)
+            verifier_env = {
+                **CONFIG.environment.env,
+                **image.env,
+                **resolve_env_templates(verifier.env),
+                **verifier_account.env,
+            }
+            with materialized_artifacts(task, verifier_root, artifacts, verifier_account.identity):
                 isolated = Workspace(
                     verifier_root,
                     guest_path="/",
                     system_mounts=(),
-                    mounts=verifier_mounts,
+                    mounts=(
+                        Mount("dev", dst="/dev"),
+                        Mount("proc", dst="/proc"),
+                        Mount("rw", src=str(LOGS), dst="/logs"),
+                        *GPU_DRIVER_MOUNTS,
+                        *(
+                            [Mount("ro", src="/etc/resolv.conf", dst="/etc/resolv.conf")]
+                            if public
+                            else []
+                        ),
+                    ),
                     env=verifier_env,
-                    network=verifier_network,
+                    network=verifier.network.enabled,
                     allowed_hosts=verifier_access,
                     credentials_dir=RUNTIME_ROOT / "verifier-keys",
                     hand_over_root=False,
@@ -811,19 +689,19 @@ async def grade_separate(
                     execution = await isolated.run(
                         verifier_command(test_script, "/tests/test.sh"),
                         env=verifier_env,
-                        cwd=image["workdir"],
-                        identity=verifier_identity,
+                        cwd=image.workdir,
+                        identity=verifier_account.identity,
                         inherit_workspace_env=False,
                         allowed_hosts=verifier_access,
                         no_new_privs=False,
-                        max_wait=task["verifier_timeout"],
+                        max_wait=task.verifier_timeout,
                         writable_hosts=True,
                     )
                 finally:
                     await isolated.stop()
         finally:
             test_script.chmod(test_mode)
-    return evaluation(execution, task["verifier_timeout"])
+    return evaluation(execution, task.verifier_timeout)
 
 
 def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:

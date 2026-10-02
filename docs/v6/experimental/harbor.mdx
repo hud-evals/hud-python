@@ -97,8 +97,8 @@ hud sync tasks my-harbor-tasks .hud-adapt/<environment>/tasks.json
 
 Hosted deploys build the project privately from the uploaded root; any registry
 image the project uses must be pullable by the hosted builder. The generated
-project can also be built and published on owned infrastructure; the commands
-and BuildKit context requirements are documented under
+project can also be built with `docker compose build` and published on owned
+infrastructure; see
 [Build on owned infrastructure](/v6/experimental/compose#build-on-owned-infrastructure).
 
 ### Verifier environments
@@ -118,7 +118,7 @@ The adapter handles:
   project; when authored Compose omits `main`, the environment recipe supplies
   that agent service;
 - the Compose variables Harbor defines (`CONTEXT_DIR`, `MAIN_IMAGE_NAME`,
-  `CPUS`, `MEMORY`, `PREBUILT_IMAGE_NAME`, `TEST_DIR`) and literal
+  `CPUS`, `MEMORY`, `PREBUILT_IMAGE_NAME`) and literal
   `[environment.env]` values, alongside the project `.env`;
 - Compose sidecars, including ones that expose no TCP ports;
 - HTTP MCP servers (`sse` and `streamable-http`), healthchecks, network modes,
@@ -186,7 +186,7 @@ covers that review.
 
 | Function | Contract |
 | --- | --- |
-| `harbor.adapt(path, *, hud_requirement="hud") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. Raises `ValueError` when no task directories exist. |
+| `harbor.adapt(path, *, hud_requirement=f"hud=={hud.__version__}") -> AdaptResult` | Package valid tasks as generated Compose environments and native task rows, and return structured failures for the rest. `hud_requirement` installs the controller each image serves (`hud.integrations.harbor.env`); pass a wheel path when adapting from an unreleased checkout. Raises `ValueError` when no task directories exist. |
 | `await harbor.export(source, out_dir, *, answer_file=..., timeout_sec=600) -> list[Path]` | Write HUD task rows as Harbor task directories. |
 
 <CardGroup cols={2}>

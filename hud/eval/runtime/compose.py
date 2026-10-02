@@ -306,6 +306,22 @@ class ComposeConfig(BaseModel):
                 return current
             current = mode.removeprefix("service:")
 
+    def healthchecked_services(self) -> list[str]:
+        """Services startup waits on: started by default and declaring a live healthcheck.
+
+        Naming a profiled or zero-scale service in ``up`` would start it, and
+        ``up --wait`` fails on a service that exits, so only these are awaited.
+        """
+        return [
+            name
+            for name, service in self.services.items()
+            if service.healthcheck is not None
+            and service.healthcheck.disable is not True
+            and service.healthcheck.test != ["NONE"]
+            and not (service.model_extra or {}).get("profiles")
+            and (service.model_extra or {}).get("scale") != 0
+        ]
+
     @classmethod
     def from_file(cls, path: Path, *, variables: Mapping[str, str] | None = None) -> ComposeConfig:
         """Load a self-contained authored Compose document without Docker.

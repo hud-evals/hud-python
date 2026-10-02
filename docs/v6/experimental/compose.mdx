@@ -128,7 +128,7 @@ services:
 ```
 
 ```dockerfile
-COPY --from=hud env.py install.sh config.json /controller/
+COPY --from=hud install.sh config.json /controller/
 COPY --from=hud packages /controller/packages
 ```
 
@@ -157,6 +157,12 @@ options, resources, and an ephemeral host port, starts the project with `docker 
 returns the published control-channel address, and removes the project and its volumes when the
 rollout ends.
 
+Startup is not complete until every service that declares a healthcheck reports healthy. Only
+services `up` starts by default are awaited - not ones gated by `profiles` or held at `scale: 0` -
+and an unhealthy service fails startup. Services without a healthcheck count as ready once
+started, so one-shot services may exit. The wait shares the runtime's startup timeout
+(`RuntimeLimits.startup_timeout_s`). Hosted execution starts projects the same way.
+
 **Hosted execution** uses `HostedRuntime`. Pass a JSON `RuntimeConfig` containing the Compose
 project with `hud deploy --runtime-config runtime.json`. The command uploads the project root and supplies the
 configuration to the builder. See the [Harbor deployment example](/v6/experimental/harbor#deploy-and-sync)
@@ -175,27 +181,14 @@ rollout.
 
 ## Build on owned infrastructure
 
-An ordinary Compose project builds with the Compose CLI:
+A Compose project builds with the Compose CLI:
 
 ```bash
 docker compose build
 ```
 
-For a single-image recipe whose Dockerfile consumes a local `hud` named context, the direct
-BuildKit form is below. The `hud/` directory must contain every file named by the Dockerfile.
-
-```bash
-cd compose-project
-docker build \
-  --build-context hud=./hud \
-  --file Dockerfile \
-  --tag registry.example/acme/task:tag \
-  ./environment
-```
-
-`service:` additional contexts require the Compose build graph; use `docker compose build` when the
-project contains build-only services. Both forms require a Docker builder with BuildKit named
-context support.
+Build-only services referenced through `service:` additional contexts require the Compose build
+graph and a Docker builder with BuildKit named context support.
 
 ## Run an image directly
 

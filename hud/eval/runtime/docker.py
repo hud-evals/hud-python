@@ -151,7 +151,8 @@ class DockerRuntime:
             compose = compose.resolve()
             if self.run_args:
                 raise ValueError("DockerRuntime run_args apply only to image environments")
-            port_service = ComposeConfig.from_file(compose).network_owner("main")
+            compose_config = ComposeConfig.from_file(compose)
+            port_service = compose_config.network_owner("main")
             resources = config.resources
             if (
                 resources is not None
@@ -209,6 +210,10 @@ class DockerRuntime:
                     str(files.ports),
                 )
                 teardown = (*command, "down", "--volumes", "--remove-orphans")
+                loop = asyncio.get_running_loop()
+                startup_deadline = (
+                    None if startup_timeout is None else loop.time() + startup_timeout
+                )
                 try:
                     await _docker(
                         *command,
@@ -218,6 +223,19 @@ class DockerRuntime:
                         "--remove-orphans",
                         deadline=startup_timeout,
                     )
+                    if awaited := compose_config.healthchecked_services():
+                        await _docker(
+                            *command,
+                            "up",
+                            "--wait",
+                            "--no-deps",
+                            "--no-recreate",
+                            "--no-build",
+                            *awaited,
+                            deadline=(
+                                None if startup_deadline is None else startup_deadline - loop.time()
+                            ),
+                        )
                     if resources is not None and resources.storage_mb is not None:
                         free_disk, _ = await _docker(
                             *command, "exec", "-T", "main", "df", "-Pk", "/"

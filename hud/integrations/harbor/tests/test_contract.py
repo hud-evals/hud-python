@@ -11,8 +11,11 @@ from typing import Any
 
 import pytest
 
+from hud.environment import Mount, Peer
 from hud.eval import RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU, Taskset
+from hud.eval.runtime.compose import ComposeConfig
 from hud.integrations import harbor
+from hud.integrations.harbor.config import ControllerConfig, TaskSpec
 
 from .conftest import make_harbor_task, make_multi_step_task
 
@@ -159,8 +162,12 @@ def test_image_resolution_builds_and_inspects_the_authored_image(
         "ExposedPorts": {"8080/tcp": {}},
     }
 
+    overrides: list[dict[str, Any]] = []
+
     def docker(*args: str, **_kwargs: Any) -> str:
         calls.append(args)
+        if args[0] == "compose":
+            overrides.append(json.loads(Path(args[-3]).read_text("utf-8"))["services"]["main"])
         if args[:2] == ("image", "inspect"):
             return json.dumps([{"Config": config}])
         return ""
@@ -169,12 +176,19 @@ def test_image_resolution_builds_and_inspects_the_authored_image(
 
     resolved = build_module.resolve_images(
         source,
-        None,
+        source.compose.with_project_directory("./environment"),
         verifier_image=source.base_image,
         peer_services=set(),
     )
 
-    assert calls[0][:3] == ("build", "--tag", source.base_image)
+    assert calls[0][0] == "compose"
+    assert calls[0][-2:] == ("build", "main")
+    assert overrides == [
+        {
+            "image": source.base_image,
+            "build": {"context": ".", "dockerfile": "Dockerfile"},
+        }
+    ]
     assert calls[1] == ("image", "inspect", source.base_image)
     assert resolved.main == config
     assert resolved.verifier == config
@@ -328,8 +342,6 @@ services:
     build:
       context: ${CONTEXT_DIR}
     image: ${MAIN_IMAGE_NAME}
-    environment:
-      - TEST_DIR=${TEST_DIR}
     deploy:
       resources:
         limits:
@@ -345,7 +357,6 @@ services:
     assert row.runtime_config.compose is not None
     assert isinstance(row.runtime_config.compose.document, Path)
     services = json.loads(row.runtime_config.compose.document.read_text("utf-8"))["services"]
-    assert services["main"]["environment"] == {"TEST_DIR": "/tests"}
     assert services["main"]["deploy"]["resources"]["limits"] == {"cpus": "2", "memory": "4096M"}
     assert services["hud-base"]["build"] == {"context": "./environment"}
 
@@ -400,19 +411,14 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
         "env.py",
         "tasks.json",
     }
-    # env.py names the environment as a literal — `hud deploy` resolves the
-    # context's identity from source, and refuses a computed name.
-    served = (context / "env.py").read_text(encoding="utf-8")
-    assert f'Environment("{context.name}")' in served
-    assert 'Environment(CONFIG["name"])' not in served
-    assert 'Mount("rw", src=str(TASK_ROOT), dst="/")' in served
-    assert served.count("*GPU_DRIVER_MOUNTS") == 2
+    # `hud deploy` resolves the context's identity from a literal Environment(...).
+    assert f"Environment({context.name!r})" in (context / "env.py").read_text("utf-8")
     project_root = context / "compose-project"
     assert _tree_snapshot(project_root / "environment") == authored_environment
-    payload = project_root / "hud"
+    payload = project_root / "main"
     assert {entry.name for entry in payload.iterdir()} == {
+        "Dockerfile",
         "config.json",
-        "env.py",
         "install.sh",
         "packages",
     }
@@ -430,23 +436,26 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert task.runtime_config.compose.root == context
     compose_path = context / "compose-project" / "compose.json"
     project = _assert_stock_compose_complete(compose_path)
-    assert set(project["services"]) == {"main"}
+    assert set(project["services"]) == {"main", "hud-base"}
+    assert project["services"]["hud-base"]["build"] == {"context": "./environment"}
+    assert project["services"]["hud-base"]["scale"] == 0
     main = project["services"]["main"]
     assert main["image"].startswith("hud-harbor:")
     assert main["build"] == {
-        "additional_contexts": {"hud": "./hud"},
-        "context": "./environment",
-        "dockerfile": "../Dockerfile",
+        "additional_contexts": {"hud-base": "service:hud-base"},
+        "args": {
+            "BASE_IMAGE": "hud-base",
+            "HUD_REQUIREMENT": "hud",
+            "VERIFIER_IMAGE": project["services"]["hud-base"]["image"],
+        },
+        "context": "./main",
+        "target": "plain",
     }
     assert "HUD_RUNTIME_ROOT" not in main.get("environment", {})
     assert main["volumes"] == ["./tests:/controller/tests:ro"]
-    combined = project_root / "Dockerfile"
-    assert combined.read_text("utf-8").startswith("FROM python:3.11-slim AS hud-base\n")
-    assert "FROM hud-base AS hud-authored-root" in combined.read_text("utf-8")
-    assert "FROM python:3.12-slim AS hud-runtime" in combined.read_text("utf-8")
-    assert "COPY --from=hud-authored-root / /rootfs" in combined.read_text("utf-8")
+    assert not (project_root / "Dockerfile").exists()
     recipe = _assert_stock_compose_complete(context / "compose.yaml")
-    assert recipe["services"]["main"]["build"]["context"] == ("./compose-project/environment")
+    assert recipe["services"]["hud-base"]["build"]["context"] == "./compose-project/environment"
     assert recipe["services"]["main"]["volumes"] == ["./compose-project/tests:/controller/tests:ro"]
 
 
@@ -470,6 +479,12 @@ def test_task_content_changes_do_not_rebuild_the_environment(tmp_path: Path) -> 
 
     assert after_compose["services"]["main"]["image"] == before_image
     assert after.args["instruction"] == "Second instruction"
+    (other_release,) = list(_adapt(tmp_path, hud_requirement="hud==0.0.1"))
+    assert other_release.runtime_config is not None
+    assert other_release.runtime_config.compose is not None
+    assert isinstance(other_release.runtime_config.compose.document, Path)
+    other_compose = json.loads(other_release.runtime_config.compose.document.read_text("utf-8"))
+    assert other_compose["services"]["main"]["image"] != before_image
     assert (
         after.runtime_config.compose.document.parent / "tests" / "task-a" / "test.sh"
     ).read_text("utf-8") == "#!/bin/sh\nexit 1\n"
@@ -486,59 +501,7 @@ def test_image_task_keeps_non_recipe_compose_names_as_context_files(tmp_path: Pa
     environment = context / "compose-project" / "environment"
     assert (environment / "docker-compose.yml").read_text("utf-8") == content
     project = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
-    assert set(project["services"]) == {"main"}
-
-
-def test_image_task_preserves_a_named_final_stage_verbatim(tmp_path: Path) -> None:
-    dockerfile = 'FROM alpine AS build\r\nRUN true\r\nFROM alpine AS final\r\nCMD ["sh"]\r\n'
-    make_harbor_task(tmp_path, "task-a", dockerfile=dockerfile)
-
-    _adapt(tmp_path)
-
-    (context,) = (tmp_path / ".hud-adapt").iterdir()
-    environment = context / "compose-project" / "environment"
-    assert (environment / "Dockerfile").read_bytes() == dockerfile.encode("utf-8")
-    combined = (environment.parent / "Dockerfile").read_bytes().decode("utf-8")
-    assert combined.startswith(dockerfile + "\nFROM final AS hud-authored-root\n")
-
-
-def test_image_task_names_an_unnamed_multiline_final_stage(tmp_path: Path) -> None:
-    dockerfile = "FROM --platform=linux/amd64 \\\n  python:3.12-slim\nRUN true\n"
-    make_harbor_task(tmp_path, "task-a", dockerfile=dockerfile)
-
-    _adapt(tmp_path)
-
-    (context,) = (tmp_path / ".hud-adapt").iterdir()
-    combined = (context / "compose-project" / "Dockerfile").read_text("utf-8")
-    assert combined.startswith(
-        "FROM --platform=linux/amd64 \\\n  python:3.12-slim AS hud-base\n"
-        "RUN true\n\nFROM hud-base AS hud-authored-root\n"
-    )
-
-
-@pytest.mark.parametrize("delimiter", ["<<'PY'", "<< 'PY'"])
-def test_image_task_ignores_from_inside_dockerfile_heredoc(tmp_path: Path, delimiter: str) -> None:
-    make_harbor_task(
-        tmp_path,
-        "task-a",
-        dockerfile=f"FROM python:3.12\nRUN python - {delimiter}\nfrom pathlib import Path\nPY\n",
-    )
-
-    _adapt(tmp_path)
-
-
-@pytest.mark.parametrize("stage", ["hud-authored-root", "hud-base", "HUD-RUNTIME"])
-def test_image_task_rejects_reserved_user_stage_names(
-    tmp_path: Path,
-    stage: str,
-) -> None:
-    make_harbor_task(tmp_path, "task-a", dockerfile=f"FROM alpine AS {stage}\n")
-
-    failure = _failure(tmp_path)
-
-    assert [finding.code for finding in failure.findings] == [
-        "harbor.invalid.reserved_dockerfile_stage"
-    ]
+    assert set(project["services"]) == {"main", "hud-base"}
 
 
 def test_image_task_preserves_environment_ignored_paths_verbatim(
@@ -555,8 +518,7 @@ def test_image_task_preserves_environment_ignored_paths_verbatim(
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     project = context / "compose-project"
     assert _tree_snapshot(project / "environment") == authored
-    assert (project / "hud").is_dir()
-    assert (project / "Dockerfile").is_file()
+    assert (project / "main" / "Dockerfile").is_file()
 
 
 def test_adapt_honors_compose_main_build_settings(
@@ -632,7 +594,7 @@ services:
     assert row.runtime_config is not None
     assert row.runtime_config.image is None
     assert row.runtime_config.compose is not None
-    assert row.runtime_config.compose.service_access is True
+    assert row.runtime_config.compose.service_access is None
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     assert row.runtime_config.compose.document == context / "compose-project" / "compose.json"
     assert row.runtime_config.compose.root == context
@@ -643,7 +605,7 @@ services:
     assert project["services"]["redis"]["image"] == "redis:7-alpine"
     assert "build" not in project["services"]["redis"]
     assert project["services"]["main"]["build"]["context"] == "./main"
-    assert project["services"]["main"]["build"]["target"] == "service-access"
+    assert project["services"]["main"]["build"]["target"] == "plain"
     assert project["services"]["main"]["build"]["additional_contexts"] == {
         "hud-base": "service:hud-base"
     }
@@ -676,12 +638,14 @@ services:
     assert manifest["local_aliases"] == ["main"]
     assert manifest["ports"] == [8080]
     assert manifest["capabilities"] == []
-    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
-    assert manifest["healthy_services"] == ["redis"]
+    assert ControllerConfig.model_validate(manifest).peers == [
+        Peer("redis", 6379, target=("redis", 6379))
+    ]
+    assert ComposeConfig.from_file(compose_path).healthchecked_services() == ["redis"]
     assert project["services"]["main"]["command"] == [
         "/controller/venv/bin/hud",
         "serve",
-        "/controller/env.py",
+        "hud.integrations.harbor.env:env",
         "--host",
         "0.0.0.0",
         "--port",
@@ -754,17 +718,9 @@ services:
     context = row.runtime_config.compose.root
     assert isinstance(context, Path)
     manifest = _environment_config(context)
-    assert manifest["mounts"] == [
-        {
-            "read_only": False,
-            "source": "/mounts/0",
-            "target": "/var/lib/main",
-        },
-        {
-            "read_only": True,
-            "source": "/mounts/1",
-            "target": "/etc/authored",
-        },
+    assert ControllerConfig.model_validate(manifest).mounts == [
+        Mount("rw", src="/mounts/0", dst="/var/lib/main"),
+        Mount("ro", src="/mounts/1", dst="/etc/authored"),
     ]
     assert project["services"]["redis"]["image"] == "redis:7-alpine"
     assert project["services"]["main"]["build"]["additional_contexts"] == {
@@ -866,7 +822,9 @@ def test_adapt_merges_implicit_main_into_authored_compose(tmp_path: Path) -> Non
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
     assert {"main", "default"} <= compose["services"].keys()
-    assert _environment_config(context)["peers"] == [{"name": "default", "port": 1234}]
+    assert ControllerConfig.model_validate(_environment_config(context)).peers == [
+        Peer("default", 1234, target=("default", 1234))
+    ]
 
 
 def test_only_network_mcp_servers_become_capabilities(
@@ -1014,7 +972,7 @@ gpu_types = ["H100"]
     assert row.runtime_config.resources.storage_mb == 32768
     assert row.runtime_config.resources.gpu is not None
     assert row.runtime_config.resources.gpu.count == 2
-    assert row.runtime_config.resources.gpu.type == "H100"
+    assert row.runtime_config.resources.gpu.acceptable_types == ["H100"]
 
 
 def test_env_templates_are_persisted_verbatim_not_resolved(
@@ -1042,7 +1000,7 @@ VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"
     harbor.adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
-    manifest = json.loads((context / "compose-project" / "hud" / "config.json").read_text("utf-8"))
+    manifest = _environment_config(context)
     assert manifest["environment"]["env"] == {
         "JUDGE_KEY": "${HARBOR_JUDGE_KEY}",
         "MODEL": "${HARBOR_JUDGE_MODEL:-gpt-4o}",
@@ -1065,11 +1023,10 @@ def test_prebuilt_harbor_image_emits_a_conventional_wrapper_build(
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     project = context / "compose-project"
-    assert (
-        (project / "Dockerfile")
-        .read_text("utf-8")
-        .startswith("FROM registry.example/base:latest AS hud-base\n")
-    )
+    services = _assert_stock_compose_complete(project / "compose.json")["services"]
+    assert set(services) == {"main"}
+    assert services["main"]["build"]["args"]["BASE_IMAGE"] == "registry.example/base:latest"
+    assert "additional_contexts" not in services["main"]["build"]
     assert not (project / "build.sh").exists()
 
 
@@ -1130,8 +1087,7 @@ VERIFIER_ONLY = "yes"
     assert manifest["workdir"] == "/app"
     assert manifest["environment"] == {
         "env": {"SHARED": "yes"},
-        "network_mode": "allowlist",
-        "allowed_hosts": ["pypi.org"],
+        "network": {"enabled": True, "allowed_hosts": ["pypi.org"]},
         "healthcheck": {
             "command": "curl -f http://localhost:8080/health",
             "interval_sec": 2.0,
@@ -1143,12 +1099,10 @@ VERIFIER_ONLY = "yes"
     }
     assert manifest["agent"]["user"] == "agent"
     assert manifest["agent"]["env"] == {"AGENT_ONLY": "yes"}
+    assert manifest["agent"]["network"] == {"enabled": True, "allowed_hosts": ["pypi.org"]}
     assert manifest["verifier"]["user"] == 0
-    assert manifest["verifier"]["network_mode"] == "no-network"
+    assert manifest["verifier"]["network"] == {"enabled": False, "allowed_hosts": []}
     assert manifest["verifier"]["env"] == {"VERIFIER_ONLY": "yes"}
-    dockerfile = (context / "compose-project" / "Dockerfile").read_text("utf-8")
-    assert "SHARED" not in dockerfile
-    assert "WORKDIR /app" not in dockerfile
 
 
 def test_image_entrypoint_is_preserved_as_runtime_data(
@@ -1176,6 +1130,8 @@ CMD ["ignored-by-harbor"]
         "VALUE_WITH_EQUALS": "one=two",
     }
     assert manifest["image_user"] == "1000:2000"
+    assert manifest["agent"]["user"] == "1000:2000"
+    assert manifest["verifier"]["user"] == "1000:2000"
     assert manifest["workdir"] == "/workspace"
     assert manifest["entrypoint"] == ["/usr/local/bin/start-environment"]
 
@@ -1354,7 +1310,7 @@ timeout_sec = 10
     assert row.verifier.runtime_config.resources == RuntimeResources(
         cpu=4,
         memory_mb=1024,
-        gpu=RuntimeGPU(type="T4"),
+        gpu=RuntimeGPU(type=["T4"]),
     )
     assert row.verifier.runtime_config.limits == RuntimeLimits(startup_timeout_s=1200)
 
@@ -1364,8 +1320,7 @@ timeout_sec = 10
     assert manifest["verifier_image"]["workdir"] == "/judge"
     assert manifest["verifier"] == {
         "user": None,
-        "network_mode": "allowlist",
-        "allowed_hosts": ["verifier.example"],
+        "network": {"enabled": True, "allowed_hosts": ["verifier.example"]},
         "env": {"NESTED_ONLY": "yes", "SHARED": "phase"},
     }
     assert "tasks" not in manifest
@@ -1377,6 +1332,11 @@ timeout_sec = 10
         "separate_verifier": True,
         "verifier_timeout": 30.0,
     }
+    controller = ControllerConfig.model_validate(manifest)
+    assert controller.verifier.network.allowed_hosts == ["verifier.example"]
+    spec = TaskSpec.model_validate(row.args["task"])
+    assert [hook.service for hook in spec.collect] == ["redis"]
+    assert [artifact.source for artifact in spec.artifacts] == ["/tmp/agent.patch"]
     assert not (context / "compose-project" / "main" / "tasks").exists()
     compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
     assert compose["services"]["main"].get("volumes", []) == []
@@ -1389,7 +1349,7 @@ timeout_sec = 10
     assert compose["services"]["hud-verifier"]["image"].startswith("hud-harbor-verifier:")
 
 
-def test_image_task_keeps_only_the_verifier_as_a_build_service(
+def test_separate_verifier_image_task_builds_the_verifier_target(
     tmp_path: Path,
 ) -> None:
     task = make_harbor_task(tmp_path, "separate-image")
@@ -1429,19 +1389,15 @@ gpu_types = ["H100"]
     assert row.verifier.runtime_config is None
     assert isinstance(row.runtime_config.compose.document, Path)
     project = _assert_stock_compose_complete(row.runtime_config.compose.document)
-    assert set(project["services"]) == {"main", "hud-verifier"}
-    assert project["services"]["main"]["build"] == {
-        "additional_contexts": {
-            "hud": "./hud",
-            "hud-verifier": "service:hud-verifier",
-        },
-        "context": "./environment",
-        "dockerfile": "../Dockerfile",
+    assert set(project["services"]) == {"main", "hud-base", "hud-verifier"}
+    build = project["services"]["main"]["build"]
+    assert build["target"] == "verifier"
+    assert build["additional_contexts"] == {
+        "hud-base": "service:hud-base",
+        "hud-verifier": "service:hud-verifier",
     }
+    assert project["services"]["hud-base"]["scale"] == 0
     assert project["services"]["hud-verifier"]["scale"] == 0
-    combined = (row.runtime_config.compose.document.parent / "Dockerfile").read_text("utf-8")
-    assert "FROM hud-verifier AS hud-verifier-root" in combined
-    assert "COPY --from=hud-verifier-root / /verifier" in combined
 
 
 def test_separate_verifier_groups_have_distinct_environment_names(
@@ -1615,7 +1571,9 @@ def test_portless_sidecar_ports_are_resolved_from_its_built_image(tmp_path: Path
     context = row.runtime_config.compose.root
     assert isinstance(context, Path)
     manifest = _environment_config(context)
-    assert manifest["peers"] == [{"name": "redis", "port": 6379}]
+    assert ControllerConfig.model_validate(manifest).peers == [
+        Peer("redis", 6379, target=("redis", 6379))
+    ]
     assert "peer_image_configs" not in manifest
 
 

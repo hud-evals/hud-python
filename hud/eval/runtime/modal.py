@@ -203,7 +203,8 @@ class ModalRuntime:
                 "ModalRuntime sandbox secrets require an image runtime; attaching them to "
                 "the outer Docker-in-Docker sandbox would not expose them to main"
             )
-        port_service = ComposeConfig.from_file(compose).network_owner("main") if compose else "main"
+        compose_config = ComposeConfig.from_file(compose) if compose is not None else None
+        port_service = compose_config.network_owner("main") if compose_config else "main"
         if compose is not None:
             image = modal.Image.from_registry("docker:28.3.3-dind")
         elif config.image is not None:
@@ -337,14 +338,23 @@ class ModalRuntime:
                     await sb.filesystem.copy_from_local.aio(
                         _DOCKER_SECCOMP_PROFILE, "/hud/docker-seccomp.json"
                     )
+                compose_command = (
+                    f"docker compose --project-directory {shlex.quote(project_directory)} "
+                    f"--file {shlex.quote(compose_path)} "
+                    "--file /hud/override.json --file /hud/ports.yaml"
+                )
+                assert compose_config is not None
+                awaited = compose_config.healthchecked_services()
                 command = (
                     "mkdir -p /hud/project /runtime && "
                     "tar -xzf /hud/project.tar.gz -C /hud/project && "
                     "until docker info >/dev/null 2>&1; do sleep 1; done && "
-                    f"docker compose --project-directory {shlex.quote(project_directory)} "
-                    f"--file {shlex.quote(compose_path)} "
-                    "--file /hud/override.json --file /hud/ports.yaml "
-                    "up --detach --build --remove-orphans"
+                    f"{compose_command} up --detach --build --remove-orphans"
+                ) + (
+                    f" && {compose_command} up --wait --no-deps --no-recreate --no-build "
+                    f"{shlex.join(awaited)}"
+                    if awaited
+                    else ""
                 )
                 try:
                     async with asyncio.timeout(ready_timeout):

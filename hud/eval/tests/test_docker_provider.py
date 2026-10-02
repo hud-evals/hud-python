@@ -884,7 +884,67 @@ async def test_docker_runtime_starts_compose_with_a_main_service_override(
     )
     assert up[up.index("--project-directory") + 1] == str(tmp_path)
     assert str(compose) not in up
+    assert not any("--wait" in call for call in calls)
     assert calls[-1][-3:] == ("down", "--volumes", "--remove-orphans")
+
+
+async def test_docker_compose_startup_waits_for_default_services_with_healthchecks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        """\
+services:
+  main:
+    image: hud-env:one
+    depends_on:
+      init: {condition: service_completed_successfully}
+  init:
+    image: alpine:3.20
+  db:
+    image: postgres:17
+    healthcheck: {test: [CMD, pg_isready]}
+  cache:
+    image: redis:7
+    healthcheck: {test: [NONE]}
+  debug:
+    image: postgres:17
+    profiles: [debug]
+    healthcheck: {test: [CMD, pg_isready]}
+  builder:
+    image: postgres:17
+    scale: 0
+    healthcheck: {test: [CMD, pg_isready]}
+""",
+        encoding="utf-8",
+    )
+
+    async def fake_docker(*args: str, **_kwargs: Any) -> tuple[str, str]:
+        calls.append(args)
+        if args[-3:] == ("port", "main", "8765"):
+            return "127.0.0.1:43210\n", ""
+        return "", ""
+
+    monkeypatch.setattr(runtime_module, "_docker", fake_docker)
+    task = Task(
+        env="any-env",
+        id="t",
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
+    )
+
+    async with DockerRuntime()(task):
+        pass
+
+    subcommands = [call[call.index("up") :] for call in calls if "up" in call]
+    assert subcommands == [
+        ("up", "--detach", "--build", "--remove-orphans"),
+        ("up", "--wait", "--no-deps", "--no-recreate", "--no-build", "db"),
+    ]
+    wait = next(index for index, call in enumerate(calls) if "--wait" in call)
+    port = next(index for index, call in enumerate(calls) if call[-3:] == ("port", "main", "8765"))
+    assert wait < port
 
 
 async def test_docker_runtime_passes_env_vars_to_docker_run(
@@ -1193,7 +1253,11 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     project = tmp_path / "artifact"
     compose = project / "compose-project" / "compose.yaml"
     compose.parent.mkdir(parents=True)
-    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    compose.write_text(
+        "services:\n  main:\n    image: hud-env:one\n"
+        "  db:\n    image: postgres:17\n    healthcheck: {test: [CMD, pg_isready]}\n",
+        encoding="utf-8",
+    )
 
     async with ModalRuntime(
         runtime_config=RuntimeConfig(
@@ -1257,7 +1321,8 @@ async def test_modal_runtime_runs_compose_inside_a_dind_vm(
     assert "--project-directory /hud/project/compose-project" in startup
     assert "--file /hud/project/compose-project/compose.yaml" in startup
     assert "build.sh" not in startup
-    assert "up --detach --build --remove-orphans" in startup
+    assert "up --detach --build --remove-orphans && " in startup
+    assert startup.endswith("up --wait --no-deps --no-recreate --no-build db")
     compose_logs = execs[1][0]
     assert compose_logs[-3:] == ("logs", "--follow", "--no-color")
     session_commands = [
