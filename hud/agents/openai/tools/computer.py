@@ -26,7 +26,6 @@ def last_image_data(result: ToolResult) -> str | None:
 
 
 def last_image_content(result: ToolResult) -> ImageContent | None:
-    """Most recent screenshot block in a tool result."""
     for block in reversed(result.content):
         if isinstance(block, ImageContent):
             return block

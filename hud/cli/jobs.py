@@ -1,13 +1,4 @@
-"""``hud jobs`` — list jobs, inspect traces, and cancel rollouts.
-
-Noun-verb surface:
-
-    hud jobs list              # recent jobs
-    hud jobs get <id>          # traces for one job
-    hud jobs cancel <id>       # cancel a job
-
-``hud jobs`` is an alias for ``hud jobs list``.
-"""
+"""``hud jobs`` — list jobs, inspect traces, and cancel rollouts."""
 
 from __future__ import annotations
 

@@ -34,10 +34,8 @@ logger = logging.getLogger("hud.runtime")
 _SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
-# DockerRuntime always serves HUD environments, so this is part of the
-# provider contract rather than a per-image option. This is intentionally a
-# default-allow compatibility profile: Workspace's bwrap sessions need the
-# namespace and mount syscalls, while unrelated kernel interfaces stay denied.
+# Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
+# sessions need the namespace and mount syscalls; unrelated kernel interfaces stay denied.
 _DOCKER_SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
 _DOCKER_SECURITY_ARGS = (
     "--security-opt",

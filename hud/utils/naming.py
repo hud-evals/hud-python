@@ -6,11 +6,9 @@ import re
 
 
 def normalize_environment_name(name: str, *, default: str = "environment") -> str:
-    """Slugify *name* into a valid environment name (lowercase, ``[a-z0-9-]``).
+    """Slugify ``name`` into a valid environment name (lowercase, ``[a-z0-9-]``).
 
-    One implementation, because the name an integration puts on a row has to
-    equal the one a deploy registers — two spellings would join silently
-    wrong.
+    Integrations and deploys must both use it, or their names stop matching.
     """
     normalized = name.strip().lower()
     normalized = normalized.replace(" ", "-").replace("_", "-")

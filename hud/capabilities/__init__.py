@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 
 
 def __getattr__(name: str) -> object:
-    # RobotClient pulls optional dependencies (numpy/msgpack — the ``robot``
-    # extra), so unlike the core clients above it is imported on first access.
+    # RobotClient needs the robot extra, so it is imported on first access.
     if name == "RobotClient":
         from .robot import RobotClient
 

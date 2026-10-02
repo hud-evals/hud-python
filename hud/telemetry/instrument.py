@@ -1,17 +1,4 @@
-"""``@instrument``: OTel-shaped debug spans for any function.
-
-Records one span per call — name, timing, status, args/result as span events —
-and queues it for export. Spans from this decorator are diagnostics: they carry
-no domain schema tag, so the platform surfaces them in debug tooling only. The
-canonical run record is the ``Step`` stream (``hud.types``), not this.
-
-Usage:
-    from hud.telemetry import instrument
-
-    @instrument
-    async def my_function(arg1, arg2):
-        ...
-"""
+"""``@instrument``: OTel-shaped debug spans for any function."""
 
 from __future__ import annotations
 
@@ -53,7 +40,7 @@ class _InstrumentedCallable(Protocol):
 
 
 def _serialize_value(value: Any, max_items: int = 10) -> JsonValue:
-    """Serialize a value for recording (domain-agnostic; pydantic models dump)."""
+    """JSON-safe form of ``value`` for a span event, with containers cut to ``max_items``."""
     if isinstance(value, str | int | float | bool | type(None)):
         return value
 
@@ -107,13 +94,10 @@ def instrument(
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[..., Any]:
-    """Record each call of ``func`` as an OTel-shaped debug span.
+    """Record each call of ``func`` as a debug span; calls outside a trace record nothing.
 
-    Args:
-        func: The function to instrument.
-        name: Custom span name (defaults to ``module.qualname``).
-        record_args: Record bound call arguments as a ``hud.request`` event.
-        record_result: Record the return value as a ``hud.result`` event.
+    The span is named ``module.qualname`` unless ``name`` is given, and carries the
+    arguments and result as ``hud.request`` and ``hud.result`` events.
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:

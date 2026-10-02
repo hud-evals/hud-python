@@ -1,22 +1,4 @@
-"""RFBClient — asyncvnc connection wrapper.
-
-Thin wrapper exposing the live ``asyncvnc.Client`` plus encoded
-screenshots. Higher-level composites (click, type, drag) live on ``RFBTool``.
-
-Latency note
-------------
-This impl is tuned for LLM-driven agents (Claude/Gemini/OpenAI computer
-use), where the model thinks for seconds per turn and a ~30-70 ms screenshot
-round-trip is irrelevant.
-
-It is **not** sufficient for the FDM-1 style video-model hot path
-(https://si.inc/posts/fdm1/) which targets ~11 ms round-trip. Reaching that
-requires: a Tight/ZRLE-capable transport (asyncvnc speaks only Raw + ZLib),
-incremental framebuffer streaming with a background reader task, raw RGBA
-frames (no PNG re-encoding), and native input bindings. When that workload
-shows up, layer it as an ``RFBStreamingClient`` subclass rather than rewriting
-this one.
-"""
+"""RFBClient — asyncvnc connection wrapper, fast enough for LLM agents, not video-rate control."""
 
 from __future__ import annotations
 
@@ -100,13 +82,11 @@ class RFBClient(CapabilityClient):
         conn = await stack.enter_async_context(
             asyncvnc.connect(host=host, port=port, username=user, password=password),
         )
-        # Warm up — first screenshot resets the framebuffer and forces a full
-        # (non-incremental) refresh so later captures have real content.
+        # The first screenshot forces a full refresh, so later captures have real content.
         await conn.screenshot()
         return conn
 
     async def _reconnect(self) -> None:
-        """Tear down the current VNC session and open a fresh one."""
         LOGGER.info("RFB stream desynced; reconnecting to %s:%s", self._host, self._port)
         with contextlib.suppress(Exception):
             await self._exit_stack.aclose()

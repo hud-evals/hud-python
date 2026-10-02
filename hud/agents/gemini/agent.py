@@ -27,11 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def _bound_text(text: str, limit: int) -> str:
-    """Keep ``limit`` characters of ``text``, weighted to its tail.
-
-    The kept span is announced so the model can re-run the call scoped to what
-    it needs rather than treating the remainder as absent.
-    """
+    """Keep ``limit`` characters of ``text``, mostly its tail, and tell the model what was cut."""
     if limit <= 0 or len(text) <= limit:
         return text
     head_chars = limit // 5
@@ -81,8 +77,6 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         self.max_recent_turn_with_screenshots = (
             gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
-
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(
         self, *, prompt: list[PromptMessage]
