@@ -477,6 +477,20 @@ async def test_exec_nonzero_exit_with_result_stream_remains_an_error() -> None:
     assert "messages" not in run.trace.extra
 
 
+async def test_exec_nonzero_exit_with_result_stream_and_no_stderr_is_graded() -> None:
+    """The CLI exits nonzero after a successful result; the run stays gradeable."""
+    sink: dict[str, bytes] = {}
+    conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON, exit_status=1))
+    ssh = _ssh_with_conn("bash", conn)
+
+    run = _fake_run()
+    await run_claude(ClaudeCLIConfig(), run, ssh=ssh, prompt="x")
+
+    assert run.trace.content == "done"
+    assert run.trace.extra["returncode"] == 1
+    assert "stderr" not in run.trace.extra
+
+
 async def test_exec_zero_exit_without_result_event_is_an_error() -> None:
     sink: dict[str, bytes] = {}
     stdout = _STREAM_JSON.rsplit('{"type":"result"', 1)[0]
