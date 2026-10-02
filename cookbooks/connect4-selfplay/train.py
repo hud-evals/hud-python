@@ -24,7 +24,7 @@ import argparse
 import asyncio
 import time
 
-from hud import Job, Run, Taskset
+from hud import Job, Taskset, Trace
 from hud.agents import create_agent
 from hud.train import TrainingClient, TrajectoryPayload, TrajectorySample
 
@@ -40,11 +40,11 @@ async def _run_validation(trained: str, opponent: str, games: int, step: int) ->
     val_agent = create_agent(trained, max_steps=30)
     val_tasks = Taskset("c4-validate", [play_self(model=opponent, seed=s) for s in range(games)])
     job = await val_tasks.run(val_agent)
-    wins = sum(1 for r in job.runs if r.reward == 1.0)
-    draws = sum(1 for r in job.runs if r.reward == 0.5)
-    losses = sum(1 for r in job.runs if r.reward == 0.0)
-    x_wins = sum(1 for i, r in enumerate(job.runs) if r.reward == 1.0 and i % 2 == 0)
-    o_wins = sum(1 for i, r in enumerate(job.runs) if r.reward == 1.0 and i % 2 != 0)
+    wins = sum(1 for r in job.traces if r.reward == 1.0)
+    draws = sum(1 for r in job.traces if r.reward == 0.5)
+    losses = sum(1 for r in job.traces if r.reward == 0.0)
+    x_wins = sum(1 for i, r in enumerate(job.traces) if r.reward == 1.0 and i % 2 == 0)
+    o_wins = sum(1 for i, r in enumerate(job.traces) if r.reward == 1.0 and i % 2 != 0)
     print(
         f"  [val@{step}] vs {opponent}: {wins}W/{draws}D/{losses}L  "
         f"mean={job.reward:.3f}  X-wins={x_wins}/{games // 2}  O-wins={o_wins}/{games - games // 2}"
@@ -80,18 +80,18 @@ async def main(
     for step in range(steps):
         t_step = time.perf_counter()
 
-        batch_start = len(session.runs)
+        batch_start = len(session.traces)
         t0 = time.perf_counter()
         await tasks.run(agent, job=session)
         t_rollout = time.perf_counter() - t0
-        batch = session.runs[batch_start:]
+        batch = session.traces[batch_start:]
 
-        combined: list[Run | TrajectoryPayload] = []
+        combined: list[Trace | TrajectoryPayload] = []
         inner_count = 0
 
-        for run in batch:
-            combined.append(run)
-            inner_dicts = run.grade.info.get("inner_samples", [])
+        for trace in batch:
+            combined.append(trace)
+            inner_dicts = trace.grade.info.get("inner_samples", [])
             inner_turns = [
                 TrajectorySample(
                     prompt_token_ids=s["prompt_token_ids"],
@@ -103,7 +103,7 @@ async def main(
             ]
             if inner_turns:
                 inner_count += 1
-                combined.append(TrajectoryPayload(samples=inner_turns, reward=1.0 - run.reward))
+                combined.append(TrajectoryPayload(samples=inner_turns, reward=1.0 - trace.reward))
 
         # group_size=2 pairs each outer with its inner per game. Fall back to
         # None (single group) if any inner samples are missing.

@@ -47,9 +47,9 @@ async def run_validation(trained: str, opponent: str, games: int) -> None:
 
     job = await taskset.run(agent)
 
-    wins = sum(1 for r in job.runs if r.reward == 1.0)
-    losses = sum(1 for r in job.runs if r.reward == 0.0)
-    draws = sum(1 for r in job.runs if r.reward == 0.5)
+    wins = sum(1 for r in job.traces if r.reward == 1.0)
+    losses = sum(1 for r in job.traces if r.reward == 0.0)
+    draws = sum(1 for r in job.traces if r.reward == 0.5)
     mean = job.reward
 
     print(f"Result vs {opponent}:")
@@ -60,9 +60,9 @@ async def run_validation(trained: str, opponent: str, games: int) -> None:
 
     # Per-game breakdown so you can spot which seeds the model struggles on.
     print("\nPer-game:")
-    for i, run in enumerate(job.runs):
+    for i, trace in enumerate(job.traces):
         side = "X" if i % 2 == 0 else "O"
-        outcome = {1.0: "WIN ", 0.5: "DRAW", 0.0: "LOSS"}.get(run.reward, f"{run.reward:.2f}")
+        outcome = {1.0: "WIN ", 0.5: "DRAW", 0.0: "LOSS"}.get(trace.reward, f"{trace.reward:.2f}")
         print(f"  game {i + 1:2d} (outer={side}): {outcome}")
 
 

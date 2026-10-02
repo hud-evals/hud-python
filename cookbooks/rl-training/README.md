@@ -63,9 +63,9 @@ A `Job` spans the training session and accumulates its runs. Each iteration
 selects the runs added by the latest rollout and trains on that batch:
 
 ```python
-batch_start = len(session.runs)
+batch_start = len(session.traces)
 await taskset.run(agent, runtime=runtime, job=session)
-batch = session.runs[batch_start:]
+batch = session.traces[batch_start:]
 
 await trainer.step(batch, learning_rate=1e-5, group_size=8)
 ```

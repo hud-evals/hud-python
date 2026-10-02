@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from hud import Run, Taskset
+from hud import Grade, Taskset, Trace
 from hud.agents.types import AgentStep, Sample
 from hud.runtime import HUDRuntime, LocalRuntime
 from hud.settings import settings
@@ -55,11 +55,9 @@ def resolved(value: object) -> Future:
     return future
 
 
-def rollout(*, group: str, reward: float) -> Run:
-    run = Run(None, "multiply", {})
-    run.group_id = group
-    run.grade.reward = reward
-    run.record(
+def rollout(*, group: str, reward: float) -> Trace:
+    trace = Trace(group_id=group, grade=Grade(reward=reward))
+    trace.record(
         AgentStep(
             content="42",
             sample=Sample(
@@ -69,7 +67,7 @@ def rollout(*, group: str, reward: float) -> Run:
             ),
         )
     )
-    return run
+    return trace
 
 
 def test_serverless_url_accepts_root_and_complete_endpoint() -> None:
@@ -79,14 +77,14 @@ def test_serverless_url_accepts_root_and_complete_endpoint() -> None:
 
 
 def test_within_group_reward_std_averages_per_group_spread() -> None:
-    runs = [
+    traces = [
         rollout(group="spread", reward=0.0),
         rollout(group="spread", reward=1.0),
         rollout(group="flat", reward=1.0),
         rollout(group="flat", reward=1.0),
     ]
     # sample std of [0, 1] is ~0.707; the flat group contributes 0.
-    assert within_group_reward_std(runs) == pytest.approx(0.3536, abs=1e-3)
+    assert within_group_reward_std(traces) == pytest.approx(0.3536, abs=1e-3)
     assert within_group_reward_std([]) == 0.0
 
 
@@ -97,14 +95,14 @@ def test_group_relative_advantages_are_centered() -> None:
 
 
 def test_training_batch_keeps_only_groups_with_reward_spread() -> None:
-    runs = [
+    traces = [
         rollout(group="learnable", reward=0.0),
         rollout(group="learnable", reward=1.0),
         rollout(group="flat", reward=0.0),
         rollout(group="flat", reward=0.0),
     ]
 
-    datums, kept_groups = make_training_batch(runs)
+    datums, kept_groups = make_training_batch(traces)
 
     assert kept_groups == 1
     assert len(datums) == 2
@@ -643,5 +641,5 @@ def test_grades_integer_on_last_nonempty_line(a, b, answer, reward, tokenizer, f
         max_seq_len=8192,
     )
     job = asyncio.run(multiply(a=a, b=b).run(agent, runtime=LocalRuntime(training.HERE / "env.py")))
-    assert job.runs[0].trace.status == "completed"
-    assert job.runs[0].reward == reward
+    assert job.traces[0].status == "completed"
+    assert job.traces[0].reward == reward

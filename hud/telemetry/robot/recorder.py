@@ -89,7 +89,7 @@ class TraceRecorder:
         self._run = run
         # Video encodes on a background thread, so it always needs an explicit id;
         # a live run's id is the ambient rollout context.
-        self.trace_id = trace_id or (run.trace_id if run else None) or get_current_trace_id()
+        self.trace_id = trace_id or (run.trace.trace_id if run else None) or get_current_trace_id()
         self._fps = fps
         self._obs_space = obs_space
         self._action_names = action_names or []

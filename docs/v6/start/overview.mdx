@@ -181,17 +181,17 @@ the **agent** you want to evaluate.
 For standard models like Claude, GPT, or Gemini our **prebuilt harnesses** and our optional inference gateway
 let you switch between models just by choosing their name. 
 
-Running the agent evaluation produces a **run** (one rollout). Every run is recorded into a **trace** - a full,
-replayable timeline of everything the agent did and how it was graded. Running a whole taskset bundles all 
-the runs into a single **job**. HUD enables executing runs in parallel with full isolation out of the box, and every
+Running the agent evaluation drives a **run** (one rollout), which is recorded into a **trace** - a full,
+replayable timeline of everything the agent did and how it was graded. Running a whole taskset bundles all
+the traces into a single **job**. HUD enables executing runs in parallel with full isolation out of the box, and every
 run is traced on the [platform](https://hud.ai), so you can see exactly what the agent did in realtime.
 
 | Concept | What it is in HUD |
 | --- | --- |
 | [**Agent**](/v6/reference/agents) | A model paired with a harness that drives it - plugged into an environment's capabilities to attempt tasks and be graded. |
-| [**Run**](/v6/reference/types#run) | A single rollout - one agent attempting one task - that produces a reward. |
-| [**Trace**](/v6/reference/types#trace) | The full, replayable timeline of a run: every action, observation, and grade. |
-| [**Job**](/v6/reference/types#job) | A collection of runs grouped together - e.g. a whole taskset evaluated by an agent. |
+| [**Run**](/v6/reference/types#run) | The live handle an agent drives while it attempts one task. |
+| [**Trace**](/v6/reference/types#trace) | The graded record of one rollout: every action, observation, and the reward. |
+| [**Job**](/v6/reference/types#job) | A collection of traces grouped together - e.g. a whole taskset evaluated by an agent. |
 
 <Accordion title="Part 4: Run your agent">
 

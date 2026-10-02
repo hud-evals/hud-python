@@ -42,23 +42,23 @@ SNAPSHOT = snapshot_name()
 TRAIN_VARIANTS = range(16)  # 16-23 held out for evaluation
 
 
-def _samples(runs: list) -> list:
+def _samples(traces: list) -> list:
     return [
         sample
-        for run in runs
-        for sample in run.trace.collect(
+        for trace in traces
+        for sample in trace.collect(
             lambda s: s.sample if isinstance(s, AgentStep) and s.sample else None
         )
     ]
 
 
-def _group_spread(runs: list) -> float | None:
+def _group_spread(traces: list) -> float | None:
     """Mean within-group reward stdev — the quantity GRPO turns into advantage."""
     groups: dict[str, list[float]] = {}
-    for run in runs:
-        gid = getattr(run, "group_id", None)
+    for trace in traces:
+        gid = getattr(trace, "group_id", None)
         if gid is not None:
-            groups.setdefault(gid, []).append(run.reward or 0.0)
+            groups.setdefault(gid, []).append(trace.reward or 0.0)
     spreads = [statistics.pstdev(v) for v in groups.values() if len(v) > 1]
     return round(statistics.mean(spreads), 4) if spreads else None
 
@@ -124,21 +124,21 @@ async def main(
             if stopping.is_set():
                 print("stop requested — exiting cleanly", flush=True)
                 break
-            batch_start = len(session.runs)
+            batch_start = len(session.traces)
 
             t0 = time.perf_counter()
             await taskset.run(
                 agent, runtime=runtime, job=session, group=group, max_concurrent=concurrent
             )
             rollout_s = time.perf_counter() - t0
-            batch = session.runs[batch_start:]
-            failed = {id(r) for r in session.errors}
-            failed |= {id(r) for r in batch if r.trace.stop_reason == "timeout"}
+            batch = session.traces[batch_start:]
+            failed = {id(t) for t in session.errors}
+            failed |= {id(t) for t in batch if t.stop_reason == "timeout"}
             trainable = [
-                r
+                t
                 for i in range(0, len(batch), group)
                 if not any(id(g) in failed for g in batch[i : i + group])
-                for r in batch[i : i + group]
+                for t in batch[i : i + group]
             ]
 
             samples = _samples(trainable)

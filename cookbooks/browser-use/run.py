@@ -13,8 +13,8 @@ from hud import Taskset
 
 async def main(source: str) -> None:
     job = await Taskset.from_file(source).run(BrowserUseAgent(BrowserUseConfig()))
-    for run in job.runs:
-        print(f"{run.slug}: reward {run.reward} ({run.trace.content!r})")
+    for trace in job.traces:
+        print(f"{trace.slug}: reward {trace.reward} ({trace.content!r})")
 
 
 if __name__ == "__main__":

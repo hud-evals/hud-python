@@ -24,8 +24,17 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    SerializeAsAny,
+    model_validator,
+)
 
+from hud.graders.results import SubScore
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -446,21 +455,60 @@ StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malfo
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 
-class Trace(BaseModel):
-    """The agent's trajectory for one rollout — ordered ``Step``s that ship as spans.
+class Grade(BaseModel):
+    """The environment's verdict on one evaluation.
 
-    A serializable list of ordered ``Step``s plus the run summary: ``status``
-    and the final ``content`` (the graded answer). Everything else the summary
-    exposes is *derived* from the steps — the steps are the record, the
-    summary is a view. :meth:`final` and :meth:`collect` are the two derivation
-    shapes (newest answer wins / every answer in order); ``error`` is a view
-    built on them, and family-specific reads use the same queries with family
+    ``raw`` is the grade frame as the environment returned it; ``content`` is
+    the grader's message (the agent's answer is ``Trace.content``).
+    """
+
+    reward: float = 0.0
+    done: bool = True
+    content: str | None = None
+    info: dict[str, Any] = Field(default_factory=dict)
+    is_error: bool = False
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+    _evaluation: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, context: Any, /) -> None:
+        # Malformed subscores fail here, where the grade is built, not when read.
+        evaluation = dict(self.raw)
+        if isinstance(subscores := evaluation.get("subscores"), list):
+            evaluation["subscores"] = [
+                SubScore.model_validate(subscore).to_summary() for subscore in subscores
+            ]
+        self._evaluation = evaluation
+
+    @property
+    def evaluation(self) -> dict[str, Any]:
+        """A persistence-safe view of ``raw``: subscores reduced to their summaries."""
+        return dict(self._evaluation)
+
+    @classmethod
+    def ungraded(cls) -> Grade:
+        """The grade of a trace that has not been graded."""
+        return cls(is_error=True, content="not graded")
+
+
+class Trace(BaseModel):
+    """The record of one graded evaluation — ordered ``Step``s that ship as spans.
+
+    A serializable list of ordered ``Step``s plus the outcome: ``status``, the
+    final ``content`` (the agent's answer), the environment's ``grade``, and
+    the identity the platform keys it by. Everything else the summary exposes
+    is *derived* from the steps — the steps are the record, the summary is a
+    view. :meth:`final` and :meth:`collect` are the two derivation shapes
+    (newest answer wins / every answer in order); ``error`` is a view built on
+    them, and family-specific reads use the same queries with family
     vocabulary at the call site (e.g. the tool-agent family's reply citations,
     or its token samples for an external trainer). The unit of training
     data — family payloads on the steps carry the trainable record.
     :meth:`record` is the single write path: it appends *and* streams the
-    step to the platform. The task lifecycle (prompt, reward, evaluation)
-    and the live connection live on ``Run``, not here.
+    step to the platform. A live :class:`~hud.Run` writes one while its agent
+    runs; :func:`~hud.eval.run.rollout` returns it graded.
 
     ``steps`` hold family subclasses at runtime; dumps serialize each step by
     its runtime type so family payloads survive serialization.
@@ -471,6 +519,8 @@ class Trace(BaseModel):
     status: TraceStatus | None = None
     stop_reason: StopReason | None = None
     content: str | None = Field(default=None)
+    #: The environment's verdict; :meth:`Grade.ungraded` until graded.
+    grade: Grade = Field(default_factory=Grade.ungraded)
 
     # Trajectory metadata that has no structured home (provider session info,
     # external-SDK run stats). Never load-bearing for the platform.
@@ -478,8 +528,35 @@ class Trace(BaseModel):
 
     # Keys the server-side-collected trajectory; None for eval-only runs.
     trace_id: str | None = Field(default=None)
+    #: The job and GRPO group this trace reports under, and the slug of the
+    #: task it came from (set when the evaluation finishes).
+    job_id: str | None = None
+    group_id: str | None = None
+    slug: str | None = None
+    #: Where the evaluation ran: the control-channel url it was driven over,
+    #: or ``hud://trace/<id>`` when it ran hosted.
+    runtime: str | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def failed(cls, error: str) -> Trace:
+        """The trace of an evaluation that failed before it started.
+
+        A rollout that fails *mid-run* keeps its real trace instead, with the
+        error recorded on it.
+        """
+        return cls(status="error", steps=[Step(source="system", error=error)])
+
+    @property
+    def reward(self) -> float:
+        """The graded reward (``grade.reward``)."""
+        return self.grade.reward
+
+    @property
+    def evaluation(self) -> dict[str, Any]:
+        """A persistence-safe view of the environment's evaluation."""
+        return self.grade.evaluation
 
     def final(self, get: Callable[[Step], T | None]) -> T | None:
         """The newest step's answer to *get* — the finalized-field query.
@@ -518,6 +595,21 @@ class Trace(BaseModel):
     def error(self) -> str | None:
         """The most recent step error, if any (errors live on steps)."""
         return self.final(lambda step: step.error)
+
+    @property
+    def prompt_text(self) -> str | None:
+        """The prompt the agent was given, as its opening user step recorded it.
+
+        Text turns joined by blank lines; ``None`` when no task ever started.
+        """
+        user = next((step for step in self.steps if step.source == "user"), None)
+        if user is None:
+            return None
+        return "\n\n".join(
+            message.content.text
+            for message in user.messages
+            if isinstance(message.content, TextContent) and message.content.text
+        )
 
     @model_validator(mode="after")
     def _number_steps(self) -> Trace:

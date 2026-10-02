@@ -89,7 +89,7 @@ async def main():
     job = await Taskset("libero-demo", TASKS).run(
         PI05Agent(), runtime=DockerRuntime("hud-libero-env"), max_concurrent=1,
     )
-    rewards = [run.reward for run in job.runs]
+    rewards = [trace.reward for trace in job.traces]
     print(f"success_rate={sum(rewards) / len(rewards):.2f}")
 
 asyncio.run(main())

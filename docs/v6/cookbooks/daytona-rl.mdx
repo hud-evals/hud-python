@@ -62,10 +62,10 @@ taskset = Taskset("calc", [fix_calc(variant=v) for v in range(16)])
 
 session = await Job.start("calc-rl", group=GROUP)
 for step in range(10):
-    start = len(session.runs)
+    start = len(session.traces)
     await taskset.run(agent, runtime=runtime, job=session,
                       group=GROUP, max_concurrent=WIDTH)
-    batch = session.runs[start:]
+    batch = session.traces[start:]
     for i in range(0, len(batch), CHUNK):
         await trainer.forward_backward(batch[i:i + CHUNK],
                                        loss_fn="importance_sampling", group_size=GROUP)

@@ -42,7 +42,7 @@ flowchart TD
     end
     env <-->|prompt · response| agent
     agent <-->|sample request · response| sampler
-    env -->|graded Runs| batch
+    env -->|graded traces| batch
     batch -->|training datums| trainer
     trainer -->|save updated snapshot| sampler
 
@@ -67,7 +67,7 @@ The boundary between the two systems is explicit:
 | Groups repeated attempts at the same task | Stores training state and sampler checkpoints |
 
 The cookbook supplies the `FireworksAgent` adapter, computes group-relative advantages, and converts
-completed Runs into Fireworks training datums.
+completed traces into Fireworks training datums.
 
 The example uses multiplication because it is small and easy to verify. HUD also represents
 environments with browsers, code execution, games, APIs, and stateful tools; the adapter changes
@@ -216,7 +216,7 @@ Each rollout can generate up to 2,048 tokens and incurs Fireworks usage. Charges
 prefill, sampled output, and training tokens at the selected model's
 [serverless rates](https://docs.fireworks.ai/fine-tuning/training-api/serverless#pricing).
 
-Each step saves the current adapter for sampling, runs the HUD taskset, converts graded runs into
+Each step saves the current adapter for sampling, runs the HUD taskset, converts graded traces into
 training datums, and applies an update when at least one group has reward variation:
 
 _Conceptual excerpt from `train.py`; this is not standalone code._
@@ -236,7 +236,7 @@ job = await taskset.run(
     group=group_size,
 )
 
-datums, kept_groups = make_training_batch(job.runs)
+datums, kept_groups = make_training_batch(job.traces)
 if datums:
     training_client.forward_backward(
         datums,
@@ -246,7 +246,7 @@ if datums:
 ```
 
 `FireworksAgent` adapts the sampler to HUD's `Agent` interface. It records the prompt tokens,
-generated tokens, and sampling logprobs on each `Run`. `make_training_batch` then:
+generated tokens, and sampling logprobs on each trace. `make_training_batch` then:
 
 1. Groups runs that attempted the same task.
 2. Standardizes rewards within each group.

@@ -1,9 +1,8 @@
 """Job: the platform receipt for one execution — there are no standalone traces.
 
-The live execution atom remains :class:`hud.Run`; a ``Job`` collects the
-graded runs of one batch under one platform job id. Every trace reports under
-a job: the scheduler's batch job, or the single-run job :func:`rollout`
-registers when called bare.
+A ``Job`` collects the graded traces (:class:`~hud.types.Trace`) of one batch
+under one platform job id. Every trace reports under a job: the scheduler's batch
+job, or the single-run job :func:`rollout` registers when called bare.
 
 Backend reporting contract:
 - ``POST /trace/job/{job_id}/enter`` — register the batch job.
@@ -25,18 +24,18 @@ from typing import TYPE_CHECKING, Any
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
-    from .run import Run
+    from hud.types import Trace
 
 logger = logging.getLogger("hud.eval.job")
 
 
 @dataclass(slots=True)
 class Job:
-    """Platform receipt for one execution: the graded runs under one job id."""
+    """Platform receipt for one execution: the graded traces under one job id."""
 
     id: str
     name: str
-    runs: list[Run] = field(default_factory=list)
+    traces: list[Trace] = field(default_factory=list)
     group: int = 1
     #: Platform taskset id this job runs, when it's a synced taskset
     #: (``Taskset.from_api``). Links the job to that taskset on the platform.
@@ -47,7 +46,7 @@ class Job:
         """Open a job spanning multiple scheduler calls.
 
         A scheduler call mints its own job by default; pass a started job as
-        ``job=`` to ``Task.run`` / ``Taskset.run`` to accumulate every run of a
+        ``job=`` to ``Task.run`` / ``Taskset.run`` to accumulate every trace of a
         longer arc — a training session, a chat conversation — under one id.
         """
         job = cls(id=uuid.uuid4().hex, name=name, group=group, taskset_id=taskset_id)
@@ -56,29 +55,29 @@ class Job:
 
     @property
     def reward(self) -> float:
-        """Mean reward across runs whose grade is not an error (0.0 when there are none)."""
-        graded = [run.reward for run in self.runs if not run.grade.is_error]
+        """Mean reward across traces whose grade is not an error (0.0 when there are none)."""
+        graded = [trace.reward for trace in self.traces if not trace.grade.is_error]
         if not graded:
             return 0.0
         return sum(graded) / len(graded)
 
     @property
-    def errors(self) -> list[Run]:
-        """Runs whose grade is an error, excluded from :attr:`reward`."""
-        return [run for run in self.runs if run.grade.is_error]
+    def errors(self) -> list[Trace]:
+        """Traces whose grade is an error, excluded from :attr:`reward`."""
+        return [trace for trace in self.traces if trace.grade.is_error]
 
     @property
-    def results(self) -> dict[str, list[Run]]:
-        """Runs grouped by task slug — the safe alternative to positional zip.
+    def results(self) -> dict[str, list[Trace]]:
+        """Traces grouped by task slug — the safe alternative to positional zip.
 
-        List-valued because ``group > 1`` produces several runs per task, and
+        List-valued because ``group > 1`` produces several traces per task, and
         in slug order within each group. Use this instead of ``zip(tasks,
-        job.runs)``, which silently misaligns once grouping or task ordering
+        job.traces)``, which silently misaligns once grouping or task ordering
         changes.
         """
-        out: dict[str, list[Run]] = {}
-        for run in self.runs:
-            out.setdefault(run.slug or "", []).append(run)
+        out: dict[str, list[Trace]] = {}
+        for trace in self.traces:
+            out.setdefault(trace.slug or "", []).append(trace)
         return out
 
 
@@ -136,23 +135,23 @@ async def trace_enter(
     )
 
 
-async def trace_exit(run: Run) -> None:
-    """Report one finished rollout (status / reward / error / metadata) from its ``Run``."""
-    if not _reporting_enabled() or run.trace.trace_id is None:
+async def trace_exit(trace: Trace) -> None:
+    """Report one finished rollout (status / reward / error / metadata) from its trace."""
+    if not _reporting_enabled() or trace.trace_id is None:
         return
     await _report(
-        f"/trace/{run.trace.trace_id}/exit",
+        f"/trace/{trace.trace_id}/exit",
         {
-            "status": run.trace.status or "completed",
-            "reward": run.reward,
-            # Recovered step errors stay on the steps; only an errored run
+            "status": trace.status or "completed",
+            "reward": trace.reward,
+            # Recovered step errors stay on the steps; only an errored trace
             # reports a trace-level error.
-            "error": run.trace.error if run.trace.is_error else None,
-            "evaluation_result": run.evaluation or None,
-            "stop_reason": run.trace.stop_reason,
+            "error": trace.error if trace.is_error else None,
+            "evaluation_result": trace.evaluation or None,
+            "stop_reason": trace.stop_reason,
             # Trajectory metadata the platform stores on the trace for display;
             # never load-bearing.
-            "metadata": run.trace.extra or None,
+            "metadata": trace.extra or None,
         },
     )
 

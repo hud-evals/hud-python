@@ -39,8 +39,8 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.runtime import Provider, Runtime
+    from hud.types import Trace
 
-    from .run import Run
     from .task import Task
 
 logger = logging.getLogger("hud.eval.taskset")
@@ -273,7 +273,7 @@ class Taskset:
         trace under it — or, given
         an open ``job`` (:meth:`Job.start`), accumulates this batch into it
         instead, so a longer arc (a training session) spans many calls under
-        one id. Returned ``job.runs`` preserves expansion order (task-major,
+        one id. Returned ``job.traces`` preserves expansion order (task-major,
         then group).
 
         ``group`` is the statistical-repeat multiplier (one GRPO group_id per
@@ -338,7 +338,7 @@ class Taskset:
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-        async def _run(task: Task, group_id: str) -> list[Run]:
+        async def _run(task: Task, group_id: str) -> list[Trace]:
             assert placement is not None  # only reached when tasks were expanded
             if isinstance(placement, HostedRuntime):
                 return [
@@ -361,7 +361,7 @@ class Taskset:
                 )
             ]
 
-        async def _one(task: Task, group_id: str) -> list[Run]:
+        async def _one(task: Task, group_id: str) -> list[Trace]:
             if sem is None:
                 return await _run(task, group_id)
             async with sem:
@@ -381,7 +381,7 @@ class Taskset:
             if isinstance(placement, contextlib.AbstractAsyncContextManager):
                 await stack.enter_async_context(placement)
             parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.runs.extend(run for part in parts for run in part)
+        job.traces.extend(trace for part in parts for trace in part)
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed
         # sleep), so the timeout is only a safety cap for a wedged network.
