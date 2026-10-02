@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, OpenAIChatConfig, Sample, Usage
 from hud.settings import settings
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import ToolCall, ToolResult
 from hud.utils import gateway
 
 from .tools import (
@@ -28,9 +28,7 @@ from .tools import (
 from .tools.base import format_chat_result
 
 if TYPE_CHECKING:
-    import mcp.types as mcp_types
-
-
+    from hud.types import PromptMessage
 logger = logging.getLogger(__name__)
 
 
@@ -91,9 +89,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(
-        self, *, prompt: list[mcp_types.PromptMessage]
-    ) -> OpenAIChatRunState:
+    async def _initialize_state(self, *, prompt: list[PromptMessage]) -> OpenAIChatRunState:
         return OpenAIChatRunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> ChatCompletionMessageParam:
@@ -107,8 +103,8 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
 
     def _format_result(
         self,
-        call: MCPToolCall,
-        result: MCPToolResult,
+        call: ToolCall,
+        result: ToolResult,
         state: RunState[ChatCompletionMessageParam],
     ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam] | None:
         return format_chat_result(call, result)
@@ -165,7 +161,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         choice = response.choices[0]
         message = choice.message
         function_calls = [tc for tc in message.tool_calls or [] if tc.type == "function"]
-        tool_calls: list[MCPToolCall] = []
+        tool_calls: list[ToolCall] = []
         recorded_calls: list[dict[str, Any]] = []
         for tc in function_calls:
             name, raw = tc.function.name, tc.function.arguments
@@ -178,7 +174,7 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
                 logger.warning("Malformed tool-call arguments for %s: %s", name, e)
                 arguments = raw
                 recorded = "{}"  # replayed history must stay parseable
-            tool_calls.append(MCPToolCall(id=tc.id, name=name, arguments=arguments))
+            tool_calls.append(ToolCall(id=tc.id, name=name, arguments=arguments))
             recorded_calls.append(
                 {"id": tc.id, "type": "function", "function": {"name": name, "arguments": recorded}}
             )

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import asyncssh
 import fastmcp
+import mcp.types as mcp_types
 from fastmcp.exceptions import ToolError
 from pydantic import TypeAdapter
 
@@ -38,6 +39,7 @@ SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
 _BRIDGE_READY_TIMEOUT_S = 5.0
 _REMOTE_TMP = PurePosixPath("/") / "tmp"
+_MCP_CONTENT = TypeAdapter(list[mcp_types.ContentBlock])
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,12 @@ def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding)
         result = await tool.execute(arguments)
         if result.isError:
             raise ToolError(result_text(result) or "computer action failed")
-        return result.content
+        return _MCP_CONTENT.validate_python(
+            [
+                block.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for block in result.content
+            ]
+        )
 
     return mcp
 

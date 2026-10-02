@@ -5,11 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
-from hud.types import MCPToolResult
+from hud.types import ImageContent, TextContent, ToolResult
 
 from .base import OpenAIToolSpec
 
@@ -21,16 +19,16 @@ OPENAI_COMPUTER_SPEC = OpenAIToolSpec(
 )
 
 
-def last_image_data(result: MCPToolResult) -> str | None:
+def last_image_data(result: ToolResult) -> str | None:
     """Base64 data of the most recent screenshot block in a tool result."""
     image = last_image_content(result)
     return image.data if image is not None else None
 
 
-def last_image_content(result: MCPToolResult) -> mcp_types.ImageContent | None:
+def last_image_content(result: ToolResult) -> ImageContent | None:
     """Most recent screenshot block in a tool result."""
     for block in reversed(result.content):
-        if isinstance(block, mcp_types.ImageContent):
+        if isinstance(block, ImageContent):
             return block
     return None
 
@@ -83,7 +81,7 @@ class OpenAIComputerTool(RFBTool):
     def to_params(self) -> Any:
         return {"type": "computer"}
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         actions = arguments.get("actions")
         if "actions" in arguments:
             if not isinstance(actions, list):
@@ -91,7 +89,7 @@ class OpenAIComputerTool(RFBTool):
             action_list = cast("list[Any]", actions)
             if not action_list:
                 return await self._error_result("actions list is empty")
-            result = MCPToolResult(content=[], isError=False)
+            result = ToolResult(content=[], isError=False)
             for index, raw_action in enumerate(action_list):
                 if not isinstance(raw_action, dict):
                     return await self._error_result("actions must be objects")
@@ -105,7 +103,7 @@ class OpenAIComputerTool(RFBTool):
             return result
         return await self._execute_one(arguments, ensure_screenshot=True)
 
-    async def _error_result(self, message: str) -> MCPToolResult:
+    async def _error_result(self, message: str) -> ToolResult:
         result = tool_err(message)
         try:
             result.content.extend((await self.screenshot()).content)
@@ -121,7 +119,7 @@ class OpenAIComputerTool(RFBTool):
         arguments: dict[str, Any],
         *,
         ensure_screenshot: bool,
-    ) -> MCPToolResult:
+    ) -> ToolResult:
         action_type = arguments.get("type")
         if not isinstance(action_type, str):
             return await self._error_result("type is required")
@@ -130,8 +128,8 @@ class OpenAIComputerTool(RFBTool):
             text = arguments.get("text")
             if not isinstance(text, str):
                 return await self._error_result("text is required for response")
-            result = MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text=text)],
+            result = ToolResult(
+                content=[TextContent(type="text", text=text)],
             )
             if ensure_screenshot:
                 result.content.extend((await self.screenshot()).content)
@@ -147,7 +145,7 @@ class OpenAIComputerTool(RFBTool):
 
         if action_type == "screenshot" or ensure_screenshot:
             return await self.screenshot()
-        return MCPToolResult(content=[], isError=False)
+        return ToolResult(content=[], isError=False)
 
     async def _dispatch(self, action_type: str, args: dict[str, Any]) -> None:
         if action_type == "screenshot":

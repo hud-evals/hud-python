@@ -8,8 +8,6 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
@@ -18,7 +16,7 @@ from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient
 from hud.capabilities.ssh import SSHConnectionError
-from hud.types import MCPToolCall, MCPToolResult, Step, StopCondition
+from hud.types import PromptMessage, Step, StopCondition, TextContent, Tool, ToolCall, ToolResult
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -51,9 +49,9 @@ class DegenerateTurnError(Exception):
     """
 
 
-def _message_text(message: mcp_types.PromptMessage) -> str:
+def _message_text(message: PromptMessage) -> str:
     content = message.content
-    return content.text if isinstance(content, mcp_types.TextContent) else ""
+    return content.text if isinstance(content, TextContent) else ""
 
 
 @dataclass
@@ -117,7 +115,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
 
         mcp_clients = [c for c in connections.values() if isinstance(c, MCPClient)]
         mcp_lists = await asyncio.gather(*(c.list_tools() for c in mcp_clients))
-        mcp_by_client: dict[MCPClient, list[mcp_types.Tool]] = dict(
+        mcp_by_client: dict[MCPClient, list[Tool]] = dict(
             zip(mcp_clients, mcp_lists, strict=True),
         )
         qualify_mcp_names = len(mcp_clients) > 1
@@ -202,7 +200,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                     if follow_up is not None:
                         text = (
                             follow_up.content.text
-                            if isinstance(follow_up.content, mcp_types.TextContent)
+                            if isinstance(follow_up.content, TextContent)
                             else ""
                         )
                         state.messages.append(self._format_user_text(text))
@@ -272,13 +270,13 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
 
     async def _dispatch_call(
         self,
-        call: MCPToolCall,
+        call: ToolCall,
         state: RunState[MessageT],
-    ) -> MCPToolResult:
+    ) -> ToolResult:
         if isinstance(call.arguments, str):
-            return MCPToolResult(
+            return ToolResult(
                 content=[
-                    mcp_types.TextContent(
+                    TextContent(
                         type="text",
                         text=(
                             f"the arguments for this {call.name!r} call arrived incomplete "
@@ -291,8 +289,8 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
             )
         tool = state.tools.get(call.name)
         if tool is None:
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text=f"unknown tool: {call.name!r}")],
+            return ToolResult(
+                content=[TextContent(type="text", text=f"unknown tool: {call.name!r}")],
                 isError=True,
             )
         args = call.arguments or {}
@@ -306,9 +304,9 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                 except TimeoutError:
                     if not deadline.expired():
                         raise
-                    return MCPToolResult(
+                    return ToolResult(
                         content=[
-                            mcp_types.TextContent(
+                            TextContent(
                                 type="text",
                                 text=(
                                     f"{call.name} timed out after {timeout:g}s; "
@@ -324,17 +322,17 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         except SSHConnectionError as exc:
             logger.exception("tool %s lost its SSH connection", call.name)
             return SSHInfrastructureErrorResult(
-                content=[mcp_types.TextContent(type="text", text=f"tool error: {exc}")],
+                content=[TextContent(type="text", text=f"tool error: {exc}")],
                 isError=True,
             )
         except Exception as exc:
             logger.exception("tool %s failed", call.name)
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text=f"tool error: {exc}")],
+            return ToolResult(
+                content=[TextContent(type="text", text=f"tool error: {exc}")],
                 isError=True,
             )
 
-    def _initial_messages(self, prompt: list[mcp_types.PromptMessage]) -> list[MessageT]:
+    def _initial_messages(self, prompt: list[PromptMessage]) -> list[MessageT]:
         """Map normalized prompt turns onto provider messages."""
         return [self._format_message(message.role, _message_text(message)) for message in prompt]
 
@@ -343,9 +341,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         return self._format_message("user", text)
 
     @abstractmethod
-    async def _initialize_state(
-        self, *, prompt: list[mcp_types.PromptMessage]
-    ) -> RunState[MessageT]:
+    async def _initialize_state(self, *, prompt: list[PromptMessage]) -> RunState[MessageT]:
         """Build fresh run state from the prompt turns (use ``self._initial_messages``)."""
 
     @abstractmethod
@@ -369,8 +365,8 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     @abstractmethod
     def _format_result(
         self,
-        call: MCPToolCall,
-        result: MCPToolResult,
+        call: ToolCall,
+        result: ToolResult,
         state: RunState[MessageT],
     ) -> MessageT | list[MessageT] | None:
         """Convert a tool result into one or more provider messages, or None to skip."""

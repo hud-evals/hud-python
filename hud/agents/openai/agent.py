@@ -27,7 +27,7 @@ from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 from hud.agents.tool_agent import DegenerateTurnError, RunState, ToolAgent
 from hud.agents.tools.base import result_text
 from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import ToolCall, ToolResult
 from hud.utils import gateway
 
 from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
@@ -36,9 +36,7 @@ from .tools.coding import shell_output
 from .tools.computer import last_image_content
 
 if TYPE_CHECKING:
-    import mcp.types as mcp_types
-
-
+    from hud.types import PromptMessage
 logger = logging.getLogger(__name__)
 
 
@@ -88,7 +86,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(self, *, prompt: list[mcp_types.PromptMessage]) -> OpenAIRunState:
+    async def _initialize_state(self, *, prompt: list[PromptMessage]) -> OpenAIRunState:
         return OpenAIRunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> ResponseInputItemParam:
@@ -102,8 +100,8 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
     def _format_result(
         self,
-        call: MCPToolCall,
-        result: MCPToolResult,
+        call: ToolCall,
+        result: ToolResult,
         state: RunState[ResponseInputItemParam],
     ) -> ResponseInputItemParam | list[ResponseInputItemParam] | None:
         tool = state.tools.get(call.name)
@@ -261,7 +259,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         text_chunks: list[str] = []
         reasoning_chunks: list[str] = []
         citations: list[Citation] = []
-        tool_calls: list[MCPToolCall] = []
+        tool_calls: list[ToolCall] = []
 
         for item in response.output:
             match item.type:
@@ -310,7 +308,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                         logger.warning("Malformed tool-call arguments for %s: %s", item.name, e)
                         fn_arguments = item.arguments
                     tool_calls.append(
-                        MCPToolCall(name=item.name or "", arguments=fn_arguments, id=item.call_id)
+                        ToolCall(name=item.name or "", arguments=fn_arguments, id=item.call_id)
                     )
                 case "computer_call":
                     if item.actions:
@@ -329,10 +327,10 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
                             check.model_dump() if hasattr(check, "model_dump") else check
                             for check in item.pending_safety_checks
                         ]
-                    tool_calls.append(MCPToolCall.model_validate(call_dict))
+                    tool_calls.append(ToolCall.model_validate(call_dict))
                 case "shell_call":
                     tool_calls.append(
-                        MCPToolCall(
+                        ToolCall(
                             name="shell",
                             arguments=item.action.to_dict(),
                             id=item.call_id,

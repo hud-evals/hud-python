@@ -1,27 +1,24 @@
 """MCPClient — fastmcp.Client wrapper that fits the CapabilityClient contract.
 
-Establishes an MCP session (initialize handshake) on ``connect``. Exposes
-``list_tools`` for post-handshake discovery and ``call_tool`` for invocation,
-both speaking raw MCP types so they slot into ``MCPTool``.
+Establishes an MCP session (initialize handshake) on ``connect``. ``list_tools``
+and ``call_tool`` translate MCP's models into HUD's own :mod:`hud.types`
+shapes, so MCP's types stay at this boundary.
 """
 
 from __future__ import annotations
 
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import Any, ClassVar, Self
 
 import fastmcp
+import mcp.types as mcp_types
 from fastmcp.client.auth import BearerAuth
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 
 from hud.telemetry.context import get_current_trace_id
+from hud.types import Tool, ToolResult
 
 from .base import Capability, CapabilityClient
-
-if TYPE_CHECKING:
-    import mcp.types as mcp_types
-
-    from hud.types import MCPToolResult
 
 _TRACE_ID_META_KEY = "hud/trace-id"
 
@@ -35,9 +32,8 @@ def get_mcp_trace_id() -> str | None:
     except RuntimeError:
         return None
     request_context = context.request_context
-    meta = request_context.meta if request_context else None
-    extra = (meta.model_extra or {}) if meta else {}
-    trace_id = extra.get(_TRACE_ID_META_KEY)
+    meta = (request_context.meta if request_context else None) or {}
+    trace_id = meta.get(_TRACE_ID_META_KEY)
     if trace_id is None:
         trace_id = get_http_headers().get("trace-id")
     if trace_id is not None and not isinstance(trace_id, str):
@@ -75,29 +71,27 @@ class MCPClient(CapabilityClient):
         await stack.enter_async_context(client)
         return cls(cap, client, stack)
 
-    async def list_tools(self) -> list[mcp_types.Tool]:
+    async def list_tools(self) -> list[Tool]:
         """Tools advertised by the MCP server (initialize already complete)."""
-        return await self._client.list_tools()
+        tools = await self._client.list_tools()
+        return [Tool.model_validate(tool.model_dump(mode="json", by_alias=True)) for tool in tools]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        """Invoke a tool, returning the raw MCP ``CallToolResult``.
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        """Invoke a tool and return its result as a HUD ``ToolResult``.
 
-        FastMCP and mcp-python use slightly different result shapes; normalize the
-        alternate field names (``is_error`` / ``structured_content``) and a missing
-        ``content`` so callers always get a canonical ``CallToolResult``.
+        The result is not checked against the tool's declared output schema: a
+        server whose structured content drifts from its schema still hands the
+        agent the content it returned.
         """
-        from hud.types import MCPToolResult as _Result
-
         trace_id = get_current_trace_id()
         meta = {_TRACE_ID_META_KEY: trace_id} if trace_id is not None else None
-        raw = await self._client.call_tool_mcp(name=name, arguments=arguments, meta=meta)
-        data = raw.model_dump()
-        if "isError" not in data and "is_error" in data:
-            data["isError"] = data.pop("is_error")
-        if "structuredContent" not in data and "structured_content" in data:
-            data["structuredContent"] = data.pop("structured_content")
-        data.setdefault("content", [])
-        return _Result.model_validate(data)
+        raw = await self._client.session.send_request(
+            mcp_types.CallToolRequest(
+                params=mcp_types.CallToolRequestParams(name=name, arguments=arguments, _meta=meta),
+            ),
+            mcp_types.CallToolResult,
+        )
+        return ToolResult.model_validate(raw.model_dump(mode="json", by_alias=True))
 
     async def close(self) -> None:
         await self._exit_stack.aclose()

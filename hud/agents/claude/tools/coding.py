@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
-from hud.types import MCPToolResult
+from hud.types import TextContent, ToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
 
@@ -108,11 +106,11 @@ class ClaudeBashTool(SSHTool):
             {"type": self.spec.api_type, "name": self.name},
         )
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         if arguments.get("restart"):
-            return MCPToolResult(
+            return ToolResult(
                 content=[
-                    mcp_types.TextContent(
+                    TextContent(
                         type="text",
                         text="restart is unnecessary; each command runs in a fresh shell session",
                     )
@@ -120,9 +118,9 @@ class ClaudeBashTool(SSHTool):
             )
         command = arguments.get("command")
         if not command:
-            return MCPToolResult(
+            return ToolResult(
                 content=[
-                    mcp_types.TextContent(
+                    TextContent(
                         type="text",
                         text="command is required unless restart is true",
                     ),
@@ -163,7 +161,7 @@ class ClaudeTextEditorTool(SSHTool):
             {"type": self.spec.api_type, "name": self.provider_name},
         )
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         command = arguments.get("command")
         path = arguments.get("path")
         if not isinstance(path, str):
@@ -190,7 +188,7 @@ class ClaudeTextEditorTool(SSHTool):
             case _:
                 return tool_err(f"unknown editor command: {command!r}")
 
-    async def _str_replace(self, path: str, old: str, new: str) -> MCPToolResult:
+    async def _str_replace(self, path: str, old: str, new: str) -> ToolResult:
         existing = await self.file_read(path)
         if existing.isError:
             return existing
@@ -202,7 +200,7 @@ class ClaudeTextEditorTool(SSHTool):
             return tool_err(f"old_str matches {count} times in {path}; must be unique")
         return await self.file_write(path, text.replace(old, new, 1))
 
-    async def _insert(self, path: str, line: int, text: str) -> MCPToolResult:
+    async def _insert(self, path: str, line: int, text: str) -> ToolResult:
         existing = await self.file_read(path)
         if existing.isError:
             return existing

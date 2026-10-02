@@ -12,13 +12,11 @@ import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
 from hud.agents.tools.rfb import keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
-from hud.types import MCPToolResult
+from hud.types import ImageContent, ToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
 
@@ -233,7 +231,7 @@ class ClaudeComputerTool(RFBTool):
             },
         )
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         action = arguments.get("action")
         try:
             return await self._dispatch(action, arguments)
@@ -243,7 +241,7 @@ class ClaudeComputerTool(RFBTool):
 
     # ─── action dispatch ──────────────────────────────────────────────
 
-    async def _dispatch(self, action: str | None, arguments: dict[str, Any]) -> MCPToolResult:
+    async def _dispatch(self, action: str | None, arguments: dict[str, Any]) -> ToolResult:
         match action:
             case "screenshot":
                 return await self.screenshot()
@@ -359,7 +357,7 @@ class ClaudeComputerTool(RFBTool):
 
     # ─── zoom ────────────────────────────────────────────────────────
 
-    async def _zoom(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def _zoom(self, arguments: dict[str, Any]) -> ToolResult:
         region = arguments.get("region")
         if not isinstance(region, (list, tuple)):
             return tool_err("region must be [x0, y0, x1, y1]")
@@ -372,9 +370,9 @@ class ClaudeComputerTool(RFBTool):
             return tool_err("region must contain 4 integers")
         screenshot, _ = await self.client.screenshot_png("image/png")
         cropped, mime_type = _crop_png(screenshot, (x0, y0, x1, y1), self.screenshot_encoding)
-        return MCPToolResult(
+        return ToolResult(
             content=[
-                mcp_types.ImageContent(
+                ImageContent(
                     type="image",
                     mimeType=mime_type,
                     data=base64.b64encode(cropped).decode("ascii"),

@@ -15,10 +15,9 @@ the ``Chat`` runner::
 
 from __future__ import annotations
 
-from mcp.types import PromptMessage, TextContent
-
 from hud.environment import Environment
 from hud.graders import EvaluationResult
+from hud.types import PromptMessage, TextContent
 
 env = Environment(name="chat")
 

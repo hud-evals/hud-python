@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from hud.agents.types import ToolAgentConfig
     from hud.capabilities import RFBClient
     from hud.capabilities.rfb import ScreenshotEncoding
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class GeminiComputerTool(RFBTool):
             ),
         )
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         action = arguments.get("action")
         if not isinstance(action, str):
             return tool_err("action is required")
@@ -118,7 +118,7 @@ class GeminiComputerTool(RFBTool):
             logger.exception("GeminiComputerTool action %s failed", action)
             return tool_err(f"computer action {action!r} failed: {exc}")
 
-    async def _dispatch(self, action: str, args: dict[str, Any]) -> MCPToolResult:
+    async def _dispatch(self, action: str, args: dict[str, Any]) -> ToolResult:
         match action:
             case "take_screenshot":
                 pass

@@ -7,8 +7,6 @@ import logging
 import shlex
 from typing import TYPE_CHECKING, Any, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.base import Agent
 from hud.agents.cli import (
     PROCESS_BOUND_CREDENTIAL,
@@ -21,7 +19,7 @@ from hud.agents.cli import (
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
-from hud.types import MCPToolCall, MCPToolResult, Step
+from hud.types import Step, TextContent, ToolCall, ToolResult
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -129,27 +127,27 @@ class CodexEvents:
         call_id = item["id"]
         match item["type"]:
             case "command_execution":
-                call = MCPToolCall(
+                call = ToolCall(
                     id=call_id,
                     name="shell",
                     arguments={"command": item["command"]},
                 )
-                result = MCPToolResult(
+                result = ToolResult(
                     call_id=call_id,
-                    content=[mcp_types.TextContent(type="text", text=item["aggregated_output"])],
+                    content=[TextContent(type="text", text=item["aggregated_output"])],
                     isError=item["status"] != "completed" or item["exit_code"] not in (None, 0),
                 )
             case "file_change":
                 changes = item["changes"]
-                call = MCPToolCall(
+                call = ToolCall(
                     id=call_id,
                     name="apply_patch",
                     arguments={"changes": changes},
                 )
-                result = MCPToolResult(
+                result = ToolResult(
                     call_id=call_id,
                     content=[
-                        mcp_types.TextContent(
+                        TextContent(
                             type="text",
                             text="\n".join(
                                 f"{change['kind']}: {change['path']}" for change in changes
@@ -159,7 +157,7 @@ class CodexEvents:
                     isError=item["status"] != "completed",
                 )
             case "mcp_tool_call":
-                call = MCPToolCall(
+                call = ToolCall(
                     id=call_id,
                     name=item["tool"],
                     provider_name=f"{item['server']}.{item['tool']}",
@@ -167,7 +165,7 @@ class CodexEvents:
                 )
                 raw_result = item.get("result") or {}
                 error = item.get("error")
-                result = MCPToolResult.model_validate(
+                result = ToolResult.model_validate(
                     {
                         "call_id": call_id,
                         "content": raw_result.get("content")
@@ -178,15 +176,15 @@ class CodexEvents:
                     }
                 )
             case "web_search":
-                call = MCPToolCall(
+                call = ToolCall(
                     id=call_id,
                     name="web_search",
                     arguments={"query": item["query"], "action": item["action"]},
                 )
-                result = MCPToolResult(
+                result = ToolResult(
                     call_id=call_id,
                     content=[
-                        mcp_types.TextContent(
+                        TextContent(
                             type="text",
                             text=json.dumps(item["action"], separators=(",", ":")),
                         )

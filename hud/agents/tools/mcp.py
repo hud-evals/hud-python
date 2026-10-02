@@ -14,9 +14,7 @@ from hud.agents.tools.base import AgentTool, AgentToolSpec
 from hud.capabilities import MCPClient
 
 if TYPE_CHECKING:
-    import mcp.types as mcp_types
-
-    from hud.types import MCPToolResult
+    from hud.types import Tool, ToolResult
 
 
 class MCPTool(AgentTool[MCPClient]):
@@ -29,7 +27,7 @@ class MCPTool(AgentTool[MCPClient]):
         *,
         spec: AgentToolSpec,
         client: MCPClient,
-        mcp_tool: mcp_types.Tool,
+        mcp_tool: Tool,
         provider_name: str | None = None,
     ) -> None:
         super().__init__(spec=spec, client=client)
@@ -40,7 +38,7 @@ class MCPTool(AgentTool[MCPClient]):
     def provider_name(self) -> str:
         return self._provider_name
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.client.call_tool(self.mcp_tool.name, arguments)
 
 

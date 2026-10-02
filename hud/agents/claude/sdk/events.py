@@ -6,12 +6,20 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-import mcp.types as mcp_types
 from anthropic.types.beta import BetaMessage
 
 from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.types import ToolStep
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import (
+    BlobResourceContents,
+    ContentBlock,
+    EmbeddedResource,
+    ImageContent,
+    TextContent,
+    TextResourceContents,
+    ToolCall,
+    ToolResult,
+)
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
@@ -26,7 +34,7 @@ class ClaudeEvents:
     def __init__(self, run: Run, *, started_at: str) -> None:
         self.run = run
         self.agent_started_at = started_at
-        self.pending_calls: dict[str, tuple[MCPToolCall, str]] = {}
+        self.pending_calls: dict[str, tuple[ToolCall, str]] = {}
         self.saw_result = False
         self.error: str | None = None
 
@@ -60,20 +68,18 @@ class ClaudeEvents:
 
                     raw_result = block.get("content")
                     raw_items = raw_result if isinstance(raw_result, list) else [raw_result]
-                    content: list[mcp_types.ContentBlock] = []
+                    content: list[ContentBlock] = []
                     for index, item in enumerate(raw_items):
                         if isinstance(item, str):
-                            content.append(mcp_types.TextContent(type="text", text=item))
+                            content.append(TextContent(type="text", text=item))
                             continue
                         match item["type"]:
                             case "text":
-                                content.append(
-                                    mcp_types.TextContent(type="text", text=item["text"])
-                                )
+                                content.append(TextContent(type="text", text=item["text"]))
                             case "image":
                                 source = item["source"]
                                 content.append(
-                                    mcp_types.ImageContent(
+                                    ImageContent(
                                         type="image",
                                         data=source["data"],
                                         mimeType=source["media_type"],
@@ -83,34 +89,30 @@ class ClaudeEvents:
                                 # The CLI's Read on a PDF.
                                 source = item["source"]
                                 uri = f"document://{call_id}/{index}"
-                                resource: mcp_types.ResourceContents = (
-                                    mcp_types.BlobResourceContents(
+                                resource: TextResourceContents | BlobResourceContents = (
+                                    BlobResourceContents(
                                         uri=uri,
                                         mimeType=source.get("media_type"),
                                         blob=source["data"],
                                     )
                                     if source["type"] == "base64"
-                                    else mcp_types.TextResourceContents(
+                                    else TextResourceContents(
                                         uri=uri,
                                         mimeType=source.get("media_type"),
                                         text=source["data"],
                                     )
                                 )
-                                content.append(
-                                    mcp_types.EmbeddedResource(type="resource", resource=resource)
-                                )
+                                content.append(EmbeddedResource(type="resource", resource=resource))
                             case kind:
                                 logger.warning("unsupported Claude tool result block: %s", kind)
                                 content.append(
-                                    mcp_types.TextContent(
-                                        type="text", text=f"[unsupported {kind} block]"
-                                    )
+                                    TextContent(type="text", text=f"[unsupported {kind} block]")
                                 )
 
                     self.run.record(
                         ToolStep(
                             call=call,
-                            result=MCPToolResult(
+                            result=ToolResult(
                                 call_id=call_id,
                                 content=content,
                                 isError=bool(block.get("is_error")),

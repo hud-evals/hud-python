@@ -96,7 +96,7 @@ flat on the skeleton:
 
 - **`AgentStep`** - the model's turn: `content`, `reasoning`, `tool_calls`, `done`, plus `model`,
   `usage`, and token-level `sample` when the backend is trainable.
-- **`ToolStep`** - one tool round-trip: the `MCPToolCall` paired with its `MCPToolResult`.
+- **`ToolStep`** - one tool round-trip: the `ToolCall` paired with its `ToolResult`.
 - **`SubagentStep`** - a nested rollout's `Trace`, embedded whole.
 
 Derived reads go through the trace's two query shapes - `trace.final(get)` (newest non-`None` answer

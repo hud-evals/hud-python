@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Literal, cast
 
-import mcp.types as types
 from openai.types.responses import ResponseOutputText
 
+from hud import types
 from hud.telemetry import instrument
 
 if TYPE_CHECKING:
