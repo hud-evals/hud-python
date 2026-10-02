@@ -626,6 +626,54 @@ Direct control claims the sim's sole slot, so it serves single-env sims. Scale o
 rollouts (`max_concurrent`) rather than a vectorized sim.
 </Note>
 
+<Accordion title="Communication with the bridge: VLA vs tool-calling LLM">
+
+Both kinds of agent end up as a client on the bridge's `robot` WebSocket. They differ in where the
+per-tick loop runs.
+
+```mermaid
+flowchart LR
+    VLA["<b>VLA agent</b><br/>RobotAgent"]
+    LLM["<b>LLM agent</b><br/>claude, openai, ..."]
+
+    subgraph ENV["env server (runs env.py)"]
+        DC["<b>DirectControl</b><br/>MCP server"]
+        EP["<b>RobotEndpoint</b>"]
+    end
+
+    subgraph SIM["sim process"]
+        BR["<b>RobotBridge</b>"]
+        CT["sim + low-level controller"]
+    end
+
+    VLA <-->|"robot WS: 1 action per tick"| BR
+    LLM <-->|"MCP: move_to(...)"| DC
+    DC <-->|"robot WS: 1 action per tick"| BR
+    EP -.->|"reset / result"| BR
+    BR --> CT
+
+    classDef node fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    class VLA,LLM,DC,EP,BR,CT node;
+    style ENV fill:transparent,stroke:#8a8580,stroke-width:1px;
+    style SIM fill:transparent,stroke:#8a8580,stroke-width:1px;
+```
+
+- **A VLA** tunnels straight to the bridge. The harness, `RobotAgent`, runs on the agent side: it
+  reads each observation, runs the policy, and sends one action per tick until the episode ends.
+- **An LLM** calls an MCP tool on the env server, where `DirectControl` acts as its harness. It
+  opens its own short connection to the bridge, plays the call out one action per tick, closes the
+  connection, and returns the camera frames and pose.
+
+Direct control does no inverse kinematics (IK, solving joint angles for a target pose). It
+interpolates setpoints at `speed` so the sim never jumps to a distant goal, and the sim's own
+low-level controller tracks each one. It stops when the arm arrives, comes to rest, or reaches
+`timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
+
+The bridge sees `DirectControl` as an ordinary `robot` client, so direct control needs no bridge
+changes. The control link from `RobotEndpoint` carries only `reset` and `result`.
+
+</Accordion>
+
 ## Recording datasets
 
 Set `agent.save = True` (wire it to a `--save` flag on your runner) to also record every
