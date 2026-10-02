@@ -1,7 +1,7 @@
 """Direct control: an LLM drives a ``robot`` capability through MCP motion tools.
 
 The ``robot`` wire takes one action per control tick, which a policy keeps up
-with and a tool-calling LLM does not. :class:`DirectControl` serves the same sim
+with and a tool-calling LLM does not. ``DirectControl`` serves the same sim
 as an ``mcp`` capability instead: a tool call names targets (or displacements)
 for some action dimensions, the tool plays them out on the wire, and answers
 with the camera frames and the pose it ended on. ``wait`` holds the pose and
@@ -86,8 +86,8 @@ class ControlKind(NamedTuple):
     quantity: str | None  # tolerance quantity of its plain scalars; None: nothing to reach
 
 
-#: Control kind -> tool. A new kind is a row. ``BASE_ABS_TWIST`` (``walk``) needs a
-#: duration and a stop-after law, so it is not served yet.
+# Control kind -> tool. A new kind is a row. ``BASE_ABS_TWIST`` (``walk``) needs a
+# duration and a stop-after law, so it is not served yet.
 CONTROL_KINDS: dict[str, ControlKind] = {
     "EE_ABS_POSE": ControlKind("move_to", True, "position"),
     "EE_ABS_POS": ControlKind("move_to", True, "position"),
@@ -97,16 +97,16 @@ CONTROL_KINDS: dict[str, ControlKind] = {
     "BASE_DEL_POSE": ControlKind("walk_by", False, None),
 }
 
-#: The control kind of a contract that only gives the coarse action ``type``.
+# The control kind of a contract that only gives the coarse action ``type``.
 _TYPE_KINDS = {"ee_abs": "EE_ABS_POSE", "joint_pos": "JOINT_ABS_POS", "ee_del": "EE_DEL_POSE"}
 
 
-#: Default ``position`` tolerance, in metres. It only picks the verdict; the model never sees it.
+# Default ``position`` tolerance, in metres. It only picks the verdict; the model never sees it.
 DEFAULT_TOLERANCE_M = 1e-3
-#: Fingertip metres per unit of each quantity (a 0.15 m gripper at the wrist, a 2.5 m summed
-#: arm lever): the position tolerance over it is the rotation / joint default.
+# Fingertip metres per unit of each quantity (a 0.15 m gripper at the wrist, a 2.5 m summed
+# arm lever): the position tolerance over it is the rotation / joint default.
 _LEVER_M = {"position": 1.0, "rotation": 0.15, "joint": 2.5}
-#: How a verdict states each quantity's distance: (scale, unit, decimals).
+# How a verdict states each quantity's distance: (scale, unit, decimals).
 _UNITS = {
     "position": (1e3, "mm", 2),
     "rotation": (1.0, "rad", 5),
@@ -114,48 +114,48 @@ _UNITS = {
     "grip": (1.0, "", 4),
 }
 
-#: At rest: over each of the last two windows of max(3 ticks, 0.25 s), every named arm
-#: dimension's mean change per tick is under a tenth of its default tolerance.
+# At rest: over each of the last two windows of max(3 ticks, 0.25 s), every named arm
+# dimension's mean change per tick is under a tenth of its default tolerance.
 _WINDOW_TICKS = 3
 _WINDOW_S = 0.25
 _FLOORS = {quantity: 0.1 * DEFAULT_TOLERANCE_M / lever for quantity, lever in _LEVER_M.items()}
-#: Rest only counts once every arm dimension has closed half its commanded travel.
+# Rest only counts once every arm dimension has closed half its commanded travel.
 _RESPONDED = 0.5
-#: A gripper change also waits for a finger to move faster than this (m/tick), then for all
-#: fingers to stay slower for this many ticks.
+# A gripper change also waits for a finger to move faster than this (m/tick), then for all
+# fingers to stay slower for this many ticks.
 _FINGER_REST_M = 5e-4
 _FINGER_REST_TICKS = 3
-#: Longest hold after the motion plays, and the rest an arm outside tolerance gets within it (s).
+# Longest hold after the motion plays, and the rest an arm outside tolerance gets within it (s).
 _SETTLE_S = 3.0
 _GRACE_S = 1.5
 
-#: Standard name of a native leaf (the last dotted part, after any ``left_`` / ``right_``).
+# Standard name of a native leaf (the last dotted part, after any ``left_`` / ``right_``).
 _LEAF_STANDARD = {"drx": "roll", "dry": "pitch", "drz": "yaw"} | {
     leaf: axis for axis in ("x", "y", "z", "roll", "pitch", "yaw") for leaf in (axis, f"d{axis}")
 }
 
-#: Observation ``type`` tags that mark an image rather than a state vector.
+# Observation ``type`` tags that mark an image rather than a state vector.
 IMAGE_TYPES = frozenset({"rgb", "bgr", "gray", "depth"})
 
-#: Safety cap on one call. A full-range move at the default speed lasts 10 s, then
-#: settles for at most 3 s.
+# Safety cap on one call. A full-range move at the default speed lasts 10 s, then
+# settles for at most 3 s.
 DEFAULT_TIMEOUT_S = 30.0
 
-#: Fraction of a full turn an absolute orientation travels per second, times ``speed``.
+# Fraction of a full turn an absolute orientation travels per second, times ``speed``.
 _FULL_TURN = 2.0 * math.pi
 
 Content = list[TextContent | ImageContent]
 
 
-#: Longest ``wait``, in sim seconds.
+# Longest ``wait``, in sim seconds.
 MAX_WAIT_S = 100.0
 
-#: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
-#: reached), and the dimensions named.
+# One plan: per-tick action rows, the intended goal (``None`` if nothing is being
+# reached), and the dimensions named.
 Plan = tuple["NDArray[np.float64]", "NDArray[np.float64] | None", set[str]]
 
-#: Asked of the model on every call (unless ``use_annotation`` is off) so the
-#: transcript records what the model saw and why.
+# Asked of the model on every call (unless ``use_annotation`` is off) so the
+# transcript records what the model saw and why.
 _NOTE = (
     "What you observe right now in the frames and state, and why you chose this. "
     "One or two plain sentences."

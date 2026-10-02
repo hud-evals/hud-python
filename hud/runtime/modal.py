@@ -117,9 +117,9 @@ class ModalEndpoint(Runtime):
 class ModalRuntime:
     """The Modal provider: each acquisition ``Sandbox.create``s a fresh container.
 
-    The cloud :class:`DockerRuntime` — boots a sandbox from a pre-built image,
+    The cloud ``DockerRuntime`` — boots a sandbox from a pre-built image,
     exposes the env's control channel as a raw-TCP tunnel (``unencrypted_ports``,
-    the only kind :func:`hud.clients.connect` dials), yields its :class:`Runtime`,
+    the only kind ``hud.clients.connect`` dials), yields its ``Runtime``,
     terminates on exit. Acquisitions are independent, so a batch fans out into
     isolated containers (one ``sb-…`` id each).
 

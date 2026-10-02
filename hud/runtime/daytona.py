@@ -61,9 +61,9 @@ class DaytonaRuntime:
     The Daytona runtime boots a sandbox from a pre-built *snapshot*
     (the durable handle, the snapshot equivalent of Modal's image name), starts the
     env's control channel inside it, then reaches it over an SSH local-forward:
-    Daytona exposes services only as HTTPS previews, but :func:`hud.clients.connect`
+    Daytona exposes services only as HTTPS previews, but ``hud.clients.connect``
     dials ``tcp://``, so the raw control channel is tunneled over SSH to a local
-    port. Yields its :class:`Runtime`, deletes the sandbox on exit.
+    port. Yields its ``Runtime``, deletes the sandbox on exit.
 
     Pass a snapshot name — ``DaytonaRuntime("hud-libero-env")`` — optionally with an
     ``image`` (Dockerfile/registry ref) to build that snapshot if it is missing.
