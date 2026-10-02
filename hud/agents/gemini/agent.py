@@ -6,12 +6,11 @@ import base64
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-import mcp.types as mcp_types
 from google.genai import types as genai_types
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, GeminiConfig, Usage
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import ImageContent, PromptMessage, TextContent, ToolCall, ToolResult
 from hud.utils import gateway
 
 if TYPE_CHECKING:
@@ -93,7 +92,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(
-        self, *, prompt: list[mcp_types.PromptMessage]
+        self, *, prompt: list[PromptMessage]
     ) -> RunState[genai_types.Content]:
         return RunState(messages=self._initial_messages(prompt))
 
@@ -106,12 +105,12 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
     def _format_result(
         self,
-        call: MCPToolCall,
-        result: MCPToolResult,
+        call: ToolCall,
+        result: ToolResult,
         state: RunState[genai_types.Content],
     ) -> genai_types.Content | None:
         text = next(
-            (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
+            (c.text for c in result.content if isinstance(c, TextContent)),
             None,
         )
         if text is not None:
@@ -130,7 +129,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
                 ),
             )
             for block in result.content
-            if isinstance(block, mcp_types.ImageContent)
+            if isinstance(block, ImageContent)
         ]
 
         return genai_types.Content(
@@ -283,16 +282,16 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         self,
         function_call: genai_types.FunctionCall,
         computer_tool: GeminiComputerTool | None,
-    ) -> MCPToolCall:
+    ) -> ToolCall:
         name = function_call.name or ""
         arguments = dict(function_call.args) if function_call.args else {}
         if computer_tool is not None and name in computer_tool.actions:
-            return MCPToolCall(
+            return ToolCall(
                 name=computer_tool.name,
                 arguments={"action": name, **arguments},
                 provider_name=name,
             )
-        return MCPToolCall(name=name, arguments=arguments)
+        return ToolCall(name=name, arguments=arguments)
 
 
 def _grounding_citations(grounding_meta: genai_types.GroundingMetadata) -> list[Citation]:

@@ -7,7 +7,7 @@ The trajectory section layers the tool-agent family on the core contract:
 :mod:`hud.types` owns the skeleton (ordering, timing, error, span
 transport); this module adds what an LLM tool-use loop produces, flat on
 that skeleton — the model's turn (:class:`AgentStep`), the tool round-trip
-(:class:`ToolStep` pairing an ``MCPToolCall`` with its ``MCPToolResult``),
+(:class:`ToolStep` pairing a ``ToolCall`` with its ``ToolResult``),
 nested rollouts (:class:`SubagentStep`), and the token-level training and
 accounting vocabulary (:class:`Sample`, :class:`Usage`). All ship under
 the core ``hud.step.v1`` schema — the platform's serializer for that
@@ -19,7 +19,6 @@ from __future__ import annotations
 from typing import Annotated, Any, ClassVar, Literal, NotRequired, Self, cast
 from uuid import uuid4
 
-from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -39,12 +38,15 @@ from hud.capabilities.rfb import (
 )
 from hud.types import (
     ROBOT_STEP_SCHEMA,
-    MCPToolCall,
-    MCPToolResult,
+    ContentBlock,
+    ImageContent,
     RobotStepSource,
     Step,
     StepSource,
     StopCondition,
+    TextContent,
+    ToolCall,
+    ToolResult,
     Trace,
 )
 from hud.utils.serialization import json_safe_value
@@ -337,7 +339,7 @@ class AgentStep(Step):
 
     content: str | None = None
     reasoning: str | None = None
-    tool_calls: list[MCPToolCall] = Field(default_factory=list[MCPToolCall])
+    tool_calls: list[ToolCall] = Field(default_factory=list[ToolCall])
     #: No further tool calls expected — the loop's stop signal.
     done: bool = False
     finish_reason: str | None = None
@@ -363,8 +365,8 @@ class ToolStep(Step):
     """
 
     source: StepSource = "tool"
-    call: MCPToolCall | None = None
-    result: MCPToolResult | None = None
+    call: ToolCall | None = None
+    result: ToolResult | None = None
 
 
 class SubagentStep(Step):

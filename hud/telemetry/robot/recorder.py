@@ -19,12 +19,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-import mcp.types as mcp_types
 import numpy as np
 
 from hud.agents.types import InferenceStep, ObservationStep, StateFeature
 from hud.telemetry.context import get_current_trace_id
-from hud.types import Step
+from hud.types import PromptMessage, Step, TextContent
 from hud.utils.platform import PlatformClient
 
 from .video import VideoStreamer
@@ -107,9 +106,7 @@ class TraceRecorder:
                 Step(
                     source="user",
                     messages=[
-                        mcp_types.PromptMessage(
-                            role="user", content=mcp_types.TextContent(type="text", text=prompt)
-                        )
+                        PromptMessage(role="user", content=TextContent(type="text", text=prompt))
                     ],
                 )
             )

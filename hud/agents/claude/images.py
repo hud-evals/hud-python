@@ -11,7 +11,7 @@ from anthropic.types.beta import BetaBase64ImageSourceParam
 from PIL import Image, ImageOps
 
 if TYPE_CHECKING:
-    from mcp.types import ImageContent
+    from hud.types import ImageContent
 
 ClaudeImageMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
 MAX_SOURCE_IMAGE_PIXELS = 16_000_000

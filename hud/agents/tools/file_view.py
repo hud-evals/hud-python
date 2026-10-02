@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import base64
 
-from mcp.types import ImageContent
-
 from hud.agents.tools.base import tool_err, tool_ok
-from hud.types import MCPToolResult
+from hud.types import ImageContent, ToolResult
 
 
-def view_file(data: bytes) -> MCPToolResult:
+def view_file(data: bytes) -> ToolResult:
     """Identify supported images by signature and preserve their encoded bytes."""
     mime_type = None
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -22,7 +20,7 @@ def view_file(data: bytes) -> MCPToolResult:
     elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         mime_type = "image/webp"
     if mime_type is not None:
-        return MCPToolResult(
+        return ToolResult(
             content=[
                 ImageContent(
                     type="image", mimeType=mime_type, data=base64.b64encode(data).decode("ascii")

@@ -7,11 +7,9 @@ import posixpath
 import shlex
 from typing import Any, ClassVar
 
-import mcp.types as mcp_types
-
 from hud.agents.tools import SSHTool
 from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
-from hud.types import MCPToolResult
+from hud.types import ImageContent, TextContent, ToolResult
 
 DEFAULT_READ_LIMIT = 2000
 
@@ -63,7 +61,7 @@ class ReadTool(_FilesystemTool):
         "required": ["filePath"],
     }
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
@@ -72,7 +70,7 @@ class ReadTool(_FilesystemTool):
         if not (await self.bash(f"test -d {shlex.quote(path)}")).isError:
             return await self._read_directory(path, offset=offset, limit=limit)
         result = await self.file_view(path)
-        if result.isError or any(isinstance(c, mcp_types.ImageContent) for c in result.content):
+        if result.isError or any(isinstance(c, ImageContent) for c in result.content):
             return result
         text = result_text(result)
         lines = text.splitlines()
@@ -96,9 +94,9 @@ class ReadTool(_FilesystemTool):
         else:
             body.append(f"\n(End of file - total {len(lines)} lines)")
         body.append("</content>")
-        return MCPToolResult(content=[mcp_types.TextContent(type="text", text="\n".join(body))])
+        return ToolResult(content=[TextContent(type="text", text="\n".join(body))])
 
-    async def _read_directory(self, path: str, *, offset: int, limit: int) -> MCPToolResult:
+    async def _read_directory(self, path: str, *, offset: int, limit: int) -> ToolResult:
         result = await self.file_list(path)
         if result.isError:
             return result
@@ -122,7 +120,7 @@ class ReadTool(_FilesystemTool):
         else:
             body.append(f"\n({len(entries)} entries)")
         body.append("</entries>")
-        return MCPToolResult(content=[mcp_types.TextContent(type="text", text="\n".join(body))])
+        return ToolResult(content=[TextContent(type="text", text="\n".join(body))])
 
 
 class BashTool(_FilesystemTool):
@@ -148,7 +146,7 @@ class BashTool(_FilesystemTool):
         "required": ["command"],
     }
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         command = arguments.get("command")
         if not isinstance(command, str) or not command:
             raise ValueError("command is required")
@@ -190,7 +188,7 @@ class EditTool(_FilesystemTool):
         "required": ["filePath", "oldString", "newString"],
     }
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
@@ -227,10 +225,10 @@ class EditTool(_FilesystemTool):
         next_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
         return await self.file_write(path, next_text)
 
-    async def _ensure_parent(self, path: str) -> MCPToolResult:
+    async def _ensure_parent(self, path: str) -> ToolResult:
         parent = posixpath.dirname(path)
         if not parent or parent in {".", "/"}:
-            return MCPToolResult(content=[])
+            return ToolResult(content=[])
         return await self.bash(f"mkdir -p {shlex.quote(parent)}")
 
 
@@ -249,7 +247,7 @@ class WriteTool(_FilesystemTool):
         "required": ["content", "filePath"],
     }
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = arguments.get("filePath")
         if not isinstance(path, str) or not path:
             raise ValueError("filePath is required")
@@ -261,10 +259,10 @@ class WriteTool(_FilesystemTool):
             return mkdir
         return await self.file_write(path, content)
 
-    async def _ensure_parent(self, path: str) -> MCPToolResult:
+    async def _ensure_parent(self, path: str) -> ToolResult:
         parent = posixpath.dirname(path)
         if not parent or parent in {".", "/"}:
-            return MCPToolResult(content=[])
+            return ToolResult(content=[])
         return await self.bash(f"mkdir -p {shlex.quote(parent)}")
 
 
@@ -284,7 +282,7 @@ class GrepTool(_FilesystemTool):
         "required": ["pattern"],
     }
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str):
             raise ValueError("pattern is required")
@@ -308,7 +306,7 @@ class GlobTool(_FilesystemTool):
         "required": ["pattern"],
     }
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str):
             raise ValueError("pattern is required")
