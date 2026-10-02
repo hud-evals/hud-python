@@ -1,7 +1,7 @@
 """HUD Telemetry - Lightweight telemetry for HUD SDK.
 
 This module provides:
-- The OTel-shaped ``Span`` wire format (:mod:`hud.telemetry.span`)
+- The OTel-shaped ``Span`` wire format (``hud.telemetry.span``)
 - ``@instrument`` debug spans for any function
 - High-performance batched span export to the HUD platform
 

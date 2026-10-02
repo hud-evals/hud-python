@@ -5,9 +5,9 @@ owns the rest: connect to the ``robot`` capability (claiming a slot token from
 the setup step when present), read the contract, run until the env terminates.
 
 Vectorized sims still look like one scalar connection per rollout; concurrent
-rollouts coalesce GPU forwards through :class:`~.batching.BatchedModel`.
+rollouts coalesce GPU forwards through ``BatchedModel``.
 
-Most policies use :class:`~.adapter.LeRobotAdapter`; a policy whose spaces
+Most policies use ``LeRobotAdapter``; a policy whose spaces
 match the env natively can set ``adapter = None`` (raw pass-through).
 """
 
@@ -35,22 +35,22 @@ class RobotAgent(Agent):
     """Drive a ``robot`` env with one open-loop chunk queue.
 
     **Subclass contract:** in ``__init__`` set ``self.model`` (a
-    :class:`~.model.Model`) and ``self.adapter`` (an :class:`~.adapter.Adapter`,
+    ``Model``) and ``self.adapter`` (an ``Adapter``,
     or ``None`` for raw pass-through).
     """
 
     robot_protocol: ClassVar[str] = ROBOT_PROTOCOL
-    #: Max control ticks before the episode is cut off. Subclasses may override.
+    # Max control ticks before the episode is cut off. Subclasses may override.
     max_steps: ClassVar[int] = 520
-    #: How often (in steps) to print a step-progress line. 0 = off.
+    # How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
-    #: Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair.
-    #: Telemetry streams regardless; see :mod:`.dataset`.
+    # Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair.
+    # Telemetry streams regardless; see ``.dataset``.
     save: bool = False
 
-    #: Runs the policy (preprocess -> forward -> postprocess). Subclasses set this.
+    # Runs the policy (preprocess -> forward -> postprocess). Subclasses set this.
     model: Model | None = None
-    #: Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
+    # Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
     def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:

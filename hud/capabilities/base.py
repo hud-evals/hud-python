@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit, urlunsplit
 
-#: Matches the scheme prefix of a URL (RFC 3986).
+# Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
 
 
@@ -42,7 +42,7 @@ class Capability:
     """``(name, protocol, url, params)`` — concrete wire data for one slice of env access.
 
     Always carries the real address of something serving the protocol —
-    what the manifest publishes and what a :class:`CapabilityClient` dials.
+    what the manifest publishes and what a ``CapabilityClient`` dials.
     A service the *environment* brings up itself publishes one of these at
     serve time: start the daemon in an ``@env.initialize`` hook and call
     ``env.add_capability(...)`` (sugar for the common case:
@@ -154,7 +154,7 @@ class Capability:
         ``N`` listens on port ``5900 + N``). When the URL omits an explicit port
         the port defaults to ``5900 + display``; an explicit port in the URL
         always wins. Envs hosting multiple screens publish one rfb capability
-        per display, e.g.::
+        per display, e.g.:
 
             Capability.rfb(name="screen-0", url="rfb://host", display=0)
             Capability.rfb(name="screen-1", url="rfb://host", display=1)
@@ -214,7 +214,7 @@ class Capability:
 
         openpi-like: reuses openpi's msgpack-numpy wire format and flat obs/action
         naming, but the env is the server and the agent is the client (see
-        :mod:`hud.capabilities.robot`). ``contract`` is the env's full self-describing
+        ``hud.capabilities.robot``). ``contract`` is the env's full self-describing
         config: ``robot_type``, ``control_rate``, and a ``features`` map where each
         feature declares its ``role`` (``"action"`` / ``"observation"``), layout
         (``dtype`` / ``shape`` / ``names``) and normalization ``stats``. It round-trips

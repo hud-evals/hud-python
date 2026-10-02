@@ -101,10 +101,10 @@ class EvalConfig(BaseModel):
     auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
-    #: ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
-    #: loading the task source otherwise); other names hand rows to that
-    #: provider; a ``tcp://`` url attaches to an already-served env. ``None``
-    #: infers from the source: a file on disk runs locally, a platform taskset hosted.
+    # ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
+    # loading the task source otherwise); other names hand rows to that
+    # provider; a ``tcp://`` url attaches to an already-served env. ``None``
+    # infers from the source: a file on disk runs locally, a platform taskset hosted.
     runtime: Placement | TcpUrl | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 

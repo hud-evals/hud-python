@@ -3,7 +3,7 @@
 Same loop as ``simple_train.py``, but instead of a built-in ``loss_fn`` the
 policy-gradient loss is written here in torch and run client-side via
 ``trainer.forward_backward_custom``. The service runs the current-policy forward
-pass and returns per-token tensors (:class:`DatumTensors`); this loss turns them
+pass and returns per-token tensors (``DatumTensors``); this loss turns them
 into per-token gradients, which the service applies. ``optim_step`` then
 checkpoints and promotes as usual.
 
@@ -49,7 +49,7 @@ def glm_double_sided_is(
     ``logprobs[i]`` are the current-policy (π_θ) per-token logprobs for datum
     ``i`` as differentiable leaves — build the loss out of *these* tensors so the
     gradient flows back. Everything else (rollout logprobs q, action mask,
-    reward) is a constant carried on the matching :class:`DatumTensors`.
+    reward) is a constant carried on the matching ``DatumTensors``.
     """
     # Per-group (GRPO) baseline: advantage = reward − group mean. GLM-5.2 uses a
     # learned critic here (README, Option A); the group baseline is the

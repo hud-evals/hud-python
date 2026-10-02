@@ -1,7 +1,7 @@
 """Translate observations and actions between env and policy spaces.
 
 The loop calls ``bind``, ``reset``, ``adapt_observation``, and the action hooks.
-Use :class:`LeRobotAdapter` for LeRobot models; subclass for custom wiring;
+Use ``LeRobotAdapter`` for LeRobot models; subclass for custom wiring;
 ``adapter=None`` for pass-through.
 """
 
@@ -16,10 +16,10 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     import builtins
 
-#: A policy-emitted action / chunk array (the robot stack's shared alias).
+# A policy-emitted action / chunk array (the robot stack's shared alias).
 ActionArray = NDArray[np.floating[Any]]
 
-#: Image types the bundled adapters treat as cameras (vs the state vector).
+# Image types the bundled adapters treat as cameras (vs the state vector).
 IMAGE_TYPES = ("rgb", "bgr", "gray", "depth")
 
 
@@ -38,10 +38,10 @@ class _TorchModule(Protocol):
 class Adapter:
     """Translate between an env's observation/action spaces and a policy's.
 
-    Driven by :class:`~hud.agents.robot.agent.RobotAgent`: :meth:`bind` once
-    after connect, :meth:`reset` once per episode, then :meth:`adapt_observation`
+    Driven by ``RobotAgent``: ``bind`` once
+    after connect, ``reset`` once per episode, then ``adapt_observation``
     per inference and the action hooks per chunk/step. Construct with the
-    policy's image-slot names; everything env-side is learned in :meth:`bind`.
+    policy's image-slot names; everything env-side is learned in ``bind``.
     """
 
     def __init__(
@@ -50,13 +50,13 @@ class Adapter:
         model_image_keys: list[str] | None = None,
         chunk_size: int | None = None,
     ) -> None:
-        #: The policy's ordered image-slot names (model side; known at load time).
+        # The policy's ordered image-slot names (model side; known at load time).
         self.model_image_keys: list[str] = list(model_image_keys or [])
-        #: Open-loop horizon: how many predicted actions to execute before re-querying.
-        #: ``None`` = full model chunk. Applied by :class:`~.agent.RobotAgent`, not here —
-        #: so subclass ``adapt_chunk`` overrides stay free of truncation duty.
+        # Open-loop horizon: how many predicted actions to execute before re-querying.
+        # ``None`` = full model chunk. Applied by ``RobotAgent``, not here —
+        # so subclass ``adapt_chunk`` overrides stay free of truncation duty.
         self.chunk_size: int | None = chunk_size
-        #: The env's action feature and observation layout (set in :meth:`bind`).
+        # The env's action feature and observation layout (set in ``bind``).
         self.action_space: dict[str, Any] = {}
         self.image_keys: list[str] = []
         self.state_key: str | None = None

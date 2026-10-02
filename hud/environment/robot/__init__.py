@@ -3,25 +3,25 @@
 A simulator always runs in its own process — the **sim program**
 (``python -m hud.environment.robot.gym``), where the sim owns the main
 thread and a bridge serves the wire. The env server holds a
-:class:`~.endpoint.RobotEndpoint` on it:
+``RobotEndpoint`` on it:
 
-- :class:`~.bridge.RobotBridge` — bridge base (``num_envs`` slots in lockstep
+- ``RobotBridge`` — bridge base (``num_envs`` slots in lockstep
   internally; scalar openpi wire per claimed connection): the agent's
   ``robot`` WebSocket plus the JSON-RPC control side channel.
-- :class:`~.gym.GymBridge` — the generic gym path (``env.gym(...)`` — a
+- ``GymBridge`` — the generic gym path (``env.gym(...)`` — a
   factory, registry id, or declared env): contract derivation, capability,
   episode control.
-- :class:`~.endpoint.RobotEndpoint` — the env server's handle: spawn (owned)
+- ``RobotEndpoint`` — the env server's handle: spawn (owned)
   or remote (attached), same control surface either way.
-- :func:`~.bridge.serve_bridge` — the sim program's blocking entry
+- ``serve_bridge`` — the sim program's blocking entry
   (``RobotEndpoint(MyBridge)`` spawns it; custom containers can call it too).
-- :func:`~.gym.wrap` — one-line trace streaming for any gym env you drive
+- ``wrap`` — one-line trace streaming for any gym env you drive
   yourself, plus the shared gym introspection.
-- :class:`~.control.DirectControl` — the same sim as MCP motion tools, so a
+- ``control.DirectControl`` — the same sim as MCP motion tools, so a
   tool-calling LLM can drive it (the ``robot`` wire stays up for policies).
 
-The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives
-under :mod:`hud.capabilities`; both ends share the wire codec defined there.
+The agent-side counterpart, ``RobotClient``, lives
+under ``hud.capabilities``; both ends share the wire codec defined there.
 """
 
 from __future__ import annotations

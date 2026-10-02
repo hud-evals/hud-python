@@ -4,7 +4,7 @@ Provides chat-style tasks that accept ``messages`` as ``list[PromptMessage]``
 -- each message has a role and typed content.
 
 Serve it locally with ``hud serve chat_env.py``, or drive a task directly with
-the ``Chat`` runner::
+the ``Chat`` runner:
 
     from hud import Chat
     from hud.agents import create_agent

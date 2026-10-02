@@ -3,12 +3,12 @@
 Shared by both sides of the robot stack (the agent harness, ``wrap``, the
 gym bridges), so it lives under telemetry rather than either side:
 
-- :class:`TraceRecorder` — one trace. Emits spans with an explicit ``trace_id``
+- ``TraceRecorder`` — one trace. Emits spans with an explicit ``trace_id``
   (no rollout contextvar needed, works from any thread), or through a ``Run``
   so steps also land on ``run.trace`` for training. Span emission only —
   trace lifecycle (enter/exit) is the caller's job.
-- :class:`JobRecorder` — a whole vectorized env as one **Job** of per-episode
-  traces: one :class:`TraceRecorder` per recorded slot; ``done[i]`` closes that
+- ``JobRecorder`` — a whole vectorized env as one **Job** of per-episode
+  traces: one ``TraceRecorder`` per recorded slot; ``done[i]`` closes that
   slot's trace (reporting its exit) and opens a fresh one for the next episode.
 """
 
@@ -173,8 +173,8 @@ class TraceRecorder:
 class JobRecorder:
     """Records a vectorized env as one Job of per-episode traces.
 
-    Construct once with the batch size, call :meth:`record` after every
-    ``env.step`` with the batched tensors, :meth:`close` at the end. A subset of
+    Construct once with the batch size, call ``record`` after every
+    ``env.step`` with the batched tensors, ``close`` at the end. A subset of
     slots (``record_indices``) gets rich traces; each ``done[i]`` closes that
     slot's trace (reporting reward — env-reported ``success`` outranks
     accumulated shaped reward) and opens a fresh one, all under one Job.
@@ -213,8 +213,8 @@ class JobRecorder:
         self._prompt = prompt
         self._action_names = action_names
         self._state_names = state_names
-        #: Extra metadata merged into each newly opened trace (e.g. the episode's
-        #: task parametrization). Mutable: set it before the episode's traces open.
+        # Extra metadata merged into each newly opened trace (e.g. the episode's
+        # task parametrization). Mutable: set it before the episode's traces open.
         self.extra_metadata: dict[str, Any] = {}
         if record_indices is None:
             record_indices = list(range(min(num_envs, 4)))  # a few representative slots

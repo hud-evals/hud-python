@@ -1,7 +1,7 @@
 """Generic HUD platform API client.
 
 Owns *how* requests reach the platform: base URL, auth, and the shared
-retry/error policy from :mod:`hud.utils.requests`. Endpoint paths and wire
+retry/error policy from ``hud.utils.requests``. Endpoint paths and wire
 payloads live with the feature that owns them (tasksets, builds, registry, ...).
 """
 
@@ -31,10 +31,10 @@ class Page(BaseModel, Generic[T]):
 class PlatformClient:
     """Sync/async client for the HUD platform API.
 
-    Raises :class:`hud.utils.exceptions.HudRequestError` (with ``status_code``
+    Raises ``hud.utils.exceptions.HudRequestError`` (with ``status_code``
     and ``response_json``) on HTTP errors and retries transient failures.
     A call that names a reply type gets the body as that type, and a body that is
-    not one raises :class:`hud.utils.exceptions.HudReplyError`; a call that names
+    not one raises ``hud.utils.exceptions.HudReplyError``; a call that names
     none gets the decoded JSON.
 
     ``api_url`` is the bare origin (``https://api.hud.ai``); ``api_prefix``

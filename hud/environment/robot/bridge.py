@@ -1,11 +1,11 @@
 """Sim-process ``robot`` bridge: WebSocket obs/action + JSON-RPC control.
 
-Subclass :class:`RobotBridge` (``reset`` / ``step`` / ``get_observation``);
-:func:`serve_bridge` is the blocking entry. Wire is scalar openpi per claimed
+Subclass ``RobotBridge`` (``reset`` / ``step`` / ``get_observation``);
+``serve_bridge`` is the blocking entry. Wire is scalar openpi per claimed
 slot; the sim may be vectorized internally (barrier step, fan-out). Sim owns
 main; serving runs on a background loop and queues touches via
-:meth:`RobotBridge._run_on_sim` (thread-affine / Isaac). Gym path:
-:class:`~.gym.GymBridge`.
+``RobotBridge._run_on_sim`` (thread-affine / Isaac). Gym path:
+``GymBridge``.
 """
 
 from __future__ import annotations
@@ -39,12 +39,12 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-#: Line the sim program prints once its control channel is bound; the spawning
-#: RobotEndpoint reads it from this process's stdout.
+# Line the sim program prints once its control channel is bound; the spawning
+# RobotEndpoint reads it from this process's stdout.
 PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
 
-#: Reserved ``--init`` key for declaration-time attrs (contract / metadata / num_envs)
-#: applied after the child ctor — keeps them out of subclass ``__init__`` signatures.
+# Reserved ``--init`` key for declaration-time attrs (contract / metadata / num_envs)
+# applied after the child ctor — keeps them out of subclass ``__init__`` signatures.
 _HUD_STATE = "__hud_state__"
 
 
@@ -116,25 +116,25 @@ class _SlotRegistry:
 class RobotBridge(ABC):
     """Serves a sim over ``robot`` WebSocket + a JSON-RPC control side channel.
 
-    **Subclass contract:** implement :meth:`reset`, :meth:`step`, and
-    :meth:`get_observation`, and set ``self.contract`` (the wire contract the
+    **Subclass contract:** implement ``reset``, ``step``, and
+    ``get_observation``, and set ``self.contract`` (the wire contract the
     capability publishes) before serving. The base owns the WebSocket serve
     loop and the control listener; subclasses own the sim and set ``num_envs``
-    (default 1). All three hooks run on the sim thread via :meth:`_run_on_sim`
-    (under :func:`serve_bridge`, that is main — safe for Isaac / thread-affine sims).
+    (default 1). All three hooks run on the sim thread via ``_run_on_sim``
+    (under ``serve_bridge``, that is main — safe for Isaac / thread-affine sims).
 
-    - :meth:`reset` initialises the sim for a new episode and returns the task
+    - ``reset`` initialises the sim for a new episode and returns the task
       prompt. The base resets scoring state.
-    - :meth:`step` advances the sim by one batched action ``[N, A]`` (N=1 ok).
-    - :meth:`get_observation` returns ``(data, terminated)`` with ``[N, ...]``
+    - ``step`` advances the sim by one batched action ``[N, A]`` (N=1 ok).
+    - ``get_observation`` returns ``(data, terminated)`` with ``[N, ...]``
       arrays and an ``[N]`` terminated mask (N=1 ok), or ``None`` if not ready.
-    - :meth:`result` returns the scalar episode score dict (override for richer
-      grading). :meth:`result_slots` fans that out per slot; vectorized bridges
+    - ``result`` returns the scalar episode score dict (override for richer
+      grading). ``result_slots`` fans that out per slot; vectorized bridges
       with per-slot scores override ``result_slots`` instead.
     """
 
-    #: Claim-frame timeout, and how long the barrier waits on a silent live slot
-    #: before marking it idle so peers can keep stepping.
+    # Claim-frame timeout, and how long the barrier waits on a silent live slot
+    # before marking it idle so peers can keep stepping.
     step_timeout: float = 30.0
 
     def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
@@ -145,8 +145,8 @@ class RobotBridge(ABC):
         self._server: Any = None
         # Connect-time metadata frame (sent first on each connection); subclasses may set it.
         self.metadata: dict[str, Any] = {}
-        #: The env's self-describing wire contract (features, control_rate); the
-        #: endpoint fetches it over the control channel to mint the capability.
+        # The env's self-describing wire contract (features, control_rate); the
+        # endpoint fetches it over the control channel to mint the capability.
         self.contract: dict[str, Any] = {}
         # Sim touches queue to the thread that owns the simulator (see _run_on_sim).
         self._sim_q: queue.Queue[tuple[Callable[[], Any], Future[Any]]] = queue.Queue()
@@ -168,7 +168,7 @@ class RobotBridge(ABC):
     async def _run_on_sim(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run ``fn(*args, **kwargs)`` on the sim thread, awaited on the caller's loop.
 
-        Before :func:`serve_bridge` binds a sim thread (tests, in-loop use) calls
+        Before ``serve_bridge`` binds a sim thread (tests, in-loop use) calls
         execute inline on the caller — the degenerate single-thread case.
         """
         if self._sim_ident is None or threading.get_ident() == self._sim_ident:
@@ -224,8 +224,8 @@ class RobotBridge(ABC):
     def reset(self, **kwargs: Any) -> str:
         """Reset the sim for a new episode; return the task prompt.
 
-        Always invoked on the sim thread (via :meth:`_run_on_sim`) — implement
-        this as ordinary sync code, same as :meth:`step` / :meth:`get_observation`.
+        Always invoked on the sim thread (via ``_run_on_sim``) — implement
+        this as ordinary sync code, same as ``step`` / ``get_observation``.
         """
 
     @abstractmethod
@@ -241,7 +241,7 @@ class RobotBridge(ABC):
 
         Default: binary success + total reward. Override for richer grading
         (fractional subtask progress, custom metadata, …). Releases call
-        :meth:`result_slots`, whose default broadcasts this dict to every slot.
+        ``result_slots``, whose default broadcasts this dict to every slot.
         """
         return {
             "score": 1.0 if self.success else 0.0,
@@ -250,10 +250,10 @@ class RobotBridge(ABC):
         }
 
     def result_slots(self) -> list[dict[str, Any]]:
-        """One score dict per slot. Default: broadcast :meth:`result` to every slot
+        """One score dict per slot. Default: broadcast ``result`` to every slot
         (vectorized bridges with per-slot scoring override this).
 
-        Invoked on the sim thread via :meth:`_run_on_sim` (same as ``step``).
+        Invoked on the sim thread via ``_run_on_sim`` (same as ``step``).
         """
         grade = self.result()
         return [dict(grade) for _ in range(self.num_envs)]
@@ -273,7 +273,7 @@ class RobotBridge(ABC):
         """The bridge's concrete ``ws://`` address — publish this in the manifest.
 
         With an ephemeral port (the default) the address only exists once
-        :meth:`start` has bound the socket, so publish after ``await bridge.start()``.
+        ``start`` has bound the socket, so publish after ``await bridge.start()``.
         """
         if self._port == 0:
             raise RuntimeError("bridge bound to an ephemeral port; call start() before reading url")
@@ -479,7 +479,7 @@ class RobotBridge(ABC):
         """Return the wire contract, deriving it when a subclass can.
 
         Default is the already-set ``self.contract``. Lazy-spawn bridges
-        (:class:`~.gym.GymBridge`) override to build the env and derive when
+        (``GymBridge``) override to build the env and derive when
         no pre-written ``contract.json`` was loaded at start — so
         ``endpoint.capabilities()`` publishes a real manifest, not ``{}``.
         """
@@ -521,7 +521,7 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
     Serving — the robot WebSocket and the control side channel (port announced
     on stdout as ``HUD_SIM_PORT=<port>``) — runs on a background loop thread;
     the calling (main) thread becomes the sim thread, executing every touch the
-    bridge queues (see :meth:`RobotBridge._run_on_sim`). SIGTERM / Ctrl-C cancel
+    bridge queues (see ``RobotBridge._run_on_sim``). SIGTERM / Ctrl-C cancel
     serving; the sim keeps draining through teardown (``stop()`` touches it too).
     """
     # Claim main as the sim thread before serving starts, so no touch slips
