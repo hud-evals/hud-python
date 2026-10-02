@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from hud import Run, Taskset
 from hud.agents.types import AgentStep, Sample
-from hud.eval import HUDRuntime, LocalRuntime, Taskset
-from hud.eval.run import Run
+from hud.runtime import HUDRuntime, LocalRuntime
 from hud.settings import settings
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers
 from transformers import PreTrainedTokenizerFast

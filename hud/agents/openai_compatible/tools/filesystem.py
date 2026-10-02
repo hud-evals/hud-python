@@ -7,8 +7,8 @@ import posixpath
 import shlex
 from typing import Any, ClassVar
 
-from hud.agents.tools import SSHTool
 from hud.agents.tools.base import AgentToolSpec, result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 from hud.types import ImageContent, TextContent, ToolResult
 
 DEFAULT_READ_LIMIT = 2000

@@ -106,9 +106,10 @@ One job spans the session; each step appends a batch and trains on it:
 
 ```python
 import asyncio
-from hud import TrainingClient, Taskset, LocalRuntime
+from hud import Job, Taskset
 from hud.agents import create_agent
-from hud.eval import Job
+from hud.runtime import LocalRuntime
+from hud.train import TrainingClient
 
 MODEL = "arith-rl"   # the model you forked above
 

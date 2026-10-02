@@ -107,10 +107,10 @@ class Manifest:
 class HudClient:
     """JSON-RPC client for a served env's control channel.
 
-    Prefer ``hud.connect(runtime)``, which owns the lifecycle (connect →
+    Prefer :func:`connect`, which owns the lifecycle (connect →
     ``hello`` → yield → ``close``) and yields one of these with ``manifest``
     ready; the raw constructor takes any connected stream pair. Task lifecycle
-    wrapping (start → grade) lives in :class:`hud.eval.Run`.
+    wrapping (start → grade) lives in :class:`hud.Run`.
     """
 
     PROTOCOL_VERSION = "hud/1.0"

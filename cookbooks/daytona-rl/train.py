@@ -27,10 +27,11 @@ import time
 from pathlib import Path
 
 from daytona import Image
-from hud import TrainingClient
+from hud import Job, Taskset
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import DaytonaRuntime, Job, Taskset
+from hud.runtime import DaytonaRuntime
+from hud.train import TrainingClient
 
 from env import fix_calc
 from snapshot import snapshot_name

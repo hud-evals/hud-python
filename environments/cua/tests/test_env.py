@@ -10,7 +10,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from hud import SubprocessRuntime, Task, connect
+from hud import Task
+from hud.clients import connect
+from hud.runtime import SubprocessRuntime
 from hud.clients import HudProtocolError
 
 from env import cua_task

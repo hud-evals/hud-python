@@ -20,7 +20,7 @@ import numpy as np
 
 from hud.agents.base import Agent
 from hud.capabilities.robot import RobotClient
-from hud.telemetry.robot import TraceRecorder
+from hud.telemetry.robot.recorder import TraceRecorder
 
 if TYPE_CHECKING:
     from hud.eval.run import Run

@@ -5,60 +5,23 @@ tools for building, evaluating, and training AI agents.
 
 from __future__ import annotations
 
-from .capabilities import Connection
-from .clients import connect
-from .environment import Environment
-from .eval import (
-    Chat,
-    ComposeProject,
-    DockerRuntime,
-    Grade,
-    HostedRuntime,
-    HUDRuntime,
-    Job,
-    LocalRuntime,
-    Run,
-    Runtime,
-    RuntimeConfig,
-    RuntimeGPU,
-    RuntimeLimits,
-    RuntimeResources,
-    RuntimeTPU,
-    SubprocessRuntime,
-    SyncPlan,
-    Task,
-    Taskset,
-)
-from .telemetry.instrument import instrument
-from .train import TrainingClient
+from .environment.env import Environment
+from .eval.chat import Chat
+from .eval.job import Job
+from .eval.run import Grade, Run
+from .eval.task import Task
+from .eval.taskset import Taskset
 from .types import Trace
 from .version import __version__
 
 __all__ = [
     "Chat",
-    "ComposeProject",
-    "Connection",
-    "DockerRuntime",
     "Environment",
     "Grade",
-    "HUDRuntime",
-    "HostedRuntime",
     "Job",
-    "LocalRuntime",
     "Run",
-    "Runtime",
-    "RuntimeConfig",
-    "RuntimeGPU",
-    "RuntimeLimits",
-    "RuntimeResources",
-    "RuntimeTPU",
-    "SubprocessRuntime",
-    "SyncPlan",
     "Task",
     "Taskset",
     "Trace",
-    "TrainingClient",
     "__version__",
-    "connect",
-    "instrument",
 ]

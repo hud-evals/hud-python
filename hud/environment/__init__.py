@@ -1,9 +1,11 @@
 """HUD environment authoring: declarations and the wire protocol that serves them.
 
-:class:`Environment` is the declaration (capabilities + tasks behind the wire
-protocol); ``load_environment`` resolves an env
-reference (source path, or dotted module attr/factory);
-:mod:`~hud.environment.server` is the serving entry point substrates run.
+:class:`~hud.Environment` (exported from :mod:`hud`) is the declaration
+(capabilities + tasks behind the wire protocol); this package exports its
+building blocks (``Workspace``, ``Mount``, ``Answer``) and
+``load_environment``, which resolves an env reference (source path, or dotted
+module attr/factory); :mod:`~hud.environment.server` is the serving entry point
+substrates run.
 How a substrate comes up — placement — belongs to the eval engine: see
 :mod:`hud.runtime` (:class:`~hud.runtime.Runtime`, the ``Provider``
 contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
@@ -19,13 +21,10 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
-from .arguments import DataFileArg, DataFileRef, DataFilesArg, GradingArg, PromptArg
-from .egress import Peer, WorkspaceRoute
 from .env import Answer, Environment
-from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
+from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, Workspace
 
 
 def load_environment(
@@ -103,17 +102,7 @@ def load_environment(
 __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
     "Answer",
-    "Capability",
-    "DataFileArg",
-    "DataFileRef",
-    "DataFilesArg",
-    "Environment",
-    "GradingArg",
     "Mount",
-    "MountKind",
-    "Peer",
-    "PromptArg",
     "Workspace",
-    "WorkspaceRoute",
     "load_environment",
 ]

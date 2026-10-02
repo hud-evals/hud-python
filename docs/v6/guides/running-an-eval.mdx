@@ -118,8 +118,9 @@ is the same eval `hud eval` runs, written out in Python.
 
 ```python run.py
 import asyncio
-from hud import Taskset, LocalRuntime
+from hud import Taskset
 from hud.agents import create_agent
+from hud.runtime import LocalRuntime
 
 agent = create_agent("claude-sonnet-4-5")
 ts = Taskset.from_file("tasks.py")
