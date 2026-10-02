@@ -119,7 +119,6 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                 else:
                     raise ValueError("HUD_API_KEY is required for HUD gateway routing")
                 env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-                env["DISABLE_AUTO_COMPACT"] = "1"
                 # Alias every model tier so background requests never bypass the gateway.
                 env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
                 env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
