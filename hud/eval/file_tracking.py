@@ -231,6 +231,3 @@ def _emit_file_tracking(
     )
     queue_span(span.model_dump(mode="json"))
     return True
-
-
-__all__ = ["file_tracking_observer"]

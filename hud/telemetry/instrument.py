@@ -256,8 +256,3 @@ def instrument(
     if func is None:
         return decorator
     return decorator(func)
-
-
-__all__ = [
-    "instrument",
-]

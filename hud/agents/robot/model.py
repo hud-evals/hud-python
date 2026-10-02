@@ -118,10 +118,3 @@ class RemoteModel(Model):
         self.connect()  # lazy connect on first call (blocks until the server is up)
         chunk = np.asarray(self._client.infer(batch)[self.response_key], dtype=np.float32)
         return chunk[None]  # add the leading N=1 batch dim
-
-
-__all__ = [
-    "LeRobotModel",
-    "Model",
-    "RemoteModel",
-]

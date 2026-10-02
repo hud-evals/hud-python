@@ -48,6 +48,3 @@ class OpenAIMCPProxyTool(MCPTool):
                 },
             ),
         )
-
-
-__all__ = ["OpenAIMCPProxyTool"]
