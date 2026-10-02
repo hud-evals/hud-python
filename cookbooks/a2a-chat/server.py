@@ -38,18 +38,18 @@ from a2a.types import (
     TextPart,
 )
 
-from hud import Chat, Runtime, LocalRuntime
+from hud import Chat, Task
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import Task
+from hud.runtime import LocalRuntime, Runtime
 
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
 
     from hud.agents.base import Agent
-    from hud.eval import Provider
-    from hud.types import Trace
+    from hud.runtime import Provider
+    from hud import Trace
 
 LOGGER = logging.getLogger("a2a_chat_server")
 

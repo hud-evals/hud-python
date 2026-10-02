@@ -16,7 +16,7 @@ from browser_use import Browser, ChatAnthropic
 
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig, AgentStep
-from hud.eval import Run
+from hud import Run
 
 
 class BrowserUseConfig(AgentConfig):

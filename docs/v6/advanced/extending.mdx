@@ -22,8 +22,8 @@ Subclass `Agent` and implement `__call__`. Open the capabilities you need off `r
 work, and write the answer to `run.trace.content` (graded on exit):
 
 ```python harness.py
-from hud.agents.base import Agent
 from hud import Run
+from hud.agents.base import Agent
 
 class MyHarness(Agent):
     async def __call__(self, run: Run) -> None:
@@ -68,7 +68,7 @@ There are two base classes, depending on how much of HUD's loop you want:
 
 - **`Agent`** (`hud.agents.base`) - the bare seam above. Best for wrapping an external framework or a
   fully custom loop.
-- **`ToolAgent`** (`hud.agents.tool_agent`, also exported as `MCPAgent`) - HUD's catalog-driven
+- **`ToolAgent`** (`hud.agents.tool_agent`) - HUD's catalog-driven
   tool-call loop, the base every provider agent subclasses. Implement the provider hooks
   (`get_response`, message/result formatting) and it handles capability wiring, the step loop, and
   recording.
@@ -110,8 +110,8 @@ An environment can expose several capabilities; the harness opens whichever it n
 a shell **and** a browser declares both:
 
 ```python env.py
+from hud import Environment
 from hud.capabilities import Capability
-from hud.environment import Environment
 
 env = Environment(
     name="full-stack",
@@ -174,7 +174,7 @@ A controlled difficulty distribution is what makes a taskset trainable - see
 Keep tasks in modules and collect them into a `Taskset` at the top:
 
 ```python tasks.py
-from hud.eval import Taskset
+from hud import Taskset
 from coding_tasks import fix_bug, add_feature
 from review_tasks import review_pr
 
@@ -261,7 +261,7 @@ An orchestrating environment declares an `mcp` capability pointing at that serve
 opens it sees `investigate_issue` as a callable tool:
 
 ```python env.py
-from hud.environment import Environment
+from hud import Environment
 from hud.capabilities import Capability
 
 env = Environment(
@@ -334,7 +334,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`Chat` is imported from `hud.eval` (also re-exported as `hud.Chat`). The task's `messages` argument is
+`Chat` is imported from `hud`. The task's `messages` argument is
 replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout
 (omit it and the task's source serves locally when minted in-process, else HUD-hosted by env name).
 

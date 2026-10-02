@@ -30,10 +30,10 @@ from hud.agents.types import AgentStep, Citation, OpenAIConfig, Usage
 from hud.types import ToolCall, ToolResult
 from hud.utils import gateway
 
-from .tools import OpenAIComputerTool, OpenAIMCPProxyTool, OpenAIShellTool
 from .tools.base import format_openai_result
-from .tools.coding import shell_output
-from .tools.computer import last_image_content
+from .tools.coding import OpenAIShellTool, shell_output
+from .tools.computer import OpenAIComputerTool, last_image_content
+from .tools.mcp_proxy import OpenAIMCPProxyTool
 
 if TYPE_CHECKING:
     from hud.types import PromptMessage

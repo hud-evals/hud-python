@@ -59,7 +59,7 @@ def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
 
 
 class Taskset:
-    """A named, ordered collection of :class:`~hud.eval.Task`s."""
+    """A named, ordered collection of :class:`~hud.Task`s."""
 
     def __init__(
         self,

@@ -150,7 +150,7 @@ collections:
 `task.run(...)` is the same call over a taskset of one, with identical semantics.
 
 ```python
-from hud import LocalRuntime
+from hud.runtime import LocalRuntime
 
 job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurrent=10)
 ```

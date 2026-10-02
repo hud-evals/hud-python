@@ -19,13 +19,12 @@ This subpackage needs the ``robot`` extra (``pip install 'hud[robot]'``).
 from __future__ import annotations
 
 from .adapter import Adapter, LeRobotAdapter, OpenPIAdapter
-from .agent import ROBOT_PROTOCOL, RobotAgent
+from .agent import RobotAgent
 from .batching import BatchedAgent, BatchedModel
 from .dataset import DatasetWriter
 from .model import LeRobotModel, Model, RemoteModel
 
 __all__ = [
-    "ROBOT_PROTOCOL",
     "Adapter",
     "BatchedAgent",
     "BatchedModel",

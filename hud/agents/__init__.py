@@ -12,12 +12,12 @@ from hud.utils.gateway import resolve_gateway_model
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from hud.agents.claude import ClaudeAgent, ClaudeCLIAgent, ClaudeCLIConfig
-    from hud.agents.codex import CodexCLIAgent, CodexCLIConfig
-    from hud.agents.gemini import GeminiAgent
-    from hud.agents.openai import OpenAIAgent
-    from hud.agents.openai_compatible import OpenAIChatAgent
-    from hud.agents.tool_agent import ToolAgent as MCPAgent
+    from hud.agents.claude.agent import ClaudeAgent
+    from hud.agents.claude.sdk.agent import ClaudeCLIAgent
+    from hud.agents.codex.agent import CodexCLIAgent
+    from hud.agents.gemini.agent import GeminiAgent
+    from hud.agents.openai.agent import OpenAIAgent
+    from hud.agents.openai_compatible.agent import OpenAIChatAgent
 
     GatewayAgent: TypeAlias = (
         ClaudeAgent | ClaudeCLIAgent | CodexCLIAgent | GeminiAgent | OpenAIAgent | OpenAIChatAgent
@@ -57,25 +57,19 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
 
 
 _LAZY_EXPORTS = {
-    "ClaudeAgent": ("hud.agents.claude", "ClaudeAgent"),
-    "ClaudeCLIAgent": ("hud.agents.claude", "ClaudeCLIAgent"),
-    "ClaudeCLIConfig": ("hud.agents.claude", "ClaudeCLIConfig"),
-    "CodexCLIAgent": ("hud.agents.codex", "CodexCLIAgent"),
-    "CodexCLIConfig": ("hud.agents.codex", "CodexCLIConfig"),
-    "GeminiAgent": ("hud.agents.gemini", "GeminiAgent"),
-    "MCPAgent": ("hud.agents.tool_agent", "ToolAgent"),
-    "OpenAIAgent": ("hud.agents.openai", "OpenAIAgent"),
-    "OpenAIChatAgent": ("hud.agents.openai_compatible", "OpenAIChatAgent"),
+    "ClaudeAgent": "hud.agents.claude.agent",
+    "ClaudeCLIAgent": "hud.agents.claude.sdk.agent",
+    "CodexCLIAgent": "hud.agents.codex.agent",
+    "GeminiAgent": "hud.agents.gemini.agent",
+    "OpenAIAgent": "hud.agents.openai.agent",
+    "OpenAIChatAgent": "hud.agents.openai_compatible.agent",
 }
 
 __all__ = [
     "ClaudeAgent",
     "ClaudeCLIAgent",
-    "ClaudeCLIConfig",
     "CodexCLIAgent",
-    "CodexCLIConfig",
     "GeminiAgent",
-    "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
     "create_agent",
@@ -83,15 +77,14 @@ __all__ = [
 
 
 def __getattr__(name: str) -> object:
-    target = _LAZY_EXPORTS.get(name)
-    if target is None:
+    module_name = _LAZY_EXPORTS.get(name)
+    if module_name is None:
         raise AttributeError(f"module 'hud.agents' has no attribute {name!r}")
 
     from importlib import import_module
 
-    module_name, symbol = target
     try:
-        value = getattr(import_module(module_name), symbol)
+        value = getattr(import_module(module_name), name)
     except ModuleNotFoundError as exc:
         raise ImportError(
             f"{name} requires the agents extra. Install with: pip install 'hud[agents]'"

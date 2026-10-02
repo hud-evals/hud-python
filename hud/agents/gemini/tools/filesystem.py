@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from hud.agents.tools import SSHTool
+from hud.agents.tools.ssh import SSHTool
 from hud.types import ToolResult
 
 from .base import GeminiToolSpec

@@ -90,7 +90,7 @@ class Chat:
         """Initialize Chat.
 
         Args:
-            task: A :class:`hud.eval.Task` (env + task id + default args).
+            task: A :class:`hud.Task` (env + task id + default args).
                 Create one by calling a task, e.g. ``assistant(messages=[])``.
                 Its ``messages`` arg is replaced with the running conversation
                 on each :meth:`send`.

@@ -6,7 +6,7 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import MCPTool
+from hud.agents.tools.mcp import MCPTool
 
 from .base import OpenAIToolSpec
 from .strict_schema import ensure_strict_json_schema
