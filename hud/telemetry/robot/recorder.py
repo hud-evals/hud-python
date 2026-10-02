@@ -1,16 +1,4 @@
-"""Robot trace recording: numeric state, per-camera H.264 video, action chunks.
-
-Shared by both sides of the robot stack (the agent harness, ``wrap``, the
-gym bridges), so it lives under telemetry rather than either side:
-
-- ``TraceRecorder`` — one trace. Emits spans with an explicit ``trace_id``
-  (no rollout contextvar needed, works from any thread), or through a ``Run``
-  so steps also land on ``run.trace`` for training. Span emission only —
-  trace lifecycle (enter/exit) is the caller's job.
-- ``JobRecorder`` — a whole vectorized env as one **Job** of per-episode
-  traces: one ``TraceRecorder`` per recorded slot; ``done[i]`` closes that
-  slot's trace (reporting its exit) and opens a fresh one for the next episode.
-"""
+"""Robot trace recording: numeric state, per-camera H.264 video, action chunks."""
 
 from __future__ import annotations
 
@@ -46,8 +34,7 @@ def to_numpy(x: Any) -> NDArray[Any]:
 
 
 def _report_sync(path: str, payload: dict[str, Any]) -> None:
-    """Best-effort sync POST to the platform (job/trace lifecycle). No-op without an
-    API key; never fails the run when the platform is unreachable."""
+    """Best-effort job/trace lifecycle POST; a no-op without telemetry and an API key."""
     from hud.settings import settings
 
     if not (settings.telemetry_enabled and settings.api_key):
@@ -99,7 +86,6 @@ class TraceRecorder:
         self._lossless_video = lossless_video
         self.reward = 0.0
         self._video: VideoStreamer | None = None  # lazy, one per trace
-        # The task instruction as an opening user step (shows on the timeline).
         # A Run records its own prompt step, so only the bare-trace path emits one.
         if prompt and run is None:
             self._emit(
@@ -171,15 +157,12 @@ class TraceRecorder:
 
 
 class JobRecorder:
-    """Records a vectorized env as one Job of per-episode traces.
+    """Records a vectorized env as one job of per-episode traces.
 
-    Construct once with the batch size, call ``record`` after every
-    ``env.step`` with the batched tensors, ``close`` at the end. A subset of
-    slots (``record_indices``) gets rich traces; each ``done[i]`` closes that
-    slot's trace (reporting reward — env-reported ``success`` outranks
-    accumulated shaped reward) and opens a fresh one, all under one Job.
-
-    ``job_id`` is an existing HUD Job UUID to share; omit it to mint one.
+    Call ``record`` after every ``env.step`` and ``close`` at the end. Only the
+    ``record_indices`` slots are traced; ``done[i]`` closes that slot's trace, scored
+    by ``success`` when given and by summed reward otherwise, and opens the next.
+    Pass ``job_id`` (a UUID) to record into an existing job.
     """
 
     def __init__(
@@ -213,8 +196,7 @@ class JobRecorder:
         self._prompt = prompt
         self._action_names = action_names
         self._state_names = state_names
-        # Extra metadata merged into each newly opened trace (e.g. the episode's
-        # task parametrization). Mutable: set it before the episode's traces open.
+        # Merged into each newly opened trace's metadata; set it before the episode's traces open.
         self.extra_metadata: dict[str, Any] = {}
         if record_indices is None:
             record_indices = list(range(min(num_envs, 4)))  # a few representative slots

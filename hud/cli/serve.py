@@ -1,8 +1,4 @@
-"""``hud serve`` — serve a v6 ``Environment`` locally.
-
-In v6, ``hud serve`` brings up an environment's control channel (tcp JSON-RPC)
-so agents can connect to it.
-"""
+"""``hud serve`` — serve an ``Environment``'s control channel locally."""
 
 from __future__ import annotations
 

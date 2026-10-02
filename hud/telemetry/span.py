@@ -1,12 +1,4 @@
-"""OpenTelemetry-shaped span types emitted by the SDK.
-
-Spans are the single wire format for platform ingest. The envelope carries
-domain data as a pair of namespaced attributes: ``hud.schema`` tags how to
-decode and ``hud.payload`` holds the one domain object the tag describes;
-``@instrument`` debug spans carry neither, only generic diagnostics. Domain
-schemas (e.g. the step stream) own their tag values and payload shapes —
-this module knows none of them.
-"""
+"""OpenTelemetry-shaped spans, the SDK's single wire format for platform ingest."""
 
 from __future__ import annotations
 
@@ -38,11 +30,7 @@ class SpanEvent(BaseModel):
 
 
 class Span(BaseModel):
-    """Fine-grained, OpenTelemetry-shaped span.
-
-    Domain identifiers live in namespaced attributes such as
-    ``hud.task_run_id``; ``trace_id``/``span_id`` describe the telemetry graph.
-    """
+    """An OpenTelemetry-shaped span; its HUD trace id is the ``hud.task_run_id`` attribute."""
 
     name: str
     trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")

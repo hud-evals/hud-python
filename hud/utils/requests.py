@@ -1,6 +1,4 @@
-"""
-HTTP request utilities for the HUD API.
-"""
+"""HTTP request utilities for the HUD API."""
 
 from __future__ import annotations
 
@@ -26,7 +24,6 @@ from hud.utils.exceptions import (
 
 T = TypeVar("T")
 
-# Set up logger
 logger = logging.getLogger("hud.http")
 logger.setLevel(logging.INFO)
 
@@ -48,7 +45,7 @@ def _retry_delay(
     attempt: int, max_retries: int, retry_delay: float, url: str, error_msg: str
 ) -> float:
     """Calculate and log the shared retry backoff."""
-    retry_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
+    retry_time = retry_delay * (2 ** (attempt - 1))
     logger.debug(
         "%s from %s, retrying in %.2f seconds (attempt %d/%d)",
         error_msg,
@@ -95,7 +92,6 @@ def _response_retry_wait(
 
 
 def _create_default_async_client() -> httpx.AsyncClient:
-    """Create a default httpx AsyncClient with standard configuration."""
     return httpx.AsyncClient(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
@@ -103,7 +99,6 @@ def _create_default_async_client() -> httpx.AsyncClient:
 
 
 def _create_default_sync_client() -> httpx.Client:
-    """Create a default httpx Client with standard configuration."""
     return httpx.Client(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
@@ -187,28 +182,15 @@ async def make_request(
     *,
     reply: type[T] | None = None,
 ) -> Any:
-    """
-    Make an asynchronous HTTP request to the HUD API.
+    """Send an authenticated request to the HUD API; return the body as ``reply``, or its
+    decoded JSON without one.
 
-    Args:
-        method: HTTP method (GET, POST, etc.)
-        url: Full URL for the request
-        json: Optional JSON serializable data
-        api_key: API key for authentication
-        max_retries: Maximum number of retries
-        retry_delay: Delay between retries
-        client: Optional custom httpx.AsyncClient
-        reply: The type the response body is read as; None returns the decoded JSON
-
-    Returns:
-        The response body as ``reply``, or its decoded JSON without one.
-
-    Raises:
-        HudAuthenticationError: If API key is missing or invalid.
-        HudRequestError: If the request fails with a non-retryable status code.
-        HudReplyError: If the response body is not JSON, or not a ``reply``.
-        HudNetworkError: If there are network-related issues.
-        HudTimeoutError: If the request times out.
+    Retries 429/502/503/504 responses and network errors, waiting out ``Retry-After`` or
+    backing off exponentially from ``retry_delay`` seconds. Raises
+    ``HudAuthenticationError`` without ``api_key``, ``HudTimeoutError`` on a timeout (not
+    retried), ``HudNetworkError`` when network errors outlast the retries,
+    ``HudReplyError`` for a body that is not JSON or not a ``reply``, and
+    ``HudRequestError`` for any other failure.
     """
     if not api_key:
         raise HudAuthenticationError("API key is required but not provided")
@@ -292,29 +274,7 @@ def make_request_sync(
     client: httpx.Client | None = None,
     reply: type[T] | None = None,
 ) -> Any:
-    """
-    Make a synchronous HTTP request to the HUD API.
-
-    Args:
-        method: HTTP method (GET, POST, etc.)
-        url: Full URL for the request
-        json: Optional JSON serializable data
-        api_key: API key for authentication
-        max_retries: Maximum number of retries
-        retry_delay: Delay between retries
-        client: Optional custom httpx.Client
-        reply: The type the response body is read as; None returns the decoded JSON
-
-    Returns:
-        The response body as ``reply``, or its decoded JSON without one.
-
-    Raises:
-        HudAuthenticationError: If API key is missing or invalid.
-        HudRequestError: If the request fails with a non-retryable status code.
-        HudReplyError: If the response body is not JSON, or not a ``reply``.
-        HudNetworkError: If there are network-related issues.
-        HudTimeoutError: If the request times out.
-    """
+    """The blocking form of ``make_request``."""
     if not api_key:
         raise HudAuthenticationError("API key is required but not provided")
 

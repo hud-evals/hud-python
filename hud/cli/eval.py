@@ -1,7 +1,4 @@
-"""``hud eval`` — run an agent over a taskset and report the graded job.
-
-Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
-"""
+"""``hud eval`` — run an agent over a taskset; CLI arguments override ``.hud_eval.toml``."""
 
 from __future__ import annotations
 
@@ -53,7 +50,7 @@ _CONFIG_PATH = Path(".hud_eval.toml")
 class Placement(StrEnum):
     """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead.
 
-    ``LOCAL`` is composed per row in the command; every other name is a provider
+    ``LOCAL`` starts each row in Docker or a subprocess; the other names are providers
     each row's ``runtime_config`` is handed to as-is.
     """
 
@@ -101,10 +98,6 @@ class EvalConfig(BaseModel):
     auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
-    # ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
-    # loading the task source otherwise); other names hand rows to that
-    # provider; a ``tcp://`` url attaches to an already-served env. ``None``
-    # infers from the source: a file on disk runs locally, a platform taskset hosted.
     runtime: Placement | TcpUrl | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 

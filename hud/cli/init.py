@@ -168,9 +168,8 @@ def init_command(
                 encoding="utf-8",
             )
     except (httpx.HTTPError, tarfile.TarError, ValueError, OSError) as exc:
-        # Don't leave a half-written tree behind — it would trip the
-        # non-empty-directory guard on the next run. Only remove a directory
-        # this run created (never a dir the user already had).
+        # A half-written tree would trip the non-empty-directory guard on the next run;
+        # remove only a directory this run created.
         if created and target.exists():
             shutil.rmtree(target, ignore_errors=True)
         raise CliError(

@@ -43,10 +43,8 @@ logger = logging.getLogger(__name__)
 class EmptyShellCallError(DegenerateTurnError):
     """The model emitted a shell_call with an empty ``commands`` array.
 
-    OpenAI stores such a turn but returns 500 for every request that continues
-    from it via ``previous_response_id``. The turn is rejected before its
-    response id is committed, so the run state still points at the last
-    healthy response and the next sample continues from there.
+    OpenAI returns 500 for every request continuing from such a turn, so it is rejected before
+    its response id is committed.
     """
 
 
@@ -83,8 +81,6 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         self.parallel_tool_calls = config.parallel_tool_calls
         self.text = config.text
         self.truncation: Literal["auto", "disabled"] | None = config.truncation
-
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: list[PromptMessage]) -> OpenAIRunState:
         return OpenAIRunState(messages=self._initial_messages(prompt))
@@ -197,8 +193,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
 
         effective_tools: list[ToolParam] = list(state.params)
 
-        # tool_search: if a ToolSearchTool is configured and function count exceeds
-        # its threshold, apply defer_loading to function tools.
+        # Past a configured tool-search threshold, function tools are deferred (defer_loading).
         from hud.agents.openai.tools.hosted import OpenAIToolSearchTool
 
         tool_search_threshold: int | None = None

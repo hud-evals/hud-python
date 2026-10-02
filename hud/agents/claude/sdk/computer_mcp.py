@@ -1,7 +1,4 @@
-"""MCP server that exposes computer-use over VNC.
-
-Single tool ``computer`` backed by ``ClaudeComputerTool`` / ``RFBTool``.
-"""
+"""MCP server that exposes computer-use over VNC."""
 
 from __future__ import annotations
 

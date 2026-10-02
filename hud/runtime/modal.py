@@ -117,16 +117,10 @@ class ModalEndpoint(Runtime):
 class ModalRuntime:
     """The Modal provider: each acquisition ``Sandbox.create``s a fresh container.
 
-    The cloud ``DockerRuntime`` — boots a sandbox from a pre-built image,
-    exposes the env's control channel as a raw-TCP tunnel (``unencrypted_ports``,
-    the only kind ``hud.clients.connect`` dials), yields its ``Runtime``,
-    terminates on exit. Acquisitions are independent, so a batch fans out into
-    isolated containers (one ``sb-…`` id each).
-
-    The image resolves once (so concurrent rollouts can't race a build): pass a
-    published name — ``ModalRuntime("hud-libero-env")``, the preferred durable
-    handle — or, as an escape hatch, an ``Image`` to build lazily on first use.
-    Requires the ``modal`` extra and a configured token.
+    The control channel is exposed as a raw TCP tunnel, the only kind ``connect``
+    dials, and the sandbox terminates on exit. ``image_name`` names a published image;
+    an ``image`` is built once, on first use. Requires the ``modal`` extra and a
+    configured token.
     """
 
     def __init__(
@@ -152,8 +146,8 @@ class ModalRuntime:
         self.sandbox_secrets = tuple(sandbox_secrets or ())
         self.registry_secret = registry_secret
         self.workdir = workdir
-        # Default CMD mirrors the scaffolded Dockerfile.hud entrypoint. Leave
-        # workdir unset by default so Modal preserves the image WORKDIR.
+        # The default command mirrors the scaffolded Dockerfile.hud entrypoint; an unset
+        # workdir keeps the image WORKDIR.
         self.command = (
             tuple(command)
             if command is not None
@@ -173,8 +167,7 @@ class ModalRuntime:
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
         self.runtime_config = config
-        # Resolved (named) or built-once (from Dockerfile) image, behind a lock so
-        # concurrent first acquisitions build/look up exactly once.
+        # The lock makes concurrent first acquisitions build image exactly once.
         self._image = image
         self._resolved: modal.Image | None = None
         self._image_lock = asyncio.Lock()
@@ -405,7 +398,7 @@ class ModalRuntime:
                 compose=compose_path,
             )
         finally:
-            # check-free teardown: never shadow the run's own error.
+            # Best-effort teardown: never shadow the run's own error.
             if compose_path is not None:
                 with contextlib.suppress(Exception):
                     process = await sb.exec.aio(

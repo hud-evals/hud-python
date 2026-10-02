@@ -41,12 +41,8 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
 class Capability:
     """``(name, protocol, url, params)`` — concrete wire data for one slice of env access.
 
-    Always carries the real address of something serving the protocol —
-    what the manifest publishes and what a ``CapabilityClient`` dials.
-    A service the *environment* brings up itself publishes one of these at
-    serve time: start the daemon in an ``@env.initialize`` hook and call
-    ``env.add_capability(...)`` (sugar for the common case:
-    ``env.workspace(root)``).
+    ``url`` is the real address of a server speaking ``protocol``: what the manifest
+    publishes and a ``CapabilityClient`` dials.
     """
 
     name: str
@@ -78,8 +74,6 @@ class Capability:
             params=params,
         )
 
-    # ─── well-known protocol factories ─────────────────────────────────
-
     @classmethod
     def ssh(
         cls,
@@ -97,16 +91,11 @@ class Capability:
     ) -> Capability:
         """``ssh/2`` — SSH daemon with publickey auth.
 
-        Client auth: ``client_key`` carries the private key *content* (what a
-        managed daemon hands its client — valid in any network namespace);
-        ``client_key_path`` points at a key file and only works when client
-        and daemon share a filesystem. ``shell`` declares the remote shell
-        type (``bash``, ``powershell``, ``cmd``). Defaults to auto-detect
-        from ``sys.platform`` at construction time. Agents read this to
-        format commands correctly. ``cwd`` is the absolute path sessions
-        start in. Paths are the session namespace's own — clients pass them
-        verbatim, and nothing is anchored or rewritten. ``isolation`` records
-        the sandbox actually granted to the served workspace.
+        ``client_key`` is the private key's content and works across network
+        namespaces; ``client_key_path`` works only when client and daemon share a
+        filesystem. ``shell`` (``bash``, ``powershell`` or ``cmd``) defaults to this
+        platform's. ``cwd`` is where sessions start, a path in the session's own
+        namespace. ``isolation`` records the sandbox actually granted to the workspace.
         """
         normalized = normalize_url(url, default_scheme="ssh", default_port=22)
         if shell is None:
@@ -150,14 +139,8 @@ class Capability:
     ) -> Capability:
         """``rfb/3.8`` — VNC/RFB pixel + HID server.
 
-        ``display`` selects the VNC display number (standard convention: display
-        ``N`` listens on port ``5900 + N``). When the URL omits an explicit port
-        the port defaults to ``5900 + display``; an explicit port in the URL
-        always wins. Envs hosting multiple screens publish one rfb capability
-        per display, e.g.:
-
-            Capability.rfb(name="screen-0", url="rfb://host", display=0)
-            Capability.rfb(name="screen-1", url="rfb://host", display=1)
+        A URL without a port gets ``5900 + display``. Envs with several screens publish
+        one capability per display.
         """
         normalized = normalize_url(url, default_scheme="rfb", default_port=5900 + display)
         params: dict[str, Any] = {"display": display}
@@ -212,15 +195,10 @@ class Capability:
     ) -> Capability:
         """``openpi/0`` — schema-driven action/observation loop over WebSocket.
 
-        openpi-like: reuses openpi's msgpack-numpy wire format and flat obs/action
-        naming, but the env is the server and the agent is the client (see
-        ``hud.capabilities.robot``). ``contract`` is the env's full self-describing
-        config: ``robot_type``, ``control_rate``, and a ``features`` map where each
-        feature declares its ``role`` (``"action"`` / ``"observation"``), layout
-        (``dtype`` / ``shape`` / ``names``) and normalization ``stats``. It round-trips
-        verbatim through the manifest, so the agent gets everything it needs to wire a
-        policy without a shared config file. ``RobotClient.spaces()`` splits the
-        contract's features into action/observation spaces by ``role``.
+        ``contract`` is the env's self-describing config, passed verbatim through the
+        manifest: ``robot_type``, ``control_rate``, and ``features``, each declaring
+        its ``role`` (``"action"`` or ``"observation"``), layout and normalization
+        ``stats``.
         """
         normalized = normalize_url(url, default_scheme="ws", default_port=9091)
         return cls(name=name, protocol="openpi/0", url=normalized, params={"contract": contract})

@@ -1,15 +1,4 @@
-"""``RobotAgent`` — drive one ``robot`` env with an open-loop chunk queue.
-
-Subclass, set ``self.model`` and ``self.adapter`` in ``__init__``, and the base
-owns the rest: connect to the ``robot`` capability (claiming a slot token from
-the setup step when present), read the contract, run until the env terminates.
-
-Vectorized sims still look like one scalar connection per rollout; concurrent
-rollouts coalesce GPU forwards through ``BatchedModel``.
-
-Most policies use ``LeRobotAdapter``; a policy whose spaces
-match the env natively can set ``adapter = None`` (raw pass-through).
-"""
+"""``RobotAgent``: drive one ``robot`` env with an open-loop chunk queue."""
 
 from __future__ import annotations
 
@@ -34,23 +23,18 @@ ROBOT_PROTOCOL = "openpi/0"
 class RobotAgent(Agent):
     """Drive a ``robot`` env with one open-loop chunk queue.
 
-    **Subclass contract:** in ``__init__`` set ``self.model`` (a
-    ``Model``) and ``self.adapter`` (an ``Adapter``,
-    or ``None`` for raw pass-through).
+    Subclasses set ``model`` and ``adapter`` in ``__init__``; a ``None`` adapter passes data raw.
     """
 
     robot_protocol: ClassVar[str] = ROBOT_PROTOCOL
-    # Max control ticks before the episode is cut off. Subclasses may override.
+    # Control ticks before the episode is cut off.
     max_steps: ClassVar[int] = 520
     # How often (in steps) to print a step-progress line. 0 = off.
     log_every: ClassVar[int] = 20
-    # Opt-in: also save a LeRobot v3 dataset of every (obs, action) pair.
-    # Telemetry streams regardless; see ``.dataset``.
+    # Also record a LeRobot v3 dataset of every (obs, action) pair; telemetry streams regardless.
     save: bool = False
 
-    # Runs the policy (preprocess -> forward -> postprocess). Subclasses set this.
     model: Model | None = None
-    # Translates env<->policy spaces. Subclasses set this; ``None`` = raw pass-through.
     adapter: Adapter | None = None
 
     def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
@@ -58,10 +42,7 @@ class RobotAgent(Agent):
         return bool(np.asarray(obs["terminated"]).reshape(-1)[0])
 
     async def __call__(self, run: Run, *, max_steps: int | None = None) -> None:
-        """The generic rollout contract: one run, one scalar robot connection.
-
-        ``max_steps`` caps control ticks; omit it to use the class ``max_steps`` (520).
-        """
+        """Run one episode; ``max_steps`` overrides the class's control-tick cap."""
         if self.model is None:
             raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
         prompt = run.prompt
@@ -69,9 +50,8 @@ class RobotAgent(Agent):
             raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
 
         cap = run.client.binding(self.robot_protocol)
-        # Per-episode slot token the template published for this capability.
-        # Single-env templates may omit it — a None claim binds the sole claimed
-        # slot; vectorized bridges reject the ambiguity at connect.
+        # The episode's slot token. Single-env templates may omit it: a ``None`` claim binds the
+        # sole slot, and vectorized bridges reject it at connect.
         token = run.bindings.get(cap.name, {}).get("token")
         robot = await RobotClient.connect(cap, token=token)
         try:
@@ -82,7 +62,6 @@ class RobotAgent(Agent):
 
             obs = await robot.get_observation()
             fps = robot.get_control_rate()
-            # Contract labels: obs_space for state, action names for InferenceStep plots.
             recorder = TraceRecorder(
                 run=run,
                 fps=fps,
@@ -141,20 +120,18 @@ class RobotAgent(Agent):
                     print(f"[agent] stopped at step {step}", flush=True)
                 break
 
-            if not chunk:  # refill with a fresh forward (BatchedModel coalesces ainfer)
+            if not chunk:
                 batch = adapter.adapt_observation(obs, prompt) if adapter else obs
                 rows = np.atleast_2d(await model.ainfer(batch))
                 if adapter is not None:
-                    # Policy chunk → env space (e.g. relative → absolute at query obs).
                     rows = adapter.adapt_chunk(rows, obs)
-                    # Open-loop horizon: keep only the first N actions, then replan.
                     if adapter.chunk_size is not None:
                         rows = rows[: adapter.chunk_size]
                 chunk.extend(rows)
                 recorder.record_inference(rows, tick=step)
 
             action = chunk.popleft()
-            if adapter is not None:  # per-step execution-time hook (default identity)
+            if adapter is not None:
                 action = adapter.adapt_action(action, obs)
             if writer is not None:
                 writer.add(obs["data"], np.asarray(action), task=prompt)
@@ -163,7 +140,6 @@ class RobotAgent(Agent):
             if self.log_every and step % self.log_every == 0:
                 print(f"[agent] step {step}/{max_steps}", flush=True)
             obs = await robot.get_observation()
-            # Env-reported per-step reward (RL wire sibling) → the trace total.
             if (reward := obs.get("reward")) is not None:
                 recorder.add_reward(reward)
         else:
