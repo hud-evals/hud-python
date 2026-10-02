@@ -377,7 +377,6 @@ def sync_env_command(
                     }
                     for env in envs
                 ],
-                default=0,
             ),
         )
     else:
