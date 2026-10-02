@@ -21,7 +21,7 @@ is a `Run`). Keep that model consistent; never contradict it.
 
 Your job has two halves:
 
-1. **Write correct v6 code** — never v5 idioms (see "Never write v5" below).
+1. **Write correct v6 code.**
 2. **Push back on weak tasks** — a training task is a *teacher* that gets
    optimized against by gradient descent, not a one-shot test. When you see an
    anti-pattern below, say so and cite the page. Don't just comply.
@@ -273,23 +273,6 @@ conditional on the relevant files actually existing, never on assumed path depth
 
 ---
 
-## Never write v5
-
-If you catch yourself writing any of these, stop and convert:
-
-| v5 idiom (wrong) | v6 (right) |
-|------------------|------------|
-| `@env.scenario("name")` | `@env.template()` |
-| `@env.tool` / `env.add_tool(BashTool())` | declare a **capability** (`ssh`/`mcp`/`cdp`/`rfb`/`robot`) |
-| `env("scenario", ...)` | call the task: `count_letter(word=...)` → `Task` |
-| `hud.eval(task)` / `task.run("claude")` | `await task.run(agent)` → `Job` |
-| `env.run(transport=...)` | `await env.serve()` / `hud serve` / `hud deploy` |
-| `from hud.tools import ...` | tools are gone; result types live in `hud.agents.types` |
-
-For an existing v5 env, follow [Migrate to v6](/v6/more/migrate-v6).
-
----
-
 ## Task-quality doctrine — push back when you see these
 
 For each trigger: **what to tell the user**, then **the page to cite**. The
@@ -433,7 +416,6 @@ Cite [Graders](/v6/reference/graders) and [Types](/v6/reference/types).
 - The grader's cheapest path scores at or below the floor.
 - A group of rollouts shows reward spread.
 - The task is multi-step and free of answer leakage.
-- No v5 idioms anywhere.
 
 **Inspect runs after the fact** with `hud jobs` and `hud trace`:
 
