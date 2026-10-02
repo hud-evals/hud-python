@@ -264,6 +264,16 @@ async def _sent_command(
     return command
 
 
+async def test_command_passes_the_configured_reasoning_effort() -> None:
+    command = await _sent_command(ClaudeCLIAgent(ClaudeCLIConfig(reasoning_effort="max")))
+    assert "--effort max" in command
+
+
+async def test_command_omits_effort_when_unconfigured() -> None:
+    command = await _sent_command(ClaudeCLIAgent(ClaudeCLIConfig()))
+    assert "--effort" not in command
+
+
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
     sink: dict[str, bytes] = {}
     conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON))

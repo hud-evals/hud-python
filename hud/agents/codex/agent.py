@@ -246,6 +246,10 @@ class CodexCLIAgent(Agent[CodexCLIConfig]):
             "--model",
             self.config.model,
         ]
+        if self.config.reasoning_effort is not None:
+            args.extend(
+                ["-c", f"model_reasoning_effort={json.dumps(self.config.reasoning_effort)}"]
+            )
 
         if connection is not None or routes_to_gateway("openai", gateway=self.config.gateway):
             if connection is not None:
