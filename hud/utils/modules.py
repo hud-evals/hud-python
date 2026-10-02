@@ -17,6 +17,10 @@ LOGGER = logging.getLogger(__name__)
 
 _SKIP_STEMS = {"conftest", "setup", "__init__", "__main__"}
 
+# Import roots of loaded sources. A cached module from another of these belongs to
+# another source; one from the stdlib or an installed package does not.
+_source_roots: set[Path] = set()
+
 
 def _module_name(file: Path) -> tuple[str, Path]:
     parts = [] if file.name == "__init__.py" else [file.stem]
@@ -45,19 +49,38 @@ def _module_name(file: Path) -> tuple[str, Path]:
     return ".".join(parts), directory
 
 
+def _check_siblings(file: Path, import_root: Path) -> None:
+    own = Path(file.relative_to(import_root).parts[0]).stem
+    for entry in import_root.iterdir():
+        name = entry.stem if entry.suffix == ".py" else entry.name
+        module = sys.modules.get(name)
+        if module is None or name == own or not (entry.suffix == ".py" or entry.is_dir()):
+            continue
+        locations = list(getattr(module, "__path__", ())) or [getattr(module, "__file__", None)]
+        roots = {Path(location).resolve().parent for location in locations if location}
+        if (roots - {import_root}) & _source_roots:
+            raise ValueError(
+                f"cannot load {file}: module {name!r} is already imported from "
+                "a different source root; load this source in a separate process"
+            )
+
+
 def load_module(path: str | Path) -> ModuleType:
     """Import a Python file as a throwaway module and return it.
 
     The import root is on ``sys.path`` during import. Packages keep their
     qualified names; standalone files use a private name when theirs is taken.
     The source module entry is restored afterward; imported dependencies use
-    normal Python caching.
+    normal Python caching. A source whose package or sibling modules are
+    already imported from another source root raises rather than binding them.
     """
     file = Path(path).resolve()
     if not file.is_file():
         raise FileNotFoundError(f"module not found: {path}")
 
     mod_name, import_root = _module_name(file)
+    _check_siblings(file, import_root)
+    _source_roots.add(import_root)
     spec = importlib.util.spec_from_file_location(mod_name, file)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot import module: {file}")
