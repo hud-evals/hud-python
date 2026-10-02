@@ -201,7 +201,7 @@ group:
 ```python run.py
 taskset = Taskset("bugs", [fix_bug(difficulty=d) for d in range(1, 6)])
 job = await taskset.run(agent, group=8, max_concurrent=10)
-rewards = [run.reward for run in job.runs]
+rewards = [trace.reward for trace in job.traces]
 ```
 
 ### Route tasks to different substrates
@@ -237,7 +237,7 @@ _specialist = create_agent("claude-haiku-4-5")   # one stateless instance drives
 async def investigate_issue(issue_id: str) -> str:
     """Investigate an issue and return the root-cause findings."""
     job = await investigate(issue_id=issue_id).run(_specialist)
-    return job.runs[0].trace.content or ""
+    return job.traces[0].content or ""
 ```
 
 The function's signature and docstring are all an MCP server needs to build the tool schema:

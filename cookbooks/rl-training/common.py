@@ -1,7 +1,7 @@
 """Shared scaffolding for the RL-training cookbook scripts.
 
 The training loop is agnostic to where rollouts come from — it only consumes
-``job.runs`` (each carrying a trajectory + reward). So the real setup and the
+``job.traces`` (each carrying a trajectory + reward). So the real setup and the
 local quickstart differ only in *which taskset* and *which runtime* you hand to
 ``Taskset.run``; the training code never changes.
 

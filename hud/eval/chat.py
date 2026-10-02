@@ -140,9 +140,8 @@ class Chat:
             )
         if self.job is None:  # one job spans the whole conversation
             self.job = await Job.start(self._task.id)
-        run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
-        self.job.runs.append(run)
-        result = run.trace
+        result = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
+        self.job.traces.append(result)
         if result.is_error:
             # Don't record the failed turn as an assistant message.
             raise RuntimeError(result.error or "chat turn failed")

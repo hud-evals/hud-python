@@ -83,8 +83,8 @@ async def _run_task(fixture_repo: Path, task, monkeypatch) -> float:
     async with runtime(task) as addr, connect(addr) as client:
         async with Run(client, task.id, task.args) as run:
             pass
-    assert not run.evaluation.get("isError"), run.evaluation
-    return run.reward
+    assert not run.trace.evaluation.get("isError"), run.trace.evaluation
+    return run.trace.reward
 
 
 async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading_workspace):

@@ -122,18 +122,18 @@ taskset = Taskset.from_file("tasks.py")
 async def main():
     session = await Job.start(MODEL, group=8)   # one job spans the session
     for step in range(10):
-        start = len(session.runs)
+        start = len(session.traces)
         await taskset.run(agent, runtime=LocalRuntime("env.py"), job=session)
-        batch = session.runs[start:]                          # this step's rollouts
+        batch = session.traces[start:]                        # this step's rollouts
         failed_groups = {
-            run.group_id
-            for run in batch
-            if run.trace.stop_reason == "timeout" or run.grade.is_error
+            trace.group_id
+            for trace in batch
+            if trace.stop_reason == "timeout" or trace.grade.is_error
         }
-        trainable = [run for run in batch if run.group_id not in failed_groups]
+        trainable = [trace for trace in batch if trace.group_id not in failed_groups]
         if trainable:
             await trainer.step(trainable, learning_rate=1e-5, group_size=8)
-        print(f"step {step}  reward {sum(r.reward for r in batch) / len(batch):.2f}")
+        print(f"step {step}  reward {sum(t.reward for t in batch) / len(batch):.2f}")
 
 asyncio.run(main())
 ```
