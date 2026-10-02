@@ -167,6 +167,8 @@ class ClaudeCLIConfig(AgentConfig):
     model: str = Field(default="claude-sonnet-5", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
+    #: Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
+    reasoning_effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     allowed_tools: list[str] = Field(
         default_factory=lambda: [
@@ -199,6 +201,10 @@ class CodexCLIConfig(AgentConfig):
     model_name: str = "Codex CLI"
     model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+    #: Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = (
+        None
+    )
 
 
 # -----------------------------------------------------------------------------
