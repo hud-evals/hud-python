@@ -19,6 +19,8 @@ from hud.utils.platform import Page, PlatformClient
 if TYPE_CHECKING:
     from typing import TypeAlias
 
+    # At runtime these load only where used: the SDKs are slow to import, and importing
+    # hud loads this module.
     from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
     from google.genai import Client as GenaiClient
 

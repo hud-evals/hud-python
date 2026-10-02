@@ -69,7 +69,6 @@ def init_command(
             preset = hud_console.select(
                 "Choose an example environment",
                 [{"name": label, "value": example} for example, label in EXAMPLES.items()],
-                default=0,
                 spaced=True,
             )
         elif name is not None:
