@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 
 from hud.agents.base import Agent
+from hud.capabilities import find_capability
 from hud.capabilities.robot import RobotClient
 from hud.telemetry.robot.recorder import TraceRecorder
+from hud.types import text_of
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
@@ -45,11 +47,9 @@ class RobotAgent(Agent):
         """Run one episode; ``max_steps`` overrides the class's control-tick cap."""
         if self.model is None:
             raise RuntimeError(f"{type(self).__name__} must set self.model in __init__")
-        prompt = run.prompt
-        if not isinstance(prompt, str):
-            raise TypeError(f"run.prompt must be a str, got {type(prompt).__name__}: {prompt!r}")
+        prompt = text_of(run.prompt)
 
-        robot = await RobotClient.connect(run.binding(self.robot_protocol))
+        robot = await RobotClient.connect(find_capability(run.capabilities, self.robot_protocol))
         try:
             action_space, obs_space = robot.spaces()
             if self.adapter is not None:

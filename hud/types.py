@@ -33,7 +33,7 @@ from hud.utils.serialization import JsonObject, JsonValue
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from hud.agents.base import Agent
     from hud.agents.types import AgentConfig
@@ -195,6 +195,15 @@ ContentBlock: TypeAlias = (
 class PromptMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: ContentBlock
+
+
+def text_of(messages: Sequence[PromptMessage]) -> str:
+    """The text turns of ``messages`` joined by blank lines; images and resources are dropped."""
+    return "\n\n".join(
+        message.content.text
+        for message in messages
+        if isinstance(message.content, TextContent) and message.content.text
+    )
 
 
 class Tool(BaseModel):
@@ -469,13 +478,7 @@ class Trace(BaseModel):
     def prompt_text(self) -> str | None:
         """The opening user step's text turns, or ``None`` when no task started."""
         user = next((step for step in self.steps if step.source == "user"), None)
-        if user is None:
-            return None
-        return "\n\n".join(
-            message.content.text
-            for message in user.messages
-            if isinstance(message.content, TextContent) and message.content.text
-        )
+        return None if user is None else text_of(user.messages)
 
     @model_validator(mode="after")
     def _number_steps(self) -> Trace:

@@ -7,8 +7,11 @@ import re
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit, urlunsplit
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # Matches the scheme prefix of a URL (RFC 3986).
 SCHEME_RE: re.Pattern[str] = re.compile(r"^([a-zA-Z][a-zA-Z0-9+\-.]*):")
@@ -41,14 +44,20 @@ def normalize_url(url: str, *, default_scheme: str, default_port: int | None) ->
 class Capability:
     """``(name, protocol, url, params)`` — concrete wire data for one slice of env access.
 
-    ``url`` is the real address of a server speaking ``protocol``: what the manifest
-    publishes and a ``CapabilityClient`` dials.
+    ``url`` is the address a ``CapabilityClient`` dials. ``env_url`` is where the environment
+    serves it, which code running inside the environment dials; the two differ once a
+    session routes the capability to this process.
     """
 
     name: str
     protocol: str
     url: str
     params: dict[str, Any] = field(default_factory=dict)
+    env_url: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.env_url:
+            object.__setattr__(self, "env_url", self.url)
 
     def to_manifest(self) -> dict[str, Any]:
         return {
@@ -202,6 +211,23 @@ class Capability:
         """
         normalized = normalize_url(url, default_scheme="ws", default_port=9091)
         return cls(name=name, protocol="openpi/0", url=normalized, params={"contract": contract})
+
+
+def find_capability(capabilities: Iterable[Capability], ref: str) -> Capability:
+    """The one capability ``ref`` names: its name, protocol, or protocol family."""
+    capabilities = list(capabilities)
+    matches = [
+        capability
+        for capability in capabilities
+        if ref in (capability.name, capability.protocol, capability.protocol.split("/", 1)[0])
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        names = ", ".join(f"{c.name} ({c.protocol})" for c in matches)
+        raise KeyError(f"ambiguous capability {ref!r}; matches: {names}")
+    available = ", ".join(f"{c.name} ({c.protocol})" for c in capabilities)
+    raise KeyError(f"no capability {ref!r} (available: {available or '<none>'})")
 
 
 class CapabilityClient(ABC):

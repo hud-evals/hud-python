@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple
 import asyncssh
 
 from hud.agents.base import Agent, ConfigT_co
+from hud.capabilities import find_capability
 from hud.settings import settings
 from hud.telemetry.context import get_trace_headers
 from hud.utils.gateway import provider_api_key, routes_to_gateway
@@ -21,11 +22,9 @@ if TYPE_CHECKING:
 
     from hud.capabilities import Connection, SSHClient
     from hud.eval.run import Run
-    from hud.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 PROCESS_CLOSE_TIMEOUT_S = 5.0
-_DECLARED_OS = {"darwin": "darwin", "linux": "linux", "macos": "darwin", "windows": "windows"}
 _PROVIDER_URLS = {
     "anthropic": ("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
     "openai": ("OPENAI_BASE_URL", "https://api.openai.com/v1"),
@@ -68,7 +67,7 @@ def model_endpoint(run: Run, provider: str, *, gateway: bool) -> ModelEndpoint |
         endpoint = ModelEndpoint(os.environ.get(variable) or default, key, {}, False, None)
     else:
         return None
-    shell = run.binding("ssh")
+    shell = find_capability(run.capabilities, "ssh")
     if shell.params.get("isolation") != "none":
         raise RuntimeError(
             f"the {shell.name!r} workspace is sandboxed, so it isn't given the agent's model "
@@ -83,7 +82,6 @@ async def resolve_executable(
     ssh: SSHClient,
     command: str,
     managed_paths: dict[str, str],
-    runtime_config: RuntimeConfig | None,
 ) -> str:
     """Resolve a CLI against the live SSH target and its declared runtime config."""
     if ssh.capability.params.get("shell", "bash") in WINDOWS_SHELLS:
@@ -110,13 +108,6 @@ async def resolve_executable(
         platform = f"{os_name}-{_normalize_arch(machine)}"
         if os_name == "linux" and libc == "musl":
             platform += "-musl"
-
-    declared = runtime_config.resources.os if runtime_config and runtime_config.resources else None
-    if declared is not None and _DECLARED_OS.get(declared.lower(), os_name) != os_name:
-        raise RuntimeError(
-            f"runtime_config.resources.os requested {declared!r}, "
-            f"but the SSH runtime reports {os_name!r}"
-        )
 
     managed = managed_paths.get(platform)
     if managed is not None:
