@@ -111,16 +111,31 @@ class ClaudeEvents:
                         trace.extra[key] = value
 
     def finish(self, *, returncode: int, stderr: str) -> None:
+        """Fail the rollout unless the CLI delivered a complete terminal result.
+
+        A nonzero exit after a result event is only recorded on the trace when
+        stderr is empty; the CLI exits that way after successful runs.
+        """
         trace = self.run.trace
-        error = self.error
         if returncode != 0:
             trace.extra["returncode"] = returncode
-            error = stderr.strip() or f"claude CLI exited with return code {returncode}"
+
+        reported = stderr.strip()
+        if self.error is not None:
+            error = self.error
         elif not self.saw_result:
-            error = "claude CLI exited without a result event"
+            error = reported or (
+                f"claude CLI exited with return code {returncode}"
+                if returncode != 0
+                else "claude CLI exited without a result event"
+            )
+        elif returncode != 0 and reported:
+            error = reported
         elif self.pending_calls:
             missing = ", ".join(sorted(self.pending_calls))
             error = f"claude CLI exited without results for tool calls: {missing}"
+        else:
+            error = None
 
         if error is not None and stderr:
             trace.extra["stderr"] = stderr

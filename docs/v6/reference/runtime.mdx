@@ -83,11 +83,14 @@ is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntim
 enough whole GiB, while providers without disk sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
 or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
-alternatives; Modal accepts one GPU type. Docker ignores `limits`; Daytona rejects `run_timeout_s`
-and resource overrides when booting from an already-built snapshot. `LocalRuntime` rejects a
+alternatives; Modal accepts one GPU type. Daytona rejects `run_timeout_s` and resource overrides
+when booting from an already-built snapshot. `LocalRuntime` rejects a
 per-task `runtime_config`.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
+Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal
+rollouts allow the task's agent timeout (`agent_config.timeout_seconds`) plus 3600 seconds for
+startup, grading, and teardown.
 The optional `rollout_timeout` passed to `Task.run` or `Taskset.run` is the execution deadline
 through grading, including submission, queueing, and provisioning. It is not an upper bound on
 method-return latency: cancellation and trace reporting still run after expiry, and `Taskset.run`

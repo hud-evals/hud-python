@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import shlex
 import sys
 import tempfile
@@ -266,7 +267,10 @@ class ModalRuntime:
             gpu = gpu_type if resources.gpu.count == 1 else f"{gpu_type}:{resources.gpu.count}"
             sandbox_kwargs["gpu"] = gpu
 
-        run_timeout = 3600
+        # Without a declared run limit, the sandbox outlives the task's agent budget by the
+        # default allowance for startup, grading, and teardown.
+        agent_timeout = (task.agent_config or {}).get("timeout_seconds")
+        run_timeout = 3600 + (math.ceil(agent_timeout) if agent_timeout is not None else 0)
         ready_timeout = 600
         if config.limits is not None:
             run_timeout = config.limits.run_timeout_s or run_timeout

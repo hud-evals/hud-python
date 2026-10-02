@@ -1405,6 +1405,35 @@ async def test_modal_runtime_accepts_modal_image_uri(
     }
 
 
+async def test_modal_runtime_outlives_the_task_agent_budget_without_a_declared_run_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    task = Task(
+        env="any-env",
+        id="t",
+        agent_config={"timeout_seconds": 28800},
+        runtime_config=RuntimeConfig(image="modal://im-built"),
+    )
+
+    async with ModalRuntime()(task):
+        pass
+
+    assert calls["sandbox_kwargs"]["timeout"] == 28800 + 3600
+
+    declared = task.model_copy(
+        update={
+            "runtime_config": RuntimeConfig(
+                image="modal://im-built", limits=RuntimeLimits(run_timeout_s=40000)
+            )
+        }
+    )
+    async with ModalRuntime()(declared):
+        pass
+
+    assert calls["sandbox_kwargs"]["timeout"] == 40000
+
+
 async def test_modal_task_runtime_config_overlays_provider_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

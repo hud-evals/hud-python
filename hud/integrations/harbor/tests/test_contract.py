@@ -329,6 +329,20 @@ def test_adapt_runs_sidecars_that_expose_no_ports(
     assert _environment_config(context)["peers"] == []
 
 
+def test_adapt_maps_the_agent_budget_to_the_agent_config(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        "[environment]\nbuild_timeout_sec = 900\n\n[agent]\ntimeout_sec = 28800\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+
+    assert row.agent_config == {"timeout_seconds": 28800.0}
+    assert row.runtime_config is not None
+    assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=900)
+
+
 def test_adapt_binds_the_compose_variables_harbor_defines(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text(
