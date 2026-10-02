@@ -77,16 +77,14 @@
           { "group": "Internals", "pages": [
             { "group": "Internals", "expanded": false, "pages": ["v6/internals/index", "v6/internals/walkthrough", "v6/internals/placement", "v6/internals/control-channel"] }
           ] },
-          { "group": "More", "pages": ["v6/more/faq", "v6/more/migrate-v6", "v6/more/contributing"] }
+          { "group": "More", "pages": ["v6/more/faq", "v6/more/contributing"] }
         ]
       }
     ]
   },
   "redirects": [
-    { "source": "/migrate-v6", "destination": "/v6/more/migrate-v6" },
     { "source": "/contributing", "destination": "/v6/more/contributing" },
     { "source": "/v6/faq", "destination": "/v6/more/faq" },
-    { "source": "/v6/migrate-v6", "destination": "/v6/more/migrate-v6" },
     { "source": "/v6/contributing", "destination": "/v6/more/contributing" },
     { "source": "/v6/index", "destination": "/v6/start/index" },
     { "source": "/v6/quickstart", "destination": "/v6/start/quickstart" },
