@@ -98,7 +98,7 @@ def _citations_event(context_id: str, task_id: str, trace: Trace) -> TaskArtifac
 class ChatExecutor(AgentExecutor):
     """A2A adapter: one ``Chat`` (conversation) per A2A context id."""
 
-    def __init__(self, task: Task, agent: Agent, *, runtime: Provider | None = None) -> None:
+    def __init__(self, task: Task, agent: Agent, *, runtime: Provider) -> None:
         self._task = task
         self._agent = agent
         self._runtime = runtime
@@ -160,7 +160,7 @@ class ChatExecutor(AgentExecutor):
         )
 
 
-def serve(task: Task, agent: Agent, *, runtime: Provider | None, host: str, port: int) -> None:
+def serve(task: Task, agent: Agent, *, runtime: Provider, host: str, port: int) -> None:
     name = task.id or "chat"
     url = f"http://{host}:{port}/"
     app = A2AStarletteApplication(

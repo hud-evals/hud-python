@@ -56,7 +56,7 @@ class Chat:
         agent: Agent,
         /,
         *,
-        runtime: Provider | None = None,
+        runtime: Provider,
     ) -> None:
         self._task = task
         self._agent = agent
@@ -73,12 +73,6 @@ class Chat:
         task = self._task.model_copy(
             update={"args": {**self._task.args, "messages": list(self.messages)}},
         )
-        if self._runtime is None:
-            raise RuntimeError(
-                "Chat needs a runtime to converse against — pass an env placement: "
-                'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
-                "Runtime(url) (a served substrate), or HUDRuntime() (your deployed env)."
-            )
         if self.job is None:  # one job spans the whole conversation
             self.job = await Job.start(self._task.id)
         result = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)

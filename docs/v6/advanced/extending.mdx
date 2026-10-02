@@ -323,10 +323,15 @@ agent over a fresh run with the full history, appends the reply, and returns the
 import asyncio
 from hud import Chat
 from hud.agents import create_agent
+from hud.runtime import LocalRuntime
 from tasks import assistant
 
 async def main():
-    chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
+    chat = Chat(
+        assistant(messages=[]),
+        create_agent("claude-sonnet-4-5"),
+        runtime=LocalRuntime("tasks.py"),
+    )
     r1 = await chat.send("Book me a flight")
     r2 = await chat.send("SFO to JFK")
     print(r2.content)            # the assistant's latest reply
@@ -335,8 +340,8 @@ asyncio.run(main())
 ```
 
 `Chat` is imported from `hud`. The task's `messages` argument is
-replaced with the running conversation on every `send`; pass `runtime=` to place each turn's rollout
-(omit it and the task's source serves locally when minted in-process, else HUD-hosted by env name).
+replaced with the running conversation on every `send`. `runtime=` places each turn's rollout; the
+agent loop runs in your process, so pass a local placement such as `LocalRuntime` or `Runtime(url)`.
 
 ### Managing history
 
@@ -355,7 +360,11 @@ directly:
 
 ```python
 app = FastAPI()
-chat = Chat(assistant(messages=[]), create_agent("claude-sonnet-4-5"))
+chat = Chat(
+    assistant(messages=[]),
+    create_agent("claude-sonnet-4-5"),
+    runtime=LocalRuntime("tasks.py"),
+)
 
 @app.post("/api/chat")
 async def chat_endpoint(message: str):
