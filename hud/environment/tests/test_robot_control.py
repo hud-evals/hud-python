@@ -224,7 +224,7 @@ class _GraspTool(DirectControl):
     """Stands in for an env that serves its own motion tool on this wire."""
 
     def _bind_tools(self, server) -> None:
-        server.tool(self.move_to, name="move_eef", description="grasp targets", output_schema=None)
+        server.tool(self.move, name="move_eef", description="grasp targets", output_schema=None)
 
 
 async def test_an_env_can_replace_the_contract_motion_tool() -> None:

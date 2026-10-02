@@ -54,7 +54,7 @@ from hud.environment.robot.orientation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from numpy.typing import NDArray
 
@@ -119,8 +119,10 @@ MotionNote = Annotated[
 
 @dataclass(frozen=True)
 class _Axis:
+    """One tool dimension: a contract column, or one euler component of a rotation block."""
+
     kind: Literal["scalar", "euler"]
-    column: int
+    index: int  # scalar: contract column; euler: roll/pitch/yaw component (0/1/2)
     block: Orientation | None = None
 
 
@@ -180,6 +182,7 @@ class DirectControl:
         """Serve the tools derived from *robot*'s contract; returns their ``mcp`` capability."""
         if self._capability is not None:
             return self._capability
+        # 1. Read the contract: the action's type picks the tool, its names are the dimensions.
         self._robot = robot
         contract = robot.params["contract"]
         features: dict[str, dict[str, Any]] = contract["features"]
@@ -191,6 +194,7 @@ class DirectControl:
             )
         self._tool, self._absolute = MOTION_TOOLS[action["type"]]
         self._names: list[str] = list(action["names"])
+        # Wrist rotation columns (quat / axis-angle / euler) are exposed as roll/pitch/yaw.
         self._orientations = (
             find_orientations(self._names)
             if self._absolute and action.get("type") == "ee_abs"
@@ -200,6 +204,7 @@ class DirectControl:
             column for block in self._orientations for column in block.contract_columns
         }
         self._axes, self._dims = self._addressable()
+        # 2. Bounds and pacing: how far each dimension may go, and how far per tick.
         bounds = action.get("limits") or action["stats"]
         self._low = np.asarray(bounds["min"], dtype=np.float64)
         self._high = np.asarray(bounds["max"], dtype=np.float64)
@@ -215,11 +220,13 @@ class DirectControl:
             self._step[self._names.index(dim)] = step
         if np.any(self._step <= 0):
             raise ValueError(f"every action dimension needs a positive step, got {self._step}")
+        # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._cameras = [n for n, f in observations.items() if f.get("type") == "rgb"]
         self._states = {
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
         }
+        # Absolute moves need a start pose: default to the state vector as wide as the action.
         self._reference = self.reference
         if self._absolute and self._reference is None:
             wide = [n for n, names in self._states.items() if len(names or ()) == len(self._names)]
@@ -230,6 +237,7 @@ class DirectControl:
                 )
             self._reference = lambda data: data[wide[0]]
 
+        # 4. Serve the tool over loopback HTTP on a free port and publish it as an mcp capability.
         server = FastMCP(name=self.name)
         self._bind_tools(server)
         with socket.socket() as sock:
@@ -264,19 +272,23 @@ class DirectControl:
 
     def _bind_tools(self, server: FastMCP) -> None:
         """Register the contract motion tool. Override to serve an env-specific tool."""
-        move = self.move_to if self._absolute else self.move_by
-        server.tool(move, name=self._tool, description=self._describe(), output_schema=None)
+        server.tool(self.move, name=self._tool, description=self._describe(), output_schema=None)
 
-    async def move_to(self, target: Target, others: Others, note: MotionNote) -> Content:
-        return await self._play([target, *others], note)
-
-    async def move_by(self, target: Target, others: Others, note: MotionNote) -> Content:
+    # The one tool body; registered as move_to / move_joints / move_by by the contract.
+    async def move(self, target: Target, others: Others, note: MotionNote) -> Content:
         return await self._play([target, *others], note)
 
     def _describe(self) -> str:
+        # Euler dimensions are unbounded in the contract; report them as ±pi.
+        ranges = [
+            (-math.pi, math.pi)
+            if (axis := self._axes[name]).kind == "euler"
+            else (self._low[axis.index], self._high[axis.index])
+            for name in self._dims
+        ]
         bounds = ", ".join(
             f"{name} [{low:.4g}, {high:.4g}]"
-            for name, low, high in zip(self._dims, self._tool_low, self._tool_high, strict=True)
+            for name, (low, high) in zip(self._dims, ranges, strict=True)
         )
         if self._absolute:
             motion = (
@@ -317,13 +329,19 @@ class DirectControl:
         if self.dims is None:
             order = _tool_order(self._names, self._orientations)
             return axes, [name for name in order if name in axes]
+        # A dims entry may name a tool dimension or any contract column of a rotation block.
+        block_of = {
+            name: block
+            for block in self._orientations
+            for name in (*block.tool_names, *(self._names[i] for i in block.contract_columns))
+        }
         chosen: list[str] = []
         unknown: list[str] = []
         for name in self.dims:
             if name in axes and name not in chosen:
                 chosen.append(name)
                 continue
-            block = next((b for b in self._orientations if name in self._block_names(b)), None)
+            block = block_of.get(name)
             if block is None:
                 unknown.append(name)
                 continue
@@ -331,15 +349,10 @@ class DirectControl:
                 if tool_name not in chosen:
                     chosen.append(tool_name)
         if unknown:
-            # Re-checked in start() with the same set. Keep the raise here so a bad
-            # list fails while the axes are in hand.
             raise ValueError(
                 f"dims {sorted(unknown)} are not dimensions of this tool ({', '.join(axes)})"
             )
         return axes, chosen
-
-    def _block_names(self, block: Orientation) -> set[str]:
-        return set(block.tool_names) | {self._names[i] for i in block.contract_columns}
 
     # ── the wire ───────────────────────────────────────────────────────────
 
@@ -348,33 +361,43 @@ class DirectControl:
         # The note stays on the tool call; an empty one is a correctable miss, not a move.
         if not note.strip():
             raise ToolError("note must say what you see and why you chose this motion")
+        # One short wire connection per call: the sim is frozen while the model thinks.
         async with self._lock:
             client = await RobotClient.connect(self._robot)
             try:
                 obs = await client.get_observation()
-                played = 0
-                timed_out = False
-                proprio: NDArray[np.float64] | None = None
-                goal: NDArray[np.float64] | None = None
+                # Plan: turn the named targets into per-tick action rows (none if already over).
                 if obs["terminated"]:
                     rows = np.zeros((0, len(self._names)))
+                    goal = None
                     clipped = False
                     named: set[str] = set()
+                    blocks: list[Orientation] = []
                 else:
                     rows, goal, clipped, named = self._plan(values, obs)
-                seen = False
-                still = 0
-                prev = self._proprio(obs)
+                    # Rotation blocks the model touched (only those count toward "reached").
+                    blocks = [
+                        b for b in self._orientations if any(n in named for n in b.tool_names)
+                    ]
+                # Playback state, updated by step() each tick.
+                played = 0
                 finished = False
+                seen = False  # proprioception has moved at least once
+                still = 0  # consecutive ticks below the movement threshold
+                prev = self._proprio(obs)
+                proprio: NDArray[np.float64] | None = None
 
                 async def step(row: NDArray[np.float64], *, check: bool) -> bool:
-                    nonlocal played, obs, seen, still, prev, finished, proprio
+                    """Play one tick; return True when the call should stop."""
+                    nonlocal played, obs, finished, seen, still, prev, proprio
                     await client.send_action(row)
                     obs = await client.get_observation()
                     played += 1
                     if self._absolute:
+                        # Remember the target so the next call continues from it, not the sim pose.
                         self._command = np.asarray(row, dtype=np.float64).copy()
                     proprio = self._proprio(obs)
+                    # Track whether the arm has moved, and how many ticks it has been still since.
                     if prev.size and proprio.shape == prev.shape:
                         if float(np.max(np.abs(proprio - prev))) > _STILL_ABS:
                             seen = True
@@ -382,36 +405,29 @@ class DirectControl:
                         else:
                             still += 1
                     prev = proprio
+                    # Done = arrived at the goal, or came to rest after moving.
                     if check and goal is not None and not obs["terminated"]:
-                        finished = self._done(proprio, goal, named, seen=seen, still=still)
+                        finished = self._reached(proprio, goal, named, blocks) or (
+                            seen and still >= _STILL_TICKS
+                        )
                     return bool(obs["terminated"] or finished)
 
+                # Play the plan; only the final setpoint can finish the move.
                 for index, row in enumerate(rows):
-                    if played >= self._max_ticks:
-                        timed_out = True
+                    if await step(row, check=index == len(rows) - 1 and not clipped):
                         break
-                    last = index == len(rows) - 1
-                    if await step(row, check=last and not clipped):
-                        break
-                else:
-                    if clipped and not finished and not obs["terminated"]:
-                        timed_out = True
-                if (
-                    goal is not None
-                    and not finished
-                    and not timed_out
-                    and not obs["terminated"]
-                    and not clipped
-                    and len(rows)
-                ):
+                # Then hold the final setpoint until the arm arrives or stops. A clipped
+                # plan already fills the safety cap, so it gets no hold.
+                if goal is not None and not clipped and not finished and not obs["terminated"]:
                     hold = goal if self._absolute else np.zeros(len(self._names))
                     while played < self._max_ticks:
                         if await step(hold, check=True):
                             break
-                    else:
-                        timed_out = True
+                # Ran out of ticks before arriving: report it rather than error.
+                timed_out = played >= self._max_ticks and not finished and not obs["terminated"]
             finally:
                 await client.close()
+        # Answer with the pose, command, residual, and camera frames the move ended on.
         return self._render(
             obs,
             played,
@@ -424,6 +440,7 @@ class DirectControl:
         self, values: list[DimValue], obs: dict[str, Any]
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], bool, set[str]]:
         """Action rows, the intended goal, whether the safety cap clipped them, and named dims."""
+        # Validate names, then find the start pose and the end pose (goal) of the move.
         if not values:
             raise ToolError("name at least one action dimension")
         unknown = [v.name for v in values if v.name not in self._dims]
@@ -438,21 +455,23 @@ class DirectControl:
                 start = np.asarray(self._reference(obs["data"]), dtype=np.float64).reshape(-1)
             else:
                 start = self._command.copy()
-        end = start.copy()
+        end = start.copy()  # unnamed dimensions keep their start value (they hold)
         named = {v.name for v in values}
+        # Scalar dimensions: range-check and write straight into the goal.
         for value in values:
             axis = self._axes[value.name]
             if axis.kind == "scalar":
-                index = axis.column
+                index = axis.index
                 if self._absolute and not self._low[index] <= value.value <= self._high[index]:
                     raise ToolError(
                         f"{value.name}={value.value} is outside "
                         f"[{self._low[index]:.4g}, {self._high[index]:.4g}]"
                     )
                 end[index] = value.value
-        for block in self._orientations:
-            if not any(name in named for name in block.tool_names):
-                continue
+        # Rotations: start from the current euler, overwrite the named angles, convert back
+        # to the contract's representation.
+        addressed = [b for b in self._orientations if any(n in named for n in b.tool_names)]
+        for block in addressed:
             roll, pitch, yaw = xyzw_to_euler(block.read(start))
             euler = [roll, pitch, yaw]
             for value in values:
@@ -462,12 +481,13 @@ class DirectControl:
                         raise ToolError(
                             f"{value.name}={value.value} is outside [{-math.pi:.4g}, {math.pi:.4g}]"
                         )
-                    euler[axis.column] = value.value
+                    euler[axis.index] = value.value
             target_q = euler_to_xyzw(euler[0], euler[1], euler[2])
             # Same rotation as now: keep the contract components bit for bit.
             if angular_distance(block.read(start), target_q) <= 1e-8:
                 continue
             block.write(end, target_q)
+        # Duration: the slowest dimension sets the tick count (scalars by step, rotations by angle).
         span = end - start
         scalar = [i for i in range(len(self._names)) if i not in self._orient_columns]
         ticks = 1
@@ -477,9 +497,7 @@ class DirectControl:
                 math.ceil(float(np.max(np.abs(span[scalar]) / self._step[scalar]))),
             )
         quats: list[tuple[Orientation, NDArray[np.float64], NDArray[np.float64]]] = []
-        for block in self._orientations:
-            if not any(name in named for name in block.tool_names):
-                continue
+        for block in addressed:
             start_q = block.read(start)
             end_q = block.read(end)
             angle = angular_distance(start_q, end_q)
@@ -487,9 +505,11 @@ class DirectControl:
                 step = self.speed * _FULL_TURN / self._rate
                 ticks = max(ticks, math.ceil(angle / step))
                 quats.append((block, start_q, end_q))
+        # Safety cap: play only the prefix that fits; `clipped` tells the caller it was cut short.
         play = min(ticks, self._max_ticks)
         clipped = play < ticks
-        fractions = np.linspace(1 / ticks, play / ticks, play)
+        fractions = np.linspace(1 / ticks, play / ticks, play)  # progress 0→1 per tick
+        # Build one action row per tick.
         if not self._absolute:
             rows = np.repeat((span / ticks)[None], play, axis=0)
         elif not self._orientations:
@@ -498,45 +518,36 @@ class DirectControl:
             rows = np.repeat(start[None], play, axis=0)
             for index in scalar:
                 rows[:, index] = start[index] + span[index] * fractions
+            # Rotations are slerped (shortest arc), never lerped component-wise.
             for block, start_q, end_q in quats:
                 for row, fraction in zip(rows, fractions, strict=True):
                     block.write(row, slerp(start_q, end_q, float(fraction)))
             if not clipped:
-                rows[-1] = end
+                rows[-1] = end  # land exactly on the goal, free of round-trip rotation error
         return rows, end, clipped, named
 
-    def _done(
+    def _reached(
         self,
         proprio: NDArray[np.float64],
         goal: NDArray[np.float64],
         named: set[str],
-        *,
-        seen: bool,
-        still: int,
+        blocks: list[Orientation],
     ) -> bool:
-        if self._reached(proprio, goal, named):
-            return True
-        return seen and still >= _STILL_TICKS
-
-    def _reached(
-        self, proprio: NDArray[np.float64], goal: NDArray[np.float64], named: set[str]
-    ) -> bool:
+        """Every addressed scalar within tolerance and every addressed rotation within reach."""
         if not self._absolute or proprio.shape != goal.shape or not named:
             return False
         for name in named:
             axis = self._axes[name]
             if axis.kind != "scalar":
                 continue
-            index = axis.column
+            index = axis.index
             tolerance = max(_REACH_ABS, _REACH_FRAC * float(self._high[index] - self._low[index]))
             if abs(float(proprio[index] - goal[index])) > tolerance:
                 return False
-        for block in self._orientations:
-            if not any(name in named for name in block.tool_names):
-                continue
-            if angular_distance(block.read(proprio), block.read(goal)) > _REACH_RAD:
-                return False
-        return True
+        return all(
+            angular_distance(block.read(proprio), block.read(goal)) <= _REACH_RAD
+            for block in blocks
+        )
 
     def _proprio(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         if self._reference is not None:
@@ -564,15 +575,15 @@ class DirectControl:
         for key, names in self._states.items():
             vector = np.asarray(data[key], dtype=np.float64).reshape(-1)
             labels = names or [str(i) for i in range(vector.size)]
-            lines.append(f"{key}: " + _labeled(labels, vector))
+            lines.append(f"{key}: " + _labeled(zip(labels, vector, strict=True)))
         if proprio is not None and proprio.size == len(self._names):
-            lines.append("pose: " + _labeled_pairs(self._reading(proprio)))
+            lines.append("pose: " + _labeled(self._reading(proprio)))
         if goal is not None:
-            lines.append("commanded: " + _labeled_pairs(self._reading(goal)))
+            lines.append("commanded: " + _labeled(self._reading(goal)))
         if proprio is not None and goal is not None and proprio.shape == goal.shape:
             lines.append("off: " + self._off(proprio, goal))
         if self._command is not None and goal is None:
-            lines.append("commanded: " + _labeled(self._names, self._command))
+            lines.append("commanded: " + _labeled(zip(self._names, self._command, strict=True)))
         if obs["terminated"]:
             lines.append("The episode has ended; stop calling tools.")
         content: Content = [TextContent(type="text", text="\n".join(lines))]
@@ -589,13 +600,13 @@ class DirectControl:
         for name in self._dims:
             axis = self._axes[name]
             if axis.kind == "scalar":
-                reading.append((name, float(vector[axis.column])))
+                reading.append((name, float(vector[axis.index])))
                 continue
             assert axis.block is not None
             key = id(axis.block)
             if key not in euler:
                 euler[key] = xyzw_to_euler(axis.block.read(vector))
-            reading.append((name, euler[key][axis.column]))
+            reading.append((name, euler[key][axis.index]))
         return reading
 
     def _off(self, proprio: NDArray[np.float64], goal: NDArray[np.float64]) -> str:
@@ -604,7 +615,7 @@ class DirectControl:
         for name in self._dims:
             axis = self._axes[name]
             if axis.kind == "scalar":
-                parts.append(f"{name}={float(proprio[axis.column] - goal[axis.column]):.4f}")
+                parts.append(f"{name}={float(proprio[axis.index] - goal[axis.index]):.4f}")
                 continue
             assert axis.block is not None
             key = id(axis.block)
@@ -614,20 +625,6 @@ class DirectControl:
             angle = angular_distance(axis.block.read(proprio), axis.block.read(goal))
             parts.append(f"orientation={angle:.4f} rad")
         return ", ".join(parts)
-
-    @property
-    def _tool_low(self) -> list[float]:
-        return [self._bound(name, low=True) for name in self._dims]
-
-    @property
-    def _tool_high(self) -> list[float]:
-        return [self._bound(name, low=False) for name in self._dims]
-
-    def _bound(self, name: str, *, low: bool) -> float:
-        axis = self._axes[name]
-        if axis.kind == "euler":
-            return -math.pi if low else math.pi
-        return float(self._low[axis.column] if low else self._high[axis.column])
 
 
 def _tool_order(names: list[str], blocks: list[Orientation]) -> list[str]:
@@ -644,11 +641,7 @@ def _tool_order(names: list[str], blocks: list[Orientation]) -> list[str]:
     return order
 
 
-def _labeled(names: list[str], vector: NDArray[Any]) -> str:
-    return ", ".join(f"{n}={x:.4f}" for n, x in zip(names, vector, strict=True))
-
-
-def _labeled_pairs(pairs: list[tuple[str, float]]) -> str:
+def _labeled(pairs: Iterable[tuple[str, Any]]) -> str:
     return ", ".join(f"{name}={value:.4f}" for name, value in pairs)
 
 
