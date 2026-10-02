@@ -1,19 +1,19 @@
 """``RobotEndpoint`` — the env server's handle on a sim process.
 
-A bridge always lives in the sim's own process (see :mod:`~.bridge`); the
+A bridge always lives in the sim's own process (see ``bridge``); the
 endpoint is the JSON-RPC client that drives it through episodes (``reset`` /
 ``result``) and mints its capability — and, when it spawned the process, owns
 its lifecycle. Two ways to build one, identical methods either way:
 
-- **Spawned** — :meth:`RobotEndpoint.spawn`: fork the sim program, read its
-  announced control port, tear the process down on :meth:`stop`
+- **Spawned** — ``RobotEndpoint.spawn``: fork the sim program, read its
+  announced control port, tear the process down on ``stop``
   (``env.gym(...)`` builds this).
-- **Attached** — :meth:`RobotEndpoint.remote`: dial a sim process something
+- **Attached** — ``RobotEndpoint.remote``: dial a sim process something
   else runs (another container, a warm Isaac kept alive across env-server
-  restarts); :meth:`stop` only drops the link, never the process.
+  restarts); ``stop`` only drops the link, never the process.
 
 Control plane only: the agent's step/observation loop tunnels straight to the
-bridge's ``robot`` WebSocket, and templates drive episodes through the handle::
+bridge's ``robot`` WebSocket, and templates drive episodes through the handle:
 
     sim = env.gym(make_env)
 
@@ -102,7 +102,7 @@ class RobotEndpoint:
     """Drive a simulation bridge living in another process.
 
     Build with a bridge class/instance (``start()`` spawns its process),
-    :meth:`spawn` (explicit argv), or :meth:`remote` (attach).
+    ``spawn`` (explicit argv), or ``remote`` (attach).
     """
 
     def __init__(
@@ -145,7 +145,7 @@ class RobotEndpoint:
 
     @classmethod
     def spawn(cls, cmd: Sequence[str], *, connect_timeout_s: float = 900.0) -> RobotEndpoint:
-        """An endpoint that forks *cmd* (a sim program; see :mod:`~.bridge`) and owns it."""
+        """An endpoint that forks *cmd* (a sim program; see ``bridge``) and owns it."""
         return cls(cmd=cmd, connect_timeout_s=connect_timeout_s)
 
     @classmethod
@@ -296,7 +296,7 @@ class RobotEndpoint:
         """This slot's score dict (frees the slot), merged with any caller ``extra``.
 
         ``token`` may be omitted on a single-env bridge (one claimed slot);
-        vectorized envs must pass the token from :meth:`reset`.
+        vectorized envs must pass the token from ``reset``.
         """
         await self._end_direct_episodes()
         res = {**(await self._call("result", {"token": token})), **extra}

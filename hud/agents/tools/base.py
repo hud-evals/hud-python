@@ -76,7 +76,7 @@ class AgentTool(ABC, Generic[ClientT]):
     """
 
     name: ClassVar[str]
-    #: Runtime dispatch key — set by each capability base.
+    # Runtime dispatch key — set by each capability base.
     client_type: ClassVar[type[CapabilityClient]]
 
     def __init__(self, *, spec: AgentToolSpec, client: ClientT) -> None:

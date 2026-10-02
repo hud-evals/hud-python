@@ -4,7 +4,7 @@ A workspace with its own network namespace has no route anywhere — not to the
 internet, and not to whatever else the substrate is running, including the
 control channel that grades it. Two kinds of route are given back
 deliberately: hosts on the internet, through a proxy that sees every
-connection and applies the task's declared policy, and :class:`Peer` services
+connection and applies the task's declared policy, and ``Peer`` services
 the environment itself runs, each forwarded to the address the task expects.
 
 Both listen on unix sockets, so reaching them is a question of the filesystem
@@ -51,13 +51,13 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.egress")
 
-#: In an allowlist, the entry that permits everything.
+# In an allowlist, the entry that permits everything.
 ANY_HOST = "*"
 
-#: Headers that belong to one hop and must not be forwarded to the next.
-#: ``transfer-encoding`` among them: the response body is read back already
-#: de-chunked, so passing the upstream's framing along leaves the client
-#: looking for chunk headers in what is now plain bytes.
+# Headers that belong to one hop and must not be forwarded to the next.
+# ``transfer-encoding`` among them: the response body is read back already
+# de-chunked, so passing the upstream's framing along leaves the client
+# looking for chunk headers in what is now plain bytes.
 _HOP_BY_HOP = frozenset(
     {
         "connection",
@@ -72,17 +72,17 @@ _HOP_BY_HOP = frozenset(
     }
 )
 
-#: Credential headers a bound process may send. The connection relay owns
-#: authentication, so a process-side value is only ever a placeholder and must
-#: not reach the upstream next to the injected credential.
+# Credential headers a bound process may send. The connection relay owns
+# authentication, so a process-side value is only ever a placeholder and must
+# not reach the upstream next to the injected credential.
 _CLIENT_CREDENTIALS = frozenset({"authorization", "x-api-key", "api-key", "x-goog-api-key"})
 
 
-#: RFC 9110 grammar for what a header may contain. A name is a `token`; a
-#: value is visible ASCII, obs-text, and blanks — no control characters, so
-#: nothing in a relayed header can end it and begin another. Matched
-#: positively: a proxy relays what the grammar admits, rather than guessing
-#: which characters an attacker would have used.
+# RFC 9110 grammar for what a header may contain. A name is a `token`; a
+# value is visible ASCII, obs-text, and blanks — no control characters, so
+# nothing in a relayed header can end it and begin another. Matched
+# positively: a proxy relays what the grammar admits, rather than guessing
+# which characters an attacker would have used.
 _FIELD_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _FIELD_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")
 
@@ -110,21 +110,21 @@ def _field(name: str, value: str) -> tuple[str, str]:
     return name, value
 
 
-#: The proxy port offered on the workspace's loopback. 3128 is unremarkable —
-#: an egress proxy is ordinary infrastructure, unlike a control channel.
+# The proxy port offered on the workspace's loopback. 3128 is unremarkable —
+# an egress proxy is ordinary infrastructure, unlike a control channel.
 BRIDGE_PORT = 3128
 
-#: Where a visitor's way out is offered instead. A visitor joins the
-#: workspace's network without being one of its sessions, and is held to its
-#: own policy rather than the sessions' — so this is a second proxy, on a
-#: second port, and it exists only while the visitor is there. Standing open
-#: it would be a route the agent could take in place of the one it was given.
+# Where a visitor's way out is offered instead. A visitor joins the
+# workspace's network without being one of its sessions, and is held to its
+# own policy rather than the sessions' — so this is a second proxy, on a
+# second port, and it exists only while the visitor is there. Standing open
+# it would be a route the agent could take in place of the one it was given.
 VISITOR_PORT = 3129
 
-#: Run inside the workspace's network namespace, one listener per route out.
-#: Its stdin is ``[[host, port, socket], ...]``; every listener is bound
-#: before it says it is ready, since a session that starts in between finds
-#: the port refused.
+# Run inside the workspace's network namespace, one listener per route out.
+# Its stdin is ``[[host, port, socket], ...]``; every listener is bound
+# before it says it is ready, since a session that starts in between finds
+# the port refused.
 _BRIDGE = """
 import asyncio, json, sys
 
@@ -289,7 +289,7 @@ def hosts_text(
     local_aliases: Collection[str] = (),
 ) -> str:
     """*base* — the substrate's ``/etc/hosts`` — plus a line per peer name, at the
-    loopback address its bridge listens on (see :func:`bind_addresses`).
+    loopback address its bridge listens on (see ``bind_addresses``).
 
     Names resolve for what runs in the workspace's *mount* namespace, which
     is its sessions. Anything joining only the network namespace (the Harbor

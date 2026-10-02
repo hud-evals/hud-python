@@ -6,7 +6,7 @@ HUD gateway); training advances the weights behind that string in place.
 
 Every training call takes a sequence of trajectories, each either a ``trace_id``
 string (the service resolves recorded tokens + reward) or a graded
-:class:`hud.Trace` (its samples + reward are sent inline). The two can be mixed.
+``hud.Trace`` (its samples + reward are sent inline). The two can be mixed.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ logger = logging.getLogger("hud.train.client")
 
 
 def _trace_to_input(trace: Trace) -> TrainInput:
-    """Turn a graded :class:`hud.Trace` into a training input: inline payload when
+    """Turn a graded ``hud.Trace`` into a training input: inline payload when
     it carries token-level samples (local rollout), else its ``trace_id``
     (remote rollout, resolved server-side)."""
     if trace.stop_reason == "timeout":
@@ -144,10 +144,10 @@ class TrainingClient(BaseTrainingClient):
     """Train an LLM model through the HUD training service.
 
     The LLM modality client. Mirrors the Tinker split between gradient
-    accumulation (:meth:`forward_backward`) and the optimizer update
-    (:meth:`optim_step`, inherited from :class:`BaseTrainingClient`). :meth:`step`
-    chains both for the common case; :meth:`forward_backward_custom` runs a
-    caller-authored loss over per-token logprobs (:class:`DatumTensors`).
+    accumulation (``forward_backward``) and the optimizer update
+    (``optim_step``, inherited from ``BaseTrainingClient``). ``step``
+    chains both for the common case; ``forward_backward_custom`` runs a
+    caller-authored loss over per-token logprobs (``DatumTensors``).
     """
 
     async def forward_backward(
@@ -163,7 +163,7 @@ class TrainingClient(BaseTrainingClient):
         """Accumulate gradients for a batch of trajectories with a built-in loss.
 
         Each trajectory is a ``trace_id`` (resolved server-side), a graded trace (its
-        tokens + reward sent inline), or an inline :class:`TrajectoryPayload`
+        tokens + reward sent inline), or an inline ``TrajectoryPayload``
         (hand-built tokens + reward — e.g. the opponent side of a self-play game).
         Advantages are normalized within contiguous groups of ``group_size`` (all
         trajectories as one group when ``None``). ``loss_fn_config`` forwards
@@ -196,9 +196,9 @@ class TrainingClient(BaseTrainingClient):
         """Run a current-policy forward pass and return per-token tensors.
 
         The first half of the custom-loss path: compute a loss over the returned
-        :class:`DatumTensors` (current-policy logprobs as differentiable leaves),
-        then send the gradients through :meth:`backward`. For the common case use
-        :meth:`forward_backward_custom`, which wires both halves together.
+        ``DatumTensors`` (current-policy logprobs as differentiable leaves),
+        then send the gradients through ``backward``. For the common case use
+        ``forward_backward_custom``, which wires both halves together.
         """
         inputs = _to_inputs(trajectories)
         _check_groups(trajectories, group_size)
@@ -220,7 +220,7 @@ class TrainingClient(BaseTrainingClient):
 
         ``weights[d][t]`` is ``-dC/dlogprobs`` for datum ``d``, token ``t`` (the
         Tinker cross-entropy backward convention), aligned with the
-        :attr:`ForwardResult.data` from the matching :meth:`forward`.
+        ``ForwardResult.data`` from the matching ``forward``.
         """
         request = BackwardRequest(forward_id=forward_id, weights=weights, metrics=metrics or {})
         return await self._post("backward", request.model_dump(), ForwardBackwardResult)
@@ -237,7 +237,7 @@ class TrainingClient(BaseTrainingClient):
 
         ``forward`` → run ``loss_fn`` locally (torch autograd) → ship per-token
         gradients to ``backward``. Any differentiable loss over π_θ and the
-        :class:`DatumTensors` scalars works (e.g. GLM double-sided IS). Requires
+        ``DatumTensors`` scalars works (e.g. GLM double-sided IS). Requires
         torch (``pip install 'hud[train]'``).
         """
         try:

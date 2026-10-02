@@ -1,19 +1,19 @@
 """Universal SDK shapes, including the trajectory contract.
 
 The trajectory contract: a ``Trace`` is an ordered collection of ``Step``s,
-and recording a step (:meth:`Trace.record`) ships it to the platform as one
+and recording a step (``Trace.record``) ships it to the platform as one
 schema-tagged span. ``Step`` here is the shared skeleton every agent family
 and the run harness speak — ordering, source, timing, error — and the
 harness records its own steps directly (``user`` prompt turns, ``task``
 lifecycle calls, ``system`` errors).
 
-Agent families layer their payloads on top by subclassing :class:`Step` —
+Agent families layer their payloads on top by subclassing ``Step`` —
 the tool-agent family adds LLM responses and tool calls in
-:mod:`hud.agents.types` under the ``hud.step.v1`` schema; other families
+``hud.agents.types`` under the ``hud.step.v1`` schema; other families
 (e.g. robot) bring their own payload fields under their own ``schema_tag``
 and inherit the transport. The platform's serializer registry dispatches on
 the schema tag, so each family decodes losslessly without this module or the
-telemetry pipe (:mod:`hud.telemetry`) knowing any payload shape.
+telemetry pipe (``hud.telemetry``) knowing any payload shape.
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ class AgentType(StrEnum):
     def of(cls, agent: object) -> AgentType | None:
         """The registered agent type *agent* is an instance of, or ``None``.
 
-        Reverse of :attr:`cls`. Agent extras (anthropic, google-genai, ...)
+        Reverse of ``cls``. Agent extras (anthropic, google-genai, ...)
         may be uninstalled, so importing a type's agent class can fail; that
         simply means *agent* is not that type. ``None`` means the ``Agent``
         implementation is not registered for reconstruction.
@@ -275,8 +275,8 @@ class ToolCall(_WireModel):
 
     meta: dict[str, Any] | None = Field(default=None, alias="_meta")
     name: str
-    #: Widened to admit the raw provider string when it didn't parse as JSON;
-    #: a str is never executed — dispatch answers it with an error result.
+    # Widened to admit the raw provider string when it didn't parse as JSON;
+    # a str is never executed — dispatch answers it with an error result.
     arguments: dict[str, Any] | str | None = None
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
     annotation: str | None = None  # Optional explanation of why this action is taken
@@ -366,7 +366,7 @@ class ToolResult(_WireModel):
 # Trajectory contract
 # -----------------------------------------------------------------------------
 
-#: Schema tag of the core step stream (the tool-agent family shares it).
+# Schema tag of the core step stream (the tool-agent family shares it).
 STEP_SCHEMA = "hud.step.v1"
 ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
@@ -395,12 +395,12 @@ class Step(BaseModel):
     prompt turns, kept as structured ``PromptMessage``s so multimodal content
     is preserved) and ``task_call`` (task lifecycle RPC). Agent families
     subclass this with their own payload fields (e.g.
-    :class:`hud.agents.types.AgentStep`) and, for a new wire schema, their
+    ``hud.agents.types.AgentStep``) and, for a new wire schema, their
     own ``schema_tag``.
     """
 
-    #: Schema tag this step ships under; families with their own wire schema
-    #: override it (the platform's serializer registry dispatches on it).
+    # Schema tag this step ships under; families with their own wire schema
+    # override it (the platform's serializer registry dispatches on it).
     schema_tag: ClassVar[str] = STEP_SCHEMA
 
     # Sequential position in the trace, assigned by ``Trace`` (1-based).
@@ -447,11 +447,11 @@ class Step(BaseModel):
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
-#: Why the rollout stopped; anything but "done" means a limit cut it off.
+# Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
 
-#: The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
-#: conditions the loop may either stop on or answer with an error result.
+# The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
+# conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 

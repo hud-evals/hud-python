@@ -97,7 +97,7 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
     All awaitables run concurrently via ``asyncio.gather``. Positive weights
     are normalized to sum to ``1.0``; negative weights are penalties.
 
-    Example::
+    Example:
 
         yield await combine(
             BashGrader.grade(weight=0.3, command="pytest -q"),

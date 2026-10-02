@@ -35,12 +35,12 @@ class _TraceState(TypedDict):
 class HostedRuntime:
     """HUD-hosted placement: runs the rollout remotely and returns its trace.
 
-    The *client-elsewhere* placement. Where a :class:`Provider` yields a channel
+    The *client-elsewhere* placement. Where a ``Provider`` yields a channel
     this process drives, ``HostedRuntime`` runs the whole rollout remotely: the
     agent runs alongside the task environment. This process only submits the
     rollout and polls the trace to completion, folding the result into a
-    local :class:`~hud.types.Trace`. Because the agent runs remotely, its identity
-    travels as its registered type plus :meth:`~hud.agents.base.Agent.dump`.
+    local ``Trace``. Because the agent runs remotely, its identity
+    travels as its registered type plus ``Agent.dump``.
 
     ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
     A local cancel (Ctrl-C) or a deadline waits up to five seconds for the
@@ -78,7 +78,7 @@ class HostedRuntime:
 
         The trace lifecycle is reported remotely, so this never double-reports.
         Failures isolating one rollout from its batch (submit rejected, the
-        env/model unresolved) surface as :meth:`Trace.failed`; a timeout or a
+        env/model unresolved) surface as ``Trace.failed``; a timeout or a
         local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex

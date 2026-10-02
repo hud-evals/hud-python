@@ -60,7 +60,7 @@ class LLMJudgeGrader(Grader):
 
     Uses the HUD inference gateway by default.
 
-    Example::
+    Example:
 
         yield await combine(
             BashGrader.grade(weight=0.4, command="pytest -q"),

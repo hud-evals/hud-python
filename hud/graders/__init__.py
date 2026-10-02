@@ -1,7 +1,7 @@
 """Native graders for HUD evaluation.
 
 All graders are async. ``combine`` runs them in parallel and combines the
-results into an ``EvaluationResult`` you can yield directly from a task::
+results into an ``EvaluationResult`` you can yield directly from a task:
 
     from hud.graders import BashGrader, LLMJudgeGrader, SubScore, combine
     from hud.graders import exact_match, contains

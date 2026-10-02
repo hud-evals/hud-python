@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from hud.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
-#: What a CLI is given as its credential on a process-bound connection; the relay
-#: replaces it with the scoped credential, so it never needs to be secret.
+# What a CLI is given as its credential on a process-bound connection; the relay
+# replaces it with the scoped credential, so it never needs to be secret.
 PROCESS_BOUND_CREDENTIAL = "hud-process-bound"
 PROCESS_CLOSE_TIMEOUT_S = 5.0
 _DECLARED_OS = {"darwin": "darwin", "linux": "linux", "macos": "darwin", "windows": "windows"}

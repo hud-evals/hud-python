@@ -31,8 +31,8 @@ class BatchedModel(Model):
     concurrency (e.g. VRAM) - that also flushes early when full.
 
     ``inner`` must batch the leading ``N`` in one in-process forward
-    (e.g. :class:`~hud.agents.robot.model.LeRobotModel`). Not
-    :class:`~hud.agents.robot.model.RemoteModel` (OpenPI has no batched request;
+    (e.g. ``LeRobotModel``). Not
+    ``RemoteModel`` (OpenPI has no batched request;
     use one agent per rollout).
     """
 
@@ -99,12 +99,12 @@ class BatchedAgent(Agent):
     """Drive many rollouts concurrently against one shared, batched model.
 
     Per run: shallow-clone ``agent`` with a per-run adapter copy and the shared
-    :class:`BatchedModel` (stateless by contract; adapter copy keeps env bindings
-    isolated). Not for :class:`~hud.agents.robot.model.RemoteModel`.
+    ``BatchedModel`` (stateless by contract; adapter copy keeps env bindings
+    isolated). Not for ``RemoteModel``.
 
-    Takes ownership: wraps ``agent.model`` in place with :class:`BatchedModel`,
+    Takes ownership: wraps ``agent.model`` in place with ``BatchedModel``,
     shared by every clone. Pass a dedicated agent - do not also use that instance
-    for unbatched :class:`RobotAgent` rollouts.
+    for unbatched ``RobotAgent`` rollouts.
     """
 
     def __init__(

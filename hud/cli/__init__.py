@@ -1,6 +1,6 @@
 """CLI infrastructure: the I/O contract, error mapping, and workspace pins.
 
-Command modules build on this; :mod:`hud.cli.__main__` assembles them.
+Command modules build on this; ``hud.cli.__main__`` assembles them.
 """
 
 from __future__ import annotations

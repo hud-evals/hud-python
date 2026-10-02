@@ -105,7 +105,7 @@ def _map_identities(pid: int) -> None:
 
 
 class NamespaceProcess:
-    """A process launched by a :class:`NamespaceHost`."""
+    """A process launched by a ``NamespaceHost``."""
 
     def __init__(self, process: asyncssh.SSHClientProcess[bytes]) -> None:
         self._process = process

@@ -48,10 +48,10 @@ _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 _ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
 _CAPABILITY_CONNECT_ATTEMPTS = 3
 _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
-#: How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
+# How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
 
-#: protocol -> CapabilityClient subclass, for ``HudClient.open``.
+# protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
     cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
 }
@@ -94,8 +94,8 @@ class Manifest:
 
     ``bindings`` are the environment-native addresses published by the
     substrate. Agents executing inside that environment consume these raw
-    endpoints; controller-side consumers use :meth:`HudClient.binding` or
-    :meth:`HudClient.open`, which route them through the control channel.
+    endpoints; controller-side consumers use ``HudClient.binding`` or
+    ``HudClient.open``, which route them through the control channel.
     """
 
     session_id: str
@@ -107,10 +107,10 @@ class Manifest:
 class HudClient:
     """JSON-RPC client for a served env's control channel.
 
-    Prefer :func:`connect`, which owns the lifecycle (connect →
+    Prefer ``connect``, which owns the lifecycle (connect →
     ``hello`` → yield → ``close``) and yields one of these with ``manifest``
     ready; the raw constructor takes any connected stream pair. Task lifecycle
-    wrapping (start → grade) lives in :class:`hud.Run`.
+    wrapping (start → grade) lives in ``hud.Run``.
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -124,8 +124,8 @@ class HudClient:
     ) -> None:
         self._reader = reader
         self._writer = writer
-        #: Control-channel (host, port), for tunnel connections. ``None`` for
-        #: raw stream pairs (no dialable endpoint): bindings pass through.
+        # Control-channel (host, port), for tunnel connections. ``None`` for
+        # raw stream pairs (no dialable endpoint): bindings pass through.
         self._endpoint = endpoint
         self._ids = itertools.count(1)
         self._call_lock = asyncio.Lock()
@@ -481,9 +481,9 @@ async def connect(
     workspace_routes: Sequence[WorkspaceRoute] = (),
     connections: Sequence[Connection] = (),
 ) -> AsyncIterator[HudClient]:
-    """Connect a :class:`HudClient` to a provisioned substrate's control channel.
+    """Connect a ``HudClient`` to a provisioned substrate's control channel.
 
-    Takes the :class:`~hud.runtime.Runtime` a provider yielded (or
+    Takes the ``Runtime`` a provider yielded (or
     one constructed directly for a substrate served elsewhere) and retries
     connect + handshake until the channel answers. Does not tear the substrate
     down — lifecycle belongs to whichever provider brought it up.

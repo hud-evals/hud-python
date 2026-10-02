@@ -4,12 +4,12 @@ Config classes are defined here separately from agent implementations
 to allow importing them without requiring SDK dependencies (anthropic, google-genai).
 
 The trajectory section layers the tool-agent family on the core contract:
-:mod:`hud.types` owns the skeleton (ordering, timing, error, span
+``hud.types`` owns the skeleton (ordering, timing, error, span
 transport); this module adds what an LLM tool-use loop produces, flat on
-that skeleton — the model's turn (:class:`AgentStep`), the tool round-trip
-(:class:`ToolStep` pairing a ``ToolCall`` with its ``ToolResult``),
-nested rollouts (:class:`SubagentStep`), and the token-level training and
-accounting vocabulary (:class:`Sample`, :class:`Usage`). All ship under
+that skeleton — the model's turn (``AgentStep``), the tool round-trip
+(``ToolStep`` pairing a ``ToolCall`` with its ``ToolResult``),
+nested rollouts (``SubagentStep``), and the token-level training and
+accounting vocabulary (``Sample``, ``Usage``). All ship under
 the core ``hud.step.v1`` schema — the platform's serializer for that
 schema understands this family's payload.
 """
@@ -73,8 +73,8 @@ class ToolAgentConfig(AgentConfig):
     tool_timeout_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     system_prompt: str | None = None
     citations_enabled: bool = False
-    #: Conditions that end the rollout instead of being answered with an error
-    #: result the model can react to; training configs typically stop on both.
+    # Conditions that end the rollout instead of being answered with an error
+    # result the model can react to; training configs typically stop on both.
     stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
     hosted_tools: list[HostedTool[object]] = Field(
         default_factory=list[HostedTool[object]], exclude=True
@@ -216,7 +216,7 @@ class ClaudeCLIConfig(AgentConfig):
     model: str = Field(default="claude-sonnet-5", validation_alias=_model_alias)
     permission_mode: str = "bypassPermissions"
     max_steps: int = -1
-    #: Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
+    # Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
     reasoning_effort: ClaudeEffort | None = None
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     allowed_tools: list[str] = Field(
@@ -250,7 +250,7 @@ class CodexCLIConfig(AgentConfig):
     model_name: str = "Codex CLI"
     model: str = Field(default="gpt-5.6-sol", validation_alias=_model_alias)
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
-    #: Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
+    # Maps to ``model_reasoning_effort``; unset leaves the CLI's own default.
     reasoning_effort: CodexReasoningEffort | None = None
 
 
@@ -340,7 +340,7 @@ class AgentStep(Step):
     content: str | None = None
     reasoning: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list[ToolCall])
-    #: No further tool calls expected — the loop's stop signal.
+    # No further tool calls expected — the loop's stop signal.
     done: bool = False
     finish_reason: str | None = None
     stop_reason: StopCondition | None = None
@@ -403,10 +403,10 @@ class ObservationStep(Step):
     Camera ``images`` are MCP ``ImageContent`` keyed by camera name — ingest
     offloads each to S3 by shape (no bespoke type needed) and presigns it on
     read. ``state`` maps each env-contract feature group (e.g. ``robot0_eef_pos``,
-    ``robot0_gripper_qpos``) to a :class:`StateFeature` carrying that slice's
+    ``robot0_gripper_qpos``) to a ``StateFeature`` carrying that slice's
     per-dimension ``names`` + ``values`` — so grouping and semantics travel with
     the data, no side schema. ``tick`` is the 0-based control-tick index, so the
-    viewer can pair it with :class:`InferenceStep`.
+    viewer can pair it with ``InferenceStep``.
     """
 
     schema_tag: ClassVar[str] = ROBOT_STEP_SCHEMA
@@ -428,7 +428,7 @@ class ObservationStep(Step):
         """Build an observation step (numeric ``state``) from a raw ``robot`` obs dict.
 
         Camera frames are streamed as per-camera H.264 video, not stored per-tick
-        here (see :class:`~hud.agents.robot.video.SegmentEncoder`), so image arrays
+        here (see ``SegmentEncoder``), so image arrays
         are skipped.
         """
         obs_space = obs_space or {}
@@ -503,8 +503,8 @@ class InferenceStep(Step):
     # post model inference (a single action is a length-1 chunk)
     chunk: list[list[float]] = Field(default_factory=list[list[float]])
     chunk_length: int = 1
-    #: Per action-dim labels from the env contract (e.g. ["eef.dx", ..., "gripper"]),
-    #: so the viewer can label action plots and match them to state features.
+    # Per action-dim labels from the env contract (e.g. ["eef.dx", ..., "gripper"]),
+    # so the viewer can label action plots and match them to state features.
     names: list[str] = Field(default_factory=list[str])
 
 
@@ -524,11 +524,11 @@ class VideoSegmentStep(Step):
     source: RobotStepSource = "video_segment"
 
     camera: str = ""
-    #: Position in the camera's stream; ``index`` 0 is the init segment.
+    # Position in the camera's stream; ``index`` 0 is the init segment.
     index: int = 0
     fps: int = 10
-    #: ``{"type": "video", "data": <base64 mp4>, "mimeType": "video/mp4"}`` —
-    #: the ingest artifact walker offloads this blob to S3 and redacts it inline.
+    # ``{"type": "video", "data": <base64 mp4>, "mimeType": "video/mp4"}`` —
+    # the ingest artifact walker offloads this blob to S3 and redacts it inline.
     segment: dict[str, Any] = Field(default_factory=dict[str, Any])
 
 
@@ -537,7 +537,7 @@ class ContentResult(BaseModel):
 
     A ``@server.tool`` returns content blocks; this assembles the common
     text (+ optional image) case in one line so vision tools — games,
-    computer-use, browsers — don't hand-roll the same block list::
+    computer-use, browsers — don't hand-roll the same block list:
 
         from hud.agents.types import ContentResult
 

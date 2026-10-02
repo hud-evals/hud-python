@@ -21,7 +21,7 @@ def normalize(text: str | Any) -> str:
     Useful as a building block before comparing agent answers to reference
     strings. Removes noise that shouldn't affect whether an answer is correct.
 
-    Example::
+    Example:
 
         normalize("  The Answer is: 42! ")  # "answer is 42"
     """
@@ -125,7 +125,7 @@ def f1_score(
     Normalizes both texts, tokenizes into words, then computes
     precision, recall, and their harmonic mean.
 
-    Example::
+    Example:
 
         f1_score("The capital is Paris, France", "Paris")  # 0.4
         f1_score("Paris", "Paris")  # 1.0

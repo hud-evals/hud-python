@@ -2,7 +2,7 @@
 
 Pure declaration — what exists (identity, capabilities, registered tasks) and
 the daemon hooks a substrate runs around serving. The protocol server that
-puts a declaration on the wire lives in :mod:`hud.environment.server`.
+puts a declaration on the wire lives in ``hud.environment.server``.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 P = ParamSpec("P")
 T = TypeVar("T")
 
-#: Control-session id for the running accept/cancel task (robot slot claims key on it).
+# Control-session id for the running accept/cancel task (robot slot claims key on it).
 current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
 
 
@@ -83,9 +83,9 @@ def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
 class _TaskFactory(Generic[P]):
     """Registered ``@env.template`` callable that creates concrete public tasks.
 
-    The server side (:class:`~hud.environment.server.TaskRunner`) drives its
+    The server side (``TaskRunner``) drives its
     async-generator ``func`` (prompt → score); calling this object with args
-    binds a runnable :class:`~hud.Task`::
+    binds a runnable ``Task``::
 
         task = fix_bug(difficulty=3)  # -> Task
         job = await task.run(agent)
@@ -105,10 +105,10 @@ class _TaskFactory(Generic[P]):
         self.id = id
         self.description = description
         self.func: Callable[..., AsyncGenerator[Any, Any]] = func
-        #: Type(s) the agent is given as input (a model or union; ``None`` = text).
+        # Type(s) the agent is given as input (a model or union; ``None`` = text).
         self.input_type = input
-        #: Type the agent must produce (``None`` = plain text). Drives answer
-        #: deserialization into ``Answer[T]``.
+        # Type the agent must produce (``None`` = plain text). Drives answer
+        # deserialization into ``Answer[T]``.
         self.return_type = returns
         self.sig = inspect.signature(func, eval_str=True)
         functools.update_wrapper(self, func)
@@ -162,17 +162,17 @@ class Environment:
     ) -> None:
         self.name = name
         self.version = version
-        #: Published capabilities — always concrete wire data. Daemons the env
-        #: runs itself publish theirs at serve time (:meth:`add_capability`
-        #: from an ``@env.initialize`` hook; :meth:`workspace` wires the
-        #: common ssh case).
+        # Published capabilities — always concrete wire data. Daemons the env
+        # runs itself publish theirs at serve time (``add_capability``
+        # from an ``@env.initialize`` hook; ``workspace`` wires the
+        # common ssh case).
         self.capabilities: list[Capability] = []
         self._started = False
         self._hooks_done = False  # True only after all @env.initialize hooks have completed
         for entry in capabilities or []:
             self.add_capability(entry)
-        #: Registered task templates by id (the ``@env.template`` registry).
-        #: Each value mints concrete :class:`~hud.Task` rows when called.
+        # Registered task templates by id (the ``@env.template`` registry).
+        # Each value mints concrete ``Task`` rows when called.
         self.tasks: dict[str, _TaskFactory[Any]] = {}
         # Backing-daemon lifecycle hooks run once by the serving substrate
         # around its lifetime.
@@ -181,8 +181,8 @@ class Environment:
         # Per task-session end (cancel / bye / post-grade cleanup).
         self._on_task_teardown: list[Callable[[], Awaitable[None]]] = []
         self._workspaces: dict[str, Workspace] = {}
-        #: Controller routes by the control sessions holding them; ``None`` peer when
-        #: an authored peer already provides the route.
+        # Controller routes by the control sessions holding them; ``None`` peer when
+        # an authored peer already provides the route.
         self._workspace_routes: dict[WorkspaceRoute, tuple[Workspace, Peer | None, set[str]]] = {}
         self._connections: dict[str, _BoundConnection] = {}
 
@@ -209,7 +209,7 @@ class Environment:
         {"prompt": ...}`` → ``yield {"score": ...}``). ``input``/``returns``
         optionally declare the agent's I/O types (surfaced in the manifest as
         JSON schemas). The decorated callable is a *template*: calling it with
-        args returns a concrete :class:`~hud.Task` row.
+        args returns a concrete ``Task`` row.
         """
 
         def decorate(func: _TaskFunction[P]) -> _TaskFactory[P]:
@@ -240,7 +240,7 @@ class Environment:
         """Register an initializer, run once before the control channel serves.
 
         Seed state, or stand up a daemon and publish its address with
-        :meth:`add_capability` — that is how capabilities the env runs itself
+        ``add_capability`` — that is how capabilities the env runs itself
         come into existence at serve time rather than at import.
         """
         self._on_start.append(fn)
@@ -293,11 +293,11 @@ class Environment:
         track_files: bool | None = None,
         **kwargs: Any,
     ) -> Workspace:
-        """Attach a :class:`Workspace` serving ``name`` over ``ssh/2``.
+        """Attach a ``Workspace`` serving ``name`` over ``ssh/2``.
 
         Registers the start → publish → stop lifecycle on this env's hooks;
         nothing touches the filesystem until the env actually serves. Extra
-        kwargs go to :class:`Workspace` (``network=``, ``env=``, ...).
+        kwargs go to ``Workspace`` (``network=``, ``env=``, ...).
 
         When ``track_files`` is set (defaulting to ``HUD_FILE_TRACKING_ENABLED``)
         the workspace also publishes an observation-only ``filetracking/1``
@@ -331,7 +331,7 @@ class Environment:
         ``target`` is a factory, gymnasium id (``"CartPole-v1"``), or constructed
         registry env (reduced to its spec). Registers spawn → publish → teardown
         on this env's hooks; nothing runs until serve. Returns a
-        :class:`~hud.environment.robot.RobotEndpoint` (``sim.reset`` / ``sim.result``).
+        ``RobotEndpoint`` (``sim.reset`` / ``sim.result``).
 
         Every capability the bridge declares is published, not just the wire —
         a ``bridge=`` subclass serving its own tools from the sim process shows
@@ -357,7 +357,7 @@ class Environment:
     # ─── substrate-run daemon lifecycle ──────────────────────────────────
 
     async def start(self) -> None:
-        """Run ``@env.initialize`` hooks. Idempotent until :meth:`stop`.
+        """Run ``@env.initialize`` hooks. Idempotent until ``stop``.
 
         Run by the substrate before the control channel serves, so every
         capability — including ones published by hooks — is concrete by the
@@ -400,7 +400,7 @@ class Environment:
         """Install one control session's controller connections into their workspaces.
 
         A connection belongs to the session that supplied it until
-        :meth:`release_session`; a resumed session rebinds its own, replacing a
+        ``release_session``; a resumed session rebinds its own, replacing a
         rotated credential, and no session can take a name another one holds.
         """
         if not self._started:

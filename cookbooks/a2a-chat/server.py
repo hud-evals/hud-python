@@ -1,6 +1,6 @@
 """Serve a HUD chat task over the A2A protocol.
 
-A2A (and any other wire protocol) is a frontend over :class:`hud.Chat`: the
+A2A (and any other wire protocol) is a frontend over ``hud.Chat``: the
 executor below translates A2A requests into ``chat.send()`` calls, keeping an
 independent ``Chat`` (and so an independent conversation) per A2A context.
 

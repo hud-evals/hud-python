@@ -3,12 +3,12 @@
 ``openpi/0`` is openpi-like — it reuses openpi's msgpack-numpy wire format and flat
 observation/action naming — but flips the roles: here the *env* is the WebSocket
 server (it owns the world) and the *agent* is the client (it acts in the world).
-:class:`RobotClient` is that agent-side client; it dials a robot env and exchanges
+``RobotClient`` is that agent-side client; it dials a robot env and exchanges
 observations/actions over the socket.
 
 The *env-side* counterpart — the server bridge that owns the simulator
-(:class:`~hud.environment.robot.bridge.RobotBridge`) — lives in
-:mod:`hud.environment.robot`, and reuses the wire codec defined here.
+(``RobotBridge``) — lives in
+``hud.environment.robot``, and reuses the wire codec defined here.
 """
 
 from __future__ import annotations

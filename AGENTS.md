@@ -78,6 +78,10 @@ Python `>=3.11, <3.13`.
 - Delete dead code. Do not keep obsolete paths around "just in case."
 - Keep comments rare and useful. Explain non-obvious intent, not what the next
   line mechanically does.
+- Keep docstrings short: a one-line summary, plus any contract a caller cannot
+  read off the signature. Refer to code as double-backtick literals. Skip
+  Sphinx and reStructuredText markup (`:class:` roles, `#:` comments, `::`
+  blocks); nothing here renders it.
 - Remove AI-generated slop before finishing: unnecessary comments, abnormal
   defensive checks, broad `try` blocks, type bypasses, deep nesting, and thin
   wrappers that do not reduce real complexity.

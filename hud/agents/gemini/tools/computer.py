@@ -25,10 +25,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 GEMINI_DRAG_INSET = 25
-#: Gemini places every coordinate on a 1000x1000 grid regardless of the screen size.
+# Gemini places every coordinate on a 1000x1000 grid regardless of the screen size.
 GEMINI_COORDINATE_SCALE = 1000
 
-#: The desktop actions Gemini 3 models call; the browser and mobile ones need a page or app.
+# The desktop actions Gemini 3 models call; the browser and mobile ones need a page or app.
 PREDEFINED_COMPUTER_USE_FUNCTIONS = (
     "click",
     "double_click",
@@ -76,8 +76,8 @@ class GeminiComputerTool(RFBTool):
     ) -> None:
         super().__init__(spec=spec, client=client, screenshot_encoding=screenshot_encoding)
         self.excluded_predefined_functions = list(excluded_predefined_functions)
-        #: The calls this tool answers. An excluded action is left to an environment
-        #: function of the same name.
+        # The calls this tool answers. An excluded action is left to an environment
+        # function of the same name.
         self.actions = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS) - frozenset(
             excluded_predefined_functions
         )

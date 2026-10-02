@@ -23,8 +23,8 @@ class Agent(ABC, Generic[ConfigT_co]):
     per run — everything comes from ``run`` — so one instance drives many concurrent
     rollouts. The caller owns lifecycle status, cancellation, and grading.
 
-    ``config`` is the agent's serializable identity: :meth:`dump` writes it and
-    :meth:`load` rebuilds the agent from it. Subclasses parametrize ``Agent[XConfig]``,
+    ``config`` is the agent's serializable identity: ``dump`` writes it and
+    ``load`` rebuilds the agent from it. Subclasses parametrize ``Agent[XConfig]``,
     set ``config_cls = XConfig`` for construction, and, when they override
     ``__init__``, call ``super().__init__(config)``.
     """

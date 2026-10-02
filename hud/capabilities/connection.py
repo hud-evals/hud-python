@@ -21,7 +21,7 @@ class Connection:
     """An authenticated HTTP endpoint available only to one bound process.
 
     ``url`` and ``headers`` describe the controller-selected upstream. The
-    process receives :attr:`client_url` instead and never receives the header
+    process receives ``client_url`` instead and never receives the header
     values. A runtime which cannot enforce process-bound connections must
     reject the connection rather than expose it workspace-wide.
     """

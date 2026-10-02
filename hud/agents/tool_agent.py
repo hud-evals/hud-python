@@ -67,7 +67,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
     """Catalog-driven provider tool-call loop."""
 
     tool_catalog: ClassVar[tuple[type[AgentTool[Any]], ...]] = ()
-    #: Capability-client types this agent can drive (derived from the catalog).
+    # Capability-client types this agent can drive (derived from the catalog).
     clients: ClassVar[tuple[type[CapabilityClient], ...]] = ()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:

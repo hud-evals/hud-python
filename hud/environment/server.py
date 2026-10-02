@@ -1,12 +1,12 @@
 """``python -m hud.environment.server`` — the protocol server for an Environment.
 
-The substrate side of the runtime contract: an :class:`Environment` only
+The substrate side of the runtime contract: an ``Environment`` only
 declares what exists; this module puts one on the wire. It owns task execution
-(:class:`TaskRunner`), per-connection protocol dispatch and serving-time state
-(:func:`bind`), and the full serving lifecycle (:func:`serve`) — backing
+(``TaskRunner``), per-connection protocol dispatch and serving-time state
+(``bind``), and the full serving lifecycle (``serve``) — backing
 daemons up, control channel bound (announcing the port on stdout as
 ``HUD_SERVE_PORT=<port>``), daemons down. Every substrate shape runs it: the
-:class:`~hud.runtime.SubprocessRuntime` child process, a container CMD, and
+``SubprocessRuntime`` child process, a container CMD, and
 ``hud serve``.
 """
 
@@ -50,8 +50,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.server")
 
-#: Line a serving process prints once its control channel is bound; the
-#: ``spawn`` provider reads it from the child's stdout.
+# Line a serving process prints once its control channel is bound; the
+# ``spawn`` provider reads it from the child's stdout.
 PORT_ANNOUNCEMENT = "HUD_SERVE_PORT="
 
 
@@ -213,7 +213,7 @@ class TaskRunner:
 
 # ─── wire protocol ───────────────────────────────────────────────────────
 # The connection grammar (control session vs capability stream) lives on
-# :func:`bind` — the accept point. Session dispatch lives on _ControlChannel.
+# ``bind`` — the accept point. Session dispatch lives on _ControlChannel.
 
 
 class _NoTaskInProgress(RuntimeError):
@@ -246,8 +246,8 @@ class _ControlChannel:
 
     def __init__(self, env: Environment) -> None:
         self.env = env
-        #: Suspended tasks by session id. An entry whose session has no live
-        #: connection is parked, awaiting a resume (or adoption) to grade.
+        # Suspended tasks by session id. An entry whose session has no live
+        # connection is parked, awaiting a resume (or adoption) to grade.
         self._runners: dict[str, TaskRunner] = {}
         self._live: set[str] = set()
 

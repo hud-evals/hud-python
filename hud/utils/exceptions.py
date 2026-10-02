@@ -1,7 +1,7 @@
 """HUD SDK exceptions.
 
-A small typed hierarchy rooted at :class:`HudException`. Subclasses carry
-default :class:`~hud.utils.hints.Hint` lists that the console renderer
+A small typed hierarchy rooted at ``HudException``. Subclasses carry
+default ``Hint`` lists that the console renderer
 displays alongside the error.
 """
 

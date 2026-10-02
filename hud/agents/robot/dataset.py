@@ -1,12 +1,12 @@
 """Opt-in LeRobot v3 dataset writing for robot rollouts.
 
-Each rollout holds a :class:`DatasetWriter` that buffers its ``(observation,
+Each rollout holds a ``DatasetWriter`` that buffers its ``(observation,
 executed action)`` frames and commits whole episodes into a process-shared
 dataset keyed by schema/FPS — concurrent same-contract rollouts (e.g.
-:class:`~hud.agents.robot.batching.BatchedAgent` clones) share one root;
+``BatchedAgent`` clones) share one root;
 heterogeneous contracts get separate datasets. Created on the first frame;
 ``atexit`` flushes every open writer. A class lock keeps episodes contiguous.
-Finalized at process exit (or :meth:`finalize`), optionally pushed to the HF Hub.
+Finalized at process exit (or ``finalize``), optionally pushed to the HF Hub.
 The contract drives the schema with no extra wiring. Destination + push come
 from the environment:
 

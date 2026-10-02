@@ -1,8 +1,8 @@
 """Typed request/result contracts for the HUD training (RL) service.
 
 Each training input is a trajectory: a ``trace_id`` (resolved server-side) or an
-inline :class:`TrajectoryPayload`; the forms mix and order is preserved. Custom
-client-side losses use :class:`ForwardResult` / :class:`BackwardRequest`.
+inline ``TrajectoryPayload``; the forms mix and order is preserved. Custom
+client-side losses use ``ForwardResult`` / ``BackwardRequest``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ LossFn = str
 
 class BuiltinLoss(StrEnum):
     """Common Tinker-backed loss names (each *is* a ``str``; not authoritative —
-    see :meth:`TrainingClient.available_losses`)."""
+    see ``TrainingClient.available_losses``)."""
 
     CROSS_ENTROPY = "cross_entropy"  # supervised; imitate sampled tokens
     IMPORTANCE_SAMPLING = "importance_sampling"  # on-policy PG, rollout-logprob ratio
@@ -30,7 +30,7 @@ class BuiltinLoss(StrEnum):
 
 
 class TrajectorySample(BaseModel):
-    """One turn's token-level training data (mirrors :class:`hud.agents` ``Sample``).
+    """One turn's token-level training data (mirrors ``hud.agents`` ``Sample``).
 
     ``output_logprobs`` are the per-output-token logprobs under the *sampling*
     policy q (the behavior proxy used by importance sampling).
@@ -155,7 +155,7 @@ class CheckpointResponse(BaseModel):
 
 # ── Custom-loss path ─────────────────────────────────────────────────────────
 # Splits the server-side built-in loss so the caller authors it:
-#   1. ``forward(inputs)`` returns per-token tensors (:class:`DatumTensors`).
+#   1. ``forward(inputs)`` returns per-token tensors (``DatumTensors``).
 #   2. caller computes a differentiable per-token loss over π_θ (torch autograd).
 #   3. ``backward(forward_id, weights)`` applies ``weights = -dC/dlogprobs``.
 # ``optim_step`` then applies + checkpoints as usual.

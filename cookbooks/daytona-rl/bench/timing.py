@@ -14,7 +14,7 @@ from typing import Any
 
 @dataclass
 class TimedProvider:
-    """Delegates to *inner*, appending each spin-up duration to :attr:`spin_ups`."""
+    """Delegates to *inner*, appending each spin-up duration to ``spin_ups``."""
 
     inner: Any
     spin_ups: list[float] = field(default_factory=list)

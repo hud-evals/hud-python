@@ -1,12 +1,12 @@
 """The ``Model``: wraps a policy and owns its inference mechanics.
 
 A ``Model`` knows *how to run* a policy (preprocess → forward → postprocess); the
-harness only awaits ``model.ainfer(batch)``. Use :class:`LeRobotModel` for stock
-LeRobot checkpoints; subclass :class:`Model` and implement ``infer`` otherwise.
+harness only awaits ``model.ainfer(batch)``. Use ``LeRobotModel`` for stock
+LeRobot checkpoints; subclass ``Model`` and implement ``infer`` otherwise.
 
-:meth:`Model.infer` is batch-shaped (one batch dict in, an ``[N, T, A]`` chunk out) and
+``Model.infer`` is batch-shaped (one batch dict in, an ``[N, T, A]`` chunk out) and
 stateless across calls, so one model can be shared and batched across concurrent rollouts
-(see :mod:`hud.agents.robot.batching`); per-episode state belongs on the agent.
+(see ``hud.agents.robot.batching``); per-episode state belongs on the agent.
 """
 
 from __future__ import annotations
@@ -27,21 +27,21 @@ class Model:
     Stateless by contract: the agent owns all per-episode state (the open-loop chunk), so a
     single model can be shared and batched across concurrent rollouts. There is deliberately
     no ``reset`` hook — anything that resets per episode belongs on the agent, not here.
-    Driven by :class:`~hud.agents.robot.agent.RobotAgent`, which awaits :meth:`ainfer`.
+    Driven by ``RobotAgent``, which awaits ``ainfer``.
     """
 
     def infer(self, batch: Any) -> ActionArray:
         """Run the policy on an ``[N, ...]`` batch, return an ``[N, T, A]`` chunk.
 
         Implementations MUST keep the leading batch dim ``N`` (even for ``N == 1``):
-        :meth:`ainfer` indexes ``[0]`` and :class:`~hud.agents.robot.batching.BatchedModel`
+        ``ainfer`` indexes ``[0]`` and ``BatchedModel``
         scatters rows along it, so a squeezed ``[T, A]`` silently breaks both.
         """
         raise NotImplementedError
 
     async def ainfer(self, batch: Any) -> ActionArray:
-        """Awaited single-rollout entry: run :meth:`infer` in a thread, return its single
-        ``[T, A]`` row. Indexing ``[0]`` assumes :meth:`infer` honors the ``[N, T, A]`` contract.
+        """Awaited single-rollout entry: run ``infer`` in a thread, return its single
+        ``[T, A]`` row. Indexing ``[0]`` assumes ``infer`` honors the ``[N, T, A]`` contract.
         """
         return (await asyncio.to_thread(self.infer, batch))[0]
 
@@ -49,7 +49,7 @@ class Model:
 class LeRobotModel(Model):
     """LeRobot policy with pre/post-processors: ``preprocess`` → ``predict_action_chunk`` →
     ``postprocess``. ``preprocess`` adds the batch dim for an unbatched sample and is a no-op
-    for an already-stacked one, so :meth:`infer` handles both single and batched inputs.
+    for an already-stacked one, so ``infer`` handles both single and batched inputs.
 
     Stateless: ``predict_action_chunk`` is a pure forward and the agent owns the open-loop
     chunk, so LeRobot's internal action queue is never consumed here — hence no ``reset``.
@@ -59,8 +59,8 @@ class LeRobotModel(Model):
         self.policy = policy
         self.preprocess = preprocess
         self.postprocess = postprocess
-        #: Flipped to False after the first forward; used to print the one-time
-        #: CUDA/flow-matching warmup message.
+        # Flipped to False after the first forward; used to print the one-time
+        # CUDA/flow-matching warmup message.
         self._first_inference = True
 
     def infer(self, batch: Any) -> ActionArray:
@@ -87,10 +87,10 @@ class RemoteModel(Model):
     """Weightless client to an OpenPI-WebSocket policy server: ships the adapter's request
     dict, returns the server's chunk. All pre/post-processing lives in the adapter + server.
 
-    Not batchable: each :meth:`infer` is one WebSocket request for one env and always adds a
+    Not batchable: each ``infer`` is one WebSocket request for one env and always adds a
     single leading batch dim, and the OpenPI server protocol currently has no batched-request
-    shape. Do not wrap in :class:`~hud.agents.robot.batching.BatchedModel` — use one
-    :class:`~hud.agents.robot.agent.RobotAgent` per concurrent rollout instead.
+    shape. Do not wrap in ``BatchedModel`` — use one
+    ``RobotAgent`` per concurrent rollout instead.
     """
 
     def __init__(
@@ -98,7 +98,7 @@ class RemoteModel(Model):
     ) -> None:
         self.host = host
         self.port = port
-        #: Server chunk key — "actions" (stock OpenPI) or "action" (Cosmos).
+        # Server chunk key — "actions" (stock OpenPI) or "action" (Cosmos).
         self.response_key = response_key
         self._client: Any = None
 
