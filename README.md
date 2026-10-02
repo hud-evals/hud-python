@@ -139,7 +139,7 @@ From the [platform UI](https://hud.ai) you can run batches, compare models on th
 
 ## Train on rewards
 
-Every rollout returns a `Run` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and pass the graded runs to `TrainingClient.step()`:
+Every rollout returns a graded `Trace` carrying a `trace_id` and a `reward`, so the tasks you evaluate are already training data. Run a **group** per task and pass the graded traces to `TrainingClient.step()`:
 
 ```python
 from hud import Job
@@ -151,9 +151,9 @@ trainer = TrainingClient("arith-rl")
 taskset, runtime = ...  # your Taskset and where rollouts run
 
 session = await Job.start("arith-rl", group=8)
-start = len(session.runs)
+start = len(session.traces)
 await taskset.run(agent, runtime=runtime, group=8, job=session)
-await trainer.step(session.runs[start:], learning_rate=1e-5, group_size=8)
+await trainer.step(session.traces[start:], learning_rate=1e-5, group_size=8)
 ```
 
 HUD is the environment-and-reward source for your own GRPO/PPO loop — the same environment trains any model, text or multimodal, unchanged.

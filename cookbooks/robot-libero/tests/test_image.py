@@ -46,7 +46,7 @@ async def test_the_image_builds_and_plays_a_libero_task() -> None:
     )
     agent = OneMove()
 
-    run = await rollout(
+    trace = await rollout(
         Task(env="robot-libero", id="libero_spatial", args={"libero_task_id": 0}),
         agent,
         runtime=DockerRuntime(TAG),
@@ -55,4 +55,4 @@ async def test_the_image_builds_and_plays_a_libero_task() -> None:
     assert agent.result is not None
     assert not agent.result.isError
     assert sum(block.type == "image" for block in agent.result.content) == 2
-    assert not run.grade.is_error  # graded; a single move does not solve the task
+    assert not trace.grade.is_error  # graded; a single move does not solve the task

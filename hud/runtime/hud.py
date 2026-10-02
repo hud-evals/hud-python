@@ -15,7 +15,7 @@ import httpx2
 from websockets.exceptions import ConnectionClosedOK
 
 from hud.eval.job import reporting_enabled
-from hud.eval.run import Run, rollout
+from hud.eval.run import rollout
 from hud.telemetry.context import get_current_trace_id
 
 from .core import Runtime
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.eval.task import Task
+    from hud.types import Trace
 
 logger = logging.getLogger("hud.runtime")
 
@@ -65,7 +66,7 @@ class HUDRuntime:
         group_id: str | None = None,
         trace_id: str | None = None,
         rollout_timeout: float | None = None,
-    ) -> Run:
+    ) -> Trace:
         return await rollout(
             task,
             agent,

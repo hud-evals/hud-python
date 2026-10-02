@@ -205,7 +205,7 @@ job = await taskset.run(
     group=8,
 )
 
-datums, kept_groups = make_training_batch(job.runs)
+datums, kept_groups = make_training_batch(job.traces)
 if datums:
     training_client.forward_backward(datums, "importance_sampling").result()
     training_client.optim_step(adam).result()

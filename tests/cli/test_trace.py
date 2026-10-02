@@ -78,10 +78,10 @@ async def write_a_report(
 
     models.script([call("write", filePath="REPORT.md", content="PASS"), Turn(text="Wrote it.")])
     agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=4))
-    run = await rollout(Task(env="report", id="write_report"), agent, runtime=LocalRuntime(env))
-    assert run.reward == 1.0
-    assert run.trace_id is not None
-    return run.trace_id
+    trace = await rollout(Task(env="report", id="write_report"), agent, runtime=LocalRuntime(env))
+    assert trace.reward == 1.0
+    assert trace.trace_id is not None
+    return trace.trace_id
 
 
 async def test_a_local_trace_lists_tool_calls_with_their_results(

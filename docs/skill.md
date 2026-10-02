@@ -186,16 +186,16 @@ Cite [Deploy](/v6/reference/runtime), [Models](/v6/reference/agents), [Training]
 
 Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug> --yes`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training](/v6/run/training) and [reference: Training](/v6/reference/training).
 
-**Standard managed loop.** Roll out a batch with `group=` for within-group spread, hand the `Run`s to `step` (one `forward_backward` + one `optim_step`), repeat.
+**Standard managed loop.** Roll out a batch with `group=` for within-group spread, hand the traces to `step` (one `forward_backward` + one `optim_step`), repeat.
 
 ```python
 agent = create_agent(slug, completion_kwargs={"extra_body": {"return_token_ids": True}})
 trainer = TrainingClient(slug)
 session = await Job.start(slug, group=8)
 for _ in range(steps):
-    start = len(session.runs)
+    start = len(session.traces)
     await taskset.run(agent, job=session)
-    result = await trainer.step(session.runs[start:], learning_rate=1e-5, group_size=8)
+    result = await trainer.step(session.traces[start:], learning_rate=1e-5, group_size=8)
 ```
 
 **Watch progress from the loop.** Read the checkpoint tree — don't tail logs or count processes. Each node carries `mean_reward`, `loss_fn`, counts, and a `metrics` blob (reward spread, KL, clip fraction).
@@ -208,13 +208,13 @@ head = await trainer.head()  # the active checkpoint
 
 **Pick the loss.** `step`/`forward_backward` take `loss_fn` (default `importance_sampling`; also `ppo`, `cispo`, `dro`, `cross_entropy`). Prefer `ppo` when a single lucky rollout could otherwise blow up the update — it clips the IS ratio. Discover the supported set with `await trainer.available_losses()`; leave `loss_fn_config` at `None` unless a provider documents a key.
 
-**Two-sided / self-play.** When one episode yields trajectories for *both* sides (the agent's `Run` plus an opponent move sampled inside the env), train both at once: build a `TrajectoryPayload` for the opponent with the flipped reward and pass it alongside the `Run`. `forward_backward` accepts `str | Run | TrajectoryPayload` mixed; use `group_size` to pair each episode so the GRPO advantage is computed within the pair.
+**Two-sided / self-play.** When one episode yields trajectories for *both* sides (the agent's trace plus an opponent move sampled inside the env), train both at once: build a `TrajectoryPayload` for the opponent with the flipped reward and pass it alongside the trace. `forward_backward` accepts `str | Trace | TrajectoryPayload` mixed; use `group_size` to pair each episode so the GRPO advantage is computed within the pair.
 
 ```python
-combined: list[Run | TrajectoryPayload] = []
-for run in batch:
-    combined.append(run)  # agent side
-    combined.append(TrajectoryPayload(samples=opp, reward=1.0 - run.reward))  # opponent
+combined: list[Trace | TrajectoryPayload] = []
+for trace in batch:
+    combined.append(trace)  # agent side
+    combined.append(TrajectoryPayload(samples=opp, reward=1.0 - trace.reward))  # opponent
 await trainer.forward_backward(combined, loss_fn="ppo", group_size=2)
 await trainer.optim_step(learning_rate=1e-5)
 ```

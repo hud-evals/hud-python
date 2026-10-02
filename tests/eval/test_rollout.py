@@ -122,14 +122,16 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
         headers={"Authorization": "Bearer secret"},
     )
     held = []
+    runs: list[Run] = []
 
     class Reader(Agent):
         async def __call__(self, run: Run) -> None:
             held.append(sorted(run.connections))
+            runs.append(run)
 
-    run = await rollout(look(), Reader(), runtime=LocalRuntime(env), connections=[search])
+    trace = await rollout(look(), Reader(), runtime=LocalRuntime(env), connections=[search])
 
-    assert (held, run.connections, run.reward) == ([["search"]], {}, 1.0)
+    assert (held, runs[0].connections, trace.reward) == ([["search"]], {}, 1.0)
 
 
 @pytest.mark.parametrize(

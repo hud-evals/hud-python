@@ -56,7 +56,7 @@ async def drive(
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
     sim = Arm(REACH, done=reached)
 
-    agent, run = await drive(
+    agent, trace = await drive(
         sim,
         DirectControl(max_step={"grip": 2.0}),
         move("move_to", x=0.5),
@@ -66,7 +66,7 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert agent.tools == {"move_to", "wait"}  # the ee_abs contract picked the motion tool
     schema = agent.schemas["move_to"]
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
-    assert run.reward == 1.0  # graded by the sim, not the tools
+    assert trace.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command; the call holds until two 3-tick windows show it settled.
     reach_x, held, close = np.array(sim.actions[:50]), sim.actions[50:56], sim.actions[56:]

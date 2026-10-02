@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, NotRequired, cast
 
 from typing_extensions import TypedDict
 
-from hud.eval.run import Grade, Run, parent_trace, validate_rollout_timeouts
-from hud.types import AgentType, Step
+from hud.eval.run import parent_trace, parse_grade, validate_rollout_timeouts
+from hud.types import AgentType, Grade, Step, Trace
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
@@ -33,13 +33,13 @@ class _TraceState(TypedDict):
 
 
 class HostedRuntime:
-    """HUD-hosted placement: runs the rollout remotely and returns its ``Run``.
+    """HUD-hosted placement: runs the rollout remotely and returns its trace.
 
     The *client-elsewhere* placement. Where a :class:`Provider` yields a channel
     this process drives, ``HostedRuntime`` runs the whole rollout remotely: the
     agent runs alongside the task environment. This process only submits the
     rollout and polls the trace to completion, folding the result into a
-    :class:`~hud.eval.run.Run`. Because the agent runs remotely, its identity
+    local :class:`~hud.types.Trace`. Because the agent runs remotely, its identity
     travels as its registered type plus :meth:`~hud.agents.base.Agent.dump`.
 
     ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
@@ -73,12 +73,12 @@ class HostedRuntime:
         group_id: str | None = None,
         trace_id: str | None = None,
         rollout_timeout: float | None = None,
-    ) -> Run:
-        """Submit one rollout, await its terminal trace, and fold it into a ``Run``.
+    ) -> Trace:
+        """Submit one rollout, await its terminal trace, and fold it into a ``Trace``.
 
         The trace lifecycle is reported remotely, so this never double-reports.
         Failures isolating one rollout from its batch (submit rejected, the
-        env/model unresolved) surface as :meth:`Run.failed`; a timeout or a
+        env/model unresolved) surface as :meth:`Trace.failed`; a timeout or a
         local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex
@@ -114,7 +114,7 @@ class HostedRuntime:
                         trace_id=trace_id,
                         parent_trace_id=parent_trace_id,
                     )
-            run = self._fold(state, trace_id)
+            trace = self._fold(state, trace_id)
         except asyncio.CancelledError:
             await self._cancel(trace_id)
             raise
@@ -123,16 +123,16 @@ class HostedRuntime:
             await self._cancel(trace_id)
             detail = f"hosted rollout {trace_id} did not finish within {timeout:g}s"
             logger.warning(detail)
-            run = Run.failed(detail)
-            run.trace.stop_reason = "timeout"
+            trace = Trace.failed(detail)
+            trace.stop_reason = "timeout"
         except Exception as exc:
             logger.warning("hosted rollout failed: %s", exc)
-            run = Run.failed(str(exc))
-        run.trace.trace_id = trace_id
-        run.job_id = job_id
-        run.group_id = group_id
-        run.slug = task.slug
-        return run
+            trace = Trace.failed(str(exc))
+        trace.trace_id = trace_id
+        trace.job_id = job_id
+        trace.group_id = group_id
+        trace.slug = task.slug
+        return trace
 
     async def _submit_and_await(
         self,
@@ -176,24 +176,24 @@ class HostedRuntime:
         return await self._await_terminal(platform, payload["trace_id"])
 
     @staticmethod
-    def _fold(state: _TraceState, trace_id: str) -> Run:
+    def _fold(state: _TraceState, trace_id: str) -> Trace:
         """Build the local view of a remotely-executed rollout from its trace state."""
-        run = Run(None, "", {})
+        trace = Trace()
         # The poll loop only returns terminal states.
-        run.trace.status = cast("TraceStatus", state["status"])
+        trace.status = cast("TraceStatus", state["status"])
         error = state.get("error")
         if error:
-            run.record(Step(source="system", error=error))
+            trace.record(Step(source="system", error=error))
         reward = state.get("reward")
         grade_error = error or None
         if reward is None and grade_error is None:
             grade_error = {
                 "cancelled": "rollout was cancelled before grading",
                 "error": "rollout failed before grading",
-            }.get(run.trace.status, "rollout finished without a grade")
+            }.get(trace.status, "rollout finished without a grade")
         evaluation_result = state.get("evaluation_result")
-        run.grade = (
-            Grade.from_dict(evaluation_result)
+        trace.grade = (
+            parse_grade(evaluation_result)
             if evaluation_result is not None
             else Grade(
                 reward=reward if reward is not None else 0.0,
@@ -202,8 +202,8 @@ class HostedRuntime:
                 raw={"score": reward} if reward is not None else {},
             )
         )
-        run._runtime = f"hud://trace/{trace_id}"
-        return run
+        trace.runtime = f"hud://trace/{trace_id}"
+        return trace
 
     async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> _TraceState:
         task = asyncio.current_task()

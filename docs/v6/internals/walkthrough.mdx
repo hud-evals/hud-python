@@ -110,7 +110,7 @@ async def run(self, agent, *, runtime=None, group=None, max_concurrent=None, ...
             return await _run(task, group_id)
 
     waves = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-    job.runs.extend(run for wave in waves for run in wave)
+    job.traces.extend(trace for wave in waves for trace in wave)
     return job
 ```
 </Accordion>
@@ -147,7 +147,7 @@ async def run(self, agent, *, runtime=None,
 
 <div className="part-label">2 · Register the Job receipt</div>
 
-A `Job` is the accumulator this call fills in and returns - every run below lands in `job.runs`.
+A `Job` is the accumulator this call fills in and returns - every trace below lands in `job.traces`.
 `job_enter` registers it with the platform so a running batch shows up before any rollout finishes.
 
 </div>
@@ -198,8 +198,8 @@ becomes the semaphore's capacity, capping how many rollouts run at once.
 `rollout` - the next hop. `gather` starts every `_one` at once, but `async with sem:` blocks all
 but `max_concurrent` of them until a running rollout exits and frees a slot.
 
-Each `_one` returns a one-`Run` list, so the nested `waves` gets flattened into individual runs
-before `job.runs.extend` appends them.
+Each `_one` returns a one-trace list, so the nested `waves` gets flattened into individual traces
+before `job.traces.extend` appends them.
 
 </div>
 <div className="guide-aside">
@@ -221,7 +221,7 @@ before `job.runs.extend` appends them.
 
     waves = await asyncio.gather(
         *(_one(t, gid) for t, gid in expanded))
-    job.runs.extend(run for wave in waves for run in wave)
+    job.traces.extend(trace for wave in waves for trace in wave)
     return job
 ```
 
@@ -262,9 +262,9 @@ async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
                 _phase = "grading"
 
         await _drive()
-        # ... failure isolation sets run = Run.failed(...) or marks the trace errored ...
-        await trace_exit(run)
-    return run
+        # ... failure isolation returns Trace.failed(...) or marks the trace errored ...
+        await trace_exit(trace)
+    return trace
 ```
 </Accordion>
 
@@ -351,9 +351,9 @@ _phase = "grading"
 
 <div className="part-label">4 · Unwind and report</div>
 
-`_drive` runs the whole nested block above; if it raises, failure isolation still produces a `run`
-(failed, or with an errored trace) before `trace_exit` closes the trace and the graded - or
-failed - `Run` returns.
+`_drive` runs the whole nested block above; if it raises, failure isolation still produces a trace
+(`Trace.failed`, or the run's trace marked errored) before `trace_exit` closes it and the graded - or
+failed - trace returns.
 
 </div>
 <div className="guide-aside">
@@ -362,10 +362,10 @@ failed - `Run` returns.
 
 ```python
 await _drive()
-# ... failure isolation sets run = Run.failed(...)
+# ... failure isolation returns Trace.failed(...)
 # or marks the trace errored ...
-await trace_exit(run)
-return run
+await trace_exit(trace)
+return trace
 ```
 
 </div>
@@ -628,7 +628,7 @@ async def __aexit__(self, exc_type, exc, tb):
         await self.client.cancel(); return False
     answer = {"answer": self.trace.content}
     evaluation = await self.client.grade(answer)    # tasks.grade
-    self.grade = Grade.from_dict(evaluation)        # score -> run.grade.reward
+    self.trace.grade = parse_grade(evaluation)      # score -> trace.grade.reward
     self.record(Step(source="task", task_call=TaskCall(phase="evaluate", ...)))
     return False
 ```
@@ -660,8 +660,8 @@ async def grade(self, payload):
     return {"score": _score_value(evaluation)}
 ```
 
-The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> `Grade.from_dict`
--> `run.grade.reward`.
+The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> `parse_grade`
+-> `trace.grade.reward`.
 
 When `task.verifier` is present, the actor grade is provisional. A verifier in the same environment
 with no row-level runtime configuration starts on the existing client. Otherwise the actor client
@@ -674,8 +674,8 @@ The `AsyncExitStack` unwinds in reverse: `connect` closes the client (forwarders
 then the provider context exits and tears the substrate down - for `LocalRuntime` it cancels the
 in-process server and runs `env.stop()` (`@env.shutdown`); for `SubprocessRuntime` it terminates
 the child, whose `serve` does the same on the way out. Back in `rollout`,
-`trace_exit(run)` reports the trace and the graded `Run` returns to `Taskset.run`, which collects it
-into `job.runs`.
+`trace_exit(trace)` reports the trace and the graded trace returns to `Taskset.run`, which collects it
+into `job.traces`.
 
 ## The whole chain
 
@@ -691,9 +691,9 @@ Every hop above, in order:
 6. `Run.__aenter__` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> `prompt` back on `run.prompt`.
 7. **Checkpoint** - `run` holds a live client (manifest + suspended runner) and the prompt.
 8. `await agent(run)` - agent opens capabilities via `run.client`, loops, fills `run.trace` (answer on `trace.content`).
-9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `run.grade.reward`.
+9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
 10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with the actor result; replace the actor grade.
-11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded `Run` to `Taskset.run`.
+11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded trace to `Taskset.run`.
 
 </div>
 
@@ -723,7 +723,7 @@ sequenceDiagram
     Env->>Env: TaskRunner.grade -> 2nd yield
     Env-->>Roll: score becomes Grade.reward
     Prov->>Env: provider stops the substrate + env.stop()
-    Roll-->>Sched: graded Run
+    Roll-->>Sched: graded trace
 ```
 
 ## Boundaries

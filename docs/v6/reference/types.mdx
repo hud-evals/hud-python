@@ -15,8 +15,9 @@ from hud.environment import Answer
 
 ## `Run`
 
-The live handle for one task - the lifecycle plus the agent's `Trace`. You get them in `job.runs` from
-`task.run(agent)` / `taskset.run(agent)`, or construct one over a connected client for manual driving.
+The live handle for one task while its agent runs - what an agent's `__call__` receives. It is not a
+result: the outcome is the graded [`Trace`](#trace) the rollout returns. Construct one over a connected
+client for manual driving; after the block, `run.trace` holds the graded trace.
 
 | Member | Type | Description |
 |--------|------|-------------|
@@ -24,21 +25,10 @@ The live handle for one task - the lifecycle plus the agent's `Trace`. You get t
 | `run.prompt_messages` | `list[PromptMessage]` | The prompt as normalized user/assistant turns - what agents consume. |
 | `run.prompt_text` | `str` | The prompt flattened to plain text, for string-only backends. |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
-| `run.grade` | `Grade` | Structured grade result; an error until the run is graded. |
-| `run.reward` | `float` | The graded reward (`grade.reward`, set on exit). |
-| `run.evaluation` | `dict` | `grade.raw`, with each `subscores` entry reduced to its summary. |
-| `run.runtime` | `str \| None` | Control-channel url the run executed against (the placement record). |
-| `run.trace_id` | `str \| None` | Keys the trajectory for training. |
-| `run.slug` | `str \| None` | The task slug this run came from, set by the runner; how [`Job.results`](#job) keys runs back to their task without positional zip. |
-| `run.job_id` / `run.group_id` | `str \| None` | Batch + GRPO group, set by the runner. |
-
-A rollout that fails before its session is live comes back as a synthesized failed run (no prompt, no
-runtime); a mid-run failure keeps the real run - prompt, runtime, partial trace - with the error on
-`run.trace`.
 
 ## `Grade`
 
-Structured result from grading one run, parsed from the wire grade frame
+The environment's verdict on one evaluation (`trace.grade`), parsed from the wire grade frame
 (`{"score": ..., "done": ..., "isError": ..., ...}`).
 
 | Field | Type | Description |
@@ -52,25 +42,25 @@ Structured result from grading one run, parsed from the wire grade frame
 
 ## `Job`
 
-The receipt for one execution: the graded [`Run`](#run)s of a batch under one platform job id. Every
-run reports under a job, so even a single `task.run` returns a job of one. You get one back from
+The receipt for one execution: the graded [traces](#trace) of a batch under one platform job id. Every
+trace reports under a job, so even a single `task.run` returns a job of one. You get one back from
 [`task.run` / `taskset.run`](/v6/reference/tasks#running).
 
 | Member | Type | Description |
 |--------|------|-------------|
 | `id` | `str` | Platform job id. |
 | `name` | `str` | Display name. |
-| `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). |
+| `traces` | `list[Trace]` | The graded traces, in expansion order (task-major, then group). |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
-| `reward` | `float` | Property: mean reward across graded runs, excluding `errors` (`0.0` when none were graded). |
-| `errors` | `list[Run]` | Property: runs whose `grade.is_error` is true. |
-| `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
+| `reward` | `float` | Property: mean reward across graded traces, excluding `errors` (`0.0` when none were graded). |
+| `errors` | `list[Trace]` | Property: traces whose `grade.is_error` is true. |
+| `results` | `dict[str, list[Trace]]` | Property: traces grouped by task slug - the alignment-safe alternative to `zip(tasks, job.traces)`, list-valued since `group > 1` gives several traces per task. |
 
 ```python
 job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
-print(job.reward)       # mean across graded runs
-print(len(job.errors))  # runs without a grade
+print(job.reward)       # mean across graded traces
+print(len(job.errors))  # traces without a grade
 ```
 
 Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
@@ -79,16 +69,27 @@ the [training agents](/v6/guides/training-agents) guide uses this session patter
 
 ## `Trace`
 
-The agent's trajectory for one rollout - an ordered collection of `Step`s plus the run summary, and the
-unit of training data. Every recorded step also streams to the platform as one schema-tagged span.
+The record of one graded evaluation - an ordered collection of `Step`s plus the outcome, and the unit of
+training data. `rollout` returns one and a [`Job`](#job) collects them; every recorded step also
+streams to the platform as one schema-tagged span.
 
-| Field | Type | Description |
-|-------|------|-------------|
+| Member | Type | Description |
+|--------|------|-------------|
 | `steps` | `list[Step]` | The ordered trajectory. |
-| `status` | `"completed" \| "error" \| "cancelled" \| None` | How the run ended (`trace.is_error` reads it). |
+| `status` | `"completed" \| "error" \| "cancelled" \| None` | How the rollout ended (`trace.is_error` reads it). |
 | `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped (`trace.is_truncated` reads it: anything but `"done"` means a limit cut it off). |
 | `content` | `str \| None` | The final answer (graded). |
-| `trace_id` | `str \| None` | Keys server-side trajectories. |
+| `grade` | `Grade` | The environment's verdict; an error ("not graded") until graded. |
+| `reward` | `float` | Property: the graded reward (`grade.reward`). |
+| `evaluation` | `dict` | Property: the grade payload, safe to persist. |
+| `prompt_text` | `str \| None` | Property: the prompt the agent was given; `None` when no task started. |
+| `trace_id` | `str \| None` | Keys the trajectory for training. |
+| `slug` | `str \| None` | The task slug it came from; how [`Job.results`](#job) keys traces back to their task without positional zip. |
+| `job_id` / `group_id` | `str \| None` | Batch and GRPO group. |
+| `runtime` | `str \| None` | Where it ran: the control-channel url, or `hud://trace/<id>` when hosted. |
+
+A rollout that fails before its session is live returns `Trace.failed(...)` (no prompt, no runtime); a
+mid-run failure keeps the real trace - prompt, runtime, partial steps - marked as errored.
 
 `hud.types.Step` is the shared skeleton (source, timing, error, plus the harness payloads: prompt
 `messages` and `task_call` lifecycle RPCs). The tool-agent family subclasses it in `hud.agents.types`,

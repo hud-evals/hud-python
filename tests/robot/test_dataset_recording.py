@@ -198,11 +198,11 @@ async def test_recorded_rollouts_land_in_one_dataset_per_rate_and_robot(
 async def test_a_recorded_episode_holds_the_observed_state_executed_action_and_task(
     recording: Path,
 ) -> None:
-    run = await record("arm", recording_contract())
+    trace = await record("arm", recording_contract())
     DatasetWriter.finalize()
 
     (dataset,) = datasets(recording)
-    assert run.reward == sum(range(EPISODE_TICKS))  # the sim saw every action
+    assert trace.reward == sum(range(EPISODE_TICKS))  # the sim saw every action
     assert dataset.meta.features["observation.state"]["names"] == ["slot", "tick"]
     image = dataset[0]["observation.images.observation_image"]
     assert tuple(image.shape) == (3, RECORD_SIDE, RECORD_SIDE)

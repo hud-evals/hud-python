@@ -59,13 +59,13 @@ The defaults are a group size of 8, a learning rate of `1e-5`, and at most
 
 ## Training flow
 
-A `Job` spans the training session and accumulates its runs. Each iteration
-selects the runs added by the latest rollout and trains on that batch:
+A `Job` spans the training session and accumulates its traces. Each iteration
+selects the traces added by the latest rollout and trains on that batch:
 
 ```python
-batch_start = len(session.runs)
+batch_start = len(session.traces)
 await taskset.run(agent, runtime=runtime, job=session)
-batch = session.runs[batch_start:]
+batch = session.traces[batch_start:]
 
 await trainer.step(batch, learning_rate=1e-5, group_size=8)
 ```
@@ -79,10 +79,10 @@ The trajectory representation depends on the runtime:
 | Runtime | Data sent to training |
 |---------|-----------------------|
 | `HUDRuntime` | Reward and `trace_id`; the training service resolves the token-level trajectory stored by the platform |
-| `LocalRuntime` | Reward and the token-level `Sample` recorded on each agent turn in `run.trace` |
+| `LocalRuntime` | Reward and the token-level `Sample` recorded on each agent turn of the trace |
 
 `TrainingClient` also accepts `trace_id` strings directly. A training batch
-may contain `Run` objects, trace ids, or both.
+may contain traces, `TrajectoryPayload`s, trace ids, or a mix.
 
 ## Built-in losses
 

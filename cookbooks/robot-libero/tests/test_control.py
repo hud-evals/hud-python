@@ -114,7 +114,9 @@ async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns
 
     agent = ToolAgent()
     try:
-        run = await rollout(Task(env="robot-libero", id="grasp"), agent, runtime=LocalRuntime(env))
+        trace = await rollout(
+            Task(env="robot-libero", id="grasp"), agent, runtime=LocalRuntime(env)
+        )
         assert {(cap.name, cap.protocol) for cap in env.capabilities} == {
             ("robot", "openpi/0"),
             ("control", "mcp/2025-11-25"),
@@ -124,7 +126,7 @@ async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns
         server.close()
         await sim.stop()
 
-    assert run.reward == 1.0
+    assert trace.reward == 1.0
     assert len(agent.results) == 3
     for result in agent.results:
         assert not result.isError
