@@ -832,17 +832,3 @@ async def serve_file_tracking(
     sock = server.sockets[0].getsockname()
     LOGGER.info("filetracking bound on %s:%s", sock[0], sock[1])
     return server
-
-
-__all__ = [
-    "DEFAULT_CAPTURE_EXTENSIONS",
-    "DEFAULT_EXCLUDE_PATTERNS",
-    "DEFAULT_MAX_FILE_SIZE",
-    "SECRET_DENY_PATTERNS",
-    "DiffResult",
-    "FileEntry",
-    "FileTracker",
-    "PatchEntry",
-    "Snapshot",
-    "serve_file_tracking",
-]

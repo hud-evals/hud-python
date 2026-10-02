@@ -81,6 +81,3 @@ def format_openai_result(call: ToolCall, result: ToolResult) -> ResponseInputIte
         "ResponseInputItemParam",
         FunctionCallOutput(type="function_call_output", call_id=call.id, output=output_items),
     )
-
-
-__all__ = ["OpenAIToolSpec", "format_openai_result"]

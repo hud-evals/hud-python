@@ -82,6 +82,3 @@ class SSHTool(AgentTool[SSHClient]):
         except asyncssh.ProcessError as e:
             return tool_err(_remote_error(e))
         return tool_ok("\n".join(names) if names else "(empty)")
-
-
-__all__ = ["SSHTool"]

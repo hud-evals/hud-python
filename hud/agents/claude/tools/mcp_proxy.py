@@ -35,6 +35,3 @@ class ClaudeMCPProxyTool(MCPTool):
             "input_schema": self.mcp_tool.inputSchema,
             "eager_input_streaming": True,
         }
-
-
-__all__ = ["ClaudeMCPProxyTool"]

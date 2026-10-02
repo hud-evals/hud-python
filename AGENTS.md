@@ -101,6 +101,9 @@ Before calling a change done, check its diff:
 - Imports at the top of the module, except an existing lazy
   optional-dependency pattern or a documented import cycle. Use
   `TYPE_CHECKING` for type-only imports that would add runtime cost or cycles.
+- Declare `__all__` only in package `__init__.py` files, where it lists the
+  names the package re-exports. Ordinary modules leave it out; their names
+  without a leading underscore are already public.
 - Public APIs expose user operations and domain concepts, not construction
   stages or compatibility scaffolding.
 - Every new `if`, `try`, nullable mode, or compatibility path earns its keep.

@@ -454,11 +454,3 @@ def _crop_png(
     else:
         cropped.save(buf, format="PNG")
     return buf.getvalue(), encoding.mime_type
-
-
-__all__ = [
-    "CLAUDE_COMPUTER_SPECS",
-    "COMPUTER_TOOLSET_SPEC",
-    "GENERIC_COMPUTER_SPEC",
-    "ClaudeComputerTool",
-]

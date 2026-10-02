@@ -101,6 +101,3 @@ class Connection:
             url=url,
             headers=dict(cast("dict[str, str]", raw_headers)),
         )
-
-
-__all__ = ["Connection"]

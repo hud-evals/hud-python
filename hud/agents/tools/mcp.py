@@ -40,6 +40,3 @@ class MCPTool(AgentTool[MCPClient]):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.client.call_tool(self.mcp_tool.name, arguments)
-
-
-__all__ = ["MCPTool"]

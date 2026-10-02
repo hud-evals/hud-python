@@ -1894,12 +1894,3 @@ class Workspace:
             return
         assert returncode is not None
         process.exit(returncode)
-
-
-__all__ = [
-    "DEFAULT_SYSTEM_MOUNTS",
-    "Mount",
-    "MountKind",
-    "Peer",
-    "Workspace",
-]

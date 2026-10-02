@@ -332,12 +332,3 @@ class RFBClient(CapabilityClient):
         writer.close()
         with contextlib.suppress(OSError):
             await writer.wait_closed()
-
-
-__all__ = [
-    "PngScreenshotEncoding",
-    "RFBClient",
-    "ScreenshotEncoding",
-    "ScreenshotMimeType",
-    "WebPScreenshotEncoding",
-]

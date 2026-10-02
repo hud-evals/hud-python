@@ -237,6 +237,3 @@ class CapabilityClient(ABC):
 
     @abstractmethod
     async def close(self) -> None: ...
-
-
-__all__ = ["Capability", "CapabilityClient"]
