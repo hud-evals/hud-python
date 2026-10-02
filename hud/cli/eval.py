@@ -318,9 +318,7 @@ def eval_command(
     if cfg.agent_type is None:
         # Pick the agent type, then a current catalog model of that type, newest first.
         picked_type = AgentType(
-            hud_console.select(
-                "Select an agent:", choices=[agent.value for agent in AgentType], default=0
-            )
+            hud_console.select("Select an agent:", choices=[agent.value for agent in AgentType])
         )
         picked: dict[str, Any] = {"agent_type": picked_type}
         if settings.api_key:
@@ -345,7 +343,6 @@ def eval_command(
                         {"name": f"{m.name or m.model_name} ({m.model_name})", "value": m}
                         for m in models
                     ],
-                    default=0,
                 ),
             )
             picked["model"] = picked_model.model_name
