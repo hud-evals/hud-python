@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import LocalRuntime
+from hud.runtime import LocalRuntime
 
 from game2048_env import play
 

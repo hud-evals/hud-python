@@ -26,7 +26,7 @@ DEFAULT_GAMES = 10  # even number keeps X/O starts balanced
 
 async def run_validation(trained: str, opponent: str, games: int) -> None:
     from hud.agents import create_agent
-    from hud.eval import Taskset
+    from hud import Taskset
 
     from env import play_self
 

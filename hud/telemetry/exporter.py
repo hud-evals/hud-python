@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
-from hud.utils import make_request_sync
+from hud.utils.requests import make_request_sync
 
 logger = logging.getLogger(__name__)
 

@@ -17,9 +17,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from hud.capabilities import Capability
-from hud.environment import Environment, Mount, Workspace
+from hud.environment import Mount, Workspace
 from hud.environment.egress import ANY_HOST
-from hud.environment.env import current_session_id
+from hud.environment.env import Environment, current_session_id
 from hud.graders import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec

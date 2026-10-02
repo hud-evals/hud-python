@@ -1,6 +1,6 @@
 """Job: the platform receipt for one execution — there are no standalone traces.
 
-The live execution atom remains :class:`hud.eval.Run`; a ``Job`` collects the
+The live execution atom remains :class:`hud.Run`; a ``Job`` collects the
 graded runs of one batch under one platform job id. Every trace reports under
 a job: the scheduler's batch job, or the single-run job :func:`rollout`
 registers when called bare.

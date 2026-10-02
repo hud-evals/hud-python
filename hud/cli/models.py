@@ -115,7 +115,7 @@ def fork_model(
 
     The fork starts from the source model's active checkpoint, so you can keep
     training where it left off. Use the returned model slug with
-    `hud.TrainingClient` (or as the gateway model string for sampling).
+    `hud.train.TrainingClient` (or as the gateway model string for sampling).
 
     [not dim]Examples:
         hud models fork claude-sonnet-4-6 --name my-sonnet
@@ -162,7 +162,7 @@ def fork_model(
             border_style="green",
         )
     )
-    hud_console.stdout.print(f"\n[dim]Train it: hud.TrainingClient({slug!r})[/dim]")
+    hud_console.stdout.print(f"\n[dim]Train it: hud.train.TrainingClient({slug!r})[/dim]")
     hud_console.stdout.print(
         f"[dim]View: {settings.hud_web_url.rstrip('/')}/models/{model['id']}[/dim]"
     )

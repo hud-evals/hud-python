@@ -15,7 +15,7 @@ Define one coding environment, run it 256 wide on Daytona sandboxes, and train a
 One file. A workspace with a shell, a seeded bug in `calc.py`, and a pytest grader that pays 1.0 only when every test passes.
 
 ```python
-from hud.environment import Environment
+from hud import Environment
 
 env = Environment(name="smoke")
 ws = env.workspace(WORKSPACE, network=True)

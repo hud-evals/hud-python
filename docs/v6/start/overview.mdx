@@ -63,7 +63,7 @@ The first and **key** part of any HUD workflow is **declaring your [environment]
 in a declaration file `env.py` - here is a standard scaffold:
 
 ```python env.py
-from hud.environment import Environment
+from hud import Environment
 from hud.capabilities import Capability
 from hud.graders import LLMJudgeGrader
 
@@ -113,7 +113,7 @@ HUD provides various ways to load, select, and run tasks. For a dedicated overvi
 [evaluating agents](/v6/guides/running-an-eval).
 
 ```python tasks.py
-from hud.eval import Taskset
+from hud import Taskset
 from env import some_task_1, some_task_2
 
 # VITAL: a named taskset of concrete tasks to evaluate (parametrize one definition into many)
@@ -155,7 +155,7 @@ hud eval env.py claude --runtime hud    # same env, executed on HUD's hosted inf
 [runtime](/v6/reference/runtime) and run a taskset against it:
 
 ```python
-from hud.eval import LocalRuntime, DockerRuntime, ModalRuntime, HUDRuntime
+from hud.runtime import DockerRuntime, HUDRuntime, LocalRuntime, ModalRuntime
 
 LocalRuntime("env.py")     # in this process - fastest iteration
 DockerRuntime("my-env")    # a fresh container per rollout
@@ -199,7 +199,7 @@ You can run this programmatically:
 
 ```python
 from hud.agents import create_agent
-from hud.eval import LocalRuntime
+from hud.runtime import LocalRuntime
 from tasks import TASKS
 
 agent = create_agent("claude-sonnet-4-5")               # routed through the HUD gateway

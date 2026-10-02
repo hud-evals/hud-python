@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Any, Self
 
 from google.genai import types as genai_types
 
-from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
-from hud.agents.tools.rfb import keysym
+from hud.agents.tools.rfb import RFBTool, keysym
 from hud.agents.types import GeminiConfig
 
 from .base import GeminiToolSpec

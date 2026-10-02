@@ -6,7 +6,9 @@ no domain schema tag, so the platform surfaces them in debug tooling only. The
 canonical run record is the ``Step`` stream (``hud.types``), not this.
 
 Usage:
-    @hud.instrument
+    from hud.telemetry import instrument
+
+    @instrument
     async def my_function(arg1, arg2):
         ...
 """

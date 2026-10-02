@@ -22,7 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import httpx
-from hud.environment import Environment
+from hud import Environment
 from hud.graders import EvaluationResult, LLMJudgeGrader, combine
 from hud.settings import settings
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter

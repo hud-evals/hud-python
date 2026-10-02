@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.capabilities import Connection
     from hud.clients.client import HudClient
-    from hud.environment import WorkspaceRoute
+    from hud.environment.egress import WorkspaceRoute
     from hud.runtime import Provider
     from hud.runtime.core import RuntimeConfig
 

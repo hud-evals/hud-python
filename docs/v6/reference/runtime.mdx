@@ -9,7 +9,7 @@ A **runtime** chooses where each rollout's environment runs. You pass it to `tas
 runtime changes.
 
 ```python
-from hud import LocalRuntime
+from hud.runtime import LocalRuntime
 
 await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
 ```
@@ -28,8 +28,8 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
-Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
-HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
+Every runtime imports from `hud.runtime` (`from hud.runtime import LocalRuntime, DockerRuntime,
+HUDRuntime, HostedRuntime, ModalRuntime, DaytonaRuntime, Runtime`).
 
 <Note>
 **You can usually omit `runtime=`.** A run without one uses its known placement:
@@ -54,7 +54,14 @@ Compose project, hardware, and timeouts. Set it on the runtime (`runtime_config=
 supports.
 
 ```python
-from hud.eval import ComposeProject, RuntimeConfig, RuntimeGPU, RuntimeLimits, RuntimeResources, RuntimeTPU
+from hud.runtime import (
+    ComposeProject,
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
+    RuntimeTPU,
+)
 
 RuntimeConfig(
     image="my-env",
@@ -186,8 +193,7 @@ ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=No
 
 ```python
 import modal
-from hud.eval import ModalRuntime
-from hud.runtime import RuntimeConfig
+from hud.runtime import ModalRuntime, RuntimeConfig
 
 ModalRuntime(
     runtime_config=RuntimeConfig(image="ghcr.io/org/private:tag"),
@@ -305,7 +311,7 @@ Runloop, your own Kubernetes:
 
 ```python run.py
 from contextlib import asynccontextmanager
-from hud import Runtime
+from hud.runtime import Runtime
 
 @asynccontextmanager
 async def my_runtime(task):

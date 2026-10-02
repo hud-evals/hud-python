@@ -62,10 +62,9 @@ import torch
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
-from hud.agents.robot.adapter import LeRobotAdapter
-from hud.agents.robot.agent import RobotAgent
-from hud.agents.robot.model import LeRobotModel
-from hud.eval import DockerRuntime, Task, Taskset
+from hud import Task, Taskset
+from hud.agents.robot import LeRobotAdapter, LeRobotModel, RobotAgent
+from hud.runtime import DockerRuntime
 
 CHECKPOINT = "lerobot/pi05_libero_finetuned"
 

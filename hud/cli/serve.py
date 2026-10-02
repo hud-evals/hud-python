@@ -1,4 +1,4 @@
-"""``hud serve`` — serve a v6 :class:`~hud.environment.Environment` locally.
+"""``hud serve`` — serve a v6 :class:`~hud.Environment` locally.
 
 In v6, ``hud serve`` brings up an environment's control channel (tcp JSON-RPC)
 so agents can connect to it.
@@ -45,7 +45,7 @@ def serve_command(
         hud serve env.py -p 9000 # serve on a specific port
         hud serve pkg.mod:make_env --arg name=demo  # call a factory
 
-    In v6, ``hud serve`` serves a :class:`hud.environment.Environment`. The old
+    In v6, ``hud serve`` serves a :class:`hud.Environment`. The old
     MCP-server hot-reload / Docker dev mode is no longer supported.[/not dim]
     """
     if verbose:

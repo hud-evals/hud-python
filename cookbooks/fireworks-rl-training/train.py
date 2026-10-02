@@ -15,10 +15,10 @@ from typing import Any
 import tinker
 from dotenv import load_dotenv
 from fireworks.training.sdk import FiretitanServiceClient
+from hud import Run, Taskset
 from hud.agents.base import Agent
 from hud.agents.types import AgentStep, Sample, Usage
-from hud.eval import HUDRuntime, LocalRuntime, Provider, Taskset
-from hud.eval.run import Run
+from hud.runtime import HUDRuntime, LocalRuntime, Provider
 from tinker_cookbook.renderers import get_renderer, get_text_content
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 

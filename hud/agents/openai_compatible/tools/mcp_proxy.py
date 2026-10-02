@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hud.agents.tools import MCPTool
+from hud.agents.tools.mcp import MCPTool
 
 from .base import openai_compatible_tool_name, openai_compatible_tool_param
 

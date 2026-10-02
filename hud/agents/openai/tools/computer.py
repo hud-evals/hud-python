@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
+from hud.agents.tools.rfb import RFBTool
 from hud.types import ImageContent, TextContent, ToolResult
 
 from .base import OpenAIToolSpec

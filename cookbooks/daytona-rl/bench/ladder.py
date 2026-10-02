@@ -24,7 +24,7 @@ from pathlib import Path
 
 from daytona import Image
 from hud.clients import connect
-from hud.eval import DaytonaRuntime
+from hud.runtime import DaytonaRuntime
 
 from env import fix_calc
 from snapshot import snapshot_name
@@ -54,7 +54,7 @@ async def one_infra(provider, idx: int) -> dict:
 
 
 async def one_rollout(provider, idx: int) -> dict:
-    from hud.agents.claude import ClaudeAgent
+    from hud.agents import ClaudeAgent
 
     timed = TimedProvider(provider)
     t0 = time.perf_counter()

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
     from pathlib import Path
 
-    from hud.eval import Task as EvalTask
+    from hud.eval.task import Task as EvalTask
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -85,7 +85,7 @@ class _TaskFactory(Generic[P]):
 
     The server side (:class:`~hud.environment.server.TaskRunner`) drives its
     async-generator ``func`` (prompt → score); calling this object with args
-    binds a runnable :class:`~hud.eval.Task`::
+    binds a runnable :class:`~hud.Task`::
 
         task = fix_bug(difficulty=3)  # -> Task
         job = await task.run(agent)
@@ -172,7 +172,7 @@ class Environment:
         for entry in capabilities or []:
             self.add_capability(entry)
         #: Registered task templates by id (the ``@env.template`` registry).
-        #: Each value mints concrete :class:`~hud.eval.Task` rows when called.
+        #: Each value mints concrete :class:`~hud.Task` rows when called.
         self.tasks: dict[str, _TaskFactory[Any]] = {}
         # Backing-daemon lifecycle hooks run once by the serving substrate
         # around its lifetime.
@@ -209,7 +209,7 @@ class Environment:
         {"prompt": ...}`` → ``yield {"score": ...}``). ``input``/``returns``
         optionally declare the agent's I/O types (surfaced in the manifest as
         JSON schemas). The decorated callable is a *template*: calling it with
-        args returns a concrete :class:`~hud.eval.Task` row.
+        args returns a concrete :class:`~hud.Task` row.
         """
 
         def decorate(func: _TaskFunction[P]) -> _TaskFactory[P]:

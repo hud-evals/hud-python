@@ -15,7 +15,7 @@ from anthropic.types.beta import (
 if TYPE_CHECKING:
     BetaUserLocationParam = Any
 
-from hud.agents.tools import HostedTool
+from hud.agents.tools.hosted import HostedTool
 
 
 @dataclass(frozen=True, kw_only=True)

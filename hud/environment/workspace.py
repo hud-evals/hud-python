@@ -498,7 +498,7 @@ class Workspace:
     """Directory + bwrap-isolated SSH.
 
     The standard shell daemon: ``env.workspace(root)`` attaches one to an
-    :class:`~hud.environment.Environment`, which starts it and publishes its
+    :class:`~hud.Environment`, which starts it and publishes its
     concrete ``ssh/2`` capability when the env serves. Construction is pure
     data — keys, sockets, and the root directory materialize only at serve
     time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)

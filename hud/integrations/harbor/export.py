@@ -7,12 +7,16 @@ import json
 import shlex
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from hud.environment import Environment, load_environment
+from hud.environment import load_environment
 from hud.environment.server import TaskRunner
-from hud.eval import Task, Taskset
+from hud.eval.task import Task
+from hud.eval.taskset import Taskset
 from hud.utils.naming import normalize_environment_name
+
+if TYPE_CHECKING:
+    from hud.environment.env import Environment
 
 ALLOWED_PROTOCOLS = ("ssh", "mcp")
 DEFAULT_ANSWER_FILE = "/workspace/answer.txt"

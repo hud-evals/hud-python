@@ -5,8 +5,7 @@ from __future__ import annotations
 import shlex
 from typing import Any, cast
 
-from hud.agents.tools import SSHTool
-from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH
+from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH, SSHTool
 from hud.types import TextContent, ToolResult
 from hud.utils.process import bound_shell_output
 

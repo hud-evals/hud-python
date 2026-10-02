@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from openai.types.responses import ToolParam
 
-from hud.agents.tools import HostedTool
+from hud.agents.tools.hosted import HostedTool
 
 
 @dataclass(frozen=True, kw_only=True)

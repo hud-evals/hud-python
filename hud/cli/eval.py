@@ -21,7 +21,8 @@ from rich import box
 from rich.table import Table
 
 from hud.cli import CLI, CliError, Result, parse_key_value
-from hud.eval import (
+from hud.eval.taskset import Taskset
+from hud.runtime import (
     DaytonaRuntime,
     DockerRuntime,
     HostedRuntime,
@@ -29,7 +30,6 @@ from hud.eval import (
     ModalRuntime,
     Runtime,
     SubprocessRuntime,
-    Taskset,
 )
 from hud.settings import settings
 from hud.types import AgentType
@@ -41,7 +41,8 @@ from hud.utils.process import run_until_terminated
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
-    from hud.eval import Provider, Task
+    from hud.eval.task import Task
+    from hud.runtime import Provider
     from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()

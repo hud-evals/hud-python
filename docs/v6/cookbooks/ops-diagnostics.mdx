@@ -13,7 +13,7 @@ We give the agent shell access to a directory of logs and traces, then ask for a
 ```python env.py
 from pathlib import Path
 
-from hud.environment import Environment
+from hud import Environment
 from hud.graders import LLMJudgeGrader
 
 ROOT = Path("/workspace/incident")

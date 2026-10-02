@@ -24,10 +24,9 @@ import argparse
 import asyncio
 import time
 
-from hud import Run, TrainingClient
+from hud import Job, Run, Taskset
 from hud.agents import create_agent
-from hud.eval import Job, Taskset
-from hud.train import TrajectoryPayload, TrajectorySample
+from hud.train import TrainingClient, TrajectoryPayload, TrajectorySample
 
 from env import play_self
 

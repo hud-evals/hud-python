@@ -8,7 +8,7 @@ import sys
 
 from agent import BrowserUseAgent, BrowserUseConfig
 
-from hud.eval import Taskset
+from hud import Taskset
 
 
 async def main(source: str) -> None:

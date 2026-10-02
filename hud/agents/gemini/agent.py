@@ -18,17 +18,10 @@ if TYPE_CHECKING:
 
 
 from .settings import gemini_agent_settings
-from .tools import (
-    GeminiComputerTool,
-    GeminiEditTool,
-    GeminiGlobTool,
-    GeminiListTool,
-    GeminiMCPProxyTool,
-    GeminiReadTool,
-    GeminiSearchTool,
-    GeminiShellTool,
-    GeminiWriteTool,
-)
+from .tools.coding import GeminiEditTool, GeminiShellTool, GeminiWriteTool
+from .tools.computer import GeminiComputerTool
+from .tools.filesystem import GeminiGlobTool, GeminiListTool, GeminiReadTool, GeminiSearchTool
+from .tools.mcp_proxy import GeminiMCPProxyTool
 
 logger = logging.getLogger(__name__)
 

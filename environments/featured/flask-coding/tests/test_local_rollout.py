@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from hud import LocalRuntime, Run, Taskset, connect
+from hud import Run, Taskset
+from hud.clients import connect
 from hud.environment import workspace as workspace_lib
+from hud.runtime import LocalRuntime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYTEST_COMMAND = (

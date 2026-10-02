@@ -137,8 +137,9 @@ Run a task with an agent two ways. **Programmatically**, pass the agent to `Task
 with a [runtime](/v6/reference/runtime):
 
 ```python
+from hud import Taskset
 from hud.agents import create_agent
-from hud.eval import LocalRuntime, Taskset
+from hud.runtime import LocalRuntime
 
 agent = create_agent("claude-sonnet-4-5")
 taskset = Taskset.from_file("tasks.py")        # scaffolded tasks.py exports a list of tasks

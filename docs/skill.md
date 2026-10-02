@@ -58,7 +58,7 @@ and [Tasks](/v6/reference/tasks).
 harness brings its own tools):
 
 ```python
-from hud.environment import Environment
+from hud import Environment
 
 env = Environment(name="coder")
 env.workspace("/workspace")
@@ -78,8 +78,8 @@ the URL via `env.add_capability(Capability.mcp(...))`. Always pair with
 ```python
 import asyncio, contextlib, socket
 from fastmcp import FastMCP
+from hud import Environment
 from hud.capabilities import Capability
-from hud.environment import Environment
 
 server = FastMCP(name="my-env")
 env = Environment(name="my-env")

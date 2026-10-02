@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 
 import numpy as np
 
-from hud.telemetry.robot import JobRecorder, to_numpy
+from hud.telemetry.robot.recorder import JobRecorder, to_numpy
 
 from .bridge import RobotBridge, serve_bridge
 

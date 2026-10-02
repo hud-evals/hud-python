@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import random
 
-from hud.eval import HUDRuntime, LocalRuntime, Provider, Taskset
+from hud import Taskset
+from hud.runtime import HUDRuntime, LocalRuntime, Provider
 
 from env import multiply
 

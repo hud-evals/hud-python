@@ -24,7 +24,7 @@ from daytona import Image
 from daytona_api_client_async import ApiClient, Configuration, WarmPoolsApi
 from daytona_api_client_async.models.create_warm_pool import CreateWarmPool
 from hud.clients import connect
-from hud.eval import DaytonaRuntime
+from hud.runtime import DaytonaRuntime
 
 import pool
 from env import fix_calc

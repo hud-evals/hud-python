@@ -23,7 +23,7 @@ from hud.cli import (
     CliError,
 )
 from hud.clients import HudProtocolError, connect
-from hud.eval import Taskset
+from hud.eval.taskset import Taskset
 from hud.runtime import Runtime, SubprocessRuntime
 from hud.utils.process import run_until_terminated
 

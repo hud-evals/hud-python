@@ -22,10 +22,10 @@ import time
 from dotenv import load_dotenv
 
 from common import load_taskset_and_runtime
-from hud import TrainingClient
+from hud import Job
 from hud.agents import create_agent
 from hud.agents.types import AgentStep
-from hud.eval import Job
+from hud.train import TrainingClient
 
 # The trainable gateway model to sample from and train, in place.
 # Pick one with `hud models list` and paste its id here.

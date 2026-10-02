@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
 
 from hud.agents.base import Agent
-from hud.agents.misc import auto_respond
+from hud.agents.misc.response_automation import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool

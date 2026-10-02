@@ -81,8 +81,8 @@ import asyncio
 
 from fastmcp import FastMCP
 
+from hud import Environment
 from hud.capabilities import Capability
-from hud.environment import Environment
 
 server = FastMCP(name="tools")
 
@@ -134,8 +134,8 @@ import tempfile
 
 from playwright.async_api import async_playwright
 
+from hud import Environment
 from hud.capabilities import Capability
-from hud.environment import Environment
 
 env = Environment(name="browser")
 _proc: asyncio.subprocess.Process | None = None
@@ -185,8 +185,8 @@ On Linux, `Xvfb` paints the framebuffer and `x11vnc` serves it (`apt install xvf
 ```python env.py
 import asyncio
 
+from hud import Environment
 from hud.capabilities import Capability
-from hud.environment import Environment
 
 env = Environment(name="desktop")
 _procs: tuple | None = None
@@ -280,7 +280,8 @@ A `Workspace` is not itself a capability - it's the built-in workspace daemon. I
 Concretely it's a directory plus a `bwrap`-isolated SSH exec server. Shell commands and file operations run through the same exec channel. [`env.workspace(root, ...)`](/v6/reference/environment#methods) wires its whole lifecycle; construction is pure data, with keys, sockets, and the root directory materializing only at serve time. To run one outside an env, drive its lifecycle directly and publish `ws.capability()`:
 
 ```python
-from hud.environment import Environment, Workspace
+from hud import Environment
+from hud.environment import Workspace
 
 env = Environment(name="coder")
 ws = Workspace("workspace", host="127.0.0.1", port=0)   # port 0 = ephemeral
