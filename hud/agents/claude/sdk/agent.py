@@ -20,8 +20,10 @@ from hud.agents.cli import (
     run_jsonl,
 )
 from hud.agents.types import ClaudeCLIConfig
+from hud.capabilities import find_capability, open_client
 from hud.settings import settings
 from hud.telemetry.context import get_trace_headers
+from hud.types import text_of
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -53,13 +55,14 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
     config_cls = ClaudeCLIConfig
 
     async def __call__(self, run: Run) -> None:
-        ssh = cast("SSHClient", await run.open("ssh"))
+        async with open_client(find_capability(run.capabilities, "ssh")) as ssh:
+            await self._drive(cast("SSHClient", ssh), run)
+
+    async def _drive(self, ssh: SSHClient, run: Run) -> None:
         shell = ssh.capability.params.get("shell", "bash")
         windows = shell in WINDOWS_SHELLS
         connection: Connection | None = run.connections.get("inference")
-        executable = await resolve_executable(
-            ssh, "claude", _MANAGED_CLAUDE_PATHS, run.runtime_config
-        )
+        executable = await resolve_executable(ssh, "claude", _MANAGED_CLAUDE_PATHS)
         rfb_count = sum(cap.protocol.partition("/")[0] == "rfb" for cap in run.capabilities)
 
         async with AsyncExitStack() as resources:
@@ -69,7 +72,8 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                 if family == "mcp":
                     name = cap.name
                     transport = "http" if cap.params["transport"] == "streamable-http" else "sse"
-                    server: dict[str, Any] = {"type": transport, "url": cap.url}
+                    # The CLI runs inside the environment, where the server lives.
+                    server: dict[str, Any] = {"type": transport, "url": cap.env_url}
                     if token := cap.params.get("auth_token"):
                         server["headers"] = {"Authorization": f"Bearer {token}"}
                 elif family == "rfb":
@@ -77,7 +81,7 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                     server = await resources.enter_async_context(
                         computer_mcp.bridge_computer_mcp(
                             ssh,
-                            run.binding(cap.name),
+                            cap,
                             self.config.screenshot_encoding,
                             shell=shell,
                         )
@@ -165,7 +169,7 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                         "type": "user",
                         "message": {
                             "role": "user",
-                            "content": [{"type": "text", "text": run.prompt_text}],
+                            "content": [{"type": "text", "text": text_of(run.prompt)}],
                         },
                     }
                 )

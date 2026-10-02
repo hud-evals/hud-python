@@ -14,21 +14,18 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from hud.capabilities import Connection, SSHClient
-    from hud.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 # What a CLI is given as its credential on a process-bound connection; the relay
 # replaces it with the scoped credential, so it never needs to be secret.
 PROCESS_BOUND_CREDENTIAL = "hud-process-bound"
 PROCESS_CLOSE_TIMEOUT_S = 5.0
-_DECLARED_OS = {"darwin": "darwin", "linux": "linux", "macos": "darwin", "windows": "windows"}
 
 
 async def resolve_executable(
     ssh: SSHClient,
     command: str,
     managed_paths: dict[str, str],
-    runtime_config: RuntimeConfig | None,
 ) -> str:
     """Resolve a CLI against the live SSH target and its declared runtime config."""
     if ssh.capability.params.get("shell", "bash") in WINDOWS_SHELLS:
@@ -55,13 +52,6 @@ async def resolve_executable(
         platform = f"{os_name}-{_normalize_arch(machine)}"
         if os_name == "linux" and libc == "musl":
             platform += "-musl"
-
-    declared = runtime_config.resources.os if runtime_config and runtime_config.resources else None
-    if declared is not None and _DECLARED_OS.get(declared.lower(), os_name) != os_name:
-        raise RuntimeError(
-            f"runtime_config.resources.os requested {declared!r}, "
-            f"but the SSH runtime reports {os_name!r}"
-        )
 
     managed = managed_paths.get(platform)
     if managed is not None:

@@ -252,13 +252,12 @@ async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
             async with contextlib.AsyncExitStack() as stack:
                 addr   = await stack.enter_async_context(runtime(task))    # 1. provider -> Runtime
                 client = await stack.enter_async_context(connect(addr))    # 2. connect -> HudClient
-                live = Run(client, task.id, task.args)
-                live.trace.runtime = addr.url
-                async with live:              # 3. Run.__aenter__ = tasks.start
+                async with start_run(client, task.id, task.args) as live:  # 3. tasks.start
                     run = live
+                    run.trace.runtime = addr.url
                     _phase = "agent loop"
                     await agent(run)          #    agent fills run.trace
-                                              #    Run.__aexit__ = tasks.grade
+                                              #    on exit: revoke, final capture, tasks.grade
                 _phase = "grading"
 
         await _drive()
@@ -333,13 +332,12 @@ sends `tasks.grade` (messages to the environment server). Everything the agent d
 <p className="aside-label">run.py · rollout · _drive</p>
 
 ```python
-live = Run(client, task.id, task.args)
-live._runtime = addr.url
-async with live:          # 3. Run.__aenter__ = tasks.start
+async with start_run(client, task.id, task.args) as live:  # 3. tasks.start
     run = live
+    run.trace.runtime = addr.url
     _phase = "agent loop"
     await agent(run)      #    fills run.trace
-                           #    __aexit__ = tasks.grade
+                          #    on exit: tasks.grade
 _phase = "grading"
 ```
 
@@ -521,21 +519,19 @@ if method == "hello":
                             "bindings": bindings})
 ```
 
-The client holds the manifest. Back in `rollout`, the pointer builds the `Run` and enters it.
+The client holds the manifest. Back in `rollout`, the pointer enters `start_run`.
 
 ## Starting the task
 
-`Run.__aenter__` is the third context manager. It sends `tasks.start` and stores the prompt the
-env returns.
+`start_run` is the third context manager. It sends `tasks.start`, normalizes the prompt the env
+returns, and builds the `Run` with the session's capabilities routed to this process.
 
-```python hud/eval/run.py · Run.__aenter__
-async def __aenter__(self):
-    started = await self.client.start_task(self._task_id, self._args)   # tasks.start
-    self.prompt = started.get("prompt")
-    self.record(Step(source="task", task_call=TaskCall(phase="setup", ...)))
-    if self.prompt is not None:
-        self.record(Step(source="user", messages=self.prompt_messages))
-    return self
+```python hud/eval/run.py · start_run (enter)
+started = await session.start_task(task_id, args)            # tasks.start
+run = Run(prompt, [session.route(cap) for cap in capabilities], connections)
+run.trace.record(Step(source="task", task_call=TaskCall(phase="setup", ...)))
+if raw_prompt is not None:
+    run.trace.record(Step(source="user", messages=prompt))
 ```
 
 ```python hud/clients/client.py · HudClient.start_task
@@ -569,19 +565,18 @@ async def start(self):
 ```
 
 The prompt travels back: `TaskRunner.start` -> server reply -> `client.start_task` ->
-`Run.prompt`.
+`run.prompt`.
 
 ## Checkpoint
 
-The pointer is inside `async with live:`, just before `await agent(run)`. At this moment
-`run` is a `Run` that holds:
+The pointer is inside `start_run`'s block, just before `await agent(run)`. The session - here the
+`HudClient` - has the `manifest`, and its server has a `TaskRunner` suspended at the task's first
+yield. `run` is a `Run` that holds:
 
 <div className="step-list">
 
-- the session it was started on - here the `HudClient`, which already has the `manifest` and
-  whose server has a `TaskRunner` suspended at the task's first yield,
-- `run.capabilities`, the environment's capabilities for this task,
-- the `prompt` the env returned, on `run.prompt`,
+- `run.capabilities`, the environment's capabilities for this task, routed to this process,
+- the prompt the env returned, as normalized turns on `run.prompt`,
 - a `run.trace` containing the task setup step and, when a prompt was returned, its opening user
   step.
 
@@ -591,13 +586,13 @@ The pointer is inside `async with live:`, just before `await agent(run)`. At thi
 
 `rollout` hands the run to the agent. The agent contract is one method: `async __call__(run)`.
 
-```python hud/eval/run.py · rollout (agent loop)
-run = live
-async with file_tracking_observer(client):
+```python hud/eval/run.py · start_run (around the agent)
+async with file_tracking_observer(session):
     try:
-        await agent(run)                # Agent.__call__(run)
+        yield run                       # rollout: await agent(run)
     finally:
-        await run.revoke()              # access ends before the final capture and grading
+        run.connections.clear()
+        await session.revoke()          # access ends before the final capture and grading
 ```
 
 ```python hud/agents/base.py · Agent
@@ -612,30 +607,29 @@ acting, observing, recording steps - until it has an answer. Everything it does 
 `run.trace`; the final answer is `run.trace.content`.
 
 ```python
-shell = await run.open("shell")   # live CapabilityClient (ssh/cdp/mcp/...)
-cdp   = run.binding("cdp")        # or wire data for something else to dial
-# ... agent loop: append steps to run.trace; final answer -> run.trace.content ...
+shell_cap = find_capability(run.capabilities, "ssh")
+async with open_client(shell_cap) as shell:                 # live CapabilityClient
+    ...                                                      # agent loop fills run.trace
+cdp_url = find_capability(run.capabilities, "cdp").url      # or wire data for an SDK to dial
 ```
 
-When `__call__` returns, `run.revoke()` closes what the agent opened and the session cuts its
-routes; file tracking takes its final capture; then the pointer leaves the `async with live:` block,
-which triggers `Run.__aexit__`.
+When `__call__` returns, the session cuts its routes, file tracking takes its final capture, and
+`start_run` grades.
 
 ## Grading and teardown
 
-`Run.__aexit__` sends `tasks.grade` with the answer taken from `trace.content`, and parses the
-reply into a `Grade` (the env's `score` becomes `reward`). On a Ctrl-C it cancels instead of
-grading.
+On exit `start_run` sends `tasks.grade` with the answer taken from `trace.content`, and parses
+the reply into a `Grade` (the env's `score` becomes `reward`). On a cancel it cancels the task
+instead of grading.
 
-```python hud/eval/run.py · Run.__aexit__
-async def __aexit__(self, exc_type, exc, tb):
-    if exc_type in (asyncio.CancelledError, KeyboardInterrupt):
-        await self.client.cancel(); return False
-    answer = {"answer": self.trace.content}
-    evaluation = await self.client.grade(answer)    # tasks.grade
-    self.trace.grade = parse_grade(evaluation)      # score -> trace.grade.reward
-    self.record(Step(source="task", task_call=TaskCall(phase="evaluate", ...)))
-    return False
+```python hud/eval/run.py · start_run (exit) + _grade
+except (asyncio.CancelledError, KeyboardInterrupt):
+    await session.cancel(); raise
+...
+answer = {"answer": run.trace.content}
+evaluation = await session.grade(answer)          # tasks.grade
+run.trace.grade = parse_grade(evaluation)         # score -> trace.grade.reward
+run.trace.record(Step(source="task", task_call=TaskCall(phase="evaluate", ...)))
 ```
 
 The server's `tasks.grade` branch pops this session's held runner and resumes it (or, with no
@@ -689,14 +683,14 @@ Every hop above, in order:
 <div className="step-list">
 
 1. `Taskset.run` - expand rows, register a `Job`, resolve placement, `gather` one `rollout` per (task, group).
-2. `rollout` - open an `AsyncExitStack`: provider, then connect, then `Run`.
+2. `rollout` - open an `AsyncExitStack`: provider, then connect, then `start_run`.
 3. `runtime(task)` - bring the env up in its substrate: `LocalRuntime` serves it in-process via `_local`; `SubprocessRuntime` spawns the serve entry point and reads its announced port.
 4. `serve` (in the substrate) - `env.start()` (initialize hooks), `bind()` a TCP server, `serve_forever()`; the provider yields a `Runtime(url)`.
 5. `connect(addr)` - retry until ready, `HudClient.hello()` -> server returns the `manifest`.
-6. `Run.__aenter__` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> `prompt` back on `run.prompt`.
-7. **Checkpoint** - `run` holds its session (manifest + suspended runner), the capabilities, and the prompt.
-8. `await agent(run)` - agent opens capabilities via `run.open`, loops, fills `run.trace` (answer on `trace.content`); `run.revoke()` then ends its access.
-9. `Run.__aexit__` - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
+6. `start_run` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> the prompt back on `run.prompt`.
+7. **Checkpoint** - `run` holds the routed capabilities and the prompt; the session holds the manifest and the suspended runner.
+8. `await agent(run)` - agent opens capabilities with `open_client`, loops, fills `run.trace` (answer on `trace.content`); the session then cuts its routes.
+9. `start_run` exit - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
 10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with the actor result; replace the actor grade.
 11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded trace to `Taskset.run`.
 
@@ -716,7 +710,7 @@ sequenceDiagram
     Roll->>Cli: connect(url)
     Cli->>Env: hello (retry until ready)
     Env-->>Cli: manifest (bindings)
-    Roll->>Env: tasks.start (Run.__aenter__)
+    Roll->>Env: tasks.start (start_run)
     Env->>Env: TaskRunner.start -> 1st yield
     Env-->>Roll: prompt
     rect rgb(238,238,238)
@@ -724,7 +718,7 @@ sequenceDiagram
     Roll->>Env: tunnel.open + drive capabilities
     Env-->>Roll: observations
     end
-    Roll->>Env: tasks.grade (Run.__aexit__)
+    Roll->>Env: tasks.grade (start_run exit)
     Env->>Env: TaskRunner.grade -> 2nd yield
     Env-->>Roll: score becomes Grade.reward
     Prov->>Env: provider stops the substrate + env.stop()

@@ -8,11 +8,11 @@ import logging
 import math
 import traceback
 import uuid
-from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, cast
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from hud.agents.types import AgentConfig
-from hud.capabilities import CDPClient, MCPClient, RFBClient, SSHClient
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients import HudProtocolError, connect
 from hud.telemetry.context import get_current_trace_id, set_trace_context
@@ -24,11 +24,10 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from types import TracebackType
+    from collections.abc import AsyncIterator, Sequence
 
     from hud.agents.base import Agent
-    from hud.capabilities import Capability, CapabilityClient, Connection
+    from hud.capabilities import Capability, Connection
     from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
@@ -38,12 +37,6 @@ if TYPE_CHECKING:
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
-
-_CONNECT_ATTEMPTS = 3
-_CONNECT_BASE_DELAY_SECONDS = 0.25
-_CLIENTS: dict[str, type[CapabilityClient]] = {
-    cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
-}
 
 
 class EnvironmentSession(Protocol):
@@ -181,41 +174,6 @@ def _episode_capabilities(
     ]
 
 
-def _find_capability(capabilities: list[Capability], ref: str) -> Capability:
-    matches = [
-        capability
-        for capability in capabilities
-        if ref in (capability.name, capability.protocol, capability.protocol.split("/", 1)[0])
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    if matches:
-        names = ", ".join(f"{c.name} ({c.protocol})" for c in matches)
-        raise KeyError(f"ambiguous capability {ref!r}; matches: {names}")
-    available = ", ".join(f"{c.name} ({c.protocol})" for c in capabilities)
-    raise KeyError(f"no capability {ref!r} (available: {available or '<none>'})")
-
-
-async def _connect_client(capability: Capability) -> CapabilityClient:
-    client_cls = _CLIENTS.get(capability.protocol)
-    if client_cls is None and capability.protocol.split("/", 1)[0] == "openpi":
-        # RobotClient needs the robot extra, so it joins the registry on first open.
-        from hud.capabilities.robot import RobotClient
-
-        client_cls = _CLIENTS[RobotClient.protocol] = RobotClient
-    if client_cls is None:
-        raise ValueError(
-            f"no client registered for protocol {capability.protocol!r}; "
-            f"use binding({capability.name!r}) for raw access"
-        )
-    for attempt in range(_CONNECT_ATTEMPTS - 1):
-        try:
-            return await client_cls.connect(capability)
-        except ConnectionError:
-            await asyncio.sleep(_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
-    return await client_cls.connect(capability)
-
-
 def parse_grade(frame: dict[str, Any]) -> Grade:
     score = frame.get("score")
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
@@ -234,168 +192,107 @@ def parse_grade(frame: dict[str, Any]) -> Grade:
     )
 
 
+@dataclass
 class Run:
-    """The live handle an agent drives for one task; its ``trace`` is graded on exit.
+    """What an agent sees of one task: its prompt, the environment's capabilities, the
+    connections an in-box process can bind, and the trace it writes.
 
-    ``capabilities`` are the environment's, at its own addresses, refined for this episode;
-    ``binding`` and ``open`` reach one from this process until access is revoked.
+    A capability's ``url`` is where this process reaches it; ``env_url`` is where code
+    running inside the environment does.
     """
 
-    def __init__(
-        self,
-        session: EnvironmentSession,
-        task_id: str,
-        args: dict[str, Any],
-        *,
-        best_effort_grade: bool = False,
-        runtime_config: RuntimeConfig | None = None,
-        connections: Sequence[Connection] = (),
-    ) -> None:
-        self._session = session
-        self._task_id = task_id
-        self._args = args
-        self._best_effort_grade = best_effort_grade
-        self.runtime_config = runtime_config
-        self.connections = {connection.name: connection for connection in connections}
-        self.prompt: str | list[Any] | None = None
-        self.capabilities: list[Capability] = []
-        self.trace = Trace()
-        self._opened: dict[str, CapabilityClient] = {}
-        self._revoked = False
+    prompt: list[PromptMessage]
+    capabilities: list[Capability]
+    connections: dict[str, Connection] = field(default_factory=dict)
+    trace: Trace = field(default_factory=Trace)
 
-    @property
-    def task_id(self) -> str:
-        return self._task_id
 
-    def binding(self, ref: str) -> Capability:
-        """The capability matching ``ref`` (name, protocol family, or protocol), where this
-        process reaches it; for when something else owns the connection."""
-        if self._revoked:
-            raise RuntimeError("the agent's access to this run has ended")
-        return self._session.route(_find_capability(self.capabilities, ref))
+@asynccontextmanager
+async def start_run(
+    session: EnvironmentSession,
+    task_id: str,
+    args: dict[str, Any],
+    *,
+    connections: Sequence[Connection] = (),
+    best_effort_grade: bool = False,
+) -> AsyncIterator[Run]:
+    """Start ``task_id`` on ``session`` and yield the agent's ``Run``.
 
-    async def open(self, ref: str) -> CapabilityClient:
-        """A live client for ``binding(ref)``, cached and closed when access ends."""
-        capability = self.binding(ref)
-        client = self._opened.get(capability.name)
-        if client is None:
-            client = self._opened[capability.name] = await _connect_client(capability)
-        return client
-
-    async def revoke(self) -> None:
-        """End the agent's access: close what it opened, then cut the session's routes."""
-        if self._revoked:
-            return
-        self._revoked = True
-        self.connections.clear()
-        opened, self._opened = list(self._opened.values()), {}
-        for client in opened:
-            with contextlib.suppress(Exception):
-                await client.close()
-        await self._session.revoke()
-
-    @property
-    def prompt_messages(self) -> list[PromptMessage]:
-        if self.prompt is None or isinstance(self.prompt, str):
-            return _prompt_messages({"content": self.prompt or ""})
-        return [message for item in self.prompt for message in _prompt_messages(item)]
-
-    @property
-    def prompt_text(self) -> str:
-        """The prompt's text turns joined by blank lines; images and resources are dropped."""
-        return "\n\n".join(
-            message.content.text
-            for message in self.prompt_messages
-            if isinstance(message.content, TextContent) and message.content.text
+    When the block exits, the agent's access ends, file tracking takes its final capture,
+    and the trace is graded: best-effort if the block failed, not at all if it was cancelled.
+    """
+    started_at = now_iso()
+    started = await session.start_task(task_id, args)
+    raw_prompt = started.get("prompt")
+    prompt = (
+        _prompt_messages({"content": raw_prompt or ""})
+        if raw_prompt is None or isinstance(raw_prompt, str)
+        else [message for item in raw_prompt for message in _prompt_messages(item)]
+    )
+    run = Run(
+        prompt,
+        [session.route(cap) for cap in _episode_capabilities(session.capabilities, started)],
+        {connection.name: connection for connection in connections},
+    )
+    run.trace.record(
+        Step(
+            source="task",
+            task_call=TaskCall(phase="setup", name=task_id, arguments=args, result=started),
+            started_at=started_at,
         )
+    )
+    if raw_prompt is not None:
+        run.trace.record(Step(source="user", messages=prompt))
+    try:
+        async with file_tracking_observer(session):
+            try:
+                yield run
+            finally:
+                # Access ends before the final file capture, which ends before grading.
+                run.connections.clear()
+                await session.revoke()
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        run.trace.status = "error" if run.trace.stop_reason == "timeout" else "cancelled"
+        with contextlib.suppress(Exception):
+            await session.cancel()
+        raise
+    except Exception:
+        run.trace.status = "error"
+        await _grade(run, session, task_id, best_effort=True)
+        raise
+    await _grade(run, session, task_id, best_effort=best_effort_grade)
 
-    def record(self, step: Step) -> None:
-        self.trace.record(step)
 
-    async def __aenter__(self) -> Self:
-        started_at = now_iso()
-        started = await self._session.start_task(self._task_id, self._args)
-        self.prompt = started.get("prompt")
-        self.capabilities = _episode_capabilities(self._session.capabilities, started)
-        self.record(
-            Step(
-                source="task",
-                task_call=TaskCall(
-                    phase="setup",
-                    name=self._task_id,
-                    arguments=self._args,
-                    result=started,
-                ),
-                started_at=started_at,
-            ),
+async def _grade(run: Run, session: EnvironmentSession, task_id: str, *, best_effort: bool) -> None:
+    answer: dict[str, Any] = {"answer": run.trace.content}
+    started_at = now_iso()
+    try:
+        evaluation = await session.grade(answer)
+        grade = parse_grade(evaluation)
+    except Exception as exc:
+        if not best_effort:
+            raise
+        detail = "".join(traceback.format_exception_only(exc)).strip()
+        logger.warning("best-effort grade failed: %s", detail)
+        run.trace.grade = Grade(
+            content=detail,
+            is_error=True,
+            raw={"score": 0.0, "answer": run.trace.content, "content": detail, "isError": True},
         )
-        if self.prompt is not None:
-            self.record(Step(source="user", messages=self.prompt_messages))
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> bool:
-        # Cancellation isn't a gradable outcome: tear down without grading.
-        if exc_type is not None and issubclass(
-            exc_type, asyncio.CancelledError | KeyboardInterrupt
-        ):
-            self.trace.status = "error" if self.trace.stop_reason == "timeout" else "cancelled"
-            with contextlib.suppress(Exception):
-                await self.revoke()
-            with contextlib.suppress(Exception):
-                await self._session.cancel()
-            return False
-
-        await self.revoke()
-        answer: dict[str, Any] = {"answer": self.trace.content}
-        started_at = now_iso()
-
-        if exc_type is not None:
-            self.trace.status = "error"
-
-        try:
-            evaluation = await self._session.grade(answer)
-            grade = parse_grade(evaluation)
-        except Exception as grade_exc:
-            if exc_type is None and not self._best_effort_grade:
-                raise
-            detail = "".join(traceback.format_exception_only(grade_exc)).strip()
-            logger.warning("best-effort grade failed: %s", detail)
-            self.trace.grade = Grade(
-                content=detail,
-                is_error=True,
-                raw={
-                    "score": 0.0,
-                    "answer": self.trace.content,
-                    "content": detail,
-                    "isError": True,
-                },
-            )
-            self.trace.status = "error"
-            self.record(Step(source="system", error=f"[grading] {detail}"))
-            return False
-
-        self.trace.grade = grade
-        self.record(
-            Step(
-                source="task",
-                task_call=TaskCall(
-                    phase="evaluate",
-                    name=self._task_id,
-                    arguments=answer,
-                    result=evaluation,
-                ),
-                started_at=started_at,
-                error=grade.content if grade.is_error else None,
-            ),
+        run.trace.status = "error"
+        run.trace.record(Step(source="system", error=f"[grading] {detail}"))
+        return
+    run.trace.grade = grade
+    run.trace.record(
+        Step(
+            source="task",
+            task_call=TaskCall(phase="evaluate", name=task_id, arguments=answer, result=evaluation),
+            started_at=started_at,
+            error=grade.content if grade.is_error else None,
         )
-        if self.trace.status is None:
-            self.trace.status = "completed"
-        return False
+    )
+    if run.trace.status is None:
+        run.trace.status = "completed"
 
 
 async def _verify(
@@ -407,7 +304,7 @@ async def _verify(
     """Run an agent-less verifier task and make its evaluation authoritative."""
     started_at = now_iso()
     started = await session.start_task(task.id, task.args)
-    run.record(
+    run.trace.record(
         Step(
             source="task",
             task_call=TaskCall(
@@ -424,7 +321,7 @@ async def _verify(
     started_at = now_iso()
     evaluation = await session.grade(answer)
     grade = run.trace.grade = parse_grade(evaluation)
-    run.record(
+    run.trace.record(
         Step(
             source="task",
             task_call=TaskCall(
@@ -531,32 +428,25 @@ async def rollout(
                     connections=connections,
                 ) as actor_client:
                     client = actor_client
-                    live = Run(
+                    async with start_run(
                         actor_client,
                         task.id,
                         task.args,
-                        best_effort_grade=task.verifier is not None,
-                        runtime_config=addr.config or actor_runtime_config,
                         connections=connections,
-                    )
-                    live.trace.runtime = addr.url
-                    async with live:
+                        best_effort_grade=task.verifier is not None,
+                    ) as live:
                         run = live  # set once live; earlier failures yield Trace.failed
+                        run.trace.runtime = addr.url
                         _phase = "agent loop"
                         try:
-                            # Access ends before the final file capture, which ends before grading.
-                            async with file_tracking_observer(actor_client):
-                                try:
-                                    await _drive_agent(agent, run, agent_timeout)
-                                finally:
-                                    await run.revoke()
+                            await _drive_agent(agent, run, agent_timeout)
                         except Exception as exc:
                             if task.verifier is None:
                                 raise
                             detail = "".join(traceback.format_exception_only(exc)).strip()
                             logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                             run.trace.status = "error"
-                            run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                            run.trace.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         _phase = "grading"
 
                     if verifier is not None:
@@ -625,7 +515,7 @@ async def rollout(
                     failed.stop_reason = "timeout"
                 else:
                     run.trace.status = "error"
-                    run.record(Step(source="system", error=detail))
+                    run.trace.record(Step(source="system", error=detail))
                     run.trace.stop_reason = "timeout"
         except asyncio.CancelledError as cancel:
             if client is not None:
@@ -650,7 +540,7 @@ async def rollout(
             else:
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
-                run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                run.trace.record(Step(source="system", error=f"[{_phase}] {detail}"))
         if run is not None:
             trace = run.trace
         else:
@@ -681,7 +571,7 @@ async def _drive_agent(agent: Agent, run: Run, agent_timeout: float | None) -> N
         logger.warning(detail)
         run.trace.status = "error"
         run.trace.stop_reason = "timeout"
-        run.record(Step(source="system", error=detail))
+        run.trace.record(Step(source="system", error=detail))
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

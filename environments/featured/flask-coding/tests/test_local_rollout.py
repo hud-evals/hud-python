@@ -7,9 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from hud import Run, Taskset
+from hud import Taskset
 from hud.clients import connect
 from hud.environment import workspace as workspace_lib
+from hud.eval.run import start_run
 from hud.runtime import LocalRuntime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -81,7 +82,7 @@ async def _run_task(fixture_repo: Path, task, monkeypatch) -> float:
     monkeypatch.delenv("BASELINE_DIR", raising=False)
     runtime = LocalRuntime(str(PROJECT_ROOT / "env.py"))
     async with runtime(task) as addr, connect(addr) as client:
-        async with Run(client, task.id, task.args) as run:
+        async with start_run(client, task.id, task.args) as run:
             pass
     assert not run.trace.evaluation.get("isError"), run.trace.evaluation
     return run.trace.reward

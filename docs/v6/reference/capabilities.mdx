@@ -261,7 +261,7 @@ env.workspace("workspace", track_files=False)  # ssh only
 
 ## Harness clients
 
-Spinning up a capability is the environment side. The harness side is the mirror: it **opens** a capability to get a live client it can drive. The capability clients live in `hud.capabilities`:
+Spinning up a capability is the environment side. The harness side is the mirror: it **opens** a capability to get a live client it can drive. `async with open_client(cap) as client:` picks the client for the capability's protocol and closes it on exit; `find_capability(run.capabilities, ref)` picks a capability by name, protocol, or protocol family. The capability clients live in `hud.capabilities`:
 
 | Client | Protocol |
 |--------|----------|
@@ -269,7 +269,7 @@ Spinning up a capability is the environment side. The harness side is the mirror
 | `MCPClient` | `mcp/2025-11-25` |
 | `CDPClient` | `cdp/1.3` |
 | `RFBClient` | `rfb/3.8` |
-| `RobotClient` | `openpi/0` - joins the registry on first open (the `robot` extra: numpy/openpi-client) |
+| `RobotClient` | `openpi/0` - loaded on first open (the `robot` extra: numpy/openpi-client) |
 
 The bundled provider agents open these automatically based on which capabilities the manifest advertises (see [Agents](/v6/reference/agents)). To write your own harness, attach to the capability you need and define your tool spec.
 

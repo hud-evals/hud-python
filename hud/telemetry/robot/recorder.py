@@ -99,7 +99,7 @@ class TraceRecorder:
 
     def _emit(self, step: Step) -> None:
         if self._run is not None:
-            self._run.record(step)
+            self._run.trace.record(step)
         else:
             step.emit(trace_id=self.trace_id)
 

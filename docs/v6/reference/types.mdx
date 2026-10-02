@@ -15,18 +15,16 @@ from hud.environment import Answer
 
 ## `Run`
 
-The live handle for one task while its agent runs - what an agent's `__call__` receives. It is not a
-result: the outcome is the graded [`Trace`](#trace) the rollout returns. Construct one over a connected
-client for manual driving; after the block, `run.trace` holds the graded trace.
+What an agent sees of one task while it runs - what an agent's `__call__` receives. It is not a
+result: the outcome is the graded [`Trace`](#trace) the rollout returns. For manual driving,
+`async with start_run(session, task_id, args) as run:` (from `hud.eval.run`) starts the task and
+grades it on exit, leaving the graded trace on `run.trace`.
 
 | Member | Type | Description |
 |--------|------|-------------|
-| `run.prompt` | `str \| list \| None` | The task's opening prompt as `tasks.start` returned it (text, or chat-style message list). |
-| `run.prompt_messages` | `list[PromptMessage]` | The prompt as normalized user/assistant turns - what agents consume. |
-| `run.prompt_text` | `str` | The prompt flattened to plain text, for string-only backends. |
-| `run.capabilities` | `list[Capability]` | The environment's capabilities for this task, at its own addresses; per-task data (such as a robot slot token) is in `params`. |
-| `run.binding(ref)` | `Capability` | The capability `ref` names (name, protocol, or protocol family), where this process reaches it. |
-| `await run.open(ref)` | `CapabilityClient` | A live client for `binding(ref)`, cached and closed when the agent's access ends. |
+| `run.prompt` | `list[PromptMessage]` | The prompt as normalized user/assistant turns; `text_of(run.prompt)` flattens it to text. |
+| `run.capabilities` | `list[Capability]` | The environment's capabilities for this task, with per-task data (such as a robot slot token) in `params`. `url` is where this process reaches each; `env_url` is where code inside the environment does. |
+| `run.connections` | `dict[str, Connection]` | HUD-provided endpoints, such as inference, that a process inside the environment can bind. |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
 
 ## `Grade`

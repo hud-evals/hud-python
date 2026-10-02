@@ -55,7 +55,7 @@ class ClaudeEvents:
                 step.ended_at = received_at
                 if step.content:
                     self.run.trace.content = step.content
-                self.run.record(step)
+                self.run.trace.record(step)
                 for call in step.tool_calls:
                     self.pending_calls[call.id] = (call, received_at)
             case "user":
@@ -109,7 +109,7 @@ class ClaudeEvents:
                                     TextContent(type="text", text=f"[unsupported {kind} block]")
                                 )
 
-                    self.run.record(
+                    self.run.trace.record(
                         ToolStep(
                             call=call,
                             result=ToolResult(
