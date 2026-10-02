@@ -100,10 +100,10 @@ GPU_DRIVER_MOUNTS = tuple(
 class Account:
     """A Docker ``USER`` spec resolved against an image's ``/etc/passwd`` and ``/etc/group``."""
 
-    #: The uid and gid to drop to; ``None`` keeps root.
+    # The uid and gid to drop to; ``None`` keeps root.
     identity: tuple[int, int] | None
-    #: ``HOME`` from the passwd entry of a non-root account; like Docker, it is only a
-    #: default beneath an explicit ``ENV HOME`` of the image.
+    # ``HOME`` from the passwd entry of a non-root account; like Docker, it is only a
+    # default beneath an explicit ``ENV HOME`` of the image.
     env: dict[str, str]
 
 

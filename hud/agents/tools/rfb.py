@@ -25,15 +25,15 @@ if TYPE_CHECKING:
     from hud.agents.types import ToolAgentConfig
 
 
-#: RFB pointer button index.
+# RFB pointer button index.
 Button = Literal["left", "middle", "right"]
 _BUTTON_INDEX: dict[Button, int] = {"left": 0, "middle": 1, "right": 2}
 _DEFAULT_SCREENSHOT_ENCODING = PngScreenshotEncoding()
 
-#: Models name keys the way xdotool or a browser does (``ctrl``, ``Enter``, ``ArrowUp``,
-#: ``cmd``); the display takes X11 keysyms. Names not listed, such as letters, ``F5`` or
-#: ``Page_Down``, are keysyms already. Environments run Linux, so ``meta`` and ``cmd``
-#: are the Super key.
+# Models name keys the way xdotool or a browser does (``ctrl``, ``Enter``, ``ArrowUp``,
+# ``cmd``); the display takes X11 keysyms. Names not listed, such as letters, ``F5`` or
+# ``Page_Down``, are keysyms already. Environments run Linux, so ``meta`` and ``cmd``
+# are the Super key.
 _KEYSYMS: dict[str, str] = {
     "alt": "Alt_L",
     "option": "Alt_L",
@@ -225,12 +225,12 @@ class RFBTool(AgentTool[RFBClient]):
         await self.client.drain()
 
     async def key_down(self, key: str) -> None:
-        """Press ``key`` without releasing it (paired with a later :meth:`key_up`)."""
+        """Press ``key`` without releasing it (paired with a later ``key_up``)."""
         self.client.key_down(key)
         await self.client.drain()
 
     async def key_up(self, key: str) -> None:
-        """Release ``key`` (paired with a prior :meth:`key_down`)."""
+        """Release ``key`` (paired with a prior ``key_down``)."""
         self.client.key_up(key)
         await self.client.drain()
 

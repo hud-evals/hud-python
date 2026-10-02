@@ -3,15 +3,15 @@
 Two consumers share the introspection here (split observations, probe success,
 derive a minimal contract) and stay in lockstep because of it:
 
-- :class:`GymBridge` - the served path (``env.gym(...)``): a generic
-  :class:`~.bridge.RobotBridge` over any gym-style target, spawned as
+- ``GymBridge`` - the served path (``env.gym(...)``): a generic
+  ``RobotBridge`` over any gym-style target, spawned as
   ``python -m hud.environment.robot.gym <target>``. This module is that sim
-  program; :func:`gym_command` builds the argv, so both ends of the format
+  program; ``gym_command`` builds the argv, so both ends of the format
   live here.
-- :func:`wrap` / :class:`TracedEnv` - the loop-owning path: wrap any
+- ``wrap`` / ``TracedEnv`` - the loop-owning path: wrap any
   ``gym.Env``, ``gym.vector.VectorEnv``, or batched-tensor Isaac env you drive
   yourself and every episode streams to the platform as a trace (numeric
-  state, per-camera H.264 video, actions, reward/success) under one job::
+  state, per-camera H.264 video, actions, reward/success) under one job:
 
       from hud.environment.robot import wrap
 
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Conventional info keys carrying env-reported success, probed in order.
+# Conventional info keys carrying env-reported success, probed in order.
 SUCCESS_KEYS = ("success", "is_success", "task_success")
 
 
@@ -216,7 +216,7 @@ class GymBridge(RobotBridge):
 
     ``target`` is how this process builds the env: a factory callable, or a
     string — a gymnasium registry id, or a declared env's spec as JSON
-    (:func:`gym_command` reduces an env instance to the latter).
+    (``gym_command`` reduces an env instance to the latter).
 
     Task args are partitioned into env-defining **build args** (a change
     rebuilds the env) and episodic args flowing to ``env.reset(seed=...,
@@ -650,7 +650,7 @@ def gym_command(
     constructed env's spec (id + kwargs) — closed here since only the spec
     crosses over; the child calls ``gym.make`` again for its own instance.
     ``fps`` / ``contract`` / build defaults (e.g. ``num_envs=``) flow through
-    to the :class:`GymBridge` the CLI builds. ``bridge`` swaps in a subclass
+    to the ``GymBridge`` the CLI builds. ``bridge`` swaps in a subclass
     (same way: by source path), for a sim process that serves more than the wire.
     """
     if callable(target):

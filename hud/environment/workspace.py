@@ -248,7 +248,7 @@ class _WindowsJob:
 class Bubblewrap:
     path: str
     pid_unshare: str | None = None
-    #: Whether ``--perms`` can set a tmpfs mode (bubblewrap 0.5+).
+    # Whether ``--perms`` can set a tmpfs mode (bubblewrap 0.5+).
     tmpfs_modes: bool = False
 
 
@@ -381,7 +381,7 @@ class Mount:
     src: str = ""
     dst: str = ""
     optional: bool = False
-    #: Permission bits for a ``tmpfs`` mount, applied where bwrap supports ``--perms``.
+    # Permission bits for a ``tmpfs`` mount, applied where bwrap supports ``--perms``.
     mode: int | None = None
 
     def to_bwrap_args(self, *, bind_devices: bool = False, tmpfs_modes: bool = False) -> list[str]:
@@ -415,17 +415,17 @@ DEFAULT_SYSTEM_MOUNTS: tuple[Mount, ...] = (
 
 _DEFAULT_USER = "agent"
 
-#: What the sandbox runs so it stays alive between sessions. It must outlast
-#: every rollout without waking (a sandbox is discarded, never expired) and
-#: come from the task's own image, since the serving venv is masked inside.
-#: bwrap's reaper is pid 1 above it, so processes the agent orphans are reaped
-#: rather than accumulating for the life of the sandbox.
-#:
-#: The line it prints first is the readiness signal, and it has to come from
-#: in here: bwrap reports the child pid before that child has finished
-#: building its mount namespace, so a session joining on the strength of the
-#: pid alone can land in a root that is still half-assembled. The payload runs
-#: only once setup is done, so its own output is the proof.
+# What the sandbox runs so it stays alive between sessions. It must outlast
+# every rollout without waking (a sandbox is discarded, never expired) and
+# come from the task's own image, since the serving venv is masked inside.
+# bwrap's reaper is pid 1 above it, so processes the agent orphans are reaped
+# rather than accumulating for the life of the sandbox.
+#
+# The line it prints first is the readiness signal, and it has to come from
+# in here: bwrap reports the child pid before that child has finished
+# building its mount namespace, so a session joining on the strength of the
+# pid alone can land in a root that is still half-assembled. The payload runs
+# only once setup is done, so its own output is the proof.
 _SANDBOX_HOLDER = ["sh", "-c", "echo ready; exec sleep 2147483647"]
 _SANDBOX_READY = b"ready\n"
 
@@ -512,10 +512,10 @@ class Workspace:
     """Directory + bwrap-isolated SSH.
 
     The standard shell daemon: ``env.workspace(root)`` attaches one to an
-    :class:`~hud.Environment`, which starts it and publishes its
+    ``Environment``, which starts it and publishes its
     concrete ``ssh/2`` capability when the env serves. Construction is pure
     data — keys, sockets, and the root directory materialize only at serve
-    time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)
+    time. Drive it directly (``start()`` / ``capability`` / ``stop()``)
     to publish the capability yourself.
 
     ``shell_uid`` and ``shell_gid`` drop agent sessions to that identity
@@ -569,20 +569,20 @@ class Workspace:
         # bwrap state
         self.mounts: tuple[Mount, ...] = tuple(mounts)
         self.network = network
-        #: Which hosts a session may reach. ``None`` leaves the network as the
-        #: substrate's — sessions share it, and so can reach whatever else is
-        #: listening there, the control channel included. A set (``{ANY_HOST}``
-        #: for everything) gives the workspace its own network namespace whose
-        #: only route out is the policy: nothing else on the substrate is
-        #: addressable from inside, and no session can reach a host the task
-        #: did not declare.
+        # Which hosts a session may reach. ``None`` leaves the network as the
+        # substrate's — sessions share it, and so can reach whatever else is
+        # listening there, the control channel included. A set (``{ANY_HOST}``
+        # for everything) gives the workspace its own network namespace whose
+        # only route out is the policy: nothing else on the substrate is
+        # addressable from inside, and no session can reach a host the task
+        # did not declare.
         self.allowed_hosts = None if allowed_hosts is None else frozenset(allowed_hosts)
-        #: Substrate services the workspace may reach, each at the address the
-        #: task expects. A workspace with a network of its own cannot address
-        #: the substrate at all, so anything the environment itself runs — a
-        #: database the task depends on, an API it is meant to call — has to be
-        #: named here to exist for it. Nothing to do where sessions share the
-        #: substrate's network: the services are already at those addresses.
+        # Substrate services the workspace may reach, each at the address the
+        # task expects. A workspace with a network of its own cannot address
+        # the substrate at all, so anything the environment itself runs — a
+        # database the task depends on, an API it is meant to call — has to be
+        # named here to exist for it. Nothing to do where sessions share the
+        # substrate's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
         self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
@@ -636,7 +636,7 @@ class Workspace:
         self._sandbox_init: int | None = None
         self._namespace: NamespaceHost | None = None
         self._bridge: NamespaceProcess | None = None
-        #: The ``(host, port)`` addresses the bridge listens on.
+        # The ``(host, port)`` addresses the bridge listens on.
         self._listening: set[tuple[str, int]] = set()
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
@@ -864,7 +864,7 @@ class Workspace:
     async def stop(self) -> None:
         """Stop accepting SSH sessions and release the socket.
 
-        Credentials stay on disk; a later :meth:`start` re-binds (fresh port
+        Credentials stay on disk; a later ``start`` re-binds (fresh port
         unless one was pinned) and reuses them.
         """
         await self.discard_sandbox()
@@ -1127,7 +1127,7 @@ class Workspace:
         """Argv for a bwrap that builds a view and holds it with ``_SANDBOX_HOLDER``.
 
         Nothing else runs under bwrap: processes enter the view with
-        :func:`~hud.environment.namespace.entry_argv`.
+        ``entry_argv``.
         Every option here is one bubblewrap 0.4 understands.
         """
         if self._bwrap is None:

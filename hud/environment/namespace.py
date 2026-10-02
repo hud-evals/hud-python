@@ -67,7 +67,7 @@ def _child_pids(pid: int) -> list[int]:
         return sorted(children)
 
 
-#: What a process can enter of a view, and the view's /proc entry that names it.
+# What a process can enter of a view, and the view's /proc entry that names it.
 _ENTRIES = {"user": "ns/user", "mnt": "ns/mnt", "net": "ns/net", "cwd": "cwd"}
 
 
@@ -233,7 +233,7 @@ async def hold_view(
 
     Payloads enter a view rather than run under bwrap: Ubuntu's AppArmor
     profile for bwrap strips capabilities from everything bwrap starts.
-    Returns the :func:`entry_argv` *into* for the view's *kinds*, and the
+    Returns the ``entry_argv`` *into* for the view's *kinds*, and the
     descriptors it names, which hold the view open until the caller passes
     them to that command and closes them.
     """
@@ -284,7 +284,7 @@ def _map_identities(pid: int) -> None:
 
 
 class NamespaceProcess:
-    """A process launched by a :class:`NamespaceHost`."""
+    """A process launched by a ``NamespaceHost``."""
 
     def __init__(self, process: asyncssh.SSHClientProcess[bytes]) -> None:
         self._process = process

@@ -1,7 +1,7 @@
 """MCPClient — fastmcp.Client wrapper that fits the CapabilityClient contract.
 
 Establishes an MCP session (initialize handshake) on ``connect``. ``list_tools``
-and ``call_tool`` translate MCP's models into HUD's own :mod:`hud.types`
+and ``call_tool`` translate MCP's models into HUD's own ``hud.types``
 shapes, so MCP's types stay at this boundary.
 """
 

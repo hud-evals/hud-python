@@ -19,7 +19,7 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__
 
-#: ``environments/<id>`` in the SDK repository, with the picker's description.
+# ``environments/<id>`` in the SDK repository, with the picker's description.
 EXAMPLES: dict[str, str] = {
     "coding": "Coding — A repository workspace with a SWE-bench task and hidden-test grading.",
     "cua": "Computer Use — A virtual Linux desktop with deterministic and model-judged grading.",

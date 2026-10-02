@@ -1,16 +1,16 @@
 """Agent-side robot harness: drive a ``robot`` env with a VLA policy.
 
-- :class:`~.agent.RobotAgent` — the harness: connects to the ``robot``
+- ``RobotAgent`` — the harness: connects to the ``robot``
   capability (claiming a slot token from the setup step when present), reads the contract,
   drives one scalar connection with an open-loop chunk queue. Subclass and
   set ``self.model`` + ``self.adapter``.
-- :class:`~.model.Model` / :class:`~.model.LeRobotModel` /
-  :class:`~.model.RemoteModel` — the policy and its inference mechanics.
-- :class:`~.adapter.Adapter` / :class:`~.adapter.LeRobotAdapter` /
-  :class:`~.adapter.OpenPIAdapter` — env <-> policy space translation.
-- :class:`~.batching.BatchedAgent` — many concurrent single-env rollouts
+- ``Model`` / ``LeRobotModel`` /
+  ``RemoteModel`` — the policy and its inference mechanics.
+- ``Adapter`` / ``LeRobotAdapter`` /
+  ``OpenPIAdapter`` — env <-> policy space translation.
+- ``BatchedAgent`` — many concurrent single-env rollouts
   sharing one batched model.
-- :class:`~.dataset.DatasetWriter` — opt-in LeRobot v3 dataset recording
+- ``DatasetWriter`` — opt-in LeRobot v3 dataset recording
   (``agent.save = True``).
 
 This subpackage needs the ``robot`` extra (``pip install 'hud[robot]'``).

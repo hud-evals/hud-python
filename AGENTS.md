@@ -111,6 +111,10 @@ Before calling a change done, check its diff:
   broad `try` blocks, type bypasses, deep nesting, and thin wrappers.
 - Comments are rare and explain non-obvious intent. Delete dead code. Decompose
   a file past 1000 lines when a focused module is there to extract.
+- Docstrings are a one-line summary plus any contract a caller cannot read off
+  the signature. Refer to code as double-backtick literals; skip Sphinx and
+  reStructuredText markup (`:class:` roles, `#:` comments, `::` blocks), since
+  nothing here renders it.
 - Use `uv` for Python commands; do not rely on an activated virtualenv. Run
   commands from the repository root.
 

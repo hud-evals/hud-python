@@ -45,8 +45,8 @@ def _hold_keys(text: str | None) -> list[str] | None:
 
 # ─── Claude tool specs (per-model gating) ───────────────────────────
 
-#: Current Claude models take the computer toolset; only the older models listed in
-#: ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
+# Current Claude models take the computer toolset; only the older models listed in
+# ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
 COMPUTER_TOOLSET_SPEC = ClaudeToolSpec(api_type="computer_toolset_20260801", api_name="computer")
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (

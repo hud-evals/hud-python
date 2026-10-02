@@ -42,7 +42,7 @@ LOGGER = logging.getLogger("hud.capabilities.rfb")
 
 ScreenshotMimeType = Literal["image/png", "image/webp"]
 
-#: X11 keysyms by name (``Return``, ``Control_L``, ``F5``) and by the character they type.
+# X11 keysyms by name (``Return``, ``Control_L``, ``F5``) and by the character they type.
 _KEYSYMS: dict[str, int] = {name: code for name, code, _ in keysymdef}
 _KEYSYMS.update((chr(char), code) for _, code, char in keysymdef if char)
 _KEYSYMS.update({"\n": _KEYSYMS["Return"], "\r": _KEYSYMS["Return"], "\t": _KEYSYMS["Tab"]})

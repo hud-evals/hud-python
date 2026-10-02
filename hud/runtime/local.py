@@ -41,12 +41,10 @@ class LocalRuntime:
     - a ``.py`` file or directory — loaded per acquisition (sibling
       imports resolve); *env* pins one name when several are declared,
       defaulting to the placed task's env
-    - a live :class:`~hud.Environment` — served directly, one
+    - a live ``Environment`` — served directly, one
       acquisition at a time
     - a ``(task) -> Environment`` callable — called per acquisition with the
       placed row
-
-    ::
 
         runtime = LocalRuntime("env.py")
         runtime = LocalRuntime(env)
@@ -57,7 +55,7 @@ class LocalRuntime:
     Acquisitions of the same environment instance are serialized, including when
     sources or constructors reuse it. Distinct instances can run concurrently.
     Hooks share this process's event loop, so blocking env code stalls concurrent rollouts —
-    use :class:`SubprocessRuntime` or :class:`DockerRuntime` for process
+    use ``SubprocessRuntime`` or ``DockerRuntime`` for process
     isolation, and ``Runtime(url)`` to attach to a substrate served elsewhere.
     """
 
@@ -149,9 +147,9 @@ class SubprocessRuntime:
 
     Each acquisition runs ``python -m hud.environment.server <path> --env
     name`` — the same serving entry point a container CMD runs — on an
-    ephemeral loopback port, yields its :class:`Runtime`, and terminates the
+    ephemeral loopback port, yields its ``Runtime``, and terminates the
     child on exit. *source* is a ``.py`` file, a directory of them, or a live
-    :class:`~hud.Environment`, which is served from the file its
+    ``Environment``, which is served from the file its
     ``@env.template`` declarations live in. The served env is the placed
     task's ``env`` name (so a mixed-env taskset works against one source),
     unless *env* pins one explicitly; placing a row whose env the source does

@@ -1,7 +1,7 @@
 """Per-camera H.264/CMAF video streaming for robot traces.
 
-:class:`SegmentEncoder` encodes one camera's frames into fragmented-MP4 (CMAF) on a
-background thread and hands each finished segment to a callback. :class:`VideoStreamer`
+``SegmentEncoder`` encodes one camera's frames into fragmented-MP4 (CMAF) on a
+background thread and hands each finished segment to a callback. ``VideoStreamer``
 fans a whole observation out across one encoder per camera and emits the segments as
 ``VideoSegmentStep`` spans, so the trace viewer plays one ``<video>`` per camera.
 
@@ -204,7 +204,7 @@ class SegmentEncoder:
 
 
 class VideoStreamer:
-    """Per-run camera→video fan-out: one :class:`SegmentEncoder` (and thread) per camera,
+    """Per-run camera→video fan-out: one ``SegmentEncoder`` (and thread) per camera,
     each emitting finished segments as ``VideoSegmentStep`` spans. ``trace_id`` is captured
     in the rollout's trace context so encoder threads can attribute their spans.
     """

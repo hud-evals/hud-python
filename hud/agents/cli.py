@@ -36,7 +36,7 @@ class CLIAgent(Agent[ConfigT_co]):
     """An agent that runs a coding CLI in the environment's workspace, where the CLI
     calls its model itself; ``rollout`` relays those calls for it in a sandbox."""
 
-    #: The provider whose API the CLI speaks.
+    # The provider whose API the CLI speaks.
     provider: ClassVar[str]
 
 

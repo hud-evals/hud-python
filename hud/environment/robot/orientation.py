@@ -27,9 +27,9 @@ class Orientation:
     """One rotation block in an absolute end-effector action."""
 
     kind: Kind
-    #: Quat: contract columns of x, y, z, w. Axis-angle and euler: rx, ry, rz.
+    # Quat: contract columns of x, y, z, w. Axis-angle and euler: rx, ry, rz.
     columns: tuple[int, ...]
-    #: Contract columns in name order, so a hold can copy them unchanged.
+    # Contract columns in name order, so a hold can copy them unchanged.
     contract_columns: tuple[int, ...]
     tool_names: tuple[str, str, str]
 

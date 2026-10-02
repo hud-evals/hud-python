@@ -32,7 +32,7 @@ from .utils import error, read_frame, reply, send_frame
 
 LOGGER = logging.getLogger("hud.environment.file_tracker")
 
-#: Noise paths excluded from tracking entirely (build output, caches, VCS internals).
+# Noise paths excluded from tracking entirely (build output, caches, VCS internals).
 DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     "node_modules/",
     ".venv/",
@@ -69,8 +69,8 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     "*.exe",
 )
 
-#: Credential-shaped paths tracked at the metadata tier only — content is never
-#: read or emitted, regardless of any capture policy. Not overridable.
+# Credential-shaped paths tracked at the metadata tier only — content is never
+# read or emitted, regardless of any capture policy. Not overridable.
 SECRET_DENY_PATTERNS: tuple[str, ...] = (
     ".env",
     ".env.*",
@@ -88,11 +88,11 @@ SECRET_DENY_PATTERNS: tuple[str, ...] = (
     ".aws/",
 )
 
-#: Skip files larger than this during scanning (default 10 MB).
+# Skip files larger than this during scanning (default 10 MB).
 DEFAULT_MAX_FILE_SIZE: int = 10 * 1024 * 1024
 
-#: Artifacts worth preserving as downloads. Common source edits are already
-#: represented by diffs; HTML is included because it is often the rendered result.
+# Artifacts worth preserving as downloads. Common source edits are already
+# represented by diffs; HTML is included because it is often the rendered result.
 DEFAULT_CAPTURE_EXTENSIONS: tuple[str, ...] = (
     ".docx",
     ".htm",
@@ -214,7 +214,7 @@ class DiffResult:
 class FileTracker:
     """Tracks file changes under a directory ``root`` via snapshot diffing.
 
-    Usage::
+    Usage:
 
         tracker = FileTracker("/workspace")
         tracker.take_baseline()  # at session start
@@ -632,7 +632,7 @@ class FileTracker:
     def _collect_gitignore_patterns(self) -> list[str]:
         """Read the root ``.gitignore`` only.
 
-        Patterns are matched tree-wide (see :meth:`_matches`), which is only
+        Patterns are matched tree-wide (see ``_matches``), which is only
         sound for ignore rules that are themselves root-scoped. Nested
         per-directory ``.gitignore`` files are intentionally not loaded: applying
         a subdirectory's rules globally would wrongly exclude (or fail to

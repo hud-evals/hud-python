@@ -295,7 +295,7 @@ def _gateway_relay(
     """The ``inference`` connection a CLI agent in a sandboxed workspace reaches the HUD
     gateway through, holding ``HUD_API_KEY`` outside the sandbox.
 
-    Bound for a :class:`~hud.agents.cli.CLIAgent` that routes to the gateway, when the
+    Bound for a ``CLIAgent`` that routes to the gateway, when the
     session has one workspace that can bind it and the caller brought no ``inference``
     connection of its own.
     """

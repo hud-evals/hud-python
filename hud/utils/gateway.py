@@ -1,6 +1,6 @@
 """HUD inference gateway: provider clients, and the model catalog they resolve against.
 
-Agent construction on top of the gateway lives in :func:`hud.agents.create_agent`.
+Agent construction on top of the gateway lives in ``hud.agents.create_agent``.
 """
 
 from __future__ import annotations

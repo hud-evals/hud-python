@@ -1,6 +1,6 @@
 """Shared training lifecycle: the model handle, HTTP plumbing, and the
 modality-independent ``optim_step``. Modality clients (e.g.
-:class:`hud.train.TrainingClient`) subclass and add ``forward_backward`` etc.
+``hud.train.TrainingClient``) subclass and add ``forward_backward`` etc.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class BaseTrainingClient:
 
     Training advances the weights behind the model string in place. The service
     keys on model id, so a slug is resolved once via the catalog and cached. Use
-    a modality client such as :class:`hud.train.TrainingClient`, not this directly.
+    a modality client such as ``hud.train.TrainingClient``, not this directly.
     """
 
     def __init__(
@@ -85,7 +85,7 @@ class BaseTrainingClient:
 
     async def available_losses(self) -> list[str]:
         """The built-in ``loss_fn`` names this model's provider supports
-        (authoritative; :class:`hud.train.BuiltinLoss` lists common ones)."""
+        (authoritative; ``hud.train.BuiltinLoss`` lists common ones)."""
         return (await self._get("losses", _Losses)).losses
 
     async def optim_step(
@@ -132,7 +132,7 @@ class BaseTrainingClient:
 
     async def set_head(self, checkpoint_id: str) -> None:
         """Promote a checkpoint to head — a rollback to, or branch from, that
-        node; the next :meth:`optim_step` extends the tree from there.
+        node; the next ``optim_step`` extends the tree from there.
 
         Use this when the reward function or environment changes underneath a
         run: continuing from a stale head fine-tunes a policy shaped by the old
