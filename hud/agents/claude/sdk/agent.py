@@ -1,10 +1,4 @@
-"""ClaudeCLIAgent — runs ``claude`` CLI over SSH inside the env workspace.
-
-SSH-execs the ``claude`` CLI on the remote workspace so all built-in tools
-(Bash, Read, Write, Edit, Glob, Grep) operate on the env's filesystem.
-MCP capabilities from the manifest are written as MCP server config so the
-CLI can call env-hosted MCP tools too.
-"""
+"""ClaudeCLIAgent — runs ``claude`` CLI over SSH inside the env workspace."""
 
 from __future__ import annotations
 
@@ -53,9 +47,7 @@ _MANAGED_CLAUDE_PATHS = {
 class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
     """Runs ``claude`` CLI over SSH inside the env workspace.
 
-    Stateless w.r.t. the env: driven by ``await agent(run)``. SSH is opened
-    live off the run. Environment MCP bindings are used directly; computer MCP
-    servers are bridged over the run's SSH connection.
+    The env's MCP bindings become the CLI's MCP servers; RFB computers are bridged in over SSH.
     """
 
     config_cls = ClaudeCLIConfig

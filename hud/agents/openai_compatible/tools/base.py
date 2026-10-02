@@ -19,7 +19,6 @@ def format_chat_result(
     call: ToolCall,
     result: ToolResult,
 ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam]:
-    """Format a tool result for OpenAI-compatible chat completions."""
     text_parts: list[str] = []
     image_parts: list[dict[str, Any]] = []
     items: list[Any] = list(result.content)

@@ -1,16 +1,4 @@
-"""Batching span exporter for the HUD telemetry backend.
-
-``queue_span`` hands each span to one background intake worker that batches by
-count *and* serialized byte-size, then dispatches each per-trace batch to a small
-pool of upload workers over a pooled HTTP connection — so the large image frames
-a robot rollout emits every tick upload in parallel instead of serially behind
-one connection. ``flush`` drains the queue and waits for the in-flight uploads to
-*finish* (not a fixed sleep); it also runs at interpreter exit.
-
-The upload workers are this module's own daemon threads rather than a
-``ThreadPoolExecutor``: the standard library shuts executors down before
-``atexit`` handlers run, which would leave the exit flush nothing to upload with.
-"""
+"""Batching span exporter for the HUD telemetry backend."""
 
 from __future__ import annotations
 
@@ -64,17 +52,11 @@ _client: httpx.Client | None = None
 _lock = threading.Lock()
 _idle = threading.Condition(_lock)
 
-# Local file exporter — the second export target, independent of the backend.
 _local_lock = threading.Lock()
 
 
 def _export_local(span: dict[str, Any], local_dir: str | None) -> None:
-    """Append one span as a JSON line to ``<local_dir>/<trace_id>.jsonl``.
-
-    Runs regardless of ``telemetry_enabled`` / ``api_key``. Set
-    ``HUD_TELEMETRY_LOCAL_DIR`` to choose a directory, or leave it unset while
-    uploads are off to write under ``~/.hud/spans``. Best-effort.
-    """
+    """Best-effort append of one span to ``<local_dir>/<trace_id>.jsonl``."""
     if not local_dir:
         return
     # Only I/O is best-effort: a config-shape error (e.g. a mock or wrong type
@@ -108,9 +90,7 @@ def queue_span(span: dict[str, Any]) -> None:
 def flush(timeout: float = 10.0) -> bool:
     """Drain queued spans and wait for their uploads to finish.
 
-    Puts a marker behind everything queued so far, waits for the worker to reach
-    it, then waits for the dispatched uploads to complete. Returns ``False`` if it
-    did not fully drain within ``timeout``.
+    Returns ``False`` if it did not fully drain within ``timeout``.
     """
     with _lock:
         worker = _worker
@@ -162,6 +142,8 @@ def _ensure_worker() -> None:
                 keepalive_expiry=30.0,
             ),
         )
+        # Plain daemon threads, not a ThreadPoolExecutor: executors shut down before
+        # atexit handlers run, which would leave the exit flush nothing to upload with.
         _uploaders[:] = [
             threading.Thread(target=_upload_loop, name=f"hud-telemetry-upload-{i}", daemon=True)
             for i in range(_UPLOAD_WORKERS)

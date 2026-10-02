@@ -1,9 +1,4 @@
-"""HUD SDK exceptions.
-
-A small typed hierarchy rooted at ``HudException``. Subclasses carry
-default ``Hint`` lists that the console renderer
-displays alongside the error.
-"""
+"""HUD SDK exceptions, carrying the hints the CLI shows alongside them."""
 
 from __future__ import annotations
 
@@ -31,7 +26,6 @@ from hud.utils.hints import (
 class HudException(Exception):
     """Base exception class for all HUD SDK errors."""
 
-    # Subclasses can override this class attribute
     default_hints: ClassVar[list[Hint]] = []
 
     def __init__(
@@ -44,7 +38,6 @@ class HudException(Exception):
         super().__init__(message)
         self.message = message
         self.response_json = response_json
-        # If hints not provided, use defaults defined by subclass
         self.hints: list[Hint] = hints if hints is not None else list(self.default_hints)
 
     def __str__(self) -> str:
@@ -55,7 +48,7 @@ class HudException(Exception):
 
 
 class HudRequestError(HudException):
-    """Any request to the HUD API can raise this exception."""
+    """A failed HUD API request; unless given, its ``hints`` follow from the status code."""
 
     def __init__(
         self,
@@ -129,21 +122,12 @@ class HudRequestError(HudException):
 
     @classmethod
     def from_httpx_error(cls, error: httpx.HTTPStatusError, context: str = "") -> Self:
-        """Create a RequestError from an HTTPx error response.
-
-        Args:
-            error: The HTTPx error response.
-            context: Additional context to include in the error message.
-
-        Returns:
-            A RequestError instance.
-        """
+        """Build from an httpx status error, prefixed with ``context``; also logs the error."""
         response = error.response
         status_code = response.status_code
         response_text = response.text
         response_headers = dict(response.headers)
 
-        # Try to get detailed error info from JSON if available
         response_json = None
         try:
             response_json = response.json()
@@ -151,15 +135,12 @@ class HudRequestError(HudException):
             if detail:
                 message = f"Request failed: {detail}"
             else:
-                # If no detail field but we have JSON, include a summary
                 message = f"Request failed with status {status_code}"
-                if len(response_json) <= 5:  # If it's a small object, include it in the message
+                if len(response_json) <= 5:
                     message += f" - JSON response: {response_json}"
         except Exception:
-            # Fallback to simple message if JSON parsing fails
             message = f"Request failed with status {status_code}"
 
-        # Add context if provided
         if context:
             message = f"{context}: {message}"
         return cls(

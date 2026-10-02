@@ -1,9 +1,4 @@
-"""Trace context: the per-rollout ``Trace-Id`` contextvar.
-
-Standalone (no env/eval dependency) so any layer — the new ``Run``/``Taskset``
-flow, ``@instrument``, the exporter, or the legacy eval context — can set and
-read the active trace without importing the environment stack.
-"""
+"""Trace context: the per-rollout ``Trace-Id`` contextvar."""
 
 from __future__ import annotations
 
@@ -26,7 +21,7 @@ def get_current_trace_id() -> str | None:
 
 
 def get_trace_headers() -> dict[str, str]:
-    """Get the active trace headers."""
+    """A copy of the active trace headers, or ``{}`` outside a trace."""
     headers = _current_trace_headers.get()
     if headers is not None:
         return dict(headers)

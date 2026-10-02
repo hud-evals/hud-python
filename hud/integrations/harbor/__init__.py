@@ -1,11 +1,4 @@
-"""Experimental Harbor task interop.
-
-``adapt()`` resolves Harbor images and packages task directories as runnable
-HUD tasksets and conventional Compose projects.
-``export()`` writes HUD tasks back to Harbor directories.
-
-This API may change between minor releases while the integration is experimental.
-"""
+"""Experimental Harbor task interop: ``adapt`` imports Harbor tasks, ``export`` writes them."""
 
 from .adapt import AdaptFailure, AdaptFinding, AdaptResult, adapt
 from .export import export

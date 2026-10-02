@@ -1,9 +1,4 @@
-"""Typed request/result contracts for the HUD training (RL) service.
-
-Each training input is a trajectory: a ``trace_id`` (resolved server-side) or an
-inline ``TrajectoryPayload``; the forms mix and order is preserved. Custom
-client-side losses use ``ForwardResult`` / ``BackwardRequest``.
-"""
+"""Typed request/result contracts for the HUD training (RL) service."""
 
 from __future__ import annotations
 
@@ -12,15 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# A built-in, server-side loss name. Open string, not an enum: the valid set is
-# provider-defined (discover it via ``TrainingClient.available_losses()``). For a
-# loss a provider lacks, use ``TrainingClient.forward_backward_custom``.
+# A built-in, server-side loss name: an open string, since the valid set is
+# provider-defined (see TrainingClient.available_losses).
 LossFn = str
 
 
 class BuiltinLoss(StrEnum):
-    """Common Tinker-backed loss names (each *is* a ``str``; not authoritative —
-    see ``TrainingClient.available_losses``)."""
+    """Common Tinker-backed loss names; ``TrainingClient.available_losses`` is authoritative."""
 
     CROSS_ENTROPY = "cross_entropy"  # supervised; imitate sampled tokens
     IMPORTANCE_SAMPLING = "importance_sampling"  # on-policy PG, rollout-logprob ratio
@@ -32,17 +25,14 @@ class BuiltinLoss(StrEnum):
 class TrajectorySample(BaseModel):
     """One turn's token-level training data (mirrors ``hud.agents`` ``Sample``).
 
-    ``output_logprobs`` are the per-output-token logprobs under the *sampling*
-    policy q (the behavior proxy used by importance sampling).
+    ``output_logprobs`` are per-output-token logprobs under the sampling policy.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    # Flat prompt token ids (text-only). ``None`` for multimodal prompts, where
-    # ``prompt_chunks`` carries the modality-complete prompt instead.
+    # Text-only prompts; multimodal prompts carry prompt_chunks instead.
     prompt_token_ids: list[int] | None = None
-    # Serialized prompt ``ModelInput`` chunks (text + image); authoritative prompt
-    # when present (mirrors the agent ``Sample``).
+    # Serialized ModelInput chunks (text and images); authoritative when present.
     prompt_chunks: list[dict[str, Any]] | None = None
     output_token_ids: list[int]
     output_logprobs: list[float] = Field(default_factory=list[float])
@@ -51,8 +41,7 @@ class TrajectorySample(BaseModel):
 class TrajectoryPayload(BaseModel):
     """An inline trajectory submitted for training (alternative to a ``trace_id``).
 
-    Carries the ordered per-turn samples plus the trajectory reward. ``trace_id``
-    is optional provenance when the trajectory also exists server-side.
+    ``trace_id`` is optional provenance when the trajectory also exists server-side.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -73,12 +62,9 @@ class ForwardBackwardRequest(BaseModel):
 
     inputs: list[TrainInput] = Field(min_length=1)
     loss_fn: LossFn = "importance_sampling"
-    # Provider-specific loss hyperparameters forwarded verbatim to the provider's
-    # loss (Tinker ``loss_fn_config``). The supported keys are provider-defined
-    # and not all losses accept config; ``None`` uses the provider defaults.
+    # Forwarded verbatim to the provider's loss; keys are provider-defined.
     loss_fn_config: dict[str, float] | None = None
-    # Trajectories are normalized for advantages within contiguous groups of this
-    # size (GRPO). ``None`` treats all trajectories as a single group.
+    # GRPO advantages normalize within contiguous groups of this size; None is one group.
     group_size: int | None = Field(default=None, ge=1)
     reward_scale: float = 1.0
     num_substeps: int = Field(default=1, ge=1)
@@ -94,12 +80,7 @@ class ForwardBackwardResult(BaseModel):
 
 
 class OptimStepRequest(BaseModel):
-    """Apply the accumulated gradients and checkpoint the new weights.
-
-    This is a compound operation: optimizer step, save training state, save
-    sampler weights, and advance the model's active sampler path so subsequent
-    inference through the gateway serves the updated weights.
-    """
+    """Apply the accumulated gradients and checkpoint the new weights."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -107,7 +88,7 @@ class OptimStepRequest(BaseModel):
     beta1: float = 0.9
     beta2: float = 0.95
     eps: float = 1e-8
-    # Adam weight decay (Tinker ``AdamParams``; matches torch AdamW). Default 0.
+    # Adam weight decay, as in torch AdamW.
     weight_decay: float = Field(default=0.0, ge=0)
 
 
@@ -126,14 +107,10 @@ class OptimStepResult(BaseModel):
 
 
 class CheckpointResponse(BaseModel):
-    """One node in a model's checkpoint tree (the programmatic form of a
-    ``hud models checkpoints`` row).
+    """One node in a model's checkpoint tree; each ``optim_step`` appends one.
 
-    Each ``optim_step`` appends one. ``is_active`` marks the head the gateway
-    serves; ``prev_model_checkpoint_id`` links to its parent. ``metrics`` is the
-    provider's per-step blob (e.g. ``reward_std``/``reward_min``/``reward_max``,
-    ``sampling_logprob_mean``, and ``tinker.*`` training stats). Extra fields the
-    service returns (jobs, tasksets, reward groups) are ignored, not rejected.
+    ``is_active`` marks the head the gateway serves; ``prev_model_checkpoint_id`` links
+    to its parent.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -153,30 +130,23 @@ class CheckpointResponse(BaseModel):
     metrics: dict[str, float] = Field(default_factory=dict)
 
 
-# ── Custom-loss path ─────────────────────────────────────────────────────────
-# Splits the server-side built-in loss so the caller authors it:
-#   1. ``forward(inputs)`` returns per-token tensors (``DatumTensors``).
-#   2. caller computes a differentiable per-token loss over π_θ (torch autograd).
-#   3. ``backward(forward_id, weights)`` applies ``weights = -dC/dlogprobs``.
-# ``optim_step`` then applies + checkpoints as usual.
-
-
 class ForwardRequest(BaseModel):
     """Run a current-policy forward pass over a batch of trajectories."""
 
     model_config = ConfigDict(extra="forbid")
 
     inputs: list[TrainInput] = Field(min_length=1)
-    # Contiguous grouping for caller-side advantage normalization (e.g. GRPO).
-    # ``None`` tags every trajectory into a single group.
+    # Contiguous groups for caller-side advantage normalization; None is one group.
     group_size: int | None = Field(default=None, ge=1)
     reward_scale: float = 1.0
 
 
 class TrainingDatum(BaseModel):
-    """Per-datum fields a custom loss reads: ``reward``, the source ``traj_idx``
-    (datums from one trajectory share it), and ``group_idx`` (the GRPO group, set
-    only when ``group_size`` was given; ``None`` otherwise)."""
+    """Per-datum fields a custom loss reads.
+
+    Datums from one trajectory share ``traj_idx``; ``group_idx`` is set only when
+    ``group_size`` was given.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -186,9 +156,11 @@ class TrainingDatum(BaseModel):
 
 
 class DatumTensors(TrainingDatum):
-    """LLM per-datum token tensors (aligned, equal length). ``logprobs`` are the
-    current policy π_θ, ``sampling_logprobs`` the rollout policy q, and ``mask``
-    is ``1.0`` on action tokens / ``0.0`` on observation tokens."""
+    """LLM per-datum token tensors of equal length.
+
+    ``logprobs`` are under the current policy, ``sampling_logprobs`` under the rollout
+    policy, and ``mask`` is 1.0 on action tokens and 0.0 on observation tokens.
+    """
 
     logprobs: list[float]
     sampling_logprobs: list[float]

@@ -293,7 +293,7 @@ class ComposeConfig(BaseModel):
     networks: dict[str, dict[str, Any] | None] = Field(default_factory=dict)
 
     def network_owner(self, service: str) -> str:
-        """Service whose network namespace and published ports *service* uses."""
+        """Service whose network namespace and published ports ``service`` uses."""
         seen: set[str] = set()
         current = service
         while True:

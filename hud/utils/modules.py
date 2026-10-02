@@ -1,8 +1,4 @@
-"""Load authored Python source files and directories.
-
-The one source-import path: env loading (``hud.environment.load_environment``)
-and CLI task collection both walk modules through here.
-"""
+"""Load authored Python source files and directories."""
 
 from __future__ import annotations
 

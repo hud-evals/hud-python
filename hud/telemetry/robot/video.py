@@ -1,15 +1,4 @@
-"""Per-camera H.264/CMAF video streaming for robot traces.
-
-``SegmentEncoder`` encodes one camera's frames into fragmented-MP4 (CMAF) on a
-background thread and hands each finished segment to a callback. ``VideoStreamer``
-fans a whole observation out across one encoder per camera and emits the segments as
-``VideoSegmentStep`` spans, so the trace viewer plays one ``<video>`` per camera.
-
-Encoding never blocks the act loop: ``submit`` is a non-blocking put on a bounded queue
-that drops frames under backpressure, and PyAV releases the GIL inside the codec. A
-``lossless`` encoder instead blocks ``submit`` until the queue has room, for callers that
-index video frames by tick.
-"""
+"""Per-camera H.264/CMAF video streaming for robot traces."""
 
 from __future__ import annotations
 
@@ -29,8 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# type alias for SegmentCallback function - takes in index and data.
-# Called on the encoder thread.
+# Receives (segment index, segment bytes) on the encoder thread.
 SegmentCallback = Callable[[int, bytes], None]
 
 
@@ -38,17 +26,17 @@ class SegmentEncoder:
     """Encode one camera's frames to CMAF: init segment, then one media fragment per
     ~``segment_seconds`` via ``on_segment`` (called on the encoder thread).
 
-    Doubles as the file-like sink PyAV muxes into: ``write`` accumulates bytes and
-    dispatches each complete top-level MP4 box as soon as it is whole.
+    Doubles as the file-like sink PyAV muxes into: ``write`` reassembles the MP4 boxes
+    and dispatches each segment as soon as it is whole.
     """
 
     def __init__(
         self,
         camera: str,
-        on_segment: SegmentCallback,  # called on each finished segment
+        on_segment: SegmentCallback,
         *,
         fps: int,
-        segment_seconds: float = 2.0,  # how many secs of video per segment
+        segment_seconds: float = 2.0,
         crf: int = 23,  # x264 quality: 0=best, 51=worst
         max_queued_frames: int = 16,
         lossless: bool = False,  # block on a full queue instead of dropping frames
@@ -56,16 +44,16 @@ class SegmentEncoder:
         self.camera = camera
         self.fps = max(1, int(fps))
         self._on_segment = on_segment
-        self._gop = max(1, round(self.fps * segment_seconds))  # keyframe interval in # of "frames"
+        self._gop = max(1, round(self.fps * segment_seconds))  # keyframe interval, in frames
         self._crf = int(crf)
         self._lossless = lossless
         self._queue: queue.Queue[NDArray[Any] | None] = queue.Queue(max_queued_frames)
         # Box-assembly state, touched only on the encoder thread.
         self._buf = bytearray()
-        self._pos = self._scan = 0  # position in the buffer and the scan position
-        self._index = 0  # counter for the number of segments emitted
-        self._init_sent = False  # flag to indicate if the init segment has been sent
-        self._pending = b""  # buffer for the pending data
+        self._pos = self._scan = 0  # write position, and how far boxes have been parsed
+        self._index = 0
+        self._init_sent = False
+        self._pending = b""
         self._thread = threading.Thread(
             target=self._run, name=f"hud-robot-video-{camera}", daemon=True
         )
@@ -107,13 +95,11 @@ class SegmentEncoder:
 
     def write(self, b: bytes) -> int:
         """Called by PyAV to write bytes to the buffer."""
-        # 1. drop the incoming bytes into the buffer at the current write position
         end = self._pos + len(b)
         if end > len(self._buf):
             self._buf.extend(b"\x00" * (end - len(self._buf)))
         self._buf[self._pos : end] = b
         self._pos = end
-        # 2. carve the stream into MP4 boxes and group them into segments:
         # ftyp+moov form the init segment (index 0); each moof+mdat is one fragment.
         while len(self._buf) - self._scan >= 8:
             # read the next box's size + type from its 8-byte header
@@ -132,7 +118,7 @@ class SegmentEncoder:
             if self._init_sent and btype == b"mdat":
                 self._dispatch(self._pending)
                 self._pending = b""
-        return len(b)  # return the number of bytes written
+        return len(b)
 
     def seek(self, offset: int, whence: int = 0) -> int:
         self._pos = (0, self._pos, len(self._buf))[whence] + offset
@@ -204,9 +190,9 @@ class SegmentEncoder:
 
 
 class VideoStreamer:
-    """Per-run camera→video fan-out: one ``SegmentEncoder`` (and thread) per camera,
-    each emitting finished segments as ``VideoSegmentStep`` spans. ``trace_id`` is captured
-    in the rollout's trace context so encoder threads can attribute their spans.
+    """One ``SegmentEncoder`` thread per camera, emitting ``VideoSegmentStep`` spans.
+
+    The spans carry ``trace_id`` explicitly, since encoder threads lack the trace context.
     """
 
     def __init__(self, *, fps: int, trace_id: str | None, lossless: bool = False) -> None:
@@ -224,10 +210,8 @@ class VideoStreamer:
     def record(self, obs: dict[str, Any]) -> None:
         """Submit each camera frame in ``obs['data']`` to its (lazy) encoder. Non-blocking.
 
-        Only ``HxWxC`` arrays (``ndim == 3``, channel last in ``{1,3,4}``) are treated as
-        camera frames; proprio/state vectors are skipped. This matters for batched robots
-        whose state rides the wire as ``[num_envs, dim]`` (``ndim == 2``) \u2014 without the
-        channel-last guard that would be mis-encoded as a tiny garbage video.
+        Only ``HxWxC`` arrays with 1, 3 or 4 channels count as frames; a batched
+        ``[num_envs, dim]`` state would otherwise encode as a garbage video.
         """
         for name, arr in obs.get("data", {}).items():
             shape = cast("tuple[int, ...]", getattr(arr, "shape", ()))

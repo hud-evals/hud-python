@@ -33,19 +33,11 @@ class _TraceState(TypedDict):
 
 
 class HostedRuntime:
-    """HUD-hosted placement: runs the rollout remotely and returns its trace.
+    """HUD-hosted placement: runs the whole rollout, agent included, on the platform.
 
-    The *client-elsewhere* placement. Where a ``Provider`` yields a channel
-    this process drives, ``HostedRuntime`` runs the whole rollout remotely: the
-    agent runs alongside the task environment. This process only submits the
-    rollout and polls the trace to completion, folding the result into a
-    local ``Trace``. Because the agent runs remotely, its identity
-    travels as its registered type plus ``Agent.dump``.
-
-    ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
-    A local cancel (Ctrl-C) or a deadline waits up to five seconds for the
-    platform to accept the remote cancellation before propagating or returning
-    the timeout.
+    The agent travels as its registered type plus ``Agent.dump``. ``run_timeout`` is a
+    deprecated alias for ``rollout_timeout``. A local cancel (Ctrl-C) or a deadline waits
+    up to five seconds for the platform to accept the remote cancellation.
     """
 
     def __init__(
@@ -76,10 +68,9 @@ class HostedRuntime:
     ) -> Trace:
         """Submit one rollout, await its terminal trace, and fold it into a ``Trace``.
 
-        The trace lifecycle is reported remotely, so this never double-reports.
-        Failures isolating one rollout from its batch (submit rejected, the
-        env/model unresolved) surface as ``Trace.failed``; a timeout or a
-        local cancel propagate after requesting remote cancellation.
+        The platform reports the trace. Failures, including a timeout, come back as
+        ``Trace.failed``; a timeout or a local cancel also requests remote
+        cancellation, and a cancel then propagates.
         """
         trace_id = trace_id or uuid.uuid4().hex
         parent = parent_trace(trace_id)
@@ -219,8 +210,8 @@ class HostedRuntime:
 
     @staticmethod
     async def _cancel(trace_id: str) -> None:
-        # The platform also bounds instances by max runtime; this just releases
-        # the lease promptly. Never shadow the caller's outcome.
+        # Best effort: the platform's max runtime bounds instances anyway, and a failed
+        # cancel must not shadow the caller's outcome.
         try:
             async with asyncio.timeout(_CANCEL_TIMEOUT_SECONDS):
                 await PlatformClient.from_settings().apost(

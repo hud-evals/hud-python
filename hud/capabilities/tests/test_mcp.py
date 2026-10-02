@@ -39,7 +39,7 @@ async def _serve(server: fastmcp.FastMCP) -> AsyncIterator[int]:
 
 @contextlib.asynccontextmanager
 async def _cut_tool_calls(upstream: int) -> AsyncIterator[int]:
-    """Forward HTTP to *upstream*, dropping the connection once a tool call is sent."""
+    """Forward HTTP to ``upstream``, dropping the connection once a tool call is sent."""
 
     async def relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         up_reader, up_writer = await asyncio.open_connection("127.0.0.1", upstream)

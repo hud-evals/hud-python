@@ -1,12 +1,4 @@
-"""Sim-process ``robot`` bridge: WebSocket obs/action + JSON-RPC control.
-
-Subclass ``RobotBridge`` (``reset`` / ``step`` / ``get_observation``);
-``serve_bridge`` is the blocking entry. Wire is scalar openpi per claimed
-slot; the sim may be vectorized internally (barrier step, fan-out). Sim owns
-main; serving runs on a background loop and queues touches via
-``RobotBridge._run_on_sim`` (thread-affine / Isaac). Gym path:
-``GymBridge``.
-"""
+"""Sim-process ``robot`` bridge: WebSocket obs/action + JSON-RPC control."""
 
 from __future__ import annotations
 
@@ -28,8 +20,7 @@ import numpy as np
 import websockets
 import websockets.exceptions
 
-# The openpi/0 wire codec is defined alongside the agent-side client; reuse it so both
-# ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
+# The agent-side openpi codec, shared so both ends of the wire stay in lockstep.
 from hud.capabilities import Capability
 from hud.capabilities.robot import _packb, _unpackb
 from hud.environment.utils import error, read_frame, reply, send_frame
@@ -75,7 +66,7 @@ class _SlotRegistry:
         return all(s.token is None for s in self.slots)
 
     def free_slot(self) -> _Slot | None:
-        # v1: a freed slot is only reclaimable after all slots free (whole-batch episodes).
+        # A freed slot is reclaimable only once every slot is free (whole-batch episodes).
         return next((s for s in self.slots if s.token is None and not s.used), None)
 
     def resolve(self, token: str | None) -> _Slot:
@@ -116,21 +107,10 @@ class _SlotRegistry:
 class RobotBridge(ABC):
     """Serves a sim over ``robot`` WebSocket + a JSON-RPC control side channel.
 
-    **Subclass contract:** implement ``reset``, ``step``, and
-    ``get_observation``, and set ``self.contract`` (the wire contract the
-    capability publishes) before serving. The base owns the WebSocket serve
-    loop and the control listener; subclasses own the sim and set ``num_envs``
-    (default 1). All three hooks run on the sim thread via ``_run_on_sim``
-    (under ``serve_bridge``, that is main — safe for Isaac / thread-affine sims).
-
-    - ``reset`` initialises the sim for a new episode and returns the task
-      prompt. The base resets scoring state.
-    - ``step`` advances the sim by one batched action ``[N, A]`` (N=1 ok).
-    - ``get_observation`` returns ``(data, terminated)`` with ``[N, ...]``
-      arrays and an ``[N]`` terminated mask (N=1 ok), or ``None`` if not ready.
-    - ``result`` returns the scalar episode score dict (override for richer
-      grading). ``result_slots`` fans that out per slot; vectorized bridges
-      with per-slot scores override ``result_slots`` instead.
+    Subclasses implement ``reset``, ``step`` and ``get_observation``, set ``contract``
+    before serving, and may set ``num_envs`` (default 1). Every hook is sync and runs on
+    the sim thread (the main thread under ``serve_bridge``). Override ``result`` for
+    richer grading, or ``result_slots`` for per-slot scores.
     """
 
     # Claim-frame timeout, and how long the barrier waits on a silent live slot
@@ -138,15 +118,13 @@ class RobotBridge(ABC):
     step_timeout: float = 30.0
 
     def __init__(self, *, host: str = "127.0.0.1", port: int = 0) -> None:
-        # Loopback + ephemeral by default; the concrete address is published in the
-        # manifest post-``start()`` and tunneled, so no env manages bridge ports.
+        # Ephemeral by default: the bound address is published after ``start()`` and tunneled.
         self._host = host
         self._port = port
         self._server: Any = None
         # Connect-time metadata frame (sent first on each connection); subclasses may set it.
         self.metadata: dict[str, Any] = {}
-        # The env's self-describing wire contract (features, control_rate); the
-        # endpoint fetches it over the control channel to mint the capability.
+        # The wire contract (features, control_rate) the endpoint publishes as the capability.
         self.contract: dict[str, Any] = {}
         # Sim touches queue to the thread that owns the simulator (see _run_on_sim).
         self._sim_q: queue.Queue[tuple[Callable[[], Any], Future[Any]]] = queue.Queue()
@@ -166,14 +144,10 @@ class RobotBridge(ABC):
         self._episode_kwargs: dict[str, Any] = {}
 
     async def _run_on_sim(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Run ``fn(*args, **kwargs)`` on the sim thread, awaited on the caller's loop.
-
-        Before ``serve_bridge`` binds a sim thread (tests, in-loop use) calls
-        execute inline on the caller — the degenerate single-thread case.
-        """
+        """Await ``fn`` on the sim thread, or inline before ``serve_bridge`` binds one."""
         if self._sim_ident is None or threading.get_ident() == self._sim_ident:
             result = fn(*args, **kwargs)
-            # In-loop path can await a legacy ``async def`` hook; sim-thread path cannot.
+            # Only the inline path can await an ``async def`` hook; the sim thread cannot.
             return await result if inspect.isawaitable(result) else result
         fut: Future[Any] = Future()
         self._sim_q.put((lambda: fn(*args, **kwargs), fut))
@@ -185,16 +159,12 @@ class RobotBridge(ABC):
             self.total_reward = 0.0
             self.success = False
             self.terminated = False
-            # Same sim-thread hop as step/obs — custom bridges must not touch Isaac here
-            # on the background serve loop.
             self.task_description = await self._run_on_sim(self.reset, **kwargs)
             self._episode_kwargs = kwargs
             self._registry.configure(self.num_envs)
             slot = self._registry.slots[0]
         else:
-            # Lockstep sim: one global reset serves the whole batch, so a later claim
-            # cannot get its own task/seed — reject differing kwargs instead of
-            # silently running the first claim's task.
+            # One global reset serves the lockstep batch, so a claim can't bring its own task.
             if kwargs != self._episode_kwargs:
                 raise ValueError(
                     f"slots share one batch reset ({self._episode_kwargs}); a concurrent "
@@ -211,8 +181,7 @@ class RobotBridge(ABC):
     async def _release_episode(self, token: str | None) -> dict[str, Any]:
         """Control-plane result: this slot's score, then free it.
 
-        Scores are written in ``step`` on the sim thread — read them there too
-        so grading never races a mid-step update on the serve loop.
+        Scores are read on the sim thread, so grading never races a step.
         """
         slot = self._registry.resolve(token)
         grade = (await self._run_on_sim(self.result_slots))[slot.index]
@@ -222,11 +191,7 @@ class RobotBridge(ABC):
 
     @abstractmethod
     def reset(self, **kwargs: Any) -> str:
-        """Reset the sim for a new episode; return the task prompt.
-
-        Always invoked on the sim thread (via ``_run_on_sim``) — implement
-        this as ordinary sync code, same as ``step`` / ``get_observation``.
-        """
+        """Reset the sim for a new episode; return the task prompt."""
 
     @abstractmethod
     def step(self, action: NDArray[Any]) -> None:
@@ -237,12 +202,7 @@ class RobotBridge(ABC):
         """Return ``(data[N, ...], terminated[N])``, or ``None`` if not ready."""
 
     def result(self) -> dict[str, Any]:
-        """Scalar episode score dict after the episode ends.
-
-        Default: binary success + total reward. Override for richer grading
-        (fractional subtask progress, custom metadata, …). Releases call
-        ``result_slots``, whose default broadcasts this dict to every slot.
-        """
+        """The episode's score dict, which ``result_slots`` broadcasts to every slot by default."""
         return {
             "score": 1.0 if self.success else 0.0,
             "success": bool(self.success),
@@ -250,11 +210,7 @@ class RobotBridge(ABC):
         }
 
     def result_slots(self) -> list[dict[str, Any]]:
-        """One score dict per slot. Default: broadcast ``result`` to every slot
-        (vectorized bridges with per-slot scoring override this).
-
-        Invoked on the sim thread via ``_run_on_sim`` (same as ``step``).
-        """
+        """One score dict per slot; vectorized bridges with per-slot scores override this."""
         grade = self.result()
         return [dict(grade) for _ in range(self.num_envs)]
 
@@ -270,18 +226,13 @@ class RobotBridge(ABC):
 
     @property
     def url(self) -> str:
-        """The bridge's concrete ``ws://`` address — publish this in the manifest.
-
-        With an ephemeral port (the default) the address only exists once
-        ``start`` has bound the socket, so publish after ``await bridge.start()``.
-        """
+        """The bridge's ``ws://`` address; raises before ``start`` binds an ephemeral port."""
         if self._port == 0:
             raise RuntimeError("bridge bound to an ephemeral port; call start() before reading url")
         return f"ws://{self._host}:{self._port}"
 
     async def start(self) -> None:
-        # Idempotent: a long-lived bridge serves sequential agents, so re-``start`` (e.g. a
-        # second run against the same sim) is a no-op rather than an EADDRINUSE rebind.
+        # Idempotent: a long-lived bridge serves sequential runs against one sim.
         if self._server is not None:
             return
         self._registry.configure(self.num_envs)
@@ -315,19 +266,15 @@ class RobotBridge(ABC):
         """One agent connection: claim a slot, then feed actions into the barrier."""
         slot: _Slot | None = None
         try:
-            # Connect-time metadata frame; claim_required lets clients without a
-            # token fail fast instead of waiting forever for an observation.
+            # ``claim_required`` lets a client without a token fail fast, not await an observation.
             await ws.send(_packb({**self.metadata, "claim_required": True}))
-            # Fail fast on a client that never claims (it would otherwise deadlock:
-            # we wait for the claim frame, it waits for an observation).
+            # Bounded, or a client that never claims deadlocks: each side awaits the other.
             raw = await asyncio.wait_for(ws.recv(), timeout=self.step_timeout)
             if isinstance(raw, str):
                 raise RuntimeError(raw)
             claim = _unpackb(raw)
             if not isinstance(claim, dict) or "claim" not in claim:
                 raise ValueError('first frame must be {"claim": <token or None>}')
-            # A None claim binds the sole claimed slot — single-env agents skip
-            # the token plumbing; ambiguous (vectorized) claims error instead.
             slot = self._registry.resolve(claim["claim"])
             if slot.ws is not None:
                 raise RuntimeError(f"slot {slot.index} already has a live connection")
@@ -335,7 +282,6 @@ class RobotBridge(ABC):
             slot.action = None
             slot.idle = False
             self._action_event.set()  # wake tick loop waiting for dialing to finish
-            # First frame after claim: one sim read, then this slot's scalar row.
             await self._send_slot_observation(slot, await self._run_on_sim(self.get_observation))
             async for frame in ws:
                 action = _unpackb(frame)["actions"]  # codec already returns an ndarray
@@ -368,8 +314,7 @@ class RobotBridge(ABC):
             self._action_event.clear()
 
             claimed = self._registry.claimed()
-            # Still dialing — wait. Never hold-step a slot before its WS claims;
-            # that would advance its env copy and corrupt a late join.
+            # Still dialing: hold-stepping a slot before its WS claims would corrupt a late join.
             if not claimed or any(s.ws is None and not s.idle for s in claimed):
                 continue
             live = [s for s in claimed if not s.idle]
@@ -454,8 +399,6 @@ class RobotBridge(ABC):
             slot.action = None
             self._action_event.set()
 
-    # ── the control side channel (driven by a RobotEndpoint) ────────────────────
-
     async def serve_control(self, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
         """Serve the JSON-RPC side channel: ``capabilities`` / ``url`` / ``contract`` /
         ``reset`` / ``result``."""
@@ -476,21 +419,13 @@ class RobotBridge(ABC):
             await writer.wait_closed()
 
     async def ensure_contract(self) -> dict[str, Any]:
-        """Return the wire contract, deriving it when a subclass can.
-
-        Default is the already-set ``self.contract``. Lazy-spawn bridges
-        (``GymBridge``) override to build the env and derive when
-        no pre-written ``contract.json`` was loaded at start — so
-        ``endpoint.capabilities()`` publishes a real manifest, not ``{}``.
-        """
+        """Return the wire contract, deriving it when a subclass can."""
         return self.contract
 
     async def capabilities(self, name: str = "robot") -> list[Capability]:
         """Everything this bridge serves, ``name`` naming the ``robot`` wire.
 
-        The sim process may serve more than the openpi wire — a bridge that
-        also runs its own MCP tool server appends that capability here, and
-        the endpoint publishes whatever comes back. Default is the wire alone.
+        A bridge that serves more, such as its own MCP tool server, appends it here.
         """
         return [Capability.robot(name=name, url=self.url, contract=await self.ensure_contract())]
 
@@ -512,17 +447,11 @@ class RobotBridge(ABC):
         raise ValueError(f"unknown method {method!r}")
 
 
-# ── the sim program shape (custom sims call serve_bridge last) ────────────────
-
-
 def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0) -> None:
-    """Serve *bridge*, blocking for the process's lifetime — the sim program's last call.
+    """Serve ``bridge`` until SIGTERM or Ctrl-C; it blocks, so call it last.
 
-    Serving — the robot WebSocket and the control side channel (port announced
-    on stdout as ``HUD_SIM_PORT=<port>``) — runs on a background loop thread;
-    the calling (main) thread becomes the sim thread, executing every touch the
-    bridge queues (see ``RobotBridge._run_on_sim``). SIGTERM / Ctrl-C cancel
-    serving; the sim keeps draining through teardown (``stop()`` touches it too).
+    Serving runs on a background loop thread while the calling thread becomes the sim
+    thread, running every touch the bridge queues, through teardown too.
     """
     # Claim main as the sim thread before serving starts, so no touch slips
     # through inline on the wrong thread.

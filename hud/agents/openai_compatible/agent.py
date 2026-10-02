@@ -80,8 +80,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             extra_body["checkpoint"] = config.checkpoint
             self.completion_kwargs["extra_body"] = extra_body
 
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
-
     async def _initialize_state(self, *, prompt: list[PromptMessage]) -> OpenAIChatRunState:
         return OpenAIChatRunState(messages=self._initial_messages(prompt))
 

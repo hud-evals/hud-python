@@ -40,12 +40,10 @@ ConfigT = TypeVar("ConfigT", bound="ToolAgentConfig")
 
 
 class DegenerateTurnError(Exception):
-    """A model sample was unusable and was not committed to the run state.
+    """Raised by ``get_response`` for an unusable sample it did not commit to the run state.
 
-    Raised by ``get_response`` implementations that reject a degenerate
-    response before recording it. The loop discards the turn and samples a
-    fresh one; each discarded turn still consumes a step from ``max_steps``,
-    and a degenerate final step fails the run.
+    The loop resamples; each discarded turn still spends a step, and one on the last step fails
+    the run.
     """
 
 
@@ -108,7 +106,6 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         self,
         connections: dict[str, CapabilityClient],
     ) -> tuple[dict[str, AgentTool[Any]], list[Any]]:
-        """Build the (tools, params) for one run from the given open connections."""
         tools: dict[str, AgentTool[Any]] = {}
         params: list[Any] = []
         model = self.config.model
@@ -333,11 +330,9 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
             )
 
     def _initial_messages(self, prompt: list[PromptMessage]) -> list[MessageT]:
-        """Map normalized prompt turns onto provider messages."""
         return [self._format_message(message.role, _message_text(message)) for message in prompt]
 
     def _format_user_text(self, text: str) -> MessageT:
-        """Wrap a plain text string as a provider user message."""
         return self._format_message("user", text)
 
     @abstractmethod
@@ -352,10 +347,10 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         system_prompt: str | None = None,
         citations_enabled: bool = False,
     ) -> AgentStep:
-        """Call the provider API and return the model's turn as an ``AgentStep``.
+        """Call the provider and return the model's turn.
 
-        The loop stamps ``started_at``/``model`` fallbacks, records the step,
-        and raises its error if present.
+        The loop fills an unset ``started_at`` and ``model``, records the step, and ends the run
+        on its ``error``; raise ``DegenerateTurnError`` to discard the sample instead.
         """
 
     @abstractmethod

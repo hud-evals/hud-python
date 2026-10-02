@@ -63,7 +63,7 @@ async def export(
     answer_file: str = DEFAULT_ANSWER_FILE,
     timeout_sec: float = 600.0,
 ) -> list[Path]:
-    """Export HUD tasks from *source* into Harbor task folders under *out_dir*.
+    """Export HUD tasks from ``source`` into Harbor task folders under ``out_dir``.
 
     ``source`` is a Python task source or a JSON/JSONL taskset next to its
     authored environment and Dockerfile. Each task becomes one self-contained

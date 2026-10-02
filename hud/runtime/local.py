@@ -36,27 +36,13 @@ _ENVIRONMENT_LOCKS: WeakValueDictionary[Environment, asyncio.Lock] = WeakValueDi
 class LocalRuntime:
     """The local provider: serve an environment in this process.
 
-    *source* points at the env in whatever form you have:
+    ``source`` is a ``.py`` file or directory loaded per acquisition (``env`` picks
+    one of several environments, defaulting to the task's), a live ``Environment``,
+    or a ``(task) -> Environment`` constructor called per acquisition.
 
-    - a ``.py`` file or directory — loaded per acquisition (sibling
-      imports resolve); *env* pins one name when several are declared,
-      defaulting to the placed task's env
-    - a live ``Environment`` — served directly, one
-      acquisition at a time
-    - a ``(task) -> Environment`` callable — called per acquisition with the
-      placed row
-
-        runtime = LocalRuntime("env.py")
-        runtime = LocalRuntime(env)
-        runtime = LocalRuntime(lambda task: build_env(task.env))
-
-    ``ready_timeout`` bounds ``@env.initialize`` startup. Source imports share
-    cached dependencies; constructors can return a new environment per acquisition.
-    Acquisitions of the same environment instance are serialized, including when
-    sources or constructors reuse it. Distinct instances can run concurrently.
-    Hooks share this process's event loop, so blocking env code stalls concurrent rollouts —
-    use ``SubprocessRuntime`` or ``DockerRuntime`` for process
-    isolation, and ``Runtime(url)`` to attach to a substrate served elsewhere.
+    ``ready_timeout`` bounds ``@env.initialize``. Acquisitions of one environment
+    instance are serialized. Hooks share this event loop, so blocking env code stalls
+    concurrent rollouts; ``SubprocessRuntime`` isolates them in a process.
     """
 
     def __init__(
@@ -99,18 +85,15 @@ class LocalRuntime:
 
         if task.runtime_config is not None:
             raise ValueError("LocalRuntime does not support task runtime_config")
-        # The source dir stays importable for the whole acquisition, not just
-        # the initial import, so a template can lazily import a sibling
-        # module at run time (as it could under the child-process runtime).
-        # Always insert-and-remove one entry: balanced under concurrency.
+        # Importable for the whole acquisition so templates can lazily import siblings;
+        # one insert and one remove per acquisition keeps sys.path balanced.
         if self._source_dir is not None:
             sys.path.insert(0, str(self._source_dir))
         try:
             try:
                 env = self._build(task)
             except RuntimeError as e:
-                # The source ran an event loop at import — usually an unguarded
-                # top-level run call; name the actual mistake.
+                # The source ran an event loop at import, usually an unguarded run call.
                 if "running event loop" not in str(e):
                     raise
                 raise RuntimeError(
@@ -143,23 +126,13 @@ class LocalRuntime:
 
 
 class SubprocessRuntime:
-    """The child-process provider: serve the placed row's env from *source*.
+    """The child-process provider: serve the placed row's env from ``source``.
 
-    Each acquisition runs ``python -m hud.environment.server <path> --env
-    name`` — the same serving entry point a container CMD runs — on an
-    ephemeral loopback port, yields its ``Runtime``, and terminates the
-    child on exit. *source* is a ``.py`` file, a directory of them, or a live
-    ``Environment``, which is served from the file its
-    ``@env.template`` declarations live in. The served env is the placed
-    task's ``env`` name (so a mixed-env taskset works against one source),
-    unless *env* pins one explicitly; placing a row whose env the source does
-    not define fails loudly in the child.
-
-    The child's working directory is the source's directory, so sibling
-    imports and relative data paths resolve; ``@env.initialize`` daemons start
-    in the child and die with it. Because the source is re-imported in the
-    child, a script spawning itself (``SubprocessRuntime(__file__)``) must keep
-    top-level run calls under ``if __name__ == "__main__":``.
+    ``source`` is a ``.py`` file, a directory, or a live ``Environment`` (served from
+    the file declaring its templates). Each acquisition serves the task's env, unless
+    ``env`` pins one, from a child in the source's directory, terminated on exit. The
+    child re-imports the source, so a script spawning itself must guard top-level run
+    calls with ``if __name__ == "__main__":``.
     """
 
     def __init__(

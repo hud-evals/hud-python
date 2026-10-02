@@ -1,7 +1,4 @@
-"""Shared training lifecycle: the model handle, HTTP plumbing, and the
-modality-independent ``optim_step``. Modality clients (e.g.
-``hud.train.TrainingClient``) subclass and add ``forward_backward`` etc.
-"""
+"""The model handle and ``optim_step`` that modality clients such as ``TrainingClient`` share."""
 
 from __future__ import annotations
 
@@ -28,9 +25,8 @@ class _Losses(BaseModel):
 class BaseTrainingClient:
     """One model handle (a gateway slug or id) + the shared optimizer step.
 
-    Training advances the weights behind the model string in place. The service
-    keys on model id, so a slug is resolved once via the catalog and cached. Use
-    a modality client such as ``hud.train.TrainingClient``, not this directly.
+    Training advances the weights behind the model string in place. Use a modality
+    client such as ``TrainingClient``, not this directly.
     """
 
     def __init__(
@@ -71,10 +67,9 @@ class BaseTrainingClient:
         self, suffix: str, payload: dict[str, Any], reply: type[T], *, max_retries: int = 0
     ) -> T:
         url = await self._train_url(suffix)
-        # Training POSTs are not safe to auto-retry: forward_backward/backward
-        # accumulate gradients in place (a retry double-counts a batch) and
-        # optim_step saves a checkpoint (a retry can save a step twice and poison
-        # the run). All callers pass max_retries=0; the server owns recovery.
+        # Never auto-retry: gradients accumulate in place (a retry double-counts a batch)
+        # and optim_step checkpoints (a retry can save a step twice). The server owns
+        # recovery.
         return await make_request(
             "POST", url, json=payload, api_key=self._api_key, max_retries=max_retries, reply=reply
         )
@@ -97,15 +92,11 @@ class BaseTrainingClient:
         eps: float = 1e-8,
         weight_decay: float = 0.0,
     ) -> OptimStepResult:
-        """Apply accumulated gradients, then checkpoint + promote: one compound
-        step that saves state + sampler weights and advances the model's active
-        checkpoint, so the gateway serves the updated weights.
+        """Apply accumulated gradients and checkpoint; the gateway then serves the new weights.
 
-        One-shot, never retried: a duplicate submit is what poisons a training
-        run (the same step number saved twice). The server owns recovery — it
-        adopts an already-saved step on a colliding save and rebuilds a poisoned
-        run from head on the next call — so a failed step is safe to simply
-        re-run from the training loop."""
+        Never retried, since a duplicate submit saves a step twice; the server recovers,
+        so a failed step is safe to re-run from the training loop.
+        """
         request = OptimStepRequest(
             learning_rate=learning_rate,
             beta1=beta1,
@@ -116,10 +107,7 @@ class BaseTrainingClient:
         return await self._post("optim-step", request.model_dump(), OptimStepResult, max_retries=0)
 
     async def checkpoints(self) -> list[CheckpointResponse]:
-        """The model's checkpoint tree (oldest first), each node carrying its
-        rewards, loss, token/datum counts, and a ``metrics`` blob. The
-        programmatic twin of ``hud models checkpoints`` — poll it inside a
-        training loop to watch ``mean_reward``, KL, and clip fraction live."""
+        """The model's checkpoint tree, oldest first, with each node's rewards and metrics."""
         model_id = await self._resolve_model_id()
         # The checkpoints endpoint lives on the catalog API.
         url = f"{self._api_url}/v2/models/{model_id}/checkpoints"
@@ -131,13 +119,7 @@ class BaseTrainingClient:
         return next((c for c in await self.checkpoints() if c.is_active), None)
 
     async def set_head(self, checkpoint_id: str) -> None:
-        """Promote a checkpoint to head — a rollback to, or branch from, that
-        node; the next ``optim_step`` extends the tree from there.
-
-        Use this when the reward function or environment changes underneath a
-        run: continuing from a stale head fine-tunes a policy shaped by the old
-        objective. Roll back to a clean checkpoint (or fork a fresh model) so the
-        run measures the new objective, not a contaminated starting point."""
+        """Promote a checkpoint to head; the next ``optim_step`` extends the tree from there."""
         model_id = await self._resolve_model_id()
         url = f"{self._api_url}/v2/models/{model_id}/head"
         await make_request("PUT", url, json={"checkpoint_id": checkpoint_id}, api_key=self._api_key)

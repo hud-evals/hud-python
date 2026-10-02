@@ -1,19 +1,4 @@
-"""Opt-in LeRobot v3 dataset writing for robot rollouts.
-
-Each rollout holds a ``DatasetWriter`` that buffers its ``(observation,
-executed action)`` frames and commits whole episodes into a process-shared
-dataset keyed by schema/FPS — concurrent same-contract rollouts (e.g.
-``BatchedAgent`` clones) share one root;
-heterogeneous contracts get separate datasets. Created on the first frame;
-``atexit`` flushes every open writer. A class lock keeps episodes contiguous.
-Finalized at process exit (or ``finalize``), optionally pushed to the HF Hub.
-The contract drives the schema with no extra wiring. Destination + push come
-from the environment:
-
-- ``RECORD_DIR``  — dataset root (default ``./data`` from where the rollout launched)
-- ``HF_REPO``     — HF namespace to also push to (needs ``HF_TOKEN``)
-- ``HF_PRIVATE``  — push the dataset private
-"""
+"""Opt-in LeRobot v3 dataset writing for robot rollouts."""
 
 from __future__ import annotations
 
@@ -38,11 +23,8 @@ logger = logging.getLogger(__name__)
 def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     """Map a robot contract to LeRobot ``features`` + a wire-key -> LeRobot-key map.
 
-    Image obs -> ``observation.images.<wire_path>`` (video; ``/`` → ``_`` so nested
-    cameras like ``left/image`` and ``right/image`` stay distinct); the lone vector
-    obs -> ``observation.state`` (else ``observation.<wire_path>``); the action ->
-    ``action``. String obs are dropped (LeRobot carries the prompt as its
-    per-frame ``task``). Duplicate mapped keys raise.
+    String observations are dropped (LeRobot carries the prompt as each frame's ``task``);
+    features that map to the same key raise.
     """
     feats = contract.get("features", {})
     vectors = [
@@ -85,8 +67,7 @@ def _lerobot_features(contract: dict[str, Any]) -> tuple[dict[str, dict[str, Any
 
 
 def _is_image(feature: dict[str, Any]) -> bool:
-    """A camera feature: authored contracts say ``dtype: image``, derived ones tag
-    the (load-bearing) image ``type`` — accept both."""
+    """Authored contracts mark cameras ``dtype: image``; derived ones tag the image ``type``."""
     return feature.get("dtype") == "image" or feature.get("type") in ("rgb", "bgr", "gray", "depth")
 
 
@@ -100,9 +81,12 @@ def _names(feature: dict[str, Any], base: str) -> list[str]:
 
 
 class DatasetWriter:
-    """Buffers one rollout's frames; commits whole episodes to a schema/FPS-keyed
-    LeRobot v3 dataset. A no-op shell when lerobot is missing (warned once) so
-    telemetry-only runs never break."""
+    """Buffers one rollout's frames and commits whole episodes to a shared LeRobot v3 dataset.
+
+    Writers with the same schema and FPS share a dataset under ``RECORD_DIR`` (default
+    ``./data``), finalized at exit and pushed to the ``HF_REPO`` namespace when that is set
+    (``HF_PRIVATE`` makes it private). Without lerobot installed, it warns and records nothing.
+    """
 
     # key -> (dataset, root, repo_id). Same schema/FPS shares; else a new root.
     _datasets: ClassVar[dict[tuple[Any, ...], tuple[Any, Path, str]]] = {}
@@ -155,19 +139,15 @@ class DatasetWriter:
         act_ft = self._features["action"]
         row["action"] = np.asarray(action, dtype=act_ft["dtype"]).reshape(act_ft["shape"])
         row["task"] = task
-        # Open the shared dataset on the first frame so atexit can flush if we
-        # die before end_episode (still in-memory until then; kill -9 loses it).
+        # Open the dataset on the first frame so atexit can flush an unfinished episode
+        # (frames stay in memory until then, so kill -9 loses them).
         with DatasetWriter._lock:
             self._ensure_dataset()
             self._frames.append(row)
             DatasetWriter._open.add(self)
 
     def end_episode(self) -> None:
-        """Commit this rollout's buffered episode to the shared dataset.
-
-        Whole episodes stay contiguous: ``_lock`` serializes create / add_frame /
-        save_episode so concurrent BatchedAgent rollouts cannot interleave frames.
-        """
+        """Commit this rollout's buffered episode, contiguously, to the shared dataset."""
         if not self._frames:
             return
         with DatasetWriter._lock:
@@ -206,10 +186,7 @@ class DatasetWriter:
                     )
 
     def _ensure_dataset(self) -> Any:
-        """Return the schema/FPS-keyed shared dataset, creating it on first use.
-
-        Caller must hold ``_lock``.
-        """
+        """Get or create the dataset shared by this schema and FPS; caller holds ``_lock``."""
         # Share only when fps + robot_type + feature schema match.
         key = (
             self._fps,

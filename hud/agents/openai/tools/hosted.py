@@ -17,8 +17,6 @@ class OpenAIHostedTool(HostedTool[ToolParam]):
 
 @dataclass(frozen=True, kw_only=True)
 class OpenAICodeInterpreterTool(OpenAIHostedTool):
-    """OpenAI code interpreter."""
-
     container: dict[str, Any]
 
     def to_params(self) -> ToolParam:

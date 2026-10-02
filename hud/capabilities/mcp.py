@@ -1,9 +1,4 @@
-"""MCPClient — fastmcp.Client wrapper that fits the CapabilityClient contract.
-
-Establishes an MCP session (initialize handshake) on ``connect``. ``list_tools``
-and ``call_tool`` translate MCP's models into HUD's own ``hud.types``
-shapes, so MCP's types stay at this boundary.
-"""
+"""MCPClient — a fastmcp session whose results come back as ``hud.types`` models."""
 
 from __future__ import annotations
 
@@ -79,9 +74,8 @@ class MCPClient(CapabilityClient):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         """Invoke a tool and return its result as a HUD ``ToolResult``.
 
-        The result is not checked against the tool's declared output schema: a
-        server whose structured content drifts from its schema still hands the
-        agent the content it returned.
+        The result is not validated against the tool's output schema, so content that
+        drifts from it still reaches the agent.
         """
         trace_id = get_current_trace_id()
         meta = {_TRACE_ID_META_KEY: trace_id} if trace_id is not None else None

@@ -1,10 +1,4 @@
-"""HudClient: JSON-RPC client for the HUD wire protocol.
-
-Transport for a served env's control channel: drives ``hello`` / ``tasks.*`` /
-``bye`` and exposes capabilities via ``binding(ref)`` (wire data) /
-``open(ref)`` (live client). Use the module-level ``connect(runtime)`` to
-attach to a provisioned substrate.
-"""
+"""HudClient: JSON-RPC client for the HUD wire protocol."""
 
 from __future__ import annotations
 
@@ -92,10 +86,8 @@ class ServerInfo:
 class Manifest:
     """Env welcome frame returned by ``HudClient.hello()``.
 
-    ``bindings`` are the environment-native addresses published by the
-    substrate. Agents executing inside that environment consume these raw
-    endpoints; controller-side consumers use ``HudClient.binding`` or
-    ``HudClient.open``, which route them through the control channel.
+    ``bindings`` hold environment-native addresses. From outside the environment, use
+    ``HudClient.binding`` or ``HudClient.open``, which route through the control channel.
     """
 
     session_id: str
@@ -107,10 +99,7 @@ class Manifest:
 class HudClient:
     """JSON-RPC client for a served env's control channel.
 
-    Prefer ``connect``, which owns the lifecycle (connect →
-    ``hello`` → yield → ``close``) and yields one of these with ``manifest``
-    ready; the raw constructor takes any connected stream pair. Task lifecycle
-    wrapping (start → grade) lives in ``hud.Run``.
+    Prefer ``connect``, which yields a client with ``manifest`` set and closes it.
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -124,8 +113,7 @@ class HudClient:
     ) -> None:
         self._reader = reader
         self._writer = writer
-        # Control-channel (host, port), for tunnel connections. ``None`` for
-        # raw stream pairs (no dialable endpoint): bindings pass through.
+        # Dialed for capability tunnels; without one, bindings pass through unrouted.
         self._endpoint = endpoint
         self._ids = itertools.count(1)
         self._call_lock = asyncio.Lock()
@@ -135,8 +123,6 @@ class HudClient:
         self._opened: dict[str, CapabilityClient] = {}
         self._forwarders: list[asyncio.Server] = []
         self._tunnels: set[asyncio.Task[None]] = set()
-
-    # ─── lifecycle ────────────────────────────────────────────────────
 
     async def close(self) -> None:
         if self._closed:
@@ -164,8 +150,6 @@ class HudClient:
             tunnel.cancel()
         self._writer.close()
 
-    # ─── handshake ────────────────────────────────────────────────────
-
     async def hello(
         self,
         session_id: str | None = None,
@@ -175,9 +159,8 @@ class HudClient:
     ) -> Manifest:
         """Send ``hello``; cache and return the parsed ``Manifest``.
 
-        ``session_id`` resumes that parked session on the env — its suspended
-        task, e.g. one a prior connection started — instead of minting a
-        fresh session.
+        ``session_id`` resumes that parked session, with its suspended task, instead
+        of minting a fresh one.
         """
         params: dict[str, Any] = {}
         if workspace_routes:
@@ -259,19 +242,11 @@ class HudClient:
                 )
         return self.manifest
 
-    # ─── capability access ────────────────────────────────────────────
-    #
-    # ``binding`` and ``open`` look up the same capability by name or protocol;
-    # they differ only in what they hand back:
-    #   binding(ref) -> Capability         wire data (url/params; BYO conn)
-    #   open(ref)    -> CapabilityClient   live, connected, cached client
-
     def binding(self, ref: str) -> Capability:
-        """Find the capability matching *ref* (name, protocol family, or protocol).
+        """Find the capability matching ``ref`` (name, protocol family, or protocol).
 
-        Returns the wire data — use this when something else owns the
-        connection (e.g. browser-use reads the CDP url). Ambiguous refs
-        (multiple matches) raise; use names to disambiguate.
+        Returns the wire data, for when something else owns the connection. Raises
+        ``KeyError`` when ``ref`` matches none or several.
         """
         if self.manifest is None:
             raise RuntimeError("call hello() before accessing bindings")
@@ -297,18 +272,16 @@ class HudClient:
         raise KeyError(f"no capability {ref!r} (available: {available or '<none>'})")
 
     async def open(self, ref: str) -> CapabilityClient:
-        """Open (and cache) a live ``CapabilityClient`` for a capability.
+        """Open (and cache) a live ``CapabilityClient`` for ``ref``, resolved like ``binding``.
 
-        Resolves like ``binding`` but connects and returns a live client, owned
-        by this connection and closed on ``close()``.
+        This connection owns the client and closes it on ``close()``.
         """
         cap = self.binding(ref)
         cap_client = self._opened.get(cap.name)
         if cap_client is None:
             client_cls = _CLIENT_REGISTRY.get(cap.protocol)
             if client_cls is None and cap.protocol.split("/", 1)[0] == "openpi":
-                # RobotClient pulls optional deps (numpy/openpi-client — the ``robot``
-                # extra), so it joins the registry on first open, not at import.
+                # RobotClient needs the robot extra, so it joins the registry on first open.
                 from hud.capabilities.robot import RobotClient
 
                 client_cls = _CLIENT_REGISTRY[RobotClient.protocol] = RobotClient
@@ -320,8 +293,6 @@ class HudClient:
             cap_client = await _connect_capability(client_cls, cap)
             self._opened[cap.name] = cap_client
         return cap_client
-
-    # ─── tasks ────────────────────────────────────────────────────────
 
     async def list_tasks(self) -> list[dict[str, Any]]:
         """Return ``[{id, description}, ...]`` for every registered task."""
@@ -361,8 +332,6 @@ class HudClient:
                         await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
         finally:
             self.abort()
-
-    # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
     async def _call(
         self,
@@ -408,9 +377,6 @@ class HudClient:
                 raise
 
 
-# ─── module-level entry points ────────────────────────────────────────
-
-
 async def _connect_ready(
     host: str,
     port: int,
@@ -422,11 +388,8 @@ async def _connect_ready(
 ) -> HudClient:
     """Connect and complete ``hello``, retrying until the env is ready.
 
-    Readiness is protocol-level, and the client owns waiting for it: a
-    freshly-provisioned substrate may refuse the connect, and a proxied port
-    (``docker -p``, a port-forward) can *accept* before the env behind it is
-    serving — that connection just dies at the handshake. Both mean
-    not-ready-yet. Returns a client whose ``manifest`` is populated.
+    A proxied port (``docker -p``, a port-forward) can accept before the env behind it
+    serves, so a handshake EOF means not ready yet, like a refused connect.
     """
     loop = asyncio.get_event_loop()
     deadline = loop.time() + ready_timeout
@@ -446,15 +409,15 @@ async def _connect_ready(
             client.abort()
             raise
         except (EOFError, OSError):
-            # The accepted connection had no live env behind it: EOF on the
-            # reply, or a reset racing our hello write. Still not-ready.
+            # No live env behind the accepted connection yet: EOF on the reply, or a
+            # reset racing the hello write.
             await client.close()
             if loop.time() >= deadline:
                 raise
             await asyncio.sleep(interval)
         except BaseException:
-            # Real failure (error frame, cancellation): don't leak the socket —
-            # an unclosed connection parks the env's connection handler.
+            # A real failure still closes the socket: an unclosed connection parks the
+            # env's connection handler.
             await client.close()
             raise
         else:
@@ -481,12 +444,10 @@ async def connect(
     workspace_routes: Sequence[WorkspaceRoute] = (),
     connections: Sequence[Connection] = (),
 ) -> AsyncIterator[HudClient]:
-    """Connect a ``HudClient`` to a provisioned substrate's control channel.
+    """Connect a ``HudClient`` to a runtime's control channel, retrying until it answers.
 
-    Takes the ``Runtime`` a provider yielded (or
-    one constructed directly for a substrate served elsewhere) and retries
-    connect + handshake until the channel answers. Does not tear the substrate
-    down — lifecycle belongs to whichever provider brought it up.
+    The substrate's teardown stays with its provider. While open, a periodic heartbeat
+    probes the transport; a transport failure cancels the body and raises that error.
     """
     parts = urlsplit(runtime.url)
     if parts.scheme not in ("", "tcp"):

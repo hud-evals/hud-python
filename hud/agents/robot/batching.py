@@ -1,8 +1,4 @@
-"""Batched inference for concurrent robot rollouts.
-
-- BatchedModel: stacks concurrent ainfer calls into one infer
-- BatchedAgent: gives each rollout its own state, shares one batched model
-"""
+"""Batched inference for concurrent robot rollouts."""
 
 from __future__ import annotations
 
@@ -25,15 +21,8 @@ if TYPE_CHECKING:
 class BatchedModel(Model):
     """Coalesce concurrent ``ainfer`` calls into one stacked ``inner.infer``.
 
-    Waits up to ``max_wait_s`` for callers, stacks to ``[N, ...]``, one forward,
-    scatters ``[N, T, A]`` rows back. Omit ``batch_size`` to size to in-flight
-    callers (``max_concurrent`` already bounds that); set it only to cap below
-    concurrency (e.g. VRAM) - that also flushes early when full.
-
-    ``inner`` must batch the leading ``N`` in one in-process forward
-    (e.g. ``LeRobotModel``). Not
-    ``RemoteModel`` (OpenPI has no batched request;
-    use one agent per rollout).
+    A batch closes after ``max_wait_s`` or at ``batch_size`` callers (unset: no cap). ``inner``
+    must batch the leading ``N`` in one forward, which rules out ``RemoteModel``.
     """
 
     def __init__(
@@ -63,7 +52,7 @@ class BatchedModel(Model):
         assert self._queue is not None
         loop = asyncio.get_running_loop()
         while True:
-            items = [await self._queue.get()]  # block for the first caller
+            items = [await self._queue.get()]
             deadline = loop.time() + self.max_wait_s
             while self.batch_size is None or len(items) < self.batch_size:
                 timeout = deadline - loop.time()
@@ -77,8 +66,7 @@ class BatchedModel(Model):
             try:
                 torch: Any = importlib.import_module("torch")
 
-                # Collate N raw observations into one [N, ...] batch: stack tensor
-                # fields on a new leading dim, gather scalars/strings into a list.
+                # Tensors stack on a new leading dim; other fields, such as prompts, become lists.
                 stacked: dict[str, Any] = {
                     k: torch.stack([s[k] for s in samples])
                     if torch.is_tensor(samples[0][k])
@@ -96,15 +84,9 @@ class BatchedModel(Model):
 
 
 class BatchedAgent(Agent):
-    """Drive many rollouts concurrently against one shared, batched model.
+    """Run concurrent rollouts as clones of ``agent`` that share one ``BatchedModel``.
 
-    Per run: shallow-clone ``agent`` with a per-run adapter copy and the shared
-    ``BatchedModel`` (stateless by contract; adapter copy keeps env bindings
-    isolated). Not for ``RemoteModel``.
-
-    Takes ownership: wraps ``agent.model`` in place with ``BatchedModel``,
-    shared by every clone. Pass a dedicated agent - do not also use that instance
-    for unbatched ``RobotAgent`` rollouts.
+    Takes ownership: ``agent.model`` is wrapped in place, so don't also run ``agent`` unbatched.
     """
 
     def __init__(
@@ -114,12 +96,10 @@ class BatchedAgent(Agent):
             raise RuntimeError("BatchedAgent needs agent.model set")
         super().__init__(agent.config)
         self._template = agent
-        # Wrap once, in place: the passed-in agent is now permanently batched (see class doc).
-        # Every per-run clone shares this batcher by reference.
         agent.model = BatchedModel(agent.model, batch_size=batch_size, max_wait_s=max_wait_s)
 
     async def __call__(self, run: Run, **kwargs: Any) -> None:
         worker = copy.copy(self._template)  # fresh __dict__; shares the batched model
-        if worker.adapter is not None:  # defensive: a stateful custom adapter must be per-run
+        if worker.adapter is not None:  # adapters hold per-run bind() state
             worker.adapter = copy.copy(worker.adapter)
         await worker(run, **kwargs)

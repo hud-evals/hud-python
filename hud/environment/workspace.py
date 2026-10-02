@@ -406,7 +406,7 @@ _DEFAULT_USER = "agent"
 # come from the task's own image, since the serving venv is masked inside.
 # bwrap's reaper is pid 1 above it, so processes the agent orphans are reaped
 # rather than accumulating for the life of the sandbox.
-# 
+#
 # The line it prints first is the readiness signal, and it has to come from
 # in here: bwrap reports the child pid before that child has finished
 # building its mount namespace, so a session joining on the strength of the

@@ -1,17 +1,4 @@
-"""Filesystem change tracker for a workspace directory.
-
-Snapshots a directory tree and produces unified diffs (patches) between
-snapshots, so a rollout can record exactly what changed on disk over time. The
-tracker is pure computation over a local ``root``; ``serve_file_tracking`` wraps
-one tracker in the small ``filetracking/1`` framed-JSON adapter used by
-workspaces.
-
-Ported from the orchestrator sidecar's ``/proc``-scanning tracker, with the
-Kubernetes coupling removed (it scans an injected ``root`` instead of
-``/proc/{pid}/root``) and a non-overridable secrets deny-list added: paths that
-look like credentials are tracked at the metadata tier only — their content is
-never read, hashed-for-fingerprint only, and never emitted as a diff.
-"""
+"""Filesystem change tracker for a workspace directory."""
 
 from __future__ import annotations
 
@@ -69,8 +56,8 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     "*.exe",
 )
 
-# Credential-shaped paths tracked at the metadata tier only — content is never
-# read or emitted, regardless of any capture policy. Not overridable.
+# Credential-shaped paths: tracked for change detection, but their content is never
+# read, diffed or captured.
 SECRET_DENY_PATTERNS: tuple[str, ...] = (
     ".env",
     ".env.*",
@@ -130,9 +117,8 @@ class FileEntry:
     size: int
     mtime_ns: int
     content_hash: str
-    # Cached text content for diffing. None = binary, unreadable, over-budget, or
-    # a redacted secret. Stored as a tuple so unchanged files share it across
-    # snapshots without re-reading.
+    # Text for diffing, shared across snapshots while the file is unchanged. None when
+    # binary, unreadable, too large, over budget or redacted.
     lines: tuple[str, ...] | None = None
     # A credential-shaped path: tracked for change detection, never for content.
     redacted: bool = False
@@ -140,11 +126,7 @@ class FileEntry:
 
 @dataclass
 class ScanBudget:
-    """Per-scan counter of new file-content bytes read into memory.
-
-    Threaded through the recursive walk so each ``_scan()`` has its own counter
-    (thread-safe when scans run concurrently via ``run_in_executor``).
-    """
+    """New file-content bytes one scan has read into memory."""
 
     bytes_loaded: int = 0
 
@@ -181,9 +163,8 @@ class DiffResult:
     files_scanned: int
     files_changed: int
     truncated: bool = False  # True if the diff payload was capped by _MAX_DIFF_BYTES
-    # Paths dropped by the byte cap. Internal-only (never serialized): the
-    # tracker uses it to keep those files pending so they re-diff on a later
-    # poll instead of being silently baselined away.
+    # Paths dropped by the byte cap; never serialized. The tracker keeps them pending so
+    # a later poll re-diffs them.
     skipped_paths: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -212,33 +193,21 @@ class DiffResult:
 
 
 class FileTracker:
-    """Tracks file changes under a directory ``root`` via snapshot diffing.
+    """Tracks file changes under a directory ``root`` via snapshot diffing."""
 
-    Usage:
-
-        tracker = FileTracker("/workspace")
-        tracker.take_baseline()  # at session start
-        diff = tracker.take_snapshot()  # later — diff since the last snapshot
-    """
-
-    # Maximum bytes of NEW file content to read into memory per scan. Unchanged
-    # files reuse the previous snapshot's cached lines (zero cost). Once
-    # exhausted, new/modified files are still recorded (hash + metadata) with
-    # ``lines=None`` so they show as changed with a placeholder rather than a
-    # full diff. 50 MB raw is ~100 MB in Python text objects.
+    # Cap on new file content read per scan (50 MB raw is ~100 MB as Python text). Past
+    # it, changed files are still recorded but diff as a placeholder.
     _MAX_SCAN_CONTENT_BYTES: int = 50 * 1024 * 1024
 
     # Hard cap on total serialized diff payload. Patches that would push the
     # cumulative total past this are skipped (smaller ones still pack in).
     _MAX_DIFF_BYTES: int = 50 * 1024 * 1024
 
-    # Per-file size cap for diff generation. Larger files get a placeholder
-    # instead of a full unified diff, so ``difflib`` never allocates unbounded.
+    # Larger files diff as a placeholder, so ``difflib`` never allocates unbounded.
     _MAX_DIFF_FILE_BYTES: int = 1 * 1024 * 1024
 
-    # Artifact capture is stricter than scan/diff limits because it emits base64
-    # into telemetry. Keep the raw total comfortably below the default 25 MB span request limit
-    # (after base64 overhead).
+    # Captured artifacts ship base64 in telemetry: the raw total stays well under the
+    # default 25 MB span request limit after base64 overhead.
     _MAX_CAPTURE_FILES: int = 20
     _MAX_CAPTURE_FILE_BYTES: int = 5 * 1024 * 1024
     _MAX_CAPTURE_TOTAL_BYTES: int = 15 * 1024 * 1024
@@ -273,8 +242,6 @@ class FileTracker:
             self._max_file_size // (1024 * 1024),
         )
 
-    # ─── public API ───────────────────────────────────────────────────
-
     def take_baseline(self) -> Snapshot:
         """Take the initial baseline snapshot. Call once at session start."""
         snapshot = self._scan()
@@ -301,8 +268,7 @@ class FileTracker:
 
         current = self._scan()
         diff = self._diff(self._previous_snapshot, current)
-        # Setup and agent edits are separate layers. Even when the setup diff is
-        # capped, agent tracking must start from the complete post-setup state.
+        # Agent tracking starts from the full post-setup state, even when this diff is capped.
         self._baseline_snapshot = current
         self._previous_snapshot = current
         return diff
@@ -314,7 +280,7 @@ class FileTracker:
         self._previous_snapshot = current
 
     def take_snapshot(self) -> DiffResult:
-        """Scan and diff against the previous snapshot, then advance the baseline."""
+        """Scan and diff against the previous snapshot, which the scan then replaces."""
         if self._previous_snapshot is None:
             LOGGER.warning("No baseline snapshot; taking one now")
             baseline = self.take_baseline()
@@ -353,9 +319,8 @@ class FileTracker:
             raise RuntimeError("cannot diff without a baseline")
 
         diff = self._diff(self._previous_snapshot, current)
-        # Keep budget-skipped files pending: revert each to its previous state in
-        # the new baseline (drop added-but-skipped files) so the next scan still
-        # sees them as changed and re-diffs them, rather than dropping the change.
+        # Budget-skipped files keep their previous state (added ones are dropped), so the
+        # next scan re-diffs them.
         for path in diff.skipped_paths:
             old_entry = self._previous_snapshot.files.get(path)
             if old_entry is None:
@@ -374,11 +339,7 @@ class FileTracker:
         return diff
 
     def current_manifest(self) -> list[dict[str, Any]]:
-        """The latest file manifest: ``[{path, size, content_hash}, ...]``.
-
-        The full-state anchor a ``snapshot`` request returns — paths + hashes,
-        never content (so it is safe regardless of capture policy).
-        """
+        """The latest snapshot's ``{path, size, content_hash}`` rows, without redacted files."""
         snapshot = self._previous_snapshot or self._baseline_snapshot
         if snapshot is None:
             return []
@@ -509,8 +470,6 @@ class FileTracker:
             result["status"] = status
         return result
 
-    # ─── scanning ─────────────────────────────────────────────────────
-
     def _scan(self) -> Snapshot:
         start = time.monotonic()
         files: dict[str, FileEntry] = {}
@@ -547,7 +506,6 @@ class FileTracker:
         with scanner:
             for entry in scanner:
                 try:
-                    # Path relative to root, posix-style, no leading slash.
                     rel = os.path.relpath(entry.path, root_str).replace(os.sep, "/")
                     is_dir = entry.is_dir(follow_symlinks=False)
 
@@ -577,7 +535,6 @@ class FileTracker:
         """Build a ``FileEntry``, reusing cached content when unchanged."""
         prev = self._previous_snapshot.files.get(rel) if self._previous_snapshot else None
         if prev is not None and prev.mtime_ns == stat.st_mtime_ns and prev.size == stat.st_size:
-            # Unchanged — reuse cached hash + lines (no allocation).
             return FileEntry(
                 rel_path=rel,
                 size=stat.st_size,
@@ -632,14 +589,8 @@ class FileTracker:
     def _collect_gitignore_patterns(self) -> list[str]:
         """Read the root ``.gitignore`` only.
 
-        Patterns are matched tree-wide (see ``_matches``), which is only
-        sound for ignore rules that are themselves root-scoped. Nested
-        per-directory ``.gitignore`` files are intentionally not loaded: applying
-        a subdirectory's rules globally would wrongly exclude (or fail to
-        exclude) paths elsewhere in the tree. The built-in
-        ``DEFAULT_EXCLUDE_PATTERNS`` already drop the dominant noise
-        (``node_modules/``, ``.venv/``, ``__pycache__/``, build artifacts), so a
-        root-only honor is enough for a telemetry noise filter.
+        ``_matches`` applies patterns tree-wide, so a nested ``.gitignore``'s rules would
+        wrongly apply everywhere.
         """
         root_gitignore = self._root / ".gitignore"
         if not root_gitignore.is_file():
@@ -681,8 +632,6 @@ class FileTracker:
         except (PermissionError, OSError):
             return f"unreadable:{size}"
         return h.hexdigest()
-
-    # ─── diffing ──────────────────────────────────────────────────────
 
     def _diff(self, old: Snapshot, new: Snapshot) -> DiffResult:
         """Unified diffs between two snapshots, smallest-first within a byte cap."""

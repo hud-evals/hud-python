@@ -1,20 +1,4 @@
-"""Universal SDK shapes, including the trajectory contract.
-
-The trajectory contract: a ``Trace`` is an ordered collection of ``Step``s,
-and recording a step (``Trace.record``) ships it to the platform as one
-schema-tagged span. ``Step`` here is the shared skeleton every agent family
-and the run harness speak — ordering, source, timing, error — and the
-harness records its own steps directly (``user`` prompt turns, ``task``
-lifecycle calls, ``system`` errors).
-
-Agent families layer their payloads on top by subclassing ``Step`` —
-the tool-agent family adds LLM responses and tool calls in
-``hud.agents.types`` under the ``hud.step.v1`` schema; other families
-(e.g. robot) bring their own payload fields under their own ``schema_tag``
-and inherit the transport. The platform's serializer registry dispatches on
-the schema tag, so each family decodes losslessly without this module or the
-telemetry pipe (``hud.telemetry``) knowing any payload shape.
-"""
+"""Universal SDK shapes, including the trajectory contract."""
 
 from __future__ import annotations
 
@@ -142,12 +126,9 @@ class AgentType(StrEnum):
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
-        """The registered agent type *agent* is an instance of, or ``None``.
+        """The registered agent type ``agent`` is an instance of, or ``None``.
 
-        Reverse of ``cls``. Agent extras (anthropic, google-genai, ...)
-        may be uninstalled, so importing a type's agent class can fail; that
-        simply means *agent* is not that type. ``None`` means the ``Agent``
-        implementation is not registered for reconstruction.
+        A type whose agent extra isn't installed is skipped.
         """
         for agent_type in cls:
             with contextlib.suppress(ImportError):
@@ -156,12 +137,8 @@ class AgentType(StrEnum):
         return None
 
 
-# -----------------------------------------------------------------------------
-# Content and tool calls
-# -----------------------------------------------------------------------------
-# The shapes HUD records in traces. Field names keep MCP's original camelCase
-# schema (``mimeType``, ``isError``, ``structuredContent``), which is the wire
-# format the platform stores; MCP clients and servers convert at their boundary.
+# The shapes traces record keep MCP's camelCase field names (mimeType, isError), the
+# wire format the platform stores; MCP clients and servers convert at their boundary.
 
 Role: TypeAlias = Literal["user", "assistant"]
 
@@ -271,19 +248,16 @@ class Tool(_WireModel):
 
 
 class ToolCall(_WireModel):
-    """A tool call."""
-
     meta: dict[str, Any] | None = Field(default=None, alias="_meta")
     name: str
-    # Widened to admit the raw provider string when it didn't parse as JSON;
-    # a str is never executed — dispatch answers it with an error result.
+    # A str is the raw provider string that didn't parse as JSON; dispatch answers it
+    # with an error result and never executes it.
     arguments: dict[str, Any] | str | None = None
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     annotation: str | None = None  # Optional explanation of why this action is taken
     provider_name: str | None = None  # Original provider tool name when it differs from MCP name
 
     def __str__(self) -> str:
-        """Format tool call as plain text."""
         args_str = ""
         if self.arguments:
             try:
@@ -299,7 +273,6 @@ class ToolCall(_WireModel):
         return s
 
     def __rich__(self) -> str:
-        """Rich representation with color formatting."""
         from rich.markup import escape
 
         from hud.utils.hud_console import hud_console
@@ -320,13 +293,10 @@ class ToolResult(_WireModel):
     call_id: str | None = None  # For correlating with provider-specific tool call IDs
 
     def _get_content_summary(self) -> str:
-        """Extract a summary of the content."""
-        # Extract content summary
         content_summary = ""
         if self.content:
             for block in self.content:
                 if isinstance(block, TextContent):
-                    # Get first line or truncate
                     text = block.text.strip()
                     first_line = text.split("\n")[0] if "\n" in text else text
                     content_summary = first_line
@@ -335,7 +305,6 @@ class ToolResult(_WireModel):
                     content_summary = "📷 Image"
                     break
 
-        # Or use structured content if no text content
         if not content_summary and self.structuredContent:
             try:
                 content_summary = json.dumps(self.structuredContent, separators=(",", ":"))
@@ -345,26 +314,19 @@ class ToolResult(_WireModel):
         return content_summary
 
     def __str__(self) -> str:
-        """Format tool result as plain text for compatibility."""
         content_summary = self._get_content_summary()
 
-        # Plain text format with unicode symbols
         if self.isError:
             return f"✗ {content_summary}"
         else:
             return f"✓ {content_summary}"
 
     def __rich__(self) -> str:
-        """Rich representation with color formatting."""
         from hud.utils.hud_console import hud_console
 
         content_summary = self._get_content_summary()
         return hud_console.format_tool_result(content_summary, self.isError)
 
-
-# -----------------------------------------------------------------------------
-# Trajectory contract
-# -----------------------------------------------------------------------------
 
 # Schema tag of the core step stream (the tool-agent family shares it).
 STEP_SCHEMA = "hud.step.v1"
@@ -390,17 +352,11 @@ class TaskCall(BaseModel):
 class Step(BaseModel):
     """One ordered interaction unit in a task run — the shared skeleton.
 
-    Carries what every family and the harness need: position, ``source``,
-    timing, ``error``, and the harness payloads — ``messages`` (user/system
-    prompt turns, kept as structured ``PromptMessage``s so multimodal content
-    is preserved) and ``task_call`` (task lifecycle RPC). Agent families
-    subclass this with their own payload fields (e.g.
-    ``hud.agents.types.AgentStep``) and, for a new wire schema, their
-    own ``schema_tag``.
+    Agent families subclass it with their own payload fields (such as
+    ``hud.agents.types.AgentStep``) and, for a new wire schema, their own ``schema_tag``.
     """
 
-    # Schema tag this step ships under; families with their own wire schema
-    # override it (the platform's serializer registry dispatches on it).
+    # The platform's serializer registry dispatches on this tag.
     schema_tag: ClassVar[str] = STEP_SCHEMA
 
     # Sequential position in the trace, assigned by ``Trace`` (1-based).
@@ -418,8 +374,10 @@ class Step(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def emit(self, *, trace_id: str | None = None) -> None:
-        """Export this step as a span with its schema. No-op if trace context is missing.
-        Pass trace_id when emitting outside the rollout thread (e.g. from a background thread)."""
+        """Export this step as a span with its schema; a no-op without a trace context.
+
+        Pass ``trace_id`` when emitting outside the rollout's context, such as from a thread.
+        """
 
         task_run_id = trace_id or get_current_trace_id()
         if not task_run_id:
@@ -427,7 +385,6 @@ class Step(BaseModel):
 
         now = now_iso()
         payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
-        # make span from step
         span = Span(
             name=f"step.{self.source}",
             trace_id=normalize_trace_id(task_run_id),

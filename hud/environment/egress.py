@@ -1,24 +1,4 @@
-"""The ways out of a bounded workspace, and the policy on them.
-
-A workspace with its own network namespace has no route anywhere — not to the
-internet, and not to whatever else the substrate is running, including the
-control channel that grades it. Two kinds of route are given back
-deliberately: hosts on the internet, through a proxy that sees every
-connection and applies the task's declared policy, and ``Peer`` services
-the environment itself runs, each forwarded to the address the task expects.
-
-Both listen on unix sockets, so reaching them is a question of the filesystem
-rather than the network: a bridge runs in the workspace's *network* namespace
-while keeping the substrate's *mount* namespace, so it can see sockets the
-workspace itself cannot, and offers them as ordinary ports on the workspace's
-loopback. Nothing is bound into the workspace, and nothing in it can address
-the substrate except through one of these.
-
-Request parsing is the standard library's. A hand-rolled request-line parser
-gets keep-alive, chunked bodies and header framing wrong in ways that surface
-as a package manager failing halfway through an index rather than as an
-obvious error.
-"""
+"""The ways out of a bounded workspace, and the policy on them."""
 
 from __future__ import annotations
 
@@ -54,10 +34,8 @@ LOGGER = logging.getLogger("hud.environment.egress")
 # In an allowlist, the entry that permits everything.
 ANY_HOST = "*"
 
-# Headers that belong to one hop and must not be forwarded to the next.
-# ``transfer-encoding`` among them: the response body is read back already
-# de-chunked, so passing the upstream's framing along leaves the client
-# looking for chunk headers in what is now plain bytes.
+# Headers for one hop only. A relayed body arrives de-chunked, so forwarding
+# ``transfer-encoding`` would leave the client parsing chunk headers out of plain bytes.
 _HOP_BY_HOP = frozenset(
     {
         "connection",
@@ -72,17 +50,13 @@ _HOP_BY_HOP = frozenset(
     }
 )
 
-# Credential headers a bound process may send. The connection relay owns
-# authentication, so a process-side value is only ever a placeholder and must
-# not reach the upstream next to the injected credential.
+# Dropped from relayed requests: the connection relay injects the real credential, so a
+# process-side value is a placeholder that must not reach the upstream.
 _CLIENT_CREDENTIALS = frozenset({"authorization", "x-api-key", "api-key", "x-goog-api-key"})
 
 
-# RFC 9110 grammar for what a header may contain. A name is a `token`; a
-# value is visible ASCII, obs-text, and blanks — no control characters, so
-# nothing in a relayed header can end it and begin another. Matched
-# positively: a proxy relays what the grammar admits, rather than guessing
-# which characters an attacker would have used.
+# RFC 9110 header grammar, matched positively: no control characters, so a relayed
+# header can never end itself and begin another.
 _FIELD_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _FIELD_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")
 
@@ -96,35 +70,26 @@ class _BlockedAddress(OSError):
 
 
 def _field(name: str, value: str) -> tuple[str, str]:
-    """*name* and *value* as a header, or raise.
+    """``(name, value)`` as a header, or raise ``_Unrelayable``.
 
-    An upstream response is remote text, and ``http.client`` preserves a
-    folded value's CRLF, so a header relayed verbatim can carry headers of
-    its own into the response the workspace reads. Refusing beats repairing:
-    a value that has to be altered to be safe is no longer the value the
-    upstream sent, and a proxy that quietly rewrites responses is worse to
-    debug than one that says it could not relay this one.
+    ``http.client`` keeps a folded value's CRLF, so a verbatim header could smuggle
+    others into the response. It is refused rather than silently repaired.
     """
     if not _FIELD_NAME.fullmatch(name) or not _FIELD_VALUE.fullmatch(value):
         raise _Unrelayable(f"header {name[:32]!r} is not relayable")
     return name, value
 
 
-# The proxy port offered on the workspace's loopback. 3128 is unremarkable —
-# an egress proxy is ordinary infrastructure, unlike a control channel.
+# The proxy port on the workspace's loopback (3128, the conventional proxy port).
 BRIDGE_PORT = 3128
 
-# Where a visitor's way out is offered instead. A visitor joins the
-# workspace's network without being one of its sessions, and is held to its
-# own policy rather than the sessions' — so this is a second proxy, on a
-# second port, and it exists only while the visitor is there. Standing open
-# it would be a route the agent could take in place of the one it was given.
+# The proxy for a visitor, which joins the workspace network without being a session and
+# keeps its own policy. It exists only while the visitor does, or the agent could use it.
 VISITOR_PORT = 3129
 
-# Run inside the workspace's network namespace, one listener per route out.
-# Its stdin is ``[[host, port, socket], ...]``; every listener is bound
-# before it says it is ready, since a session that starts in between finds
-# the port refused.
+# Runs in the workspace's network namespace, one listener per route out, read from
+# stdin as ``[[host, port, socket], ...]``. All are bound before "ready": a session
+# starting in between would find its port refused.
 _BRIDGE = """
 import asyncio, json, sys
 
@@ -171,15 +136,10 @@ asyncio.run(main())
 
 @dataclass(frozen=True, slots=True)
 class Peer:
-    """A substrate service a bounded workspace is allowed to reach.
+    """A substrate service a bounded workspace may reach.
 
-    A workspace with its own network cannot address the substrate at all —
-    that is what makes it bounded — so a service the environment runs is as
-    unreachable from it as the control channel. A peer hands one of them back,
-    at the address the task expects rather than wherever it happens to listen:
-    ``name`` and ``port`` are what the workspace calls it, ``target`` where it
-    actually answers outside (its own port on the substrate's loopback, unless
-    something else is said).
+    ``name`` and ``port`` are what the workspace calls it; ``target`` is where it
+    answers on the substrate (its own port on loopback by default).
     """
 
     name: str
@@ -250,12 +210,10 @@ def bind_addresses(
     *,
     reserved_ports: Collection[int] = (),
 ) -> dict[str, str]:
-    """Which loopback address each peer answers on inside the workspace.
+    """The loopback address each peer answers on inside the workspace.
 
-    ``127.0.0.1`` wherever the port is free, because a task that says
-    ``localhost:6379`` means that one. Two peers cannot both hold a port
-    there, so the second moves down 127.0.0.0/8 and is reached by its name —
-    which is how a task naming several services addresses them anyway.
+    ``127.0.0.1`` while its ports are free there; a peer that would collide moves
+    down 127.0.0.0/8 and is reached by name.
     """
     taken = {
         ("127.0.0.1", BRIDGE_PORT),
@@ -288,13 +246,10 @@ def hosts_text(
     *,
     local_aliases: Collection[str] = (),
 ) -> str:
-    """*base* — the substrate's ``/etc/hosts`` — plus a line per peer name, at the
-    loopback address its bridge listens on (see ``bind_addresses``).
+    """``base`` (the substrate's ``/etc/hosts``) plus a line per local alias and peer.
 
-    Names resolve for what runs in the workspace's *mount* namespace, which
-    is its sessions. Anything joining only the network namespace (the Harbor
-    verifier does, to reach a service the agent started) still reaches a peer
-    at its address, but not by its name.
+    Only the workspace's mount namespace sees these names; a process joining just its
+    network (such as the Harbor verifier) reaches peers by address only.
     """
     lines = "".join(
         [
@@ -314,12 +269,8 @@ def proxy_environment(
 ) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
 
-    In the spellings clients read, and with the peers left out of them: a peer
-    is reached directly, on the loopback the bridge binds it to, because sent
-    through the proxy it would be resolved on the substrate, where the name
-    means nothing and the address is something else. Listed one by one rather
-    than as 127.0.0.0/8, which most clients (curl among them) match literally
-    instead of as a network.
+    Peers bypass the proxy, which would resolve them on the substrate. ``no_proxy`` names
+    each one because most clients, curl among them, match 127.0.0.0/8 literally.
     """
     credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
     url = f"http://{credentials}127.0.0.1:{port}"
@@ -337,7 +288,7 @@ def proxy_environment(
 
 
 def permitted(host: str | None, allowed: Collection[str]) -> bool:
-    """Whether *host* is in *allowed*, by exact match or as a subdomain."""
+    """Whether ``host`` is in ``allowed``, by exact match or as a subdomain."""
     if not host:
         return False
     if ANY_HOST in allowed:
@@ -404,8 +355,7 @@ class _Proxy(BaseHTTPRequestHandler):
         """The workspace's traffic is not the substrate's log."""
 
     def _fail(self, status: int, reason: str) -> None:
-        # Loud and diagnosable from inside the workspace: a request the proxy
-        # would not carry should not look like a network that is merely broken.
+        # The reason header keeps a refusal from reading as a merely broken network.
         self.send_response(status)
         self.send_header("X-Proxy-Error", reason)
         self.send_header("Content-Length", "0")
@@ -512,9 +462,7 @@ class _Proxy(BaseHTTPRequestHandler):
             for k, v in self.headers.items()
             if k.lower() not in _HOP_BY_HOP and k.lower() != "host"
         }
-        # Rebuilt from the parsed components rather than forwarded raw: the
-        # policy was applied to *this* hostname, and the request that goes out
-        # must be the one it was applied to.
+        # Rebuilt from the parsed URL, so the request sent is the one the policy checked.
         path = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
         host = parts.hostname or ""
         connection = http.client.HTTPConnection(host, port, timeout=60)
@@ -523,9 +471,7 @@ class _Proxy(BaseHTTPRequestHandler):
             connection.sock = _connect_public(host, port, timeout=60)
             connection.request(self.command, path, body=body, headers=headers)
             response = connection.getresponse()
-            # Validate every field before writing any of them: a response is
-            # relayed whole or not at all, and half a status line has already
-            # committed this connection by the time a later header fails.
+            # Validate every field before writing any: the status line commits the response.
             relayed = [
                 _field(key, value)
                 for key, value in response.getheaders()
@@ -810,15 +756,9 @@ class ConnectionRelay:
 class Egress:
     """A workspace's routes out, and the policy applied to them.
 
-    ``allowed`` is the set of internet hosts a session may reach —
-    ``{ANY_HOST}`` for all of them, and an empty set for a workspace that may
-    reach none. ``peers`` are substrate services it may reach whatever the
-    host policy says: they are named by the task rather than dialed by the
-    agent, so reaching one is not a question the allowlist answers.
-
-    Every socket lives in ``socket_dir``, which must be somewhere the
-    workspace cannot see: a socket it could connect to directly would be a
-    route out that skips all of this.
+    ``allowed`` holds the internet hosts a session may reach (``{ANY_HOST}`` for all,
+    empty for none); ``peers`` are reachable whatever it says. ``socket_dir`` must be
+    invisible to the workspace, or its sockets would be a route around the policy.
     """
 
     def __init__(
@@ -853,8 +793,7 @@ class Egress:
         return self.socket_dir / "egress.sock"
 
     def _peer_socket(self, index: int) -> Path:
-        # By position rather than by name: a peer's name comes from the task,
-        # and a task does not get to choose paths in here.
+        # Indexed, not named: a peer's name comes from the task, which must not choose paths here.
         return self.socket_dir / f"peer-{index}.sock"
 
     def start(self) -> None:
@@ -924,11 +863,9 @@ class Egress:
         return [sys.executable, "-c", _BRIDGE], config
 
     def environment(self, port: int = BRIDGE_PORT) -> dict[str, str]:
-        """Proxy variables for what this serves.
+        """Proxy variables for what this serves, or none when no host is permitted.
 
-        Empty where no host is permitted: pointing a client at a proxy that
-        is not there turns "this task has no network" into a connection error
-        on the first hop, which reads as a broken one instead.
+        A proxy that isn't there would make "no network" look like a broken one.
         """
         return (
             proxy_environment(

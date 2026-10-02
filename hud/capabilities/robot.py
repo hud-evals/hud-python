@@ -1,15 +1,4 @@
-"""The ``openpi/0`` protocol: wire codec + the agent-side client.
-
-``openpi/0`` is openpi-like — it reuses openpi's msgpack-numpy wire format and flat
-observation/action naming — but flips the roles: here the *env* is the WebSocket
-server (it owns the world) and the *agent* is the client (it acts in the world).
-``RobotClient`` is that agent-side client; it dials a robot env and exchanges
-observations/actions over the socket.
-
-The *env-side* counterpart — the server bridge that owns the simulator
-(``RobotBridge``) — lives in
-``hud.environment.robot``, and reuses the wire codec defined here.
-"""
+"""The ``openpi/0`` wire codec and agent-side client; unlike openpi, the env is the server."""
 
 from __future__ import annotations
 
@@ -24,14 +13,10 @@ from openpi_client import msgpack_numpy
 
 from .base import Capability, CapabilityClient
 
-# ─── wire codec ──────────────────────────────────────────────────────────────
-# openpi's msgpack-numpy codec: numpy arrays nested anywhere in a message serialize
-# transparently and recursively, so neither end wraps obs/action fields by hand.
+# openpi's msgpack-numpy codec serializes nested numpy arrays, so neither end wraps
+# obs/action fields by hand.
 _packb = msgpack_numpy.packb
 _unpackb = msgpack_numpy.unpackb
-
-
-# ─── agent-side client ───────────────────────────────────────────────────────
 
 
 class RobotClient(CapabilityClient):
@@ -61,10 +46,8 @@ class RobotClient(CapabilityClient):
     def spaces(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Split the contract's ``features`` into ``(action_space, observation_space)`` by role.
 
-        ``action_space`` is the single ``role == "action"`` feature; the
-        observation space is the ordered ``name -> feature`` map of the
-        ``role == "observation"`` features. Full feature dicts (type/dtype/shape/
-        names/stats) are preserved, so agents wire policies with no shared config.
+        The action space is the single action feature; the observation space maps
+        names to observation features, in contract order.
         """
         features = self.contract.get("features", {})
         action = next((f for f in features.values() if f.get("role") == "action"), {})
@@ -75,10 +58,9 @@ class RobotClient(CapabilityClient):
     async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
         """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
 
-        A ``None`` token binds the sole claimed slot on a single-env bridge;
-        vectorized bridges (ambiguous slots) reject it — pass the token from
-        ``endpoint.reset()`` there. Waits for the first observation so a rejected
-        claim fails here instead of hanging the first ``get_observation``.
+        A ``None`` token binds the sole slot of a single-env bridge; vectorized bridges
+        need the token from ``endpoint.reset()``. A rejected claim raises here rather
+        than hanging the first ``get_observation``.
         """
         # Bounded dial: an undialed claim stalls the bridge's barrier for every peer.
         ws = await websockets.connect(cap.url, max_size=None, ping_interval=None, open_timeout=30.0)
@@ -86,8 +68,8 @@ class RobotClient(CapabilityClient):
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
-        # Bind this connection to an episode slot (scalar openpi from here). HUD
-        # bridges require the claim frame; plain openpi servers have no slots.
+        # HUD bridges require a claim frame binding this connection to an episode slot;
+        # plain openpi servers have no slots.
         meta = _unpackb(raw)
         seed: dict[str, Any] | None = None
         if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
@@ -108,10 +90,8 @@ class RobotClient(CapabilityClient):
     async def get_observation(self) -> dict[str, Any]:
         """Await the latest observation: ``{"data": {name: ndarray}, "terminated": bool}``.
 
-        Wire format is a flat openpi dict (``{name: ndarray, ...}``) with ``terminated``
-        as a sibling; array fields are regrouped under ``"data"``. Realtime bridges also
-        attach ``"meta"`` (``obs_index``, ``queue_remaining``, ``delay``,
-        ``unexecuted_chunk``); sync bridges omit it. Raises on an env error frame.
+        A per-step ``"reward"`` and, from realtime bridges, ``"meta"`` ride alongside.
+        Raises on an env error frame.
         """
         msg = await self._queue.get()
         if "error" in msg:
@@ -136,9 +116,8 @@ class RobotClient(CapabilityClient):
     ) -> None:
         """Send a whole action chunk ``[chunk_len, action_dim]`` to a realtime bridge.
 
-        ``obs_index`` echoes the observation the chunk was inferred from so the env
-        can measure the real inference delay (ticks consumed in flight); ``delay_used``
-        is the delay the agent conditioned on (informational).
+        ``obs_index`` names the observation the chunk was inferred from, so the env can
+        measure the real inference delay; ``delay_used`` is informational.
         """
         msg: dict[str, Any] = {"actions": np.asarray(chunk, dtype=np.float32)}
         if obs_index is not None:

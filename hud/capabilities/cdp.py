@@ -1,21 +1,4 @@
-"""CDPClient — Chrome DevTools Protocol over a single page-target WebSocket.
-
-Thin transport: opens one WebSocket to a Chromium *page* target and speaks CDP
-JSON-RPC. A background reader demuxes command replies (matched by ``id``) from
-protocol events. The only verb is ``send(method, params)`` — callers build
-higher-level helpers (navigate, evaluate, screenshot, click, type, …) on top of
-it.
-
-Discovery
----------
-A ``cdp/1.3`` capability publishes the DevTools endpoint as ``ws://host:port``.
-On connect we resolve a concrete page target:
-
-* an explicit ``params['target_id']`` → ``ws://host:port/devtools/page/<id>``,
-* a full ``/devtools/`` URL is used verbatim,
-* otherwise ``GET http://host:port/json`` picks the first ``page`` target
-  (creating one via ``/json/new`` if none exist).
-"""
+"""CDPClient — Chrome DevTools Protocol over a single page-target WebSocket."""
 
 from __future__ import annotations
 
@@ -51,7 +34,11 @@ class CDPError(RuntimeError):
 
 
 class CDPClient(CapabilityClient):
-    """Live CDP session bound to one Chromium page target."""
+    """Live CDP session bound to one Chromium page target.
+
+    Without a ``target_id`` or a ``/devtools/`` URL, ``connect`` takes the first page
+    target, creating a blank one if there is none.
+    """
 
     protocol: ClassVar[str] = "cdp/1.3"
 
@@ -103,8 +90,6 @@ class CDPClient(CapabilityClient):
         if not ws_url:
             raise ValueError(f"no CDP page target available at {host}:{port}")
         return str(ws_url)
-
-    # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Issue one CDP command and await its result frame."""

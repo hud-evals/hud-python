@@ -27,13 +27,10 @@ async def _snapshot_is_current(
     snapshot: DaytonaSnapshot,
     image: str | DaytonaImage,
 ) -> bool:
-    """Whether *snapshot* was built from *image* as it exists right now.
+    """Whether ``snapshot`` was built from ``image`` as it exists right now.
 
-    Daytona records what a snapshot was built from — the registry ref, or for a
-    built ``Image`` its Dockerfile text plus the hashes of the context it
-    uploads (``build_info``). The hashes are recomputed here with the SDK's own
-    hasher so they are comparable to what ``snapshot.create`` would upload.
-    ``_context_list`` is the same private attribute ``snapshot.create`` reads.
+    Context hashes are recomputed with the Daytona SDK's own hasher, over the same
+    private ``_context_list`` that ``snapshot.create`` reads, so they compare equal.
     """
     if isinstance(image, str):
         return bool(snapshot.image_name == image)
@@ -42,8 +39,7 @@ async def _snapshot_is_current(
         return False
     from daytona._async.object_storage import AsyncObjectStorage
 
-    # The hasher is an instance method only for code organization; credentials
-    # are needed to upload, not to hash, so skip the credentialed __init__.
+    # Hashing needs no credentials, so skip the credentialed __init__.
     storage = AsyncObjectStorage.__new__(AsyncObjectStorage)
     hashes = [
         await storage._compute_hash_for_path_md5(entry.source_path, entry.archive_path)
@@ -58,23 +54,12 @@ async def _snapshot_is_current(
 class DaytonaRuntime:
     """The Daytona provider: each acquisition creates a fresh sandbox from a snapshot.
 
-    The Daytona runtime boots a sandbox from a pre-built *snapshot*
-    (the durable handle, the snapshot equivalent of Modal's image name), starts the
-    env's control channel inside it, then reaches it over an SSH local-forward:
-    Daytona exposes services only as HTTPS previews, but ``hud.clients.connect``
-    dials ``tcp://``, so the raw control channel is tunneled over SSH to a local
-    port. Yields its ``Runtime``, deletes the sandbox on exit.
-
-    Pass a snapshot name — ``DaytonaRuntime("hud-libero-env")`` — optionally with an
-    ``image`` (Dockerfile/registry ref) to build that snapshot if it is missing.
-    With *image*, an existing snapshot is compared against the image's recorded
-    build (Dockerfile plus context hashes) and rebuilt under the same name when
-    they differ, so editing the env never silently reuses the snapshot built
-    before the edit.
-    Resources (cpu/memory/gpu) live on the snapshot, not here. *workdir* defaults to
-    ``/app`` (the scaffolded ``Dockerfile.hud`` WORKDIR) since a Daytona session
-    starts in ``~``, not the image's WORKDIR; override only for a non-standard layout.
-    Requires the ``daytona`` extra and ``DAYTONA_API_KEY``.
+    The control channel is reached over an SSH local-forward, since Daytona exposes
+    services only as HTTPS previews; the sandbox is deleted on exit. With ``image`` (a
+    Dockerfile-built ``Image`` or a registry ref), a missing or stale snapshot is
+    rebuilt under the same name. A snapshot's resources are fixed when it is built.
+    ``workdir`` defaults to ``/app`` because a Daytona session starts in ``~``, not
+    the image's WORKDIR. Requires the ``daytona`` extra and ``DAYTONA_API_KEY``.
     """
 
     def __init__(
@@ -90,8 +75,7 @@ class DaytonaRuntime:
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
     ) -> None:
         self.snapshot_name = snapshot_name
-        # Default command serves on *port*, so the SSH forward target always
-        # matches what's listening; override only for a non-default layout.
+        # The default command serves on port, the SSH forward's target.
         self.command = (
             command or f'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port {port}'
         )
@@ -103,8 +87,8 @@ class DaytonaRuntime:
         if runtime_config is not None:
             config = RuntimeConfig.model_validate(runtime_config)
         self.runtime_config = config
-        # Resolve each snapshot name against the image once; lock so concurrent
-        # first acquisitions resolve exactly once.
+        # Each snapshot name is checked against the image once, even under concurrent
+        # first acquisitions.
         self._image = image
         self._resolved: set[str] = set()
         self._snapshot_lock = asyncio.Lock()
@@ -254,9 +238,8 @@ class DaytonaRuntime:
             )
             output_task: asyncio.Task[None] | None = None
             try:
-                # Start the env server in a background session (the snapshot's CMD is
-                # not the sandbox's main process). connect() retries the handshake,
-                # so we don't poll for readiness here.
+                # The snapshot's CMD is not the sandbox's main process, so serve from a
+                # session; connect retries the handshake, so there is no readiness poll.
                 session: str = "hud-serve"
                 await sandbox.process.create_session(session)
                 cmd = f"cd {self.workdir} && {self.command}" if self.workdir else self.command
@@ -311,7 +294,7 @@ class DaytonaRuntime:
                 try:
                     await daytona.delete(sandbox)
                 except Exception:
-                    # Swallowing this is how a billable sandbox outlives its process.
+                    # Warn, never swallow silently: the billable sandbox may outlive us.
                     logger.warning(
                         "failed to delete Daytona sandbox %s; it may still be running",
                         sandbox.id,

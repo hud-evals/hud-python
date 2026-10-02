@@ -266,10 +266,8 @@ def render_hud_warnings() -> None:
 
 
 def main() -> None:
-    """Main entry point for the CLI."""
-    # Windows cmd.exe uses the system code page (e.g. cp1252) which can't
-    # encode the emoji that Rich uses. Rewrap stdout/stderr as UTF-8 so
-    # Rich's legacy Windows renderer never hits a charmap error.
+    # cmd.exe's code page (e.g. cp1252) can't encode Rich's emoji; UTF-8 streams
+    # keep Rich's legacy Windows renderer from hitting charmap errors.
     if sys.platform == "win32":
         if hasattr(sys.stdout, "buffer"):
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")

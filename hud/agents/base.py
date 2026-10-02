@@ -19,14 +19,9 @@ ConfigT_co = TypeVar("ConfigT_co", bound=AgentConfig, covariant=True, default=Ag
 class Agent(ABC, Generic[ConfigT_co]):
     """Drives a live ``Run`` by recording its trajectory and final answer.
 
-    Subclasses implement ``__call__(run)``; callers do ``await agent(run)``. Stateless
-    per run — everything comes from ``run`` — so one instance drives many concurrent
-    rollouts. The caller owns lifecycle status, cancellation, and grading.
-
-    ``config`` is the agent's serializable identity: ``dump`` writes it and
-    ``load`` rebuilds the agent from it. Subclasses parametrize ``Agent[XConfig]``,
-    set ``config_cls = XConfig`` for construction, and, when they override
-    ``__init__``, call ``super().__init__(config)``.
+    Stateless across runs, so one instance drives many concurrent rollouts; the caller owns
+    status, cancellation and grading. ``config`` is the serializable identity ``dump`` and
+    ``load`` round-trip, and subclasses set ``config_cls`` to their config type.
     """
 
     config_cls: ClassVar[type[AgentConfig]] = AgentConfig

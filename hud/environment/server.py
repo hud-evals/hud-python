@@ -1,14 +1,4 @@
-"""``python -m hud.environment.server`` — the protocol server for an Environment.
-
-The substrate side of the runtime contract: an ``Environment`` only
-declares what exists; this module puts one on the wire. It owns task execution
-(``TaskRunner``), per-connection protocol dispatch and serving-time state
-(``bind``), and the full serving lifecycle (``serve``) — backing
-daemons up, control channel bound (announcing the port on stdout as
-``HUD_SERVE_PORT=<port>``), daemons down. Every substrate shape runs it: the
-``SubprocessRuntime`` child process, a container CMD, and
-``hud serve``.
-"""
+"""The control-channel server for an Environment (``python -m hud.environment.server``)."""
 
 from __future__ import annotations
 
@@ -50,8 +40,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.environment.server")
 
-# Line a serving process prints once its control channel is bound; the
-# ``spawn`` provider reads it from the child's stdout.
+# Line a serving process prints once its control channel is bound;
+# ``SubprocessRuntime`` reads it from the child's stdout.
 PORT_ANNOUNCEMENT = "HUD_SERVE_PORT="
 
 
@@ -64,16 +54,7 @@ class _ServerState:
 _SERVER_STATES: WeakKeyDictionary[asyncio.Server, _ServerState] = WeakKeyDictionary()
 
 
-# ─── task execution ──────────────────────────────────────────────────────
-
-
 def _jsonable(value: Any) -> Any:
-    """Recursively convert a prompt payload into JSON-safe primitives.
-
-    The prompt frame may carry rich objects — most importantly a list of
-    ``PromptMessage`` (chat-style message prompts) — which must become plain
-    dicts/lists before the JSON-RPC framing layer (``json.dumps``) ships them.
-    """
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, dict):
@@ -106,13 +87,6 @@ def _coerce_args(sig: inspect.Signature, args: dict[str, Any]) -> dict[str, Any]
 
 
 def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
-    """Build the value sent into the task gen for evaluation.
-
-    Without a declared ``return_type`` the answer value is forwarded unchanged.
-    With one, the agent's answer is parsed into an ``Answer[T]`` — the
-    structured-answer contract (parse failures fall back to the raw string
-    on ``content`` so the task can grade them).
-    """
     if return_type is None:
         return payload.get("answer")
 
@@ -125,7 +99,7 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
             else adapter.validate_python(raw_text)
         )
     except ValidationError:
-        content = raw_text
+        content = raw_text  # an unparseable answer still reaches the task to grade
     return Answer(
         content=content,
         raw=raw_text if isinstance(raw_text, str) else str(raw_text),
@@ -133,12 +107,6 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
 
 
 def _score_value(result: Any) -> float:
-    """Normalize a task's grade yield to a float score, loudly.
-
-    Accepts a number or an object with a numeric ``reward`` attribute (the
-    ``hud.graders.EvaluationResult`` shape). Anything else is an authoring bug;
-    grading it silently as 0.0 would hide it.
-    """
     score = getattr(result, "reward", result)
     if isinstance(score, (int, float)):
         return float(score)
@@ -187,8 +155,7 @@ class TaskRunner:
                 )
             frame = cast("dict[str, Any]", _jsonable(evaluation))
         elif isinstance(evaluation, EvaluationResult):
-            # Forward the full grade frame so metadata (info/content/done/isError/
-            # subscores) survives; the wire names the score "score", the model "reward".
+            # Forward the whole frame so its metadata survives; the wire names ``reward`` "score".
             frame = evaluation.model_dump(mode="json")
             frame["score"] = frame.pop("reward")
         else:
@@ -205,15 +172,9 @@ class TaskRunner:
             with contextlib.suppress(Exception):
                 await self._gen.aclose()
             self._gen = None
-        # Session ended (cancel / bye / post-grade) — run teardown hooks.
         for hook in self.task.env._on_task_teardown:
             with contextlib.suppress(Exception):
                 await hook()
-
-
-# ─── wire protocol ───────────────────────────────────────────────────────
-# The connection grammar (control session vs capability stream) lives on
-# ``bind`` — the accept point. Session dispatch lives on _ControlChannel.
 
 
 class _NoTaskInProgress(RuntimeError):
@@ -232,22 +193,16 @@ async def _frames(
 
 
 class _ControlChannel:
-    """Serving-time state for one bound control channel.
+    """One bound server's suspended tasks, one per session id.
 
-    Owns what the declaration must not: runtime state — one suspended task per
-    session, keyed by session id (scoped to this server; two servers for one
-    env never share). A session's ``start`` replaces its own runner, ``grade``
-    consumes it, ``cancel`` clears it. A connection drop parks the session's
-    runner in place; a later connection grades it by resuming the session
-    (``hello`` with its id) or, when exactly one session is parked, by a plain
-    ``tasks.grade`` — the split start/grade flow (e.g. ``hud task grade`` or
-    harbor's verifier reconnecting to grade) with no parking handoff to manage.
+    A dropped connection parks its session's task; a later connection grades it by
+    resuming the session (``hello`` with its id) or, when it is the only parked
+    session, by a plain ``tasks.grade``.
     """
 
     def __init__(self, env: Environment) -> None:
         self.env = env
-        # Suspended tasks by session id. An entry whose session has no live
-        # connection is parked, awaiting a resume (or adoption) to grade.
+        # A runner whose session is not in ``_live`` is parked.
         self._runners: dict[str, TaskRunner] = {}
         self._live: set[str] = set()
 
@@ -304,11 +259,7 @@ class _ControlChannel:
         self._release_if_idle(session_id)
 
     def _release_if_idle(self, session_id: str) -> None:
-        """Release a session's controller connections and routes once nothing can use them.
-
-        A live control connection or a parked task (awaiting resume or grade) keeps
-        them; otherwise they are released so a later session inherits neither.
-        """
+        """Release the session's connections and routes unless it is live or has a parked task."""
         if session_id not in self._live and session_id not in self._runners:
             self.env.release_session(session_id)
 
@@ -542,11 +493,7 @@ async def _stream(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
 ) -> None:
-    """One capability stream: dial the resolved daemon and splice raw bytes.
-
-    The client opens one such connection per capability stream, so the
-    control port is the only address a substrate ever needs to expose.
-    """
+    """One capability stream: dial the resolved daemon and splice raw bytes."""
     msg_id = msg.get("id")
     try:
         name = (msg.get("params") or {}).get("capability")
@@ -580,23 +527,13 @@ async def _stream(
 
 
 async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyncio.Server:
-    """Bind a control-channel server for *env* (not yet serving).
+    """Bind a control-channel server for ``env`` without serving it yet.
 
-    The accept point owns the transport's connection grammar — TCP has no
-    native streams, so the preface (first) frame decides what a connection
-    is: a ``tunnel.open`` frame opens one capability stream (a single reply,
-    then raw bytes — the CONNECT analog); anything else begins a JSON-RPC
-    control session. Session methods are transport-invariant; the preface is
-    TCP routing (a WebSocket transport would tunnel via its native upgrade).
-
-    Each bind gets fresh serving state. Callers read the assigned port from
-    ``server.sockets[0].getsockname()`` and drive it with
-    ``server.serve_forever()``.
+    A connection's first frame decides what it is: ``tunnel.open`` opens one raw
+    capability stream; anything else begins a JSON-RPC control session.
     """
     channel = _ControlChannel(env)
-    # Live connection handlers, so teardown can cancel them instead of
-    # abandoning them to loop shutdown (-> "Task was destroyed but it is
-    # pending" + GeneratorExit thrown into mid-splice coroutines).
+    # Tracked so shutdown cancels handlers instead of abandoning them mid-splice.
     active: set[asyncio.Task[None]] = set()
 
     async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -638,7 +575,7 @@ async def _shutdown(server: asyncio.Server) -> None:
 
 
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
-    """Start *env*'s daemons and serve its control channel until cancelled."""
+    """Start ``env``'s daemons and serve its control channel until cancelled."""
     await env.start()
     server: asyncio.Server | None = None
     try:

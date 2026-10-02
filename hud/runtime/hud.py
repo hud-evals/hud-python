@@ -34,9 +34,8 @@ _RUNTIME_READY_TIMEOUT = 300.0
 class HUDRuntime:
     """HUD tunnel placement: local agent loop against a HUD-hosted environment.
 
-    The SDK creates a runtime session by environment name, exposes the remote
-    control channel through a local TCP listener, and lets the normal rollout
-    atom drive it from this process.
+    Each acquisition leases a runtime session by environment name and tunnels its
+    control channel to a local port.
     """
 
     def __init__(
@@ -84,12 +83,9 @@ class HUDRuntime:
         from hud.settings import settings as sdk_settings
 
         if task.runtime_config is not None:
-            # The lease resolves the env by name: a stamped image is
-            # provenance and rides along. Declared cpu/memory are best-effort
-            # on the platform's substrate (warned once, not fatal — loaders
-            # stamp them on every row), but a GPU or explicit limits change
-            # what the task *is*; running without them would grade a
-            # different environment than declared.
+            # The lease resolves the env by name, so a stamped image is only provenance.
+            # Loaders stamp cpu/memory on every row, so those only warn; a GPU, OS, TPU
+            # or limits change what is graded, so those fail.
             resources = task.runtime_config.resources
             if (
                 resources is not None

@@ -1,8 +1,4 @@
-"""Text normalization, answer comparisons, and token-level metrics.
-
-Each comparison returns a ``float`` in ``[0.0, 1.0]`` for use as a
-``SubScore.value`` or yielded directly from a task.
-"""
+"""Text normalization, and answer comparisons that score a ``float`` in ``[0.0, 1.0]``."""
 
 from __future__ import annotations
 
@@ -16,15 +12,7 @@ _PUNCTUATION_RE = re.compile(r"[^\w\s]")
 
 
 def normalize(text: str | Any) -> str:
-    """Normalize text for comparison: lowercase, strip punctuation and articles.
-
-    Useful as a building block before comparing agent answers to reference
-    strings. Removes noise that shouldn't affect whether an answer is correct.
-
-    Example:
-
-        normalize("  The Answer is: 42! ")  # "answer is 42"
-    """
+    """Normalize text for comparison: lowercase, strip punctuation and articles."""
     s = str(text) if not isinstance(text, str) else text
     s = s.lower()
     s = _PUNCTUATION_RE.sub(" ", s)
@@ -112,7 +100,6 @@ def numeric_match(
 
 
 def _tokenize(text: str) -> list[str]:
-    """Tokenize normalized text into words."""
     return normalize(text).split()
 
 
@@ -120,16 +107,7 @@ def f1_score(
     answer: str | Any,
     reference: str,
 ) -> float:
-    """Token-level F1 between answer and reference.
-
-    Normalizes both texts, tokenizes into words, then computes
-    precision, recall, and their harmonic mean.
-
-    Example:
-
-        f1_score("The capital is Paris, France", "Paris")  # 0.4
-        f1_score("Paris", "Paris")  # 1.0
-    """
+    """Token-level F1 between ``answer`` and ``reference``, after normalizing both."""
     pred_tokens = _tokenize(str(answer))
     ref_tokens = _tokenize(reference)
 
