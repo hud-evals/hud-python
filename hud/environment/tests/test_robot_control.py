@@ -8,12 +8,15 @@ by the sim.
 
 from __future__ import annotations
 
+import base64
 import copy
+import io
 import math
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
+import av
 import numpy as np
 import pytest
 
@@ -22,6 +25,7 @@ from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task, rollout
+from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -435,3 +439,29 @@ async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
     with pytest.raises(ValueError, match="direct control needs an action type"):
         async with _served(sim, DirectControl()) as env:
             await env.start()
+
+
+async def test_every_played_tick_streams_to_the_trace_as_one_video_per_camera(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spans: list[dict[str, Any]] = []
+    monkeypatch.setattr("hud.types.queue_span", spans.append)
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.3), _move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl()) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    segments = [
+        span["attributes"][PAYLOAD_ATTRIBUTE]
+        for span in spans
+        if span["attributes"][PAYLOAD_ATTRIBUTE].get("source") == "video_segment"
+        and span["attributes"][TASK_RUN_ID_ATTRIBUTE] == run.trace_id
+    ]
+    assert {segment["camera"] for segment in segments} == {"observation/image"}
+    assert [segment["index"] for segment in segments] == list(range(len(segments)))
+    assert {segment["fps"] for segment in segments} == {10}
+    mp4 = b"".join(base64.b64decode(segment["segment"]["data"]) for segment in segments)
+    with av.open(io.BytesIO(mp4), mode="r") as container:
+        frames = sum(1 for _ in container.decode(video=0))
+    assert frames == 1 + len(sim.actions)  # the opening scene, then every tick of both moves
