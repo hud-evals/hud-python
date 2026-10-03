@@ -381,6 +381,106 @@ def test_group_and_concurrency_reach_the_scheduler(eval_cli: _EvalCli) -> None:
     assert eval_cli.kwargs["max_concurrent"] == 2
 
 
+def test_detached_hosted_eval_submits_once_without_polling(
+    eval_cli: _EvalCli,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    taskset = Taskset(
+        "Platform Tasks",
+        [
+            Task(env="demo", id="solve", slug="first"),
+            Task(env="demo", id="solve", slug="second"),
+        ],
+        taskset_id="11111111-1111-4111-8111-111111111111",
+    )
+    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda cls, name: taskset))
+    model = GatewayModelInfo(
+        id="22222222-2222-4222-8222-222222222222",
+        name="Gemini",
+        model_name="gemini-test",
+        sdk_agent_type="gemini",
+    )
+    monkeypatch.setattr(eval_mod, "resolve_gateway_model", lambda *_args, **_kwargs: model)
+    platform = MagicMock()
+    platform.post.return_value = {
+        "job_id": "33333333-3333-4333-8333-333333333333",
+        "accepted": 3,
+    }
+    monkeypatch.setattr(
+        eval_mod.PlatformClient,
+        "from_settings",
+        classmethod(lambda cls: platform),
+    )
+
+    result = eval_cli.invoke(
+        "Platform Tasks",
+        "gemini",
+        "--model",
+        "gemini-test",
+        "--runtime",
+        "hosted",
+        "--detach",
+        "--task-ids",
+        "second",
+        "--group",
+        "3",
+        "--max-concurrent",
+        "2",
+        "--config",
+        "thinking_level=high",
+        "--yes",
+    )
+
+    assert result["detached"] is True
+    assert result["run_count"] == 3
+    platform.post.assert_called_once_with(
+        "/rollouts/run_list",
+        json={
+            "taskset_id": taskset.taskset_id,
+            "task_slugs": ["second"],
+            "model_configs": [
+                {
+                    "model_id": model.id,
+                    "reasoning_level": "high",
+                }
+            ],
+            "group_size": 3,
+            "max_steps": 10,
+            "max_concurrent": 2,
+        },
+    )
+    assert eval_cli.taskset is None
+
+
+def test_detached_hosted_eval_rejects_unsupported_agent_config(
+    eval_cli: _EvalCli,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        Taskset,
+        "from_api",
+        classmethod(
+            lambda cls, name: Taskset(
+                name,
+                [Task(env="demo", id="solve", slug="one")],
+                taskset_id="11111111-1111-4111-8111-111111111111",
+            )
+        ),
+    )
+    payload = eval_cli.invoke(
+        "Platform Tasks",
+        "gemini",
+        "--model",
+        "gemini-test",
+        "--detach",
+        "--config",
+        "max_output_tokens=65536",
+        "--yes",
+        exit_code=2,
+    )
+    assert "does not support agent config: max_output_tokens" in payload["message"]
+
+
 def test_local_placement_routes_each_row(eval_cli: _EvalCli, tmp_path: Path, monkeypatch) -> None:
     docker = MagicMock(name="docker")
     subprocesses: dict[object, MagicMock] = {}

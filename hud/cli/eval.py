@@ -100,6 +100,7 @@ class EvalConfig(BaseModel):
     auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
+    detach: bool = False
     #: ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
     #: loading the task source otherwise); other names hand rows to that
     #: provider; a ``tcp://`` url attaches to an already-served env. ``None``
@@ -137,6 +138,63 @@ class EvalConfig(BaseModel):
         return self.model_validate(
             {**data, **{k: v for k, v in overrides.items() if k != "agent_config"}}
         )
+
+
+def _detached_eval_payload(
+    cfg: EvalConfig,
+    taskset: Taskset,
+    agent_type: AgentType,
+    agent_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    if taskset.taskset_id is None:
+        raise ValueError("Detached evaluation requires a platform taskset id")
+
+    configured = cfg.agent_config.get(agent_type.value, {})
+    reasoning_level: str | None = None
+    allowed_config = {"model", "model_name"}
+    if agent_type == AgentType.GEMINI:
+        allowed_config.add("thinking_level")
+        value = configured.get("thinking_level")
+        reasoning_level = value if isinstance(value, str) else None
+    elif agent_type in {AgentType.OPENAI, AgentType.OPENAI_COMPATIBLE}:
+        allowed_config.add("reasoning_effort")
+        value = configured.get("reasoning_effort")
+        reasoning_level = value if isinstance(value, str) else None
+        if agent_type == AgentType.OPENAI:
+            allowed_config.add("reasoning")
+            reasoning = configured.get("reasoning")
+            if isinstance(reasoning, dict):
+                effort = reasoning.get("effort")
+                reasoning_level = effort if isinstance(effort, str) else reasoning_level
+    unsupported = sorted(set(configured) - allowed_config)
+    if cfg.auto_respond:
+        unsupported.append("auto_respond")
+    if unsupported:
+        raise ValueError(
+            "Detached hosted evaluation does not support agent config: " + ", ".join(unsupported)
+        )
+
+    selected_model = resolve_gateway_model(
+        cfg.model or str(agent_kwargs.get("model") or agent_type.config_cls().model)
+    )
+    if selected_model.sdk_agent_type != agent_type.value:
+        raise ValueError(
+            f"Model {selected_model.model_name!r} uses agent type "
+            f"{selected_model.sdk_agent_type!r}, not {agent_type.value!r}"
+        )
+    return {
+        "taskset_id": taskset.taskset_id,
+        "task_slugs": list(taskset.tasks),
+        "model_configs": [
+            {
+                "model_id": selected_model.id,
+                **({"reasoning_level": reasoning_level} if reasoning_level is not None else {}),
+            }
+        ],
+        "group_size": cfg.group_size,
+        "max_steps": cfg.max_steps,
+        "max_concurrent": cfg.max_concurrent,
+    }
 
 
 def eval_command(
@@ -196,6 +254,11 @@ def eval_command(
         "--remote",
         help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        help="Submit one hosted job and exit without polling its rollouts.",
+    ),
 ) -> dict[str, Any]:
     """Run evaluation on datasets or individual tasks with agents.
 
@@ -239,6 +302,7 @@ def eval_command(
                 "very_verbose": very_verbose,
                 "auto_respond": auto_respond or full,
                 "gateway": gateway,
+                "detach": detach,
             }.items()
             if value
         }
@@ -307,6 +371,7 @@ def eval_command(
             "max_concurrent": cfg.max_concurrent,
             "group_size": cfg.group_size,
             "task_ids": cfg.task_ids,
+            "detach": cfg.detach,
         }
 
     if cfg.source is None:
@@ -371,6 +436,10 @@ def eval_command(
         is_file = Path(source).exists()
         cfg = cfg.merge({"runtime": Placement.LOCAL if is_file else Placement.HOSTED})
     assert cfg.runtime is not None
+    if cfg.detach and cfg.runtime != Placement.HOSTED:
+        raise ValueError("--detach requires --runtime hosted")
+    if cfg.detach and Path(source).exists():
+        raise ValueError("--detach requires a platform taskset, not a local tasks file")
 
     if cfg.gateway or cfg.runtime in (Placement.HUD, Placement.HOSTED):
         PlatformClient.from_settings()
@@ -470,6 +539,10 @@ def eval_command(
     if cfg.gateway:
         agent_kwargs["gateway"] = True
 
+    detached_payload = (
+        _detached_eval_payload(cfg, taskset, agent_type, agent_kwargs) if cfg.detach else None
+    )
+
     table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
     table.add_column("Setting", style="yellow")
     table.add_column("Value", style="green")
@@ -495,6 +568,21 @@ def eval_command(
         table.add_row(f"  {name}", "****" if name == "api_key" else str(value))
     hud_console.print(table)
     CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
+
+    if detached_payload is not None:
+        platform = PlatformClient.from_settings()
+        response = platform.post("/rollouts/run_list", json=detached_payload)
+        if not isinstance(response, dict) or not isinstance(response.get("job_id"), str):
+            raise ValueError("Detached evaluation submission returned no job id")
+        job_id = cast("str", response["job_id"])
+        hud_console.success("Hosted evaluation submitted")
+        hud_console.info(f"{settings.hud_web_url}/jobs/{job_id}")
+        return {
+            "job_id": job_id,
+            "source": cfg.source,
+            "detached": True,
+            "run_count": response.get("accepted", 0),
+        }
 
     single_run = len(taskset) == 1 and cfg.group_size == 1
     if cfg.very_verbose:

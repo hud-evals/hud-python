@@ -145,6 +145,13 @@ Platform tasksets run remotely by default: `hud eval "My Tasks" claude`. To run
 them locally, pass `--runtime local`; each task and any verifier running in its
 own environment must include an image or Compose configuration.
 
+Add `--detach` to submit the selected platform tasks as one hosted job and exit
+after the API accepts it. The job continues independently of the terminal. Detached
+submission supports catalog-backed models and the model's advertised reasoning
+levels (`thinking_level` for Gemini, `reasoning_effort` for OpenAI-compatible
+agents, or `reasoning.effort` in an OpenAI TOML section); other agent-specific
+overrides are rejected instead of being ignored.
+
 **Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
 
 | Option | Description |
@@ -162,6 +169,7 @@ own environment must include an image or Compose configuration.
 | `--very-verbose`, `-vv` | Debug-level logs. |
 | `--runtime` | `local`: a Python process or Docker container per rollout. `hud`: local agent, deployed environment. `hosted`: agent and environment on HUD. `docker`, `modal`, `daytona`: run using the task's container configuration. `tcp://host:port`: connect to a running environment. Defaults to `local` for files and `hosted` for platform tasksets. |
 | `--remote` | Alias for `--runtime hosted`. |
+| `--detach` | Submit one hosted platform-taskset job and exit without polling it. |
 | `--yes`, `-y` | Skip confirmation prompt (required when stdin is not a TTY). |
 | `--json` | Structured results on stdout. |
 | `--dry-run` | Print the resolved eval plan without running. |
@@ -183,6 +191,7 @@ group_size = 1                # runs per task
 auto_respond = false
 gateway = false               # set true to force LLM calls through the HUD gateway
 runtime = "local"             # local, hud, hosted, docker, modal, daytona, or tcp://host:port
+detach = false                # hosted platform tasksets only; submit once and exit
 verbose = false
 very_verbose = false
 
