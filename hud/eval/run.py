@@ -220,8 +220,8 @@ async def start_run(
     When the block exits, the agent's access ends, file tracking takes its final capture,
     and the trace is graded: best-effort if the block failed, not at all if it was cancelled.
     """
-    started_at = now_iso()
-    started = await session.start_task(task_id, args)
+    trace = Trace()
+    started = await _start(session, task_id, args, trace)
     raw_prompt = started.get("prompt")
     prompt = (
         _prompt_messages({"content": raw_prompt or ""})
@@ -232,16 +232,10 @@ async def start_run(
         prompt,
         _episode_capabilities(session.capabilities, started),
         {connection.name: connection for connection in connections},
-    )
-    run.trace.record(
-        Step(
-            source="task",
-            task_call=TaskCall(phase="setup", name=task_id, arguments=args, result=started),
-            started_at=started_at,
-        )
+        trace,
     )
     if raw_prompt is not None:
-        run.trace.record(Step(source="user", messages=prompt))
+        trace.record(Step(source="user", messages=prompt))
     try:
         async with file_tracking_observer(session):
             try:
@@ -251,17 +245,40 @@ async def start_run(
                 run.connections.clear()
                 await session.revoke()
     except (asyncio.CancelledError, KeyboardInterrupt):
-        run.trace.status = "error" if run.trace.stop_reason == "timeout" else "cancelled"
+        trace.status = "error" if trace.stop_reason == "timeout" else "cancelled"
         raise
     except Exception:
-        run.trace.status = "error"
-        await _grade(run, session, task_id, best_effort=True)
+        trace.status = "error"
+        await _grade(trace, session, task_id, {"answer": trace.content}, best_effort=True)
         raise
-    await _grade(run, session, task_id, best_effort=best_effort_grade)
+    await _grade(trace, session, task_id, {"answer": trace.content}, best_effort=best_effort_grade)
 
 
-async def _grade(run: Run, session: EnvironmentSession, task_id: str, *, best_effort: bool) -> None:
-    answer: dict[str, Any] = {"answer": run.trace.content}
+async def _start(
+    session: EnvironmentSession, task_id: str, args: dict[str, Any], trace: Trace
+) -> dict[str, Any]:
+    """Start ``task_id`` on ``session``, record its setup on ``trace``, and return its frame."""
+    started_at = now_iso()
+    started = await session.start_task(task_id, args)
+    trace.record(
+        Step(
+            source="task",
+            task_call=TaskCall(phase="setup", name=task_id, arguments=args, result=started),
+            started_at=started_at,
+        )
+    )
+    return started
+
+
+async def _grade(
+    trace: Trace,
+    session: EnvironmentSession,
+    task_id: str,
+    answer: dict[str, Any],
+    *,
+    best_effort: bool,
+) -> None:
+    """Grade the task on ``session`` with ``answer`` and record its evaluation on ``trace``."""
     started_at = now_iso()
     try:
         evaluation = await session.grade(answer)
@@ -271,16 +288,16 @@ async def _grade(run: Run, session: EnvironmentSession, task_id: str, *, best_ef
             raise
         detail = "".join(traceback.format_exception_only(exc)).strip()
         logger.warning("best-effort grade failed: %s", detail)
-        run.trace.grade = Grade(
+        trace.grade = Grade(
             content=detail,
             is_error=True,
-            raw={"score": 0.0, "answer": run.trace.content, "content": detail, "isError": True},
+            raw={"score": 0.0, "answer": answer["answer"], "content": detail, "isError": True},
         )
-        run.trace.status = "error"
-        run.trace.record(Step(source="system", error=f"[grading] {detail}"))
+        trace.status = "error"
+        trace.record(Step(source="system", error=f"[grading] {detail}"))
         return
-    run.trace.grade = grade
-    run.trace.record(
+    trace.grade = grade
+    trace.record(
         Step(
             source="task",
             task_call=TaskCall(phase="evaluate", name=task_id, arguments=answer, result=evaluation),
@@ -288,49 +305,16 @@ async def _grade(run: Run, session: EnvironmentSession, task_id: str, *, best_ef
             error=grade.content if grade.is_error else None,
         )
     )
-    if run.trace.status is None:
-        run.trace.status = "completed"
+    if trace.status is None:
+        trace.status = "completed"
 
 
 async def _verify(
-    run: Run,
-    session: EnvironmentSession,
-    task: Task,
-    actor_result: dict[str, Any],
+    trace: Trace, session: EnvironmentSession, task: Task, actor_result: dict[str, Any]
 ) -> None:
     """Run an agent-less verifier task and make its evaluation authoritative."""
-    started_at = now_iso()
-    started = await session.start_task(task.id, task.args)
-    run.trace.record(
-        Step(
-            source="task",
-            task_call=TaskCall(
-                phase="setup",
-                name=task.id,
-                arguments=task.args,
-                result=started,
-            ),
-            started_at=started_at,
-        )
-    )
-
-    answer = {"answer": actor_result}
-    started_at = now_iso()
-    evaluation = await session.grade(answer)
-    grade = run.trace.grade = parse_grade(evaluation)
-    run.trace.record(
-        Step(
-            source="task",
-            task_call=TaskCall(
-                phase="evaluate",
-                name=task.id,
-                arguments=answer,
-                result=evaluation,
-            ),
-            started_at=started_at,
-            error=grade.content if grade.is_error else None,
-        )
-    )
+    await _start(session, task.id, task.args, trace)
+    await _grade(trace, session, task.id, {"answer": actor_result}, best_effort=False)
 
 
 async def rollout(
@@ -465,7 +449,7 @@ async def rollout(
                     if shared_verifier:
                         assert verifier is not None
                         _phase = "verifying"
-                        await _verify(live, actor_session, verifier, actor_result)
+                        await _verify(live.trace, actor_session, verifier, actor_result)
                         _phase = "cleanup"
                         return
 
@@ -490,7 +474,7 @@ async def rollout(
                     if archive is not None:
                         await verifier_addr.restore_session(verifier_session.session_id, archive)
                     _phase = "verifying"
-                    await _verify(live, verifier_session, verifier, actor_result)
+                    await _verify(live.trace, verifier_session, verifier, actor_result)
                 _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
