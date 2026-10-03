@@ -15,10 +15,11 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.environment.server import DEFAULT_PORT, default_serve_command
+from hud.environment.session import SESSION_STATE_ROOT, session_state_dir
 from hud.utils.process import finish_output, stream_output
 
 from .compose import SECCOMP_PROFILE, ComposeConfig
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -31,7 +32,6 @@ logger = logging.getLogger("hud.runtime")
 
 _MODAL_COMPOSE_CPU = 4.0
 _MODAL_COMPOSE_MEMORY_MB = 8192
-_SESSION_ROOT = "/runtime/sessions"
 _SESSION_ARCHIVE = "/runtime/session.tar.gz"
 
 
@@ -65,10 +65,9 @@ class ModalEndpoint(Runtime):
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
-        validate_session_id(session_id)
+        session = str(session_state_dir(session_id))
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            session = f"{_SESSION_ROOT}/{session_id}"
             if self.compose is None:
                 root = session
                 command = ""
@@ -97,8 +96,7 @@ class ModalEndpoint(Runtime):
             yield destination
 
     async def restore_session(self, session_id: str, source: Path) -> None:
-        validate_session_id(session_id)
-        session = f"{_SESSION_ROOT}/{session_id}"
+        session = str(session_state_dir(session_id))
         await self.sandbox.filesystem.copy_from_local.aio(source, _SESSION_ARCHIVE)
         if self.compose is None:
             command = (
@@ -266,9 +264,9 @@ class ModalRuntime:
             else (
                 "sh",
                 "-c",
-                "mkdir -p /runtime/sessions /media/hud && "
+                f"mkdir -p {SESSION_STATE_ROOT} /media/hud && "
                 "rm -rf /media/hud/sessions && "
-                "ln -s /runtime/sessions /media/hud/sessions && "
+                f"ln -s {SESSION_STATE_ROOT} /media/hud/sessions && "
                 'exec "$@"',
                 "hud-runtime",
                 *self.command,
