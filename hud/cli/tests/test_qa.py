@@ -84,7 +84,7 @@ def test_qa_lists_check_title_and_key(args: list[str]) -> None:
     result = _invoke(platform, args)
 
     assert result.exit_code == 0
-    assert result.output.strip() == f"Failure Analysis\t{_CHECK}"
+    assert result.output.strip() == f"Failure Analysis\t{_CHECK}\tWhy did the agent fail?"
     platform.get.assert_called_once_with("/qa/checks")
 
 
@@ -179,6 +179,20 @@ def test_qa_run_does_not_poll_settled_results() -> None:
 
     assert result.exit_code == 0
     platform.get.assert_not_called()
+
+
+def test_qa_run_prints_one_line_per_result() -> None:
+    row = _result("failed")
+    row["result"] = {**row["result"], "summary": "The grader missed it.\n\n  The answer was right."}
+    platform = MagicMock()
+    platform.post.return_value = {"results": [row]}
+
+    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
+
+    assert result.exit_code == 1
+    assert result.output.splitlines() == [
+        f"{_TRACE_ID}\t{_CHECK}\tfailed\tThe grader missed it. The answer was right."
+    ]
 
 
 def test_qa_run_wait_ignores_unrequested_checks() -> None:

@@ -213,14 +213,14 @@ def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
 
 
 def _print_results(results: list[dict[str, Any]]) -> None:
-    """One tab-separated line per result: trace, check, verdict, summary."""
+    """One tab-separated line per result: trace, check, verdict, summary on one line."""
     if not results:
         typer.echo("No QA results found.")
         return
     for result in results:
         view = presentation_for_result(result)
         verdict = result["status"] if view.kind == "pending" else view.tag
-        summary = view.summary or result.get("note")
+        summary = " ".join(str(view.summary or result.get("note") or "").split())
         line = f"{result['subject_trace_id']}\t{result['check_key']}\t{verdict}"
         typer.echo(f"{line}\t{summary}" if summary else line)
 
@@ -261,7 +261,7 @@ def list_command(
         typer.echo("No QA checks are available.")
     else:
         for check in checks:
-            typer.echo(f"{check['title']}\t{check['key']}")
+            typer.echo(f"{check['title']}\t{check['key']}\t{check['question']}")
     return response
 
 
