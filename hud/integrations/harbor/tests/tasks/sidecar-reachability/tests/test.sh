@@ -23,7 +23,7 @@ if grep -q "Directory listing" /app/sidecar.html 2>/dev/null \
   && [ "$(id -u)" = "1001" ] \
   && [ "$(stat -c %u /home/verifier/owned)" = "1001" ] \
   && [ "$PWD" = "/home/verifier" ] \
-  && [ "$HOME" = "/home/verifier" ] \
+  && [ "$HOME" = "/home/verifier/dotfiles" ] \
   && [ "$VERIFIER_PRECEDENCE" = "verifier-image" ]; then
   echo 1 > /logs/verifier/reward.txt
 else
