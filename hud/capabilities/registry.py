@@ -30,15 +30,6 @@ async def open_client(capability: Capability) -> AsyncGenerator[CapabilityClient
 
     Connecting retries while the capability's server comes up.
     """
-    client = await _connect(capability)
-    try:
-        yield client
-    finally:
-        with contextlib.suppress(Exception):
-            await client.close()
-
-
-async def _connect(capability: Capability) -> CapabilityClient:
     client_cls = _CLIENTS.get(capability.protocol)
     if client_cls is None and capability.protocol.split("/", 1)[0] == "openpi":
         # RobotClient needs the robot extra, so it joins the registry on first open.
@@ -49,7 +40,14 @@ async def _connect(capability: Capability) -> CapabilityClient:
         raise ValueError(f"no client speaks {capability.protocol!r}")
     for attempt in range(_CONNECT_ATTEMPTS - 1):
         try:
-            return await client_cls.connect(capability)
+            client = await client_cls.connect(capability)
+            break
         except ConnectionError:
             await asyncio.sleep(_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
-    return await client_cls.connect(capability)
+    else:
+        client = await client_cls.connect(capability)
+    try:
+        yield client
+    finally:
+        with contextlib.suppress(Exception):
+            await client.close()
