@@ -291,15 +291,15 @@ experimental [Harbor integration](/v6/experimental/harbor).
 ```bash
 hud qa list
 hud qa
-hud qa run <trace-id> --check failure_analysis
-hud qa run <trace-id> <trace-id> -c reward_hacking -c false_positive
+hud qa run failure_analysis <trace-id>
+hud qa run reward_hacking,false_positive <trace-id> <trace-id>
 hud qa results <trace-id>
 ```
 
 `hud qa list` lists HUD's QA checks (title and key). `hud qa` is an alias for
 `list`.
 
-`hud qa run` runs one or more checks (`--check`, repeatable) on up to 100
+`hud qa run` runs one check, or several separated by commas, on up to 100
 completed traces as a single run, then waits until every check has finished on
 every trace. Where a check's current result on a trace is completed or still
 running, it is kept rather than run again; pass `--overwrite` to run it anyway.

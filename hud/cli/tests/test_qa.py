@@ -98,10 +98,11 @@ def test_qa_list_quiet_prints_keys() -> None:
     assert result.output.split() == [_CHECK, _OTHER_CHECK]
 
 
-def test_qa_run_requires_a_check() -> None:
+@pytest.mark.parametrize("args", [[_CHECK], [" , ", _TRACE_ID]])
+def test_qa_run_requires_checks_and_traces(args: list[str]) -> None:
     platform = MagicMock()
 
-    result = _invoke(platform, ["qa", "run", _TRACE_ID])
+    result = _invoke(platform, ["qa", "run", *args])
 
     assert result.exit_code == 2
     platform.post.assert_not_called()
@@ -110,13 +111,13 @@ def test_qa_run_requires_a_check() -> None:
 def test_qa_run_rejects_non_uuid_traces() -> None:
     platform = MagicMock()
 
-    result = _invoke(platform, ["qa", "run", "not-a-trace", "--check", _CHECK])
+    result = _invoke(platform, ["qa", "run", _CHECK, "not-a-trace"])
 
     assert result.exit_code == 2
     platform.post.assert_not_called()
 
 
-def test_qa_run_no_wait_posts_one_run() -> None:
+def test_qa_run_no_wait_posts_comma_separated_checks_as_one_run() -> None:
     platform = MagicMock()
     platform.post.return_value = {
         "results": [_row("queued"), _row("queued", check_key=_OTHER_CHECK)]
@@ -124,7 +125,14 @@ def test_qa_run_no_wait_posts_one_run() -> None:
 
     result = _invoke(
         platform,
-        ["qa", "run", _TRACE_ID.upper(), "-c", _CHECK, "-c", _OTHER_CHECK, "--no-wait", "--json"],
+        [
+            "qa",
+            "run",
+            f"{_CHECK}, {_OTHER_CHECK},{_CHECK}",
+            _TRACE_ID.upper(),
+            "--no-wait",
+            "--json",
+        ],
     )
 
     assert result.exit_code == 0
@@ -140,7 +148,7 @@ def test_qa_run_forwards_overwrite() -> None:
     platform = MagicMock()
     platform.post.return_value = {"results": [_result()]}
 
-    result = _invoke(platform, ["qa", "run", _TRACE_ID, "-c", _CHECK, "--overwrite"])
+    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID, "--overwrite"])
 
     assert result.exit_code == 0
     assert platform.post.call_args.kwargs["json"]["overwrite"] is True
@@ -156,7 +164,7 @@ def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
     ]
 
     with patch("hud.cli.qa.time.sleep"):
-        result = _invoke(platform, ["qa", "run", _TRACE_ID, "--check", _CHECK])
+        result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == exit_code
     assert f"{_TRACE_ID}\t{_CHECK}\t{verdict}" in result.output
@@ -167,7 +175,7 @@ def test_qa_run_does_not_poll_settled_results() -> None:
     platform = MagicMock()
     platform.post.return_value = {"results": [_result("passed")]}
 
-    result = _invoke(platform, ["qa", "run", _TRACE_ID, "--check", _CHECK])
+    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == 0
     platform.get.assert_not_called()
@@ -181,7 +189,7 @@ def test_qa_run_wait_ignores_unrequested_checks() -> None:
     }
 
     with patch("hud.cli.qa.time.sleep"):
-        result = _invoke(platform, ["qa", "run", _TRACE_ID, "--check", _CHECK])
+        result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == 0
     assert _OTHER_CHECK not in result.output
@@ -193,7 +201,7 @@ def test_qa_run_errored_check_fails() -> None:
         "results": [_row("error", error="The QA check produced an invalid result.")]
     }
 
-    result = _invoke(platform, ["qa", "run", _TRACE_ID, "--check", _CHECK])
+    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == 1
     assert "The QA check produced an invalid result." in result.output
@@ -212,7 +220,7 @@ def test_qa_run_times_out() -> None:
         patch("hud.cli.qa.time.sleep", side_effect=sleep),
         patch("hud.cli.qa.time.monotonic", side_effect=lambda: clock[0]),
     ):
-        result = _invoke(platform, ["qa", "run", _TRACE_ID, "--check", _CHECK, "--timeout", "1"])
+        result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID, "--timeout", "1"])
 
     assert result.exit_code != 0
     assert "Timed out" in result.output

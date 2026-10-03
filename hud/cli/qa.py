@@ -14,6 +14,7 @@ from rich.text import Text
 
 from hud.cli import (
     CLI,
+    CliError,
     Result,
     map_exception,
 )
@@ -278,7 +279,7 @@ def qa_command(
     [not dim]Examples:
         hud qa
         hud qa list --json
-        hud qa run <trace-id> --check failure_analysis[/not dim]
+        hud qa run failure_analysis <trace-id>[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return None
@@ -287,15 +288,13 @@ def qa_command(
 
 @qa_app.command("run")
 def run_checks(
+    checks: str = typer.Argument(
+        ...,
+        help="QA check key from `hud qa list`, or several separated by commas.",
+    ),
     trace_ids: list[UUID] = typer.Argument(  # noqa: B008
         ...,
         help="One or more completed evaluation trace UUIDs (at most 100).",
-    ),
-    check_keys: list[str] = typer.Option(  # noqa: B008
-        ...,
-        "--check",
-        "-c",
-        help="QA check key from `hud qa list`. Repeat to run several checks.",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -320,10 +319,17 @@ def run_checks(
     """Run QA checks on completed evaluation traces as one run.
 
     [not dim]Examples:
-        hud qa run <trace-id> --check failure_analysis
-        hud qa run <trace-id> <trace-id> -c reward_hacking -c false_positive --no-wait --json
-        hud qa run <trace-id> -c failure_analysis --dry-run --json[/not dim]
+        hud qa run failure_analysis <trace-id>
+        hud qa run reward_hacking,false_positive <trace-id> <trace-id> --no-wait --json
+        hud qa run failure_analysis <trace-id> --dry-run --json[/not dim]
     """
+    check_keys = list(dict.fromkeys(key.strip() for key in checks.split(",") if key.strip()))
+    if not check_keys:
+        raise CliError(
+            error="usage",
+            message="Name at least one QA check; `hud qa list` shows them.",
+            input={"checks": checks},
+        )
     traces = [str(trace_id) for trace_id in trace_ids]
     if dry_run:
         typer.echo(f"--dry-run: would run {len(check_keys)} check(s) on {len(traces)} trace(s)")
