@@ -17,7 +17,6 @@ import statistics
 import time
 
 from daytona import AsyncDaytona, Image
-from hud.clients import connect
 
 import pool
 from env import fix_calc
@@ -30,8 +29,8 @@ async def one(provider) -> tuple[float | None, str]:
     try:
         async with provider(fix_calc(variant=0)) as rt:
             elapsed = time.perf_counter() - t0
-            async with connect(rt) as client:
-                assert client.manifest is not None
+            async with rt.connect():
+                pass
             return elapsed, ""
     except Exception as exc:
         return None, f"{type(exc).__name__}: {exc}"

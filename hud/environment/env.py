@@ -109,7 +109,7 @@ def _parameter_signature(func: types.FunctionType) -> inspect.Signature:
 class TaskTemplate(Generic[P]):
     """A registered ``@env.template``: calling it with args binds a runnable ``Task``.
 
-    ``TaskRunner`` drives its async-generator ``func`` when the env is served.
+    A ``Session`` drives its async-generator ``func`` when the env is served.
     """
 
     def __init__(

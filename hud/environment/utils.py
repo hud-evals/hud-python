@@ -20,6 +20,16 @@ class InvalidFrameError(ValueError):
     """A control-channel frame is not a JSON object."""
 
 
+class HudProtocolError(RuntimeError):
+    """A JSON-RPC error: the env answers a request with one, and a client raises one when
+    the env's reply is an error."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(f"hud rpc error {code}: {message}")
+        self.code = code
+        self.message = message
+
+
 class FrameTooLargeError(ValueError):
     """An encoded JSON-RPC frame exceeds its channel's byte limit."""
 
