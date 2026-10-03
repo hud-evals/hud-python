@@ -135,7 +135,30 @@ def resolve_images(
 
     if source.config.verifier.separate:
         verifier_root = source.path / "tests"
-        docker("build", "--tag", verifier_image, str(verifier_root), timeout=timeout)
+        # The verifier grades what the task produced, so it builds for the task image's platform.
+        platform = docker(
+            "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", source.base_image
+        )
+        try:
+            docker(
+                "build",
+                "--platform",
+                platform,
+                "--tag",
+                verifier_image,
+                str(verifier_root),
+                timeout=timeout,
+            )
+        except ImageResolutionError as error:
+            host = docker("version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
+            if host.endswith("/amd64"):
+                raise
+            raise ImageResolutionError(
+                f"{error}\nThe docker server builds for {host}. Tasks authored for linux/amd64 "
+                "often pin dependencies that publish no wheels for other architectures; set "
+                "DOCKER_DEFAULT_PLATFORM=linux/amd64 to adapt the task for one architecture "
+                "throughout."
+            ) from error
         verifier = inspect_image(verifier_image)
     else:
         verifier = main
