@@ -190,7 +190,7 @@ class VideoStreamer:
     in the rollout's trace context so encoder threads can attribute their spans.
     """
 
-    def __init__(self, *, fps: int, trace_id: str | None) -> None:
+    def __init__(self, *, fps: int, trace_id: str | None, max_queued_frames: int = 16) -> None:
         try:
             importlib.import_module("av")
         except Exception as exc:
@@ -199,6 +199,7 @@ class VideoStreamer:
             ) from exc
         self._fps = fps
         self._trace_id = trace_id
+        self._max_queued_frames = max_queued_frames
         self._encoders: dict[str, SegmentEncoder] = {}
 
     def record(self, obs: dict[str, Any]) -> None:
@@ -240,7 +241,9 @@ class VideoStreamer:
                 },
             ).emit(trace_id=trace_id)
 
-        return SegmentEncoder(camera, on_segment, fps=fps)
+        return SegmentEncoder(
+            camera, on_segment, fps=fps, max_queued_frames=self._max_queued_frames
+        )
 
 
 def _to_rgb24(arr: NDArray[Any]) -> NDArray[np.uint8] | None:

@@ -22,6 +22,10 @@ whatever the contract stores (quaternion, axis-angle, or euler)::
 A call steps until the arm reaches the target or stops moving, then returns
 that pose. ``timeout`` is only a safety cap. Single-env sims only: a tool call
 claims the sole slot (no slot token).
+
+Every tick of every call is also streamed to the rollout's trace as one H.264
+video per returned camera, so the trace viewer plays the whole episode, not only
+the frames the model is shown. The env process needs ``HUD_API_KEY`` to upload.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from hud.capabilities import Capability
+from hud.capabilities.mcp import get_mcp_trace_id
 from hud.capabilities.robot import RobotClient
 from hud.environment.robot.orientation import (
     Orientation,
@@ -52,6 +57,8 @@ from hud.environment.robot.orientation import (
     slerp,
     xyzw_to_euler,
 )
+from hud.telemetry.exporter import flush
+from hud.telemetry.robot import VideoStreamer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -73,6 +80,13 @@ IMAGE_TYPES = frozenset({"rgb", "bgr", "gray", "depth"})
 #: Safety cap on one call. A full-range move at the default speed lasts 10 s;
 #: 60 s is well above that, including the 10.1 s move that used to be rejected.
 DEFAULT_TIMEOUT_S = 60.0
+
+#: Frames the video encoder may queue per camera. A sim steps faster than real time, so a
+#: move bursts frames the encoder thread has yet to catch up on.
+_VIDEO_QUEUE_FRAMES = 256
+
+#: Per-camera cap on streamed video frames (4 min at 20 Hz); later ticks are not recorded.
+_MAX_VIDEO_FRAMES = 5000
 
 #: Fraction of a full turn an absolute orientation travels per second, times ``speed``.
 _FULL_TURN = 2.0 * math.pi
@@ -172,6 +186,8 @@ class DirectControl:
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
         self._serving: asyncio.Task[None] | None = None
         self._capability: Capability | None = None
+        self._video: VideoStreamer | None = None  # this episode's camera video
+        self._video_frames = 0
 
     def attach(self, endpoint: RobotEndpoint) -> DirectControl:
         """Register with a robotics endpoint, which owns serving and episode lifecycle."""
@@ -256,6 +272,7 @@ class DirectControl:
         return self._capability
 
     async def stop(self) -> None:
+        await self.end_episode()
         if self._serving is None:
             return
         self._serving.cancel()
@@ -264,9 +281,13 @@ class DirectControl:
         self._serving = None
         self._capability = None
 
-    def reset(self) -> None:
-        """Clear the last absolute target before a robotics endpoint starts an episode."""
+    async def end_episode(self) -> None:
+        """Clear the last absolute target and close the episode's video, flushing its tail."""
         self._command = None
+        video, self._video, self._video_frames = self._video, None, 0
+        if video is not None:
+            await asyncio.to_thread(video.finalize)
+            await asyncio.to_thread(flush)
 
     # ── tools ──────────────────────────────────────────────────────────────
 
@@ -366,6 +387,14 @@ class DirectControl:
             client = await RobotClient.connect(self._robot)
             try:
                 obs = await client.get_observation()
+                # Stream the episode's frames to the rollout's trace, from its opening scene on.
+                if self._video is None and (trace_id := get_mcp_trace_id()) is not None:
+                    self._video = VideoStreamer(
+                        fps=round(self._rate),
+                        trace_id=trace_id,
+                        max_queued_frames=_VIDEO_QUEUE_FRAMES,
+                    )
+                    self._record(obs)
                 # Plan: turn the named targets into per-tick action rows (none if already over).
                 if obs["terminated"]:
                     rows = np.zeros((0, len(self._names)))
@@ -393,6 +422,7 @@ class DirectControl:
                     await client.send_action(row)
                     obs = await client.get_observation()
                     played += 1
+                    self._record(obs)
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = np.asarray(row, dtype=np.float64).copy()
@@ -435,6 +465,12 @@ class DirectControl:
             timed_out=timed_out,
             goal=goal if self._absolute else None,
         )
+
+    def _record(self, obs: dict[str, Any]) -> None:
+        """Stream the cameras the model sees to the trace video, up to the frame cap."""
+        if self._video is not None and self._video_frames < _MAX_VIDEO_FRAMES:
+            self._video.record({"data": {name: obs["data"][name] for name in self._cameras}})
+            self._video_frames += 1
 
     def _plan(
         self, values: list[DimValue], obs: dict[str, Any]
