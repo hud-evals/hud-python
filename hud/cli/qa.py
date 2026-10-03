@@ -9,7 +9,10 @@ from typing import Any, cast
 from uuid import UUID  # noqa: TC003 - typer resolves argument annotations at runtime
 
 import typer
+from rich.console import Group, RenderableType
+from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 from hud.cli import (
@@ -20,7 +23,7 @@ from hud.cli import (
 )
 from hud.settings import settings
 from hud.utils.exceptions import HudException, HudTimeoutError
-from hud.utils.hud_console import DIM, GOLD, HUDConsole
+from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
@@ -38,6 +41,8 @@ _CAUSE = {
     "eval": "Evaluation failure",
     "platform": "Platform failure",
 }
+_VERDICT_STYLES = {"passed": "green", "failed": "red", "unknown": "yellow"}
+_SEVERITY_STYLES = {"error": "red", "warning": "yellow"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +50,9 @@ class QaFinding:
     title: str
     description: str
     fault: str | None = None
+    severity: str | None = None
+    action: str | None = None
+    evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -85,11 +93,19 @@ def _findings(items: list[Any], *title_keys: str) -> tuple[QaFinding, ...]:
             continue
         description = item.get("description")
         fault = item.get("fault")
+        severity = item.get("severity")
+        action = item.get("recommended_action")
+        evidence = item.get("evidence_refs")
         findings.append(
             QaFinding(
                 title=title,
                 description=description.strip() if isinstance(description, str) else "",
                 fault=fault if isinstance(fault, str) else None,
+                severity=severity if isinstance(severity, str) else None,
+                action=action.strip() if isinstance(action, str) and action.strip() else None,
+                evidence=tuple(ref for ref in evidence if isinstance(ref, str))
+                if isinstance(evidence, list)
+                else (),
             )
         )
     return tuple(findings)
@@ -105,7 +121,10 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
     summary = "\n\n".join(dict.fromkeys(parts)) or None
 
     confidence: str | None = None
+    metadata = parsed.get("metadata")
     raw_confidence = parsed.get("confidence")
+    if raw_confidence is None and isinstance(metadata, dict):
+        raw_confidence = cast("dict[str, Any]", metadata).get("confidence")
     if isinstance(raw_confidence, str) and raw_confidence.strip():
         lowered = raw_confidence.strip().lower()
         confidence = (
@@ -212,17 +231,113 @@ def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
     return replace(view, tag=str(verdict)) if verdict else view
 
 
+def _verdict(result: dict[str, Any], view: QaPresentation) -> Text:
+    if view.kind == "pending":
+        return Text(str(result["status"]), style="dim")
+    return Text(view.tag, style=_VERDICT_STYLES.get(view.tag, "yellow"))
+
+
+def _headline(text: str | None) -> Markdown | str:
+    """The first non-empty line of a markdown summary."""
+    line = next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
+    return Markdown(line) if line else "-"
+
+
 def _print_results(results: list[dict[str, Any]]) -> None:
-    """One tab-separated line per result: trace, check, verdict, summary on one line."""
+    """One table row per result: trace, check, verdict, and the summary's first line."""
     if not results:
-        typer.echo("No QA results found.")
+        hud_console.stdout.print("[yellow]No QA results found.[/yellow]")
         return
+    hud_console.stdout.print(Panel.fit("[bold cyan]QA Results[/bold cyan]", border_style="cyan"))
+    table = Table()
+    table.add_column("Trace", style="blue", no_wrap=True)
+    table.add_column("Check", style="cyan", no_wrap=True)
+    table.add_column("Verdict", no_wrap=True)
+    table.add_column("Summary")
     for result in results:
         view = presentation_for_result(result)
-        verdict = result["status"] if view.kind == "pending" else view.tag
-        summary = " ".join(str(view.summary or result.get("note") or "").split())
-        line = f"{result['subject_trace_id']}\t{result['check_key']}\t{verdict}"
-        typer.echo(f"{line}\t{summary}" if summary else line)
+        table.add_row(
+            str(result["subject_trace_id"]),
+            str(result["check_key"]),
+            _verdict(result, view),
+            _headline(view.summary or result.get("note")),
+        )
+    hud_console.stdout.print(table)
+    hud_console.stdout.print(
+        Text("\nTip: hud qa results <trace-id> for summaries and findings", style="dim")
+    )
+
+
+def _finding_panel(index: int, finding: QaFinding) -> Panel:
+    body: list[RenderableType] = []
+    if finding.description:
+        body.append(Markdown(finding.description))
+    if finding.action:
+        body.append(Text.assemble(("Action: ", "bold"), finding.action))
+    details = [
+        f"{label}: {value}"
+        for label, value in (("severity", finding.severity), ("fault", finding.fault))
+        if value
+    ]
+    if finding.evidence:
+        details.append(f"evidence: {', '.join(finding.evidence)}")
+    if details:
+        body.append(Text("\n".join(details), style="dim"))
+    return Panel(
+        Group(*body) if body else Text("-", style="dim"),
+        title=Text(f"{index}. {finding.title}", style="bold"),
+        title_align="left",
+        border_style=_SEVERITY_STYLES.get(finding.severity or "", "dim"),
+        padding=(0, 1),
+    )
+
+
+def _print_result(result: dict[str, Any], web_url: str) -> None:
+    """One result in full: verdict, details, markdown summary, findings, and links."""
+    subject_id = str(result["subject_trace_id"])
+    view = presentation_for_result(result)
+    hud_console.stdout.print(
+        Panel.fit(
+            Text.assemble((str(result["check_key"]), "bold cyan"), " ", (subject_id, "dim")),
+            border_style="cyan",
+        )
+    )
+    if view.kind == "pending":
+        hud_console.status_item("status", str(result["status"]), status="info", stderr=False)
+    else:
+        status = {"passed": "success", "failed": "error"}.get(view.tag, "warning")
+        hud_console.status_item("verdict", view.tag, status=status, stderr=False)
+
+    details: dict[str, str | int | float] = {}
+    if view.answer:
+        details[view.label.lower() if view.kind == "boolean" else "cause"] = view.answer
+    if result["source"] != "analysis":
+        details["source"] = str(result["source"])
+    if view.confidence:
+        details["confidence"] = view.confidence
+    if result.get("note"):
+        details["note"] = str(result["note"])
+    if details:
+        hud_console.key_value_table(details, stderr=False)
+
+    if view.summary:
+        hud_console.stdout.print(
+            Panel(
+                Markdown(view.summary),
+                title=Text("Summary", style="bold"),
+                title_align="left",
+                border_style="dim",
+                padding=(0, 1),
+            )
+        )
+    for index, finding in enumerate(view.findings, start=1):
+        hud_console.stdout.print(_finding_panel(index, finding))
+
+    if result.get("analysis_trace_id"):
+        hud_console.stdout.print(
+            Text(f"Analysis: {web_url}/trace/{result['analysis_trace_id']}", style="dim")
+        )
+    hud_console.stdout.print(Text(f"View: {web_url}/trace/{subject_id}", style="dim"))
 
 
 def _results(platform: PlatformClient, trace_ids: list[str]) -> list[dict[str, Any]]:
@@ -257,11 +372,22 @@ def list_command(
     if quiet:
         for check in checks:
             typer.echo(check["key"])
-    elif not checks:
-        typer.echo("No QA checks are available.")
-    else:
-        for check in checks:
-            typer.echo(f"{check['title']}\t{check['key']}\t{check['question']}")
+        return response
+    if not checks:
+        hud_console.stdout.print("[yellow]No QA checks are available.[/yellow]")
+        return response
+
+    hud_console.stdout.print(Panel.fit("[bold cyan]QA Checks[/bold cyan]", border_style="cyan"))
+    table = Table()
+    table.add_column("Key", style="blue", no_wrap=True)
+    table.add_column("Title", style="cyan")
+    table.add_column("Question")
+    for check in checks:
+        table.add_row(check["key"], check["title"], check["question"])
+    hud_console.stdout.print(table)
+    hud_console.stdout.print(
+        Text("\nTip: hud qa run <check>[,<check>...] <trace-id>... to run checks", style="dim")
+    )
     return response
 
 
@@ -387,56 +513,12 @@ def list_results(
     """Inspect the QA result in effect for every check on the given traces."""
     results = _results(PlatformClient.from_settings(), [str(trace_id) for trace_id in trace_ids])
     if not results:
-        typer.echo("No QA results found.")
+        hud_console.stdout.print("[yellow]No QA results found.[/yellow]")
         return results
 
     web_url = settings.hud_web_url.rstrip("/")
-    for result in results:
-        subject_id = str(result["subject_trace_id"])
-        view = presentation_for_result(result)
-        hud_console.header(str(result["check_key"]), icon="", stderr=False)
-        if view.kind == "pending":
-            hud_console.status_item("status", str(result["status"]), status="info", stderr=False)
-        else:
-            status = {"passed": "success", "failed": "error"}.get(view.tag, "info")
-            hud_console.status_item("verdict", view.tag, status=status, stderr=False)
-            if view.kind == "boolean" and view.answer:
-                hud_console.dim_info(view.label.lower(), view.answer, stderr=False)
-            elif view.answer:
-                hud_console.dim_info("cause", view.answer, stderr=False)
-        hud_console.dim_info("trace", subject_id, stderr=False)
-        if result["source"] != "analysis":
-            hud_console.dim_info("source", str(result["source"]), stderr=False)
-        if view.confidence:
-            hud_console.dim_info("confidence", view.confidence, stderr=False)
-        if result.get("note"):
-            hud_console.dim_info("note", str(result["note"]), stderr=False)
-        if view.summary:
-            hud_console.stdout.print(
-                Panel(
-                    Text(view.summary),
-                    title=Text("Summary", style="bold"),
-                    border_style=GOLD,
-                    padding=(0, 1),
-                )
-            )
-        for index, finding in enumerate(view.findings, start=1):
-            body = Text(finding.description)
-            if finding.fault:
-                if finding.description:
-                    body.append("\n\n")
-                body.append(f"fault: {finding.fault}", style=DIM)
-            hud_console.stdout.print(
-                Panel(
-                    body,
-                    title=Text(f"{index}. {finding.title}", style="bold"),
-                    border_style=GOLD,
-                    padding=(0, 1),
-                )
-            )
-        if result.get("analysis_trace_id"):
-            hud_console.dim_info(
-                "analysis", f"{web_url}/trace/{result['analysis_trace_id']}", stderr=False
-            )
-        hud_console.link(f"{web_url}/trace/{subject_id}", stderr=False)
+    for index, result in enumerate(results):
+        if index:
+            hud_console.stdout.print()
+        _print_result(result, web_url)
     return results

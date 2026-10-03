@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -73,18 +74,24 @@ def _result(verdict: str = "passed", *, check_key: str = _CHECK) -> dict[str, An
 
 def _invoke(platform: MagicMock, args: list[str]):
     with patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform):
-        return runner.invoke(app, args)
+        return runner.invoke(app, args, env={"TERM": "xterm", "COLUMNS": "200"})
+
+
+def _table_row(output: str, *cells: str) -> str:
+    """The table line holding every given cell."""
+    return next(line for line in output.splitlines() if all(cell in line for cell in cells))
 
 
 @pytest.mark.parametrize("args", [["qa"], ["qa", "list"]])
-def test_qa_lists_check_title_and_key(args: list[str]) -> None:
+def test_qa_lists_checks_as_a_table(args: list[str]) -> None:
     platform = MagicMock()
     platform.get.return_value = {"checks": [_check()]}
 
     result = _invoke(platform, args)
 
     assert result.exit_code == 0
-    assert result.output.strip() == f"Failure Analysis\t{_CHECK}\tWhy did the agent fail?"
+    assert "QA Checks" in result.output
+    assert _table_row(result.output, _CHECK, "Failure Analysis", "Why did the agent fail?")
     platform.get.assert_called_once_with("/qa/checks")
 
 
@@ -167,7 +174,7 @@ def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
         result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == exit_code
-    assert f"{_TRACE_ID}\t{_CHECK}\t{verdict}" in result.output
+    assert _table_row(result.output, _TRACE_ID, _CHECK, verdict)
     platform.get.assert_called_with("/qa/results", params={"trace_ids": [_TRACE_ID]})
 
 
@@ -181,18 +188,21 @@ def test_qa_run_does_not_poll_settled_results() -> None:
     platform.get.assert_not_called()
 
 
-def test_qa_run_prints_one_line_per_result() -> None:
+def test_qa_run_table_shows_the_summary_headline_as_markdown() -> None:
     row = _result("failed")
-    row["result"] = {**row["result"], "summary": "The grader missed it.\n\n  The answer was right."}
+    row["result"] = {
+        **row["result"],
+        "summary": "**Verdict:** The grader missed it.\n\n- The answer was right.",
+    }
     platform = MagicMock()
     platform.post.return_value = {"results": [row]}
 
     result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == 1
-    assert result.output.splitlines() == [
-        f"{_TRACE_ID}\t{_CHECK}\tfailed\tThe grader missed it. The answer was right."
-    ]
+    assert _table_row(result.output, _TRACE_ID, _CHECK, "failed", "Verdict: The grader missed it.")
+    assert "**" not in result.output
+    assert "The answer was right." not in result.output
 
 
 def test_qa_run_wait_ignores_unrequested_checks() -> None:
@@ -260,9 +270,17 @@ def test_qa_results_tui_renders_findings_and_trace_link() -> None:
                 result={
                     "schema_version": "qa_agent_result.v1",
                     "verdict": "failed",
-                    "summary": "The agent never wrote /app/[regex].txt.",
-                    "findings": [{"summary": "Required [/output] file was never created"}],
-                    "metadata": {},
+                    "summary": "**Verdict:** The agent never wrote /app/[regex].txt.",
+                    "findings": [
+                        {
+                            "finding_type": "missing_output",
+                            "severity": "error",
+                            "summary": "Required [/output] file was never created",
+                            "recommended_action": "Write the regex to /app/regex.txt.",
+                            "evidence_refs": ["trajectory.json"],
+                        }
+                    ],
+                    "metadata": {"confidence": 0.9},
                 },
             )
         ]
@@ -273,10 +291,15 @@ def test_qa_results_tui_renders_findings_and_trace_link() -> None:
     assert result.exit_code == 0
     assert _CHECK in result.output
     assert "verdict: failed" in result.output
-    assert "The agent never wrote /app/[regex].txt." in result.output
-    assert "Required [/output] file was never created" in result.output
-    assert f"https://hud.ai/trace/{_TRACE_ID}" in result.output
-    assert "analysis:" not in result.output
+    assert re.search(r"confidence\s+90%", result.output)
+    assert "Verdict: The agent never wrote /app/[regex].txt." in result.output
+    assert "**" not in result.output
+    assert "1. Required [/output] file was never created" in result.output
+    assert "Action: Write the regex to /app/regex.txt." in result.output
+    assert "severity: error" in result.output
+    assert "evidence: trajectory.json" in result.output
+    assert f"View: https://hud.ai/trace/{_TRACE_ID}" in result.output
+    assert "Analysis:" not in result.output
 
 
 def test_qa_results_links_the_analysis_trace_when_returned() -> None:
@@ -368,7 +391,7 @@ def test_qa_results_legacy_boolean_omits_findings() -> None:
 
     assert result.exit_code == 0
     assert "verdict: passed" in result.output
-    assert "false negative no" in result.output.lower()
+    assert re.search(r"false negative\s+no\b", result.output.lower())
     assert "1. " not in result.output
     assert "The zero reward matches the missing file." in result.output
 
