@@ -16,6 +16,7 @@ from hud.utils.deprecation import moved_to, resolve_retired
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
+from .session import session_state_dir
 from .workspace import Mount, Workspace
 
 
@@ -94,6 +95,7 @@ __all__ = [
     "Mount",
     "Workspace",
     "load_environment",
+    "session_state_dir",
 ]
 
 _RETIRED = {
