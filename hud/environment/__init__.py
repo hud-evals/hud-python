@@ -24,6 +24,7 @@ from typing import Any
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
+from .session import session_state_dir
 from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, Workspace
 
 
@@ -105,4 +106,5 @@ __all__ = [
     "Mount",
     "Workspace",
     "load_environment",
+    "session_state_dir",
 ]
