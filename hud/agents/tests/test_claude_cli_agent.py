@@ -21,11 +21,12 @@ from unittest.mock import AsyncMock, Mock
 
 import fastmcp
 import pytest
-from mcp.types import ImageContent, TextContent
+from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent, TextContent
 
 from hud.agents import create_agent
 from hud.agents.claude.sdk import computer_mcp
 from hud.agents.claude.sdk.agent import ClaudeCLIAgent
+from hud.agents.claude.sdk.events import ClaudeEvents
 from hud.agents.tests.cli_fakes import FakeClient as _FakeClient
 from hud.agents.tests.cli_fakes import FakeProcess as _FakeStreamProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
@@ -856,3 +857,64 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated() -> None:
         "second"
     )
     assert run_a.trace.content == run_b.trace.content == "done"
+
+
+def test_events_record_document_and_unknown_tool_result_blocks() -> None:
+    """A PDF Read returns a document block; neither it nor an unknown block ends the run."""
+    run = _fake_run()
+    events = ClaudeEvents(run, started_at="2026-01-01T00:00:00Z")
+    events.consume(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-test",
+                    "content": [{"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}],
+                    "stop_reason": "tool_use",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            }
+        )
+    )
+    events.consume(
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "content": [
+                                {
+                                    "type": "document",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "application/pdf",
+                                        "data": "JVBERi0=",
+                                    },
+                                },
+                                {"type": "novelty", "payload": 1},
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    tool = cast("ToolStep", run.steps[1])
+    assert tool.result is not None
+    document, unknown = tool.result.content
+    assert isinstance(document, EmbeddedResource)
+    assert isinstance(document.resource, BlobResourceContents)
+    assert document.resource.mimeType == "application/pdf"
+    assert document.resource.blob == "JVBERi0="
+    assert str(document.resource.uri) == "document://tool-1/0"
+    assert isinstance(unknown, TextContent)
+    assert unknown.text == "[unsupported novelty block]"
+    assert events.error is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import mcp.types as mcp_types
@@ -15,6 +16,24 @@ from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
+
+logger = logging.getLogger(__name__)
+
+
+def document_resource(source: dict[str, str], call_id: str, index: int) -> mcp_types.ContentBlock:
+    """Record a ``document`` tool result block (the CLI's Read on a PDF) as an embedded resource."""
+    uri = f"document://{call_id}/{index}"
+    media_type = source.get("media_type")
+    if source["type"] == "base64":
+        resource: mcp_types.ResourceContents = mcp_types.BlobResourceContents(
+            uri=uri, mimeType=media_type, blob=source["data"]
+        )
+    elif source["type"] == "text":
+        resource = mcp_types.TextResourceContents(uri=uri, mimeType=media_type, text=source["data"])
+    else:
+        logger.warning("unsupported Claude document source: %s", source["type"])
+        return mcp_types.TextContent(type="text", text=f"[unsupported {source['type']} document]")
+    return mcp_types.EmbeddedResource(type="resource", resource=resource)
 
 
 class ClaudeEvents:
@@ -72,8 +91,15 @@ class ClaudeEvents:
                                     mimeType=source["media_type"],
                                 )
                             )
+                        elif item["type"] == "document":
+                            content.append(document_resource(item["source"], call_id, len(content)))
                         else:
-                            raise ValueError(f"unsupported Claude tool result block: {item!r}")
+                            logger.warning("unsupported Claude tool result block: %s", item["type"])
+                            content.append(
+                                mcp_types.TextContent(
+                                    type="text", text=f"[unsupported {item['type']} block]"
+                                )
+                            )
 
                     self.run.record(
                         ToolStep(
