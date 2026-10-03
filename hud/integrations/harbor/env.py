@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from hud.capabilities import Capability
 from hud.environment import Mount, Workspace
 from hud.environment.egress import ANY_HOST
-from hud.environment.env import Environment, current_session_id
+from hud.environment.env import Environment
 from hud.environment.session import session_state_dir
 from hud.graders import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
@@ -440,12 +440,9 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
                 f"Harbor environment entrypoint exited with status {entrypoint.returncode}"
             )
         if task.separate_verifier:
-            session_id = current_session_id.get()
-            if session_id is None:
-                raise RuntimeError("Harbor actor is not running in an environment session")
             await workspace.terminate_sessions()
             try:
-                await collect(task, Path(session_state_dir(session_id)) / "artifacts")
+                await collect(task, Path(session_state_dir()) / "artifacts")
             except Exception as error:
                 yield EvaluationResult(isError=True, content=str(error))
             else:
@@ -467,10 +464,7 @@ if CONFIG.verifier_root is not None:
         actor = EvaluationResult.model_validate((yield ""))
         if actor.isError:
             raise RuntimeError(actor.content)
-        session_id = current_session_id.get()
-        if session_id is None:
-            raise RuntimeError("Harbor verifier is not running in an environment session")
-        session = Path(session_state_dir(session_id))
+        session = Path(session_state_dir())
         if not await asyncio.to_thread(session.is_dir):
             raise ValueError("Harbor actor session files are unavailable in this runtime")
         try:

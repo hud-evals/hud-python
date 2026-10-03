@@ -31,9 +31,14 @@ def validate_session_id(session_id: str) -> None:
         raise ValueError("session id must be a single path component")
 
 
-def session_state_dir(session_id: str) -> PurePosixPath:
-    """Where ``session_id`` keeps, inside its substrate, the state it hands to a verifier
-    placed elsewhere. Environments write it; providers snapshot and restore it."""
+def session_state_dir(session_id: str | None = None) -> PurePosixPath:
+    """Where a session keeps, inside its substrate, the state it hands to a verifier
+    placed elsewhere; by default, the session whose task code is running. Tasks write
+    it; providers snapshot and restore it."""
+    if session_id is None:
+        session_id = current_session_id.get()
+        if session_id is None:
+            raise RuntimeError("session_state_dir() names the current session only in task code")
     validate_session_id(session_id)
     return PurePosixPath("/runtime/sessions", session_id)
 
