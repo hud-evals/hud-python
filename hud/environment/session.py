@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import inspect
 import secrets
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -24,6 +25,21 @@ if TYPE_CHECKING:
     from .egress import WorkspaceRoute
     from .env import Environment, TaskTemplate
     from .file_tracker import FileTrackingOp
+
+
+def validate_session_id(session_id: str) -> None:
+    if not session_id or session_id in {".", ".."} or "/" in session_id or "\\" in session_id:
+        raise ValueError("session id must be a single path component")
+
+
+SESSION_STATE_ROOT = PurePosixPath("/runtime/sessions")
+
+
+def session_state_dir(session_id: str) -> PurePosixPath:
+    """Where ``session_id`` keeps, inside its host, the state it hands to a verifier
+    placed elsewhere. Environments write it; providers snapshot and restore it."""
+    validate_session_id(session_id)
+    return SESSION_STATE_ROOT / session_id
 
 
 def _jsonable(value: Any) -> Any:
