@@ -7,6 +7,7 @@ import contextlib
 import inspect
 import math
 import secrets
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -23,6 +24,18 @@ if TYPE_CHECKING:
     from .egress import WorkspaceRoute
     from .env import Environment, _TaskFactory
     from .file_tracker import FileTrackingOp
+
+
+def validate_session_id(session_id: str) -> None:
+    if not session_id or session_id in {".", ".."} or "/" in session_id or "\\" in session_id:
+        raise ValueError("session id must be a single path component")
+
+
+def session_state_dir(session_id: str) -> PurePosixPath:
+    """Where ``session_id`` keeps, inside its substrate, the state it hands to a verifier
+    placed elsewhere. Environments write it; providers snapshot and restore it."""
+    validate_session_id(session_id)
+    return PurePosixPath("/runtime/sessions", session_id)
 
 
 def _jsonable(value: Any) -> Any:
