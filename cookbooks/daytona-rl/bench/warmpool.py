@@ -113,7 +113,7 @@ async def main(n: int) -> None:
     # Match the pool's region to where the runtime actually creates sandboxes.
     provider = DaytonaRuntime(built, image=Image.from_dockerfile("Dockerfile.hud"))
     async with provider(fix_calc(variant=0)) as probe:
-        target = await pool.region_of(probe.params["instance_id"])
+        target = await pool.region_of(probe.sandbox.id)
     print(f"region: {target}")
 
     try:

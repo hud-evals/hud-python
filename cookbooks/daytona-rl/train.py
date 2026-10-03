@@ -101,7 +101,7 @@ async def main(
         # The pool must sit in the same region the runtime creates sandboxes in,
         # or Daytona never serves from it. The runtime sets no target, so take
         # the region from this sandbox rather than assuming one.
-        target = await pool.region_of(warmup.params["instance_id"])
+        target = await pool.region_of(warmup.sandbox.id)
     print(f"region: {target}", flush=True)
 
     await pool.drop(SNAPSHOT)

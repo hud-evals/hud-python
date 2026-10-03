@@ -436,7 +436,7 @@ closes.
 ```python hud/runtime/core.py · Runtime.connect
 @asynccontextmanager
 async def connect(self, *, workspace_routes=(), connections=()):
-    while True:                                     # until params["ready_timeout"]
+    while True:                                     # until self.ready_timeout
         try:
             reader, writer = await asyncio.open_connection(host, port)
         except OSError:

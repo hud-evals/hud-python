@@ -90,9 +90,11 @@ is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntim
 enough whole GiB, while providers without disk sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
 or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
-alternatives; Modal accepts one GPU type. Daytona rejects Compose, `run_timeout_s`, and resource overrides
-when booting from an already-built snapshot. `LocalRuntime` rejects a
-per-task `runtime_config`.
+alternatives; Modal accepts one GPU type. Docker, Modal, and Daytona apply `startup_timeout_s` to
+starting the environment and to waiting for it to answer; without it, Docker and Daytona wait up
+to 240 seconds for the environment to answer, and Modal 600. Docker and Modal tear the
+environment down after `run_timeout_s`; Daytona rejects it, and resource overrides when booting
+from an already-built snapshot. `LocalRuntime` rejects a per-task `runtime_config`.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
 Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal
@@ -270,11 +272,13 @@ custom `model_client` must use `HUDRuntime` or `LocalRuntime`.
 ### `Runtime`
 
 ```python
-Runtime(url, params=..., config=...)
+Runtime(url, ready_timeout=240, config=None)
 ```
 
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
-- **`params`** - connection-time data a transport may need (auth token, sandbox id).
+- **`ready_timeout`** - seconds to keep retrying until the environment answers; a forwarded port
+  can accept before the environment behind it serves.
+- **`config`** - the `RuntimeConfig` its provider applied, when known.
 
 Provisioned runtimes expose `snapshot_session(session_id)` and
 `restore_session(session_id, archive)` for transferring session files to an

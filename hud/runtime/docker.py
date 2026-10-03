@@ -22,7 +22,7 @@ from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import ComposeConfig, DockerBindMount
-from .core import DEFAULT_READY_TIMEOUT, Runtime, RuntimeConfig
+from .core import READY_TIMEOUT_SECONDS, Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -171,12 +171,16 @@ class DockerRuntime:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
         self.runtime_config = config if config.model_dump(exclude_none=True) else None
 
+    def config_for(self, task: Task) -> RuntimeConfig:
+        """This provider's runtime configuration, overridden by ``task``'s."""
+        return (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        config = self.config_for(task)
         startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
         run_timeout = config.limits.run_timeout_s if config.limits is not None else None
-        params = {"ready_timeout": startup_timeout} if startup_timeout is not None else {}
+        ready_timeout = startup_timeout or READY_TIMEOUT_SECONDS
         resources = config.resources
         if resources is not None:
             resources._require_support("DockerRuntime", {"cpu", "memory_mb", "storage_mb", "gpu"})
@@ -279,7 +283,7 @@ class DockerRuntime:
                         await _wait_serving(
                             container,
                             "Compose main service",
-                            DEFAULT_READY_TIMEOUT
+                            ready_timeout
                             if startup_deadline is None
                             else startup_deadline - loop.time(),
                         )
@@ -293,7 +297,7 @@ class DockerRuntime:
                         async with _docker_deadline(run_timeout, teardown):
                             yield DockerEndpoint(
                                 f"tcp://127.0.0.1:{host_port}",
-                                params=params,
+                                ready_timeout=ready_timeout,
                                 config=config if config.model_dump(exclude_none=True) else None,
                                 container=container,
                             )
@@ -355,7 +359,7 @@ class DockerRuntime:
                 await _wait_serving(
                     container,
                     f"container for image {config.image!r}",
-                    DEFAULT_READY_TIMEOUT if startup_timeout is None else startup_timeout,
+                    ready_timeout,
                 )
                 if resources is not None and resources.storage_mb is not None:
                     free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
@@ -365,7 +369,7 @@ class DockerRuntime:
                 async with _docker_deadline(run_timeout, teardown):
                     yield DockerEndpoint(
                         f"tcp://127.0.0.1:{host_port}",
-                        params=params,
+                        ready_timeout=ready_timeout,
                         config=config,
                         container=container,
                     )

@@ -170,11 +170,15 @@ class ModalRuntime:
         self._resolved: modal.Image | None = None
         self._image_lock = asyncio.Lock()
 
+    def config_for(self, task: Task) -> RuntimeConfig:
+        """This provider's runtime configuration, overridden by ``task``'s."""
+        return (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         import modal
 
-        config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+        config = self.config_for(task)
         resources = config.resources
         if resources is not None:
             resources._require_support("ModalRuntime", {"cpu", "memory_mb", "gpu"})
@@ -386,11 +390,7 @@ class ModalRuntime:
             host, port = (await sb.tunnels.aio())[self.port].tcp_socket
             yield ModalEndpoint(
                 url=f"tcp://{host}:{port}",
-                params={
-                    "provider": "modal",
-                    "instance_id": sb.object_id,
-                    **({"ready_timeout": ready_timeout} if compose is not None else {}),
-                },
+                ready_timeout=ready_timeout,
                 config=config if config.model_dump(exclude_none=True) else None,
                 sandbox=sb,
                 compose=compose_path,
