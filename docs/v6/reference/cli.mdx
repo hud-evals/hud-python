@@ -286,30 +286,32 @@ remain in their original Project. The first upload from a directory records the 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).
 
-### Platform QA
+### QA checks
 
 ```bash
 hud qa list
 hud qa
-hud qa run <agent-id> <trace-id>
+hud qa run failure_analysis <trace-id>
+hud qa run reward_hacking,false_positive <trace-id> <trace-id>
 hud qa results <trace-id>
-hud qa results <trace-id> --rollout
 ```
 
-`hud qa list` lists **trace** agents (name and UUID), including public ones.
-`hud qa` is an alias for `list`.
-Copy an id into `hud qa run`. Reuses matching evidence by default and waits
-for every requested trace. Pass `--overwrite` to create a fresh attempt,
-`--no-wait` to return after launch, or `--json` for machine-readable output.
-Exit code `1` means a completed QA result failed or the SDK could not
-complete the command.
+`hud qa list` lists HUD's QA checks: title, key, and the question each one
+answers. `hud qa` is an alias for
+`list`.
 
-`hud qa results` prints the analysis verdict (`passed` or `failed`), not the
-job status. Failure Analysis shows a cause and numbered findings when present.
-Boolean agents (false negative, false positive, reward hacking, prompt
-alignment) show yes/no and a summary, without a findings list. Pass `--rollout`
-for the sanitized analysis trajectory. `--json` still prints the raw result
-list and does not fetch the trajectory.
+`hud qa run` runs one check, or several separated by commas, on up to 100
+completed traces as a single run, then waits until every check has finished on
+every trace. Where a check's current result on a trace is completed or still
+running, it is kept rather than run again; pass `--overwrite` to run it anyway.
+Pass `--no-wait` to return after launch, or `--json` for machine-readable
+output. Exit code `1` means a check did not pass or the SDK could not complete
+the command.
+
+`hud qa results` prints the result in effect for every check on the given
+traces: its verdict (`passed`, `failed`, or `unknown`), summary, and numbered
+findings. A check passed on reward alone shows source `skipped`; a reviewer's
+verdict shows source `manual` with its note. `--json` prints the raw results.
 
 ## Inspect
 
