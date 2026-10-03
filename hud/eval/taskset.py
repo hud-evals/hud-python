@@ -20,13 +20,13 @@ from hud.utils.modules import iter_modules
 from hud.utils.platform import PlatformClient
 
 from .hosted import hosted_rollout
-from .job import Job, job_enter
+from .job import Job
 from .run import rollout, validate_rollout_timeouts
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 from .task import Task
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
@@ -36,9 +36,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.taskset")
 
 
-def _is_container_row(task: Task) -> bool:
+def is_container_row(task: Task) -> bool:
     config = task.runtime_config
     return config is not None and (config.image is not None or config.compose is not None)
+
+
+def containers_or(run_env: Callable[[Task], AbstractAsyncContextManager[Runtime]]) -> Provider:
+    """Image and Compose rows start under Docker; ``run_env`` starts every other row."""
+    docker = DockerRuntime()
+
+    def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
+        return docker(task) if is_container_row(task) else run_env(task)
+
+    return place
 
 
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
@@ -178,6 +188,17 @@ class Taskset:
             task.verifier.env for task in self if task.verifier is not None
         }
 
+    def placed_rows(self) -> list[Task]:
+        """Every row a placement starts: each task, and each verifier that runs apart from it."""
+        return [
+            *self,
+            *(
+                task.verifier
+                for task in self
+                if task.verifier is not None and not task.shares_verifier_runtime
+            ),
+        ]
+
     def _resolve_placement(self) -> Provider:
         """Pick the provider for this taskset's rows.
 
@@ -186,32 +207,21 @@ class Taskset:
         """
         if self.taskset_id is not None:
             return HUDRuntime()
-        rows = list(self)
-        # A verifier sharing its task's host is placed with that task, not on its own.
-        rows.extend(
-            task.verifier
-            for task in self
-            if task.verifier is not None and not task.shares_verifier_runtime
-        )
-        placeable = [_is_container_row(task) or task.environment is not None for task in rows]
-        if not rows or not all(placeable):
+        rows = self.placed_rows()
+        if not rows or not all(
+            is_container_row(task) or task.environment is not None for task in rows
+        ):
             raise ValueError(
                 "no placement: pass runtime= — "
                 'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
                 "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
                 "(a served host), or HUDRuntime() (your deployed env)"
             )
-        docker = DockerRuntime()
         live: dict[int, LocalRuntime] = {}
         for task in rows:
-            if not _is_container_row(task) and id(task.environment) not in live:
-                assert task.environment is not None
+            if task.environment is not None and id(task.environment) not in live:
                 live[id(task.environment)] = LocalRuntime(task.environment)
-
-        def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
-            return docker(task) if _is_container_row(task) else live[id(task.environment)](task)
-
-        return place
+        return containers_or(lambda task: live[id(task.environment)](task))
 
     async def run(
         self,
@@ -266,21 +276,17 @@ class Taskset:
             expanded.extend((task, group_id) for _ in range(group))
 
         if job is None:
-            job = Job(
-                id=uuid.uuid4().hex,
-                name=_job_name(self.name, task_list, group),
-                group=group,
-                taskset_id=self.taskset_id,
+            job = await Job.start(
+                _job_name(self.name, task_list, group), group=group, taskset_id=self.taskset_id
             )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-        async def _run(task: Task, group_id: str) -> list[Trace]:
+        async def _one(task: Task, group_id: str) -> Trace:
             assert placement is not None
-            if isinstance(placement, HostedRuntime):
-                return [
-                    await hosted_rollout(
+            async with sem or contextlib.nullcontext():
+                if isinstance(placement, HostedRuntime):
+                    return await hosted_rollout(
                         placement,
                         task,
                         agent,
@@ -288,9 +294,7 @@ class Taskset:
                         group_id=group_id,
                         rollout_timeout=rollout_timeout,
                     )
-                ]
-            return [
-                await rollout(
+                return await rollout(
                     task,
                     agent,
                     runtime=placement,
@@ -298,13 +302,6 @@ class Taskset:
                     group_id=group_id,
                     rollout_timeout=rollout_timeout,
                 )
-            ]
-
-        async def _one(task: Task, group_id: str) -> list[Trace]:
-            if sem is None:
-                return await _run(task, group_id)
-            async with sem:
-                return await _run(task, group_id)
 
         logger.info(
             "running %d rollouts (%d tasks x %d group)%s",
@@ -317,8 +314,7 @@ class Taskset:
             # A pooled placement such as Shared lives for this call unless already open.
             if isinstance(placement, contextlib.AbstractAsyncContextManager):
                 await stack.enter_async_context(placement)
-            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.traces.extend(trace for part in parts for trace in part)
+            job.traces.extend(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
         # flush waits for in-flight uploads; the timeout only caps a wedged network.
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")

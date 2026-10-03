@@ -26,7 +26,7 @@ from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
 from .file_tracking import file_tracking_observer
-from .job import job_enter, trace_enter, trace_exit
+from .job import Job, trace_enter, trace_exit
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -400,8 +400,7 @@ async def rollout(
         ),
     )
     if job_id is None:  # every trace reports under a job; a lone rollout is a job of one
-        job_id = uuid.uuid4().hex
-        await job_enter(job_id, name=task.id, group=1)
+        job_id = (await Job.start(task.id)).id
     trace_id = trace_id or uuid.uuid4().hex
     parent = parent_trace(trace_id)
     parent_trace_id = parent.hex if parent is not None else None
