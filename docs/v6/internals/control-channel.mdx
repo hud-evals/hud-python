@@ -66,7 +66,7 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 | `tasks.list` | Registered task metadata for introspection and validation. |
 | `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
 | `tasks.grade` | The selected task's evaluation, including numeric `score`. |
-| `tasks.cancel` | Interrupts a running `tasks.start` or `tasks.grade`, then cancels and removes the session's task. |
+| `tasks.cancel` | Cancels the session's task, whether suspended or still starting or grading. |
 | `bye` | Closes the session, cancelling its task, and ends the connection. |
 
 Each request and response is one newline-delimited JSON frame. Calls on a
@@ -113,11 +113,16 @@ session holds at most one suspended task: `tasks.start` replaces it,
 is what `LocalRuntime` hands the engine directly, with no channel.
 
 A session belongs to the connection whose first `hello` opened it and closes
-when that connection ends: its task is cancelled and its bindings released. A
-connection can ask for a `lease` instead; the session then stays open that many
-seconds after the connection ends, and a later connection attaches to it with
-`hello` and its `session_id`. Attaching stops the clock, and `bye` closes a
-session at once.
+when that connection ends: its task is cancelled, even mid-start or mid-grade,
+and its bindings released. The server keeps reading the connection while a
+`tasks.start` or `tasks.grade` runs, so it notices the connection ending even
+when that call never returns, and a `tasks.cancel` or `bye` interrupts the call;
+any other request meanwhile is refused. A connection can ask for a `lease` instead; the
+session then stays open that many seconds after the connection ends, a call it
+was running runs on, and a later connection attaches to it with `hello` and its
+`session_id`. Until that call finishes, the later connection's `tasks.start` and
+`tasks.grade` are refused and its `tasks.cancel` stops it. Attaching stops the
+clock, and `bye` closes a session at once.
 
 ```python hud/environment/server.py · _ControlChannel._detach
 async def _detach(self, session, lease):
