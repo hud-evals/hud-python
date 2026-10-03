@@ -264,7 +264,7 @@ def _print_results(results: list[dict[str, Any]]) -> None:
         )
     hud_console.stdout.print(table)
     hud_console.stdout.print(
-        Text("\nTip: hud qa results <trace-id> for summaries and findings", style="dim")
+        "\n[dim]Tip: hud qa results <trace-id> for summaries and findings[/dim]"
     )
 
 
@@ -302,23 +302,20 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
             border_style="cyan",
         )
     )
-    if view.kind == "pending":
-        hud_console.status_item("status", str(result["status"]), status="info", stderr=False)
-    else:
-        status = {"passed": "success", "failed": "error"}.get(view.tag, "warning")
-        hud_console.status_item("verdict", view.tag, status=status, stderr=False)
+    label = "Status" if view.kind == "pending" else "Verdict"
+    hud_console.stdout.print(Text.assemble((f"{label}: ", "bold"), _verdict(result, view)))
 
-    details: dict[str, str | int | float] = {}
+    details: list[tuple[str, str]] = []
     if view.answer:
-        details[view.label.lower() if view.kind == "boolean" else "cause"] = view.answer
+        details.append((view.label if view.kind == "boolean" else "Cause", view.answer))
     if result["source"] != "analysis":
-        details["source"] = str(result["source"])
+        details.append(("Source", str(result["source"])))
     if view.confidence:
-        details["confidence"] = view.confidence
+        details.append(("Confidence", view.confidence))
     if result.get("note"):
-        details["note"] = str(result["note"])
-    if details:
-        hud_console.key_value_table(details, stderr=False)
+        details.append(("Note", str(result["note"])))
+    for name, value in details:
+        hud_console.stdout.print(Text(f"{name}: {value}", style="dim"))
 
     if view.summary:
         hud_console.stdout.print(
@@ -333,11 +330,11 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
     for index, finding in enumerate(view.findings, start=1):
         hud_console.stdout.print(_finding_panel(index, finding))
 
+    hud_console.stdout.print(f"\n[dim]View: {web_url}/trace/{subject_id}[/dim]")
     if result.get("analysis_trace_id"):
         hud_console.stdout.print(
-            Text(f"Analysis: {web_url}/trace/{result['analysis_trace_id']}", style="dim")
+            f"[dim]Analysis: {web_url}/trace/{result['analysis_trace_id']}[/dim]"
         )
-    hud_console.stdout.print(Text(f"View: {web_url}/trace/{subject_id}", style="dim"))
 
 
 def _results(platform: PlatformClient, trace_ids: list[str]) -> list[dict[str, Any]]:
@@ -386,7 +383,7 @@ def list_command(
         table.add_row(check["key"], check["title"], check["question"])
     hud_console.stdout.print(table)
     hud_console.stdout.print(
-        Text("\nTip: hud qa run <check>[,<check>...] <trace-id>... to run checks", style="dim")
+        "\n[dim]Tip: hud qa run <check>[,<check>...] <trace-id>... to run checks[/dim]"
     )
     return response
 

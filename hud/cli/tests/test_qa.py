@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -290,8 +289,8 @@ def test_qa_results_tui_renders_findings_and_trace_link() -> None:
 
     assert result.exit_code == 0
     assert _CHECK in result.output
-    assert "verdict: failed" in result.output
-    assert re.search(r"confidence\s+90%", result.output)
+    assert "Verdict: failed" in result.output
+    assert "Confidence: 90%" in result.output
     assert "Verdict: The agent never wrote /app/[regex].txt." in result.output
     assert "**" not in result.output
     assert "1. Required [/output] file was never created" in result.output
@@ -329,8 +328,8 @@ def test_qa_results_skipped_check_shows_source_and_note() -> None:
     result = _invoke(platform, ["qa", "results", _TRACE_ID])
 
     assert result.exit_code == 0
-    assert "verdict: passed" in result.output
-    assert "skipped" in result.output
+    assert "Verdict: passed" in result.output
+    assert "Source: skipped" in result.output
     assert "A full reward passes this check without analysis." in result.output
 
 
@@ -362,8 +361,8 @@ def test_qa_results_legacy_failure_analysis() -> None:
     result = _invoke(platform, ["qa", "results", _TRACE_ID])
 
     assert result.exit_code == 0
-    assert "verdict: failed" in result.output
-    assert "Agent failure" in result.output
+    assert "Verdict: failed" in result.output
+    assert "Cause: Agent failure" in result.output
     assert "Required output file was never created" in result.output
     assert "The agent did not save any regex." in result.output
 
@@ -390,8 +389,8 @@ def test_qa_results_legacy_boolean_omits_findings() -> None:
     result = _invoke(platform, ["qa", "results", _TRACE_ID])
 
     assert result.exit_code == 0
-    assert "verdict: passed" in result.output
-    assert re.search(r"false negative\s+no\b", result.output.lower())
+    assert "Verdict: passed" in result.output
+    assert "False Negative: no" in result.output
     assert "1. " not in result.output
     assert "The zero reward matches the missing file." in result.output
 
