@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from hud.agents.types import AgentConfig
 from hud.capabilities.mcp import get_mcp_trace_id
-from hud.clients import HudProtocolError, connect
+from hud.clients import HudProtocolError
 from hud.telemetry.context import get_current_trace_id, set_trace_context
 from hud.telemetry.span import normalize_trace_id
 from hud.types import Grade, PromptMessage, Step, TaskCall, TextContent, Trace
@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.capabilities import Capability, Connection
-    from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
     from hud.runtime import Provider
@@ -40,24 +39,24 @@ logger = logging.getLogger("hud.eval.run")
 
 
 class EnvironmentSession(Protocol):
-    """One live environment as the engine drives it; each kind of environment implements it.
+    """One live environment as the engine drives it; each kind of runtime opens its own.
 
-    ``revoke`` ends the agent's access and must finish before ``grade``. ``files`` returns
-    ``None`` when the environment tracks no files.
+    ``capabilities`` are at the addresses this process reaches them. ``revoke`` ends the
+    agent's access and must finish before ``grade``. ``files`` returns ``None`` when the
+    environment tracks no files. Closing the session cancels any task it still holds.
     """
 
     @property
-    def capabilities(self) -> list[Capability]: ...
+    def session_id(self) -> str: ...
 
-    def route(self, capability: Capability) -> Capability: ...
+    @property
+    def capabilities(self) -> list[Capability]: ...
 
     async def start_task(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]: ...
 
     async def revoke(self) -> None: ...
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
-    async def cancel(self) -> None: ...
 
     async def files(self, op: FileTrackingOp) -> dict[str, Any] | None: ...
 
@@ -231,7 +230,7 @@ async def start_run(
     )
     run = Run(
         prompt,
-        [session.route(cap) for cap in _episode_capabilities(session.capabilities, started)],
+        _episode_capabilities(session.capabilities, started),
         {connection.name: connection for connection in connections},
     )
     run.trace.record(
@@ -253,8 +252,6 @@ async def start_run(
                 await session.revoke()
     except (asyncio.CancelledError, KeyboardInterrupt):
         run.trace.status = "error" if run.trace.stop_reason == "timeout" else "cancelled"
-        with contextlib.suppress(Exception):
-            await session.cancel()
         raise
     except Exception:
         run.trace.status = "error"
@@ -390,10 +387,8 @@ async def rollout(
         _phase = "provisioning"
         rollout_expired = False
 
-        client: HudClient | None = None
-
         async def _drive() -> None:
-            nonlocal client, run, _phase
+            nonlocal run, _phase
             actor_result: dict[str, Any] = {}
             actor_session_id: str | None = None
             verifier = task.verifier
@@ -422,14 +417,12 @@ async def rollout(
                     )
                     shared_verifier = True
                 _phase = "starting task"
-                async with connect(
-                    addr,
+                async with addr.connect(
                     workspace_routes=workspace_routes,
                     connections=connections,
-                ) as actor_client:
-                    client = actor_client
+                ) as actor_session:
                     async with start_run(
-                        actor_client,
+                        actor_session,
                         task.id,
                         task.args,
                         connections=connections,
@@ -451,14 +444,13 @@ async def rollout(
 
                     if verifier is not None:
                         actor_result = live.trace.grade.raw
-                        assert actor_client.manifest is not None
-                        actor_session_id = actor_client.manifest.session_id
+                        actor_session_id = actor_session.session_id
                         # The verifier is authoritative: no actor grade survives its failure.
                         live.trace.grade = Grade.ungraded()
                     if shared_verifier:
                         assert verifier is not None
                         _phase = "verifying"
-                        await _verify(live, actor_client, verifier, actor_result)
+                        await _verify(live, actor_session, verifier, actor_result)
                         _phase = "cleanup"
                         return
 
@@ -475,21 +467,15 @@ async def rollout(
                 async with addr.snapshot_session(actor_session_id) as archive:
                     _phase = "actor cleanup"
                     await actor.aclose()
-                    client = None
                     if rollout_expired:
                         return
                     _phase = "provisioning verifier"
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
-                    verifier_client = await scope.enter_async_context(connect(verifier_addr))
+                    verifier_session = await scope.enter_async_context(verifier_addr.connect())
                     if archive is not None:
-                        assert verifier_client.manifest is not None
-                        await verifier_addr.restore_session(
-                            verifier_client.manifest.session_id,
-                            archive,
-                        )
-                    client = verifier_client
+                        await verifier_addr.restore_session(verifier_session.session_id, archive)
                     _phase = "verifying"
-                    await _verify(live, verifier_client, verifier, actor_result)
+                    await _verify(live, verifier_session, verifier, actor_result)
                 _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
@@ -503,8 +489,6 @@ async def rollout(
                 phase = _phase
                 if run is not None:
                     run.trace.stop_reason = "timeout"
-                if client is not None:
-                    await client._abandon_task()
                 if phase not in {"actor cleanup", "cleanup"}:
                     driver.cancel()
                 driver.add_done_callback(_consume_task_result)
@@ -518,8 +502,6 @@ async def rollout(
                     run.trace.record(Step(source="system", error=detail))
                     run.trace.stop_reason = "timeout"
         except asyncio.CancelledError as cancel:
-            if client is not None:
-                await client._abandon_task()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
             cancellation = cancel

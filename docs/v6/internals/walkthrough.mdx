@@ -44,8 +44,8 @@ print(score)                        # 1.0, once `check("patched")` returns True
 ```
 Calling `asend(value)` resumes the suspended `yield` expression with `value` - that's the moment
 `answer = yield ...` gets populated - then runs the generator forward to the next `yield`, whose
-argument becomes `asend`'s return value. The [`TaskRunner.start`](#starting-the-task) call later in
-this walkthrough is exactly the `__anext__()` call above; [`TaskRunner.grade`](#grading-and-teardown)
+argument becomes `asend`'s return value. The [`Session.start_task`](#starting-the-task) call later
+in this walkthrough is exactly the `__anext__()` call above; [`Session.grade`](#grading-and-teardown)
 is exactly the `asend(...)` call.
 </Accordion>
 
@@ -72,7 +72,7 @@ A `Taskset` is just a named collection of those rows, indexed by slug:
 
 ```python
 taskset = Taskset("bugs", [fix_bug(1), fix_bug(2)])
-job = await taskset.run(agent, runtime=LocalRuntime("env.py"))   # <- the pointer starts here
+job = await taskset.run(agent, runtime=SubprocessRuntime("env.py"))   # <- the pointer starts here
 ```
 
 ## Start point: the scheduler
@@ -233,7 +233,7 @@ Everything below happens inside one `rollout(task, agent, runtime=placement, ...
 ## Into the rollout atom
 
 `rollout` is the whole lifecycle for one task. The key structure is one `AsyncExitStack` that
-stacks three context managers - the **provider**, the **client connection**, and the **`Run`** -
+stacks three context managers - the **provider**, the **session**, and the **`Run`** -
 and unwinds them in reverse on the way out.
 
 <Accordion title="Full code">
@@ -250,9 +250,9 @@ async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
         async def _drive():
             nonlocal run, _phase
             async with contextlib.AsyncExitStack() as stack:
-                addr   = await stack.enter_async_context(runtime(task))    # 1. provider -> Runtime
-                client = await stack.enter_async_context(connect(addr))    # 2. connect -> HudClient
-                async with start_run(client, task.id, task.args) as live:  # 3. tasks.start
+                addr    = await stack.enter_async_context(runtime(task))    # 1. provider -> Runtime
+                session = await stack.enter_async_context(addr.connect())   # 2. connect -> a session
+                async with start_run(session, task.id, task.args) as live:  # 3. tasks.start
                     run = live
                     run.trace.runtime = addr.url
                     _phase = "agent loop"
@@ -297,9 +297,9 @@ async def rollout(task, agent, *, runtime,
 
 <div className="part-label">2 · Open the AsyncExitStack: provider, then connect</div>
 
-Two of the stack's three context managers enter here. The provider yields a `Runtime` address;
-`connect` turns that address into a live `HudClient`. Exiting `stack` later tears both down, in
-reverse order.
+Two of the stack's three context managers enter here. The provider yields a `Runtime`; its
+`connect` opens a live session on it - over the control channel, a `HudClient`. Exiting `stack`
+later tears both down, in reverse order.
 
 </div>
 <div className="guide-aside">
@@ -310,8 +310,8 @@ reverse order.
 async with contextlib.AsyncExitStack() as stack:
     addr = await stack.enter_async_context(
         runtime(task))          # 1. provider -> Runtime
-    client = await stack.enter_async_context(
-        connect(addr))          # 2. connect -> HudClient
+    session = await stack.enter_async_context(
+        addr.connect())         # 2. connect -> a session
 ```
 
 </div>
@@ -332,7 +332,7 @@ sends `tasks.grade` (messages to the environment server). Everything the agent d
 <p className="aside-label">run.py · rollout · _drive</p>
 
 ```python
-async with start_run(client, task.id, task.args) as live:  # 3. tasks.start
+async with start_run(session, task.id, task.args) as live:  # 3. tasks.start
     run = live
     run.trace.runtime = addr.url
     _phase = "agent loop"
@@ -389,10 +389,9 @@ env, binds the control channel, prints the bound port, and serves until torn dow
 ```python hud/environment/server.py · serve
 async def serve(env, host="127.0.0.1", port=0):
     await env.start()                              # run @env.initialize hooks
-    server = await bind(env, host, port)          # bind the control channel
-    print(f"HUD_SERVE_PORT={server.sockets[0].getsockname()[1]}", flush=True)  # announce it
     try:
-        async with server:
+        async with bind(env, host, port) as server:   # bind the control channel
+            print(f"HUD_SERVE_PORT={server.sockets[0].getsockname()[1]}", flush=True)  # announce it
             await server.serve_forever()
     finally:
         await env.stop()                          # @env.shutdown hooks
@@ -413,39 +412,19 @@ async def start(self):
 
 Then `bind` puts the env on one TCP port that carries both the control session and raw capability
 tunnels - the [control channel](/v6/internals/control-channel). The bound port is the only thing the provider
-needs back: child and container substrates announce it on stdout; the in-process provider reads it
-straight off the socket.
+needs back: child and container substrates announce it on stdout.
 
 ### The provider
 
-`LocalRuntime` calls `env.start()`, opens a local TCP server, and yields its address.
-On exit, it stops the server and calls `env.stop()`. The environment runs in the same
-Python process as the agent.
-
-```python hud/runtime/local.py · LocalRuntime.__call__
-started = env.start()
-await asyncio.wait_for(started, ready_timeout)     # @env.initialize, bounded
-server = await bind(env, "127.0.0.1", 0)           # in-process control channel
-host, port = server.sockets[0].getsockname()[:2]
-serve_task = asyncio.create_task(server.serve_forever())
-try:
-    yield Runtime(f"tcp://{host}:{port}")          # <- this is `addr` back in rollout
-finally:
-    serve_task.cancel()
-    # ...
-    await env.stop()                               # @env.shutdown
-```
-
-Blocking environment code stalls other rollouts on the same event loop.
-`SubprocessRuntime` starts `python -m hud.environment.server <path> --env name` in a
-child process, reads `HUD_SERVE_PORT=` from its output, and stops the process on exit.
+`SubprocessRuntime` starts `python -m hud.environment.server <path> --env name` in a child
+process, reads `HUD_SERVE_PORT=` from its output, and yields `Runtime(f"tcp://127.0.0.1:{port}")`,
+the `addr` back in `rollout`. On exit it stops the process, whose `serve` runs `env.stop()`.
 
 Every other provider runs that same serve entry point inside a different substrate and reaches its
 port a different way:
 
 | Provider | Substrate | Reaches the control port by |
 | --- | --- | --- |
-| `LocalRuntime` | this process | reading the bound socket directly (`_local`) |
 | `SubprocessRuntime` | a child process on this host | reading `HUD_SERVE_PORT=` from its stdout |
 | `DockerRuntime` | a `docker run` container | publishing the port, reading the `docker port` mapping |
 | `ModalRuntime` | a Modal sandbox | a raw-TCP tunnel (`unencrypted_ports`) |
@@ -453,43 +432,48 @@ port a different way:
 | `HUDRuntime` | a HUD-hosted env | a WebSocket tunnel behind a local TCP listener |
 | `Runtime(url)` | one already served elsewhere | nothing - the url passes straight through |
 
-Whichever provider ran, the result is a `Runtime(url)` whose server is listening. The pointer
-returns to `rollout` and enters the second context manager: `connect(addr)`.
+`LocalRuntime` is the exception: it calls `env.start()` in this process and yields a runtime named
+`local://<env>` with no control port. Its sessions drive the environment's task generators directly,
+so the [connecting](#connecting) hop below - handshake, frames, tunnels - does not happen, and the
+agent reaches each capability at the address the environment published. Blocking environment code
+stalls other rollouts on the same event loop.
+
+Whichever provider ran, the result is a runtime the pointer can open a session on. It returns to
+`rollout` and enters the second context manager: `addr.connect()`, which for a served runtime opens
+its control channel.
 
 ## Connecting
 
-`connect` retries the connect-and-`hello` handshake until the env answers (a freshly bound port can
-accept before the env behind it is serving), then yields a `HudClient` with its `manifest` ready.
+`Runtime.connect` retries the connect-and-`hello` handshake until the env answers (a freshly bound
+port can accept before the env behind it is serving), for the runtime's `ready_timeout`. It then
+yields a `HudClient` with its `manifest` ready and heartbeats the connection until the session
+closes.
 
-```python hud/clients/client.py · connect
+```python hud/runtime/core.py · Runtime.connect
 @asynccontextmanager
-async def connect(runtime, *, ready_timeout=240.0):
-    parts = urlsplit(runtime.url)
-    client = await _connect_ready(parts.hostname, parts.port, ready_timeout=...)
+async def connect(self, *, workspace_routes=(), connections=()):
+    while True:                                     # until params["ready_timeout"]
+        try:
+            reader, writer = await asyncio.open_connection(host, port)
+        except OSError:
+            ...; continue                           # not accepting yet, retry
+        client = HudClient(reader, writer, endpoint=(host, port))
+        try:
+            await client.hello(...)                 # handshake
+            break
+        except (EOFError, OSError):
+            await client.close(); ...               # accepted but no env behind it, retry
+    heartbeat_task = asyncio.create_task(heartbeat())   # a dead channel cancels the body
     try:
         yield client
     finally:
+        heartbeat_task.cancel()
         await client.close()
-```
-
-```python hud/clients/client.py · _connect_ready
-while True:
-    try:
-        reader, writer = await asyncio.open_connection(host, port)
-    except OSError:
-        ...; continue                               # not accepting yet, retry
-    client = HudClient(reader, writer, endpoint=(host, port))
-    try:
-        await client.hello()                        # handshake
-    except (EOFError, OSError):
-        await client.close(); ...                   # accepted but no env behind it, retry
-    else:
-        return client
 ```
 
 `hello()` sends the frame and parses the reply into a `Manifest`. It creates a loopback forwarder
 for every binding and records the routed local URL, so all capability traffic returns through the
-control address. An optional `session_id` resumes a parked session instead of minting a fresh one;
+control address. An optional `session_id` attaches to an open session instead of opening a fresh one;
 the [suspended task](/v6/internals/control-channel#the-suspended-task) section describes that path.
 
 ```python hud/clients/client.py · HudClient.hello
@@ -503,20 +487,22 @@ async def hello(self, session_id=None):
             partial(forward, capability), "127.0.0.1", 0
         )
         self._forwarders.append(forwarder)
-        self._routes[capability.name] = ...          # binding() returns the local route
+        self._routes[capability.name] = ...          # capabilities carry the local route
     return self.manifest
 ```
 
-On the server, the `hello` branch answers with the env identity and its capabilities (the branch
-that resumes a requested `session_id` is elided here; see the link above):
+On the server, the `hello` branch binds the session's connections and routes and answers with
+the env identity and its capabilities (a connection's first `hello` opens the session, or
+attaches to the open one it names; see the link above). Each branch produces a `result` that
+the loop sends back as the reply:
 
-```python hud/environment/server.py · _ControlChannel.session (hello)
+```python hud/environment/server.py · _ControlChannel.handle (hello)
 if method == "hello":
-    # ... a requested session_id resumes that parked session instead ...
-    bindings = [c.to_manifest() for c in env.capabilities]
-    await reply_to(msg_id, {"session_id": session_id,
-                            "env": {"name": env.name, "version": env.version},
-                            "bindings": bindings})
+    # ... parse workspace_routes, connections and lease; open or attach the session ...
+    session.bind(connections=connections, workspace_routes=routes)
+    result = {"session_id": session.session_id,
+              "env": {"name": env.name, "version": env.version},
+              "bindings": [c.to_manifest() for c in env.capabilities]}
 ```
 
 The client holds the manifest. Back in `rollout`, the pointer enters `start_run`.
@@ -524,11 +510,12 @@ The client holds the manifest. Back in `rollout`, the pointer enters `start_run`
 ## Starting the task
 
 `start_run` is the third context manager. It sends `tasks.start`, normalizes the prompt the env
-returns, and builds the `Run` with the session's capabilities routed to this process.
+returns, and builds the `Run` with the session's capabilities, already at addresses this process
+reaches.
 
 ```python hud/eval/run.py · start_run (enter)
 started = await session.start_task(task_id, args)            # tasks.start
-run = Run(prompt, [session.route(cap) for cap in capabilities], connections)
+run = Run(prompt, _episode_capabilities(session.capabilities, started), connections)
 run.trace.record(Step(source="task", task_call=TaskCall(phase="setup", ...)))
 if raw_prompt is not None:
     run.trace.record(Step(source="user", messages=prompt))
@@ -539,38 +526,36 @@ async def start_task(self, task_id, args=None):
     return await self._call("tasks.start", {"id": task_id, "args": args or {}})
 ```
 
-The frame reaches the server's `tasks.start` branch, which creates a `TaskRunner` and starts it,
-holding it on the channel under this connection's session id:
+The frame reaches the server's `tasks.start` branch, which starts the task on this connection's
+`Session` (`hud/environment/session.py`):
 
-```python hud/environment/server.py · session (tasks.start) + _ControlChannel.start
+```python hud/environment/server.py · _ControlChannel.handle (tasks.start)
 elif method == "tasks.start":
-    prompt = await self.start(session_id, task_id, args)   # _ControlChannel.start
-    await reply_to(msg_id, prompt)
-
-async def start(self, session_id, task_id, args):   # _ControlChannel.start
-    await self.cancel(session_id)                    # replace this session's own task, if any
-    self._runners[session_id] = TaskRunner(self.env.tasks[task_id], args)
-    return await self._runners[session_id].start()
+    # ... check that 'id' names one of env.tasks and 'args' is an object ...
+    result = await session.start_task(task_id, args)
 ```
 
-`TaskRunner.start` instantiates the async generator and runs it to the **first yield** - the
-prompt:
+`Session.start_task` replaces any task the session holds, instantiates the async generator, and
+runs it to the **first yield** - the prompt. The session holds the suspended generator until
+it is graded:
 
-```python hud/environment/server.py · TaskRunner.start
-async def start(self):
-    self._gen = self.task.func(**_coerce_args(self.task.sig, self._args))   # make the generator
-    prompt = await self._gen.__anext__()            # run task fn to 1st yield
-    frame = prompt if isinstance(prompt, dict) and "prompt" in prompt else {"prompt": prompt}
-    return _jsonable(frame)                          # -> back over the wire
+```python hud/environment/session.py · Session.start_task
+async def start_task(self, task_id, args):
+    await self.cancel()                             # replace this session's own task, if any
+    task = self.env.tasks[task_id]
+    gen = task.func(**_coerce_args(task.sig, args))   # make the generator
+    prompt = await gen.__anext__()                  # run task fn to 1st yield
+    self._held = (task, gen)
+    return _jsonable(...)                           # -> back over the wire
 ```
 
-The prompt travels back: `TaskRunner.start` -> server reply -> `client.start_task` ->
+The prompt travels back: `Session.start_task` -> server reply -> `client.start_task` ->
 `run.prompt`.
 
 ## Checkpoint
 
 The pointer is inside `start_run`'s block, just before `await agent(run)`. The session - here the
-`HudClient` - has the `manifest`, and its server has a `TaskRunner` suspended at the task's first
+`HudClient` - has the `manifest`, and its server's `Session` holds the task suspended at its first
 yield. `run` is a `Run` that holds:
 
 <div className="step-list">
@@ -632,34 +617,28 @@ run.trace.grade = parse_grade(evaluation)         # score -> trace.grade.reward
 run.trace.record(Step(source="task", task_call=TaskCall(phase="evaluate", ...)))
 ```
 
-The server's `tasks.grade` branch pops this session's held runner and resumes it (or, with no
-runner of its own, adopts the lone parked one - see
-[the suspended task](/v6/internals/control-channel#the-suspended-task)):
+The server's `tasks.grade` branch grades the session's task:
 
-```python hud/environment/server.py · session (tasks.grade) + _ControlChannel.grade
+```python hud/environment/server.py · _ControlChannel.handle (tasks.grade)
 elif method == "tasks.grade":
-    evaluation = await self.grade(session_id, params)   # _ControlChannel.grade
-    await reply_to(msg_id, evaluation)
-
-async def grade(self, session_id, payload):          # _ControlChannel.grade
-    runner = self._runners.pop(session_id, None)      # this session's own task ...
-    if runner is None:
-        runner = self._adopt_parked()                 # ... or the lone parked one
-    return await runner.grade(payload)
+    if not session.has_task:
+        raise HudProtocolError(-32600, "no task in progress")
+    result = await session.grade(params)
 ```
 
-`TaskRunner.grade` sends the answer into the paused generator (optionally wrapped as `Answer[T]`
+`Session.grade` sends the answer into the paused generator (optionally wrapped as `Answer[T]`
 when `returns=` was declared), which advances past the first yield, evaluates, and yields the
 **score**:
 
-```python hud/environment/server.py · TaskRunner.grade
+```python hud/environment/session.py · Session.grade
 async def grade(self, payload):
-    evaluation = await self._gen.asend(_build_answer(self.task.return_type, payload))  # 2nd yield
+    (task, gen), self._held = self._held, None
+    evaluation = await gen.asend(_build_answer(task.return_type, payload))  # 2nd yield
     # ... normalize dict / EvaluationResult ...
     return {"score": _score_value(evaluation)}
 ```
 
-The score travels back: `TaskRunner.grade` -> server reply -> `client.grade` -> `parse_grade`
+The score travels back: `Session.grade` -> server reply -> `client.grade` -> `parse_grade`
 -> `trace.grade.reward`.
 
 When `task.verifier` is present, the actor grade is provisional. A verifier in the same environment
@@ -669,10 +648,11 @@ task without an agent loop and immediately grades it with the actor result frame
 replaces the actor grade. The full phase contract is documented in
 [verifier environments](/v6/experimental/verifier-environments#provisioning-order).
 
-The `AsyncExitStack` unwinds in reverse: `connect` closes the client (forwarders and socket),
-then the provider context exits and tears the substrate down - for `LocalRuntime` it cancels the
-in-process server and runs `env.stop()` (`@env.shutdown`); for `SubprocessRuntime` it terminates
-the child, whose `serve` does the same on the way out. Back in `rollout`,
+The `AsyncExitStack` unwinds in reverse: the session closes the client (forwarders and socket),
+then the provider context exits and tears the substrate down - for `SubprocessRuntime` it
+terminates the child, whose `serve` runs `env.stop()` (`@env.shutdown`) on the way out; for
+`LocalRuntime`, whose session cancelled any task it left suspended, it runs `env.stop()` itself.
+Back in `rollout`,
 `trace_exit(trace)` reports the trace and the graded trace returns to `Taskset.run`, which collects it
 into `job.traces`.
 
@@ -684,13 +664,13 @@ Every hop above, in order:
 
 1. `Taskset.run` - expand rows, register a `Job`, resolve placement, `gather` one `rollout` per (task, group).
 2. `rollout` - open an `AsyncExitStack`: provider, then connect, then `start_run`.
-3. `runtime(task)` - bring the env up in its substrate: `LocalRuntime` serves it in-process via `_local`; `SubprocessRuntime` spawns the serve entry point and reads its announced port.
+3. `runtime(task)` - bring the env up in its substrate: `SubprocessRuntime` spawns the serve entry point and reads its announced port; `LocalRuntime` starts the env in this process instead, and its sessions skip the wire.
 4. `serve` (in the substrate) - `env.start()` (initialize hooks), `bind()` a TCP server, `serve_forever()`; the provider yields a `Runtime(url)`.
-5. `connect(addr)` - retry until ready, `HudClient.hello()` -> server returns the `manifest`.
-6. `start_run` - `client.start_task` -> `tasks.start` -> `TaskRunner.start` runs the generator to the first yield -> the prompt back on `run.prompt`.
-7. **Checkpoint** - `run` holds the routed capabilities and the prompt; the session holds the manifest and the suspended runner.
+5. `addr.connect()` - retry until ready, `HudClient.hello()` -> server returns the `manifest`.
+6. `start_run` - `client.start_task` -> `tasks.start` -> `Session.start_task` runs the generator to the first yield -> the prompt back on `run.prompt`.
+7. **Checkpoint** - `run` holds the routed capabilities and the prompt; the client holds the manifest and the server's `Session` the suspended task.
 8. `await agent(run)` - agent opens capabilities with `open_client`, loops, fills `run.trace` (answer on `trace.content`); the session then cuts its routes.
-9. `start_run` exit - `client.grade` -> `tasks.grade` -> `TaskRunner.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
+9. `start_run` exit - `client.grade` -> `tasks.grade` -> `Session.grade` resumes the generator to the second yield -> provisional `score` -> `trace.grade.reward`.
 10. Optional verifier - reuse the live substrate or finish actor cleanup and acquire the verifier substrate; start and grade the verifier with the actor result; replace the actor grade.
 11. Unwind - close the active client, stop the substrate (`serve` runs `env.stop()`), `trace_exit`, return the graded trace to `Taskset.run`.
 
@@ -707,11 +687,11 @@ sequenceDiagram
     Roll->>Prov: runtime(task)
     Prov->>Env: serve: env.start() + bind()
     Prov-->>Roll: Runtime(url)
-    Roll->>Cli: connect(url)
+    Roll->>Cli: addr.connect()
     Cli->>Env: hello (retry until ready)
     Env-->>Cli: manifest (bindings)
     Roll->>Env: tasks.start (start_run)
-    Env->>Env: TaskRunner.start -> 1st yield
+    Env->>Env: Session.start_task -> 1st yield
     Env-->>Roll: prompt
     rect rgb(238,238,238)
     Note over Roll,Env: await agent(run) fills run.trace
@@ -719,7 +699,7 @@ sequenceDiagram
     Env-->>Roll: observations
     end
     Roll->>Env: tasks.grade (start_run exit)
-    Env->>Env: TaskRunner.grade -> 2nd yield
+    Env->>Env: Session.grade -> 2nd yield
     Env-->>Roll: score becomes Grade.reward
     Prov->>Env: provider stops the substrate + env.stop()
     Roll-->>Sched: graded trace
@@ -731,24 +711,26 @@ This reading path exposes the boundaries encoded by the rollout engine.
 
 <div className="step-list">
 
-- **Each provider acquisition yields one control-channel address.** The address can represent a
-  process, one container, or a Compose project whose `main` service owns the channel. A verifier in
-  another environment causes a second acquisition after the actor acquisition exits.
-- **A control channel holds one suspended task per session.** A `_ControlChannel` keys its
-  suspended `TaskRunner`s by session id, so concurrent sessions each own their own, and a dropped
-  connection parks its session's task for a later one to grade (see the
+- **Each provider acquisition yields one runtime.** It is a control-channel address - a process,
+  one container, or a Compose project whose `main` service owns the channel - or, from
+  `LocalRuntime`, an environment started in this process. A verifier in another environment causes
+  a second acquisition after the actor acquisition exits.
+- **A session holds one suspended task.** A `_ControlChannel` keys its `Session`s by id, so
+  concurrent sessions each own their own task, and a session leased past its connection stays
+  open for a later one to attach and grade (see the
   [control channel](/v6/internals/control-channel#the-suspended-task)). Vectorized robot sims reuse that
   shape: N sessions on one control port, each claiming a bridge slot by token.
 - **The agent loop runs in the caller's process.** Every provider except `HostedRuntime` is
   *client-here*: the substrate can be anywhere, but `agent(run)` executes locally. With the
-  default `LocalRuntime` the env serves in this same process too, so its hooks share the caller's
-  event loop and blocking env code stalls concurrent rollouts; `SubprocessRuntime` and
-  `DockerRuntime` move the env to its own substrate, where hooks run isolated from the caller.
+  default `LocalRuntime` the env runs in this same process too, with no control channel, so its
+  hooks share the caller's event loop and blocking env code stalls concurrent rollouts;
+  `SubprocessRuntime` and `DockerRuntime` move the env to its own substrate, where hooks run
+  isolated from the caller.
 - **Every capability is concrete by `hello` time.** `env.start()` runs all initialize hooks before
   serving, and the manifest is negotiated once. A capability published later will not appear in an
   already-connected client.
 - **A template generator is single-use per start.** `grade` closes it after the second yield, so
-  one `TaskRunner` grades exactly once; re-running the task means a fresh `tasks.start`.
+  one start grades exactly once; re-running the task means a fresh `tasks.start`.
 - **Placement is chosen once per batch.** `Taskset.run` resolves one provider for all rows. Per-row
   heterogeneity is possible only because the `Provider` contract takes the `task` and can branch on
   it - the engine never does.

@@ -85,7 +85,7 @@ def _args_json_schema(sig: inspect.Signature) -> dict[str, Any]:
 class _TaskFactory(Generic[P]):
     """Registered ``@env.template`` callable that creates concrete public tasks.
 
-    The server side (``TaskRunner``) drives its
+    A ``Session`` drives its
     async-generator ``func`` (prompt → score); calling this object with args
     binds a runnable ``Task``::
 

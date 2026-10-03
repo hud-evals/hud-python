@@ -11,7 +11,7 @@ runtime changes.
 ```python
 from hud.runtime import LocalRuntime
 
-await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locally, run here
+await taskset.run(agent, runtime=LocalRuntime("env.py"))   # run env.py's tasks in this process
 ```
 
 ## Built-in runtimes
@@ -123,7 +123,9 @@ The constructor for each built-in runtime:
 LocalRuntime(source, *, env=None, ready_timeout=120.0)
 ```
 
-Runs an environment in the current Python process. `source` can be:
+Runs an environment in the current Python process. The rollout drives its tasks directly, with no
+control channel or tunnels: the agent reaches each capability at the address the environment
+published. `source` can be:
 
 - **A `.py` file or directory:** load the environment from that source.
 - **An `Environment`:** reuse that instance.

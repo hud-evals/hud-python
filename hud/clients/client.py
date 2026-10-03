@@ -6,8 +6,6 @@ import asyncio
 import contextlib
 import itertools
 import logging
-import math
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -17,6 +15,7 @@ from hud.capabilities import Capability, Connection
 from hud.environment.utils import (
     CONTROL_FRAME_LIMIT_BYTES,
     FILE_TRACKING_FRAME_LIMIT_BYTES,
+    HudProtocolError,
     encode_frame,
     read_frame,
     send_frame,
@@ -24,29 +23,14 @@ from hud.environment.utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import Sequence
 
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
-    from hud.runtime import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
-_CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
-_CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
-_ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
-# How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
-DEFAULT_READY_TIMEOUT = 240.0
 _LEGACY_FILE_TRACKING = "filetracking/1"
 _METHOD_NOT_FOUND = -32601
-
-
-class HudProtocolError(RuntimeError):
-    """Raised when the env returns a JSON-RPC error frame."""
-
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(f"hud rpc error {code}: {message}")
-        self.code = code
-        self.message = message
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +45,8 @@ class ServerInfo:
 class Manifest:
     """Env welcome frame returned by ``HudClient.hello()``.
 
-    ``bindings`` hold environment-native addresses. From outside the environment, use
-    ``HudClient.binding`` or ``HudClient.open``, which route through the control channel.
+    ``bindings`` hold environment-native addresses; ``HudClient.capabilities`` holds them
+    routed through the control channel.
     """
 
     session_id: str
@@ -74,7 +58,7 @@ class Manifest:
 class HudClient:
     """The session of a served environment: JSON-RPC over its control channel.
 
-    Prefer ``connect``, which yields a client with ``manifest`` set and closes it.
+    Prefer ``Runtime.connect``, which yields a client with ``manifest`` set and closes it.
     """
 
     PROTOCOL_VERSION = "hud/1.0"
@@ -94,22 +78,32 @@ class HudClient:
         self._call_lock = asyncio.Lock()
         self._closed = False
         self.manifest: Manifest | None = None
+        # The routes and connections ``hello`` bound, which ``ping`` re-sends.
+        self._bound: dict[str, Any] = {}
         self._legacy_files: _LegacyFileTracking | None = None
         self._routes: dict[str, str] = {}
         self._forwarders: list[asyncio.Server] = []
         self._tunnels: set[asyncio.Task[None]] = set()
 
     @property
+    def session_id(self) -> str:
+        """The environment's id for this session."""
+        if self.manifest is None:
+            raise RuntimeError("call hello() before accessing session_id")
+        return self.manifest.session_id
+
+    @property
     def capabilities(self) -> list[Capability]:
-        """The capabilities the environment published, at its own addresses."""
+        """The environment's capabilities at the local addresses that tunnel to them.
+
+        ``Capability.env_url`` keeps each one's address inside the environment.
+        """
         if self.manifest is None:
             raise RuntimeError("call hello() before accessing capabilities")
-        return list(self.manifest.bindings)
-
-    def route(self, capability: Capability) -> Capability:
-        """``capability`` at the local address that tunnels to it, when there is one."""
-        url = self._routes.get(capability.name)
-        return capability if url is None else replace(capability, url=url)
+        return [
+            replace(cap, url=self._routes[cap.name]) if cap.name in self._routes else cap
+            for cap in self.manifest.bindings
+        ]
 
     async def close(self) -> None:
         if self._closed:
@@ -119,8 +113,6 @@ class HudClient:
         self.abort()
         if tunnels:
             await asyncio.gather(*tunnels, return_exceptions=True)
-        # No `bye`: a plain disconnect leaves the env's held session for a later
-        # connection to grade; `grade` itself clears the session when it completes.
         self._writer.close()
         with contextlib.suppress(Exception):
             await self._writer.wait_closed()
@@ -146,19 +138,25 @@ class HudClient:
         self,
         session_id: str | None = None,
         *,
+        lease: float | None = None,
         workspace_routes: Sequence[WorkspaceRoute] = (),
         connections: Sequence[Connection] = (),
     ) -> Manifest:
         """Send ``hello``; cache and return the parsed ``Manifest``.
 
-        ``session_id`` resumes that parked session, with its suspended task, instead
-        of minting a fresh one.
+        ``session_id`` attaches to that open session, with any task it holds, instead
+        of opening a fresh one; it must be the connection's first ``hello``. ``lease``
+        keeps the session open that many seconds after this connection ends; by
+        default it closes with the connection, cancelling its task.
         """
-        params: dict[str, Any] = {}
+        self._bound = {}
+        if lease is not None:
+            self._bound["lease"] = lease
         if workspace_routes:
-            params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
+            self._bound["workspace_routes"] = [route.to_wire() for route in workspace_routes]
         if connections:
-            params["connections"] = [connection.to_wire() for connection in connections]
+            self._bound["connections"] = [connection.to_wire() for connection in connections]
+        params = dict(self._bound)
         if session_id is not None:
             params["session_id"] = session_id
         result = await self._call("hello", params)
@@ -262,21 +260,11 @@ class HudClient:
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
 
-    async def _abandon_task(self) -> None:
-        """Cancel the task, even mid-call, wait briefly for its teardown, then abort."""
-        frame = encode_frame(
-            {"jsonrpc": "2.0", "id": next(self._ids), "method": "tasks.cancel", "params": {}},
-            max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+    async def ping(self, *, reply_timeout: float) -> None:
+        """Re-send this session's ``hello`` to probe the connection."""
+        await self._call(
+            "hello", {"session_id": self.session_id, **self._bound}, reply_timeout=reply_timeout
         )
-        try:
-            with contextlib.suppress(Exception):
-                async with asyncio.timeout(_ABANDON_REPLY_TIMEOUT_SECONDS):
-                    self._writer.write(frame)
-                    await self._writer.drain()
-                    async with self._call_lock:
-                        await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
-        finally:
-            self.abort()
 
     async def files(self, op: FileTrackingOp) -> dict[str, Any] | None:
         """Run one file-tracking operation; ``None`` when the environment tracks no files."""
@@ -395,130 +383,3 @@ class _LegacyFileTracking:
         if self._stream is not None:
             self._stream[1].close()
             self._stream = None
-
-
-async def _connect_ready(
-    host: str,
-    port: int,
-    *,
-    ready_timeout: float,
-    workspace_routes: Sequence[WorkspaceRoute],
-    connections: Sequence[Connection],
-    interval: float = 0.5,
-) -> HudClient:
-    """Connect and complete ``hello``, retrying until the env is ready.
-
-    A proxied port (``docker -p``, a port-forward) can accept before the env behind it
-    serves, so a handshake EOF means not ready yet, like a refused connect.
-    """
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + ready_timeout
-    while True:
-        try:
-            reader, writer = await asyncio.open_connection(host, port)
-        except OSError:
-            if loop.time() >= deadline:
-                raise
-            await asyncio.sleep(interval)
-            continue
-
-        client = HudClient(reader, writer, endpoint=(host, port))
-        try:
-            await client.hello(workspace_routes=workspace_routes, connections=connections)
-        except asyncio.CancelledError:
-            client.abort()
-            raise
-        except (EOFError, OSError):
-            # No live env behind the accepted connection yet: EOF on the reply, or a
-            # reset racing the hello write.
-            await client.close()
-            if loop.time() >= deadline:
-                raise
-            await asyncio.sleep(interval)
-        except BaseException:
-            # A real failure still closes the socket: an unclosed connection parks the
-            # env's connection handler.
-            await client.close()
-            raise
-        else:
-            return client
-
-
-def _runtime_ready_timeout(runtime: Runtime, default: float) -> float:
-    raw = runtime.params.get("ready_timeout")
-    if raw is None:
-        return default
-    if isinstance(raw, bool) or not isinstance(raw, int | float):
-        raise ValueError("runtime.params['ready_timeout'] must be a positive finite number")
-    timeout = float(raw)
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("runtime.params['ready_timeout'] must be a positive finite number")
-    return timeout
-
-
-@asynccontextmanager
-async def connect(
-    runtime: Runtime,
-    *,
-    ready_timeout: float = DEFAULT_READY_TIMEOUT,
-    workspace_routes: Sequence[WorkspaceRoute] = (),
-    connections: Sequence[Connection] = (),
-) -> AsyncIterator[HudClient]:
-    """Connect a ``HudClient`` to a runtime's control channel, retrying until it answers.
-
-    The substrate's teardown stays with its provider. While open, a periodic heartbeat
-    probes the transport; a transport failure cancels the body and raises that error.
-    """
-    parts = urlsplit(runtime.url)
-    if parts.scheme not in ("", "tcp"):
-        raise NotImplementedError(
-            f"control transport {parts.scheme!r} not supported yet (only tcp://)",
-        )
-    client = await _connect_ready(
-        parts.hostname or "127.0.0.1",
-        parts.port or 0,
-        ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
-        workspace_routes=workspace_routes,
-        connections=connections,
-    )
-    owner = asyncio.current_task()
-    assert owner is not None
-    heartbeat_error: Exception | None = None
-
-    async def heartbeat() -> None:
-        nonlocal heartbeat_error
-        while True:
-            await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
-            assert client.manifest is not None
-            try:
-                params: dict[str, Any] = {"session_id": client.manifest.session_id}
-                if workspace_routes:
-                    params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
-                if connections:
-                    params["connections"] = [connection.to_wire() for connection in connections]
-                await client._call(
-                    "hello",
-                    params,
-                    reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS,
-                )
-            except HudProtocolError as exc:
-                LOGGER.warning("control heartbeat failed: %s", exc)
-                return
-            except Exception as exc:
-                LOGGER.warning("control heartbeat failed: %s", exc)
-                heartbeat_error = exc
-                owner.cancel()
-                return
-
-    heartbeat_task = asyncio.create_task(heartbeat(), name="hud-control-heartbeat")
-    try:
-        try:
-            yield client
-        finally:
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
-            await client.close()
-    except asyncio.CancelledError:
-        if heartbeat_error is not None:
-            raise heartbeat_error from None
-        raise

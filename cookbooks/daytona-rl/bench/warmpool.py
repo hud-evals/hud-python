@@ -23,7 +23,6 @@ import time
 from daytona import Image
 from daytona_api_client_async import ApiClient, Configuration, WarmPoolsApi
 from daytona_api_client_async.models.create_warm_pool import CreateWarmPool
-from hud.clients import connect
 from hud.runtime import DaytonaRuntime
 
 import pool
@@ -42,8 +41,8 @@ async def one(provider) -> tuple[float | None, str]:
     try:
         async with provider(fix_calc(variant=0)) as rt:
             elapsed = time.perf_counter() - t0
-            async with connect(rt) as client:
-                assert client.manifest is not None
+            async with rt.connect():
+                pass
             return elapsed, ""
     except Exception as exc:
         return None, f"{type(exc).__name__}: {exc}"

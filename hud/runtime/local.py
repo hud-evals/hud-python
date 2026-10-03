@@ -8,10 +8,15 @@ import inspect
 import sys
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 from weakref import WeakValueDictionary
 
+from hud.environment import load_environment
+from hud.environment.env import Environment
+from hud.environment.server import PORT_ANNOUNCEMENT
+from hud.environment.session import Session
 from hud.utils.process import (
     OUTPUT_DRAIN_TIMEOUT,
     create_process_group_exec,
@@ -23,9 +28,11 @@ from hud.utils.process import (
 from .core import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Sequence
 
-    from hud.environment.env import Environment
+    from hud.capabilities import Connection
+    from hud.environment.egress import WorkspaceRoute
+    from hud.eval.run import EnvironmentSession
     from hud.eval.task import Task
 
 
@@ -33,12 +40,38 @@ if TYPE_CHECKING:
 _ENVIRONMENT_LOCKS: WeakValueDictionary[Environment, asyncio.Lock] = WeakValueDictionary()
 
 
+@dataclass(frozen=True)
+class _InProcessRuntime(Runtime):
+    """An environment started in this process."""
+
+    env: Environment = field(kw_only=True, repr=False, compare=False)
+
+    @asynccontextmanager
+    async def connect(
+        self,
+        *,
+        session_id: str | None = None,
+        lease: float | None = None,
+        workspace_routes: Sequence[WorkspaceRoute] = (),
+        connections: Sequence[Connection] = (),
+    ) -> AsyncIterator[EnvironmentSession]:
+        if session_id is not None or lease is not None:
+            raise ValueError("an in-process session ends with this block; none outlives it")
+        session = Session(self.env)
+        try:
+            session.bind(connections=connections, workspace_routes=workspace_routes)
+            yield session
+        finally:
+            await session.close()
+
+
 class LocalRuntime:
-    """The local provider: serve an environment in this process.
+    """The local provider: run an environment in this process, with no control channel.
 
     ``source`` is a ``.py`` file or directory loaded per acquisition (``env`` picks
     one of several environments, defaulting to the task's), a live ``Environment``,
-    or a ``(task) -> Environment`` constructor called per acquisition.
+    or a ``(task) -> Environment`` constructor called per acquisition. The yielded
+    runtime's url, ``local://<env name>``, names the environment.
 
     ``ready_timeout`` bounds ``@env.initialize``. Acquisitions of one environment
     instance are serialized. Hooks share this event loop, so blocking env code stalls
@@ -52,18 +85,15 @@ class LocalRuntime:
         env: str | None = None,
         ready_timeout: float = 120.0,
     ) -> None:
-        from hud.environment.env import Environment as _Environment
-
         self.ready_timeout = ready_timeout
         self._source_dir: Path | None = None
-        if isinstance(source, _Environment):
+        if isinstance(source, Environment):
             if env is not None:
                 raise TypeError("LocalRuntime: env= applies only to source paths")
             self._build: Callable[[Task], Environment] = lambda _task: source
         elif isinstance(source, (str, Path)):
             path, pinned = Path(source).resolve(), env
             self._source_dir = path if path.is_dir() else path.parent
-            from hud.environment import load_environment
 
             def _load(task: Task) -> Environment:
                 return load_environment(path, name=pinned or task.env)
@@ -81,8 +111,6 @@ class LocalRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        from hud.environment.env import Environment as _Environment
-
         if task.runtime_config is not None:
             raise ValueError("LocalRuntime does not support task runtime_config")
         # Importable for the whole acquisition so templates can lazily import siblings;
@@ -100,23 +128,13 @@ class LocalRuntime:
                     "the env source ran async code while being imported to place a "
                     'rollout — guard top-level run calls with `if __name__ == "__main__":`'
                 ) from e
-            if not isinstance(env, _Environment):
+            if not isinstance(env, Environment):
                 raise TypeError(f"LocalRuntime: constructor returned {env!r}, not an Environment")
-            from hud.environment.server import _shutdown, bind
 
             async with _ENVIRONMENT_LOCKS.setdefault(env, asyncio.Lock()):
                 try:
                     await asyncio.wait_for(env.start(), self.ready_timeout)
-                    server = await bind(env, "127.0.0.1", 0)
-                    host, port = server.sockets[0].getsockname()[:2]
-                    serve_task = asyncio.create_task(server.serve_forever())
-                    try:
-                        yield Runtime(f"tcp://{host}:{port}")
-                    finally:
-                        serve_task.cancel()
-                        await _shutdown(server)
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await serve_task
+                    yield _InProcessRuntime(f"local://{env.name}", env=env)
                 finally:
                     await env.stop()
         finally:
@@ -142,9 +160,7 @@ class SubprocessRuntime:
         env: str | None = None,
         ready_timeout: float = 120.0,
     ) -> None:
-        from hud.environment.env import Environment as _Environment
-
-        if isinstance(source, _Environment):
+        if isinstance(source, Environment):
             if env is not None:
                 raise TypeError("SubprocessRuntime: env= applies only to source paths")
             files = {Path(inspect.getfile(t.func)).resolve() for t in source.tasks.values()}
@@ -189,8 +205,6 @@ class SubprocessRuntime:
 
         stderr_drain = asyncio.create_task(stream_output(error, sys.stderr, capture=capture_error))
         try:
-            from hud.environment.server import PORT_ANNOUNCEMENT
-
             write_stdout, finish_stdout = output_writer(
                 sys.stdout,
                 capture=lambda text: output_tail.append(text.strip()[-1024:]),

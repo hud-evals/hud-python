@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
+import math
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -18,13 +21,25 @@ from pydantic import (
     model_validator,
 )
 
+from hud.clients import HudClient, HudProtocolError
+
 from .compose import ComposeProject
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
     from pathlib import Path
 
+    from hud.capabilities import Connection
+    from hud.environment.egress import WorkspaceRoute
+    from hud.eval.run import EnvironmentSession
     from hud.eval.task import Task
+
+LOGGER = logging.getLogger("hud.runtime")
+# How long a connect waits for a freshly provisioned env to serve when nothing sets a limit.
+DEFAULT_READY_TIMEOUT = 240.0
+_CONNECT_RETRY_SECONDS = 0.5
+_HEARTBEAT_INTERVAL_SECONDS = 120.0
+_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 
 
 class RuntimeGPU(BaseModel):
@@ -144,10 +159,12 @@ def validate_session_id(session_id: str) -> None:
 
 @dataclass(frozen=True)
 class Runtime:
-    """A provisioned substrate's control-channel ``url`` plus connection-time ``params``.
+    """An acquired substrate: where its environment is, how to open sessions on it, and
+    how to move a session's files between substrates.
 
-    Constructed directly, it is also a provider that yields itself and leaves teardown
-    to whoever provisioned the substrate.
+    ``url`` is the environment's control channel; ``params`` are connection-time settings
+    such as ``ready_timeout``. Constructed directly, a runtime is also a provider that
+    yields itself and leaves teardown to whoever provisioned the substrate.
     """
 
     url: str
@@ -160,6 +177,106 @@ class Runtime:
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
+
+    @asynccontextmanager
+    async def connect(
+        self,
+        *,
+        session_id: str | None = None,
+        lease: float | None = None,
+        workspace_routes: Sequence[WorkspaceRoute] = (),
+        connections: Sequence[Connection] = (),
+    ) -> AsyncIterator[EnvironmentSession]:
+        """Open a session on the environment over its control channel.
+
+        ``session_id`` attaches to that open session instead; ``lease`` keeps the session
+        open that many seconds after this connection ends, for a later one to attach.
+
+        Connecting retries until the environment answers ``hello``, for
+        ``params["ready_timeout"]`` seconds: a proxied port (``docker -p``, a port-forward)
+        can accept before the environment behind it serves. While the session is open, a
+        heartbeat probes the connection; a failure cancels the body and raises that error.
+        """
+        parts = urlsplit(self.url)
+        if parts.scheme not in ("", "tcp"):
+            raise NotImplementedError(
+                f"control transport {parts.scheme!r} not supported yet (only tcp://)",
+            )
+        host, port = parts.hostname or "127.0.0.1", parts.port or 0
+        timeout = self.params.get("ready_timeout", DEFAULT_READY_TIMEOUT)
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int | float)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("runtime.params['ready_timeout'] must be a positive finite number")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            try:
+                reader, writer = await asyncio.open_connection(host, port)
+            except OSError:
+                if loop.time() >= deadline:
+                    raise
+                await asyncio.sleep(_CONNECT_RETRY_SECONDS)
+                continue
+            client = HudClient(reader, writer, endpoint=(host, port))
+            try:
+                await client.hello(
+                    session_id,
+                    lease=lease,
+                    workspace_routes=workspace_routes,
+                    connections=connections,
+                )
+                break
+            except asyncio.CancelledError:
+                client.abort()
+                raise
+            except (EOFError, OSError):
+                # No live env behind the accepted connection yet: EOF on the reply, or a
+                # reset racing the hello write.
+                await client.close()
+                if loop.time() >= deadline:
+                    raise
+                await asyncio.sleep(_CONNECT_RETRY_SECONDS)
+            except BaseException:
+                # A real failure still closes the socket: an unclosed connection parks the
+                # env's connection handler.
+                await client.close()
+                raise
+
+        owner = asyncio.current_task()
+        assert owner is not None
+        heartbeat_error: Exception | None = None
+
+        async def heartbeat() -> None:
+            nonlocal heartbeat_error
+            while True:
+                await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+                try:
+                    await client.ping(reply_timeout=_HEARTBEAT_TIMEOUT_SECONDS)
+                except HudProtocolError as exc:
+                    LOGGER.warning("control heartbeat failed: %s", exc)
+                    return
+                except Exception as exc:
+                    LOGGER.warning("control heartbeat failed: %s", exc)
+                    heartbeat_error = exc
+                    owner.cancel()
+                    return
+
+        heartbeat_task = asyncio.create_task(heartbeat(), name="hud-control-heartbeat")
+        try:
+            try:
+                yield client
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+                await client.close()
+        except asyncio.CancelledError:
+            if heartbeat_error is not None:
+                raise heartbeat_error from None
+            raise
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:

@@ -205,9 +205,9 @@ harbor_tasks/
     └── tests/test.sh
 ```
 
-The exported image serves the HUD control channel and parks the task after
-setup. Harbor runs the agent in that container, then `tests/test.sh` reconnects
-to grade the parked task and writes the reward. This mapping requires Harbor's
+The exported image serves the HUD control channel and starts the task, leaving
+its session open. Harbor runs the agent in that container, then `tests/test.sh`
+attaches to that session to grade the task and writes the reward. This mapping requires Harbor's
 same-container verifier; exported `task.toml` files do not declare
 `[verifier.environment]`.
 

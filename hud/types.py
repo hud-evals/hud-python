@@ -475,7 +475,8 @@ class Trace(BaseModel):
     job_id: str | None = None
     group_id: str | None = None
     slug: str | None = None
-    # The control-channel url the evaluation ran over, or hud://trace/<id> when hosted.
+    # Where the evaluation ran: its control-channel url, local://<env> for an environment
+    # in the evaluating process, or hud://trace/<id> when hosted.
     runtime: str | None = None
 
     model_config = ConfigDict(extra="forbid")
