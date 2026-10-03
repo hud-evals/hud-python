@@ -9,6 +9,7 @@ import hashlib
 import logging
 import mimetypes
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -230,6 +231,8 @@ class FileTracker:
 
         self._previous_snapshot: Snapshot | None = None
         self._baseline_snapshot: Snapshot | None = None
+        # Every session of the environment shares this tracker.
+        self._lock = threading.Lock()
 
         self._gitignore_patterns: list[str] = []
         self._gitignore_loaded = False
@@ -338,20 +341,21 @@ class FileTracker:
         return diff
 
     def call(self, op: str) -> dict[str, Any]:
-        """Run one ``files.*`` control-channel operation and return its reply."""
-        if op == "setup":
-            return self.take_setup_snapshot().to_dict()
-        if op == "snapshot":
-            manifest = self.current_manifest()
-            return {
-                "root": self._root.as_posix(),
-                "files": manifest,
-                "files_scanned": len(manifest),
-            }
-        if op == "diff":
-            return self.take_snapshot().to_dict()
-        if op == "flush":
-            return self.flush_changes()
+        """Run one ``files.*`` operation and return its reply, one operation at a time."""
+        with self._lock:
+            if op == "setup":
+                return self.take_setup_snapshot().to_dict()
+            if op == "snapshot":
+                manifest = self.current_manifest()
+                return {
+                    "root": self._root.as_posix(),
+                    "files": manifest,
+                    "files_scanned": len(manifest),
+                }
+            if op == "diff":
+                return self.take_snapshot().to_dict()
+            if op == "flush":
+                return self.flush_changes()
         raise ValueError(f"unknown file tracking operation: {op!r}")
 
     def current_manifest(self) -> list[dict[str, Any]]:

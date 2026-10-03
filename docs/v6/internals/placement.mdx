@@ -16,7 +16,7 @@ callable.
 | --- | --- |
 | **Task row** | A `Task` (`hud/eval/task.py`): an env *name*, a task id, bound args. The name is a join key, never a live object - see [what we start with](/v6/internals/walkthrough#what-we-start-with). |
 | **Provider** | Anything callable as `(task) -> async context manager yielding a Runtime` (`hud/runtime/`). Entering the context provisions; exiting tears down. |
-| **Runtime** | Pure data: the connectable address of one substrate (`url`, connection `params`, optional `config`). |
+| **Runtime** | One acquired substrate: its address (`url`, connection `params`, optional `config`) and the operations on it - opening a session (`connect`) and moving a session's files to another substrate. |
 | **Substrate** | The provisioned instance behind a url - a local env, a subprocess, a container, a cloud sandbox. |
 
 ## The contract
@@ -28,7 +28,7 @@ callable.
 
 The whole layer is two definitions. A `Provider` is a structural protocol - no base class, no
 registry - so any function of the right shape is a valid placement strategy. A `Runtime` is the
-value it yields: where to connect, nothing more.
+value it yields: where the environment is, and how to open a session on it.
 
 </div>
 <div className="guide-aside">
@@ -49,6 +49,10 @@ class Runtime:
 
     def __call__(self, task):     # a Runtime is
         return nullcontext(self)  # itself a provider
+
+    @asynccontextmanager
+    async def connect(self, ...):  # a session on the
+        ...                        # control channel at url
 ```
 
 </div>
@@ -69,9 +73,10 @@ Two consequences do most of the work:
 </div>
 
 The built-ins (`LocalRuntime`, `SubprocessRuntime`, `DockerRuntime`, `ModalRuntime`,
-`DaytonaRuntime`, `HUDRuntime`) are all providers of this shape. They differ only in *where* the
-substrate runs and how its url is reached; all of them serve the same module and speak the same
-channel.
+`DaytonaRuntime`, `HUDRuntime`) are all providers of this shape. They differ in *where* the
+substrate runs and how its url is reached; all but `LocalRuntime` serve the same module and speak
+the same channel. `LocalRuntime` starts the environment in this process and yields a runtime whose
+`connect` drives it directly, with no channel.
 
 ## Resolution
 

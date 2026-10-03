@@ -211,6 +211,8 @@ Every key is optional. `${VAR}` expands from the environment and HUD settings (`
 
 `hud task start` / `hud task grade` resolve authored task slugs and arguments from `--source` (default `.`). Without `--url`, HUD serves the bound environment's template file in a subprocess. With both `--source` and `--url`, it runs the resolved task against the already-served environment. Pass `--url` without `--source` to call a raw template id with explicit `--args`. `hud task list` always reads from source.
 
+With `--url`, `hud task start` leaves the task's session open on the served environment for a day and remembers its id in `~/.hud/task-sessions.json`; `hud task grade` with the same `--url` attaches to it, or to the session `--session` names. Without a session to attach to, `hud task grade` starts the task and grades it in one go.
+
 ```bash
 hud task list
 hud task start fix_bug --source tasks.py --url tcp://127.0.0.1:8765
@@ -220,7 +222,7 @@ hud task grade fix_bug --source tasks.py --url tcp://127.0.0.1:8765 --answer "..
 | Command | Key options |
 |---------|-------------|
 | `hud task start <task>` | `--source`/`-s`, `--args` (JSON), `--url`/`-u`, `--json` |
-| `hud task grade <task>` | `--answer`, `--answer-file` (`-` reads stdin), `--source`, `--args`, `--url`, `--json` |
+| `hud task grade <task>` | `--answer`, `--answer-file` (`-` reads stdin), `--source`, `--args`, `--url`, `--session`, `--json` |
 | `hud task list` | `--source`/`-s`, `--json`, `--quiet` |
 
 ## Platform

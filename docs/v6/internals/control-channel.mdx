@@ -46,7 +46,7 @@ sequenceDiagram
     Env-->>Agent: evaluation
 ```
 
-`hello` creates or resumes a session and returns the environment identity plus
+`hello` opens a session, or attaches to an open one by id, and returns the environment identity plus
 its capability bindings. `tasks.start` advances one task generator to its first
 yield and returns the prompt. The agent drives the advertised capabilities while
 that generator remains suspended. `tasks.grade` sends the agent's answer into
@@ -62,12 +62,12 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 
 | Method | Result |
 | --- | --- |
-| `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session. |
+| `hello` | Session id, environment name/version, and capability `bindings`. On a connection's first `hello`, `session_id` attaches to an open session instead of opening one. `lease` keeps the session open that many seconds after the connection ends (default 0). |
 | `tasks.list` | Registered task metadata for introspection and validation. |
 | `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
 | `tasks.grade` | The selected task's evaluation, including numeric `score`. |
 | `tasks.cancel` | Interrupts a running `tasks.start` or `tasks.grade`, then cancels and removes the session's task. |
-| `bye` | Cancels the task and ends the session. |
+| `bye` | Closes the session, cancelling its task, and ends the connection. |
 
 Each request and response is one newline-delimited JSON frame. Calls on a
 `HudClient` are serialized, and reply ids must match the corresponding request.
@@ -92,7 +92,7 @@ async def accept(reader, writer):
     if first.get("method") == "tunnel.open":
         await _stream(env, first, reader, writer)
     else:
-        await channel.session(first, reader, writer)
+        await channel.handle(first, reader, writer)
 ```
 
 The fork is connection-local. Control-session connections continue parsing
@@ -107,38 +107,32 @@ tunnels through its own stream or upgrade mechanism.
 ## The suspended task
 
 `bind` creates one `_ControlChannel` for the served environment. That channel
-owns one suspended `TaskRunner` per session id. A session's `tasks.start`
-replaces its runner, `tasks.grade` consumes it, and `tasks.cancel` removes it.
+keeps the open `Session`s (`hud/environment/session.py`) by id, and each
+session holds at most one suspended task: `tasks.start` replaces it,
+`tasks.grade` consumes it, and `tasks.cancel` tears it down. The same `Session`
+is what `LocalRuntime` hands the engine directly, with no channel.
 
-```python hud/environment/server.py · _ControlChannel
-async def start(self, session_id, task_id, args):
-    await self.cancel(session_id)
-    runner = TaskRunner(self.env.tasks[task_id], args)
-    self._runners[session_id] = runner
-    try:
-        return await runner.start()
-    except BaseException:
-        self._runners.pop(session_id, None)
-        await runner.cancel()
-        raise
+A session belongs to the connection whose first `hello` opened it and closes
+when that connection ends: its task is cancelled and its bindings released. A
+connection can ask for a `lease` instead; the session then stays open that many
+seconds after the connection ends, and a later connection attaches to it with
+`hello` and its `session_id`. Attaching stops the clock, and `bye` closes a
+session at once.
 
-async def grade(self, session_id, payload):
-    runner = self._runners.pop(session_id, None)
-    if runner is None:
-        _, runner = self._adopt_parked()
-    return await runner.grade(payload)
+```python hud/environment/server.py · _ControlChannel._detach
+async def _detach(self, session, lease):
+    self._attached.discard(session.session_id)
+    if lease:                               # open for a later connection
+        self._expiries[session.session_id] = asyncio.create_task(
+            self._expire(session, lease)
+        )
+    else:
+        await self._close(session)          # cancel its task, release its bindings
 ```
 
-The runner lives on the channel rather than the socket. A dropped connection
-removes its session id from the live set but leaves its runner parked. A later
-connection reaches the same runner in either of two ways:
-
-- `hello` with its `session_id` resumes that exact parked session.
-- A plain `tasks.grade` adopts a parked runner only when exactly one exists.
-
-Zero parked runners produces `no task in progress`; multiple parked runners
-produce an ambiguity error that names their session ids. This is the channel
-mechanism behind split `hud task start` and `hud task grade` invocations.
+This is the mechanism behind split `hud task start` and `hud task grade`
+invocations: `start` asks for a long lease and remembers the session id, and
+`grade` attaches to it.
 
 ## Capability streams
 
@@ -178,7 +172,7 @@ connections alongside the control-session connection.
 
 ## Client-side routes
 
-`connect(Runtime(url))` gives `HudClient` the control endpoint. During `hello`,
+`Runtime.connect` opens a `HudClient` on the control endpoint. During `hello`,
 the client creates one loopback forwarder for every returned binding. Each
 forwarder accepts local connections, opens a `tunnel.open` connection to the
 control endpoint, and splices the local client to that tunnel.
@@ -205,11 +199,11 @@ for capability in bindings:
     )
 ```
 
-`binding(ref)` returns the capability with its routed local URL.
-`open(ref)` resolves that same binding, constructs the registered protocol
-client, and caches it for the life of the `HudClient`. All external capability
-traffic therefore follows the control address even when a manifest binding
-contains a substrate-local or otherwise unreachable address.
+`HudClient.capabilities` returns every binding at its routed local URL, with
+`env_url` keeping the address inside the environment. Agents open those
+through `open_client`, so all external capability traffic follows the control
+address even when a manifest binding contains a substrate-local or otherwise
+unreachable address.
 
 The [walkthrough](/v6/internals/walkthrough#connecting) places the handshake and
 forwarders on the execution path. [Placement](/v6/internals/placement) explains

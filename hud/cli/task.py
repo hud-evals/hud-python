@@ -13,13 +13,32 @@ from hud.cli import (
     CLI,
     CliError,
 )
-from hud.clients import HudProtocolError, connect
 from hud.eval.taskset import Taskset
 from hud.runtime import Runtime, SubprocessRuntime
 from hud.utils.process import run_until_terminated
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
+
+# How long a session `hud task start` leaves on a served env stays open for `hud task grade`.
+_SESSION_LEASE_SECONDS = 24 * 60 * 60
+
+
+def _sessions_file() -> Path:
+    # The sessions `hud task start` left open, by env url and task, for `hud task grade`.
+    return Path.home() / ".hud" / "task-sessions.json"
+
+
+def _load_sessions() -> dict[str, str]:
+    path = _sessions_file()
+    return json.loads(path.read_text("utf-8")) if path.exists() else {}
+
+
+def _save_sessions(sessions: dict[str, str]) -> None:
+    path = _sessions_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sessions, indent=2), "utf-8")
+
 
 task_app = CLI(
     help="Start a task or grade an answer (attaches to a running env, or spawns from source).",
@@ -135,14 +154,19 @@ def start_command(
         hud task start fix_bug --source . --args '{}'[/not dim]
     """
     task_id, task_args, placement = _resolve(task, source, url, args)
+    # A served env keeps the session open for `hud task grade`; a spawned one exits with us.
+    lease = _SESSION_LEASE_SECONDS if url is not None else None
 
     async def _run() -> dict[str, Any]:
-        # Start and disconnect without grading; an attached (persistent) env keeps
-        # the session for a later `hud task grade` to resume.
-        async with placement as runtime, connect(runtime) as client:
-            return await client.start_task(task_id, task_args)
+        async with placement as runtime, runtime.connect(lease=lease) as session:
+            started = await session.start_task(task_id, task_args)
+            return {**started, "session_id": session.session_id}
 
     result = run_until_terminated(_run())
+    if url is not None:
+        sessions = _load_sessions()
+        sessions[f"{url} {task_id}"] = result["session_id"]
+        _save_sessions(sessions)
     prompt = result.get("prompt", result)
     typer.echo(prompt if isinstance(prompt, str) else json.dumps(prompt, default=str))
     return result
@@ -177,6 +201,12 @@ def grade_command(
         help="Run against this served control channel (tcp://host:port); --source may still "
         "resolve the task.",
     ),
+    session: str | None = typer.Option(
+        None,
+        "--session",
+        help="Grade the task in this session on --url (default: the one `hud task start` "
+        "left there).",
+    ),
 ) -> Any:
     """Grade an answer for a task and print its reward.
 
@@ -186,18 +216,23 @@ def grade_command(
         hud task grade fix_bug --answer-file answer.txt[/not dim]
     """
     answer_text = CLI.read_text(answer_file) if answer_file is not None else answer
+    if session is not None and url is None:
+        raise CliError(error="usage", message="--session needs the --url of the env serving it")
     task_id, task_args, placement = _resolve(task, source, url, args)
+    if url is not None and session is None:
+        # Attaching closes the session when this command ends, so it is forgotten either way.
+        sessions = _load_sessions()
+        session = sessions.pop(f"{url} {task_id}", None)
+        _save_sessions(sessions)
 
     async def _run() -> dict[str, Any]:
-        async with placement as runtime, connect(runtime) as client:
-            try:
-                return await client.grade({"answer": answer_text})  # resume a prior start
-            except HudProtocolError as exc:
-                if exc.code != -32600 or exc.message != "no task in progress":
-                    raise
-                # No held session: run the whole lifecycle here (start then grade).
-                await client.start_task(task_id, task_args)
-                return await client.grade({"answer": answer_text})
+        if session is not None:
+            async with placement as runtime, runtime.connect(session_id=session) as attached:
+                return await attached.grade({"answer": answer_text})
+        # No session to grade in: run the whole lifecycle here.
+        async with placement as runtime, runtime.connect() as fresh:
+            await fresh.start_task(task_id, task_args)
+            return await fresh.grade({"answer": answer_text})
 
     result = run_until_terminated(_run())
     typer.echo(json.dumps(result.get("score", result), default=str))

@@ -7,7 +7,7 @@
 Infra mode measures the thing we actually doubt: how sandbox spin-up and the
 one-SSH-connection-per-sandbox transport (runtime.py:780) behave under fan-out.
 Each worker acquires a sandbox, opens a *fresh control connection* to it, does
-one real handshake (`client.manifest()`), and exits — no agent, no tokens.
+one real handshake (`rt.connect()`), and exits — no agent, no tokens.
 
 Writes ladder.csv and ladder.svg.
 """
@@ -23,7 +23,6 @@ import time
 from pathlib import Path
 
 from daytona import Image
-from hud.clients import connect
 from hud.runtime import DaytonaRuntime
 
 from env import fix_calc
@@ -43,8 +42,7 @@ async def one_infra(provider, idx: int) -> dict:
         async with provider(fix_calc()) as rt:
             row["spin_up_s"] = time.perf_counter() - t0
             t1 = time.perf_counter()
-            async with connect(rt) as client:
-                assert client.manifest is not None
+            async with rt.connect():
                 row["connect_s"] = time.perf_counter() - t1
             row["ok"] = True
     except Exception as exc:

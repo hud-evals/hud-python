@@ -64,7 +64,7 @@ itself belongs to `hud.environment.server`, the entry point every substrate runs
 | Function | Description |
 |----------|-------------|
 | `await serve(env, host="127.0.0.1", port=0)` | Start daemons and serve the control channel until cancelled (blocks). |
-| `await bind(env, host="127.0.0.1", port=0)` | Bind the control-channel socket and return an `asyncio.Server` without serving. |
+| `async with bind(env, host="127.0.0.1", port=0) as server` | Bind the control-channel socket and yield its `asyncio.Server`; leaving the block closes it and cancels its sessions' suspended tasks. Does not start daemons. |
 | `load_environment(path, *, name=None)` | Return the one `Environment` defined at `path` (a `.py` file or directory); `name` selects among several. |
 
 The server module is the same entry point a container CMD runs:
