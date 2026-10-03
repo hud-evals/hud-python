@@ -44,9 +44,10 @@ class _ControlChannel:
     """The open sessions of one bound server, by id.
 
     A connection's first ``hello`` opens a session or attaches to an open one by id, and a
-    session has at most one connection. When its connection ends, a session stays open for
-    the lease that connection's ``hello`` asked for (none by default), so a later
-    connection can attach and carry on; then it closes, cancelling its task and releasing
+    session has at most one connection. When its connection ends, even mid-call, a session
+    stays open for the lease that connection's ``hello`` asked for (none by default), so a
+    later connection can attach and carry on; a task start or grade in progress runs on
+    meanwhile. Then the session closes, cancelling its task, even mid-call, and releasing
     its bindings. ``bye`` closes it at once.
     """
 
@@ -55,6 +56,8 @@ class _ControlChannel:
         self._open: dict[str, Session] = {}
         self._attached: set[str] = set()
         self._expiries: dict[str, asyncio.Task[None]] = {}
+        # The task start or grade each session is running, which can outlive its connection.
+        self._running: dict[str, asyncio.Task[dict[str, Any]]] = {}
 
     async def handle(
         self,
@@ -99,7 +102,14 @@ class _ControlChannel:
 
     async def _close(self, session: Session) -> None:
         del self._open[session.session_id]
+        await self._stop(session)
         await session.close()
+
+    async def _stop(self, session: Session) -> None:
+        """Cancel the task start or grade ``session`` is running, if any."""
+        if (call := self._running.pop(session.session_id, None)) is not None:
+            call.cancel()
+            await asyncio.wait((call,))
 
     async def close(self) -> None:
         """Close every open session (server shutdown)."""
@@ -108,18 +118,22 @@ class _ControlChannel:
         for expiry in expiries:
             expiry.cancel()
         await asyncio.gather(*expiries, return_exceptions=True)
-        while self._open:
-            _, session = self._open.popitem()
-            await session.close()
+        for session in list(self._open.values()):
+            await self._close(session)
+
+
+def _log_abandoned_failure(call: asyncio.Task[dict[str, Any]]) -> None:
+    if not call.cancelled() and (exc := call.exception()) is not None:
+        LOGGER.warning("a task call its connection left failed: %r", exc)
 
 
 class _Connection:
-    """One control connection: the session it speaks for, and the task call it runs.
+    """One control connection: the session it speaks for, and the task call it awaits.
 
     tasks.start and tasks.grade run the task's own code, which can take as long as it
-    likes, so they run beside the read loop: a cancel or a bye still reaches them, and any
-    other request meanwhile is refused. A hang-up lets a start finish and ends a grade,
-    whose result nobody is left to receive.
+    likes, so the connection awaits them beside its read loop: a cancel or a bye still
+    reaches the call, and any other request meanwhile is refused. A call the connection
+    leaves stays with its session, which the lease keeps open or closes.
     """
 
     def __init__(self, channel: _ControlChannel, writer: asyncio.StreamWriter) -> None:
@@ -129,7 +143,7 @@ class _Connection:
         self.lease = 0.0
         self._work: asyncio.Task[bool] | None = None
         self._work_id: int | str | None = None
-        self._work_method = ""
+        self._call: asyncio.Task[dict[str, Any]] | None = None
 
     async def serve(self, first: dict[str, Any], reader: asyncio.StreamReader) -> None:
         # The first frame is already read.
@@ -151,9 +165,6 @@ class _Connection:
                     continue
                 msg = next_frame.result()
                 if msg is None:
-                    if self._work is not None and self._work_method == "tasks.start":
-                        starting, self._work = self._work, None
-                        await starting
                     return
                 next_frame = asyncio.ensure_future(
                     read_frame(reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
@@ -162,6 +173,10 @@ class _Connection:
                     return
         finally:
             next_frame.cancel()
+            if self._work is not None and self._call is not None and not self._call.done():
+                # The connection ended mid-call: the lease decides the rest, and a failure
+                # has no one to report to but the log.
+                self._call.add_done_callback(_log_abandoned_failure)
             await self._stop_work()
 
     async def _receive(self, msg: dict[str, Any]) -> bool:
@@ -183,11 +198,12 @@ class _Connection:
             return True
         elif method in ("tasks.start", "tasks.grade"):
             self._work = asyncio.create_task(self._respond(msg))
-            self._work_id, self._work_method = msg_id, method
+            self._work_id = msg_id
             return True
         return await self._respond(msg)
 
     async def _stop_work(self) -> None:
+        """Stop awaiting the call; the call itself stays with the session."""
         if self._work is None:
             return
         stopping, self._work = self._work, None
@@ -251,20 +267,30 @@ class _Connection:
                 raise HudProtocolError(-32601, f"method not found: {method}")
             elif (session := self.session) is None:
                 raise HudProtocolError(-32600, f"{method}: send hello first")
-            elif method == "tasks.start":
-                task_id, args = params.get("id"), params.get("args") or {}
-                if not isinstance(task_id, str):
-                    raise HudProtocolError(-32602, "tasks.start: 'id' must be a string")
-                if not isinstance(args, dict):
-                    raise HudProtocolError(-32602, "tasks.start: 'args' must be an object")
-                if task_id not in env.tasks:
-                    raise HudProtocolError(-32602, f"unknown task: {task_id!r}")
-                result = await session.start_task(task_id, args)
-            elif method == "tasks.grade":
-                if not session.has_task:
-                    raise HudProtocolError(-32600, "no task in progress")
-                result = await session.grade(params)
+            elif method in ("tasks.start", "tasks.grade"):
+                running = self.channel._running.get(session.session_id)
+                if running is not None and not running.done():
+                    raise HudProtocolError(
+                        -32600, f"{method}: the session is still running an earlier call"
+                    )
+                if method == "tasks.start":
+                    task_id, args = params.get("id"), params.get("args") or {}
+                    if not isinstance(task_id, str):
+                        raise HudProtocolError(-32602, "tasks.start: 'id' must be a string")
+                    if not isinstance(args, dict):
+                        raise HudProtocolError(-32602, "tasks.start: 'args' must be an object")
+                    if task_id not in env.tasks:
+                        raise HudProtocolError(-32602, f"unknown task: {task_id!r}")
+                    self._call = asyncio.create_task(session.start_task(task_id, args))
+                else:
+                    if not session.has_task:
+                        raise HudProtocolError(-32600, "no task in progress")
+                    self._call = asyncio.create_task(session.grade(params))
+                self.channel._running[session.session_id] = self._call
+                # Shielded: the connection can stop waiting while the call runs on.
+                result = await asyncio.shield(self._call)
             elif method == "tasks.cancel":
+                await self.channel._stop(session)
                 await session.cancel()
                 result = {"cancelled": True}
             else:
@@ -351,7 +377,8 @@ async def bind(
 
     A connection's first frame decides what it is: ``tunnel.open`` opens one raw
     capability stream; anything else begins a JSON-RPC control session. On exit the
-    server closes, its connections are cut, and suspended tasks are cancelled.
+    server closes, its connections are cut, and its open sessions close, cancelling
+    their tasks.
     """
     channel = _ControlChannel(env)
     # Tracked so shutdown cancels handlers instead of abandoning them mid-splice.
