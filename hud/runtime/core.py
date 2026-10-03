@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from hud.eval.run import EnvironmentSession
     from hud.eval.task import Task
 
+    from .hosted import HostedRuntime
+
 LOGGER = logging.getLogger("hud.runtime")
 # How long a connect waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
@@ -373,8 +375,8 @@ class Shared:
             yield addr
 
 
-def resolve_runtime_config(provider: Provider, task: Task) -> RuntimeConfig | None:
-    """Return the runtime configuration a provider will apply to a task."""
+def resolve_runtime_config(provider: Provider | HostedRuntime, task: Task) -> RuntimeConfig | None:
+    """Return the runtime configuration a placement will apply to a task."""
     if isinstance(provider, Shared):
         return resolve_runtime_config(provider.inner, task)
     if isinstance(provider, Runtime):

@@ -20,12 +20,12 @@ from hud.runtime.core import resolve_runtime_config
 from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
-from .job import Job, job_enter
+from .job import Job
 from .run import rollout, validate_rollout_timeouts
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from contextlib import AbstractAsyncContextManager
 
     from hud.agents.base import Agent
@@ -40,6 +40,16 @@ logger = logging.getLogger("hud.eval.taskset")
 def _is_container_row(task: Task) -> bool:
     config = task.runtime_config
     return config is not None and (config.image is not None or config.compose is not None)
+
+
+def _containers_or(run_env: Callable[[Task], AbstractAsyncContextManager[Runtime]]) -> Provider:
+    """Image and Compose rows start under Docker; ``run_env`` starts every other row."""
+    docker = DockerRuntime()
+
+    def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
+        return docker(task) if _is_container_row(task) else run_env(task)
+
+    return place
 
 
 def _job_name(taskset_name: str, tasks: list[Task], group: int) -> str:
@@ -201,36 +211,34 @@ class Taskset:
             task.verifier.env for task in self if task.verifier is not None
         }
 
+    def _placed_rows(self) -> list[Task]:
+        """Every row a placement starts: each task, and each verifier that runs apart from it."""
+        return [
+            *self,
+            *(
+                task.verifier
+                for task in self
+                if task.verifier is not None and not task.shares_verifier_runtime
+            ),
+        ]
+
     def _resolve_placement(self) -> Provider:
         """Container rows start their image; rows minted by a live env run against it."""
         if self.taskset_id is not None:
             return HUDRuntime()
-        rows = list(self)
-        # A verifier sharing its task's substrate is placed with that task, not on its own.
-        rows.extend(
-            task.verifier
-            for task in self
-            if task.verifier is not None and not task.shares_verifier_runtime
-        )
-        placeable = [_is_container_row(task) or task._env is not None for task in rows]
-        if not rows or not all(placeable):
+        rows = self._placed_rows()
+        if not rows or not all(_is_container_row(task) or task._env is not None for task in rows):
             raise ValueError(
                 "no placement: pass runtime= — "
                 'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
                 "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
                 "(a served substrate), or HUDRuntime() (your deployed env)"
             )
-        docker = DockerRuntime()
         live: dict[int, LocalRuntime] = {}
         for task in rows:
-            if not _is_container_row(task) and id(task._env) not in live:
-                assert task._env is not None
+            if task._env is not None and id(task._env) not in live:
                 live[id(task._env)] = LocalRuntime(task._env)
-
-        def place(task: Task) -> AbstractAsyncContextManager[Runtime]:
-            return docker(task) if _is_container_row(task) else live[id(task._env)](task)
-
-        return place
+        return _containers_or(lambda task: live[id(task._env)](task))
 
     async def run(
         self,
@@ -260,25 +268,17 @@ class Taskset:
         if timeout is None and isinstance(placement, (HUDRuntime, HostedRuntime)):
             timeout = placement.run_timeout
         for task in task_list:
-            if isinstance(placement, HostedRuntime):
-                actor_runtime_config = task.runtime_config
-                verifier_runtime_config = (
-                    task.verifier.runtime_config if task.verifier is not None else None
-                )
-            else:
-                assert placement is not None
-                actor_runtime_config = resolve_runtime_config(placement, task)
-                verifier_runtime_config = (
-                    resolve_runtime_config(placement, task.verifier)
-                    if task.verifier is not None
-                    else None
-                )
+            assert placement is not None
             validate_rollout_timeouts(
                 task,
                 agent,
                 timeout,
-                actor_runtime_config=actor_runtime_config,
-                verifier_runtime_config=verifier_runtime_config,
+                actor_runtime_config=resolve_runtime_config(placement, task),
+                verifier_runtime_config=(
+                    resolve_runtime_config(placement, task.verifier)
+                    if task.verifier is not None
+                    else None
+                ),
             )
 
         # A task's repeats share a group_id (the GRPO group).
@@ -288,30 +288,16 @@ class Taskset:
             expanded.extend((task, group_id) for _ in range(group))
 
         if job is None:
-            job = Job(
-                id=uuid.uuid4().hex,
-                name=_job_name(self.name, task_list, group),
-                group=group,
-                taskset_id=self.taskset_id,
+            job = await Job.start(
+                _job_name(self.name, task_list, group), group=group, taskset_id=self.taskset_id
             )
-            await job_enter(job.id, name=job.name, group=group, taskset_id=self.taskset_id)
         job_id = job.id
         sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-        async def _run(task: Task, group_id: str) -> list[Trace]:
+        async def _one(task: Task, group_id: str) -> Trace:
             assert placement is not None
-            if isinstance(placement, HostedRuntime):
-                return [
-                    await placement.run(
-                        task,
-                        agent,
-                        job_id=job_id,
-                        group_id=group_id,
-                        rollout_timeout=timeout,
-                    )
-                ]
-            return [
-                await rollout(
+            async with sem or contextlib.nullcontext():
+                return await rollout(
                     task,
                     agent,
                     runtime=placement,
@@ -319,13 +305,6 @@ class Taskset:
                     group_id=group_id,
                     rollout_timeout=timeout,
                 )
-            ]
-
-        async def _one(task: Task, group_id: str) -> list[Trace]:
-            if sem is None:
-                return await _run(task, group_id)
-            async with sem:
-                return await _run(task, group_id)
 
         logger.info(
             "running %d rollouts (%d tasks x %d group)%s",
@@ -338,8 +317,7 @@ class Taskset:
             # A pooled placement such as Shared lives for this call unless already open.
             if isinstance(placement, contextlib.AbstractAsyncContextManager):
                 await stack.enter_async_context(placement)
-            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-        job.traces.extend(trace for part in parts for trace in part)
+            job.traces.extend(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
         # flush waits for in-flight uploads; the timeout only caps a wedged network.
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")

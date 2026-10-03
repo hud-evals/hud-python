@@ -21,7 +21,7 @@ from hud.types import Grade, PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.time import now_iso
 
 from .file_tracking import file_tracking_observer
-from .job import job_enter, trace_enter, trace_exit
+from .job import Job, trace_enter, trace_exit
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from hud.capabilities import Capability, Connection
     from hud.environment.egress import WorkspaceRoute
     from hud.environment.file_tracker import FileTrackingOp
-    from hud.runtime import Provider
+    from hud.runtime import HostedRuntime, Provider
     from hud.runtime.core import RuntimeConfig
 
     from .task import Task
@@ -337,7 +337,7 @@ async def rollout(
     task: Task,
     agent: Agent,
     *,
-    runtime: Provider,
+    runtime: Provider | HostedRuntime,
     job_id: str | None = None,
     group_id: str | None = None,
     trace_id: str | None = None,
@@ -347,12 +347,15 @@ async def rollout(
 ) -> Trace:
     """Drive ``agent`` through ``task`` on ``runtime`` and return the graded trace.
 
-    Failures come back on the trace instead of raising: one before the run is
-    live yields ``Trace.failed``; one mid-run keeps the partial trace,
-    errored and graded best-effort. ``rollout_timeout`` bounds everything
+    A ``HostedRuntime`` runs the whole rollout on the platform; any other runtime is a
+    provider this process drives. Failures come back on the trace instead of raising:
+    one before the run is live yields ``Trace.failed``; one mid-run keeps the partial
+    trace, errored and graded best-effort. ``rollout_timeout`` bounds everything
     through grading; on expiry the env's task is cancelled.
     """
-    from hud.runtime.core import resolve_runtime_config  # hud.runtime imports this module
+    # hud.runtime imports this module.
+    from hud.runtime.core import resolve_runtime_config
+    from hud.runtime.hosted import HostedRuntime
 
     actor_runtime_config = resolve_runtime_config(runtime, task)
     agent_timeout = validate_rollout_timeouts(
@@ -365,10 +368,22 @@ async def rollout(
         ),
     )
     if job_id is None:  # every trace reports under a job; a lone rollout is a job of one
-        job_id = uuid.uuid4().hex
-        await job_enter(job_id, name=task.id, group=1)
+        job_id = (await Job.start(task.id)).id
     trace_id = trace_id or uuid.uuid4().hex
     parent = parent_trace(trace_id)
+    if isinstance(runtime, HostedRuntime):
+        if connections or workspace_routes:
+            raise ValueError("a hosted rollout takes no connections or workspace_routes")
+        # The platform runs and reports the whole rollout, agent included.
+        return await runtime.submit(
+            task,
+            agent,
+            trace_id=trace_id,
+            job_id=job_id,
+            group_id=group_id,
+            parent_trace_id=str(parent) if parent is not None else None,
+            rollout_timeout=rollout_timeout,
+        )
     parent_trace_id = parent.hex if parent is not None else None
     config = getattr(agent, "config", None)
     agent_model = config.model if isinstance(config, AgentConfig) else None
