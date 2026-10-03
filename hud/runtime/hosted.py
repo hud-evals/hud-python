@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, NotRequired, cast
 
 from typing_extensions import TypedDict
 
-from hud.eval.run import parent_trace, parse_grade, validate_rollout_timeouts
+from hud.eval.run import parse_grade
 from hud.types import AgentType, Grade, Step, Trace
 from hud.utils.platform import PlatformClient
 
@@ -56,35 +56,25 @@ class HostedRuntime:
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
 
-    async def run(
+    async def submit(
         self,
         task: Task,
         agent: Agent,
         *,
+        trace_id: str,
         job_id: str,
-        group_id: str | None = None,
-        trace_id: str | None = None,
-        rollout_timeout: float | None = None,
+        group_id: str | None,
+        parent_trace_id: str | None,
+        rollout_timeout: float | None,
     ) -> Trace:
         """Submit one rollout, await its terminal trace, and fold it into a ``Trace``.
 
-        The platform reports the trace. Failures, including a timeout, come back as
-        ``Trace.failed``; a timeout or a local cancel also requests remote
+        ``rollout`` calls this for a hosted placement once it has validated the task and
+        opened its trace. The platform reports the trace. Failures, including a timeout,
+        come back as ``Trace.failed``; a timeout or a local cancel also requests remote
         cancellation, and a cancel then propagates.
         """
-        trace_id = trace_id or uuid.uuid4().hex
-        parent = parent_trace(trace_id)
-        parent_trace_id = str(parent) if parent is not None else None
-        timeout = self.run_timeout if rollout_timeout is None else rollout_timeout
-        validate_rollout_timeouts(
-            task,
-            agent,
-            timeout,
-            actor_runtime_config=task.runtime_config,
-            verifier_runtime_config=(
-                task.verifier.runtime_config if task.verifier is not None else None
-            ),
-        )
+        timeout = rollout_timeout
         try:
             if timeout is None:
                 state = await self._submit_and_await(

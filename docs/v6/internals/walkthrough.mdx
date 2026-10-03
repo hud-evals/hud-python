@@ -92,25 +92,18 @@ async def run(self, agent, *, runtime=None, group=None, max_concurrent=None, ...
         expanded += [(task, group_id) for _ in range(group)]
 
     if job is None:                                  # register one platform Job as the receipt
-        job = Job(id=uuid.uuid4().hex, name=..., group=group, ...)
-        await job_enter(job.id, ...)
+        job = await Job.start(name, group=group, ...)
 
     # placement chosen once for the whole batch (the runtime= you passed, or inferred)
     placement = runtime if runtime is not None else self._resolve_placement()
     sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-    async def _run(task, group_id):
-        return [await rollout(task, agent, runtime=placement,       # <- next hop
-                              job_id=job.id, group_id=group_id, rollout_timeout=...)]
-
     async def _one(task, group_id):
-        if sem is None:
-            return await _run(task, group_id)
-        async with sem:                              # cap parallelism
-            return await _run(task, group_id)
+        async with sem or contextlib.nullcontext():  # cap parallelism
+            return await rollout(task, agent, runtime=placement,   # <- next hop
+                                 job_id=job.id, group_id=group_id, rollout_timeout=...)
 
-    waves = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
-    job.traces.extend(trace for wave in waves for trace in wave)
+    job.traces.extend(await asyncio.gather(*(_one(t, gid) for t, gid in expanded)))
     return job
 ```
 </Accordion>
@@ -148,7 +141,7 @@ async def run(self, agent, *, runtime=None,
 <div className="part-label">2 · Register the Job receipt</div>
 
 A `Job` is the accumulator this call fills in and returns - every trace below lands in `job.traces`.
-`job_enter` registers it with the platform so a running batch shows up before any rollout finishes.
+`Job.start` registers it with the platform so a running batch shows up before any rollout finishes.
 
 </div>
 <div className="guide-aside">
@@ -157,9 +150,8 @@ A `Job` is the accumulator this call fills in and returns - every trace below la
 
 ```python
     if job is None:
-        job = Job(id=uuid.uuid4().hex, name=...,
-                   group=group, ...)
-        await job_enter(job.id, ...)
+        job = await Job.start(name, group=group,
+                              ...)
 ```
 
 </div>
@@ -195,11 +187,9 @@ becomes the semaphore's capacity, capping how many rollouts run at once.
 <div className="part-label">4 · Fan out one rollout per pair, collect into the job</div>
 
 `_one` is the unit `gather` schedules: acquire the semaphore (if there is one), then call
-`rollout` - the next hop. `gather` starts every `_one` at once, but `async with sem:` blocks all
-but `max_concurrent` of them until a running rollout exits and frees a slot.
-
-Each `_one` returns a one-trace list, so the nested `waves` gets flattened into individual traces
-before `job.traces.extend` appends them.
+`rollout` - the next hop, for every placement, hosted included. `gather` starts every `_one` at
+once, but the semaphore blocks all but `max_concurrent` of them until a running rollout exits
+and frees a slot. `gather` returns the traces in order, and `job.traces` takes them as they are.
 
 </div>
 <div className="guide-aside">
@@ -207,21 +197,15 @@ before `job.traces.extend` appends them.
 <p className="aside-label">taskset.py · Taskset.run</p>
 
 ```python
-    async def _run(task, group_id):
-        return [await rollout(
-            task, agent, runtime=placement,       # <- next hop
-            job_id=job.id, group_id=group_id,
-            rollout_timeout=...)]
-
     async def _one(task, group_id):
-        if sem is None:
-            return await _run(task, group_id)
-        async with sem:
-            return await _run(task, group_id)
+        async with sem or contextlib.nullcontext():
+            return await rollout(
+                task, agent, runtime=placement,   # <- next hop
+                job_id=job.id, group_id=group_id,
+                rollout_timeout=...)
 
-    waves = await asyncio.gather(
-        *(_one(t, gid) for t, gid in expanded))
-    job.traces.extend(trace for wave in waves for trace in wave)
+    job.traces.extend(await asyncio.gather(
+        *(_one(t, gid) for t, gid in expanded)))
     return job
 ```
 
@@ -240,9 +224,10 @@ and unwinds them in reverse on the way out.
 ```python hud/eval/run.py · rollout
 async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
     if job_id is None:                       # a lone rollout is a job of one
-        job_id = uuid.uuid4().hex
-        await job_enter(job_id, name=task.id, group=1)
+        job_id = (await Job.start(task.id)).id
     trace_id = trace_id or uuid.uuid4().hex
+    if isinstance(runtime, HostedRuntime):   # the platform runs the whole rollout
+        return await runtime.submit(task, agent, trace_id=trace_id, job_id=job_id, ...)
 
     with set_trace_context(trace_id):
         await trace_enter(trace_id, job_id=job_id, group_id=group_id, ...)
@@ -273,7 +258,7 @@ async def rollout(task, agent, *, runtime, job_id=None, group_id=None, ...):
 <div className="part-label">1 · Give the rollout a job and a trace</div>
 
 A `rollout` called on its own (not through `Taskset.run`) still needs a `Job` and a trace id to
-report against, so it mints its own `job_id` and `trace_id` when neither arrives from the caller.
+report against, so it opens its own job and mints a `trace_id` when neither arrives from the caller.
 
 </div>
 <div className="guide-aside">
@@ -284,8 +269,7 @@ report against, so it mints its own `job_id` and `trace_id` when neither arrives
 async def rollout(task, agent, *, runtime,
                    job_id=None, group_id=None, ...):
     if job_id is None:
-        job_id = uuid.uuid4().hex
-        await job_enter(job_id, name=task.id, group=1)
+        job_id = (await Job.start(task.id)).id
     trace_id = trace_id or uuid.uuid4().hex
 ```
 

@@ -14,7 +14,6 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from websockets.exceptions import ConnectionClosedOK
 
-from hud.eval.run import rollout
 from hud.telemetry.context import get_current_trace_id
 
 from .core import Runtime
@@ -22,9 +21,7 @@ from .core import Runtime
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from hud.agents.base import Agent
     from hud.eval.task import Task
-    from hud.types import Trace
 
 logger = logging.getLogger("hud.runtime")
 
@@ -54,26 +51,6 @@ class HUDRuntime:
         self.run_timeout = run_timeout
         self.runtime_url = runtime_url
         self._warned_unsupported_config = False
-
-    async def run(
-        self,
-        task: Task,
-        agent: Agent,
-        *,
-        job_id: str,
-        group_id: str | None = None,
-        trace_id: str | None = None,
-        rollout_timeout: float | None = None,
-    ) -> Trace:
-        return await rollout(
-            task,
-            agent,
-            runtime=self,
-            trace_id=trace_id,
-            job_id=job_id,
-            group_id=group_id,
-            rollout_timeout=(self.run_timeout if rollout_timeout is None else rollout_timeout),
-        )
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return self._runtime_session(task)
