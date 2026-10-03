@@ -136,7 +136,9 @@ Rollouts using the same environment instance run one at a time, including when a
 source or function returns a cached instance. Distinct instances can run concurrently.
 
 Imported modules share state between runs. Loading a second copy of a package from
-another directory raises an error. Use `SubprocessRuntime` for separate Python processes.
+another directory, or a source whose sibling modules (such as its `env.py`) another
+directory's source already imported, raises an error. Use `SubprocessRuntime` for
+separate Python processes.
 
 ### `SubprocessRuntime`
 
