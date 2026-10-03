@@ -543,6 +543,21 @@ async def rollout(
 
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
+                if (
+                    verifier is not None
+                    and not shared_verifier
+                    and verifier.env == task.env
+                    and addr.shares_substrate
+                ):
+                    # The verifier's declared runtime cannot be honored on a borrowed
+                    # substrate: both phases land in the same place, so they share the
+                    # session rather than copying it between runtimes.
+                    logger.warning(
+                        "verifier runtime_config ignored on a shared substrate (%s); "
+                        "the verifier runs beside the actor",
+                        type(addr).__name__,
+                    )
+                    shared_verifier = True
                 _phase = "starting task"
                 async with connect(
                     addr,

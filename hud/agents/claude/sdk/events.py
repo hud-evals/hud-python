@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import mcp.types as mcp_types
@@ -15,6 +16,24 @@ from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
+
+logger = logging.getLogger(__name__)
+
+
+def document_resource(source: dict[str, str], call_id: str, index: int) -> mcp_types.ContentBlock:
+    """Record a ``document`` tool result block (the CLI's Read on a PDF) as an embedded resource."""
+    uri = f"document://{call_id}/{index}"
+    media_type = source.get("media_type")
+    if source["type"] == "base64":
+        resource: mcp_types.ResourceContents = mcp_types.BlobResourceContents(
+            uri=uri, mimeType=media_type, blob=source["data"]
+        )
+    elif source["type"] == "text":
+        resource = mcp_types.TextResourceContents(uri=uri, mimeType=media_type, text=source["data"])
+    else:
+        logger.warning("unsupported Claude document source: %s", source["type"])
+        return mcp_types.TextContent(type="text", text=f"[unsupported {source['type']} document]")
+    return mcp_types.EmbeddedResource(type="resource", resource=resource)
 
 
 class ClaudeEvents:
@@ -72,8 +91,15 @@ class ClaudeEvents:
                                     mimeType=source["media_type"],
                                 )
                             )
+                        elif item["type"] == "document":
+                            content.append(document_resource(item["source"], call_id, len(content)))
                         else:
-                            raise ValueError(f"unsupported Claude tool result block: {item!r}")
+                            logger.warning("unsupported Claude tool result block: %s", item["type"])
+                            content.append(
+                                mcp_types.TextContent(
+                                    type="text", text=f"[unsupported {item['type']} block]"
+                                )
+                            )
 
                     self.run.record(
                         ToolStep(
@@ -111,14 +137,27 @@ class ClaudeEvents:
                         trace.extra[key] = value
 
     def finish(self, *, returncode: int, stderr: str) -> None:
+        """Fail the rollout unless the CLI delivered a complete terminal result.
+
+        The CLI can exit nonzero after reporting a successful result and writing
+        nothing to stderr; that exit is recorded on the trace rather than raised,
+        because the work it committed to the environment is still gradeable.
+        A nonzero exit that also wrote to stderr is a genuine fault, and a run
+        that never reported a result is a fault whatever the exit code.
+        """
         trace = self.run.trace
-        error = self.error
         if returncode != 0:
             trace.extra["returncode"] = returncode
-            error = stderr.strip() or f"claude CLI exited with return code {returncode}"
-        elif not self.saw_result:
-            error = "claude CLI exited without a result event"
-        elif self.pending_calls:
+
+        failed_loudly = returncode != 0 and bool(stderr.strip())
+        error = self.error
+        if error is None and (failed_loudly or not self.saw_result):
+            error = stderr.strip() or (
+                f"claude CLI exited with return code {returncode}"
+                if returncode != 0
+                else "claude CLI exited without a result event"
+            )
+        elif error is None and self.pending_calls:
             missing = ", ".join(sorted(self.pending_calls))
             error = f"claude CLI exited without results for tool calls: {missing}"
 

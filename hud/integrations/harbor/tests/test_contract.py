@@ -329,6 +329,39 @@ def test_adapt_runs_sidecars_that_expose_no_ports(
     assert _environment_config(context)["peers"] == []
 
 
+def test_adapt_sizes_the_run_budget_above_the_agent_timeout(tmp_path: Path) -> None:
+    """The runtime hosting the agent outlives the agent budget the task grants."""
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        "[environment]\nbuild_timeout_sec = 900\n\n[agent]\ntimeout_sec = 28800\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+
+    assert row.agent_config == {"timeout_seconds": 28800.0}
+    assert row.runtime_config is not None
+    limits = row.runtime_config.limits
+    assert limits is not None
+    assert limits.startup_timeout_s == 900
+    assert limits.run_timeout_s is not None
+    assert limits.run_timeout_s > 28800
+
+
+def test_adapt_leaves_the_run_budget_unset_without_an_agent_timeout(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        "[environment]\nbuild_timeout_sec = 900\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+
+    assert row.runtime_config is not None
+    assert row.runtime_config.limits is not None
+    assert row.runtime_config.limits.run_timeout_s is None
+
+
 def test_adapt_binds_the_compose_variables_harbor_defines(tmp_path: Path) -> None:
     task = make_harbor_task(tmp_path, "task-a")
     (task / "task.toml").write_text(

@@ -56,7 +56,10 @@ packaged.
 ```
 
 Adaptation requires a Docker-compatible builder when an authored image must be
-built or pulled.
+built or pulled. Images build for the builder's own platform, and a verifier
+environment builds for the same platform as the task's image. Tasks authored for
+`linux/amd64` often pin dependencies that publish no wheels elsewhere, so adapt
+them with `DOCKER_DEFAULT_PLATFORM=linux/amd64` on an arm64 host.
 
 The artifact is self-contained. Authored build contexts and Compose-relative
 paths are rebased beneath `compose-project/`; task instructions remain in

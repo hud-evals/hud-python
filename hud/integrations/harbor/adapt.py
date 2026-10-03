@@ -54,6 +54,9 @@ CONTROLLER_ROOT = Path("/controller")
 CONTROLLER_MODULE = "hud.integrations.harbor.env:env"
 MOUNTS_ROOT = Path("/mounts")
 TASK_ROOT = Path("/rootfs")
+#: Seconds added to a task's agent budget when sizing the runtime that hosts it,
+#: covering rollout teardown after the agent's own budget expires.
+_AGENT_RUN_TIMEOUT_GRACE_S = 300
 IGNORED = shutil.ignore_patterns(
     "__pycache__",
     "*.pyc",
@@ -215,6 +218,24 @@ class HarborTask:
     dockerfile: Path
     base_image: str
     resources: RuntimeResources | None
+
+
+def _actor_limits(
+    limits: RuntimeLimits | None, agent_timeout_sec: float | None
+) -> RuntimeLimits | None:
+    """Return ``limits`` with a run budget that outlives the task's agent budget.
+
+    Harbor states the agent budget under ``[agent]``, separately from the
+    environment's build timeout, so nothing else constrains how long the runtime
+    hosting that agent may live. A runtime that expired first would kill the
+    agent partway through a budget the task had granted it.
+    """
+    if agent_timeout_sec is None:
+        return limits
+    run_timeout_s = math.ceil(agent_timeout_sec) + _AGENT_RUN_TIMEOUT_GRACE_S
+    if limits is None:
+        return RuntimeLimits(run_timeout_s=run_timeout_s)
+    return limits.model_copy(update={"run_timeout_s": run_timeout_s})
 
 
 def _tree_hash(root: Path) -> str:
@@ -807,7 +828,9 @@ def adapt(
             needs_service_access = any(
                 item.service != "main" for item in (*config.verifier.collect, *config.artifacts)
             )
-            runtime_limits = config.environment.runtime_limits
+            runtime_limits = _actor_limits(
+                config.environment.runtime_limits, config.agent.timeout_sec
+            )
             verifier_uses_actor = (
                 verifier_resources == task.resources and verifier_limits == runtime_limits
             )

@@ -11,7 +11,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.utils.process import finish_output, stream_output
 
@@ -36,6 +36,8 @@ _SESSION_ARCHIVE = "/runtime/session.tar.gz"
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModalEndpoint(Runtime):
+    shares_substrate: ClassVar[bool] = False
+
     sandbox: modal.Sandbox
     compose: str | None
 

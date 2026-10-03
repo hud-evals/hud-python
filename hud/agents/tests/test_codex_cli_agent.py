@@ -97,6 +97,16 @@ _STREAM_JSON = (
 )
 
 
+async def test_command_passes_the_configured_reasoning_effort() -> None:
+    command = await _sent_command(CodexCLIConfig(reasoning_effort="max"))
+    assert 'model_reasoning_effort="max"' in command
+
+
+async def test_command_omits_reasoning_effort_when_unconfigured() -> None:
+    command = await _sent_command(CodexCLIConfig())
+    assert "model_reasoning_effort" not in command
+
+
 async def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "api_key", "hud-key")
     monkeypatch.setattr(settings, "openai_api_key", "openai-key")

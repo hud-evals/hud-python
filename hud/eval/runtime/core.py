@@ -7,7 +7,7 @@ import contextlib
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -171,12 +171,22 @@ class Runtime:
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
 
+    #: Every task placed on this runtime lands on the same substrate, so phases
+    #: see one filesystem and need no session transport between them. Providers
+    #: that build a substrate per task set this False.
+    shares_substrate: ClassVar[bool] = True
+
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-        """Yield a portable archive of one control session's files when present."""
+        """Yield a portable archive of one control session's files when present.
+
+        ``None`` means there is nothing to transport: a borrowed runtime owns no
+        substrate to export from, and phases that share one reuse the session in
+        place rather than copying it.
+        """
         validate_session_id(session_id)
         yield None
 
