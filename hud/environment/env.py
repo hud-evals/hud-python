@@ -413,8 +413,9 @@ class Environment:
         """Install one control session's controller connections into their workspaces.
 
         A connection belongs to the session that supplied it until
-        ``release_session``; a resumed session rebinds its own, replacing a
-        rotated credential, and no session can take a name another one holds.
+        ``release_session``; a later ``hello`` on the session rebinds its own,
+        replacing a rotated credential, and no session can take a name another
+        one holds.
         """
         async with self._binding:
             if not self._started:
