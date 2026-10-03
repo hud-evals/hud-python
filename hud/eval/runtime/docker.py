@@ -12,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 from hud.utils.docker import docker as _docker
@@ -357,6 +357,8 @@ class DockerRuntime:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DockerEndpoint(Runtime):
+    transports_sessions: ClassVar[bool] = True
+
     container: str
 
     @asynccontextmanager

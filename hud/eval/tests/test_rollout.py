@@ -39,6 +39,8 @@ from hud.eval import (
     Job,
     LocalRuntime,
     Runtime,
+    RuntimeConfig,
+    RuntimeLimits,
     SubprocessRuntime,
     Task,
     Taskset,
@@ -348,6 +350,86 @@ async def test_independent_verifier_receives_runtime_session_files(tmp_path: Pat
     assert transfers[0][1].startswith("sess-")
     assert transfers[1][1].startswith("sess-")
     assert transfers[0][1] != transfers[1][1]
+
+
+async def test_same_env_verifier_runs_beside_an_actor_that_cannot_transport_its_session() -> None:
+    env = Environment("solo")
+
+    @env.template()
+    async def solve():
+        yield "answer secret"
+        yield {"score": 0.0}
+
+    @env.template()
+    async def verify():
+        yield ""
+        yield 1.0
+
+    placements: list[str] = []
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.id)
+        async with LocalRuntime(env)(row) as runtime:
+            yield runtime
+
+    verifier_config = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=60))
+    task = Task(
+        env="solo",
+        id="solve",
+        verifier=Task(env="solo", id="verify", runtime_config=verifier_config),
+    )
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
+
+    assert run.reward == 1.0
+    assert placements == ["solve"]
+
+
+async def test_same_env_verifier_gets_its_own_runtime_when_the_session_transports(
+    tmp_path: Path,
+) -> None:
+    env = Environment("solo")
+
+    @env.template()
+    async def solve():
+        yield "answer secret"
+        yield {"score": 0.0}
+
+    @env.template()
+    async def verify():
+        yield ""
+        yield 1.0
+
+    placements: list[str] = []
+
+    class TransportingRuntime(Runtime):
+        transports_sessions = True
+
+        @asynccontextmanager
+        async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+            destination = tmp_path / "session.tar.gz"
+            await asyncio.to_thread(destination.write_text, session_id, encoding="utf-8")
+            yield destination
+
+        async def restore_session(self, session_id: str, source: Path) -> None:
+            pass
+
+    @asynccontextmanager
+    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
+        placements.append(row.id)
+        async with LocalRuntime(env)(row.model_copy(update={"runtime_config": None})) as runtime:
+            yield TransportingRuntime(runtime.url)
+
+    verifier_config = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=60))
+    task = Task(
+        env="solo",
+        id="solve",
+        verifier=Task(env="solo", id="verify", runtime_config=verifier_config),
+    )
+    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
+
+    assert run.reward == 1.0
+    assert placements == ["solve", "verify"]
 
 
 async def test_runtime_session_transfer_rejects_invalid_ids(tmp_path: Path) -> None:
