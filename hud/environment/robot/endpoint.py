@@ -290,7 +290,7 @@ class RobotEndpoint:
             if session_id is not None and isinstance(token, str):
                 self._claims[session_id] = token
             for control in self._direct_controls:
-                control.reset()
+                await control.end_episode()
             return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
@@ -300,6 +300,8 @@ class RobotEndpoint:
         vectorized envs must pass the token from :meth:`reset`.
         """
         res = {**(await self._call("result", {"token": token})), **extra}
+        for control in self._direct_controls:
+            await control.end_episode()
         if (session_id := current_session_id.get()) is not None:
             self._claims[session_id] = ""  # freed; disconnect/cancel must not re-result
         print(

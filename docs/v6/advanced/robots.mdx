@@ -584,7 +584,8 @@ hud eval env.py openai --model gpt-6-astra --max-steps 40
 
 `attach` registers the profile on that endpoint, which is robotics code. Publishing
 `sim.capabilities()` starts the MCP server from the `robot` contract, `reset` clears the
-commanded target for the new episode, and `stop` shuts the server down. Nothing in the generic
+commanded target for the new episode, `result` and `stop` close the episode's video, and `stop`
+shuts the server down. Nothing in the generic
 environment, server, or tool loop knows about direct control.
 
 The [contract](#contract) derives the tool surface:
@@ -609,6 +610,13 @@ is only the safety cap: a full-range move at the default speed is about 10 s, an
 move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
 (roll, pitch, yaw, radians). The tool slerps that rotation onto the contract, which may store a
 quaternion, an axis-angle, or euler.
+
+Every tick of every call is also streamed to the rollout's trace as one H.264 video per camera
+the call returns, so the trace viewer plays the whole episode, including the arm's motion between
+the frames the model sees. The screenshots and the model's notes stay on the timeline. Video runs
+at the contract `control_rate` and the cameras' native resolution, and stops after 5000 frames per
+camera. The env process uploads it, so it needs `HUD_API_KEY` (for `ModalRuntime`, pass it in
+`env_vars`) and the `robot` extra.
 
 A few embodiment facts can't be read off the contract, so the environment states them:
 
