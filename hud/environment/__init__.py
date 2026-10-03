@@ -17,6 +17,7 @@ from hud.utils.deprecation import moved_to, resolve_retired
 from hud.utils.modules import iter_modules
 
 from .env import Answer, Environment
+from .session import session_state_dir
 from .utils import error, read_frame, reply, send_frame
 from .workspace import Mount, Workspace
 
@@ -100,6 +101,7 @@ __all__ = [
     "read_frame",
     "reply",
     "send_frame",
+    "session_state_dir",
 ]
 
 _RETIRED = {
