@@ -69,6 +69,39 @@ def inspect_image(image: str) -> dict[str, Any]:
     return config
 
 
+def image_platform(image: str) -> str | None:
+    """Return the ``os/arch`` an image was built for, when docker reports both."""
+    result = json.loads(docker("image", "inspect", image))
+    if not isinstance(result, list) or len(result) != 1:
+        raise RuntimeError(f"docker image inspect returned an invalid result for {image!r}")
+    os_name, architecture = result[0].get("Os"), result[0].get("Architecture")
+    if not isinstance(os_name, str) or not isinstance(architecture, str):
+        return None
+    return f"{os_name}/{architecture}"
+
+
+def _docker_server_platform() -> str | None:
+    """Return the ``os/arch`` the docker server builds for by default."""
+    try:
+        reported = docker("version", "--format", "{{.Server.Os}}/{{.Server.Arch}}").strip()
+    except RuntimeError:
+        return None
+    return reported or None
+
+
+def _cross_platform_hint() -> str:
+    """Explain an x86-authored verifier that cannot build on a non-amd64 host."""
+    host = _docker_server_platform()
+    if host is None or host.endswith("/amd64"):
+        return ""
+    return (
+        f"\nThe docker server builds for {host}. Tasks authored for linux/amd64 often "
+        "pin dependencies that publish no wheels for other architectures; set "
+        "DOCKER_DEFAULT_PLATFORM=linux/amd64 to adapt the task for one architecture "
+        "throughout."
+    )
+
+
 def resolve_images(
     source: HarborTask,
     compose_project: ComposeConfig,
@@ -135,7 +168,16 @@ def resolve_images(
 
     if source.config.verifier.separate:
         verifier_root = source.path / "tests"
-        docker("build", "--tag", verifier_image, str(verifier_root), timeout=timeout)
+        # The verifier grades what the task produced, so it is built for the same
+        # platform as the task's own image rather than whatever the host runs.
+        arguments = ["build", "--tag", verifier_image]
+        target = image_platform(source.base_image)
+        if target is not None:
+            arguments += ["--platform", target]
+        try:
+            docker(*arguments, str(verifier_root), timeout=timeout)
+        except RuntimeError as error:
+            raise RuntimeError(f"{error}{_cross_platform_hint()}") from error
         verifier = inspect_image(verifier_image)
     else:
         verifier = main
