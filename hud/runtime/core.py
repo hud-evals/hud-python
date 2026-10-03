@@ -22,6 +22,7 @@ from pydantic import (
 )
 
 from hud.clients import HudClient, HudProtocolError
+from hud.environment.session import validate_session_id
 
 from .compose import ComposeProject
 
@@ -152,11 +153,6 @@ class Provider(Protocol):
 @runtime_checkable
 class _ConfiguredProvider(Protocol):
     runtime_config: RuntimeConfig | None
-
-
-def validate_session_id(session_id: str) -> None:
-    if not session_id or session_id in {".", ".."} or "/" in session_id or "\\" in session_id:
-        raise ValueError("runtime session id must be a single path component")
 
 
 @dataclass(frozen=True)

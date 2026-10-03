@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 from hud.environment.server import PORT_ANNOUNCEMENT
+from hud.environment.session import session_state_dir
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import ComposeConfig, DockerBindMount
-from .core import DEFAULT_READY_TIMEOUT, Runtime, RuntimeConfig, validate_session_id
+from .core import DEFAULT_READY_TIMEOUT, Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -384,10 +385,9 @@ class DockerEndpoint(Runtime):
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-        validate_session_id(session_id)
+        root = str(session_state_dir(session_id))
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
-            root = f"{_SESSION_ROOT}/{session_id}"
             exists, _ = await _docker(
                 "exec",
                 self.container,
@@ -436,8 +436,7 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
             yield destination
 
     async def restore_session(self, session_id: str, source: Path) -> None:
-        validate_session_id(session_id)
-        target = f"{_SESSION_ROOT}/{session_id}"
+        target = str(session_state_dir(session_id))
         with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
             root = Path(directory)
             _extract_session_archive(source, root)

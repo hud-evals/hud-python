@@ -20,6 +20,7 @@ from hud.capabilities import Capability
 from hud.environment import Mount, Workspace
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import Environment, current_session_id
+from hud.environment.session import session_state_dir
 from hud.graders import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
 from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
@@ -36,7 +37,6 @@ DOCKER = CONTROLLER_ROOT / "bin" / "docker"
 CONFIG = ControllerConfig.model_validate_json((CONTROLLER_ROOT / "config.json").read_text("utf-8"))
 TASK_ROOT = Path("/rootfs")
 RUNTIME_ROOT = Path("/runtime")
-SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
 
@@ -445,7 +445,7 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
                 raise RuntimeError("Harbor actor is not running in an environment session")
             await workspace.terminate_sessions()
             try:
-                await collect(task, SESSIONS / session_id / "artifacts")
+                await collect(task, Path(session_state_dir(session_id)) / "artifacts")
             except Exception as error:
                 yield EvaluationResult(isError=True, content=str(error))
             else:
@@ -470,8 +470,8 @@ if CONFIG.verifier_root is not None:
         session_id = current_session_id.get()
         if session_id is None:
             raise RuntimeError("Harbor verifier is not running in an environment session")
-        session = SESSIONS / session_id
-        if not session.is_dir():
+        session = Path(session_state_dir(session_id))
+        if not await asyncio.to_thread(session.is_dir):
             raise ValueError("Harbor actor session files are unavailable in this runtime")
         try:
             yield await grade_separate(task, session / "artifacts", actor.info["answer"])
