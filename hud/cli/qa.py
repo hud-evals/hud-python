@@ -1,11 +1,12 @@
-"""List, run, and inspect trace-level platform QA agents."""
+"""List, run, and inspect HUD's QA checks on evaluation traces."""
 
 from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
+from uuid import UUID  # noqa: TC003 - typer resolves argument annotations at runtime
 
 import typer
 from rich.panel import Panel
@@ -13,19 +14,18 @@ from rich.text import Text
 
 from hud.cli import (
     CLI,
-    CliError,
     Result,
     map_exception,
 )
 from hud.settings import settings
 from hud.utils.exceptions import HudException, HudTimeoutError
-from hud.utils.hud_console import DIM, GOLD, GREEN, RED, SECONDARY, HUDConsole
+from hud.utils.hud_console import DIM, GOLD, HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
 
 _POLL_INTERVAL_SECONDS = 2.0
-_RESULT_LINE_CAP = 12
+_TERMINAL_STATUSES = frozenset({"completed", "error", "cancelled"})
 _BOOLEAN_KEYS = (
     ("is_false_negative", "False Negative"),
     ("is_false_positive", "False Positive"),
@@ -178,68 +178,60 @@ def _from_blob(parsed: dict[str, Any]) -> QaPresentation:
     return QaPresentation("unknown", "unknown", summary=summary, confidence=confidence)
 
 
-def is_standard_result_blob(text: str) -> bool:
-    parsed = _loads(text)
-    return parsed is not None and _from_blob(parsed).kind != "unknown"
+def _legacy_output(raw: dict[str, Any]) -> dict[str, Any]:
+    """A pre-backfill QA agent output, unwrapped from its ``output`` and ``content`` strings."""
+    parsed = raw
+    for key in ("output", "content"):
+        inner = parsed.get(key)
+        unwrapped = _loads(inner) if isinstance(inner, str) else None
+        if unwrapped is not None:
+            parsed = unwrapped
+    return parsed
 
 
 def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
-    status = str(row.get("status") or "")
-    error = row.get("error")
+    """How a ``/v2/qa/results`` row reads; the row's own verdict wins over its output's."""
+    status = str(row["status"])
     if status == "error":
+        error = row.get("error")
         return QaPresentation(
             "unknown", "failed", summary=str(error) if error else "QA run failed."
         )
-    if status and status != "completed":
-        return QaPresentation(
-            "pending", "unknown", label=status, summary=str(error) if error else None
-        )
-    payload = row.get("canonical_result")
-    if not isinstance(payload, dict):
-        payload = row.get("result")
-    # The blob may arrive as a dict, a JSON string, or wrapped in an output/content string.
-    parsed = _loads(payload) if isinstance(payload, str) else payload
-    if isinstance(parsed, dict):
-        for key in ("output", "content"):
-            raw = parsed.get(key)
-            inner = _loads(raw) if isinstance(raw, str) else None
-            if inner is not None:
-                parsed = inner
-    if not isinstance(parsed, dict):
-        return QaPresentation("unknown", "unknown", summary=str(error) if error else None)
-    return _from_blob(parsed)
-
-
-def _tool_command(event: dict[str, Any]) -> str:
-    args = event.get("arguments") or {}
-    if not isinstance(args, dict):
-        return str(args)
-    if isinstance(args.get("commands"), list):
-        return "\n".join(str(item) for item in args["commands"])
-    if args.get("claims"):
-        return str(args["claims"])
-    return ", ".join(f"{k}={v!r}" for k, v in args.items())
+    if status != "completed":
+        return QaPresentation("pending", "unknown", label=status)
+    result = row.get("result")
+    legacy = row.get("legacy_result")
+    if isinstance(result, dict):
+        view = _from_blob(cast("dict[str, Any]", result))
+    elif isinstance(legacy, dict):
+        view = _from_blob(_legacy_output(cast("dict[str, Any]", legacy)))
+    else:
+        view = QaPresentation("unknown", "unknown")
+    verdict = row.get("verdict")
+    return replace(view, tag=str(verdict)) if verdict else view
 
 
 def _print_results(results: list[dict[str, Any]]) -> None:
-    """One tab-separated line per result: trace, agent, verdict, summary."""
+    """One tab-separated line per result: trace, check, verdict, summary."""
     if not results:
         typer.echo("No QA results found.")
         return
     for result in results:
         view = presentation_for_result(result)
-        verdict = result.get("status", "unknown") if view.kind == "pending" else view.tag
-        summary = view.summary or result.get("error")
-        subject_id = result.get("subject_trace_id") or "-"
-        agent = result.get("agent_name") or result.get("qa_agent_id") or "-"
-        stale = " stale" if result.get("stale") is True else ""
-        line = f"{subject_id}\t{agent}\t{verdict}{stale}"
+        verdict = result["status"] if view.kind == "pending" else view.tag
+        summary = view.summary or result.get("note")
+        line = f"{result['subject_trace_id']}\t{result['check_key']}\t{verdict}"
         typer.echo(f"{line}\t{summary}" if summary else line)
+
+
+def _results(platform: PlatformClient, trace_ids: list[str]) -> list[dict[str, Any]]:
+    response = cast("dict[str, Any]", platform.get("/qa/results", params={"trace_ids": trace_ids}))
+    return cast("list[dict[str, Any]]", response["results"])
 
 
 qa_app = CLI(
     name="qa",
-    help="List, run, and inspect trace-level platform QA agents.",
+    help="List, run, and inspect HUD's QA checks on evaluation traces.",
     add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=False,
@@ -249,34 +241,26 @@ qa_app = CLI(
 @qa_app.command("list")
 def list_command(
     quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+        False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
-    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
-    offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
 ) -> Any:
-    """List trace QA agents available to this team.
+    """List the QA checks HUD runs on evaluation traces.
 
     [not dim]Examples:
         hud qa list
         hud qa list --json
         hud qa list --quiet[/not dim]
     """
-    response = cast(
-        "dict[str, Any]",
-        PlatformClient.from_settings().get(
-            "/qa-agents", params={"subject_type": "trace", "limit": limit, "offset": offset}
-        ),
-    )
-    agents = response["items"]
+    response = cast("dict[str, Any]", PlatformClient.from_settings().get("/qa/checks"))
+    checks = response["checks"]
     if quiet:
-        for agent in agents:
-            if agent.get("id"):
-                typer.echo(agent["id"])
-    elif not agents:
-        typer.echo("No trace QA agents found.")
+        for check in checks:
+            typer.echo(check["key"])
+    elif not checks:
+        typer.echo("No QA checks are available.")
     else:
-        for agent in agents:
-            typer.echo(f"{agent.get('name', '-')}\t{agent.get('id', '-')}")
+        for check in checks:
+            typer.echo(f"{check['title']}\t{check['key']}")
     return response
 
 
@@ -284,41 +268,44 @@ def list_command(
 def qa_command(
     ctx: typer.Context,
     quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
+        False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
-    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum agents to return."),
-    offset: int = typer.Option(0, "--offset", min=0, help="Number of agents to skip."),
 ) -> Any:
-    """List trace QA agents, or run and inspect them.
+    """List QA checks, or run and inspect them.
 
-    Without a verb, lists available agents. ``hud qa`` is an alias for ``hud qa list``.
+    Without a verb, lists the checks. ``hud qa`` is an alias for ``hud qa list``.
 
     [not dim]Examples:
         hud qa
         hud qa list --json
-        hud qa run <agent-id> <trace-id>[/not dim]
+        hud qa run <trace-id> --check failure_analysis[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return None
-    return list_command(quiet=quiet, limit=limit, offset=offset)
+    return list_command(quiet=quiet)
 
 
 @qa_app.command("run")
-def run_agent(
-    agent_id: str = typer.Argument(..., help="QA agent UUID."),
-    trace_ids: list[str] = typer.Argument(  # noqa: B008
+def run_checks(
+    trace_ids: list[UUID] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more trace UUIDs.",
+        help="One or more completed evaluation trace UUIDs (at most 100).",
+    ),
+    check_keys: list[str] = typer.Option(  # noqa: B008
+        ...,
+        "--check",
+        "-c",
+        help="QA check key from `hud qa list`. Repeat to run several checks.",
     ),
     overwrite: bool = typer.Option(
         False,
         "--overwrite",
-        help="Create a fresh attempt even when current evidence already exists.",
+        help="Run again even where a check's current result is completed or in flight.",
     ),
     wait: bool = typer.Option(
         True,
         "--wait/--no-wait",
-        help="Wait for every launched analysis to finish.",
+        help="Wait for every check to finish on every trace.",
     ),
     timeout: float = typer.Option(
         900,
@@ -330,122 +317,80 @@ def run_agent(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
 ) -> Any:
-    """Run one trace QA agent against the given traces.
+    """Run QA checks on completed evaluation traces as one run.
 
     [not dim]Examples:
-        hud qa run <agent-id> <trace-id>
-        hud qa run <agent-id> <trace-id> --json --no-wait
-        hud qa run <agent-id> <trace-id> --dry-run --json[/not dim]
+        hud qa run <trace-id> --check failure_analysis
+        hud qa run <trace-id> <trace-id> -c reward_hacking -c false_positive --no-wait --json
+        hud qa run <trace-id> -c failure_analysis --dry-run --json[/not dim]
     """
+    traces = [str(trace_id) for trace_id in trace_ids]
     if dry_run:
-        typer.echo(f"--dry-run: would run agent {agent_id} on {len(trace_ids)} trace(s)")
+        typer.echo(f"--dry-run: would run {len(check_keys)} check(s) on {len(traces)} trace(s)")
         return {
             "dry_run": True,
             "action": "qa_run",
-            "agent_id": agent_id,
-            "trace_ids": trace_ids,
+            "check_keys": check_keys,
+            "trace_ids": traces,
             "overwrite": overwrite,
             "wait": wait,
         }
 
     platform = PlatformClient.from_settings()
-    agent = cast("dict[str, Any]", platform.get(f"/qa-agents/{agent_id}"))
-    if agent.get("subject_type") != "trace":
-        raise CliError(
-            error="usage",
-            message=(
-                f"Agent {agent_id} is a {agent.get('subject_type')} QA agent. "
-                "The CLI currently supports trace agents only."
-            ),
-            input={"agent_id": agent_id, "subject_type": agent.get("subject_type")},
-            suggestion="Use a trace QA agent id from `hud qa list --json`.",
-        )
     try:
-        launched = cast(
-            "list[dict[str, Any]]",
+        response = cast(
+            "dict[str, Any]",
             platform.post(
-                f"/qa-agents/{agent_id}/run",
-                json={"trace_ids": trace_ids, "overwrite": overwrite},
+                "/qa/runs",
+                json={"check_keys": check_keys, "trace_ids": traces, "overwrite": overwrite},
             ),
         )
     except HudException as exc:
-        raise map_exception(exc, input={"agent_id": agent_id, "trace_ids": trace_ids}) from exc
+        raise map_exception(exc, input={"check_keys": check_keys, "trace_ids": traces}) from exc
+    results = cast("list[dict[str, Any]]", response["results"])
     if not wait:
-        _print_results(launched)
-        return launched
+        _print_results(results)
+        return results
 
-    # Poll until every trace has a terminal result: the launched run's own row when
-    # the launch returned one, otherwise this agent's latest row for the trace.
-    launched_by_trace = {str(run["subject_trace_id"]): str(run["id"]) for run in launched}
+    requested = {(trace_id, check_key) for trace_id in traces for check_key in check_keys}
     deadline = time.monotonic() + timeout
-    while True:
-        listed = cast(
-            "list[dict[str, Any]]",
-            platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
-        )
-        by_id = {str(result["id"]): result for result in listed}
-        results: list[dict[str, Any]] = []
-        for trace_id in trace_ids:
-            if trace_id in launched_by_trace:
-                result = by_id.get(launched_by_trace[trace_id])
-            else:
-                result = next(
-                    (
-                        row
-                        for row in reversed(listed)
-                        if row.get("qa_agent_id") == agent_id
-                        and str(row.get("subject_trace_id")) == trace_id
-                    ),
-                    None,
-                )
-            if result is None or result["status"] not in ("completed", "error"):
-                break
-            results.append(result)
-        if len(results) == len(trace_ids):
-            break
+    while len(results) < len(requested) or any(
+        result["status"] not in _TERMINAL_STATUSES for result in results
+    ):
         if time.monotonic() >= deadline:
-            raise HudTimeoutError(f"Timed out after {timeout:g}s waiting for QA runs.")
+            raise HudTimeoutError(f"Timed out after {timeout:g}s waiting for QA checks.")
         time.sleep(_POLL_INTERVAL_SECONDS)
+        results = [
+            result
+            for result in _results(platform, traces)
+            if (result["subject_trace_id"], result["check_key"]) in requested
+        ]
 
     _print_results(results)
-    failed = any(
-        result["status"] == "error" or presentation_for_result(result).tag != "passed"
-        for result in results
-    )
+    failed = any(presentation_for_result(result).tag != "passed" for result in results)
     return Result(results) if failed else results
 
 
 @qa_app.command("results")
 def list_results(
-    trace_ids: list[str] = typer.Argument(  # noqa: B008
+    trace_ids: list[UUID] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more trace UUIDs.",
-    ),
-    rollout: bool = typer.Option(
-        False,
-        "--rollout",
-        help="Show the sanitized analysis trajectory (agent turns and tool calls).",
+        help="One or more evaluation trace UUIDs (at most 100).",
     ),
 ) -> Any:
-    """Inspect QA results for the given traces. Pass --rollout for the trajectory."""
-    platform = PlatformClient.from_settings()
-    results = cast(
-        "list[dict[str, Any]]",
-        platform.get("/qa-agents/results", params={"subject_trace_ids": trace_ids}),
-    )
+    """Inspect the QA result in effect for every check on the given traces."""
+    results = _results(PlatformClient.from_settings(), [str(trace_id) for trace_id in trace_ids])
     if not results:
         typer.echo("No QA results found.")
         return results
 
+    web_url = settings.hud_web_url.rstrip("/")
     for result in results:
-        agent = str(result.get("agent_name") or result.get("qa_agent_id") or "QA")
-        subject_id = str(result.get("subject_trace_id") or "-")
+        subject_id = str(result["subject_trace_id"])
         view = presentation_for_result(result)
-        hud_console.header(agent, icon="", stderr=False)
+        hud_console.header(str(result["check_key"]), icon="", stderr=False)
         if view.kind == "pending":
-            hud_console.status_item(
-                "status", str(result.get("status") or "unknown"), status="info", stderr=False
-            )
+            hud_console.status_item("status", str(result["status"]), status="info", stderr=False)
         else:
             status = {"passed": "success", "failed": "error"}.get(view.tag, "info")
             hud_console.status_item("verdict", view.tag, status=status, stderr=False)
@@ -454,12 +399,12 @@ def list_results(
             elif view.answer:
                 hud_console.dim_info("cause", view.answer, stderr=False)
         hud_console.dim_info("trace", subject_id, stderr=False)
+        if result["source"] != "analysis":
+            hud_console.dim_info("source", str(result["source"]), stderr=False)
         if view.confidence:
             hud_console.dim_info("confidence", view.confidence, stderr=False)
-        if result.get("stale") is True:
-            hud_console.warning(
-                "This result is stale relative to the current agent config.", stderr=False
-            )
+        if result.get("note"):
+            hud_console.dim_info("note", str(result["note"]), stderr=False)
         if view.summary:
             hud_console.stdout.print(
                 Panel(
@@ -483,92 +428,9 @@ def list_results(
                     padding=(0, 1),
                 )
             )
-
-        if not rollout or not result.get("id"):
-            hud_console.dim_info("trajectory", "hidden; pass --rollout to show", stderr=False)
-        else:
-            events: list[dict[str, Any]] = []
-            since_seq = -1
-            while True:
-                page = cast(
-                    "dict[str, Any]",
-                    platform.get(
-                        f"/qa-agents/results/{result['id']}/rollout",
-                        params={"since_seq": since_seq, "limit": 100},
-                    ),
-                )
-                events.extend(page.get("events") or [])
-                if not page.get("has_more"):
-                    break
-                if int(page["next_seq"]) <= since_seq:
-                    raise ValueError("QA rollout pagination did not advance")
-                since_seq = int(page["next_seq"])
-
-            if events:
-                hud_console.section_title("Rollout", stderr=False)
-            turn = 0
-            for event in events:
-                kind = event.get("kind")
-                if kind == "agent_message":
-                    text = event.get("text")
-                    reasoning = event.get("reasoning")
-                    # The agent's final structured verdict is shown above, not as a turn.
-                    if isinstance(text, str) and is_standard_result_blob(text):
-                        continue
-                    if not text and not reasoning:
-                        continue
-                    turn += 1
-                    body = Text()
-                    if reasoning:
-                        body.append(str(reasoning), style=f"italic {DIM}")
-                        if text:
-                            body.append("\n")
-                    if text:
-                        body.append(str(text))
-                    hud_console.stdout.print(
-                        Panel(
-                            body,
-                            title=Text(f"Turn {turn} · agent", style="bold"),
-                            border_style=SECONDARY,
-                            padding=(0, 1),
-                        )
-                    )
-                elif kind in ("tool_call", "tool_result"):
-                    name = str(event.get("tool_name") or event.get("name") or "tool")
-                    body = Text(_tool_command(event))
-                    if event.get("error"):
-                        body.append(f"\n\nerror: {event['error']}", style=RED)
-                        border = RED
-                    else:
-                        output = str(event.get("result_text") or event.get("result") or "")
-                        if output:
-                            lines = output.splitlines() or [output]
-                            body.append("\n\n" + "\n".join(lines[:_RESULT_LINE_CAP]))
-                            if len(lines) > _RESULT_LINE_CAP:
-                                body.append(
-                                    f"\n… {len(lines) - _RESULT_LINE_CAP} more lines", style=DIM
-                                )
-                        border = GREEN
-                    hud_console.stdout.print(
-                        Panel(
-                            body,
-                            title=Text(name, style="bold"),
-                            border_style=border,
-                            padding=(0, 1),
-                        )
-                    )
-                elif kind == "subagent":
-                    name = str(event.get("agent_name") or "subagent")
-                    hud_console.stdout.print(
-                        Panel(
-                            Text(
-                                _tool_command(event) if event.get("arguments") else name,
-                                style=DIM,
-                            ),
-                            title=Text(name, style="bold"),
-                            border_style=GOLD,
-                            padding=(0, 1),
-                        )
-                    )
-        hud_console.link(f"{settings.hud_web_url.rstrip('/')}/trace/{subject_id}", stderr=False)
+        if result.get("analysis_trace_id"):
+            hud_console.dim_info(
+                "analysis", f"{web_url}/trace/{result['analysis_trace_id']}", stderr=False
+            )
+        hud_console.link(f"{web_url}/trace/{subject_id}", stderr=False)
     return results
