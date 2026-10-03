@@ -110,14 +110,7 @@ class HUDRuntime:
                 0,
             )
             port = server.sockets[0].getsockname()[1]
-            yield Runtime(
-                f"tcp://127.0.0.1:{port}",
-                params={
-                    "session_id": session_id,
-                    "gateway_url": runtime_url,
-                    "ready_timeout": _RUNTIME_READY_TIMEOUT,
-                },
-            )
+            yield Runtime(f"tcp://127.0.0.1:{port}", ready_timeout=_RUNTIME_READY_TIMEOUT)
         finally:
             if server is not None:
                 server.close()

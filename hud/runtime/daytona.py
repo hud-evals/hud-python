@@ -6,21 +6,28 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from hud.utils.process import finish_output, output_writer
 
-from .core import Runtime, RuntimeConfig
+from .core import READY_TIMEOUT_SECONDS, Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from daytona import AsyncSandbox
     from daytona import Image as DaytonaImage
     from daytona.common.snapshot import Snapshot as DaytonaSnapshot
 
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.runtime")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DaytonaEndpoint(Runtime):
+    sandbox: AsyncSandbox
 
 
 async def _snapshot_is_current(
@@ -93,6 +100,10 @@ class DaytonaRuntime:
         self._resolved: set[str] = set()
         self._snapshot_lock = asyncio.Lock()
 
+    def config_for(self, task: Task) -> RuntimeConfig:
+        """This provider's runtime configuration, overridden by ``task``'s."""
+        return (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         import asyncssh
@@ -109,7 +120,7 @@ class DaytonaRuntime:
         )
 
         async with AsyncDaytona() as daytona:
-            config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
+            config = self.config_for(task)
             if config.compose is not None:
                 raise ValueError("DaytonaRuntime does not support runtime_config.compose")
             if config.limits is not None and config.limits.run_timeout_s is not None:
@@ -227,14 +238,12 @@ class DaytonaRuntime:
                     auto_stop_interval=0,
                 )
 
-            create_timeout = 120
-            if config.limits is not None and config.limits.startup_timeout_s is not None:
-                create_timeout = config.limits.startup_timeout_s
+            startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
             # ephemeral: these sandboxes are per-rollout and deleted on exit anyway,
             # and some regions only permit ephemeral sandboxes.
             sandbox = await daytona.create(
                 sandbox_params,
-                timeout=create_timeout,
+                timeout=startup_timeout or 120,
             )
             output_task: asyncio.Task[None] | None = None
             try:
@@ -268,10 +277,11 @@ class DaytonaRuntime:
                 ) as conn:
                     listener = await conn.forward_local_port("127.0.0.1", 0, "127.0.0.1", self.port)
                     try:
-                        yield Runtime(
+                        yield DaytonaEndpoint(
                             f"tcp://127.0.0.1:{listener.get_port()}",
-                            params={"provider": "daytona", "instance_id": sandbox.id},
+                            ready_timeout=startup_timeout or READY_TIMEOUT_SECONDS,
                             config=config if config.model_dump(exclude_none=True) else None,
+                            sandbox=sandbox,
                         )
                     except (EOFError, OSError) as exc:
                         # Why it died only exists inside the sandbox, and the

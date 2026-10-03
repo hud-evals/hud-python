@@ -8,7 +8,7 @@ import json
 import logging
 import math
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
 from urllib.parse import urlsplit
 
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.runtime")
 # How long a connect waits for a freshly provisioned env to serve when nothing sets a limit.
-DEFAULT_READY_TIMEOUT = 240.0
+READY_TIMEOUT_SECONDS = 240.0
 _CONNECT_RETRY_SECONDS = 0.5
 _HEARTBEAT_INTERVAL_SECONDS = 120.0
 _HEARTBEAT_TIMEOUT_SECONDS = 5.0
@@ -152,7 +152,7 @@ class Provider(Protocol):
 
 @runtime_checkable
 class _ConfiguredProvider(Protocol):
-    runtime_config: RuntimeConfig | None
+    def config_for(self, task: Task, /) -> RuntimeConfig | None: ...
 
 
 @dataclass(frozen=True)
@@ -160,21 +160,30 @@ class Runtime:
     """An acquired substrate: where its environment is, how to open sessions on it, and
     how to move a session's files between substrates.
 
-    ``url`` is the environment's control channel; ``params`` are connection-time settings
-    such as ``ready_timeout``. Constructed directly, a runtime is also a provider that
-    yields itself and leaves teardown to whoever provisioned the substrate.
+    ``url`` is the environment's control channel, and ``connect`` waits up to
+    ``ready_timeout`` seconds for the environment behind it to answer. ``config`` is the
+    runtime configuration its provider applied. Constructed directly, a runtime is also a
+    provider that yields itself and leaves teardown to whoever provisioned the substrate.
     """
 
     url: str
-    params: dict[str, Any] = field(default_factory=dict)
+    ready_timeout: float = READY_TIMEOUT_SECONDS
     config: RuntimeConfig | None = None
 
-    # Whether ``snapshot_session`` can export a control session for another
-    # runtime to restore. Without it, a verifier must run beside the actor.
+    # Whether ``snapshot_session`` can export a control session for another runtime to
+    # restore. Without it, a verifier must run beside the actor.
     transports_sessions: ClassVar[bool] = False
+
+    def __post_init__(self) -> None:
+        if not 0 < self.ready_timeout < math.inf:
+            raise ValueError("Runtime ready_timeout must be a positive, finite number of seconds")
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
+
+    def config_for(self, task: Task) -> RuntimeConfig | None:
+        """The runtime configuration this placement applies to ``task``."""
+        return self.config if self.config is not None else task.runtime_config
 
     @asynccontextmanager
     async def connect(
@@ -190,10 +199,10 @@ class Runtime:
         ``session_id`` attaches to that open session instead; ``lease`` keeps the session
         open that many seconds after this connection ends, for a later one to attach.
 
-        Connecting retries until the environment answers ``hello``, for
-        ``params["ready_timeout"]`` seconds: a proxied port (``docker -p``, a port-forward)
-        can accept before the environment behind it serves. While the session is open, a
-        heartbeat probes the connection; a failure cancels the body and raises that error.
+        Connecting retries until the environment answers ``hello``, for ``ready_timeout``
+        seconds: a proxied port (``docker -p``, a port-forward) can accept before the
+        environment behind it serves. While the session is open, a heartbeat probes the
+        connection; a failure cancels the body and raises that error.
         """
         parts = urlsplit(self.url)
         if parts.scheme not in ("", "tcp"):
@@ -201,16 +210,8 @@ class Runtime:
                 f"control transport {parts.scheme!r} not supported yet (only tcp://)",
             )
         host, port = parts.hostname or "127.0.0.1", parts.port or 0
-        timeout = self.params.get("ready_timeout", DEFAULT_READY_TIMEOUT)
-        if (
-            isinstance(timeout, bool)
-            or not isinstance(timeout, int | float)
-            or not math.isfinite(timeout)
-            or timeout <= 0
-        ):
-            raise ValueError("runtime.params['ready_timeout'] must be a positive finite number")
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
+        deadline = loop.time() + self.ready_timeout
         while True:
             try:
                 reader, writer = await asyncio.open_connection(host, port)
@@ -239,8 +240,8 @@ class Runtime:
                     raise
                 await asyncio.sleep(_CONNECT_RETRY_SECONDS)
             except BaseException:
-                # A real failure still closes the socket: an unclosed connection parks the
-                # env's connection handler.
+                # A real failure still closes the socket, or the env's handler, and the
+                # session this hello opened, stay open waiting on it.
                 await client.close()
                 raise
 
@@ -355,30 +356,26 @@ class Shared:
                 if key not in self._addresses:
                     # A failed boot retains nothing: it fails only its own rollout,
                     # and the next lease retries.
-                    config = resolve_runtime_config(self.inner, task)
-                    run_timeout = (
-                        config.limits.run_timeout_s
-                        if config is not None and config.limits is not None
-                        else None
-                    )
                     context = contextlib.AsyncExitStack()
                     address = await context.enter_async_context(self.inner(task))
                     self._contexts[key] = context
                     self._addresses[key] = address
-                    if run_timeout is not None:
-                        self._deadlines[key] = asyncio.get_running_loop().time() + run_timeout
+                    limits = address.config.limits if address.config is not None else None
+                    if limits is not None and limits.run_timeout_s is not None:
+                        self._deadlines[key] = (
+                            asyncio.get_running_loop().time() + limits.run_timeout_s
+                        )
                 addr = self._addresses[key]
             yield addr
 
+    def config_for(self, task: Task) -> RuntimeConfig | None:
+        """The runtime configuration this placement applies to ``task``."""
+        return resolve_runtime_config(self.inner, task)
+
 
 def resolve_runtime_config(provider: Provider | HostedRuntime, task: Task) -> RuntimeConfig | None:
-    """Return the runtime configuration a placement will apply to a task."""
-    if isinstance(provider, Shared):
-        return resolve_runtime_config(provider.inner, task)
-    if isinstance(provider, Runtime):
-        return provider.config if provider.config is not None else task.runtime_config
-    if isinstance(provider, _ConfiguredProvider) and provider.runtime_config is not None:
-        base = provider.runtime_config
-        config = base.with_overrides(task.runtime_config)
-        return config if config.model_dump(exclude_none=True) else None
+    """The runtime configuration a placement applies to ``task``; a placement that
+    cannot say is taken to apply the task's own."""
+    if isinstance(provider, _ConfiguredProvider):
+        return provider.config_for(task)
     return task.runtime_config
