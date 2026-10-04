@@ -338,6 +338,14 @@ async def pick_and_place(task_id: str, seed: int = 0):
     yield await endpoint.result(token=ep["token"])  # this slot's {score, success, total_reward}
 ```
 
+Override `RobotBridge.evidence()` to return a `RobotEvidence` and `result()` attaches it to the
+grade: `content` gets a one-line summary and `info["evidence"]` the full record. It holds the
+termination reason, the goal `predicates` (name, satisfied, value, threshold) as the grader
+evaluated them, initial and final object poses, whether the gripper holds the target, reward
+components, and the task and seed ids. Trace reviewers read it from the run's `evaluation`, so a
+grader bug can be told from an agent failure without the sim. Bridges that override
+`result_slots` (vectorized) attach their own per-slot evidence.
+
 ## Agent side
 
 The harness lives in `hud.agents.robot`. 
