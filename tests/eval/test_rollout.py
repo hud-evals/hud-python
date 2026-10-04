@@ -16,9 +16,11 @@ from hud.agents.types import AgentConfig
 from hud.capabilities import Connection
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime, Runtime
+from hud.types import text_of
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
+from tests.serving import serving
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -97,8 +99,8 @@ async def test_the_agent_is_handed_the_prompt_as_turns_and_as_text(
 
     class Reader(Agent):
         async def __call__(self, run: Run) -> None:
-            roles = [(m.role, getattr(m.content, "text", None)) for m in run.prompt_messages]
-            handed.append((roles, run.prompt_text))
+            roles = [(m.role, getattr(m.content, "text", None)) for m in run.prompt]
+            handed.append((roles, text_of(run.prompt)))
 
     await ask().run(Reader())
 
@@ -297,7 +299,7 @@ async def test_the_rollout_timeout_ends_the_run_naming_its_phase_and_stops_the_e
     class WaitsWhenAsked(Agent):
         async def __call__(self, run: Run) -> None:
             run.trace.content = "done"
-            if run.prompt_text == "take your time":
+            if text_of(run.prompt) == "take your time":
                 await asyncio.sleep(30)
 
     job = await Task(env="slow", id=template).run(
@@ -332,7 +334,7 @@ async def test_a_rollout_cancelled_on_an_env_served_elsewhere_closes_its_task_th
             events.append("prompted")
             await asyncio.sleep(30)
 
-    async with LocalRuntime(env)(wait()) as served:
+    async with serving(env) as served:
         pending = asyncio.create_task(wait().run(Waits(), runtime=Runtime(served.url)))
         await eventually(lambda: events == ["prompted"])
         pending.cancel()
@@ -371,7 +373,7 @@ async def test_a_rollout_timed_out_on_an_env_served_elsewhere_closes_its_task_th
             await asyncio.sleep(30)
 
     task = Task(env="served", id=template)
-    async with LocalRuntime(env)(task) as served:
+    async with serving(env) as served:
         job = await task.run(Waits(), runtime=Runtime(served.url), rollout_timeout=0.3)
 
         await eventually(lambda: events == ["task closed"])

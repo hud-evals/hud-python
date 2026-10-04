@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents.base import Agent
-from hud.capabilities import MCPClient, SSHClient
+from hud.capabilities import MCPClient, SSHClient, find_capability, open_client
 from hud.integrations import harbor
 from hud.runtime import DockerBindMount, DockerRuntime, Shared
 from tests.integrations.harbor.cases import assemble_case, read_expected
@@ -113,20 +113,20 @@ class Oracle(Agent):
 
     async def __call__(self, run: Run) -> None:
         if self.probe is not None:
-            mcp = await run.client.open(self.probe)
-            assert isinstance(mcp, MCPClient)
-            self.probed.append(sorted(tool.name for tool in await mcp.list_tools()))
-        ssh = await run.client.open("ssh")
-        assert isinstance(ssh, SSHClient)
+            async with open_client(find_capability(run.capabilities, self.probe)) as mcp:
+                assert isinstance(mcp, MCPClient)
+                self.probed.append(sorted(tool.name for tool in await mcp.list_tools()))
         stdout = ""
-        for session in range(self.repeat):
-            result = await ssh.run(self.solution, check=False)
-            if result.exit_status != 0:
-                raise RuntimeError(
-                    f"solution session {session} exited with {result.exit_status}:\n"
-                    f"{result.stdout}\n{result.stderr}"
-                )
-            stdout = str(result.stdout)
+        async with open_client(find_capability(run.capabilities, "ssh")) as ssh:
+            assert isinstance(ssh, SSHClient)
+            for session in range(self.repeat):
+                result = await ssh.run(self.solution, check=False)
+                if result.exit_status != 0:
+                    raise RuntimeError(
+                        f"solution session {session} exited with {result.exit_status}:\n"
+                        f"{result.stdout}\n{result.stderr}"
+                    )
+                stdout = str(result.stdout)
         run.trace.content = stdout
 
 

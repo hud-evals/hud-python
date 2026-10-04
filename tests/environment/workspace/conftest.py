@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 from hud import Environment, Task
-from hud.clients import connect
+from hud.capabilities import find_capability, open_client
 from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ async def shell(root: Path, **options: Any) -> AsyncGenerator[tuple[Workspace, S
     workspace = env.workspace(root, track_files=False, **options)
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
+        runtime.connect() as client,
+        open_client(find_capability(client.capabilities, "shell")) as ssh,
     ):
-        yield workspace, cast("SSHClient", await client.open("shell"))
+        yield workspace, cast("SSHClient", ssh)

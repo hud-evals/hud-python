@@ -11,11 +11,12 @@ import uuid
 from typing import TYPE_CHECKING
 
 from hud import Task, Taskset
-from hud.runtime import HUDRuntime, LocalRuntime
+from hud.runtime import HUDRuntime
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
 from tests.runtime.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
+from tests.serving import serving
 
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket
@@ -29,7 +30,7 @@ async def test_a_reported_run_opens_its_hosted_environment_under_its_trace(
 ) -> None:
     row = Task(env="checked", id="check")
 
-    async with LocalRuntime(checked())(row) as served:
+    async with serving(checked()) as served:
         host_on_runtime(reporting, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
@@ -52,7 +53,7 @@ async def test_with_telemetry_off_the_hosted_environment_opens_without_a_trace(
     hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="0")
     row = Task(env="checked", id="check")
 
-    async with LocalRuntime(checked())(row) as served:
+    async with serving(checked()) as served:
         host_on_runtime(services, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 

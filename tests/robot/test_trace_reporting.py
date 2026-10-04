@@ -22,6 +22,7 @@ from mcp.shared.exceptions import MCPError
 
 from hud import Task
 from hud.agents.base import Agent
+from hud.capabilities import find_capability, open_client
 from hud.environment.robot import DirectControl, wrap
 from hud.eval.run import rollout
 from hud.runtime import LocalRuntime
@@ -166,11 +167,12 @@ class AbandonsMidMove(Agent):
         self.playing: asyncio.Task[ToolResult] | None = None
 
     async def __call__(self, run: Run) -> None:
-        client = cast("MCPClient", await run.client.open("control"))
-        targets = {"targets": {"x": 0.5, "grip": None}, "note": "move toward the goal"}
-        self.playing = asyncio.create_task(client.call_tool("move_to", targets))
-        assert await asyncio.to_thread(self.moving.wait, 30)
-        raise RuntimeError("the agent gave up")
+        async with open_client(find_capability(run.capabilities, "control")) as opened:
+            client = cast("MCPClient", opened)
+            targets = {"targets": {"x": 0.5, "grip": None}, "note": "move toward the goal"}
+            self.playing = asyncio.create_task(client.call_tool("move_to", targets))
+            assert await asyncio.to_thread(self.moving.wait, 30)
+            raise RuntimeError("the agent gave up")
 
 
 class StallsAfterThreeTicks(Arm):

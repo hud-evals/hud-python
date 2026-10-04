@@ -10,14 +10,14 @@ from hud.environment.server import bind
 from hud.runtime import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, Sequence
 
     from hud import Environment
     from hud.environment.egress import WorkspaceRoute
 
 
 @asynccontextmanager
-async def serving(env: Environment) -> AsyncIterator[Runtime]:
+async def serving(env: Environment) -> AsyncGenerator[Runtime]:
     """Serve ``env``'s control channel on loopback and yield its runtime."""
     await env.start()
     try:
@@ -35,7 +35,7 @@ async def hud_client(
     session_id: str | None = None,
     lease: float | None = None,
     workspace_routes: Sequence[WorkspaceRoute] = (),
-) -> AsyncIterator[HudClient]:
+) -> AsyncGenerator[HudClient]:
     """A control-channel session on ``runtime``, as the ``HudClient`` it is."""
     async with runtime.connect(
         session_id=session_id,
@@ -47,7 +47,7 @@ async def hud_client(
 
 
 @asynccontextmanager
-async def served(env: Environment) -> AsyncIterator[HudClient]:
+async def served(env: Environment) -> AsyncGenerator[HudClient]:
     """Serve ``env`` on loopback and yield a client connected to it."""
     async with serving(env) as runtime, hud_client(runtime) as client:
         yield client

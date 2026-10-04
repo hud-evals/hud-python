@@ -11,6 +11,7 @@ verdict is about. ``ScriptedLLM`` stands in for a tool-calling model.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
@@ -19,6 +20,7 @@ from gymnasium.spaces import Box
 
 from hud import Environment
 from hud.agents.base import Agent
+from hud.capabilities import find_capability, open_client
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.runtime import LocalRuntime
 
@@ -214,22 +216,23 @@ class ScriptedLLM(Agent):
         self.results: list[ToolResult] = []
 
     async def __call__(self, run: Run) -> None:
-        client = cast("MCPClient", await run.client.open("control"))
-        listed = await client.list_tools()
-        self.tools = {tool.name for tool in listed}
-        self.schemas = {tool.name: tool.inputSchema for tool in listed}
-        self.descriptions = {tool.name: tool.description or "" for tool in listed}
-        for name, arguments in self.calls:
-            properties = self.schemas[name]["properties"]
-            if isinstance(arguments.get("targets"), Sparse):
-                arguments = {
-                    **arguments,
-                    "targets": nulled(properties["targets"], arguments["targets"]),
-                }
-            if "note" not in properties:
-                arguments = {k: v for k, v in arguments.items() if k != "note"}
-            self.results.append(await client.call_tool(name, arguments))
-        run.trace.content = "done"
+        async with open_client(find_capability(run.capabilities, "control")) as opened:
+            client = cast("MCPClient", opened)
+            listed = await client.list_tools()
+            self.tools = {tool.name for tool in listed}
+            self.schemas = {tool.name: tool.inputSchema for tool in listed}
+            self.descriptions = {tool.name: tool.description or "" for tool in listed}
+            for name, arguments in self.calls:
+                properties = self.schemas[name]["properties"]
+                if isinstance(arguments.get("targets"), Sparse):
+                    arguments = {
+                        **arguments,
+                        "targets": nulled(properties["targets"], arguments["targets"]),
+                    }
+                if "note" not in properties:
+                    arguments = {k: v for k, v in arguments.items() if k != "note"}
+                self.results.append(await client.call_tool(name, arguments))
+            run.trace.content = "done"
 
     def replies(self) -> list[str]:
         """Each result's text."""

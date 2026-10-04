@@ -11,6 +11,7 @@ stepped with.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -20,9 +21,8 @@ import websockets
 from openpi_client import msgpack_numpy
 
 from hud import Environment, Task
-from hud.capabilities import Capability
+from hud.capabilities import Capability, find_capability
 from hud.capabilities.robot import RobotClient
-from hud.clients import connect
 from hud.environment.robot import GymBridge, RobotEndpoint
 from hud.runtime import LocalRuntime
 
@@ -71,7 +71,9 @@ async def test_a_client_whose_sim_stops_raises_instead_of_waiting() -> None:
     try:
         (robot,) = await endpoint.capabilities()
         claimed = await endpoint.reset()
-        client = await RobotClient.connect(robot, token=claimed["token"])
+        client = await RobotClient.connect(
+            replace(robot, params={**robot.params, "token": claimed["token"]})
+        )
         await client.get_observation()
     finally:
         await endpoint.stop()
@@ -102,12 +104,12 @@ async def step_once(env: Environment, action: list[float]) -> tuple[dict[str, An
     and the grade."""
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
+        runtime.connect() as client,
     ):
-        started = await client.start_task("episode")
-        agent = await RobotClient.connect(
-            client.binding("robot"), token=started["bindings"]["robot"]["token"]
-        )
+        started = await client.start_task("episode", {})
+        robot = find_capability(client.capabilities, "robot")
+        token = started["bindings"]["robot"]["token"]
+        agent = await RobotClient.connect(replace(robot, params={**robot.params, "token": token}))
         try:
             await agent.get_observation()
             await agent.send_action(action)
@@ -178,7 +180,10 @@ async def test_a_finished_env_is_observed_on_the_frame_it_ended_on(per_env: bool
     try:
         robot = Capability.robot(url=bridge.url, contract=bridge.contract)
         tokens = [(await endpoint.reset())["token"] for _ in range(2)]
-        agents = [await RobotClient.connect(robot, token=token) for token in tokens]
+        agents = [
+            await RobotClient.connect(replace(robot, params={**robot.params, "token": token}))
+            for token in tokens
+        ]
         try:
             for agent in agents:
                 await agent.get_observation()

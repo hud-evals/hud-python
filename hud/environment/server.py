@@ -31,7 +31,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from .env import Environment
 
@@ -72,7 +72,7 @@ class _ControlChannel:
         self._attached: set[str] = set()
         self._expiries: dict[str, asyncio.Task[None]] = {}
         # The task start or grade each session is running, which can outlive its connection.
-        self._running: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        self.running: dict[str, asyncio.Task[dict[str, Any]]] = {}
 
     async def handle(
         self,
@@ -117,12 +117,12 @@ class _ControlChannel:
 
     async def close_session(self, session: Session) -> None:
         del self._open[session.session_id]
-        await self._stop(session)
+        await self.stop_call(session)
         await session.close()
 
-    async def _stop(self, session: Session) -> None:
+    async def stop_call(self, session: Session) -> None:
         """Cancel the task start or grade ``session`` is running, if any."""
-        if (call := self._running.pop(session.session_id, None)) is not None:
+        if (call := self.running.pop(session.session_id, None)) is not None:
             call.cancel()
             await asyncio.wait((call,))
 
@@ -134,7 +134,7 @@ class _ControlChannel:
             expiry.cancel()
         await asyncio.gather(*expiries, return_exceptions=True)
         for session in list(self._open.values()):
-            await self._close(session)
+            await self.close_session(session)
 
 
 def _log_abandoned_failure(call: asyncio.Task[dict[str, Any]]) -> None:
@@ -283,7 +283,7 @@ class _Connection:
             elif (session := self.session) is None:
                 raise HudProtocolError(-32600, f"{method}: send hello first")
             elif method in ("tasks.start", "tasks.grade"):
-                running = self.channel._running.get(session.session_id)
+                running = self.channel.running.get(session.session_id)
                 if running is not None and not running.done():
                     raise HudProtocolError(
                         -32600, f"{method}: the session is still running an earlier call"
@@ -301,11 +301,11 @@ class _Connection:
                     if not session.has_task:
                         raise HudProtocolError(-32600, "no task in progress")
                     self._call = asyncio.create_task(session.grade(params))
-                self.channel._running[session.session_id] = self._call
+                self.channel.running[session.session_id] = self._call
                 # Shielded: the connection can stop waiting while the call runs on.
                 result = await asyncio.shield(self._call)
             elif method == "tasks.cancel":
-                await self.channel._stop(session)
+                await self.channel.stop_call(session)
                 await session.cancel()
                 result = {"cancelled": True}
             else:
@@ -316,8 +316,8 @@ class _Connection:
                 try:
                     await send_frame(self.writer, reply(msg_id, result), max_bytes=limit)
                 except FrameTooLargeError:
-                    if method == "tasks.start":
-                        await session.cancel()  # its prompt never reaches the client
+                    if method == "tasks.start" and self.session is not None:
+                        await self.session.cancel()  # its prompt never reaches the client
                     raise
         except HudProtocolError as exc:
             if msg_id is not None:
@@ -387,7 +387,7 @@ async def _stream(
 @contextlib.asynccontextmanager
 async def bind(
     env: Environment, host: str = "127.0.0.1", port: int = 0
-) -> AsyncIterator[asyncio.Server]:
+) -> AsyncGenerator[asyncio.Server]:
     """Accept control connections for the started ``env`` until the block exits.
 
     A connection's first frame decides what it is: ``tunnel.open`` opens one raw

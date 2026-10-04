@@ -17,7 +17,7 @@ import asyncssh
 import pytest
 
 from hud import Environment, Task
-from hud.clients import connect
+from hud.capabilities import find_capability
 from hud.environment import Workspace
 from hud.runtime import LocalRuntime
 
@@ -32,10 +32,10 @@ async def test_a_workspace_lives_exactly_while_its_environment_serves(tmp_path: 
     created_before_serving = (tmp_path / "root").exists()
 
     async with LocalRuntime(env)(Task(env=env.name, id="test")) as runtime:
-        async with connect(runtime) as client:
-            first = client.binding("shell").params["host_pubkey"]
-        async with connect(runtime) as client:
-            again = client.binding("shell").params["host_pubkey"]
+        async with runtime.connect() as client:
+            first = find_capability(client.capabilities, "shell").params["host_pubkey"]
+        async with runtime.connect() as client:
+            again = find_capability(client.capabilities, "shell").params["host_pubkey"]
         backing_port = urlsplit(env.capability("shell").url).port
 
     assert not created_before_serving

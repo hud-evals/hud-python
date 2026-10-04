@@ -33,6 +33,7 @@ from hud.runtime import (
     Shared,
     SubprocessRuntime,
 )
+from hud.runtime.modal import ModalEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
@@ -173,7 +174,8 @@ async def placed(
             @asynccontextmanager
             async def recorded(task: Task) -> AsyncGenerator[Runtime]:
                 async with inner(task) as placed_runtime:
-                    sandboxes.append(placed_runtime.params["instance_id"])
+                    assert isinstance(placed_runtime, ModalEndpoint)
+                    sandboxes.append(placed_runtime.sandbox.object_id)
                     yield placed_runtime
 
             async def terminated() -> bool:

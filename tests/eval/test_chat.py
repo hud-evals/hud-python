@@ -32,7 +32,7 @@ class Echo(Agent):
     """Replies ``echo:`` and the last turn's text, and fails on ``fail``."""
 
     async def __call__(self, run: Run) -> None:
-        last = run.prompt_messages[-1].content
+        last = run.prompt[-1].content
         text = last.text if isinstance(last, TextContent) else "<image>"
         if text == "fail":
             raise RuntimeError("model unavailable")

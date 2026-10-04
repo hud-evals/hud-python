@@ -29,7 +29,7 @@ from .file_tracking import file_tracking_observer
 from .job import Job, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, Sequence
 
     from hud.agents.base import Agent
     from hud.capabilities.base import Capability
@@ -221,7 +221,7 @@ async def start_run(
     *,
     connections: Sequence[Connection] = (),
     best_effort_grade: bool = False,
-) -> AsyncIterator[Run]:
+) -> AsyncGenerator[Run]:
     """Start ``task_id`` on ``session`` and yield the agent's ``Run``.
 
     When the block exits, the agent's access ends, file tracking takes its final capture,
