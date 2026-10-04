@@ -395,6 +395,7 @@ class DirectControl:
                         fps=round(self._rate),
                         obs_space=self._obs_space,
                         max_queued_frames=_VIDEO_QUEUE_FRAMES,
+                        sim_clock=True,
                     )
                     self._record(obs)
                 # Plan: turn the named targets into per-tick action rows (none if already over).

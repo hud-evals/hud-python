@@ -11,9 +11,11 @@ from __future__ import annotations
 import base64
 import copy
 import io
+import itertools
 import math
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import av
@@ -473,4 +475,9 @@ async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per
         and span["attributes"][TASK_RUN_ID_ATTRIBUTE] == run.trace_id
     ]
     assert [obs["tick"] for obs in observations] == list(range(frames))
+    # The viewer's clock is the stamps' span; it must be the video's length, not the call latency.
+    starts = [datetime.fromisoformat(obs["started_at"]) for obs in observations]
+    assert [(b - a).total_seconds() for a, b in itertools.pairwise(starts)] == pytest.approx(
+        [0.1] * (frames - 1)
+    )
     assert observations[-1]["state"]
