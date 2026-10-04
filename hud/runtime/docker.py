@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 from hud.environment.server import PORT_ANNOUNCEMENT
-from hud.environment.session import session_state_dir
+from hud.environment.session import SESSION_STATE_ROOT, session_state_dir
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.runtime")
 
-_SESSION_ROOT = "/runtime/sessions"
+# Images built before session state moved to SESSION_STATE_ROOT still write it here.
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
 # Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
@@ -356,7 +356,7 @@ class DockerRuntime:
                 *mount_args,
                 *_DOCKER_SECURITY_ARGS,
                 "--mount",
-                f"type=volume,source={session_volume},target={_SESSION_ROOT}",
+                f"type=volume,source={session_volume},target={SESSION_STATE_ROOT}",
                 "--mount",
                 f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
                 "--publish",

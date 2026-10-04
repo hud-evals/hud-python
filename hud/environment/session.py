@@ -31,6 +31,10 @@ def validate_session_id(session_id: str) -> None:
         raise ValueError("session id must be a single path component")
 
 
+# Where sessions keep the state they hand to a verifier placed elsewhere.
+SESSION_STATE_ROOT = PurePosixPath("/runtime/sessions")
+
+
 def session_state_dir(session_id: str | None = None) -> PurePosixPath:
     """Where a session keeps, inside its substrate, the state it hands to a verifier
     placed elsewhere; by default, the session whose task code is running. Tasks write
@@ -40,7 +44,7 @@ def session_state_dir(session_id: str | None = None) -> PurePosixPath:
         if session_id is None:
             raise RuntimeError("session_state_dir() names the current session only in task code")
     validate_session_id(session_id)
-    return PurePosixPath("/runtime/sessions", session_id)
+    return SESSION_STATE_ROOT / session_id
 
 
 def _jsonable(value: Any) -> Any:

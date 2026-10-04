@@ -30,15 +30,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents.base import Agent
-from hud.capabilities import MCPClient, SSHClient
-from hud.eval import DockerRuntime, Shared
-from hud.eval.runtime import DockerBindMount
+from hud.capabilities import MCPClient, SSHClient, find_capability, open_client
 from hud.integrations import harbor
+from hud.runtime import DockerBindMount, DockerRuntime, Shared
 from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
-    from hud.eval import Provider
-    from hud.eval.run import Run
+    from hud import Run, Trace
+    from hud.runtime import Provider
 
 TASKS = Path(__file__).parent / "tasks"
 
@@ -115,20 +114,20 @@ class Oracle(Agent):
 
     async def __call__(self, run: Run) -> None:
         if self.probe is not None:
-            mcp = await run.client.open(self.probe)
-            assert isinstance(mcp, MCPClient)
-            self.probed.append(sorted(tool.name for tool in await mcp.list_tools()))
-        ssh = await run.client.open("ssh")
-        assert isinstance(ssh, SSHClient)
+            async with open_client(find_capability(run.capabilities, self.probe)) as mcp:
+                assert isinstance(mcp, MCPClient)
+                self.probed.append(sorted(tool.name for tool in await mcp.list_tools()))
         stdout = ""
-        for session in range(self.repeat):
-            result = await ssh.run(self.solution, check=False)
-            if result.exit_status != 0:
-                raise RuntimeError(
-                    f"solution session {session} exited with {result.exit_status}:\n"
-                    f"{result.stdout}\n{result.stderr}"
-                )
-            stdout = str(result.stdout)
+        async with open_client(find_capability(run.capabilities, "ssh")) as ssh:
+            assert isinstance(ssh, SSHClient)
+            for session in range(self.repeat):
+                result = await ssh.run(self.solution, check=False)
+                if result.exit_status != 0:
+                    raise RuntimeError(
+                        f"solution session {session} exited with {result.exit_status}:\n"
+                        f"{result.stdout}\n{result.stderr}"
+                    )
+                stdout = str(result.stdout)
         run.trace.content = stdout
 
 
@@ -140,15 +139,15 @@ def adapted(case: Case, sdk_wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
     return result
 
 
-def report(run: Run) -> str:
-    """Everything a failed run says about why, for assertions and their messages."""
-    evaluation = run.evaluation
+def report(trace: Trace) -> str:
+    """Everything a failed trace says about why, for assertions and their messages."""
+    evaluation = trace.evaluation
     info = evaluation.get("info") or {}
     return "\n".join(
         str(part)
         for part in (
-            run.trace.content,
-            run.trace.error,
+            trace.content,
+            trace.error,
             evaluation.get("content"),
             info.get("stdout"),
             info.get("stderr"),
@@ -172,14 +171,14 @@ async def test_a_harbor_task_grades_as_its_fixture_expects(
 
     job = await taskset.run(oracle, runtime=runtime, group=case.group, max_concurrent=1)
 
-    assert len(job.runs) == (case.group or 1)
-    for run in job.runs:
-        detail = report(run)
-        assert run.reward == case.reward, detail
+    assert len(job.traces) == (case.group or 1)
+    for trace in job.traces:
+        detail = report(trace)
+        assert trace.reward == case.reward, detail
         if case.error is not None:
             assert case.error in detail
     if case.probe is not None:
-        assert oracle.probed == [sorted(case.probe["tools"])] * len(job.runs)
+        assert oracle.probed == [sorted(case.probe["tools"])] * len(job.traces)
 
 
 @pytest.mark.parametrize("case", REFUSED, ids=[case.id for case in REFUSED])

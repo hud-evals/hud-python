@@ -6,10 +6,10 @@ import asyncio
 
 import pytest
 
-from hud.capabilities import Capability, CDPClient
-from hud.clients import connect
+from hud import Task
+from hud.capabilities import Capability, CDPClient, find_capability, open_client
 from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 from tests.conftest import eventually
 from tests.fixtures.browser import fake_browser
 
@@ -52,20 +52,18 @@ async def test_pending_commands_fail_when_the_browser_closes_the_socket() -> Non
             await client.close()
 
 
-async def test_a_page_published_at_serve_time_opens_through_the_control_port() -> None:
+async def test_a_page_published_at_serve_time_opens_as_a_cdp_client() -> None:
     async with fake_browser(replies={"Page.navigate": {"result": {"frameId": "f-1"}}}) as browser:
         page = Capability.cdp(name="browser", url=f"{browser.url}/devtools/page/page-1")
         env = Environment("cdp", capabilities=[page])
         async with (
             LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-            connect(runtime) as control,
+            runtime.connect() as control,
+            open_client(find_capability(control.capabilities, "browser")) as opened,
         ):
-            opened = await control.open("browser")
             assert isinstance(opened, CDPClient)
             navigated = await opened.send("Page.navigate", {"url": "https://example.com"})
-            again = await control.open("browser")
 
-    assert again is opened
     assert navigated == {"frameId": "f-1"}
 
 

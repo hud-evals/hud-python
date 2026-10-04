@@ -1,5 +1,6 @@
-"""``filetracking/1``: what a served workspace with ``track_files=True`` reports about its
-files: what it tracks, the deliverables it captures, and what never leaves the workspace."""
+"""The control channel's ``files.*`` calls: what a served workspace with ``track_files=True``
+reports about its files: what it tracks, the deliverables it captures, and what never
+leaves the workspace."""
 
 from __future__ import annotations
 
@@ -7,11 +8,10 @@ import base64
 import hashlib
 from typing import TYPE_CHECKING
 
-from hud.clients import connect
 from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
 from tests.conftest import write_files
-from tests.environment.conftest import wire
+from tests.environment.conftest import session
+from tests.serving import serving
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,11 +48,10 @@ async def test_a_snapshot_lists_the_files_it_tracks_leaving_out_what_is_not_the_
 
     env = tracked(root)
     async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
+        serving(env) as runtime,
+        session(runtime.url) as peer,
     ):
-        snapshot = await peer.call("snapshot")
+        snapshot = await peer.call("files.snapshot")
 
     files = {entry["path"]: entry["content_hash"] for entry in snapshot["result"]["files"]}
     assert sorted(files) == [".gitignore", "a.txt", "pkg/.gitignore", "pkg/data.txt"]
@@ -68,11 +67,10 @@ async def test_secrets_never_leave_in_a_diff(tmp_path: Path) -> None:
 
     env = tracked(root)
     async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
+        serving(env) as runtime,
+        session(runtime.url) as peer,
     ):
-        await peer.call("snapshot")
+        await peer.call("files.snapshot")
         write_files(
             root,
             {
@@ -81,7 +79,7 @@ async def test_secrets_never_leave_in_a_diff(tmp_path: Path) -> None:
                 ".git/config": "url = https://new-token@x/repo.git\n",
             },
         )
-        edited = await peer.call("diff")
+        edited = await peer.call("files.diff")
 
     assert {patch["path"] for patch in edited["result"]["patches"]} == {".env", ".gitmodules"}
     for secret in ("supersecretvalue", "hunter2", "new-token"):
@@ -96,11 +94,10 @@ async def test_a_flush_diffs_the_deliverables_and_captures_the_documents_under_t
 
     env = tracked(root)
     async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
+        serving(env) as runtime,
+        session(runtime.url) as peer,
     ):
-        await peer.call("snapshot")
+        await peer.call("files.snapshot")
         write_files(
             root,
             {
@@ -111,7 +108,7 @@ async def test_a_flush_diffs_the_deliverables_and_captures_the_documents_under_t
                 "large.pdf": "%" * BIG_PDF,
             },
         )
-        flushed = (await peer.call("flush"))["result"]
+        flushed = (await peer.call("files.flush"))["result"]
 
     assert {p["path"]: p["status"] for p in flushed["diff"]["patches"]} == {
         "analysis.py": "added",

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from hud.environment.server import TaskRunner
+from hud.environment.session import Session
 from hud.graders import SubScore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,8 +46,8 @@ async def test_edited_prompt_and_rubric_grade_the_saved_report(monkeypatch, tmp_
     task_args.update(
         prompt="Identify the payment records.", criteria=[{"requirement": "Names the records.", "weight": 3}]
     )
-    runner = TaskRunner(example.reconcile_supplier_payments, task_args)
-    frame = await runner.start()
+    runner = Session(example.env)
+    frame = await runner.start_task(example.reconcile_supplier_payments.id, task_args)
     assert "Identify the payment records." in frame["prompt"]
     assert len(list((tmp_path / "files").iterdir())) == 7
     (tmp_path / "reconciliation-report.md").write_text("The report from the workspace.")
@@ -78,14 +78,14 @@ async def test_uploads_supplement_but_cannot_replace_sample_records(monkeypatch,
         example.httpx, "AsyncClient", partial(httpx.AsyncClient, transport=httpx.MockTransport(respond))
     )
     task_args["attachments"] = [{"file_id": "uploaded-record"}]
-    runner = TaskRunner(example.reconcile_supplier_payments, task_args)
+    runner = Session(example.env)
     try:
         if filename == "bank-payments.csv":
             with pytest.raises(FileExistsError):
-                await runner.start()
+                await runner.start_task(example.reconcile_supplier_payments.id, task_args)
             assert (tmp_path / "files" / filename).read_bytes() == (ROOT / "fixtures" / filename).read_bytes()
         else:
-            frame = await runner.start()
+            frame = await runner.start_task(example.reconcile_supplier_payments.id, task_args)
             assert (tmp_path / "files" / filename).read_text() == "Additional context"
             assert len(list((tmp_path / "files").iterdir())) == 8
             assert frame["data_files"] == [{"path": "files/extra-notes.md", "file_id": "uploaded-record"}]
@@ -95,7 +95,7 @@ async def test_uploads_supplement_but_cannot_replace_sample_records(monkeypatch,
 
 async def test_missing_report_cannot_pass_from_final_text(monkeypatch, tmp_path, task_args):
     monkeypatch.setattr(example, "WORKSPACE_ROOT", tmp_path)
-    runner = TaskRunner(example.reconcile_supplier_payments, task_args)
-    await runner.start()
+    runner = Session(example.env)
+    await runner.start_task(example.reconcile_supplier_payments.id, task_args)
     result = await runner.grade({"answer": "All invoices reconciled correctly."})
     assert result["score"] == 0.0

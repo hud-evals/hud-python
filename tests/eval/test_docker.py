@@ -20,17 +20,17 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.eval import (
+from hud import Task
+from hud.eval.run import rollout
+from hud.runtime import (
     ComposeProject,
+    DockerBindMount,
     DockerRuntime,
     RuntimeConfig,
     RuntimeLimits,
     RuntimeResources,
-    Task,
-    rollout,
 )
-from hud.eval.runtime import DockerBindMount
-from hud.eval.runtime.docker import DockerEndpoint
+from hud.runtime.docker import DockerEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
@@ -79,10 +79,10 @@ async def test_an_image_row_runs_in_a_confined_container_that_is_removed_after(
     async with DockerRuntime(fixture_image("echo"), run_args=flags)(ECHO) as runtime:
         assert isinstance(runtime, DockerEndpoint)
         held = inspect(runtime.container)
-        run = await rollout(ECHO, ScriptedAgent("tangerine"), runtime=runtime)
+        trace = await rollout(ECHO, ScriptedAgent("tangerine"), runtime=runtime)
 
     sessions = [mount["Name"] for mount in held["Mounts"] if mount["Type"] == "volume"]
-    assert run.reward == 1.0
+    assert trace.reward == 1.0
     assert any(option.startswith("seccomp=") for option in held["HostConfig"]["SecurityOpt"])
     assert held["HostConfig"]["Privileged"] is False
     assert containers(**{"hud-test": label}) == []
@@ -114,10 +114,10 @@ async def test_the_rows_settings_win_over_the_providers_and_reach_the_container(
     async with provider(row) as runtime:
         assert isinstance(runtime, DockerEndpoint)
         held = inspect(runtime.container)
-        run = await rollout(row, ScriptedAgent("tangerine"), runtime=runtime)
+        trace = await rollout(row, ScriptedAgent("tangerine"), runtime=runtime)
 
     (data,) = [mount for mount in held["Mounts"] if mount["Destination"] == "/data"]
-    assert run.reward == 1.0
+    assert trace.reward == 1.0
     assert (held["HostConfig"]["NanoCpus"], held["HostConfig"]["Memory"]) == (10**9, 512 * 2**20)
     assert "MODE=eval" in held["Config"]["Env"]
     assert data["RW"] is False
@@ -227,10 +227,10 @@ async def test_a_compose_project_serves_main_confined_through_its_network_owner(
     async with DockerRuntime()(row) as runtime:
         assert isinstance(runtime, DockerEndpoint)
         held = inspect(runtime.container)
-        run = await rollout(row, ScriptedAgent("tangerine"), runtime=runtime)
+        trace = await rollout(row, ScriptedAgent("tangerine"), runtime=runtime)
 
     compose = held["Config"]["Labels"]["com.docker.compose.project"]
-    assert run.reward == 1.0
+    assert trace.reward == 1.0
     assert any(option.startswith("seccomp=") for option in held["HostConfig"]["SecurityOpt"])
     assert {"MODE=eval", "LITERAL=$HOST_ONLY"} <= set(held["Config"]["Env"])
     assert containers(**{"com.docker.compose.project": compose}) == []

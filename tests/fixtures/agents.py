@@ -6,11 +6,12 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from hud.agents.base import Agent
+from hud.types import text_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.eval import Run
+    from hud import Run
 
 
 class ScriptedAgent(Agent):
@@ -41,12 +42,12 @@ class ScriptedAgent(Agent):
         self.prompts: list[str] = []
 
     async def __call__(self, run: Run) -> None:
-        self.prompts.append(run.prompt_text)
+        self.prompts.append(text_of(run.prompt))
         if self._delay:
             await asyncio.sleep(self._delay)
         if self._fail_before is not None:
             raise self._fail_before
-        run.trace.content = self._answer(run.prompt_text)
+        run.trace.content = self._answer(text_of(run.prompt))
         if self._linger:
             await asyncio.sleep(self._linger)
         if self._fail_after is not None:

@@ -435,7 +435,7 @@ closes.
 
 ```python hud/runtime/core.py · Runtime.connect
 @asynccontextmanager
-async def connect(self, *, workspace_routes=(), connections=()):
+async def connect(self, *, workspace_routes=()):
     while True:                                     # until self.ready_timeout
         try:
             reader, writer = await asyncio.open_connection(host, port)
@@ -483,13 +483,15 @@ the loop sends back as the reply:
 ```python hud/environment/server.py · _ControlChannel.handle (hello)
 if method == "hello":
     # ... parse workspace_routes, connections and lease; open or attach the session ...
-    session.bind(connections=connections, workspace_routes=routes)
+    await session.bind(connections, workspace_routes=routes)
     result = {"session_id": session.session_id,
               "env": {"name": env.name, "version": env.version},
               "bindings": [c.to_manifest() for c in env.capabilities]}
 ```
 
-The client holds the manifest. Back in `rollout`, the pointer enters `start_run`.
+The client holds the manifest. When the rollout has connections to bind, its own or the gateway
+relay a CLI agent in a sandboxed workspace is given, `rollout` binds them with `session.bind`: one
+more `hello` on the open session, which the heartbeat re-sends. Then the pointer enters `start_run`.
 
 ## Starting the task
 
