@@ -615,7 +615,8 @@ Every tick of every call is also streamed to the rollout's trace as numeric stat
 video per camera, so the trace viewer's Robotics tab plays the whole episode, including the arm's
 motion between the frames the model sees. The screenshots and the model's notes stay on the
 timeline. Video runs at the contract `control_rate` and the cameras' native resolution, and
-streaming stops after 5000 ticks. The env process uploads it, so it needs `HUD_API_KEY` (for `ModalRuntime`, pass it in
+streaming stops after 5000 ticks. Ticks are stamped on the simulated clock (`tick / control_rate`), so the
+viewer's elapsed time is the video's, not the wall-clock time the model spent thinking. The env process uploads it, so it needs `HUD_API_KEY` (for `ModalRuntime`, pass it in
 `env_vars`) and the `robot` extra.
 
 A few embodiment facts can't be read off the contract, so the environment states them:
