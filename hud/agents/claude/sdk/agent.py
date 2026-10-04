@@ -119,7 +119,6 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                 else:
                     raise ValueError("HUD_API_KEY is required for HUD gateway routing")
                 env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-                env["DISABLE_AUTO_COMPACT"] = "1"
                 # Alias every model tier so background requests never bypass the gateway.
                 env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
                 env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
@@ -141,6 +140,8 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
             ]
             if self.config.max_steps > 0:
                 args.append(f"--max-turns={self.config.max_steps}")
+            if self.config.reasoning_effort is not None:
+                args.extend(["--effort", self.config.reasoning_effort])
             if self.config.system_prompt:
                 args.extend(["--system-prompt", self.config.system_prompt])
             for tool in self.config.allowed_tools:

@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 
-ENV VERIFIER_PRECEDENCE=verifier-image
+ENV VERIFIER_PRECEDENCE=verifier-image HOME=/home/verifier/dotfiles
 COPY . /tests
 RUN apk add --no-cache bash \
     && addgroup -g 1001 verifier \

@@ -271,6 +271,68 @@ def test_image_resolution_builds_the_interpolated_compose_document(
     assert document["services"]["main"]["image"] == source.base_image
 
 
+def test_separate_verifier_builds_for_the_task_image_platform(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = make_harbor_task(tmp_path, "separate")
+    (task / "tests" / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    (task / "task.toml").write_text('[verifier]\nenvironment_mode = "separate"\n', encoding="utf-8")
+    source, findings = adapt_module._inspect_task(task)
+    assert findings == ()
+    assert source is not None
+    builds: list[tuple[str, ...]] = []
+
+    def docker(*args: str, **_kwargs: Any) -> str:
+        if args[0] == "build":
+            builds.append(args)
+        if args[:3] == ("image", "inspect", "--format"):
+            return "linux/amd64"
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Config": {"Env": []}}])
+        return ""
+
+    monkeypatch.setattr(build_module, "docker", docker)
+
+    build_module.resolve_images(
+        source, source.compose, verifier_image="verifier:test", peer_services=set()
+    )
+
+    (build,) = builds
+    assert build[build.index("--platform") + 1] == "linux/amd64"
+    assert build[build.index("--tag") + 1] == "verifier:test"
+
+
+def test_separate_verifier_build_failure_names_the_platform_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = make_harbor_task(tmp_path, "separate")
+    (task / "tests" / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    (task / "task.toml").write_text('[verifier]\nenvironment_mode = "separate"\n', encoding="utf-8")
+    source, findings = adapt_module._inspect_task(task)
+    assert findings == ()
+    assert source is not None
+
+    def docker(*args: str, **_kwargs: Any) -> str:
+        if args[0] == "build":
+            raise build_module.ImageResolutionError("docker build failed: no matching wheel")
+        if args[0] == "version":
+            return "linux/arm64"
+        if args[:3] == ("image", "inspect", "--format"):
+            return "linux/amd64"
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Config": {"Env": []}}])
+        return ""
+
+    monkeypatch.setattr(build_module, "docker", docker)
+
+    with pytest.raises(build_module.ImageResolutionError, match="DOCKER_DEFAULT_PLATFORM"):
+        build_module.resolve_images(
+            source, source.compose, verifier_image="verifier:test", peer_services=set()
+        )
+
+
 def test_adapt_reports_tasks_whose_images_cannot_be_resolved(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -327,6 +389,20 @@ def test_adapt_runs_sidecars_that_expose_no_ports(
     assert "worker" in project["services"]
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     assert _environment_config(context)["peers"] == []
+
+
+def test_adapt_maps_the_agent_budget_to_the_agent_config(tmp_path: Path) -> None:
+    task = make_harbor_task(tmp_path, "task-a")
+    (task / "task.toml").write_text(
+        "[environment]\nbuild_timeout_sec = 900\n\n[agent]\ntimeout_sec = 28800\n",
+        encoding="utf-8",
+    )
+
+    (row,) = list(_adapt(tmp_path))
+
+    assert row.agent_config == {"timeout_seconds": 28800.0}
+    assert row.runtime_config is not None
+    assert row.runtime_config.limits == RuntimeLimits(startup_timeout_s=900)
 
 
 def test_adapt_binds_the_compose_variables_harbor_defines(tmp_path: Path) -> None:

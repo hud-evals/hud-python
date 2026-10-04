@@ -7,7 +7,7 @@ import contextlib
 import json
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -171,12 +171,19 @@ class Runtime:
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
 
+    #: Whether :meth:`snapshot_session` can export a control session for another
+    #: runtime to restore. Without it, a verifier must run beside the actor.
+    transports_sessions: ClassVar[bool] = False
+
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
 
     @asynccontextmanager
     async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-        """Yield a portable archive of one control session's files when present."""
+        """Yield a portable archive of one control session's files when present.
+
+        ``None`` means this runtime cannot export the session.
+        """
         validate_session_id(session_id)
         yield None
 

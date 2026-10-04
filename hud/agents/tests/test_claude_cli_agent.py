@@ -21,11 +21,12 @@ from unittest.mock import AsyncMock, Mock
 
 import fastmcp
 import pytest
-from mcp.types import ImageContent, TextContent
+from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent, TextContent
 
 from hud.agents import create_agent
 from hud.agents.claude.sdk import computer_mcp
 from hud.agents.claude.sdk.agent import ClaudeCLIAgent
+from hud.agents.claude.sdk.events import ClaudeEvents
 from hud.agents.tests.cli_fakes import FakeClient as _FakeClient
 from hud.agents.tests.cli_fakes import FakeProcess as _FakeStreamProcess
 from hud.agents.tests.cli_fakes import fake_run as _fake_run
@@ -57,7 +58,7 @@ async def test_command_follows_explicit_gateway_routing(monkeypatch: pytest.Monk
     assert f"ANTHROPIC_BASE_URL={settings.hud_gateway_url}" in gateway
     assert "ANTHROPIC_API_KEY=hud-key" in gateway
     assert "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1" in gateway
-    assert "DISABLE_AUTO_COMPACT=1" in gateway
+    assert "DISABLE_AUTO_COMPACT" not in gateway
     assert "ANTHROPIC_API_KEY=anthropic-key" in provider
     assert "ANTHROPIC_BASE_URL" not in provider
     assert "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS" not in provider
@@ -141,7 +142,6 @@ async def test_windows_command_encodes_environment_and_arguments(
     script = base64.b64decode(encoded).decode("utf-16-le")
     assert "$env:ANTHROPIC_API_KEY='hud&key''s'" in script
     assert "$env:CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS='1'" in script
-    assert "$env:DISABLE_AUTO_COMPACT='1'" in script
     assert "'--system-prompt' 'don''t $expand'" in script
     assert "Get-Content -Raw -Encoding UTF8 '.hud_input.jsonl' | & 'claude'" in script
     assert "'--input-format=stream-json'" in script
@@ -262,6 +262,16 @@ async def _sent_command(
         return conn.written[".hud_run.bat"].decode().split("\r\n")[1]
     (command,) = conn.ran
     return command
+
+
+async def test_command_passes_the_configured_reasoning_effort() -> None:
+    command = await _sent_command(ClaudeCLIAgent(ClaudeCLIConfig(reasoning_effort="max")))
+    assert "--effort max" in command
+
+
+async def test_command_omits_effort_when_unconfigured() -> None:
+    command = await _sent_command(ClaudeCLIAgent(ClaudeCLIConfig()))
+    assert "--effort" not in command
 
 
 async def test_exec_on_windows_writes_batch_and_execs_via_cmd() -> None:
@@ -475,6 +485,20 @@ async def test_exec_nonzero_exit_with_result_stream_remains_an_error() -> None:
     assert run.trace.extra["returncode"] == 1
     assert run.trace.extra["stderr"] == "transport failed"
     assert "messages" not in run.trace.extra
+
+
+async def test_exec_nonzero_exit_with_result_stream_and_no_stderr_is_graded() -> None:
+    """The CLI exits nonzero after a successful result; the run stays gradeable."""
+    sink: dict[str, bytes] = {}
+    conn = _FakeConn(sink, _FakeStreamProcess(_STREAM_JSON, exit_status=1))
+    ssh = _ssh_with_conn("bash", conn)
+
+    run = _fake_run()
+    await run_claude(ClaudeCLIConfig(), run, ssh=ssh, prompt="x")
+
+    assert run.trace.content == "done"
+    assert run.trace.extra["returncode"] == 1
+    assert "stderr" not in run.trace.extra
 
 
 async def test_exec_zero_exit_without_result_event_is_an_error() -> None:
@@ -833,3 +857,64 @@ async def test_concurrent_runs_keep_their_ssh_state_isolated() -> None:
         "second"
     )
     assert run_a.trace.content == run_b.trace.content == "done"
+
+
+def test_events_record_document_and_unknown_tool_result_blocks() -> None:
+    """A PDF Read returns a document block; neither it nor an unknown block ends the run."""
+    run = _fake_run()
+    events = ClaudeEvents(run, started_at="2026-01-01T00:00:00Z")
+    events.consume(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-test",
+                    "content": [{"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}],
+                    "stop_reason": "tool_use",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            }
+        )
+    )
+    events.consume(
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "content": [
+                                {
+                                    "type": "document",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "application/pdf",
+                                        "data": "JVBERi0=",
+                                    },
+                                },
+                                {"type": "novelty", "payload": 1},
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    tool = cast("ToolStep", run.steps[1])
+    assert tool.result is not None
+    document, unknown = tool.result.content
+    assert isinstance(document, EmbeddedResource)
+    assert isinstance(document.resource, BlobResourceContents)
+    assert document.resource.mimeType == "application/pdf"
+    assert document.resource.blob == "JVBERi0="
+    assert str(document.resource.uri) == "document://tool-1/0"
+    assert isinstance(unknown, TextContent)
+    assert unknown.text == "[unsupported novelty block]"
+    assert events.error is None

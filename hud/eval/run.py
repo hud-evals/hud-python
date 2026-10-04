@@ -543,6 +543,18 @@ async def rollout(
 
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
+                if (
+                    verifier is not None
+                    and not shared_verifier
+                    and verifier.env == task.env
+                    and not addr.transports_sessions
+                ):
+                    logger.warning(
+                        "verifier runtime_config ignored: %s cannot transport the actor's "
+                        "session, so the verifier runs beside the actor",
+                        type(addr).__name__,
+                    )
+                    shared_verifier = True
                 _phase = "starting task"
                 async with connect(
                     addr,

@@ -102,7 +102,8 @@ class Account:
 
     #: The uid and gid to drop to; ``None`` keeps root.
     identity: tuple[int, int] | None
-    #: ``HOME`` from the passwd entry of a non-root account.
+    #: ``HOME`` from the passwd entry of a non-root account; like Docker, it is only a
+    #: default beneath an explicit ``ENV HOME`` of the image.
     env: dict[str, str]
 
 
@@ -182,7 +183,7 @@ workspace = env.workspace(
     shell_gid=agent_account.identity[1] if agent_account.identity else None,
     hand_over_root=False,
     track_files=False if rooted_at_filesystem else None,
-    env={**TASK_ENV, **agent.env, **agent_account.env},
+    env={**agent_account.env, **TASK_ENV, **agent.env},
     network=agent.network.enabled,
     allowed_hosts=agent_hosts,
     peers=CONFIG.peers,
@@ -533,7 +534,7 @@ async def grade(task_id: str, timeout_sec: float, answer: Any) -> EvaluationResu
     execution = await workspace.run(
         verifier_command(test_script),
         mounts=verifier_mounts,
-        env={**TASK_ENV, **resolve_env_templates(verifier.env), **verifier_account.env},
+        env={**verifier_account.env, **TASK_ENV, **resolve_env_templates(verifier.env)},
         identity=verifier_account.identity,
         inherit_workspace_env=False,
         allowed_hosts=verifier.network.allowed_hosts,
@@ -656,10 +657,10 @@ async def grade_separate(
             image = CONFIG.verifier_image
             verifier_account = account(verifier.user, verifier_root)
             verifier_env = {
+                **verifier_account.env,
                 **CONFIG.environment.env,
                 **image.env,
                 **resolve_env_templates(verifier.env),
-                **verifier_account.env,
             }
             with materialized_artifacts(task, verifier_root, artifacts, verifier_account.identity):
                 isolated = Workspace(

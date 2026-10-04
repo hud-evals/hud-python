@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import mcp.types as mcp_types
@@ -15,6 +16,8 @@ from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
     from hud.eval.run import Run
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeEvents:
@@ -58,22 +61,51 @@ class ClaudeEvents:
                     raw_result = block.get("content")
                     raw_items = raw_result if isinstance(raw_result, list) else [raw_result]
                     content: list[mcp_types.ContentBlock] = []
-                    for item in raw_items:
+                    for index, item in enumerate(raw_items):
                         if isinstance(item, str):
                             content.append(mcp_types.TextContent(type="text", text=item))
-                        elif item["type"] == "text":
-                            content.append(mcp_types.TextContent(type="text", text=item["text"]))
-                        elif item["type"] == "image":
-                            source = item["source"]
-                            content.append(
-                                mcp_types.ImageContent(
-                                    type="image",
-                                    data=source["data"],
-                                    mimeType=source["media_type"],
+                            continue
+                        match item["type"]:
+                            case "text":
+                                content.append(
+                                    mcp_types.TextContent(type="text", text=item["text"])
                                 )
-                            )
-                        else:
-                            raise ValueError(f"unsupported Claude tool result block: {item!r}")
+                            case "image":
+                                source = item["source"]
+                                content.append(
+                                    mcp_types.ImageContent(
+                                        type="image",
+                                        data=source["data"],
+                                        mimeType=source["media_type"],
+                                    )
+                                )
+                            case "document" if item["source"]["type"] in ("base64", "text"):
+                                # The CLI's Read on a PDF.
+                                source = item["source"]
+                                uri = f"document://{call_id}/{index}"
+                                resource: mcp_types.ResourceContents = (
+                                    mcp_types.BlobResourceContents(
+                                        uri=uri,
+                                        mimeType=source.get("media_type"),
+                                        blob=source["data"],
+                                    )
+                                    if source["type"] == "base64"
+                                    else mcp_types.TextResourceContents(
+                                        uri=uri,
+                                        mimeType=source.get("media_type"),
+                                        text=source["data"],
+                                    )
+                                )
+                                content.append(
+                                    mcp_types.EmbeddedResource(type="resource", resource=resource)
+                                )
+                            case kind:
+                                logger.warning("unsupported Claude tool result block: %s", kind)
+                                content.append(
+                                    mcp_types.TextContent(
+                                        type="text", text=f"[unsupported {kind} block]"
+                                    )
+                                )
 
                     self.run.record(
                         ToolStep(
@@ -111,16 +143,31 @@ class ClaudeEvents:
                         trace.extra[key] = value
 
     def finish(self, *, returncode: int, stderr: str) -> None:
+        """Fail the rollout unless the CLI delivered a complete terminal result.
+
+        A nonzero exit after a result event is only recorded on the trace when
+        stderr is empty; the CLI exits that way after successful runs.
+        """
         trace = self.run.trace
-        error = self.error
         if returncode != 0:
             trace.extra["returncode"] = returncode
-            error = stderr.strip() or f"claude CLI exited with return code {returncode}"
+
+        reported = stderr.strip()
+        if self.error is not None:
+            error = self.error
         elif not self.saw_result:
-            error = "claude CLI exited without a result event"
+            error = reported or (
+                f"claude CLI exited with return code {returncode}"
+                if returncode != 0
+                else "claude CLI exited without a result event"
+            )
+        elif returncode != 0 and reported:
+            error = reported
         elif self.pending_calls:
             missing = ", ".join(sorted(self.pending_calls))
             error = f"claude CLI exited without results for tool calls: {missing}"
+        else:
+            error = None
 
         if error is not None and stderr:
             trace.extra["stderr"] = stderr
