@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
 
     from .job import Job
+    from .run import Run
     from .runtime import HostedRuntime, Provider
 
 
@@ -132,6 +133,26 @@ class Task(BaseModel):
             group=group,
             max_concurrent=max_concurrent,
             job=job,
+            rollout_timeout=rollout_timeout,
+        )
+
+    async def regrade(
+        self,
+        run: Run,
+        *,
+        runtime: Provider | HostedRuntime | None = None,
+        rollout_timeout: float | None = None,
+    ) -> Job:
+        """Regrade a completed run with the current task template, without re-running the agent.
+
+        Single-task form of :meth:`Taskset.regrade`.
+        """
+        from .taskset import Taskset
+
+        taskset = Taskset(self.slug, [self])
+        return await taskset.regrade(
+            [run],
+            runtime=runtime,
             rollout_timeout=rollout_timeout,
         )
 

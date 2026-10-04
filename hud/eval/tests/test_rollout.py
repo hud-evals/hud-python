@@ -45,11 +45,34 @@ from hud.eval import (
 )
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
+from hud.types import Trace
 
 
 async def test_taskset_rejects_zero_group_before_execution():
     with pytest.raises(ValueError, match="group must be >= 1"):
         await Taskset("empty", []).run(_FnAgent(lambda _: "answer"), group=0)
+
+
+async def test_taskset_regrade_returns_failed_run_for_unmatched_slug() -> None:
+    env = Environment("rg-env")
+
+    @env.template(id="known-task")
+    async def known_task():
+        answer = yield "prompt"
+        yield 1.0 if answer == "ok" else 0.0
+
+    taskset = Taskset("rg", [known_task()])
+
+    run = Run(None, "", {})
+    run.slug = "unknown-slug-xyz"
+    run.trace = Trace(trace_id="a" * 32, content="ok")
+
+    # Rollout is never called — the slug check fires first and returns Run.failed.
+    job = await taskset.regrade([run], runtime=LocalRuntime(env))
+
+    assert len(job.runs) == 1
+    assert job.runs[0].trace.is_error
+    assert "not found" in (job.runs[0].trace.error or "")
 
 
 if TYPE_CHECKING:
@@ -1380,6 +1403,32 @@ async def test_nested_rollout_binds_child_and_parent_trace_context(
     }
     assert entered["trace_id"] == trace_id
     assert entered["parent_trace_id"] == expected_parent_trace_id
+
+
+async def test_rollout_clears_explicit_parent_trace_id_when_it_matches_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+    env_file: Path,
+) -> None:
+    # If the caller explicitly passes the same ID as both trace_id and parent_trace_id
+    # (e.g. a regrade that accidentally reuses the trace), the self-reference guard
+    # must clear parent_trace_id so a trace is never its own parent.
+    entered: dict[str, Any] = {}
+    same_id = "00000000000000000000000000000002"
+
+    async def capture_enter(_trace_id: str, **kwargs: Any) -> None:
+        entered.update(kwargs)
+
+    monkeypatch.setattr(run_module, "trace_enter", capture_enter)
+
+    await rollout(
+        _add_task(1, 2),
+        _FnAgent(_solve_add),
+        runtime=SubprocessRuntime(env_file),
+        trace_id=same_id,
+        parent_trace_id=same_id,
+    )
+
+    assert entered.get("parent_trace_id") is None
 
 
 # ─── Run prompt views (what agents consume) ───────────────────────────

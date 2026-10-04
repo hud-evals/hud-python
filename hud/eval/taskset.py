@@ -19,17 +19,13 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hud.agents.regrade import RegradeAgent
 from hud.telemetry import flush
 from hud.utils.platform import PlatformClient
 
 from .job import Job, job_enter
-from .run import rollout, validate_rollout_timeouts
-from .runtime import (
-    DockerRuntime,
-    HostedRuntime,
-    HUDRuntime,
-    LocalRuntime,
-)
+from .run import Run, rollout, validate_rollout_timeouts
+from .runtime import DockerRuntime, HostedRuntime, HUDRuntime, LocalRuntime
 from .runtime.core import resolve_runtime_config
 from .sync import fetch_taskset_tasks, resolve_taskset_id
 
@@ -39,7 +35,6 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
 
-    from .run import Run
     from .runtime import Provider, Runtime
     from .task import Task
 
@@ -378,6 +373,88 @@ class Taskset:
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed
         # sleep), so the timeout is only a safety cap for a wedged network.
+        if not await asyncio.to_thread(flush, timeout=120.0):
+            logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
+        return job
+
+    async def regrade(
+        self,
+        runs: list[Run],
+        *,
+        runtime: Provider | HostedRuntime | None = None,
+        max_concurrent: int | None = None,
+        rollout_timeout: float | None = None,
+    ) -> Job:
+        """Regrade completed runs with the current task templates, without re-running agents.
+
+        Provisions the environment, re-runs task setup with the original task
+        arguments, replays the original agent steps, and injects the original stored
+        answer — skipping the agent loop entirely. Produces a new job and a new trace
+        per run, linked to the original via ``parent_trace_id``.
+
+        Tasks are resolved by slug from this taskset. A run whose slug is not found
+        is recorded as a failed run. Workspace capability is not supported in the
+        initial implementation; ensure the grader does not depend on workspace state
+        persisted from the original run.
+        """
+        if max_concurrent is not None and max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
+
+        task_list = list(self)
+        placement = runtime if runtime is not None or not task_list else self._resolve_placement()
+        job = Job(
+            id=uuid.uuid4().hex,
+            name=f"{self.name}/regrade",
+            group=1,
+            taskset_id=self.taskset_id,
+        )
+        await job_enter(job.id, name=job.name, group=1, taskset_id=self.taskset_id)
+        sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+
+        async def _one(run: Run) -> Run:
+            assert placement is not None
+            task = self.tasks.get(run.slug or "")
+            if task is None:
+                return Run.failed(
+                    f"task slug {run.slug!r} not found in taskset — task template may have drifted"
+                )
+            agent_steps = [s for s in run.trace.steps if s.source in {"agent", "tool", "subagent"}]
+            regrade_agent = RegradeAgent(agent_steps, run.trace.content)
+            if isinstance(placement, HostedRuntime):
+                return await placement.run(
+                    task,
+                    regrade_agent,
+                    job_id=job.id,
+                    group_id=run.group_id,
+                    rollout_timeout=rollout_timeout,
+                )
+            return await rollout(
+                task,
+                regrade_agent,
+                runtime=placement,
+                job_id=job.id,
+                group_id=run.group_id,
+                parent_trace_id=run.trace_id,
+                rollout_timeout=rollout_timeout,
+            )
+
+        async def _guarded(run: Run) -> Run:
+            if sem is None:
+                return await _one(run)
+            async with sem:
+                return await _one(run)
+
+        logger.info(
+            "regrading %d run(s)%s",
+            len(runs),
+            f", max_concurrent={max_concurrent}" if max_concurrent else "",
+        )
+        async with contextlib.AsyncExitStack() as stack:
+            if isinstance(placement, contextlib.AbstractAsyncContextManager):
+                await stack.enter_async_context(placement)
+            results = await asyncio.gather(*(_guarded(r) for r in runs))
+
+        job.runs.extend(results)
         if not await asyncio.to_thread(flush, timeout=120.0):
             logger.warning("telemetry flush did not fully drain within 120s; some spans may lag")
         return job

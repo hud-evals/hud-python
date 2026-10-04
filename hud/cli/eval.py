@@ -49,6 +49,65 @@ hud_console = HUDConsole()
 _CONFIG_PATH = Path(".hud_eval.toml")
 
 
+def load_taskset(source: str) -> Taskset:
+    """Load a taskset from a file path or platform name."""
+    if Path(source).exists():
+        hud_console.info(f"Loading tasks from: {source}")
+        return Taskset.from_file(source)
+    hud_console.info(f"Loading platform taskset: {source}")
+    return Taskset.from_api(source)
+
+
+def local_placement(source: str, taskset: Taskset) -> Provider:
+    """Build a local per-task spawn function (subprocess or Docker)."""
+    rows = list(taskset)
+    rows.extend(
+        task.verifier
+        for task in taskset
+        if task.verifier is not None and not task.shares_verifier_runtime
+    )
+    if not Path(source).exists() and any(
+        not (task.runtime_config and (task.runtime_config.image or task.runtime_config.compose))
+        for task in rows
+    ):
+        raise ValueError(
+            f"{source} is a platform taskset, so there is no env source to spawn "
+            "locally. Run it with --remote, --runtime hud, or --runtime tcp://host:port."
+        )
+    docker = DockerRuntime()
+    source_path = Path(source).resolve()
+    beside = SubprocessRuntime(source_path if source_path.is_dir() else source_path.parent)
+
+    def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
+        config = task.runtime_config
+        if config and (config.image or config.compose):
+            return docker(task)
+        if task._env is not None:
+            return SubprocessRuntime(source_path)(task)
+        return beside(task)
+
+    return spawn
+
+
+def named_placement(name: Placement, source: str, taskset: Taskset) -> Provider | HostedRuntime:
+    """Resolve a ``Placement`` enum value to a concrete runtime provider."""
+    match name:
+        case Placement.LOCAL:
+            return local_placement(source, taskset)
+        case Placement.HUD:
+            return HUDRuntime()
+        case Placement.HOSTED:
+            return HostedRuntime()
+        case Placement.DOCKER:
+            return DockerRuntime()
+        case Placement.MODAL:
+            return ModalRuntime()
+        case Placement.DAYTONA:
+            return DaytonaRuntime()
+        case _:
+            assert_never(name)
+
+
 class Placement(StrEnum):
     """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead.
 
@@ -133,7 +192,10 @@ class EvalConfig(BaseModel):
         """Layer ``overrides`` on this config; agent sections merge one level deep."""
         data = self.model_dump()
         for name, params in overrides.get("agent_config", {}).items():
-            data["agent_config"][name] = {**data["agent_config"].get(name, {}), **params}
+            data["agent_config"][name] = {
+                **data["agent_config"].get(name, {}),
+                **params,
+            }
         return self.model_validate(
             {**data, **{k: v for k, v in overrides.items() if k != "agent_config"}}
         )
@@ -325,7 +387,9 @@ def eval_command(
         # Pick the agent type, then a current catalog model of that type, newest first.
         picked_type = AgentType(
             hud_console.select(
-                "Select an agent:", choices=[agent.value for agent in AgentType], default=0
+                "Select an agent:",
+                choices=[agent.value for agent in AgentType],
+                default=0,
             )
         )
         picked: dict[str, Any] = {"agent_type": picked_type}
@@ -348,7 +412,10 @@ def eval_command(
                 hud_console.select(
                     "Select a model:",
                     choices=[
-                        {"name": f"{m.name or m.model_name} ({m.model_name})", "value": m}
+                        {
+                            "name": f"{m.name or m.model_name} ({m.model_name})",
+                            "value": m,
+                        }
                         for m in models
                     ],
                     default=0,
@@ -381,12 +448,7 @@ def eval_command(
     ):
         raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
-    if Path(source).exists():
-        hud_console.info(f"Loading tasks from: {source}")
-        taskset = Taskset.from_file(source)
-    else:
-        hud_console.info(f"Loading platform taskset: {source}")
-        taskset = Taskset.from_api(source)
+    taskset = load_taskset(source)
     if not taskset:
         raise ValueError(
             f"No runnable Tasks found in {source}. Define a `hud.Environment` with "
@@ -416,49 +478,8 @@ def eval_command(
     match cfg.runtime:
         case AnyUrl():
             placement = Runtime(str(cfg.runtime))
-        case Placement.LOCAL:
-            rows = list(taskset)
-            rows.extend(
-                task.verifier
-                for task in taskset
-                if task.verifier is not None and not task.shares_verifier_runtime
-            )
-            if not Path(source).exists() and any(
-                not (
-                    task.runtime_config
-                    and (task.runtime_config.image or task.runtime_config.compose)
-                )
-                for task in rows
-            ):
-                raise ValueError(
-                    f"{source} is a platform taskset, so there is no env source to spawn "
-                    "locally. Run it with --remote, --runtime hud, or --runtime tcp://host:port."
-                )
-            docker = DockerRuntime()
-            source_path = Path(source).resolve()
-            beside = SubprocessRuntime(source_path if source_path.is_dir() else source_path.parent)
-
-            def spawn(task: Task) -> AbstractAsyncContextManager[Runtime]:
-                config = task.runtime_config
-                if config and (config.image or config.compose):
-                    return docker(task)
-                if task._env is not None:
-                    return SubprocessRuntime(source_path)(task)
-                return beside(task)
-
-            placement = spawn
-        case Placement.HUD:
-            placement = HUDRuntime()
-        case Placement.HOSTED:
-            placement = HostedRuntime()
-        case Placement.DOCKER:
-            placement = DockerRuntime()
-        case Placement.MODAL:
-            placement = ModalRuntime()
-        case Placement.DAYTONA:
-            placement = DaytonaRuntime()
         case _:
-            assert_never(cfg.runtime)
+            placement = named_placement(cfg.runtime, source, taskset)
 
     # The agent's config kwargs: its TOML section, then --model on top.
     agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))

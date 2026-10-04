@@ -291,6 +291,7 @@ class CLIGroup(TyperGroup):
         "serve",
         "deploy",
         "eval",
+        "regrade",
         "task",
         "project",
         "sync",
