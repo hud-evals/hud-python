@@ -13,6 +13,7 @@ from hud import Environment, Task, Taskset
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.runtime import ComposeProject, LocalRuntime, RuntimeConfig
+from hud.types import text_of
 from tests.conftest import eventually
 
 if TYPE_CHECKING:
@@ -199,7 +200,7 @@ async def test_each_row_runs_group_times_in_task_major_order_under_one_job() -> 
 
     class Adds(Agent):
         async def __call__(self, run: Run) -> None:
-            a, b = run.prompt_text.split("+")
+            a, b = text_of(run.prompt).split("+")
             run.trace.content = str(int(a) + int(b))
 
     first, second = add(a=1, b=2), add(a=3, b=4)
@@ -328,7 +329,7 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
 
     class Waits(Agent):
         async def __call__(self, run: Run) -> None:
-            prompted.append(run.prompt_text)
+            prompted.append(text_of(run.prompt))
             await asyncio.sleep(30)
 
     rows = [Task(env="sums", id="add", args={"a": a, "b": 1}) for a in (1, 2)]

@@ -17,7 +17,7 @@ from hud.graders.base import Grade, grade_problems
 from .env import Answer, current_session_id
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Iterator, Sequence
+    from collections.abc import AsyncGenerator, Generator, Sequence
 
     from hud.capabilities.base import Capability
     from hud.capabilities.connection import Connection
@@ -207,7 +207,7 @@ class Session:
         """Nothing to cut: in this process the agent reaches the capabilities directly."""
 
     @contextlib.contextmanager
-    def _current(self) -> Iterator[None]:
+    def _current(self) -> Generator[None]:
         token = current_session_id.set(self.session_id)
         try:
             yield

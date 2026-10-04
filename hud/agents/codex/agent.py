@@ -253,9 +253,7 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
             args.extend(
                 ["-c", f"model_reasoning_effort={json.dumps(self.config.reasoning_effort)}"]
             )
-        manifest = run.client.manifest
-        assert manifest is not None
-        mcp_bindings = [cap for cap in manifest.bindings if cap.protocol.partition("/")[0] == "mcp"]
+        mcp_bindings = [cap for cap in run.capabilities if cap.protocol.partition("/")[0] == "mcp"]
         for index, cap in enumerate(mcp_bindings):
             if cap.params["transport"] != "streamable-http":
                 raise ValueError(
@@ -267,7 +265,8 @@ class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
                     f"MCP server name {cap.name!r} cannot be a codex config key; "
                     "use letters, digits, '_' and '-'"
                 )
-            args.extend(["-c", f"mcp_servers.{cap.name}.url={json.dumps(cap.url)}"])
+            # Codex runs inside the environment, where the server lives.
+            args.extend(["-c", f"mcp_servers.{cap.name}.url={json.dumps(cap.env_url)}"])
             if token := cap.params.get("auth_token"):
                 # Codex reads the bearer token from a variable, which keeps it out of argv.
                 env[f"HUD_MCP_TOKEN_{index}"] = token
