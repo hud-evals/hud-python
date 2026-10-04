@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from hud.clients import connect
+from hud import Task
+from hud.capabilities import find_capability, open_client
 from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -41,6 +42,7 @@ async def shell(root: Path, **options: Any) -> AsyncIterator[tuple[Workspace, SS
     workspace = env.workspace(root, track_files=False, **options)
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
+        runtime.connect() as client,
+        open_client(find_capability(client.capabilities, "shell")) as ssh,
     ):
-        yield workspace, cast("SSHClient", await client.open("shell"))
+        yield workspace, cast("SSHClient", ssh)

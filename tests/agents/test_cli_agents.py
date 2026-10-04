@@ -14,7 +14,8 @@ from hud.agents import ClaudeCLIAgent, CodexCLIAgent
 from hud.agents.types import ToolStep
 from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
-from hud.eval import LocalRuntime, Shared, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime, Shared
 from hud.types import AgentType
 from tests.fixtures import clis
 from tests.fixtures.environments import workspace_task
@@ -45,7 +46,7 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_cli(
 
     jobs = await asyncio.gather(task(prompt="first").run(agent), task(prompt="second").run(agent))
 
-    assert [run.trace.status for job in jobs for run in job.runs] == ["completed", "completed"]
+    assert [trace.status for job in jobs for trace in job.traces] == ["completed", "completed"]
     assert sorted(clis.prompt(cli, capture["stdin"]) for capture in stub.captures()) == [
         "first",
         "second",
@@ -73,7 +74,7 @@ async def test_the_agent_timeout_ends_the_run_and_the_cli_while_the_workspace_li
     task = workspace_task(tmp_path / "ws", env=hung.shell_env())
 
     async with Shared(LocalRuntime(task.env), width=1) as pool:
-        run = await rollout(
+        trace = await rollout(
             task(),
             kind(kind.config_cls(timeout_seconds=timeout)),
             runtime=pool,
@@ -81,7 +82,7 @@ async def test_the_agent_timeout_ends_the_run_and_the_cli_while_the_workspace_li
         (capture,) = hung.captures()
         exited = clis.process_exited(capture["pid"])
 
-    assert (run.trace.status, run.trace.stop_reason, exited) == ("error", "timeout", True)
+    assert (trace.status, trace.stop_reason, exited) == ("error", "timeout", True)
 
 
 WRITE = clis.claude_assistant(
@@ -140,10 +141,10 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(ClaudeCLIAgent())).runs
+    (trace,) = (await task().run(ClaudeCLIAgent())).traces
 
-    assert (run.trace.status, run.trace.content) == (status, content)
-    assert run.trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
+    assert (trace.status, trace.content) == (status, content)
+    assert trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
 
 
 async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: Path) -> None:
@@ -160,10 +161,10 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: P
         task = workspace_task(
             tmp_path / "ws", env=stub.shell_env(), capabilities=(Capability.rfb(url=screen.url),)
         )
-        (run,) = (await task().run(ClaudeCLIAgent())).runs
+        (trace,) = (await task().run(ClaudeCLIAgent())).traces
 
     (capture,) = stub.captures()
-    assert run.trace.status == "completed"
+    assert trace.status == "completed"
     assert capture["computer"] == [
         {"isError": False, "content": ["image"]},
         {"isError": True, "content": ["unsupported computer action: 'frobnicate'"]},
@@ -197,12 +198,12 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
         track_files=False,
     )
 
-    run = await rollout(
+    trace = await rollout(
         task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env), connections=(connection,)
     )
 
     (capture,) = stub.captures()
-    assert run.trace.status == "completed"
+    assert trace.status == "completed"
     assert (capture["env"]["ANTHROPIC_BASE_URL"], capture["env"]["ANTHROPIC_AUTH_TOKEN"]) == (
         connection.client_url,
         "hud-process-bound",
@@ -291,9 +292,9 @@ async def test_each_item_codex_ran_lands_on_the_trace_as_a_tool_step(
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(CodexCLIAgent())).runs
+    (trace,) = (await task().run(CodexCLIAgent())).traces
 
-    (recorded,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    (recorded,) = [step for step in trace.steps if isinstance(step, ToolStep)]
     assert recorded.call is not None and recorded.result is not None
     sent = [getattr(block, "text", None) for block in recorded.result.content]
     assert (recorded.call.name, recorded.result.isError, sent) == (name, is_error, texts)
@@ -345,9 +346,9 @@ async def test_how_codex_exits_decides_how_the_run_ends(
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(CodexCLIAgent())).runs
+    (trace,) = (await task().run(CodexCLIAgent())).traces
 
-    assert (run.trace.status, run.trace.content, run.trace.error) == (
+    assert (trace.status, trace.content, trace.error) == (
         "error",
         content,
         f"[agent loop] RuntimeError: {error}",
@@ -375,11 +376,11 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
         track_files=False,
     )
 
-    run = await rollout(
+    trace = await rollout(
         task(), CodexCLIAgent(), runtime=LocalRuntime(task.env), connections=(connection,)
     )
 
     assert "/codex is a launcher script, but a process-bound inference connection " in (
-        run.trace.error or ""
+        trace.error or ""
     )
     assert stub.captures() == []

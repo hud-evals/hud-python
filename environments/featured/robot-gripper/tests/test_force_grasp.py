@@ -10,7 +10,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from hud.environment.server import TaskRunner
+from hud.environment.session import Session
 
 
 @dataclass(frozen=True)
@@ -66,9 +66,9 @@ async def test_hold_advances_the_configured_duration_without_releasing_the_grip(
     simulator = Simulator([Observation()] * (duration + 1))
     monkeypatch.setattr(robot_env.sim_tools, "call", simulator.call)
     task = robot_env.force_grasp() if hold_steps is None else robot_env.force_grasp(hold_steps=hold_steps)
-    runner = TaskRunner(robot_env.env.templates[task.id], task.args)
+    runner = Session(robot_env.env)
 
-    prompt = await runner.start()
+    prompt = await runner.start_task(task.id, task.args)
     result = await runner.grade({"answer": "ready"})
 
     assert f"{duration} physics steps" in prompt["prompt"]
@@ -109,9 +109,9 @@ async def test_a_failed_hold_criterion_stays_failed_after_recovery(
     simulator = Simulator(observations)
     monkeypatch.setattr(robot_env.sim_tools, "call", simulator.call)
     task = robot_env.force_grasp(hold_steps=3)
-    runner = TaskRunner(robot_env.env.templates[task.id], task.args)
+    runner = Session(robot_env.env)
 
-    await runner.start()
+    await runner.start_task(task.id, task.args)
     result = await runner.grade({"answer": "ready"})
 
     assert result["score"] == pytest.approx(score)
@@ -138,10 +138,10 @@ async def test_invalid_hold_configuration_fails_before_reset(
 ) -> None:
     call = AsyncMock()
     monkeypatch.setattr(robot_env.sim_tools, "call", call)
-    runner = TaskRunner(robot_env.env.templates["force-grasp"], args)
+    runner = Session(robot_env.env)
 
     with pytest.raises(ValueError, match="hold_steps|min_grip_force"):
-        await runner.start()
+        await runner.start_task("force-grasp", args)
 
     await runner.cancel()
     call.assert_not_awaited()
@@ -159,8 +159,8 @@ async def test_a_failed_physics_step_does_not_yield_a_successful_grade(
 
     monkeypatch.setattr(robot_env.sim_tools, "call", fail_step)
     task = robot_env.force_grasp(hold_steps=1)
-    runner = TaskRunner(robot_env.env.templates[task.id], task.args)
-    await runner.start()
+    runner = Session(robot_env.env)
+    await runner.start_task(task.id, task.args)
 
     with pytest.raises(RuntimeError, match="Could not advance grasp hold"):
         await runner.grade({"answer": "ready"})

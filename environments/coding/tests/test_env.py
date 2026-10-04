@@ -14,9 +14,8 @@ from pathlib import Path
 
 import pytest
 from hud import Task
-from hud.clients import connect
-from hud.runtime import SubprocessRuntime
 from hud.clients import HudProtocolError
+from hud.runtime import SubprocessRuntime
 
 import tasks
 from env import coding_task
@@ -67,7 +66,7 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 @asynccontextmanager
 async def served(row: Task):
     """A fresh environment process serving ``row``, and a client connected to it."""
-    async with SubprocessRuntime(ENV_SOURCE)(row) as runtime, connect(runtime) as client:
+    async with SubprocessRuntime(ENV_SOURCE)(row) as runtime, runtime.connect() as client:
         yield client
 
 

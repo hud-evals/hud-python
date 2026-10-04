@@ -52,7 +52,7 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_conversati
 
     jobs = await asyncio.gather(task(prompt="first").run(agent), task(prompt="second").run(agent))
 
-    assert [run.trace.status for job in jobs for run in job.runs] == ["completed", "completed"]
+    assert [trace.status for job in jobs for trace in job.traces] == ["completed", "completed"]
     assert sorted(request.prompt for request in models.requests()) == ["first", "second"]
 
 
@@ -64,9 +64,9 @@ async def test_a_reply_cut_at_the_token_cap_ends_the_run_as_truncated(
     kind = AgentType(agent_type).cls
 
     task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
+    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
 
-    assert (run.trace.status, run.trace.stop_reason, run.trace.content) == (
+    assert (trace.status, trace.stop_reason, trace.content) == (
         "completed",
         "length",
         "part",
@@ -81,10 +81,10 @@ async def test_a_provider_fault_ends_the_run_with_its_error(
     kind = AgentType(agent_type).cls
 
     task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
+    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
 
-    assert run.trace.status == "error"
-    assert "model unavailable" in (run.trace.error or "")
+    assert trace.status == "error"
+    assert "model unavailable" in (trace.error or "")
 
 
 @EVERY_PROVIDER
@@ -96,9 +96,9 @@ async def test_an_overloaded_provider_is_asked_again(
     kind = AgentType(agent_type).cls
 
     task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
+    (trace,) = (await task().run(kind(kind.config_cls(model=model)))).traces
 
-    assert (run.trace.status, run.trace.content, len(models.requests())) == (
+    assert (trace.status, trace.content, len(models.requests())) == (
         "completed",
         "done",
         2,
@@ -125,9 +125,9 @@ async def test_an_error_inside_the_stream_is_retried_only_when_transient(
     )
 
     task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model=CLAUDE_MODEL)))).runs
+    (trace,) = (await task().run(ClaudeAgent(ClaudeConfig(model=CLAUDE_MODEL)))).traces
 
-    assert (run.trace.status, len(models.requests())) == (status, requests)
+    assert (trace.status, len(models.requests())) == (status, requests)
 
 
 async def test_an_excluded_computer_action_reaches_the_environment_tool_of_that_name(
@@ -142,9 +142,9 @@ async def test_an_excluded_computer_action_reaches_the_environment_tool_of_that_
     async with fake_screen() as screen, mcp_server(notes, name="notes") as tools:
         capabilities = (Capability.rfb(url=screen.url), tools)
         task = workspace_task(tmp_path / "ws", capabilities=capabilities)
-        (run,) = (await task().run(GeminiAgent(config))).runs
+        (trace,) = (await task().run(GeminiAgent(config))).traces
 
-    assert (run.trace.status, typed, screen.key_events()) == ("completed", ["hello"], [])
+    assert (trace.status, typed, screen.key_events()) == ("completed", ["hello"], [])
 
 
 async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_toolset(
@@ -161,7 +161,7 @@ async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_
 
     async with fake_screen() as screen:
         task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-opus-5")))).runs
+        (trace,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-opus-5")))).traces
 
     (result,) = (
         block
@@ -169,7 +169,7 @@ async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_
         for block in message["content"]
         if block.get("type") == "tool_result"
     )
-    assert run.trace.status == "completed"
+    assert trace.status == "completed"
     assert (result["toolset_name"], result.get("is_error", False)) == ("computer", False)
     assert [(e.x, e.y, e.buttons) for e in screen.pointer_events()] == [
         (3, 4, 0),
@@ -213,7 +213,7 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
     models.queue([turn])
 
     task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(GeminiAgent(GeminiConfig(model=GEMINI_MODEL)))).runs
+    (trace,) = (await task().run(GeminiAgent(GeminiConfig(model=GEMINI_MODEL)))).traces
 
-    assert (run.trace.status, len(models.requests())) == ("error", 1)
-    assert error in (run.trace.error or "")
+    assert (trace.status, len(models.requests())) == ("error", 1)
+    assert error in (trace.error or "")

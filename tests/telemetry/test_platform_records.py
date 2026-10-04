@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Job, Task, Taskset
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
-from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime, Runtime
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
@@ -23,7 +24,7 @@ from tests.fixtures.environments import checked
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from hud.eval import Run
+    from hud import Run
     from tests.conftest import HudEnv
     from tests.fixtures.services import FakeServices
 
@@ -52,10 +53,10 @@ async def test_a_taskset_reports_one_job_and_enters_each_rollout_under_it(
     assert registered.path == f"/v2/trace/job/{job.id}/enter"
     assert (registered.json["group"], registered.json["taskset_id"]) == (2, "ts-1")
     assert f"job: {reporting.url('web')}/jobs/{uuid.UUID(job.id)}" in caplog.messages
-    assert set(entered) == {run.trace_id for run in job.runs}
+    assert set(entered) == {trace.trace_id for trace in job.traces}
     assert {(e["job_id"], e["model"]) for e in entered.values()} == {(job.id, "claude-test")}
     assert sorted((e["task_slug"], e["group_id"]) for e in entered.values()) == sorted(
-        (run.slug, run.group_id) for run in job.runs
+        (trace.slug, trace.group_id) for trace in job.traces
     )
 
 

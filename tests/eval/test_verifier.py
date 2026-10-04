@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Environment
-from hud.eval import LocalRuntime, Runtime, Task
+from hud import Environment, Task
+from hud.runtime import LocalRuntime, Runtime
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
@@ -63,8 +63,8 @@ async def test_a_verifier_on_its_own_env_runs_after_the_actors_env_is_torn_down(
 
     job = await verified(actor, judge).run(ScriptedAgent("secret"))
 
-    (run,) = job.runs
-    assert (run.reward, run.trace.status) == (1.0, "completed")
+    (trace,) = job.traces
+    assert (trace.reward, trace.status) == (1.0, "completed")
     assert events == ["actor up", "actor down", "judge up", "judge down"]
 
 
@@ -96,7 +96,7 @@ async def test_a_verifier_on_the_actors_env_grades_on_the_same_substrate() -> No
     task.verifier = verify()
     job = await task.run(ScriptedAgent("secret"))
 
-    assert job.runs[0].reward == 1.0
+    assert job.traces[0].reward == 1.0
     assert events == ["up", "actor graded", "verifier graded", "down"]
 
 
@@ -165,14 +165,14 @@ async def test_the_verdict_is_the_grade_whichever_side_fails(
     task.verifier = verify(verdict=verdict)
     job = await task.run(ScriptedAgent("secret"))
 
-    (run,) = job.runs
-    assert (run.reward, run in job.errors) == (reward, not graded)
+    (trace,) = job.traces
+    assert (trace.reward, trace in job.errors) == (reward, not graded)
     if error is None:
-        assert run.trace.error is None
+        assert trace.error is None
     else:
         phase, phrase = error
-        assert (run.trace.error or "").startswith(phase)
-        assert phrase in (run.trace.error or "")
+        assert (trace.error or "").startswith(phase)
+        assert phrase in (trace.error or "")
 
 
 async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> None:
@@ -194,11 +194,11 @@ async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> Non
     task.verifier = Task(env="judge", id="verify")
     job = await task.run(ScriptedAgent("secret"), runtime=actor_only)
 
-    (run,) = job.runs
-    assert (run.reward, run.trace.error, job.errors) == (
+    (trace,) = job.traces
+    assert (trace.reward, trace.error, job.errors) == (
         0.0,
         "[provisioning verifier] RuntimeError: no judge here",
-        [run],
+        [trace],
     )
 
 
@@ -248,6 +248,6 @@ async def test_a_rollout_timeout_in_teardown_returns_and_lets_teardown_finish(
     job = await verified(actor, judge).run(ScriptedAgent("secret"), rollout_timeout=0.3)
     release.set()
 
-    (run,) = job.runs
-    assert (run.reward, run.trace.stop_reason, run.trace.error) == (reward, "timeout", error)
+    (trace,) = job.traces
+    assert (trace.reward, trace.stop_reason, trace.error) == (reward, "timeout", error)
     await eventually(lambda: seen == events)

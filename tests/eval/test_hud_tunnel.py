@@ -10,11 +10,13 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from hud.eval import HUDRuntime, LocalRuntime, Task, Taskset
+from hud import Task, Taskset
+from hud.runtime import HUDRuntime
 from tests.conftest import eventually
 from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
+from tests.serving import serving
 
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket
@@ -29,16 +31,16 @@ async def test_a_platform_taskset_runs_over_the_tunnel_and_releases_its_session(
     hud_env.set(HUD_API_KEY="k")
     row = Task(env="checked", id="check")
 
-    async with LocalRuntime(checked())(row) as served:
+    async with serving(checked()) as served:
         host_on_runtime(services, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
-    (run,) = job.runs
-    assert run.reward == 1.0
+    (trace,) = job.traces
+    assert trace.reward == 1.0
     (created,) = services.requests("runtime", "POST", SESSIONS)
     assert (created.bearer, created.json) == (
         "k",
-        {"environment": "checked", "trace_id": str(uuid.UUID(run.trace_id))},
+        {"environment": "checked", "trace_id": str(uuid.UUID(trace.trace_id))},
     )
     assert {
         (tunnel.params["id"], tunnel.bearer) for tunnel in services.requests("runtime", "WS")
@@ -63,6 +65,6 @@ async def test_a_tunnel_that_keeps_dropping_ends_at_the_deadline_and_releases_th
         ScriptedAgent("yes"), runtime=HUDRuntime(), rollout_timeout=0.5
     )
 
-    assert job.runs[0].trace.stop_reason == "timeout"
-    assert "during starting task" in (job.runs[0].trace.error or "")
+    assert job.traces[0].stop_reason == "timeout"
+    assert "during starting task" in (job.traces[0].error or "")
     await eventually(lambda: len(services.requests("runtime", "DELETE", SESSION)) == 1)

@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.environment import Peer, Workspace
+from hud.environment import Workspace
+from hud.environment.egress import Peer
 from hud.environment.workspace import usable_bwrap
 
 from .conftest import SANDBOX, shell

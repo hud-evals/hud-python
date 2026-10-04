@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
+from hud import Task
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment.robot import DirectControl
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 
 from .sims import (
     Arm,
@@ -34,7 +36,7 @@ from .sims import (
 )
 
 if TYPE_CHECKING:
-    from hud.eval.run import Run
+    from hud import Trace
 
 #: The default contract: an absolute ``[x, grip]`` action, x in [0, 1].
 REACH = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
@@ -42,11 +44,11 @@ REACH = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
 
 async def drive(
     sim: Arm, control: DirectControl, *calls: tuple[str, dict[str, Any]]
-) -> tuple[ScriptedLLM, Run]:
+) -> tuple[ScriptedLLM, Trace]:
     agent = ScriptedLLM(*calls)
     async with arm_env(sim, control) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-    return agent, run
+        trace = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    return agent, trace
 
 
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:

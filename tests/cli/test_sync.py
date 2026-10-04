@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.eval import Task
+from hud import Task
 
 if TYPE_CHECKING:
     from tests.conftest import Hud

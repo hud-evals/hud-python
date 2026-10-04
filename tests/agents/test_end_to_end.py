@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.eval import LocalRuntime, Taskset
+from hud import Taskset
+from hud.runtime import LocalRuntime
 from hud.types import AgentType
 from tests.fixtures.envs import HERE, source
 
@@ -59,7 +60,7 @@ async def test_a_real_model_takes_each_fixture_to_its_reward(
 
     job = await Taskset.from_file(path).run(agent, runtime=LocalRuntime(path))
 
-    (run,) = job.runs
+    (trace,) = job.traces
     # Chat Completions has no computer use, so the screen pays it nothing.
     pays = 0.0 if (kind, fixture) == (AgentType.OPENAI_COMPATIBLE, "screen") else 1.0
-    assert (run.reward, run.trace.error) == (pays, None), f"answered {run.trace.content!r}"
+    assert (trace.reward, trace.error) == (pays, None), f"answered {trace.content!r}"

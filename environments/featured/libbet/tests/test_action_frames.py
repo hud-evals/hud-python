@@ -8,7 +8,7 @@ from unittest.mock import Mock, call
 import pytest
 import yaml
 from fastmcp import Client, FastMCP
-from hud.environment.server import TaskRunner
+from hud.environment.session import Session
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,8 +45,8 @@ def test_omitted_frames_use_the_game_default_in_prompt_and_tool(game_env, config
     async def play():
         server = FastMCP("libbet-test")
         server.tool(module.press_buttons)
-        runner = TaskRunner(module.play_game, {"game": "configured"})
-        frame = await runner.start()
+        runner = Session(module.env)
+        frame = await runner.start_task(module.play_game.id, {"game": "configured"})
         try:
             assert f"press_buttons(buttons, frames={expected})" in frame["prompt"]
             async with Client(server) as client:
@@ -67,8 +67,8 @@ def test_explicit_frames_override_the_game_default_and_keep_clamping(game_env, r
     async def play():
         server = FastMCP("libbet-test")
         server.tool(module.press_buttons)
-        runner = TaskRunner(module.play_game, {"game": "configured"})
-        await runner.start()
+        runner = Session(module.env)
+        await runner.start_task(module.play_game.id, {"game": "configured"})
         try:
             async with Client(server) as client:
                 await client.call_tool("press_buttons", {"buttons": ["B"], "frames": requested})
@@ -89,8 +89,8 @@ def test_next_game_uses_its_own_action_default(game_env):
         server.tool(module.press_buttons)
         async with Client(server) as client:
             for game in ("first", "second"):
-                runner = TaskRunner(module.play_game, {"game": game})
-                await runner.start()
+                runner = Session(module.env)
+                await runner.start_task(module.play_game.id, {"game": game})
                 try:
                     await client.call_tool("press_buttons", {"buttons": ["RIGHT"]})
                 finally:

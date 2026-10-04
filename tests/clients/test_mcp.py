@@ -15,9 +15,12 @@ from typing import TYPE_CHECKING, Any, Literal
 import pytest
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 
 from hud.capabilities import Capability, MCPClient
+from hud.capabilities.mcp import get_mcp_trace_id
+from hud.telemetry.context import set_trace_context
+from hud.types import TextContent
 from tests.clients.conftest import relayed
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server, serve_asgi
@@ -101,7 +104,7 @@ async def test_an_auth_token_rides_every_request_and_is_needed_where_the_server_
         finally:
             await client.close()
         authorized = set(seen)
-        with pytest.raises(McpError, match="HTTPStatusError"):
+        with pytest.raises(MCPError, match="HTTPStatusError"):
             await MCPClient.connect(Capability.mcp(url=url))
 
     assert added.structuredContent == {"result": 5}
@@ -216,7 +219,7 @@ async def test_a_failing_tool_call_resolves_with_a_transport_error(
     hud_env.set(HUD_CLIENT_TIMEOUT="1")
     server = ScriptedMCPServer(services, calls)
 
-    with pytest.raises(McpError) as raised:
+    with pytest.raises(MCPError) as raised:
         await server.call()
 
     assert raised.value.error.code == -32000
@@ -271,3 +274,22 @@ async def test_a_cancelled_and_a_timed_out_tool_call_end_and_the_next_one_runs()
             await client.close()
 
     assert added.structuredContent == {"result": 5}
+
+
+async def test_a_tool_call_carries_the_callers_trace_id_to_the_server() -> None:
+    server = FastMCP("probe")
+
+    @server.tool
+    def whoami() -> str:
+        """The trace id the call arrived with."""
+        return get_mcp_trace_id() or ""
+
+    async with mcp_server(server) as capability:
+        client = await MCPClient.connect(capability)
+        try:
+            with set_trace_context("child-trace"):
+                result = await client.call_tool("whoami", {})
+        finally:
+            await client.close()
+
+    assert result.content == [TextContent(type="text", text="child-trace")]

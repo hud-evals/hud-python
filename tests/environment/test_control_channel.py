@@ -11,13 +11,12 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import BaseModel
 
-from hud.capabilities import Capability
-from hud.clients import connect
+from hud.capabilities import Capability, find_capability
 from hud.environment import (
     Environment,
 )
-from hud.eval import LocalRuntime, Task
-from tests.environment.conftest import FRAME_LIMIT, encode, wire
+from tests.environment.conftest import FRAME_LIMIT, encode, session, wire
+from tests.serving import serving
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -54,7 +53,7 @@ async def test_start_arguments_arrive_as_their_annotated_types(
         yield text + "!" * (retries or 0)
         yield 1.0
 
-    async with LocalRuntime(env)(Task(env="typed", id="x")) as runtime, wire(runtime.url) as peer:
+    async with serving(env) as runtime, session(runtime.url) as peer:
         started = await peer.call("tasks.start", {"id": "shout", "args": args})
 
     assert started["result"] == {"prompt": prompt}
@@ -81,8 +80,8 @@ async def test_a_declared_return_type_parses_the_answer_and_keeps_it_raw(
         }
 
     async with (
-        LocalRuntime(env)(Task(env="structured", id="x")) as runtime,
-        wire(runtime.url) as peer,
+        serving(env) as runtime,
+        session(runtime.url) as peer,
     ):
         await peer.call("tasks.start", {"id": "point"})
         graded = (await peer.call("tasks.grade", {"answer": answer}))["result"]
@@ -114,7 +113,7 @@ async def test_ending_a_sessions_task_closes_its_template(
         finally:
             events.append(f"closed {name}")
 
-    async with LocalRuntime(env)(Task(env="held", id="x")) as runtime, wire(runtime.url) as peer:
+    async with serving(env) as runtime, session(runtime.url) as peer:
         await peer.call("tasks.start", {"id": "hold", "args": {"name": "first"}})
         answered = await peer.call(method, params)
         closed = list(events)
@@ -140,8 +139,8 @@ def stalled(events: list[str]) -> Environment:
 @pytest.mark.parametrize("ending", ["cancel", "hang-up"])
 async def test_a_grade_still_running_ends_with_its_session(ending: str) -> None:
     events: list[str] = []
-    async with LocalRuntime(stalled(events))(Task(env="stalled", id="stall")) as runtime:
-        async with wire(runtime.url) as peer:
+    async with serving(stalled(events)) as runtime:
+        async with session(runtime.url) as peer:
             await peer.call("tasks.start", {"id": "stall"})
             await peer.send("tasks.grade", {"answer": "x"})
             if ending == "cancel":
@@ -174,7 +173,7 @@ async def test_a_request_at_the_frame_limit_round_trips_its_payload() -> None:
         yield {"score": 1.0, "detail": data}
 
     frame = start_of_size(FRAME_LIMIT)
-    async with LocalRuntime(env)(Task(env="limits", id="x")) as runtime, wire(runtime.url) as peer:
+    async with serving(env) as runtime, session(runtime.url) as peer:
         await peer.write(encode(frame))
         started = await peer.read()
         graded = await peer.call("tasks.grade", {"answer": "done"})
@@ -197,9 +196,9 @@ def tagged() -> Environment:
 
 async def test_concurrent_sessions_each_grade_their_own_task() -> None:
     async with (
-        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
-        wire(runtime.url) as a,
-        wire(runtime.url) as b,
+        serving(tagged()) as runtime,
+        session(runtime.url) as a,
+        session(runtime.url) as b,
     ):
         await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
         await b.call("tasks.start", {"id": "echo", "args": {"tag": "b"}})
@@ -210,41 +209,42 @@ async def test_concurrent_sessions_each_grade_their_own_task() -> None:
     assert graded == ["a", "b"]
 
 
-async def test_a_session_dropped_before_its_prompt_is_resumed_by_its_id_and_graded() -> None:
-    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
+async def test_a_leased_session_outlives_its_connection_and_is_graded_by_its_id() -> None:
+    async with serving(tagged()) as runtime:
         async with wire(runtime.url) as a:
-            session = (await a.call("hello", {}))["result"]["session_id"]
-            await a.send("tasks.start", {"id": "echo", "args": {"tag": "parked"}})
+            session_id = (await a.call("hello", {"lease": 30}))["result"]["session_id"]
+            await a.call("tasks.start", {"id": "echo", "args": {"tag": "leased"}})
+            await a.hang_up()
+        async with session(runtime.url, session_id=session_id) as b:
+            graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert graded["result"]["tag"] == "leased"
+
+
+async def test_a_session_without_a_lease_closes_with_its_connection() -> None:
+    async with serving(tagged()) as runtime:
+        async with wire(runtime.url) as a:
+            session_id = (await a.call("hello", {}))["result"]["session_id"]
+            await a.call("tasks.start", {"id": "echo", "args": {"tag": "gone"}})
             await a.hang_up()
         async with wire(runtime.url) as b:
-            resumed = (await b.call("hello", {"session_id": session}))["result"]["session_id"]
-            graded = await b.call("tasks.grade", {"answer": "x"})
+            refused = await b.call("hello", {"session_id": session_id})
 
-    assert (resumed, graded["result"]["tag"]) == (session, "parked")
-
-
-async def test_a_plain_grade_adopts_the_only_parked_session() -> None:
-    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
-        async with wire(runtime.url) as a:
-            await a.call("tasks.start", {"id": "echo", "args": {"tag": "parked"}})
-        async with wire(runtime.url) as b:
-            graded = await b.call("tasks.grade", {"answer": "x"})
-
-    assert graded["result"]["tag"] == "parked"
+    assert refused["error"]["code"] == BAD_STATE
 
 
 async def test_a_session_with_a_live_connection_cannot_be_resumed() -> None:
     async with (
-        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        serving(tagged()) as runtime,
         wire(runtime.url) as a,
         wire(runtime.url) as b,
     ):
-        session = (await a.call("hello", {}))["result"]["session_id"]
+        session_id = (await a.call("hello", {}))["result"]["session_id"]
         await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
-        refused = await b.call("hello", {"session_id": session})
+        refused = await b.call("hello", {"session_id": session_id})
         graded = await a.call("tasks.grade", {"answer": "x"})
 
-    assert refused["error"]["code"] == -32600
+    assert refused["error"]["code"] == BAD_STATE
     assert graded["result"]["tag"] == "a"
 
 
@@ -288,10 +288,10 @@ async def test_concurrent_tunnel_streams_do_not_interleave(echo_port: int) -> No
 
     env = echo_env(echo_port)
     async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
+        serving(env) as runtime,
+        runtime.connect() as client,
     ):
-        binding = urlsplit(client.binding("echo").url)
+        binding = urlsplit(find_capability(client.capabilities, "echo").url)
         echoed = await asyncio.gather(
             *(round_trip(binding.hostname, binding.port, payload) for payload in payloads)
         )
@@ -314,7 +314,7 @@ async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
     env = echo_env(echo_port)
 
     async with (
-        LocalRuntime(env)(Task(env=env.name, id="tunnel")) as runtime,
+        serving(env) as runtime,
         wire(runtime.url) as stream,
     ):
         await stream.write(encode(preface) + b"raw bytes")

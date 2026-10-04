@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
-from hud.agents.openai_compatible import OpenAIChatAgent
+from hud import Environment, Task
+from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from tests.fixtures.models import Turn, call
 
 if TYPE_CHECKING:
@@ -78,10 +79,10 @@ async def write_a_report(
 
     models.script([call("write", filePath="REPORT.md", content="PASS"), Turn(text="Wrote it.")])
     agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=4))
-    run = await rollout(Task(env="report", id="write_report"), agent, runtime=LocalRuntime(env))
-    assert run.reward == 1.0
-    assert run.trace_id is not None
-    return run.trace_id
+    trace = await rollout(Task(env="report", id="write_report"), agent, runtime=LocalRuntime(env))
+    assert trace.reward == 1.0
+    assert trace.trace_id is not None
+    return trace.trace_id
 
 
 async def test_a_local_trace_lists_tool_calls_with_their_results(

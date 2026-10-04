@@ -10,6 +10,7 @@ stepped with.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -18,12 +19,12 @@ import pytest
 import websockets
 from openpi_client import msgpack_numpy
 
-from hud.capabilities import Capability
+from hud import Task
+from hud.capabilities import Capability, find_capability
 from hud.capabilities.robot import RobotClient
-from hud.clients import connect
 from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 from .sims import Reach, plain_env, vector_env
 
@@ -78,12 +79,12 @@ async def step_once(env: Environment, action: list[float]) -> tuple[dict[str, An
     and the grade."""
     async with (
         LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
+        runtime.connect() as client,
     ):
-        started = await client.start_task("episode")
-        agent = await RobotClient.connect(
-            client.binding("robot"), token=started["bindings"]["robot"]["token"]
-        )
+        started = await client.start_task("episode", {})
+        robot = find_capability(client.capabilities, "robot")
+        token = started["bindings"]["robot"]["token"]
+        agent = await RobotClient.connect(replace(robot, params={**robot.params, "token": token}))
         try:
             await agent.get_observation()
             await agent.send_action(action)
@@ -154,7 +155,10 @@ async def test_a_finished_env_is_observed_on_the_frame_it_ended_on(per_env: bool
     try:
         robot = Capability.robot(url=bridge.url, contract=bridge.contract)
         tokens = [(await endpoint.reset())["token"] for _ in range(2)]
-        agents = [await RobotClient.connect(robot, token=token) for token in tokens]
+        agents = [
+            await RobotClient.connect(replace(robot, params={**robot.params, "token": token}))
+            for token in tokens
+        ]
         try:
             for agent in agents:
                 await agent.get_observation()

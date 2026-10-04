@@ -22,8 +22,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hud import Task, Taskset
 from hud.agents.robot import Adapter, Model, RobotAgent
-from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime, Shared
 
 from .sims import EPISODE_TICKS, StubSim, sim_env, stub_episode
 
@@ -147,10 +149,10 @@ async def test_a_single_env_custom_bridge_is_driven_until_the_sim_ends_the_episo
 
     async with stub_episode(StubSim(), "stub-sim") as runtime:
         task = Task(env="stub-sim", id="episode", args={"goal": "lift"})
-        run = await rollout(task, EchoAgent(adapter), runtime=runtime)
+        trace = await rollout(task, EchoAgent(adapter), runtime=runtime)
 
-    assert run.reward == EPISODE_TICKS  # every tick's echoed action reached the sim
-    assert run.prompt == "stub task: lift"  # the sim's prompt, built from the task arg
+    assert trace.reward == EPISODE_TICKS  # every tick's echoed action reached the sim
+    assert trace.prompt_text == "stub task: lift"  # the sim's prompt, built from the task arg
     assert adapter.image_keys == ["observation/image"]
     assert {batch["task"] for batch in adapter.wired} == {"stub task: lift"}
     # A camera arrives HWC uint8, the state as named: slot 1, before any step.
@@ -167,14 +169,14 @@ async def test_a_gym_env_behind_a_prewritten_contract_is_wired_from_the_contract
     (tmp_path / "env.py").write_text(TEMPLATE_ENV, encoding="utf-8")
     adapter = EchoAdapter()
 
-    run = await rollout(
+    trace = await rollout(
         Task(env="libero", id="episode", args={"task_id": 0}),
         EchoAgent(adapter, action_dim=7),
         runtime=LocalRuntime(tmp_path / "env.py"),
     )
 
-    assert run.reward == 1.0  # the sim's own success outranks accumulated reward
-    assert run.prompt == "pick up the black bowl"  # the sim's instruction, not the task args
+    assert trace.reward == 1.0  # the sim's own success outranks accumulated reward
+    assert trace.prompt_text == "pick up the black bowl"  # the sim's instruction, not the task args
     # The contract's camera order, with the state after them.
     assert adapter.image_keys == ["observation/image", "observation/wrist_image"]
     assert {batch["task"] for batch in adapter.wired} == {"pick up the black bowl"}
@@ -207,4 +209,4 @@ async def test_the_slot_token_pins_each_rollout_to_its_own_slot() -> None:
 
     # Slot i echoes i + 1 per tick, so distinct grades mean neither rollout read or
     # graded the other's slot: a dropped or crossed token grades them the same.
-    assert sorted(run.reward for run in job.runs) == [EPISODE_TICKS, 2 * EPISODE_TICKS]
+    assert sorted(trace.reward for trace in job.traces) == [EPISODE_TICKS, 2 * EPISODE_TICKS]

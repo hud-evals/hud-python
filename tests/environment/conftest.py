@@ -80,3 +80,12 @@ async def wire(url: str) -> AsyncIterator[Wire]:
         yield connection
     finally:
         await connection.close()
+
+
+@asynccontextmanager
+async def session(url: str, **hello: Any) -> AsyncIterator[Wire]:
+    """A raw connection whose ``hello`` opened a session, or attached to one by id."""
+    async with wire(url) as connection:
+        opened = await connection.call("hello", hello)
+        assert "result" in opened, opened
+        yield connection

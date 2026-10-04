@@ -23,9 +23,7 @@ CHECKS = (
     ("-m", "ruff", "check", "."),
     ("-m", "pytest", "-q", "-p", "no:cacheprovider"),
 )
-EXPORT_TASKS = (
-    "from hud.eval import Taskset; Taskset.from_file('tasks.py').to_file('.hud/tasks.json')"
-)
+EXPORT_TASKS = "from hud import Taskset; Taskset.from_file('tasks.py').to_file('.hud/tasks.json')"
 
 
 def system_python() -> str:

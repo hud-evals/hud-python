@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from hud.environment import Mount, Peer
+from hud.environment import Mount
+from hud.environment.egress import Peer
 
 if TYPE_CHECKING:
     from hud.runtime.compose import ComposeHealthcheck

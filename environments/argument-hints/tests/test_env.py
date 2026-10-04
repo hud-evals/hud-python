@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from hud import Task
-from hud.clients import HudProtocolError, connect
+from hud.clients import HudProtocolError
 from hud.runtime import SubprocessRuntime
 
 from env import review_files
@@ -39,7 +39,7 @@ def row(attachments: list[dict] | None = None, criteria: list[dict] | None = Non
 @asynccontextmanager
 async def served(task: Task):
     """A fresh environment process serving ``task``, and a client connected to it."""
-    async with SubprocessRuntime(ENV_SOURCE)(task) as runtime, connect(runtime) as client:
+    async with SubprocessRuntime(ENV_SOURCE)(task) as runtime, runtime.connect() as client:
         yield client
 
 
@@ -198,8 +198,8 @@ async def test_concurrent_sessions_grade_with_the_runtime_key(rejected, platform
 
     async with (
         SubprocessRuntime(ENV_SOURCE)(first) as runtime,
-        connect(runtime) as one,
-        connect(runtime) as two,
+        runtime.connect() as one,
+        runtime.connect() as two,
     ):
         await one.start_task(first.id, first.args)
         await two.start_task(second.id, second.args)

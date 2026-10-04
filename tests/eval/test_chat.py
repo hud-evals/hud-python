@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from mcp.types import ImageContent, TextContent
 
-from hud import Environment
+from hud import Chat, Environment, Task
 from hud.agents.base import Agent
-from hud.eval import Chat, LocalRuntime, Task
+from hud.runtime import LocalRuntime
+from hud.types import ImageContent, TextContent
 
 if TYPE_CHECKING:
-    from hud.eval import Run
+    from hud import Run
 
 
 def assistant(prompts: list[Any]) -> Environment:
@@ -32,7 +32,7 @@ class Echo(Agent):
     """Replies ``echo:`` and the last turn's text, and fails on ``fail``."""
 
     async def __call__(self, run: Run) -> None:
-        last = run.prompt_messages[-1].content
+        last = run.prompt[-1].content
         text = last.text if isinstance(last, TextContent) else "<image>"
         if text == "fail":
             raise RuntimeError("model unavailable")

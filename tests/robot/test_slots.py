@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -19,10 +20,11 @@ import pytest
 
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
-from hud.clients import HudProtocolError, connect
+from hud.clients import HudProtocolError
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task
+from tests.serving import hud_client
+from tests.serving import serving as served_on_loopback
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from hud.eval import Runtime
+    from hud.runtime import Runtime
 
 
 class Sim(RobotBridge):
@@ -118,7 +120,7 @@ def slot_env(port: int) -> Environment:
 
 def episodes(port: int) -> AbstractAsyncContextManager[Runtime]:
     """The ``slots`` env served on loopback for the block."""
-    return LocalRuntime(slot_env(port))(Task(env="slots", id="episode"))
+    return served_on_loopback(slot_env(port))
 
 
 PROMPT = "prompt [('task', 'pick')]"
@@ -134,11 +136,11 @@ async def test_cancel_frees_the_slot_for_the_next_session(failures: int, results
     sim = Sim(failures=failures)
 
     async with serving(sim) as (port, _, _), episodes(port) as runtime:
-        async with connect(runtime) as first:
-            await first.start_task("episode")
+        async with hud_client(runtime) as first:
+            await first.start_task("episode", {})
             await first.cancel()
-        async with connect(runtime) as second:
-            started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
+        async with runtime.connect() as second:
+            started = await asyncio.wait_for(second.start_task("episode", {}), timeout=10)
             assert await second.grade({"answer": "x"}) == GRADE
 
     assert started == {"prompt": PROMPT}
@@ -149,11 +151,11 @@ async def test_a_grade_frees_the_slot_with_the_sims_grade() -> None:
     sim = Sim()
 
     async with serving(sim) as (port, _, _), episodes(port) as runtime:
-        async with connect(runtime) as first:
-            await first.start_task("episode")
+        async with runtime.connect() as first:
+            await first.start_task("episode", {})
             graded = await first.grade({"answer": "x"})
-        async with connect(runtime) as second:
-            started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
+        async with runtime.connect() as second:
+            started = await asyncio.wait_for(second.start_task("episode", {}), timeout=10)
             await second.grade({"answer": "x"})
 
     assert graded == GRADE
@@ -161,18 +163,16 @@ async def test_a_grade_frees_the_slot_with_the_sims_grade() -> None:
     assert sim.results == 2
 
 
-async def test_a_dropped_session_frees_its_slot_when_graded() -> None:
+async def test_a_dropped_session_frees_its_slot_for_the_next_session() -> None:
     sim = Sim()
 
     async with serving(sim) as (port, _, _), episodes(port) as runtime:
-        async with connect(runtime) as first:
-            await first.start_task("episode")
-        async with connect(runtime) as second:
-            graded = await second.grade({"answer": "x"})
-            started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
+        async with runtime.connect() as first:
+            await first.start_task("episode", {})
+        async with runtime.connect() as second:
+            started = await asyncio.wait_for(second.start_task("episode", {}), timeout=10)
             await second.grade({"answer": "x"})
 
-    assert graded == GRADE
     assert started == {"prompt": PROMPT}
     assert sim.results == 2
 
@@ -183,11 +183,11 @@ async def test_a_session_waits_for_a_held_slot_until_its_holder_ends() -> None:
     async with (
         serving(sim) as (port, _, _),
         episodes(port) as runtime,
-        connect(runtime) as holder,
-        connect(runtime) as waiter,
+        runtime.connect() as holder,
+        hud_client(runtime) as waiter,
     ):
-        await holder.start_task("episode")
-        waiting = asyncio.create_task(waiter.start_task("episode"))
+        await holder.start_task("episode", {})
+        waiting = asyncio.create_task(waiter.start_task("episode", {}))
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(asyncio.shield(waiting), timeout=0.2)
         await holder.grade({"answer": "x"})
@@ -202,8 +202,8 @@ async def test_concurrent_sessions_with_different_args_cannot_share_a_batch() ->
     async with (
         serving(Sim(num_envs=2)) as (port, _, _),
         episodes(port) as runtime,
-        connect(runtime) as first,
-        connect(runtime) as second,
+        runtime.connect() as first,
+        runtime.connect() as second,
     ):
         started = await first.start_task("episode", {"task": "A"})
         with pytest.raises(HudProtocolError):
@@ -220,7 +220,10 @@ async def test_a_silent_slot_times_out_while_its_peer_keeps_stepping() -> None:
 
     async with serving(sim) as (_, endpoint, robot):
         tokens = [(await endpoint.reset())["token"] for _ in range(2)]
-        active, silent = [await RobotClient.connect(robot, token=token) for token in tokens]
+        active, silent = [
+            await RobotClient.connect(replace(robot, params={**robot.params, "token": token}))
+            for token in tokens
+        ]
         try:
             await active.get_observation()
             await silent.get_observation()
@@ -246,7 +249,9 @@ async def test_a_claim_that_never_dials_holds_the_batch_until_it_joins() -> None
 
     async with serving(sim) as (_, endpoint, robot):
         tokens = [(await endpoint.reset())["token"] for _ in range(2)]
-        early = await RobotClient.connect(robot, token=tokens[0])
+        early = await RobotClient.connect(
+            replace(robot, params={**robot.params, "token": tokens[0]})
+        )
         try:
             await early.get_observation()
             await early.send_action([1.0])
@@ -254,7 +259,9 @@ async def test_a_claim_that_never_dials_holds_the_batch_until_it_joins() -> None
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(early.get_observation(), timeout=1.0)
             steps_before_join = len(sim.steps)
-            late = await RobotClient.connect(robot, token=tokens[1])
+            late = await RobotClient.connect(
+                replace(robot, params={**robot.params, "token": tokens[1]})
+            )
             try:
                 await late.get_observation()
                 await late.send_action([2.0])

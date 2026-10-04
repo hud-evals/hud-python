@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from hud import Task, Taskset
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import HostedRuntime, Task, Taskset
+from hud.runtime import HostedRuntime
 from hud.types import AgentType
 from tests.conftest import eventually
 from tests.fixtures.services import Reply
@@ -66,13 +67,13 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
 
     job = await Taskset("sums", [row]).run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
-    (run,) = job.runs
+    (trace,) = job.traces
     (submitted,) = services.requests("api", "POST", SUBMIT)
     body = submitted.json
     assert (body["trace_id"], body["job_id"], body["group_id"]) == (
-        str(uuid.UUID(run.trace_id)),
+        str(uuid.UUID(trace.trace_id)),
         str(uuid.UUID(job.id)),
-        run.group_id,
+        trace.group_id,
     )
     assert (body["env"], body["task"], body["args"]) == ("sums", "add", {"a": 1, "b": 2})
     assert (body["agent"]["type"], body["agent"]["config"]["timeout_seconds"]) == (
@@ -87,10 +88,10 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
         {"image": "judge:1"},
     )
     assert "secret" not in str(body)
-    assert (run.reward, run.trace.status, run.runtime) == (
+    assert (trace.reward, trace.status, trace.runtime) == (
         0.5,
         "completed",
-        f"hud://trace/{run.trace_id}",
+        f"hud://trace/{trace.trace_id}",
     )
     assert services.requests("api", "POST", "/v2/trace/{id}/exit") == []
 
@@ -161,12 +162,12 @@ async def test_the_trace_the_platform_ends_with_is_the_runs_outcome(
 
     job = await Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
-    (run,) = job.runs
-    assert (run.reward, run.trace.status, run in job.errors) == (reward, status, not graded)
+    (trace,) = job.traces
+    assert (trace.reward, trace.status, trace in job.errors) == (reward, status, not graded)
     if error is None:
-        assert run.trace.error is None
+        assert trace.error is None
     else:
-        assert error in (run.trace.error or "")
+        assert error in (trace.error or "")
 
 
 @pytest.mark.parametrize(
@@ -183,10 +184,10 @@ async def test_a_hosted_rollout_past_its_deadline_is_cancelled_on_the_platform(
         chat_agent(), runtime=HostedRuntime(poll_interval=0), rollout_timeout=1
     )
 
-    (run,) = job.runs
-    assert (run.trace.status, run.trace.stop_reason) == ("error", "timeout")
+    (trace,) = job.traces
+    assert (trace.status, trace.stop_reason) == ("error", "timeout")
     await eventually(lambda: len(services.requests("api", "POST", CANCEL)) == 1, within=10)
-    assert services.bodies("api", "POST", CANCEL) == [{"trace_id": str(uuid.UUID(run.trace_id))}]
+    assert services.bodies("api", "POST", CANCEL) == [{"trace_id": str(uuid.UUID(trace.trace_id))}]
 
 
 async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(

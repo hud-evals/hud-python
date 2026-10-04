@@ -9,22 +9,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Task, Taskset
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
-from hud.eval import (
-    ComposeProject,
-    LocalRuntime,
-    RuntimeConfig,
-    Task,
-    Taskset,
-)
+from hud.runtime import ComposeProject, LocalRuntime, RuntimeConfig
+from hud.types import text_of
 from tests.conftest import eventually
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.eval import Run
+    from hud import Run
     from tests.conftest import HudEnv
     from tests.fixtures.services import FakeServices
 
@@ -165,17 +160,17 @@ async def test_each_row_runs_group_times_in_task_major_order_under_one_job() -> 
 
     class Adds(Agent):
         async def __call__(self, run: Run) -> None:
-            a, b = run.prompt_text.split("+")
+            a, b = text_of(run.prompt).split("+")
             run.trace.content = str(int(a) + int(b))
 
     first, second = add(a=1, b=2), add(a=3, b=4)
     job = await Taskset("sums", [first, second]).run(Adds(), group=3)
 
-    assert [run.slug for run in job.runs] == [first.slug] * 3 + [second.slug] * 3
-    assert [run.reward for run in job.runs] == [1.0] * 6
-    assert {run.job_id for run in job.runs} == {job.id}
+    assert [trace.slug for trace in job.traces] == [first.slug] * 3 + [second.slug] * 3
+    assert [trace.reward for trace in job.traces] == [1.0] * 6
+    assert {trace.job_id for trace in job.traces} == {job.id}
     assert [len(job.results[row.slug]) for row in (first, second)] == [3, 3]
-    groups = [{run.group_id for run in job.results[row.slug]} for row in (first, second)]
+    groups = [{trace.group_id for trace in job.results[row.slug]} for row in (first, second)]
     assert [len(group) for group in groups] == [1, 1] and groups[0] != groups[1]
 
 
@@ -236,7 +231,7 @@ async def test_rollouts_on_one_live_environment_take_turns() -> None:
 
     job = await wait().run(Pauses(), group=3)
 
-    assert [run.reward for run in job.runs] == [1.0] * 3
+    assert [trace.reward for trace in job.traces] == [1.0] * 3
 
 
 async def test_a_jobs_reward_averages_its_graded_runs_and_its_errors_are_the_rest() -> None:
@@ -265,11 +260,11 @@ async def test_a_jobs_reward_averages_its_graded_runs_and_its_errors_are_the_res
     agent = AnswersThenWaits(AgentConfig(timeout_seconds=0.3))
     job = await Taskset("mixed", rows).run(agent, runtime=LocalRuntime(env))
 
-    assert {run.slug: run.reward for run in job.runs} == {
+    assert {trace.slug: trace.reward for trace in job.traces} == {
         "timed-out-after-answering": 1.0,
         "grader-raised": 0.0,
     }
-    assert ([run.slug for run in job.errors], job.reward) == (["grader-raised"], 1.0)
+    assert ([trace.slug for trace in job.errors], job.reward) == (["grader-raised"], 1.0)
 
 
 async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> None:
@@ -294,7 +289,7 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
 
     class Waits(Agent):
         async def __call__(self, run: Run) -> None:
-            prompted.append(run.prompt_text)
+            prompted.append(text_of(run.prompt))
             await asyncio.sleep(30)
 
     rows = [Task(env="sums", id="add", args={"a": a, "b": 1}) for a in (1, 2)]

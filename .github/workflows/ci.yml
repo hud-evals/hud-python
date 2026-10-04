@@ -103,7 +103,7 @@ jobs:
       - name: Run sandbox scenarios in a container
         run: >-
           docker run --rm
-          --security-opt seccomp=hud/eval/docker-seccomp.json
+          --security-opt seccomp=hud/runtime/docker-seccomp.json
           --security-opt systempaths=unconfined
           --security-opt apparmor=unconfined
           --volume "$PWD:/src" --workdir /src

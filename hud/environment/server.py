@@ -301,8 +301,8 @@ class _Connection:
                 try:
                     await send_frame(self.writer, reply(msg_id, result), max_bytes=limit)
                 except FrameTooLargeError:
-                    if method == "tasks.start":
-                        await session.cancel()  # its prompt never reaches the client
+                    if method == "tasks.start" and self.session is not None:
+                        await self.session.cancel()  # its prompt never reaches the client
                     raise
         except HudProtocolError as exc:
             if msg_id is not None:
