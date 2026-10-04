@@ -78,6 +78,7 @@ class TraceRecorder:
         obs_space: dict[str, Any] | None = None,
         action_names: list[str] | None = None,
         state_names: dict[str, list[str]] | None = None,
+        max_queued_frames: int = 16,
     ) -> None:
         assert trace_id or run, "TraceRecorder needs a trace_id or a run"
         self._run = run
@@ -88,6 +89,7 @@ class TraceRecorder:
         self._obs_space = obs_space
         self._action_names = action_names or []
         self._state_names = state_names or {}
+        self._max_queued_frames = max_queued_frames
         self.reward = 0.0
         self._video: VideoStreamer | None = None  # lazy, one per trace
         # The task instruction as an opening user step (shows on the timeline).
@@ -133,7 +135,9 @@ class TraceRecorder:
             step = ObservationStep(tick=tick, state=state)
         self._emit(step)
         if self._video is None:
-            self._video = VideoStreamer(fps=self._fps, trace_id=self.trace_id)
+            self._video = VideoStreamer(
+                fps=self._fps, trace_id=self.trace_id, max_queued_frames=self._max_queued_frames
+            )
         self._video.record({"data": data})
 
     def record_inference(self, chunk: Any, *, tick: int) -> None:

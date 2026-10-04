@@ -58,7 +58,7 @@ from hud.environment.robot.orientation import (
     xyzw_to_euler,
 )
 from hud.telemetry.exporter import flush
-from hud.telemetry.robot import VideoStreamer
+from hud.telemetry.robot import TraceRecorder
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -85,8 +85,8 @@ DEFAULT_TIMEOUT_S = 60.0
 #: move bursts frames the encoder thread has yet to catch up on.
 _VIDEO_QUEUE_FRAMES = 256
 
-#: Per-camera cap on streamed video frames (4 min at 20 Hz); later ticks are not recorded.
-_MAX_VIDEO_FRAMES = 5000
+#: Cap on ticks streamed to the trace per episode (4 min at 20 Hz); later ticks are not recorded.
+_MAX_TRACE_TICKS = 5000
 
 #: Fraction of a full turn an absolute orientation travels per second, times ``speed``.
 _FULL_TURN = 2.0 * math.pi
@@ -186,8 +186,8 @@ class DirectControl:
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
         self._serving: asyncio.Task[None] | None = None
         self._capability: Capability | None = None
-        self._video: VideoStreamer | None = None  # this episode's camera video
-        self._video_frames = 0
+        self._recorder: TraceRecorder | None = None  # this episode's trace telemetry
+        self._ticks = 0
 
     def attach(self, endpoint: RobotEndpoint) -> DirectControl:
         """Register with a robotics endpoint, which owns serving and episode lifecycle."""
@@ -238,6 +238,7 @@ class DirectControl:
             raise ValueError(f"every action dimension needs a positive step, got {self._step}")
         # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
+        self._obs_space = observations
         self._cameras = [n for n, f in observations.items() if f.get("type") == "rgb"]
         self._states = {
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
@@ -282,11 +283,11 @@ class DirectControl:
         self._capability = None
 
     async def end_episode(self) -> None:
-        """Clear the last absolute target and close the episode's video, flushing its tail."""
+        """Clear the last absolute target and close the episode's telemetry, flushing its tail."""
         self._command = None
-        video, self._video, self._video_frames = self._video, None, 0
-        if video is not None:
-            await asyncio.to_thread(video.finalize)
+        recorder, self._recorder, self._ticks = self._recorder, None, 0
+        if recorder is not None:
+            await asyncio.to_thread(recorder.close)
             await asyncio.to_thread(flush)
 
     # ── tools ──────────────────────────────────────────────────────────────
@@ -388,10 +389,11 @@ class DirectControl:
             try:
                 obs = await client.get_observation()
                 # Stream the episode's frames to the rollout's trace, from its opening scene on.
-                if self._video is None and (trace_id := get_mcp_trace_id()) is not None:
-                    self._video = VideoStreamer(
-                        fps=round(self._rate),
+                if self._recorder is None and (trace_id := get_mcp_trace_id()) is not None:
+                    self._recorder = TraceRecorder(
                         trace_id=trace_id,
+                        fps=round(self._rate),
+                        obs_space=self._obs_space,
                         max_queued_frames=_VIDEO_QUEUE_FRAMES,
                     )
                     self._record(obs)
@@ -467,10 +469,10 @@ class DirectControl:
         )
 
     def _record(self, obs: dict[str, Any]) -> None:
-        """Stream the cameras the model sees to the trace video, up to the frame cap."""
-        if self._video is not None and self._video_frames < _MAX_VIDEO_FRAMES:
-            self._video.record({"data": {name: obs["data"][name] for name in self._cameras}})
-            self._video_frames += 1
+        """Stream one tick's state and camera video to the trace, up to the tick cap."""
+        if self._recorder is not None and self._ticks < _MAX_TRACE_TICKS:
+            self._recorder.record_observation(obs["data"], tick=self._ticks)
+            self._ticks += 1
 
     def _plan(
         self, values: list[DimValue], obs: dict[str, Any]

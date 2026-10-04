@@ -441,7 +441,7 @@ async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
             await env.start()
 
 
-async def test_every_played_tick_streams_to_the_trace_as_one_video_per_camera(
+async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per_camera(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spans: list[dict[str, Any]] = []
@@ -465,3 +465,12 @@ async def test_every_played_tick_streams_to_the_trace_as_one_video_per_camera(
     with av.open(io.BytesIO(mp4), mode="r") as container:
         frames = sum(1 for _ in container.decode(video=0))
     assert frames == 1 + len(sim.actions)  # the opening scene, then every tick of both moves
+    # The viewer builds its robot timeline from these, pairing tick N with video frame N.
+    observations = [
+        span["attributes"][PAYLOAD_ATTRIBUTE]
+        for span in spans
+        if span["attributes"][PAYLOAD_ATTRIBUTE].get("source") == "observation"
+        and span["attributes"][TASK_RUN_ID_ATTRIBUTE] == run.trace_id
+    ]
+    assert [obs["tick"] for obs in observations] == list(range(frames))
+    assert observations[-1]["state"]
