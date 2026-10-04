@@ -25,7 +25,13 @@ import pytest
 from hud.agents.base import Agent
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
-from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
+from hud.environment.robot import (
+    DirectControl,
+    Predicate,
+    RobotBridge,
+    RobotEndpoint,
+    RobotEvidence,
+)
 from hud.eval import LocalRuntime, Task, rollout
 from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
@@ -152,6 +158,43 @@ def _move(tool: str, **values: float) -> tuple[str, dict[str, Any]]:
     items = [{"name": name, "value": value} for name, value in values.items()]
     target, *others = items
     return tool, {"target": target, "others": others, "note": "move toward the goal"}
+
+
+async def test_bridge_evidence_reaches_the_run_evaluation() -> None:
+    class _Evidenced(_Arm):
+        def evidence(self) -> RobotEvidence:
+            return RobotEvidence(
+                termination_reason="success" if self.success else "agent_ended",
+                predicates=[
+                    Predicate(
+                        name="x_reached",
+                        satisfied=self.success,
+                        value=float(self.state[0]),
+                        threshold=0.5,
+                    )
+                ],
+                final_poses={"hand": [float(self.state[0]), 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]},
+                holding=bool(self.state[1] >= 0.9),
+                task_id="reach",
+                seed=7,
+            )
+
+    sim = _Evidenced(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.5), _move("move_to", grip=1.0))
+
+    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    evaluation = run.evaluation
+    assert evaluation["score"] == 1.0
+    assert evaluation["content"] == "success; unmet: none"
+    evidence = RobotEvidence.model_validate(evaluation["info"]["evidence"])
+    assert evidence.predicates == [
+        Predicate(name="x_reached", satisfied=True, value=0.5, threshold=0.5)
+    ]
+    assert evidence.final_poses["hand"][0] == 0.5
+    assert evidence.holding is True
+    assert (evidence.task_id, evidence.seed) == ("reach", 7)
 
 
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
