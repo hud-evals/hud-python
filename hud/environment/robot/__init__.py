@@ -17,6 +17,8 @@ thread and a bridge serves the wire. The env server holds a
   (``RobotEndpoint(MyBridge)`` spawns it; custom containers can call it too).
 - :func:`~.gym.wrap` — one-line trace streaming for any gym env you drive
   yourself, plus the shared gym introspection.
+- :class:`~.control.DirectControl` — the same sim as MCP motion tools, so a
+  tool-calling LLM can drive it (the ``robot`` wire stays up for policies).
 
 The agent-side counterpart, :class:`~hud.capabilities.robot.RobotClient`, lives
 under :mod:`hud.capabilities`; both ends share the wire codec defined there.
@@ -25,10 +27,12 @@ under :mod:`hud.capabilities`; both ends share the wire codec defined there.
 from __future__ import annotations
 
 from .bridge import RobotBridge, serve_bridge
+from .control import DirectControl
 from .endpoint import RobotEndpoint
 from .gym import GymBridge, TracedEnv, wrap
 
 __all__ = [
+    "DirectControl",
     "GymBridge",
     "RobotBridge",
     "RobotEndpoint",

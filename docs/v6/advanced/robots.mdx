@@ -540,11 +540,11 @@ Feature keys are openpi flat slash-paths and must match *verbatim* the keys your
 | `control_rate` | top level | Control-loop frequency in Hz; the agent reads it as the playback/record fps. Recommended. |
 | `features` | top level | Map of feature name → feature spec (rows below). |
 | `role` | feature | `observation` or `action` - **the only field that splits the spaces**. Load-bearing. |
-| `type` | feature | Representation tag. Observations: `rgb`/`bgr`/`gray`/`depth` mark an image (load-bearing for the bundled adapter); others (`ee_abs`, `ee_del`, `joint_pos`, …) are descriptive control/state modes. |
+| `type` | feature | Representation tag. Observations: `rgb`/`bgr`/`gray`/`depth` mark an image (load-bearing for the bundled adapter); others (`ee_abs`, `ee_del`, `joint_pos`, …) are control/state modes, descriptive except that the action's `type` picks its [direct control](#direct-control) motion tool. |
 | `dtype` | feature | `image` for frames, else a numpy dtype (`float32`). Descriptive - not checked against your arrays. |
 | `shape` | feature | Declared dims (`[H, W, 3]`, `[8]`). Descriptive; every feature is rank ≥ 1 (scalars are `[1]`). |
 | `names` | feature | Per-element labels; what the trace viewer uses to label state/action slices. |
-| `stats` | feature | Per-element `mean` / `std` / `min` / `max` for a custom adapter. The stock LeRobot path uses the checkpoint's own normalization, so you can omit it. |
+| `stats` | feature | Per-element `mean` / `std` / `min` / `max` for a custom adapter. The stock LeRobot path uses the checkpoint's own normalization, so you can omit it. [Direct control](#direct-control) bounds the action by `limits` `min` / `max`, else by these. |
 | `state_type` / `state_representation` / `frame` | feature | Closed-symbol embodiment metadata (EEF vs joint, quaternion vs axis-angle, world vs base frame). Descriptive. |
 
 The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per
@@ -553,6 +553,126 @@ spec - the closed symbol sets and known traps - lives outside the SDK alongside 
 
 </Accordion>
 
+## Direct control
+
+A tool-calling LLM cannot stream an action every control tick, but it can drive the same sim
+through **direct control**: motion tools that name targets for the action's dimensions, such as
+"move the end effector to z = 0.95". `DirectControl` serves those tools as an `mcp` capability next
+to the `robot` wire, so one environment serves a VLA over `robot` and an LLM over MCP. Each agent
+opens only the protocol it speaks, so any tool-calling agent (`claude`, `openai`, ...) drives the
+robot with no robot code of its own.
+
+```python env.py
+from hud import Environment
+from hud.environment.robot import DirectControl
+
+env = Environment(name="my-sim")
+sim = env.gym(make_env)  # a RobotEndpoint
+DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
+
+
+@env.template()
+async def episode(seed: int = 0):
+    ep = await sim.reset(seed=seed)
+    yield {"prompt": ep["prompt"]}
+    yield await sim.result()
+```
+
+```bash
+hud eval env.py openai --model gpt-6-astra --max-steps 40
+```
+
+`attach` registers the profile on that endpoint, which is robotics code. Publishing
+`sim.capabilities()` starts the MCP server from the `robot` contract, `reset` clears the
+commanded target for the new episode, and `stop` shuts the server down. Nothing in the generic
+environment, server, or tool loop knows about direct control.
+
+The [contract](#contract) derives the tool surface:
+
+| Contract field | Tool surface |
+|----------------|--------------|
+| action `type` | The motion tool: `ee_abs` → `move_to` and `joint_pos` → `move_joints` take absolute targets, interpolated at a safe speed; `ee_del` → `move_by` takes a displacement, split into steps within the per-step bounds. |
+| action `names` | The dimensions a call addresses. `target` is one `{name, value}` and is required; `others` is any further ones. Unnamed dimensions hold. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
+| action `limits` (else `stats`) | Per-dimension `min` / `max`: the target range, or the per-step box for a displacement. |
+| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops, and gives up at `timeout` (default 60 s). |
+| `rgb` observations and the rest | The camera frames and labeled state every call returns. |
+
+There is no `observe` tool. Every motion call returns the camera frames and the pose it
+ended on, so the model does not choose whether to look. Each call is its own short connection on
+the `robot` wire, so the sim holds still while the model thinks. A call also takes a required
+`note`: what the model sees and why it chose the motion. The episode ends when the model stops
+calling tools. The template grades it as usual.
+
+A call steps until the commanded target is reached or the arm
+stops moving, then returns the pose and how far it is from the command. `timeout` (default 60 s)
+is only the safety cap: a full-range move at the default speed is about 10 s, and a longer real
+move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
+(roll, pitch, yaw, radians). The tool slerps that rotation onto the contract, which may store a
+quaternion, an axis-angle, or euler.
+
+A few embodiment facts can't be read off the contract, so the environment states them:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
+| `dims` | every action dimension | The dimensions a call may address; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
+| `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
+| `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops. |
+| `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
+| `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
+
+<Note>
+Direct control claims the sim's sole slot, so it serves single-env sims. Scale out with more
+rollouts (`max_concurrent`) rather than a vectorized sim.
+</Note>
+
+<Accordion title="Communication with the bridge: VLA vs tool-calling LLM">
+
+Both kinds of agent end up as a client on the bridge's `robot` WebSocket. They differ in where the
+per-tick loop runs.
+
+```mermaid
+flowchart LR
+    VLA["<b>VLA agent</b><br/>RobotAgent"]
+    LLM["<b>LLM agent</b><br/>claude, openai, ..."]
+
+    subgraph ENV["env server (runs env.py)"]
+        DC["<b>DirectControl</b><br/>MCP server"]
+        EP["<b>RobotEndpoint</b>"]
+    end
+
+    subgraph SIM["sim process"]
+        BR["<b>RobotBridge</b>"]
+        CT["sim + low-level controller"]
+    end
+
+    VLA <-->|"robot WS: 1 action per tick"| BR
+    LLM <-->|"MCP: move_to(...)"| DC
+    DC <-->|"robot WS: 1 action per tick"| BR
+    EP -.->|"reset / result"| BR
+    BR --> CT
+
+    classDef node fill:#efece8,stroke:#2b2722,stroke-width:1px,color:#2b2722;
+    class VLA,LLM,DC,EP,BR,CT node;
+    style ENV fill:transparent,stroke:#8a8580,stroke-width:1px;
+    style SIM fill:transparent,stroke:#8a8580,stroke-width:1px;
+```
+
+- **A VLA** tunnels straight to the bridge. The harness, `RobotAgent`, runs on the agent side: it
+  reads each observation, runs the policy, and sends one action per tick until the episode ends.
+- **An LLM** calls an MCP tool on the env server, where `DirectControl` acts as its harness. It
+  opens its own short connection to the bridge, plays the call out one action per tick, closes the
+  connection, and returns the camera frames and pose.
+
+Direct control does no inverse kinematics (IK, solving joint angles for a target pose). It
+interpolates setpoints at `speed` so the sim never jumps to a distant goal, and the sim's own
+low-level controller tracks each one. It stops when the arm arrives, comes to rest, or reaches
+`timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
+
+The bridge sees `DirectControl` as an ordinary `robot` client, so direct control needs no bridge
+changes. The control link from `RobotEndpoint` carries only `reset` and `result`.
+
+</Accordion>
 
 ## Recording datasets
 
@@ -590,6 +710,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotBridge` / `GymBridge` | `hud.environment.robot` | Env-side serve loop (slot barrier + scalar wire); subclass `RobotBridge` for a custom sim |
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
 | `RobotEndpoint.capabilities(...)` | `hud.environment.robot` | Everything the bridge serves after `start()` (the `openpi/0` wire, plus any extras) |
+| `DirectControl(...).attach(sim)` | `hud.environment.robot` | The `robot` capability as MCP motion tools, for tool-calling LLM agents |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |

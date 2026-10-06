@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
@@ -15,6 +16,7 @@ from hud.environment.env import current_session_id
 from hud.environment.robot.bridge import _HUD_STATE, RobotBridge, _apply_declaration_state
 from hud.environment.robot.endpoint import RobotEndpoint, _bridge_init_kwargs
 from hud.environment.robot.gym import GymBridge, action_dim_of
+from hud.environment.robot.orientation import angular_distance, euler_to_xyzw, xyzw_to_euler
 from hud.telemetry.robot.recorder import JobRecorder
 
 if TYPE_CHECKING:
@@ -555,3 +557,18 @@ async def test_tick_loop_does_not_hold_step_undialed_claimed_slot() -> None:
         await task
     assert bridge.steps == []
     assert not b.idle  # still waiting to dial — not timed out into hold
+
+
+def test_both_pitch_singularities_keep_roll_through_a_partial_yaw_merge() -> None:
+    """A wrist at ±pi/2 reports its twist as roll, so naming only yaw rebuilds that start."""
+    roll = 0.4
+    yaw = -0.25
+    for pitch in (math.pi / 2, -math.pi / 2):
+        got_roll, got_pitch, got_yaw = xyzw_to_euler(euler_to_xyzw(roll, pitch, 0.0))
+        assert got_roll == pytest.approx(roll)
+        assert got_pitch == pytest.approx(pitch)
+        assert got_yaw == pytest.approx(0.0, abs=1e-8)
+        merged = euler_to_xyzw(got_roll, got_pitch, yaw)
+        assert angular_distance(merged, euler_to_xyzw(roll, pitch, yaw)) == pytest.approx(
+            0.0, abs=1e-8
+        )
