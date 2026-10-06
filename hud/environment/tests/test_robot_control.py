@@ -481,7 +481,7 @@ async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per
     )
 
 
-async def test_ending_the_episode_waits_for_the_move_in_flight_to_finish_recording(
+async def test_ending_the_episode_mid_move_closes_the_recording_after_the_tick_in_flight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("hud.types.queue_span", lambda _span: None)
@@ -491,13 +491,13 @@ async def test_ending_the_episode_waits_for_the_move_in_flight_to_finish_recordi
 
     class _Recorder(TraceRecorder):
         def record_observation(self, data: dict[str, Any], *, tick: int) -> None:
-            super().record_observation(data, tick=tick)
-            events.append("record")
             if tick == 2:  # mid-move, the episode is ended (as a cancel would)
                 loop.call_soon_threadsafe(
                     lambda: ends.append(loop.create_task(control.end_episode()))
                 )
                 time.sleep(0.2)
+            super().record_observation(data, tick=tick)
+            events.append("record")
 
         def close(self) -> None:
             events.append("close")
@@ -512,4 +512,4 @@ async def test_ending_the_episode_waits_for_the_move_in_flight_to_finish_recordi
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
     await asyncio.gather(*ends)
 
-    assert events == ["record"] * (1 + len(sim.actions)) + ["close"]
+    assert events == ["record"] * 3 + ["close"]  # ticks 0-2, then nothing after the close

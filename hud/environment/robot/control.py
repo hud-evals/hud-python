@@ -182,6 +182,7 @@ class DirectControl:
         self._capability: Capability | None = None
         self._recorder: TraceRecorder | None = None  # this episode's trace telemetry
         self._tick = 0
+        self._recording = asyncio.Lock()  # one tick is recorded (or the recorder closed) at a time
 
     def attach(self, endpoint: RobotEndpoint) -> DirectControl:
         """Register with a robotics endpoint, which owns serving and episode lifecycle."""
@@ -279,12 +280,12 @@ class DirectControl:
     async def end_episode(self) -> None:
         """Clear the last absolute target and close the episode's trace telemetry.
 
-        Waits for a move in flight, so its last ticks are recorded before the close.
+        A move still playing stops recording; the tick being recorded finishes first.
         """
-        async with self._lock:
-            self._command = None
-            recorder, self._recorder, self._tick = self._recorder, None, 0
-            if recorder is not None:
+        self._command = None
+        recorder, self._recorder = self._recorder, None
+        if recorder is not None:
+            async with self._recording:
                 await asyncio.to_thread(recorder.close)  # flushes the video tails
                 await asyncio.to_thread(flush)
 
@@ -387,6 +388,7 @@ class DirectControl:
             try:
                 obs = await client.get_observation()
                 if self._recorder is None and (trace_id := get_mcp_trace_id()) is not None:
+                    self._tick = 0
                     self._recorder = TraceRecorder(
                         trace_id=trace_id,
                         fps=max(1, round(self._rate)),
@@ -468,10 +470,14 @@ class DirectControl:
 
     async def _record(self, obs: dict[str, Any]) -> None:
         """Stream one tick's state and camera frames to the trace."""
-        if self._recorder is not None:
-            # Off the loop: a lossless encoder blocks while its queue drains.
-            await asyncio.to_thread(self._recorder.record_observation, obs["data"], tick=self._tick)
-            self._tick += 1
+        if (recorder := self._recorder) is not None:
+            async with self._recording:
+                if recorder is self._recorder:  # the episode may have ended while waiting
+                    # Off the loop: a lossless encoder blocks while its queue drains.
+                    await asyncio.to_thread(
+                        recorder.record_observation, obs["data"], tick=self._tick
+                    )
+                    self._tick += 1
 
     def _plan(
         self, values: list[DimValue], obs: dict[str, Any]
