@@ -44,13 +44,12 @@ packaged.
 
 ```text
 .hud-adapt/<environment>/
-├── compose.yaml
-├── env.py
+├── compose.yaml               # the Compose project the task rows and `hud deploy` run
+├── env.py                     # deploy identity
 ├── tasks.json
 └── compose-project/
-    ├── compose.json
-    ├── environment/
-    ├── hud/ or main/           # HUD build payload (depends on source shape)
+    ├── environment/           # authored build context
+    ├── main/                  # HUD build payload
     ├── tests/                 # inline-verifier task tests
     └── verifier/              # verifier-environment build context, when declared
 ```

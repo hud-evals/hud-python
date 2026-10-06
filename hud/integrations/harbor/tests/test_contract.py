@@ -434,7 +434,7 @@ services:
     assert isinstance(row.runtime_config.compose.document, Path)
     services = json.loads(row.runtime_config.compose.document.read_text("utf-8"))["services"]
     assert services["main"]["deploy"]["resources"]["limits"] == {"cpus": "2", "memory": "4096M"}
-    assert services["hud-base"]["build"] == {"context": "./environment"}
+    assert services["hud-base"]["build"] == {"context": "./compose-project/environment"}
 
 
 def test_adapt_aborts_when_the_docker_daemon_is_unreachable(
@@ -506,14 +506,13 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
     assert not (project_root / "build.sh").exists()
     assert (project_root / "tests" / "task-a" / "test.sh").is_file()
     assert not any(path.name in {"tasks", "tasks.json"} for path in payload.rglob("*"))
-    assert not (context / "compose.json").exists()
+    assert not (project_root / "compose.json").exists()
     assert task.runtime_config.compose is not None
-    assert task.runtime_config.compose.document == context / "compose-project" / "compose.json"
+    assert task.runtime_config.compose.document == context / "compose.yaml"
     assert task.runtime_config.compose.root == context
-    compose_path = context / "compose-project" / "compose.json"
-    project = _assert_stock_compose_complete(compose_path)
+    project = _assert_stock_compose_complete(context / "compose.yaml")
     assert set(project["services"]) == {"main", "hud-base"}
-    assert project["services"]["hud-base"]["build"] == {"context": "./environment"}
+    assert project["services"]["hud-base"]["build"] == {"context": "./compose-project/environment"}
     assert project["services"]["hud-base"]["scale"] == 0
     main = project["services"]["main"]
     assert main["image"].startswith("hud-harbor:")
@@ -524,15 +523,12 @@ def test_adapt_packages_an_image_task_as_a_compose_project(tmp_path: Path) -> No
             "HUD_REQUIREMENT": "hud",
             "VERIFIER_IMAGE": project["services"]["hud-base"]["image"],
         },
-        "context": "./main",
+        "context": "./compose-project/main",
         "target": "plain",
     }
     assert "HUD_RUNTIME_ROOT" not in main.get("environment", {})
-    assert main["volumes"] == ["./tests:/controller/tests:ro"]
+    assert main["volumes"] == ["./compose-project/tests:/controller/tests:ro"]
     assert not (project_root / "Dockerfile").exists()
-    recipe = _assert_stock_compose_complete(context / "compose.yaml")
-    assert recipe["services"]["hud-base"]["build"]["context"] == "./compose-project/environment"
-    assert recipe["services"]["main"]["volumes"] == ["./compose-project/tests:/controller/tests:ro"]
 
 
 def test_task_content_changes_do_not_rebuild_the_environment(tmp_path: Path) -> None:
@@ -562,7 +558,11 @@ def test_task_content_changes_do_not_rebuild_the_environment(tmp_path: Path) -> 
     other_compose = json.loads(other_release.runtime_config.compose.document.read_text("utf-8"))
     assert other_compose["services"]["main"]["image"] != before_image
     assert (
-        after.runtime_config.compose.document.parent / "tests" / "task-a" / "test.sh"
+        after.runtime_config.compose.document.parent
+        / "compose-project"
+        / "tests"
+        / "task-a"
+        / "test.sh"
     ).read_text("utf-8") == "#!/bin/sh\nexit 1\n"
 
 
@@ -576,7 +576,7 @@ def test_image_task_keeps_non_recipe_compose_names_as_context_files(tmp_path: Pa
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     environment = context / "compose-project" / "environment"
     assert (environment / "docker-compose.yml").read_text("utf-8") == content
-    project = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
+    project = json.loads((context / "compose.yaml").read_text("utf-8"))
     assert set(project["services"]) == {"main", "hud-base"}
 
 
@@ -672,27 +672,22 @@ services:
     assert row.runtime_config.compose is not None
     assert row.runtime_config.compose.service_access is None
     (context,) = (tmp_path / ".hud-adapt").iterdir()
-    assert row.runtime_config.compose.document == context / "compose-project" / "compose.json"
+    assert row.runtime_config.compose.document == context / "compose.yaml"
     assert row.runtime_config.compose.root == context
-    assert not (context / "compose.json").exists()
-    compose_path = row.runtime_config.compose.document
-    assert isinstance(compose_path, Path)
-    project = _assert_stock_compose_complete(compose_path)
+    assert not (context / "compose-project" / "compose.json").exists()
+    project = _assert_stock_compose_complete(context / "compose.yaml")
     assert project["services"]["redis"]["image"] == "redis:7-alpine"
     assert "build" not in project["services"]["redis"]
-    assert project["services"]["main"]["build"]["context"] == "./main"
+    assert project["services"]["main"]["build"]["context"] == "./compose-project/main"
     assert project["services"]["main"]["build"]["target"] == "plain"
     assert project["services"]["main"]["build"]["additional_contexts"] == {
         "hud-base": "service:hud-base"
     }
     assert project["services"]["main"]["image"].startswith("hud-harbor:")
     assert project["services"]["hud-base"]["image"].startswith("hud-harbor-base:")
-    assert project["services"]["hud-base"]["build"]["context"] == "./environment"
+    assert project["services"]["hud-base"]["build"]["context"] == "./compose-project/environment"
     assert (context / "compose-project" / "environment" / "Dockerfile").is_file()
     assert not any(path.name == ".hud" for path in context.rglob(".hud"))
-    recipe = _assert_stock_compose_complete(context / "compose.yaml")
-    assert recipe["services"]["main"]["build"]["context"] == "./compose-project/main"
-    assert recipe["services"]["redis"]["image"] == "redis:7-alpine"
     redis = project["services"]["redis"]
     assert redis["image"] == "redis:7-alpine"
     assert redis["environment"] == {"SIDE": "car"}
@@ -717,7 +712,7 @@ services:
     assert ControllerConfig.model_validate(manifest).peers == [
         Peer("redis", 6379, target=("redis", 6379))
     ]
-    assert ComposeConfig.from_file(compose_path).healthchecked_services() == ["redis"]
+    assert ComposeConfig.from_file(context / "compose.yaml").healthchecked_services() == ["redis"]
     assert project["services"]["main"]["command"] == [
         "/controller/venv/bin/hud",
         "serve",
@@ -777,17 +772,25 @@ services:
     compose_path = row.runtime_config.compose.document
     assert isinstance(compose_path, Path)
     project = json.loads(compose_path.read_text("utf-8"))
-    assert project["services"]["database"]["build"]["context"] == ("./environment/database")
+    assert project["services"]["database"]["build"]["context"] == (
+        "./compose-project/environment/database"
+    )
     assert project["services"]["database"]["image"].startswith("hud-harbor-sidecar:")
-    assert project["services"]["database"]["env_file"] == "./environment/database/db.env"
+    assert (
+        project["services"]["database"]["env_file"]
+        == "./compose-project/environment/database/db.env"
+    )
     assert project["services"]["database"]["volumes"] == [
-        "./environment/database/data:/var/lib/postgresql/data"
+        "./compose-project/environment/database/data:/var/lib/postgresql/data"
     ]
-    assert project["services"]["main"]["env_file"] == "./environment/main.env"
-    assert "./environment/main-data:/mounts/0" in (project["services"]["main"]["volumes"])
+    assert project["services"]["main"]["env_file"] == "./compose-project/environment/main.env"
+    assert (
+        "./compose-project/environment/main-data:/mounts/0"
+        in (project["services"]["main"]["volumes"])
+    )
     assert {
         "type": "bind",
-        "source": "./environment/readonly",
+        "source": "./compose-project/environment/readonly",
         "target": "/mounts/1",
         "read_only": True,
     } in project["services"]["main"]["volumes"]
@@ -823,7 +826,7 @@ services:
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
-    compose = _assert_stock_compose_complete(context / "compose-project" / "compose.json")
+    compose = _assert_stock_compose_complete(context / "compose.yaml")
     assert manifest["image_user"] == "1001:1002"
     assert manifest["entrypoint"] == ["/compose-init"]
     assert manifest["workdir"] == "/compose-work"
@@ -853,7 +856,7 @@ services:
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     manifest = _environment_config(context)
-    compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.yaml").read_text("utf-8"))
     assert manifest["environment"]["healthcheck"] == {
         "command": "curl -f http://localhost:8080/health",
         "interval_sec": 2.0,
@@ -896,7 +899,7 @@ def test_adapt_merges_implicit_main_into_authored_compose(tmp_path: Path) -> Non
     _adapt(tmp_path)
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
-    compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.yaml").read_text("utf-8"))
     assert {"main", "default"} <= compose["services"].keys()
     assert ControllerConfig.model_validate(_environment_config(context)).peers == [
         Peer("default", 1234, target=("default", 1234))
@@ -1099,7 +1102,7 @@ def test_prebuilt_harbor_image_emits_a_conventional_wrapper_build(
 
     (context,) = (tmp_path / ".hud-adapt").iterdir()
     project = context / "compose-project"
-    services = _assert_stock_compose_complete(project / "compose.json")["services"]
+    services = _assert_stock_compose_complete(context / "compose.yaml")["services"]
     assert set(services) == {"main"}
     assert services["main"]["build"]["args"]["BASE_IMAGE"] == "registry.example/base:latest"
     assert "additional_contexts" not in services["main"]["build"]
@@ -1414,7 +1417,7 @@ timeout_sec = 10
     assert [hook.service for hook in spec.collect] == ["redis"]
     assert [artifact.source for artifact in spec.artifacts] == ["/tmp/agent.patch"]
     assert not (context / "compose-project" / "main" / "tasks").exists()
-    compose = json.loads((context / "compose-project" / "compose.json").read_text("utf-8"))
+    compose = json.loads((context / "compose.yaml").read_text("utf-8"))
     assert compose["services"]["main"].get("volumes", []) == []
     assert compose["services"]["main"]["build"]["target"] == "verifier"
     assert compose["services"]["main"]["build"]["additional_contexts"] == {
@@ -1501,7 +1504,7 @@ def test_separate_verifier_groups_have_distinct_environment_names(
     assert len(compose_paths) == 2
     assert all(path.is_file() for path in compose_paths)
     task_files = [
-        json.loads((path.parents[1] / "tasks.json").read_text("utf-8")) for path in compose_paths
+        json.loads((path.parent / "tasks.json").read_text("utf-8")) for path in compose_paths
     ]
     assert {rows[0]["slug"] for rows in task_files} == {"task-a", "task-b"}
     assert {rows[0]["args"]["task"]["id"] for rows in task_files} == {"task-a", "task-b"}

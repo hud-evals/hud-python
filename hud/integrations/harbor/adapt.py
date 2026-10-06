@@ -761,18 +761,9 @@ def adapt(
             compose_project.services["main"] = main.model_copy(
                 update={"volumes": [*main.volumes, "./tests:/controller/tests:ro"]}
             )
-        project_compose = context / "compose-project" / "compose.json"
-        project_compose.write_text(
-            json.dumps(
-                compose_project.model_dump(mode="json", exclude_none=True),
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
         recipe = compose_project.with_project_directory("./compose-project")
-        (context / "compose.yaml").write_text(
+        compose_document = context / "compose.yaml"
+        compose_document.write_text(
             json.dumps(
                 recipe.model_dump(mode="json", exclude_none=True),
                 indent=2,
@@ -830,7 +821,7 @@ def adapt(
                 columns=columns or None,
                 runtime_config=RuntimeConfig(
                     compose=ComposeProject(
-                        document=context / "compose-project" / "compose.json",
+                        document=compose_document,
                         root=context,
                         service_access=(True if needs_service_access else None),
                     ),
@@ -846,7 +837,7 @@ def adapt(
                         runtime_config=(
                             RuntimeConfig(
                                 compose=ComposeProject(
-                                    document=context / "compose-project" / "compose.json",
+                                    document=compose_document,
                                     root=context,
                                 ),
                                 resources=verifier_resources,
