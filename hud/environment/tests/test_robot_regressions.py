@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from hud.environment.env import current_session_id
+from hud.environment.robot import DirectControl
 from hud.environment.robot.bridge import _HUD_STATE, RobotBridge, _apply_declaration_state
 from hud.environment.robot.endpoint import RobotEndpoint, _bridge_init_kwargs
 from hud.environment.robot.gym import GymBridge, action_dim_of
@@ -258,6 +259,24 @@ async def test_release_claim_frees_current_session_slot(endpoint: RobotEndpoint)
         await endpoint.release_claim()
         assert "sess-a" not in endpoint._claims
         call.assert_called_with("result", {"token": "slot-0-abcd"})
+    finally:
+        current_session_id.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_release_claim_ends_the_direct_control_episode(
+    endpoint: RobotEndpoint, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    control = DirectControl().attach(endpoint)
+    end_episode = AsyncMock()
+    monkeypatch.setattr(control, "end_episode", end_episode)
+    cast("AsyncMock", endpoint._call).return_value = {"prompt": "p", "token": "slot-0-abcd"}
+    token = current_session_id.set("sess-a")
+    try:
+        await endpoint.reset()
+        end_episode.reset_mock()
+        await endpoint.release_claim()
+        end_episode.assert_awaited_once()
     finally:
         current_session_id.reset(token)
 

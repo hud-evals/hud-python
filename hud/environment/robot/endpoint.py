@@ -289,8 +289,7 @@ class RobotEndpoint:
             session_id, token = current_session_id.get(), ep.get("token")
             if session_id is not None and isinstance(token, str):
                 self._claims[session_id] = token
-            for control in self._direct_controls:
-                await control.end_episode()
+            await self._end_direct_episodes()
             return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
@@ -299,8 +298,7 @@ class RobotEndpoint:
         ``token`` may be omitted on a single-env bridge (one claimed slot);
         vectorized envs must pass the token from :meth:`reset`.
         """
-        for control in self._direct_controls:
-            await control.end_episode()
+        await self._end_direct_episodes()
         res = {**(await self._call("result", {"token": token})), **extra}
         if (session_id := current_session_id.get()) is not None:
             self._claims[session_id] = ""  # freed; disconnect/cancel must not re-result
@@ -322,9 +320,14 @@ class RobotEndpoint:
         if not token:  # already freed via result()
             self._claims.pop(session_id, None)
             return
+        await self._end_direct_episodes()
         if await self._result_with_retry(token):
             self._claims.pop(session_id, None)
             # else keep the claim — stop() drains leftovers while the link is up
+
+    async def _end_direct_episodes(self) -> None:
+        for control in self._direct_controls:
+            await control.end_episode()
 
     async def _release_outstanding_claims(self) -> None:
         """Best-effort free of every tracked slot (last chance before the link drops)."""
