@@ -598,6 +598,7 @@ class DirectControl:
         goal: NDArray[np.float64] | None,
     ) -> Content:
         data = obs["data"]
+        # Keep this opening line: the trace viewer reads it to place each call on the video.
         lines = [f"Played {played} steps ({played / self._rate:.1f} s)."] if played else []
         if timed_out:
             lines.append(

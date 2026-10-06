@@ -180,7 +180,8 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     np.testing.assert_allclose(close, [[0.5, 1.0]])
     reached, closed = agent.results
     assert [block.type for block in reached.content] == ["text", "text", "image"]
-    assert "Played 50 steps (5.0 s)." in _text(reached)
+    # The trace viewer parses this opening line to map tool calls to ticks.
+    assert _text(reached).startswith("Played 50 steps (5.0 s).")
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "The episode has ended" in _text(closed)
