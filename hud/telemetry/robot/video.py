@@ -48,7 +48,7 @@ class SegmentEncoder:
         fps: int,
         segment_seconds: float = 2.0,  # how many secs of video per segment
         crf: int = 23,  # x264 quality: 0=best, 51=worst
-        max_queued_frames: int = 16,
+        max_queued_frames: int = 256,  # a sim bursts frames faster than real time
     ) -> None:
         self.camera = camera
         self.fps = max(1, int(fps))

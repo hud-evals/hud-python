@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import mcp.types as mcp_types
@@ -66,6 +67,8 @@ class TraceRecorder:
     ambient context) or ``run`` (steps recorded through it, so they also land
     on ``run.trace``). ``obs_space`` labels observations from the env contract;
     ``state_names``/``action_names`` are the contract-free fallback labels.
+    ``sim_clock`` stamps each observation at ``tick / fps`` after the first, so the
+    viewer's clock follows the video even when the sim idles between ticks.
     """
 
     def __init__(
@@ -78,6 +81,7 @@ class TraceRecorder:
         obs_space: dict[str, Any] | None = None,
         action_names: list[str] | None = None,
         state_names: dict[str, list[str]] | None = None,
+        sim_clock: bool = False,
     ) -> None:
         assert trace_id or run, "TraceRecorder needs a trace_id or a run"
         self._run = run
@@ -88,6 +92,8 @@ class TraceRecorder:
         self._obs_space = obs_space
         self._action_names = action_names or []
         self._state_names = state_names or {}
+        self._sim_clock = sim_clock
+        self._clock_start: datetime | None = None
         self.reward = 0.0
         self._video: VideoStreamer | None = None  # lazy, one per trace
         # The task instruction as an opening user step (shows on the timeline).
@@ -131,6 +137,10 @@ class TraceRecorder:
                         names=labels if len(labels) == flat.size else [], values=flat.tolist()
                     )
             step = ObservationStep(tick=tick, state=state)
+        if self._sim_clock:
+            self._clock_start = self._clock_start or datetime.now(UTC)
+            at = self._clock_start + timedelta(seconds=tick / self._fps)
+            step.started_at = step.ended_at = at.isoformat().replace("+00:00", "Z")
         self._emit(step)
         if self._video is None:
             self._video = VideoStreamer(fps=self._fps, trace_id=self.trace_id)
