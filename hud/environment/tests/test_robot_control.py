@@ -8,11 +8,13 @@ by the sim.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import copy
 import io
 import itertools
 import math
+import time
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -27,6 +29,7 @@ from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task, rollout
+from hud.telemetry.robot import TraceRecorder
 from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
 if TYPE_CHECKING:
@@ -476,3 +479,37 @@ async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per
     assert [(b - a).total_seconds() for a, b in itertools.pairwise(starts)] == pytest.approx(
         [tick_seconds] * (frames - 1)
     )
+
+
+async def test_ending_the_episode_waits_for_the_move_in_flight_to_finish_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hud.types.queue_span", lambda _span: None)
+    events: list[str] = []
+    ends: list[asyncio.Task[None]] = []
+    control = DirectControl()
+
+    class _Recorder(TraceRecorder):
+        def record_observation(self, data: dict[str, Any], *, tick: int) -> None:
+            super().record_observation(data, tick=tick)
+            events.append("record")
+            if tick == 2:  # mid-move, the episode is ended (as a cancel would)
+                loop.call_soon_threadsafe(
+                    lambda: ends.append(loop.create_task(control.end_episode()))
+                )
+                time.sleep(0.2)
+
+        def close(self) -> None:
+            events.append("close")
+            super().close()
+
+    monkeypatch.setattr("hud.environment.robot.control.TraceRecorder", _Recorder)
+    loop = asyncio.get_running_loop()
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, control) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    await asyncio.gather(*ends)
+
+    assert events == ["record"] * (1 + len(sim.actions)) + ["close"]

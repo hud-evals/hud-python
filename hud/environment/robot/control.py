@@ -277,12 +277,16 @@ class DirectControl:
         self._capability = None
 
     async def end_episode(self) -> None:
-        """Clear the last absolute target and close the episode's trace telemetry."""
-        self._command = None
-        recorder, self._recorder, self._tick = self._recorder, None, 0
-        if recorder is not None:
-            await asyncio.to_thread(recorder.close)  # flushes the video tails
-            await asyncio.to_thread(flush)
+        """Clear the last absolute target and close the episode's trace telemetry.
+
+        Waits for a move in flight, so its last ticks are recorded before the close.
+        """
+        async with self._lock:
+            self._command = None
+            recorder, self._recorder, self._tick = self._recorder, None, 0
+            if recorder is not None:
+                await asyncio.to_thread(recorder.close)  # flushes the video tails
+                await asyncio.to_thread(flush)
 
     # ── tools ──────────────────────────────────────────────────────────────
 
