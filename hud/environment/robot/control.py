@@ -385,11 +385,12 @@ class DirectControl:
                 if self._recorder is None and (trace_id := get_mcp_trace_id()) is not None:
                     self._recorder = TraceRecorder(
                         trace_id=trace_id,
-                        fps=round(self._rate),
+                        fps=max(1, round(self._rate)),
                         obs_space=self._obs_space,
                         sim_clock=True,
+                        lossless_video=True,
                     )
-                    self._record(obs)  # the episode's opening scene
+                    await self._record(obs)  # the episode's opening scene
                 # Plan: turn the named targets into per-tick action rows (none if already over).
                 if obs["terminated"]:
                     rows = np.zeros((0, len(self._names)))
@@ -416,7 +417,7 @@ class DirectControl:
                     nonlocal played, obs, finished, seen, still, prev, proprio
                     await client.send_action(row)
                     obs = await client.get_observation()
-                    self._record(obs)
+                    await self._record(obs)
                     played += 1
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
@@ -461,10 +462,11 @@ class DirectControl:
             goal=goal if self._absolute else None,
         )
 
-    def _record(self, obs: dict[str, Any]) -> None:
+    async def _record(self, obs: dict[str, Any]) -> None:
         """Stream one tick's state and camera frames to the trace."""
         if self._recorder is not None:
-            self._recorder.record_observation(obs["data"], tick=self._tick)
+            # Off the loop: a lossless encoder blocks while its queue drains.
+            await asyncio.to_thread(self._recorder.record_observation, obs["data"], tick=self._tick)
             self._tick += 1
 
     def _plan(

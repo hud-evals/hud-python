@@ -69,6 +69,8 @@ class TraceRecorder:
     ``state_names``/``action_names`` are the contract-free fallback labels.
     ``sim_clock`` stamps each observation at ``tick / fps`` after the first, so the
     viewer's clock follows the video even when the sim idles between ticks.
+    ``lossless_video`` makes ``record_observation`` wait for the encoder instead of
+    dropping frames, so video frame N is always tick N.
     """
 
     def __init__(
@@ -82,6 +84,7 @@ class TraceRecorder:
         action_names: list[str] | None = None,
         state_names: dict[str, list[str]] | None = None,
         sim_clock: bool = False,
+        lossless_video: bool = False,
     ) -> None:
         assert trace_id or run, "TraceRecorder needs a trace_id or a run"
         self._run = run
@@ -94,6 +97,7 @@ class TraceRecorder:
         self._state_names = state_names or {}
         self._sim_clock = sim_clock
         self._clock_start: datetime | None = None
+        self._lossless_video = lossless_video
         self.reward = 0.0
         self._video: VideoStreamer | None = None  # lazy, one per trace
         # The task instruction as an opening user step (shows on the timeline).
@@ -143,7 +147,9 @@ class TraceRecorder:
             step.started_at = step.ended_at = at.isoformat().replace("+00:00", "Z")
         self._emit(step)
         if self._video is None:
-            self._video = VideoStreamer(fps=self._fps, trace_id=self.trace_id)
+            self._video = VideoStreamer(
+                fps=self._fps, trace_id=self.trace_id, lossless=self._lossless_video
+            )
         self._video.record({"data": data})
 
     def record_inference(self, chunk: Any, *, tick: int) -> None:

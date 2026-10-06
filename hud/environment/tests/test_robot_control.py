@@ -444,12 +444,14 @@ async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
             await env.start()
 
 
+@pytest.mark.parametrize(("control_rate", "tick_seconds"), [(10, 0.1), (0.4, 1.0)])
 async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per_camera(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, control_rate: float, tick_seconds: float
 ) -> None:
     spans: list[dict[str, Any]] = []
     monkeypatch.setattr("hud.types.queue_span", spans.append)
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    sim.contract["control_rate"] = control_rate
     agent = _ScriptedLLM(_move("move_to", x=0.3), _move("move_to", x=0.5))
 
     async with _served(sim, DirectControl()) as env:
@@ -472,5 +474,5 @@ async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per
     # The viewer's clock is the stamps' span: the video's length, not the calls' latency.
     starts = [datetime.fromisoformat(obs["started_at"]) for obs in observations]
     assert [(b - a).total_seconds() for a, b in itertools.pairwise(starts)] == pytest.approx(
-        [0.1] * (frames - 1)
+        [tick_seconds] * (frames - 1)
     )

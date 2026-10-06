@@ -6,7 +6,9 @@ fans a whole observation out across one encoder per camera and emits the segment
 ``VideoSegmentStep`` spans, so the trace viewer plays one ``<video>`` per camera.
 
 Encoding never blocks the act loop: ``submit`` is a non-blocking put on a bounded queue
-that drops frames under backpressure, and PyAV releases the GIL inside the codec.
+that drops frames under backpressure, and PyAV releases the GIL inside the codec. A
+``lossless`` encoder instead blocks ``submit`` until the queue has room, for callers that
+index video frames by tick.
 """
 
 from __future__ import annotations
@@ -48,13 +50,15 @@ class SegmentEncoder:
         fps: int,
         segment_seconds: float = 2.0,  # how many secs of video per segment
         crf: int = 23,  # x264 quality: 0=best, 51=worst
-        max_queued_frames: int = 256,  # a sim bursts frames faster than real time
+        max_queued_frames: int = 16,
+        lossless: bool = False,  # block on a full queue instead of dropping frames
     ) -> None:
         self.camera = camera
         self.fps = max(1, int(fps))
         self._on_segment = on_segment
         self._gop = max(1, round(self.fps * segment_seconds))  # keyframe interval in # of "frames"
         self._crf = int(crf)
+        self._lossless = lossless
         self._queue: queue.Queue[NDArray[Any] | None] = queue.Queue(max_queued_frames)
         # Box-assembly state, touched only on the encoder thread.
         self._buf = bytearray()
@@ -68,21 +72,36 @@ class SegmentEncoder:
         self._thread.start()
 
     def submit(self, frame: NDArray[Any]) -> None:
-        """Hand one frame to the encoder; non-blocking, dropping under backpressure."""
+        """Hand one frame to the encoder; drops it under backpressure unless ``lossless``."""
+        frame = np.array(frame, copy=True)
+        if self._lossless:
+            self._put_blocking(frame)
+            return
         with contextlib.suppress(queue.Full):
-            self._queue.put_nowait(np.array(frame, copy=True))  # NOTE drops under backpressure
+            self._queue.put_nowait(frame)  # NOTE drops under backpressure
 
     def finalize(self, timeout: float = 15.0) -> None:
         """Flush the tail fragment and stop the encoder thread (best-effort)."""
-        try:
-            self._queue.put_nowait(
-                None
-            )  # tries to drop item in mailbox; if queue is full, raises queue.Full
-        except queue.Full:  # make room for the stop sentinel rather than hang
-            with contextlib.suppress(queue.Empty):
-                self._queue.get_nowait()
-            self._queue.put_nowait(None)
+        if self._lossless:
+            self._put_blocking(None)
+        else:
+            try:
+                self._queue.put_nowait(
+                    None
+                )  # tries to drop item in mailbox; if queue is full, raises queue.Full
+            except queue.Full:  # make room for the stop sentinel rather than hang
+                with contextlib.suppress(queue.Empty):
+                    self._queue.get_nowait()
+                self._queue.put_nowait(None)
         self._thread.join(timeout)
+
+    def _put_blocking(self, item: NDArray[Any] | None) -> None:
+        while self._thread.is_alive():  # a dead encoder drains nothing, so stop waiting
+            try:
+                self._queue.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                continue
 
     # ── file-like sink (encoder thread) ────────────────────────────────────────
 
@@ -190,7 +209,7 @@ class VideoStreamer:
     in the rollout's trace context so encoder threads can attribute their spans.
     """
 
-    def __init__(self, *, fps: int, trace_id: str | None) -> None:
+    def __init__(self, *, fps: int, trace_id: str | None, lossless: bool = False) -> None:
         try:
             importlib.import_module("av")
         except Exception as exc:
@@ -199,6 +218,7 @@ class VideoStreamer:
             ) from exc
         self._fps = fps
         self._trace_id = trace_id
+        self._lossless = lossless
         self._encoders: dict[str, SegmentEncoder] = {}
 
     def record(self, obs: dict[str, Any]) -> None:
@@ -240,7 +260,7 @@ class VideoStreamer:
                 },
             ).emit(trace_id=trace_id)
 
-        return SegmentEncoder(camera, on_segment, fps=fps)
+        return SegmentEncoder(camera, on_segment, fps=fps, lossless=self._lossless)
 
 
 def _to_rgb24(arr: NDArray[Any]) -> NDArray[np.uint8] | None:
