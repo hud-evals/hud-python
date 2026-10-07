@@ -70,12 +70,7 @@ _announced_deprecations: set[tuple[str, str, str]] = set()
 
 
 def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
-    """Emit a ``FutureWarning`` for a ``Deprecation`` response header (RFC 9745).
-
-    The warning carries the ``Sunset`` date (RFC 8594) and the ``Link``
-    replacement and documentation (RFC 8288). Each distinct notice warns once
-    per process, so a deprecated route with IDs in its path does not repeat.
-    """
+    """Warn once per process for each deprecation notice the HUD API sends."""
     if "Deprecation" not in response.headers:
         return
     notice = (

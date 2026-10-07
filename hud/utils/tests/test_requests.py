@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-import warnings
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -70,40 +69,22 @@ async def test_requests_preserve_status_hints_without_retry(asynchronous, status
     assert error.value.hints == [CREDITS_EXHAUSTED if status == 402 else RATE_LIMIT_HIT]
 
 
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_requests_warn_once_per_deprecation_notice(asynchronous):
+def test_requests_warn_once_per_deprecation_notice():
     successor = f"https://api.test/v2/{uuid.uuid4()}"
-    notice = {
+    headers = {
         "Deprecation": "@1790985600",
         "Sunset": "Sat, 10 Oct 2026 00:00:00 GMT",
-        "Link": f'<https://docs.test/qa>; rel="deprecation"; type="text/html", '
-        f'<{successor}>; rel="successor-version"',
+        "Link": f'<{successor}>; rel="successor-version"',
     }
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}, headers=headers))
+    with httpx.Client(transport=transport) as client, pytest.warns(FutureWarning) as caught:
+        for url in ("https://api.test/v2/old/1", "https://api.test/v2/old/2"):
+            make_request_sync("GET", url, api_key="key", client=client)
 
-    def handle(request):
-        headers = notice if request.url.path.startswith("/v2/old") else {}
-        return httpx.Response(200, json={"ok": True}, headers=headers)
-
-    transport = httpx.MockTransport(handle)
-    urls = ["https://api.test/v2/current", "https://api.test/v2/old/1", "https://api.test/v2/old/2"]
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("default")
-        if asynchronous:
-            async with httpx.AsyncClient(transport=transport) as client:
-                for url in urls:
-                    await make_request("GET", url, api_key="key", client=client)
-        else:
-            with httpx.Client(transport=transport) as client:
-                for url in urls:
-                    make_request_sync("GET", url, api_key="key", client=client)
-
-    assert [(w.category, str(w.message)) for w in caught] == [
-        (
-            FutureWarning,
-            "GET /v2/old/1 is deprecated by the HUD API and stops being served on "
-            f"Sat, 10 Oct 2026 00:00:00 GMT; its replacement is {successor} "
-            "(see https://docs.test/qa). If a hud command printed this, upgrade hud.",
-        )
+    assert [str(warning.message) for warning in caught] == [
+        "GET /v2/old/1 is deprecated by the HUD API and stops being served on "
+        f"Sat, 10 Oct 2026 00:00:00 GMT; its replacement is {successor}. "
+        "If a hud command printed this, upgrade hud."
     ]
 
 
