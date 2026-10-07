@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import ssl
 import time
 import warnings
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -35,11 +38,52 @@ _DEFAULT_LIMITS = httpx.Limits(
 )
 
 
+# Gateway and upstream failures are retried, with or without a Retry-After header.
+_RETRY_STATUS_CODES = frozenset({502, 503, 504})
+# A 429 is retried only when the server says how long to wait and the wait is short:
+# the server then knows the exact time its limiter reopens, and a caller that
+# sleeps that long (plus jitter) is admitted instead of being refused again.
+_RATE_LIMIT_STATUS = 429
+# Longest server-requested wait the client sleeps through. A longer wait is not
+# slept: a 429 is raised to the caller as before, a 5xx falls back to this cap.
+_MAX_RETRY_AFTER_SECONDS = 30.0
+# Retry-After is a minimum wait under the client's own backoff, not a replacement for it.
+# Extra wait added on top of a server-requested delay, as a fraction of it, so
+# callers refused together do not all return in the same instant. Never negative:
+# returning before the requested time would only be refused again.
+_RETRY_AFTER_JITTER = 0.25
+
+
+def _rand() -> float:
+    """Uniform [0, 1) source for jitter; a seam for tests."""
+    return random.random()  # noqa: S311
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Seconds named by a Retry-After header (delta-seconds or HTTP-date), else None."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - datetime.now(UTC)).total_seconds()
+    if seconds != seconds or seconds < 0:  # NaN or in the past
+        return None
+    return seconds
+
+
 def _retry_delay(
     attempt: int, max_retries: int, retry_delay: float, url: str, error_msg: str
 ) -> float:
-    """Calculate and log the shared retry backoff."""
-    retry_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
+    """Calculate and log the shared retry backoff (exponential, with equal jitter)."""
+    retry_time = jittered_backoff(retry_delay * (2 ** (attempt - 1)))
     logger.debug(
         "%s from %s, retrying in %.2f seconds (attempt %d/%d)",
         error_msg,
@@ -49,6 +93,54 @@ def _retry_delay(
         max_retries,
     )
     return retry_time
+
+
+def is_retryable_response(response: httpx.Response) -> bool:
+    """Whether a response status is worth retrying.
+
+    502, 503 and 504 always are. A 429 is only when it names a short wait.
+    """
+    status = response.status_code
+    if status == _RATE_LIMIT_STATUS:
+        retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+        return retry_after is not None and retry_after <= _MAX_RETRY_AFTER_SECONDS
+    return status in _RETRY_STATUS_CODES
+
+
+def retry_after_wait(response: httpx.Response) -> float | None:
+    """Seconds the server asked the caller to wait, or None without a readable Retry-After.
+
+    The wait is capped at ``_MAX_RETRY_AFTER_SECONDS`` and only ever lengthened by jitter.
+    Callers use it as a minimum under their own backoff, never in place of it: a short
+    Retry-After on every refusal would otherwise make a retry loop knock once a second.
+    """
+    retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+    if retry_after is None:
+        return None
+    wait = min(retry_after, _MAX_RETRY_AFTER_SECONDS)
+    return wait + wait * _RETRY_AFTER_JITTER * _rand()
+
+
+def jittered_backoff(base: float) -> float:
+    """Equal jitter: a wait drawn from the upper half of ``base``."""
+    return base * (0.5 + 0.5 * _rand())
+
+
+def _response_retry_delay(
+    response: httpx.Response, attempt: int, max_retries: int, retry_delay: float, url: str
+) -> float | None:
+    """Seconds to wait before retrying this response, or None when it is not retried.
+
+    The wait is the exponential backoff, or the server's Retry-After (capped at
+    ``_MAX_RETRY_AFTER_SECONDS``, with a little added jitter) when that is longer.
+    """
+    if not is_retryable_response(response):
+        return None
+    backoff = _retry_delay(
+        attempt, max_retries, retry_delay, url, f"Received status {response.status_code}"
+    )
+    asked = retry_after_wait(response)
+    return backoff if asked is None else max(asked, backoff)
 
 
 def _create_default_async_client() -> httpx.AsyncClient:
@@ -121,7 +213,10 @@ async def make_request(
         json: Optional JSON serializable data
         api_key: API key for authentication
         max_retries: Maximum number of retries
-        retry_delay: Delay between retries
+        retry_delay: Base delay between retries; it doubles each attempt and is jittered.
+            A Retry-After header on a 429, 502, 503 or 504 response sets a minimum wait
+            (capped at 30 seconds, with up to 25% added jitter) when it is longer. A 429
+            is retried only when it carries a Retry-After of at most 30 seconds.
         *,
         client: Optional custom httpx.AsyncClient
 
@@ -138,7 +233,6 @@ async def make_request(
         raise HudAuthenticationError("API key is required but not provided")
 
     headers = {"Authorization": f"Bearer {api_key}"}
-    retry_status_codes = [502, 503, 504]
     attempt = 0
     should_close_client = False
 
@@ -154,16 +248,13 @@ async def make_request(
                 response = await client.request(method=method, url=url, json=json, headers=headers)
 
                 # Check if we got a retriable status code
-                if response.status_code in retry_status_codes and attempt <= max_retries:
-                    await asyncio.sleep(
-                        _retry_delay(
-                            attempt,
-                            max_retries,
-                            retry_delay,
-                            url,
-                            f"Received status {response.status_code}",
-                        )
-                    )
+                delay = (
+                    _response_retry_delay(response, attempt, max_retries, retry_delay, url)
+                    if attempt <= max_retries
+                    else None
+                )
+                if delay is not None:
+                    await asyncio.sleep(delay)
                     continue
 
                 _warn_if_deprecated(method, response)
@@ -208,7 +299,10 @@ def make_request_sync(
         json: Optional JSON serializable data
         api_key: API key for authentication
         max_retries: Maximum number of retries
-        retry_delay: Delay between retries
+        retry_delay: Base delay between retries; it doubles each attempt and is jittered.
+            A Retry-After header on a 429, 502, 503 or 504 response sets a minimum wait
+            (capped at 30 seconds, with up to 25% added jitter) when it is longer. A 429
+            is retried only when it carries a Retry-After of at most 30 seconds.
         client: Optional custom httpx.Client
 
     Returns:
@@ -224,7 +318,6 @@ def make_request_sync(
         raise HudAuthenticationError("API key is required but not provided")
 
     headers = {"Authorization": f"Bearer {api_key}"}
-    retry_status_codes = [502, 503, 504]
     attempt = 0
     should_close_client = False
 
@@ -240,16 +333,13 @@ def make_request_sync(
                 response = client.request(method=method, url=url, json=json, headers=headers)
 
                 # Check if we got a retriable status code
-                if response.status_code in retry_status_codes and attempt <= max_retries:
-                    time.sleep(
-                        _retry_delay(
-                            attempt,
-                            max_retries,
-                            retry_delay,
-                            url,
-                            f"Received status {response.status_code}",
-                        )
-                    )
+                delay = (
+                    _response_retry_delay(response, attempt, max_retries, retry_delay, url)
+                    if attempt <= max_retries
+                    else None
+                )
+                if delay is not None:
+                    time.sleep(delay)
                     continue
 
                 _warn_if_deprecated(method, response)
