@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import tempfile
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -212,16 +213,10 @@ def imports_command(
 
     table = Table()
     table.add_column("Run ID", style="blue", no_wrap=True)
-    table.add_column("Bundle", style="cyan")
     table.add_column("Status")
-    table.add_column("Started", style="dim")
+    table.add_column("Started", style="dim", no_wrap=True)
     for run in runs:
-        table.add_row(
-            run.id,
-            run.input_filename,
-            run.phase,
-            run.created_at.strftime("%Y-%m-%d %H:%M"),
-        )
+        table.add_row(run.id, run.phase, run.created_at.strftime("%Y-%m-%d %H:%M"))
     hud_console.stdout.print(table)
     if total > len(runs):
         hud_console.stdout.print(
@@ -459,12 +454,17 @@ def _status(status: str) -> str:
     return f"[{style}]{status}[/{style}]"
 
 
+def _status_count(count: int, status: str) -> str:
+    style = _STATUS_STYLE[status]
+    return f"[{style}]{count} {status}[/{style}]"
+
+
 def _print_report(report: ImportReport) -> None:
     out = hud_console.stdout
     if report.tasks:
         table = Table(title="Tasks", title_justify="left")
         table.add_column("Task", style="cyan")
-        table.add_column("From", style="dim")
+        table.add_column("From", style="dim", overflow="fold")
         table.add_column("Version", justify="right")
         table.add_column("Status")
         for task in report.tasks:
@@ -477,21 +477,15 @@ def _print_report(report: ImportReport) -> None:
         out.print(table)
     if report.jobs:
         table = Table(title="Jobs", title_justify="left")
-        table.add_column("Job", style="cyan")
+        table.add_column("Job", style="cyan", overflow="fold")
+        table.add_column("Trials")
         table.add_column("HUD job", style="blue", no_wrap=True)
-        table.add_column("Trials", justify="right")
-        for status in _STATUS_STYLE:
-            table.add_column(status.capitalize(), justify="right")
         for job in report.jobs:
-            counts = {status: 0 for status in _STATUS_STYLE}
-            for trial in job.trials:
-                counts[trial.status] += 1
-            table.add_row(
-                job.name or job.path,
-                job.job_id or "-",
-                str(len(job.trials)),
-                *(str(counts[status]) for status in _STATUS_STYLE),
+            counts = Counter(trial.status for trial in job.trials)
+            trials = ", ".join(
+                _status_count(counts[status], status) for status in _STATUS_STYLE if counts[status]
             )
+            table.add_row(job.name or job.path, trials or "none", job.job_id or "-")
         out.print(table)
 
     left_out = [
