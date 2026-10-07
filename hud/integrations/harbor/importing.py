@@ -1,10 +1,4 @@
-"""Importing Harbor task folders and job runs into a HUD taskset.
-
-The platform's ``harbor_import`` data pipeline does the import: it reads a zip of
-Harbor folders from the data store and publishes a report of what became of
-each task, job, and trial. This module packs local folders into that zip and
-reads the report.
-"""
+"""Packing Harbor folders for the ``harbor_import`` pipeline and reading its report."""
 
 from __future__ import annotations
 
@@ -35,9 +29,9 @@ class BundleError(ValueError):
 def pack_bundle(paths: Sequence[Path], destination: Path) -> int:
     """Zip each folder under its own name into ``destination``; returns how many files it holds.
 
-    Every file goes in unchanged, so the import computes the same task digests
-    Harbor does. Symlinked files are stored by content and symlinked folders are
-    not followed, as Harbor's packager reads them.
+    Files go in unchanged so the import computes Harbor's task digests. Like
+    Harbor's packager, symlinked files are stored by content and symlinked
+    folders are skipped.
     """
     folders: dict[str, Path] = {}
     for path in paths:

@@ -37,6 +37,7 @@ from hud.integrations.harbor.importing import (
     REPORT_OUTPUT,
     REPORT_SCHEMA,
     ImportReport,
+    ItemStatus,
     pack_bundle,
 )
 from hud.settings import settings
@@ -54,7 +55,7 @@ harbor_app = CLI(
     rich_markup_mode="rich",
 )
 
-_STATUS_STYLE = {
+_STATUS_STYLE: dict[ItemStatus, str] = {
     "imported": "green",
     "unchanged": "dim",
     "skipped": "yellow",
@@ -449,12 +450,12 @@ def _read_report(platform: PlatformClient, run: data.PipelineRun) -> ImportRepor
     return ImportReport.model_validate(raw)
 
 
-def _status(status: str) -> str:
+def _status(status: ItemStatus) -> str:
     style = _STATUS_STYLE[status]
     return f"[{style}]{status}[/{style}]"
 
 
-def _status_count(count: int, status: str) -> str:
+def _status_count(count: int, status: ItemStatus) -> str:
     style = _STATUS_STYLE[status]
     return f"[{style}]{count} {status}[/{style}]"
 
