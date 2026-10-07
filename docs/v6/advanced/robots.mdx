@@ -587,6 +587,10 @@ hud eval env.py openai --model gpt-6-astra --max-steps 40
 commanded target for the new episode, and `stop` shuts the server down. Nothing in the generic
 environment, server, or tool loop knows about direct control.
 
+Every control tick of every call also streams to the rollout's trace as state plus one video per
+camera, so the trace viewer replays the whole episode, not only the frames the model is shown. The
+env process needs `HUD_API_KEY` and `hud[robot]` (PyAV) to upload.
+
 The [contract](#contract) derives the tool surface:
 
 | Contract field | Tool surface |

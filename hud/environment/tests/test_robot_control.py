@@ -8,12 +8,19 @@ by the sim.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import copy
+import io
+import itertools
 import math
+import time
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
+import av
 import numpy as np
 import pytest
 
@@ -22,6 +29,8 @@ from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task, rollout
+from hud.telemetry.robot import TraceRecorder
+from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -174,7 +183,8 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     np.testing.assert_allclose(close, [[0.5, 1.0]])
     reached, closed = agent.results
     assert [block.type for block in reached.content] == ["text", "text", "image"]
-    assert "Played 50 steps (5.0 s)." in _text(reached)
+    # The trace viewer parses this opening line to map tool calls to ticks.
+    assert _text(reached).startswith("Played 50 steps (5.0 s).")
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "The episode has ended" in _text(closed)
@@ -435,3 +445,71 @@ async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
     with pytest.raises(ValueError, match="direct control needs an action type"):
         async with _served(sim, DirectControl()) as env:
             await env.start()
+
+
+@pytest.mark.parametrize(("control_rate", "tick_seconds"), [(10, 0.1), (0.4, 1.0)])
+async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per_camera(
+    monkeypatch: pytest.MonkeyPatch, control_rate: float, tick_seconds: float
+) -> None:
+    spans: list[dict[str, Any]] = []
+    monkeypatch.setattr("hud.types.queue_span", spans.append)
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    sim.contract["control_rate"] = control_rate
+    agent = _ScriptedLLM(_move("move_to", x=0.3), _move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl()) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    payloads = [
+        span["attributes"][PAYLOAD_ATTRIBUTE]
+        for span in spans
+        if span["attributes"][TASK_RUN_ID_ATTRIBUTE] == run.trace_id
+    ]
+    segments = [p for p in payloads if p.get("source") == "video_segment"]
+    assert {segment["camera"] for segment in segments} == {"observation/image"}
+    mp4 = b"".join(base64.b64decode(segment["segment"]["data"]) for segment in segments)
+    with av.open(io.BytesIO(mp4), mode="r") as container:
+        frames = sum(1 for _ in container.decode(video=0))
+    assert frames == 1 + len(sim.actions)  # the opening scene, then every tick of both moves
+    observations = [p for p in payloads if p.get("source") == "observation"]
+    assert [obs["tick"] for obs in observations] == list(range(frames))
+    assert observations[-1]["state"]
+    # The viewer's clock is the stamps' span: the video's length, not the calls' latency.
+    starts = [datetime.fromisoformat(obs["started_at"]) for obs in observations]
+    assert [(b - a).total_seconds() for a, b in itertools.pairwise(starts)] == pytest.approx(
+        [tick_seconds] * (frames - 1)
+    )
+
+
+async def test_ending_the_episode_mid_move_closes_the_recording_after_the_tick_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hud.types.queue_span", lambda _span: None)
+    events: list[str] = []
+    ends: list[asyncio.Task[None]] = []
+    control = DirectControl()
+
+    class _Recorder(TraceRecorder):
+        def record_observation(self, data: dict[str, Any], *, tick: int) -> None:
+            if tick == 2:  # mid-move, the episode is ended (as a cancel would)
+                loop.call_soon_threadsafe(
+                    lambda: ends.append(loop.create_task(control.end_episode()))
+                )
+                time.sleep(0.2)
+            super().record_observation(data, tick=tick)
+            events.append("record")
+
+        def close(self) -> None:
+            events.append("close")
+            super().close()
+
+    monkeypatch.setattr("hud.environment.robot.control.TraceRecorder", _Recorder)
+    loop = asyncio.get_running_loop()
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, control) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    await asyncio.gather(*ends)
+
+    assert events == ["record"] * 3 + ["close"]  # ticks 0-2, then nothing after the close
