@@ -240,7 +240,8 @@ hud project use browser-evals -C ./my-env
 
 #### Project selection
 
-`hud deploy` and `hud sync tasks` resolve their destination in this order:
+`hud deploy`, `hud sync tasks`, and `hud harbor import` (for a taskset it creates) resolve their
+destination in this order:
 
 | Priority | Source | Scope |
 |----------|--------|-------|
@@ -287,6 +288,28 @@ remain in their original Project. The first upload from a directory records the 
 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).
+
+### `hud harbor`
+
+Import Harbor task folders and the job runs Harbor recorded into a taskset:
+
+```bash
+hud harbor import ./tasks ./jobs/2026-10-01__12-00 --taskset tb2  # tasks and their runs
+hud harbor import ./jobs/2026-10-02__09-00                        # into the directory's taskset
+hud harbor import bundle.zip --taskset tb2 --no-wait --json       # a prepared zip; return at once
+hud harbor imports --taskset tb2                                  # past imports
+hud harbor report <run-id> --wait                                 # follow one, then show its report
+hud harbor cancel <run-id>
+```
+
+`hud harbor import` zips the folders, uploads the zip, runs the platform's Harbor import on
+it, and prints what became of each task, job, and trial. `--taskset` takes a name or ID, and a new
+name creates the taskset; without it, the directory's taskset is used, then a taskset named after
+the first folder. A created taskset goes to the Project chosen as in
+[Project selection](#project-selection). `--link` saves the taskset as the directory's default.
+Exit code `1` means the import did not complete; tasks or trials it skipped are listed in the report
+without failing the command. See [Import into HUD](/v6/experimental/harbor#import-into-hud) for what
+an import creates and its limits.
 
 ### QA checks
 
