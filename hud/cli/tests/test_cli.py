@@ -657,6 +657,7 @@ def test_root_help_lists_nouns() -> None:
         "task",
         "project",
         "sync",
+        "harbor",
         "qa",
         "jobs",
         "cancel",
@@ -674,6 +675,7 @@ def test_plan_flags_use_shared_help() -> None:
         ["sync", "tasks", "--help"],
         ["sync", "env", "--help"],
         ["jobs", "cancel", "--help"],
+        ["harbor", "import", "--help"],
     ):
         result = runner.invoke(app, args)
         assert result.exit_code == 0, result.output
