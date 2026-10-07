@@ -1,9 +1,4 @@
-"""HUD Data: files in the team data store and the data pipelines that run on them.
-
-Endpoint paths and wire shapes for ``/data`` and ``/data-pipelines``. Transport
-is :mod:`hud.utils.platform`; file contents move over the presigned storage URLs
-those endpoints hand out.
-"""
+"""HUD Data: files in the team data store and the data pipelines that run on them."""
 
 from __future__ import annotations
 

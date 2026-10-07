@@ -172,7 +172,8 @@ hud harbor import ./terminal-bench ./jobs/2026-10-01__12-00 --taskset tb2
   of that name), created in the taskset's Project on first import, and a task of the
   taskset. The environment's version is the folder's Harbor content
   digest: importing the same content again changes nothing, and changed content becomes
-  the environment's next version, which the taskset's task moves to. `dataset.toml`
+  the environment's next version, which its task moves to in every taskset you can
+  edit. `dataset.toml`
   manifests are ignored; the task folders in a dataset folder import like any other.
 - **Jobs.** Each job folder (`config.json` and `result.json`, with a folder per trial)
   becomes a HUD job marked as imported from Harbor. Each finished trial becomes a trace
