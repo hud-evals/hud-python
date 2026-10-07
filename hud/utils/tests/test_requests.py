@@ -12,6 +12,7 @@ import pytest
 
 from hud.utils.exceptions import (
     HudAuthenticationError,
+    HudDeprecationWarning,
     HudNetworkError,
     HudRequestError,
     HudTimeoutError,
@@ -77,7 +78,7 @@ def test_requests_warn_once_per_deprecation_notice():
         "Link": f'<{successor}>; rel="successor-version"',
     }
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}, headers=headers))
-    with httpx.Client(transport=transport) as client, pytest.warns(FutureWarning) as caught:
+    with httpx.Client(transport=transport) as client, pytest.warns(HudDeprecationWarning) as caught:
         for url in ("https://api.test/v2/old/1", "https://api.test/v2/old/2"):
             make_request_sync("GET", url, api_key="key", client=client)
 

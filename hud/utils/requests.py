@@ -15,6 +15,7 @@ import httpx
 
 from hud.utils.exceptions import (
     HudAuthenticationError,
+    HudDeprecationWarning,
     HudNetworkError,
     HudRequestError,
     HudTimeoutError,
@@ -89,7 +90,9 @@ def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
     if docs := response.links.get("deprecation"):
         message += f" (see {docs['url']})"
     warnings.warn(
-        f"{message}. If a hud command printed this, upgrade hud.", FutureWarning, stacklevel=3
+        f"{message}. If a hud command printed this, upgrade hud.",
+        HudDeprecationWarning,
+        stacklevel=3,
     )
 
 
