@@ -227,3 +227,7 @@ class HudMCPError(HudException):
     """MCP protocol or server error."""
 
     default_hints: ClassVar[list[Hint]] = [MCP_SERVER_ERROR]
+
+
+class HudDeprecationWarning(FutureWarning):
+    """The HUD API deprecated a route this client calls."""

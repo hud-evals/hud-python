@@ -6,6 +6,7 @@ import json
 import re
 import sys
 import uuid
+import warnings
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -29,8 +30,15 @@ from hud.cli import (
     ExitCode,
     set_env_values,
 )
-from hud.cli.__main__ import app, main, notify_if_outdated, recorded_invocation, version
-from hud.utils.exceptions import HudException, HudRequestError
+from hud.cli.__main__ import (
+    app,
+    main,
+    notify_if_outdated,
+    recorded_invocation,
+    render_hud_warnings,
+    version,
+)
+from hud.utils.exceptions import HudDeprecationWarning, HudException, HudRequestError
 from hud.utils.gateway import list_gateway_models
 from hud.utils.platform import PlatformClient
 
@@ -248,6 +256,19 @@ def _pypi(version: str) -> httpx.Response:
 
 def _fail_fetch(*_a: object, **_k: object) -> httpx.Response:
     raise AssertionError("fetch")
+
+
+def test_cli_prints_hud_deprecation_warnings_through_the_console(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with warnings.catch_warnings(record=True) as passed_through:
+        warnings.simplefilter("always")
+        render_hud_warnings()
+        warnings.warn("GET /v2/old is deprecated", HudDeprecationWarning, stacklevel=1)
+        warnings.warn("other", UserWarning, stacklevel=1)
+
+    assert capsys.readouterr().err == "\u26a0 GET /v2/old is deprecated\n"
+    assert [str(warning.message) for warning in passed_through] == ["other"]
 
 
 class TestVersionCheck:

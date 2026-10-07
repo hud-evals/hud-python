@@ -8,12 +8,14 @@ import asyncio
 import logging
 import ssl
 import time
+import warnings
 from typing import Any
 
 import httpx
 
 from hud.utils.exceptions import (
     HudAuthenticationError,
+    HudDeprecationWarning,
     HudNetworkError,
     HudRequestError,
     HudTimeoutError,
@@ -62,6 +64,35 @@ def _create_default_sync_client() -> httpx.Client:
     return httpx.Client(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
+    )
+
+
+_announced_deprecations: set[tuple[str, str, str]] = set()
+
+
+def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
+    """Warn once per process for each deprecation notice the HUD API sends."""
+    if "Deprecation" not in response.headers:
+        return
+    notice = (
+        response.headers["Deprecation"],
+        response.headers.get("Sunset", ""),
+        response.headers.get("Link", ""),
+    )
+    if notice in _announced_deprecations:
+        return
+    _announced_deprecations.add(notice)
+    message = f"{method} {response.url.path} is deprecated by the HUD API"
+    if sunset := response.headers.get("Sunset"):
+        message += f" and stops being served on {sunset}"
+    if successor := response.links.get("successor-version"):
+        message += f"; its replacement is {successor['url']}"
+    if docs := response.links.get("deprecation"):
+        message += f" (see {docs['url']})"
+    warnings.warn(
+        f"{message}. If a hud command printed this, upgrade hud.",
+        HudDeprecationWarning,
+        stacklevel=3,
     )
 
 
@@ -135,6 +166,7 @@ async def make_request(
                     )
                     continue
 
+                _warn_if_deprecated(method, response)
                 response.raise_for_status()
                 result = _response_payload(response)
                 return result
@@ -220,6 +252,7 @@ def make_request_sync(
                     )
                     continue
 
+                _warn_if_deprecated(method, response)
                 response.raise_for_status()
                 result = _response_payload(response)
                 return result

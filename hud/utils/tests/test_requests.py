@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -11,6 +12,7 @@ import pytest
 
 from hud.utils.exceptions import (
     HudAuthenticationError,
+    HudDeprecationWarning,
     HudNetworkError,
     HudRequestError,
     HudTimeoutError,
@@ -66,6 +68,25 @@ async def test_requests_preserve_status_hints_without_retry(asynchronous, status
             with httpx.Client(transport=transport) as client:
                 make_request_sync("GET", "https://test/data", api_key="key", client=client)
     assert error.value.hints == [CREDITS_EXHAUSTED if status == 402 else RATE_LIMIT_HIT]
+
+
+def test_requests_warn_once_per_deprecation_notice():
+    successor = f"https://api.test/v2/{uuid.uuid4()}"
+    headers = {
+        "Deprecation": "@1790985600",
+        "Sunset": "Sat, 10 Oct 2026 00:00:00 GMT",
+        "Link": f'<{successor}>; rel="successor-version"',
+    }
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}, headers=headers))
+    with httpx.Client(transport=transport) as client, pytest.warns(HudDeprecationWarning) as caught:
+        for url in ("https://api.test/v2/old/1", "https://api.test/v2/old/2"):
+            make_request_sync("GET", url, api_key="key", client=client)
+
+    assert [str(warning.message) for warning in caught] == [
+        "GET /v2/old/1 is deprecated by the HUD API and stops being served on "
+        f"Sat, 10 Oct 2026 00:00:00 GMT; its replacement is {successor}. "
+        "If a hud command printed this, upgrade hud."
+    ]
 
 
 def _create_mock_response(
