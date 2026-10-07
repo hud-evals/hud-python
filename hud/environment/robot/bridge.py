@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import websockets
 import websockets.exceptions
+from pydantic import BaseModel, Field
 
 # The openpi/0 wire codec is defined alongside the agent-side client; reuse it so both
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
@@ -113,6 +114,34 @@ class _SlotRegistry:
         # keep used=True until configure() on the next global reset
 
 
+class Predicate(BaseModel):
+    """One goal condition as the env's grader evaluated it at grade time."""
+
+    name: str
+    satisfied: bool
+    value: float | None = None
+    threshold: float | None = None
+
+
+class RobotEvidence(BaseModel):
+    """What the grader saw when it scored an episode.
+
+    Poses map an object name to ``[x, y, z, qw, qx, qy, qz]``. Reward components
+    map a name to a float. :meth:`RobotBridge.result` attaches this to the grade
+    as ``content`` (one-line summary) and ``info["evidence"]`` (the full model), so
+    a reviewer can tell a grader bug from an agent failure without the sim.
+    """
+
+    termination_reason: str
+    predicates: list[Predicate] = Field(default_factory=list)
+    initial_poses: dict[str, list[float]] = Field(default_factory=dict)
+    final_poses: dict[str, list[float]] = Field(default_factory=dict)
+    holding: bool | None = None
+    reward_components: dict[str, float] = Field(default_factory=dict)
+    task_id: str | None = None
+    seed: int | None = None
+
+
 class RobotBridge(ABC):
     """Serves a sim over ``robot`` WebSocket + a JSON-RPC control side channel.
 
@@ -131,6 +160,8 @@ class RobotBridge(ABC):
     - :meth:`result` returns the scalar episode score dict (override for richer
       grading). :meth:`result_slots` fans that out per slot; vectorized bridges
       with per-slot scores override ``result_slots`` instead.
+    - :meth:`evidence` optionally returns a :class:`RobotEvidence` that
+      :meth:`result` attaches to the grade.
     """
 
     #: Claim-frame timeout, and how long the barrier waits on a silent live slot
@@ -239,15 +270,25 @@ class RobotBridge(ABC):
     def result(self) -> dict[str, Any]:
         """Scalar episode score dict after the episode ends.
 
-        Default: binary success + total reward. Override for richer grading
-        (fractional subtask progress, custom metadata, …). Releases call
-        :meth:`result_slots`, whose default broadcasts this dict to every slot.
+        Default: binary success + total reward, plus :meth:`evidence` when the
+        subclass provides it. Override for richer grading (fractional subtask
+        progress, custom metadata, …). Releases call :meth:`result_slots`, whose
+        default broadcasts this dict to every slot.
         """
-        return {
+        grade: dict[str, Any] = {
             "score": 1.0 if self.success else 0.0,
             "success": bool(self.success),
             "total_reward": float(self.total_reward),
         }
+        if (evidence := self.evidence()) is not None:
+            unmet = [p.name for p in evidence.predicates if not p.satisfied]
+            grade["content"] = f"{evidence.termination_reason}; unmet: {', '.join(unmet) or 'none'}"
+            grade["info"] = {"evidence": evidence.model_dump(mode="json")}
+        return grade
+
+    def evidence(self) -> RobotEvidence | None:
+        """Grader evidence for the finished episode; ``None`` (default) attaches none."""
+        return None
 
     def result_slots(self) -> list[dict[str, Any]]:
         """One score dict per slot. Default: broadcast :meth:`result` to every slot

@@ -26,7 +26,7 @@ under :mod:`hud.capabilities`; both ends share the wire codec defined there.
 
 from __future__ import annotations
 
-from .bridge import RobotBridge, serve_bridge
+from .bridge import Predicate, RobotBridge, RobotEvidence, serve_bridge
 from .control import DirectControl
 from .endpoint import RobotEndpoint
 from .gym import GymBridge, TracedEnv, wrap
@@ -34,8 +34,10 @@ from .gym import GymBridge, TracedEnv, wrap
 __all__ = [
     "DirectControl",
     "GymBridge",
+    "Predicate",
     "RobotBridge",
     "RobotEndpoint",
+    "RobotEvidence",
     "TracedEnv",
     "serve_bridge",
     "wrap",

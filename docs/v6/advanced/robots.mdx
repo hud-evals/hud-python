@@ -19,7 +19,7 @@ environment streams observations (camera frames, robot state) and the agent stre
 fast as the policy can run. The wire format is **openpi**-inspired (msgpack with numpy serialization), 
 so existing openpi policy servers only need a thin adapter. 
 
-Everything below ships behind the `robot` extra (pulls in numpy + openpi-client):
+Everything below ships behind the `robot` extra (numpy, the openpi wire codec, video, and the Rerun viewer):
 
 <CodeGroup>
 ```bash uv
@@ -337,6 +337,14 @@ async def pick_and_place(task_id: str, seed: int = 0):
     yield {"prompt": ep["prompt"], "bindings": {"robot": {"token": ep["token"]}}}
     yield await endpoint.result(token=ep["token"])  # this slot's {score, success, total_reward}
 ```
+
+Override `RobotBridge.evidence()` to return a `RobotEvidence` and `result()` attaches it to the
+grade: `content` gets a one-line summary and `info["evidence"]` the full record. It holds the
+termination reason, the goal `predicates` (name, satisfied, value, threshold) as the grader
+evaluated them, initial and final object poses, whether the gripper holds the target, reward
+components, and the task and seed ids. Trace reviewers read it from the run's `evaluation`, so a
+grader bug can be told from an agent failure without the sim. Bridges that override
+`result_slots` (vectorized) attach their own per-slot evidence.
 
 ## Agent side
 
@@ -705,6 +713,26 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 `action`, and the task prompt rides along as each frame's `task`.
 
 
+## Watching a rollout in Rerun
+
+Set `agent.rerun = True` to open a [Rerun](https://rerun.io) viewer on this episode and write
+`rerun/episode_*.rrd` next to it. The view is the control loop: cameras, contract-labelled
+state, the action sent that tick, reward when the env puts it on the wire, and termination.
+Platform traces still record either way. `rerun-sdk` is installed with `hud[robot]`; the flag
+defaults off.
+
+```python
+from hud.telemetry.robot import RerunView
+
+agent.rerun = True  # local viewer + rerun/episode_*.rrd
+agent.rerun = RerunView()  # file only
+agent.rerun = RerunView(connect_url="rerun+http://127.0.0.1:9876/proxy")  # viewer on another machine
+```
+
+`connect_url` is the headless-robot path: run `rerun` on your laptop and tunnel port 9876.
+Frames are queued off the control loop. A slow viewer drops cameras before it drops steps,
+so the arm does not wait on the viewer. Replay a file with `rerun path/to/episode.rrd`.
+
 ## API summary
 
 | Symbol | Where | Role |
@@ -718,6 +746,7 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
+| `RerunView` | `hud.telemetry.robot` | Opt-in Rerun viewer / `.rrd` of cameras, state, and executed actions |
 | `Model` / `LeRobotModel`, `Adapter` / `LeRobotAdapter` | `hud.agents.robot` | Policy + space-translation seams |
 | `BatchedAgent` / `BatchedModel` | `hud.agents.robot.batching` | Many concurrent rollouts against one shared, batched model |
 | `Shared(provider, width=N)` | `hud.eval` | Refcounting provider: N concurrent rollouts share one substrate |
