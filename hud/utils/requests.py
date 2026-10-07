@@ -8,6 +8,7 @@ import asyncio
 import logging
 import ssl
 import time
+import warnings
 from typing import Any
 
 import httpx
@@ -62,6 +63,38 @@ def _create_default_sync_client() -> httpx.Client:
     return httpx.Client(
         timeout=_DEFAULT_TIMEOUT,
         limits=_DEFAULT_LIMITS,
+    )
+
+
+_announced_deprecations: set[tuple[str, str, str]] = set()
+
+
+def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
+    """Emit a ``FutureWarning`` for a ``Deprecation`` response header (RFC 9745).
+
+    The warning carries the ``Sunset`` date (RFC 8594) and the ``Link``
+    replacement and documentation (RFC 8288). Each distinct notice warns once
+    per process, so a deprecated route with IDs in its path does not repeat.
+    """
+    if "Deprecation" not in response.headers:
+        return
+    notice = (
+        response.headers["Deprecation"],
+        response.headers.get("Sunset", ""),
+        response.headers.get("Link", ""),
+    )
+    if notice in _announced_deprecations:
+        return
+    _announced_deprecations.add(notice)
+    message = f"{method} {response.url.path} is deprecated by the HUD API"
+    if sunset := response.headers.get("Sunset"):
+        message += f" and stops being served on {sunset}"
+    if successor := response.links.get("successor-version"):
+        message += f"; its replacement is {successor['url']}"
+    if docs := response.links.get("deprecation"):
+        message += f" (see {docs['url']})"
+    warnings.warn(
+        f"{message}. If a hud command printed this, upgrade hud.", FutureWarning, stacklevel=3
     )
 
 
@@ -135,6 +168,7 @@ async def make_request(
                     )
                     continue
 
+                _warn_if_deprecated(method, response)
                 response.raise_for_status()
                 result = _response_payload(response)
                 return result
@@ -220,6 +254,7 @@ def make_request_sync(
                     )
                     continue
 
+                _warn_if_deprecated(method, response)
                 response.raise_for_status()
                 result = _response_payload(response)
                 return result
