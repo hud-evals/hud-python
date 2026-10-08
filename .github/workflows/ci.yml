@@ -29,6 +29,9 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --all-extras pytest --cov --cov-report=''
 
+      - name: Test featured environment updates
+        run: uv run --python ${{ matrix.python-version }} --all-extras pytest scripts/tests/test_mark_featured.py -q
+
   lint-ruff:
     runs-on: ubuntu-latest
     steps:

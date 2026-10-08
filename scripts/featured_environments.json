@@ -1,0 +1,32 @@
+{
+  "browser-use": {
+    "registry_id": "706b1834-d82f-4f6f-a33f-3b3c9f3ac968",
+    "taskset_id": "a2fc3b8a-611f-4ab5-a183-f576aab6af35",
+    "example_task_slug": "rental-kitchen-chairs",
+    "sample_trace_id": "a69d9d5e-b545-491d-a39d-7656d7aec3b5"
+  },
+  "file-analysis": {
+    "registry_id": "2b9448f9-8b77-40d1-9bee-ac6a8ee022e3",
+    "taskset_id": "c1dffb7b-9f48-4dcd-948a-80eab6621d78",
+    "example_task_slug": "reconcile-supplier-payment-batch",
+    "sample_trace_id": "d4609595-1a51-4b20-b74c-eeb0df6ff606"
+  },
+  "flask-coding": {
+    "registry_id": "4eec769e-a95f-4b88-9867-460d42423709",
+    "taskset_id": "dbe1f1e3-0510-4777-a010-cb4330ead75c",
+    "example_task_slug": "flask-config-toml",
+    "sample_trace_id": "ba7eccde-5d47-4dcf-a553-df43a19801c0"
+  },
+  "robot-gripper": {
+    "registry_id": "57deb856-a7b6-4868-84ba-ad57869489a2",
+    "taskset_id": "c945dfe1-0b81-4d7e-9c4e-a25d92a58e52",
+    "example_task_slug": "pick-mug",
+    "sample_trace_id": "399c3387-fcab-4837-afd7-b5b0c250c096"
+  },
+  "libbet": {
+    "registry_id": "a42925d0-1e7e-4b69-93ca-008f81dc7dd4",
+    "taskset_id": "b9be9eaa-0183-492b-88b2-cc47b113232f",
+    "example_task_slug": "libbet-explore-40",
+    "sample_trace_id": "72fc23c3-36e7-448d-a9c1-cf97e0a3d1ad"
+  }
+}

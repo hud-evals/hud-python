@@ -1,0 +1,38 @@
+name: Mark featured environments
+
+on:
+  workflow_dispatch:
+    inputs:
+      example:
+        description: Existing environment to mark Featured
+        type: choice
+        default: all
+        options: [all, browser-use, file-analysis, flask-coding, robot-gripper, libbet]
+
+permissions:
+  contents: read
+
+jobs:
+  feature:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: featured
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJSON(inputs.example == 'all' && '["browser-use","file-analysis","flask-coding","robot-gripper","libbet"]' || format('["{0}"]', inputs.example)) }}
+    concurrency:
+      group: featured-${{ matrix.example }}
+      cancel-in-progress: false
+    env:
+      EXAMPLE: ${{ matrix.example }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Mark existing environment Featured
+        env:
+          HUD_API_KEY: ${{ secrets.HUD_FEATURED_API_KEY }}
+        run: uv run --no-project --python 3.12 --with 'hud==0.6.19' python scripts/mark_featured.py "$EXAMPLE"
