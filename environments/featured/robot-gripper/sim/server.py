@@ -361,7 +361,7 @@ def render(camera: str = "overhead", width: int = 640, height: int = 480) -> MCP
 
 @server.tool()
 def get_state() -> dict[str, Any]:
-    """Get the full simulation state: gripper position, joint positions, sensor data."""
+    """Get gripper and joint positions, sensor data, and current actuator controls."""
     sim = _require_sim()
     model = sim.mj_model or sim.solver.mj_model
     data = sim.mj_data or sim.solver.mj_data
@@ -375,6 +375,7 @@ def get_state() -> dict[str, Any]:
         "time": round(data.time, 4),
         "gripper_position": gripper_pos,
         "gripper_orientation": gripper_quat,
+        "actuator_controls": sim.solver.mj_data.ctrl.tolist(),
         "joint_positions": {
             mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i): round(data.qpos[model.jnt_qposadr[i]], 5)
             for i in range(model.njnt)

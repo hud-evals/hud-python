@@ -199,35 +199,50 @@ async def move_object(
     )
 
 
-@env.template(id="force-grasp", description="Grasp an object with sufficient contact force.")
+@env.template(id="force-grasp", description="Lift an object and maintain finger contact force for a hold interval.")
 async def force_grasp(
     scene_id: str = "tabletop-v1", target_object: str = "mug", min_grip_force: float = 0.5, hold_steps: int = 100
 ):
+    if not isinstance(hold_steps, int) or hold_steps < 1:
+        raise ValueError("hold_steps must be a positive integer")
+    if not math.isfinite(min_grip_force) or min_grip_force <= 0:
+        raise ValueError("min_grip_force must be finite and positive")
     await sim_tools.call("reset", scene_id=scene_id)
     yield (
-        f"Control the robot gripper to grasp the '{target_object}' and hold it firmly. "
-        f"Both fingers must maintain at least {min_grip_force} N of contact force. "
+        f"Control the robot gripper to grasp the '{target_object}', lift its center above z=0.78 m, and hold it firmly. "
+        f"Both fingers must maintain at least {min_grip_force} N of contact force, and the object must remain "
+        f"above z=0.78 m, throughout {hold_steps} physics steps after you finish. "
+        f"During that hold, translation and rotation commands stop; your finger control targets stay unchanged. "
+        f"The score is 60% for the fraction of fingers maintaining the required force throughout the hold "
+        f"and 40% for keeping the object lifted throughout. "
         f"Tools: {TOOLS}. Monitor your grip with get_contact_forces(body_name='finger_left') "
         f"and get_contact_forces(body_name='finger_right')."
     )
 
-    try:
+    state = await sim_tools.call("get_state")
+    hold_action = [0.0, 0.0, 0.0, 0.0, *state["actuator_controls"][4:]]
+    left_ok, right_ok, obj_lifted = True, True, True
+    for sample in range(hold_steps + 1):
+        if sample:
+            advanced = await sim_tools.call("step", action=hold_action)
+            if "error" in advanced:
+                raise RuntimeError(f"Could not advance grasp hold: {advanced['error']}")
         left = await sim_tools.call("get_contact_forces", body_name="finger_left")
         right = await sim_tools.call("get_contact_forces", body_name="finger_right")
         obj = await sim_tools.call("get_object_state", object_name=target_object)
-        left_ok = isinstance(left, dict) and left.get("total_force_magnitude", 0) >= min_grip_force
-        right_ok = isinstance(right, dict) and right.get("total_force_magnitude", 0) >= min_grip_force
-        obj_lifted = isinstance(obj, dict) and "error" not in obj and obj["position"]["z"] > 0.78
-    except Exception:
-        left_ok, right_ok, obj_lifted = False, False, False
+        left_ok = left_ok and left.get("total_force_magnitude", 0) >= min_grip_force
+        right_ok = right_ok and right.get("total_force_magnitude", 0) >= min_grip_force
+        obj_lifted = obj_lifted and "error" not in obj and obj["position"]["z"] > 0.78
 
-    grip = (int(left_ok) + int(right_ok)) / 2.0  # fraction of fingers gripping
+    grip = (int(left_ok) + int(right_ok)) / 2.0
     reward = 0.6 * grip + 0.4 * (1.0 if obj_lifted else 0.0)
     yield EvaluationResult(
         reward=round(reward, 4),
         done=True,
-        content=f"Grasp '{target_object}': left_force={'OK' if left_ok else 'LOW'}, "
-        f"right_force={'OK' if right_ok else 'LOW'}, lifted={'YES' if obj_lifted else 'NO'}",
+        content=f"Grasp '{target_object}' held for {hold_steps} physics steps: "
+        f"left_force={'SUSTAINED' if left_ok else 'NOT SUSTAINED'}, "
+        f"right_force={'SUSTAINED' if right_ok else 'NOT SUSTAINED'}, "
+        f"lifted={'SUSTAINED' if obj_lifted else 'NOT SUSTAINED'}",
         subscores=[
             SubScore(name="grip_quality", weight=0.6, value=round(grip, 4)),
             SubScore(name="object_lifted", weight=0.4, value=1.0 if obj_lifted else 0.0),

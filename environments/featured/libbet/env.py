@@ -57,7 +57,7 @@ GB_CONTROLS = """\
 ## Controls
 
 You see the current Game Boy screen each turn and act with these tools:
-- press_buttons(buttons, frames=15): press one or more buttons together this turn.
+- press_buttons(buttons, frames={action_frames}): press one or more buttons together this turn.
   Valid buttons: A, B, START, SELECT, UP, DOWN, LEFT, RIGHT.
   A = confirm / advance dialogue, B = cancel / back, START = open menu,
   SELECT = secondary, and the d-pad (UP/DOWN/LEFT/RIGHT) moves one tile per press.
@@ -176,14 +176,14 @@ def _record_frame() -> None:
 # ---------------------------------------------------------------------------
 # Agent-facing tools (registered on the in-process MCP server in @env.initialize)
 # ---------------------------------------------------------------------------
-async def press_buttons(buttons: list[str], frames: int = 15) -> list[ContentBlock]:
+async def press_buttons(buttons: list[str], frames: int | None = None) -> list[ContentBlock]:
     """Press one or more Game Boy buttons, then return the new screen.
 
     Args:
         buttons: Buttons to press together this turn. Valid values:
             A, B, START, SELECT, UP, DOWN, LEFT, RIGHT.
         frames: How long the buttons are held / how far the game advances
-            (1-600, default 15).
+            (1-600). Omit to use the game-specific default shown in the prompt.
     """
     emu = _session["emulator"]
     if emu is None:
@@ -191,7 +191,8 @@ async def press_buttons(buttons: list[str], frames: int = 15) -> list[ContentBlo
     valid, invalid = sanitize_buttons(buttons)
     if not valid:
         return [TextContent(type="text", text=f"No valid buttons in {buttons}. Valid buttons: {GB_BUTTONS}.")]
-    emu.step({b: True for b in valid}, frames=_clamp_frames(frames))
+    action_frames = _session["spec"].action_frames if frames is None else frames
+    emu.step({b: True for b in valid}, frames=_clamp_frames(action_frames))
     _session["steps"] += 1
     _score_current()
     _record_frame()
@@ -312,7 +313,7 @@ async def play_game(
         _record_frame()  # capture the starting frame
 
     prompt = (
-        f"{GB_CONTROLS}\n"
+        f"{GB_CONTROLS.format(action_frames=_clamp_frames(spec.action_frames))}\n"
         f"## Game: {game}\n{spec.prompt}\n\n"
         f"Aim to explore within {max_steps} action steps. Scoring: {board.summary()}. "
         "Your score measures visual exploration; it does not check whether you completed a level or won the game."
