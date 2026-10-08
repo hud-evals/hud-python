@@ -120,7 +120,13 @@ class ClaudeConfig(ToolAgentConfig):
     max_tool_result_images: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
-    def validate_image_history_thinking(self) -> Self:
+    def validate_thinking(self) -> Self:
+        if (
+            self.thinking is not None
+            and self.thinking["type"] == "enabled"
+            and self.thinking["budget_tokens"] >= self.max_tokens
+        ):
+            raise ValueError("enabled thinking budget_tokens must be less than max_tokens")
         if self.max_tool_result_images is not None and (
             self.thinking is None or self.thinking["type"] == "disabled"
         ):

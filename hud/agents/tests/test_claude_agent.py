@@ -573,3 +573,24 @@ async def test_image_history_preserves_tool_results_and_thinking(
 def test_image_history_requires_enabled_thinking(thinking: dict[str, str] | None) -> None:
     with pytest.raises(ValidationError, match="requires explicit adaptive or enabled thinking"):
         ClaudeConfig.model_validate({"max_tool_result_images": 1, "thinking": thinking})
+
+
+@pytest.mark.parametrize(
+    ("max_tokens", "budget_tokens"),
+    [(16384, 16384), (16384, 16385), (2048, 2048), (2048, 2049)],
+)
+def test_enabled_thinking_budget_must_be_below_max_tokens(
+    max_tokens: int, budget_tokens: int
+) -> None:
+    with pytest.raises(ValidationError, match="budget_tokens must be less than max_tokens"):
+        ClaudeConfig(
+            max_tokens=max_tokens, thinking={"type": "enabled", "budget_tokens": budget_tokens}
+        )
+
+
+@pytest.mark.parametrize("max_tokens", [1025, 2048])
+def test_enabled_thinking_budget_below_max_tokens_is_allowed(max_tokens: int) -> None:
+    config = ClaudeConfig(
+        max_tokens=max_tokens, thinking={"type": "enabled", "budget_tokens": max_tokens - 1}
+    )
+    assert config.thinking == {"type": "enabled", "budget_tokens": max_tokens - 1}
