@@ -30,6 +30,7 @@ from anthropic.types.beta import (
     BetaPlainTextSourceParam,
     BetaRequestDocumentBlockParam,
     BetaTextBlockParam,
+    BetaThinkingConfigParam,
     BetaToolChoiceAutoParam,
     BetaToolResultBlockParam,
     BetaToolUnionParam,
@@ -69,6 +70,7 @@ _STREAM_MAX_ATTEMPTS = 3
 _STREAM_RETRY_BASE_DELAY_SECONDS = 1.0
 _STREAM_RETRY_MAX_DELAY_SECONDS = 5.0
 _STREAM_JITTER = SystemRandom()
+_THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
 
 
 def _stream_retry_delay(attempt: int, error: Exception) -> float:
@@ -232,6 +234,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         tools: list[BetaToolUnionParam],
         tool_choice: BetaToolChoiceAutoParam,
         betas: list[str] | Omit,
+        thinking: BetaThinkingConfigParam | Omit,
     ) -> BetaMessage:
         attempt = 1
         while True:
@@ -245,6 +248,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     tools=tools,
                     tool_choice=tool_choice,
                     betas=betas,
+                    thinking=thinking,
                 ) as stream:
                     stream_opened = True
                     async for _ in stream:
@@ -294,6 +298,17 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         required_betas = {
             beta for tool in state.tools.values() if (beta := getattr(tool.spec, "beta", None))
         }
+        thinking_payload = dict(self.config.thinking) if self.config.thinking is not None else None
+        if self.config.max_tool_result_images is not None:
+            self._prune_tool_result_images(state.messages, self.config.max_tool_result_images)
+            required_betas.add(_THINKING_BINDING_BETA)
+            assert thinking_payload is not None
+            thinking_payload["block_binding"] = {"prefix_mismatch_behavior": "drop_block"}
+        thinking = (
+            cast("BetaThinkingConfigParam", thinking_payload)
+            if thinking_payload is not None
+            else Omit()
+        )
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
         tools = cast("list[BetaToolUnionParam]", list(state.params))
@@ -315,6 +330,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                         tools=tools,
                         tool_choice=tool_choice,
                         betas=betas,
+                        thinking=thinking,
                     )
                 else:
                     client = cast("AsyncAnthropic", self.anthropic_client)
@@ -325,6 +341,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                         tools=tools,
                         tool_choice=tool_choice,
                         betas=betas,
+                        thinking=thinking,
                     )
 
                 state.messages.append(
@@ -370,6 +387,35 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             raise ValueError("Claude response missing after retries")
 
         return self.message_to_agent_step(response, citations_enabled=citations_enabled)
+
+    @staticmethod
+    def _prune_tool_result_images(messages: list[BetaMessageParam], limit: int) -> None:
+        retained = 0
+        removed = 0
+        for message in reversed(messages):
+            content = message["content"]
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                result_content = block.get("content")
+                if not isinstance(result_content, list):
+                    continue
+                result_content = cast("list[ClaudeToolResultContent]", result_content)
+                for index in range(len(result_content) - 1, -1, -1):
+                    image = result_content[index]
+                    if not isinstance(image, dict) or image.get("type") != "image":
+                        continue
+                    retained += 1
+                    if retained > limit:
+                        result_content[index] = BetaTextBlockParam(
+                            type="text",
+                            text="[Earlier tool-result image omitted by image-history policy.]",
+                        )
+                        removed += 1
+        if removed:
+            logger.info("Removed %d older tool-result images; retaining %d", removed, limit)
 
     @classmethod
     def message_to_agent_step(
