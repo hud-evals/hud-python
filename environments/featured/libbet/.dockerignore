@@ -1,0 +1,15 @@
+# Keep copyrighted ROMs out of the image — only the bundled test ROM ships.
+roms/*.gb
+roms/*.gbc
+roms/*.gba
+!roms/libbet.gb
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+logs/
+dist/
+*.state
+.DS_Store

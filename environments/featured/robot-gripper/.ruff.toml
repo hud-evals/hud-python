@@ -1,0 +1,15 @@
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = ["E", "F", "B", "I", "C4", "UP"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Imports deliberately bracket warning filters, Warp setup, and stdout redirection.
+"sim/server.py" = ["E402", "I001"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

@@ -1,0 +1,7 @@
+# ROMs are copyrighted — do NOT commit real game ROMs.
+# Only the bundled freely-licensed test ROM (libbet, zlib) is tracked.
+*
+!.gitignore
+!README.md
+!libbet.gb
+!libbet.LICENSE.txt

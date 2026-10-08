@@ -1,0 +1,38 @@
+[
+  {
+    "env": "flask-coding",
+    "id": "coding-task",
+    "slug": "flask-config-toml",
+    "args": {
+      "description": "The Flask repository is at /app. Add binary-file loading support to flask.Config.from_file so it works with Python 3.11+ tomllib.load. Add a text parameter that defaults to True; text=False must open the configuration file in binary mode. Preserve existing JSON/text loading, silent missing-file behavior, and other configuration behavior.",
+      "test_command": "python -I -m pytest -q -o pythonpath=$PWD/src -c /dev/null --rootdir=. --confcutdir=tests -W ignore::DeprecationWarning tests/test_config.py --junitxml={junit_path}",
+      "test_patch": "diff --git a/tests/static/config.toml b/tests/static/config.toml\nnew file mode 100644\n--- /dev/null\n+++ b/tests/static/config.toml\n@@ -0,0 +1,2 @@\n+TEST_KEY=\"foo\"\n+SECRET_KEY=\"config\"\ndiff --git a/tests/test_config.py b/tests/test_config.py\n--- a/tests/test_config.py\n+++ b/tests/test_config.py\n@@ -6,7 +6,6 @@\n \n import flask\n \n-\n # config keys used for the TestConfig\n TEST_KEY = \"foo\"\n SECRET_KEY = \"config\"\n@@ -30,13 +29,23 @@ def test_config_from_object():\n     common_object_test(app)\n \n \n-def test_config_from_file():\n+def test_config_from_file_json():\n     app = flask.Flask(__name__)\n     current_dir = os.path.dirname(os.path.abspath(__file__))\n     app.config.from_file(os.path.join(current_dir, \"static\", \"config.json\"), json.load)\n     common_object_test(app)\n \n \n+def test_config_from_file_toml():\n+    tomllib = pytest.importorskip(\"tomllib\", reason=\"tomllib added in 3.11\")\n+    app = flask.Flask(__name__)\n+    current_dir = os.path.dirname(os.path.abspath(__file__))\n+    app.config.from_file(\n+        os.path.join(current_dir, \"static\", \"config.toml\"), tomllib.load, text=False\n+    )\n+    common_object_test(app)\n+\n+\n def test_from_prefixed_env(monkeypatch):\n     monkeypatch.setenv(\"FLASK_STRING\", \"value\")\n     monkeypatch.setenv(\"FLASK_BOOL\", \"true\")\n",
+      "test_path": "tests",
+      "base_ref": "origin/flask_4992_baseline",
+      "fail_to_pass": [
+        "tests.test_config.test_config_from_file_toml"
+      ],
+      "pass_to_pass": [
+        "tests.test_config.test_config_from_pyfile",
+        "tests.test_config.test_config_from_object",
+        "tests.test_config.test_config_from_file_json",
+        "tests.test_config.test_from_prefixed_env",
+        "tests.test_config.test_from_prefixed_env_custom_prefix",
+        "tests.test_config.test_from_prefixed_env_nested",
+        "tests.test_config.test_config_from_mapping",
+        "tests.test_config.test_config_from_class",
+        "tests.test_config.test_config_from_envvar",
+        "tests.test_config.test_config_from_envvar_missing",
+        "tests.test_config.test_config_missing",
+        "tests.test_config.test_config_missing_file",
+        "tests.test_config.test_custom_config_class",
+        "tests.test_config.test_session_lifetime",
+        "tests.test_config.test_get_namespace",
+        "tests.test_config.test_from_pyfile_weird_encoding[utf-8]",
+        "tests.test_config.test_from_pyfile_weird_encoding[iso-8859-15]",
+        "tests.test_config.test_from_pyfile_weird_encoding[latin-1]"
+      ],
+      "binary": true
+    }
+  }
+]

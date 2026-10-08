@@ -1,0 +1,60 @@
+{
+  "scene_id": "tabletop-v1",
+  "description": "A wooden table with a single pull-out drawer and a ceramic mug on top. A floating parallel-jaw gripper is available for manipulation. Loaded via Newton's MJCF importer.",
+  "source": "hand-crafted",
+  "format": "mjcf",
+  "engine": "newton",
+  "objects": {
+    "table": {
+      "type": "fixture",
+      "description": "Wooden table with four legs"
+    },
+    "drawer": {
+      "type": "articulated",
+      "description": "Pull-out drawer under the tabletop",
+      "joint": "drawer_slide",
+      "joint_type": "slide",
+      "range": [0.0, 0.25],
+      "closed_position": 0.0,
+      "open_position": 0.25
+    },
+    "mug": {
+      "type": "free",
+      "description": "Ceramic mug on the tabletop",
+      "initial_position": [0.25, 0.1, 0.75]
+    }
+  },
+  "gripper": {
+    "actuators": ["act_x", "act_y", "act_z", "act_yaw", "act_finger_left", "act_finger_right"],
+    "actuator_descriptions": {
+      "act_x": "Move gripper left (-) / right (+)",
+      "act_y": "Move gripper forward (+) / backward (-)",
+      "act_z": "Move gripper up (+) / down (-)",
+      "act_yaw": "Rotate gripper counter-clockwise (+) / clockwise (-)",
+      "act_finger_left": "Left finger: 0 = closed, 0.04 = open",
+      "act_finger_right": "Right finger: 0 = closed, 0.04 = open"
+    }
+  },
+  "cameras": ["overhead", "front", "side", "wrist"],
+  "sensors": {
+    "contact_forces": "Use get_contact_forces(body_name) to query contact forces on any body",
+    "depth_camera": "Use render_depth(camera) to get distance measurements from any camera"
+  },
+  "tasks": {
+    "open_drawer": {
+      "target_joint": "drawer_slide",
+      "success_threshold": 0.2,
+      "description": "Pull the drawer open"
+    },
+    "pick_mug": {
+      "target_object": "mug",
+      "success_height": 0.9,
+      "description": "Pick up the mug from the table"
+    },
+    "force_grasp": {
+      "target_object": "mug",
+      "min_grip_force": 0.5,
+      "description": "Grasp the mug with sufficient contact force on both fingers"
+    }
+  }
+}

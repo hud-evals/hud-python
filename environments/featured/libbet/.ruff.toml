@@ -1,0 +1,15 @@
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["E", "F", "B", "I", "C4", "UP"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Preserve the tested button-state construction instead of rewriting runtime logic.
+"env.py" = ["C420"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

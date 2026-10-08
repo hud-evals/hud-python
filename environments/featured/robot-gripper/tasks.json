@@ -1,0 +1,15 @@
+[
+  {
+    "env": "robot-gripper",
+    "id": "pick-object",
+    "slug": "pick-mug",
+    "args": {
+      "scene_id": "tabletop-v1",
+      "target_object": "mug",
+      "lift_height": 0.9
+    },
+    "agent_config": {
+      "max_steps": 40
+    }
+  }
+]

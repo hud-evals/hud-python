@@ -1,0 +1,35 @@
+[project]
+name = "worldsim"
+version = "0.1.0"
+description = "MCP-controlled tabletop gripper simulation with height-based task scoring"
+requires-python = ">=3.12,<3.13"
+
+# Eval-machine dependencies. The Newton physics engine (`newton` + `gizmo`) is
+# NOT on PyPI: it ships as a pre-built wheel in wheels/ (see [tool.uv.sources]).
+dependencies = [
+    "hud==0.6.19",  # HUD SDK: Environment, capabilities, hud eval
+    "mujoco>=3.2.0",       # rendering, model name lookups, IK
+    "numpy>=1.26.0",
+    "Pillow>=10.0.0",      # base64 PNG encode/decode for render()
+    "warp-lang>=1.13.0",   # Newton's compute backend
+    "newton",              # Newton engine (bundled wheel, see below)
+    "mujoco-warp>=3.8.0.1",  # Newton's MuJoCo solver backend
+    "scipy>=1.11.0",       # mesh processing during scene import
+    "trimesh>=4.6.8",      # mesh loading during scene import
+]
+
+[project.optional-dependencies]
+# Live 3D viewer (WORLDSIM_VIEWER=1; the sim process renders it - see sim/host.py).
+# Needs a display; the Gizmo desktop shell uses imgui-bundle, the bare Newton
+# ViewerGL fallback uses pyglet.
+viewer = [
+    "pyglet>=2.0",
+    "imgui-bundle>=1.90",
+]
+
+[tool.uv.sources]
+newton = { path = "wheels/newton-1.2.0.dev0+gbecfa36c-py3-none-any.whl" }
+
+[tool.uv]
+# Serve the environment directly from source, without installing a project package.
+package = false

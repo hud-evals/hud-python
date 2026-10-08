@@ -1,0 +1,24 @@
+# Git / Python / OS
+.git
+.venv
+__pycache__/
+*.py[cod]
+.env
+.hud/
+.hud_eval.toml
+.DS_Store
+
+# Run artifacts (never in the image)
+datasets/
+results/
+telemetry-dump/
+*.mp4
+*.gif
+
+# Not part of the LLM-task (mcp) image: the VLA/serve/viewer paths + docs/examples
+agents/
+serve/
+examples/
+docs/
+run_vla.py
+*.md

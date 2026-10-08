@@ -1,0 +1,125 @@
+<mujoco model="tabletop-v1">
+  <compiler angle="radian" autolimits="true"/>
+
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <default>
+    <geom condim="4" friction="0.8 0.02 0.01"/>
+    <joint damping="0.5"/>
+  </default>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.9 0.9 0.9" rgb2="0.7 0.7 0.7" width="64" height="64"/>
+    <material name="floor_mat" texture="grid" texrepeat="8 8"/>
+    <material name="wood" rgba="0.6 0.4 0.2 1"/>
+    <material name="wood_dark" rgba="0.45 0.3 0.15 1"/>
+    <material name="ceramic" rgba="0.95 0.95 0.9 1" specular="0.5" shininess="0.5"/>
+    <material name="metal" rgba="0.7 0.7 0.75 1" specular="0.8" shininess="0.8"/>
+    <material name="gripper_mat" rgba="0.3 0.3 0.3 1" specular="0.5"/>
+  </asset>
+
+  <worldbody>
+    <!-- Scene lighting -->
+    <light name="top" pos="0 0 2.5" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3"/>
+    <light name="front_light" pos="0 -2 1.5" dir="0 1 -0.5" diffuse="0.4 0.4 0.4"/>
+
+    <!-- Floor -->
+    <geom name="floor" type="plane" size="2 2 0.01" material="floor_mat"/>
+
+    <!-- Overhead camera (looks down at the table) -->
+    <camera name="overhead" pos="0 -0.1 1.8" xyaxes="1 0 0 0 1 0"/>
+
+    <!-- Front camera -->
+    <camera name="front" pos="0 -1.2 0.9" xyaxes="1 0 0 0 0.3 1"/>
+
+    <!-- Side camera -->
+    <camera name="side" pos="1.2 0 0.9" xyaxes="0 1 0 0 0.3 1"/>
+
+    <!-- ============ TABLE ============ -->
+    <body name="table" pos="0 0 0.35">
+      <geom name="tabletop" type="box" size="0.5 0.35 0.02" pos="0 0 0.35" material="wood"/>
+      <geom name="leg_fl" type="cylinder" size="0.03 0.35" pos="-0.42 -0.28 0" material="wood"/>
+      <geom name="leg_fr" type="cylinder" size="0.03 0.35" pos="0.42 -0.28 0" material="wood"/>
+      <geom name="leg_bl" type="cylinder" size="0.03 0.35" pos="-0.42 0.28 0" material="wood"/>
+      <geom name="leg_br" type="cylinder" size="0.03 0.35" pos="0.42 0.28 0" material="wood"/>
+
+      <!-- Drawer housing (fixed to table, under the tabletop) -->
+      <geom name="drawer_housing_bottom" type="box" size="0.2 0.15 0.005" pos="0 0 0.2" material="wood_dark"/>
+      <geom name="drawer_housing_left" type="box" size="0.005 0.15 0.06" pos="-0.2 0 0.26" material="wood_dark"/>
+      <geom name="drawer_housing_right" type="box" size="0.005 0.15 0.06" pos="0.2 0 0.26" material="wood_dark"/>
+      <geom name="drawer_housing_back" type="box" size="0.2 0.005 0.06" pos="0 0.15 0.26" material="wood_dark"/>
+
+      <!-- Drawer (slides along Y axis, i.e., pulls toward you) -->
+      <body name="drawer" pos="0 0 0.26">
+        <joint name="drawer_slide" type="slide" axis="0 -1 0" range="0 0.25" damping="2.0"/>
+        <geom name="drawer_bottom" type="box" size="0.19 0.14 0.004" pos="0 0 -0.055" material="wood" mass="0.5"/>
+        <geom name="drawer_front" type="box" size="0.2 0.01 0.06" pos="0 -0.15 0" material="wood" mass="0.3"/>
+        <geom name="drawer_left" type="box" size="0.005 0.14 0.05" pos="-0.185 0 0" material="wood" mass="0.1"/>
+        <geom name="drawer_right" type="box" size="0.005 0.14 0.05" pos="0.185 0 0" material="wood" mass="0.1"/>
+        <!-- Drawer handle -->
+        <geom name="drawer_handle" type="capsule" size="0.012 0.06" pos="0 -0.17 0" euler="0 1.5708 0" material="metal" mass="0.05"/>
+      </body>
+
+    </body>
+
+    <!-- Mug on the tabletop (freejoint requires top-level body) -->
+    <body name="mug" pos="0.25 0.1 0.75">
+      <freejoint name="mug_joint"/>
+      <geom name="mug_body" type="cylinder" size="0.035 0.05" material="ceramic" mass="0.25"/>
+      <geom name="mug_handle" type="capsule" size="0.008 0.025" pos="0.04 0 0.01" euler="0 0 0" material="ceramic" mass="0.02"/>
+    </body>
+
+    <!-- ============ FLOATING GRIPPER ============ -->
+    <!-- A simple parallel-jaw gripper that can move freely in 3D -->
+    <body name="gripper_base" pos="0 -0.3 1.0">
+      <!-- 6-DOF movement: 3 translation + 3 rotation -->
+      <joint name="gripper_x" type="slide" axis="1 0 0" range="-0.8 0.8" damping="50"/>
+      <joint name="gripper_y" type="slide" axis="0 1 0" range="-0.8 0.8" damping="50"/>
+      <!-- The range floor must let the fingers reach the tabletop: with the
+           old floor of 0.1 the gripper could never descend below z=1.1, so
+           nothing in the scene (mug at 0.77, handle at 0.61) was reachable. -->
+      <joint name="gripper_z" type="slide" axis="0 0 1" range="-0.4 0.5" damping="50"/>
+      <joint name="gripper_yaw" type="hinge" axis="0 0 1" range="-3.14 3.14" damping="20"/>
+
+      <!-- Gripper palm -->
+      <geom name="gripper_palm" type="box" size="0.04 0.02 0.015" material="gripper_mat" mass="0.5"/>
+
+      <!-- Wrist camera (attached to gripper) -->
+      <camera name="wrist" pos="0 -0.05 0.08" xyaxes="1 0 0 0 0.1 1" fovy="60"/>
+
+      <!-- Left finger -->
+      <body name="finger_left" pos="-0.04 0 -0.015">
+        <joint name="finger_left_slide" type="slide" axis="1 0 0" range="-0.005 0.04" damping="10"/>
+        <geom name="finger_left_geom" type="box" size="0.008 0.015 0.03" pos="0 0 -0.03" material="gripper_mat" mass="0.05" friction="1.5 0.01 0.005"/>
+      </body>
+
+      <!-- Right finger -->
+      <body name="finger_right" pos="0.04 0 -0.015">
+        <joint name="finger_right_slide" type="slide" axis="-1 0 0" range="-0.005 0.04" damping="10"/>
+        <geom name="finger_right_geom" type="box" size="0.008 0.015 0.03" pos="0 0 -0.03" material="gripper_mat" mass="0.05" friction="1.5 0.01 0.005"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- Actuators: how the agent controls the gripper -->
+  <actuator>
+    <!-- Gripper position control (velocity-servo for smooth movement) -->
+    <velocity name="act_x" joint="gripper_x" kv="200" ctrlrange="-0.5 0.5"/>
+    <velocity name="act_y" joint="gripper_y" kv="200" ctrlrange="-0.5 0.5"/>
+    <velocity name="act_z" joint="gripper_z" kv="200" ctrlrange="-0.5 0.5"/>
+    <velocity name="act_yaw" joint="gripper_yaw" kv="50" ctrlrange="-2.0 2.0"/>
+
+    <!-- Finger control (position-servo so they hold grip) -->
+    <position name="act_finger_left" joint="finger_left_slide" kp="400" ctrlrange="-0.005 0.04"/>
+    <position name="act_finger_right" joint="finger_right_slide" kp="400" ctrlrange="-0.005 0.04"/>
+  </actuator>
+
+  <!-- Sensors for observation -->
+  <sensor>
+    <jointpos name="sens_drawer" joint="drawer_slide"/>
+    <jointpos name="sens_finger_left" joint="finger_left_slide"/>
+    <jointpos name="sens_finger_right" joint="finger_right_slide"/>
+    <framepos name="sens_gripper_pos" objtype="body" objname="gripper_base"/>
+    <framequat name="sens_gripper_quat" objtype="body" objname="gripper_base"/>
+  </sensor>
+</mujoco>
