@@ -10,6 +10,7 @@ values. This is the only place tests touch ``hud.settings``.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hud.settings import Settings, settings
@@ -18,8 +19,6 @@ from hud.utils.gateway import list_gateway_models
 from .services import SERVICE_ENV
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 # Every service the SDK calls points at a closed local port until a test opts into
@@ -59,6 +58,11 @@ class HudEnv:
         self._monkeypatch = monkeypatch
         self.home = home
         home.mkdir(parents=True, exist_ok=True)
+        # The Docker CLI finds its plugins (compose) and current context under its
+        # config directory; keep the real one so a real daemon stays reachable.
+        monkeypatch.setenv(
+            "DOCKER_CONFIG", os.environ.get("DOCKER_CONFIG") or str(Path.home() / ".docker")
+        )
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setenv("USERPROFILE", str(home))
         for name in (*setting_variables(), *PROVIDER_ENV):
