@@ -37,6 +37,7 @@ async def test_a_screenshot_encodes_the_framebuffer_as_requested(
     colors = image.convert("RGB").getcolors()
     assert colors is not None
     ((count, pixel),) = colors
+    assert isinstance(pixel, tuple)
     assert count == 48
     assert max(abs(channel - expected) for channel, expected in zip(pixel, COLOR, strict=True)) <= 4
 
