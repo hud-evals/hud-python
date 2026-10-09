@@ -343,7 +343,9 @@ def analytics(services: FakeServices, hud_env: HudEnv) -> FakeServices:
     return services
 
 
-def event(command: str, subcommand: str | None, exit_code: int, error: str | None) -> dict:
+def event(
+    command: str, subcommand: str | None, exit_code: int, error: str | None
+) -> dict[str, Any]:
     return {
         "command": command,
         "subcommand": subcommand,
@@ -379,7 +381,7 @@ def test_each_invocation_posts_one_anonymous_event(
     hud_env: HudEnv,
     argv: list[str],
     key: str | None,
-    expected: list[dict],
+    expected: list[dict[str, Any]],
 ) -> None:
     hud_env.set(HUD_API_KEY=key)
     analytics.route("api", "GET", "/v2/jobs", status=403, json={"detail": "Not your team"})
