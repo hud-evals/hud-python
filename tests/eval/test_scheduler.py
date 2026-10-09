@@ -303,6 +303,13 @@ def timed(seconds: float, **row: Any) -> Task:
     return ROWS[0].model_copy(update={"agent_config": {"timeout_seconds": seconds}, **row})
 
 
+NO_PLACEMENT = (
+    "no placement: pass runtime= — "
+    'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
+    "LocalRuntime(build) (a (task) -> Environment constructor), Runtime(url) "
+    "(a served substrate), or HUDRuntime() (your deployed env)"
+)
+
 INVALID: dict[str, tuple[Callable[[Provider], Any], str]] = {
     "group below one": (
         lambda runtime: Taskset("t", ROWS).run(ScriptedAgent(), runtime=runtime, group=0),
@@ -372,17 +379,17 @@ INVALID: dict[str, tuple[Callable[[Provider], Any], str]] = {
     ),
     "a portable row without a runtime": (
         lambda runtime: Taskset("t", ROWS).run(ScriptedAgent()),
-        "no placement: pass runtime=",
+        NO_PLACEMENT,
     ),
     "a row minted by a template, serialized and reloaded": (
         lambda runtime: Task.model_validate(minted().model_dump()).run(ScriptedAgent()),
-        "no placement: pass runtime=",
+        NO_PLACEMENT,
     ),
     "container rows mixed with portable rows": (
         lambda runtime: Taskset(
             "t", [ROWS[0], ROWS[1].model_copy(update={"runtime_config": RuntimeConfig(image="x")})]
         ).run(ScriptedAgent()),
-        "no placement: pass runtime=",
+        NO_PLACEMENT,
     ),
 }
 

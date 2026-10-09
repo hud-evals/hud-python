@@ -190,6 +190,42 @@ async def test_one_source_serves_each_rows_own_environment(
     assert sorted(agent.prompts) == ["add 1 2", "add 3 4"]
 
 
+WHERE_ENV = """
+from pathlib import Path
+
+from hud import Environment
+
+env = Environment("{name}")
+
+
+@env.template()
+async def where():
+    answer = yield f"{name} serves from {{Path.cwd()}}"
+    yield 1.0
+"""
+
+
+@pytest.mark.parametrize("provider", [LocalRuntime, SubprocessRuntime])
+async def test_env_picks_one_of_several_environments_a_source_defines(
+    provider: Callable[..., Provider], tmp_path: Path
+) -> None:
+    source = tmp_path / "project"
+    source.mkdir()
+    (source / "alpha.py").write_text(WHERE_ENV.format(name="alpha"))
+    (source / "beta.py").write_text(WHERE_ENV.format(name="beta"))
+    (source / "env.py").write_text("from alpha import env as alpha\nfrom beta import env as beta\n")
+    agent = ScriptedAgent("ok")
+
+    job = await Task(env="alpha", id="where").run(
+        agent, runtime=provider(source / "env.py", env="beta")
+    )
+
+    assert job.runs[0].reward == 1.0
+    assert agent.prompts == [
+        f"beta serves from {source if provider is SubprocessRuntime else os.getcwd()}"
+    ]
+
+
 async def test_distinct_instances_from_a_constructor_run_concurrently() -> None:
     built: list[str] = []
     started = 0
