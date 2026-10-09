@@ -181,6 +181,13 @@ ROWS = [
         id="missing-file",
     ),
     pytest.param(
+        "nothing.py",
+        None,
+        None,
+        (FileNotFoundError, "no environment source at nothing.py"),
+        id="missing-file-in-cwd",
+    ),
+    pytest.param(
         "env.py",
         None,
         {"a": "b"},
@@ -328,6 +335,7 @@ async def announced_port(process: asyncio.subprocess.Process) -> int:
     ("command", "error"),
     [
         pytest.param([*SERVER, "multi.py"], "multiple Environments in multi.py", id="ambiguous"),
+        pytest.param([*SERVER, "nothing.py"], "no environment source at nothing.py", id="missing"),
     ],
 )
 async def test_the_serving_process_exits_with_the_load_error(
