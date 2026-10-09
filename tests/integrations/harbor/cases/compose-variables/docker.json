@@ -1,5 +1,8 @@
 {
   "pulls": {
     "redis:7-alpine": {}
-  }
+  },
+  "observe": [
+    "compose"
+  ]
 }

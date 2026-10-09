@@ -14,5 +14,8 @@
       "match": "^build ",
       "stderr": "no matching distribution for numpy==1.21"
     }
+  ],
+  "observe": [
+    "docker"
   ]
 }

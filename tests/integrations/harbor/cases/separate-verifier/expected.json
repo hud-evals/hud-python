@@ -1,213 +1,7 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/placement/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "environment": {},
-              "expose": [
-                "6379"
-              ],
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "image inspect --format {{.Os}}/{{.Architecture}} hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "build --platform linux/arm64 --tag hud-harbor-verifier:separate-verifier-<h2>-<h3> <case>/placement/tests"
-    },
-    {
-      "argv": "image inspect hud-harbor-verifier:separate-verifier-<h2>-<h3>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/plain/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "environment": {},
-              "expose": [
-                "6379"
-              ],
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "image inspect --format {{.Os}}/{{.Architecture}} hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "build --platform linux/amd64 --tag hud-harbor-verifier:separate-verifier-<h4>-<h3> <case>/plain/tests"
-    },
-    {
-      "argv": "image inspect hud-harbor-verifier:separate-verifier-<h4>-<h3>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h5> --project-directory <case>/same-placement/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h5>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h5>"
-    },
-    {
-      "argv": "image inspect --format {{.Os}}/{{.Architecture}} hud-harbor-base:<h5>"
-    },
-    {
-      "argv": "build --platform linux/amd64 --tag hud-harbor-verifier:separate-verifier-<h6>-<h3> <case>/same-placement/tests"
-    },
-    {
-      "argv": "image inspect hud-harbor-verifier:separate-verifier-<h6>-<h3>"
-    }
-  ],
   "failures": [],
   "projects": {
-    "separate-verifier-<h2>": {
-      "compose.yaml": {
-        "networks": {},
-        "services": {
-          "hud-base": {
-            "build": {
-              "context": "./compose-project/environment"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-base:<h1>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "hud-verifier": {
-            "build": {
-              "context": "./compose-project/verifier"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-verifier:separate-verifier-<h2>-<h3>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "main": {
-            "build": {
-              "additional_contexts": {
-                "hud-base": "service:hud-base",
-                "hud-verifier": "service:hud-verifier"
-              },
-              "args": {
-                "BASE_IMAGE": "hud-base",
-                "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-verifier"
-              },
-              "context": "./compose-project/main",
-              "target": "verifier"
-            },
-            "command": [
-              "/controller/venv/bin/hud",
-              "serve",
-              "hud.integrations.harbor.env:env",
-              "--host",
-              "0.0.0.0",
-              "--port",
-              "8765"
-            ],
-            "entrypoint": [],
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor:separate-verifier-<h2>-<h7>",
-            "ports": [],
-            "volumes": []
-          },
-          "redis": {
-            "environment": {},
-            "expose": [
-              "6379"
-            ],
-            "image": "redis:7-alpine",
-            "ports": [],
-            "volumes": []
-          }
-        }
-      },
+    "separate-verifier-<h1>": {
       "tasks.json": [
         {
           "args": {
@@ -232,7 +26,7 @@
               "verifier_timeout": 30.0
             }
           },
-          "env": "separate-verifier-<h2>",
+          "env": "separate-verifier-<h1>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -271,7 +65,7 @@
                 "verifier_timeout": 30.0
               }
             },
-            "env": "separate-verifier-<h2>",
+            "env": "separate-verifier-<h1>",
             "id": "verify",
             "runtime_config": {
               "compose": {
@@ -309,73 +103,7 @@
         "tasks.json"
       ]
     },
-    "separate-verifier-<h4>": {
-      "compose.yaml": {
-        "networks": {},
-        "services": {
-          "hud-base": {
-            "build": {
-              "context": "./compose-project/environment"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-base:<h1>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "hud-verifier": {
-            "build": {
-              "context": "./compose-project/verifier"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-verifier:separate-verifier-<h4>-<h3>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "main": {
-            "build": {
-              "additional_contexts": {
-                "hud-base": "service:hud-base",
-                "hud-verifier": "service:hud-verifier"
-              },
-              "args": {
-                "BASE_IMAGE": "hud-base",
-                "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-verifier"
-              },
-              "context": "./compose-project/main",
-              "target": "verifier"
-            },
-            "command": [
-              "/controller/venv/bin/hud",
-              "serve",
-              "hud.integrations.harbor.env:env",
-              "--host",
-              "0.0.0.0",
-              "--port",
-              "8765"
-            ],
-            "entrypoint": [],
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor:separate-verifier-<h4>-<h8>",
-            "ports": [],
-            "volumes": []
-          },
-          "redis": {
-            "environment": {},
-            "expose": [
-              "6379"
-            ],
-            "image": "redis:7-alpine",
-            "ports": [],
-            "volumes": []
-          }
-        }
-      },
+    "separate-verifier-<h2>": {
       "tasks.json": [
         {
           "args": {
@@ -389,7 +117,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "separate-verifier-<h4>",
+          "env": "separate-verifier-<h2>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -412,7 +140,7 @@
                 "verifier_timeout": 600.0
               }
             },
-            "env": "separate-verifier-<h4>",
+            "env": "separate-verifier-<h2>",
             "id": "verify",
             "slug": "plain:verify"
           }
@@ -431,64 +159,7 @@
         "tasks.json"
       ]
     },
-    "separate-verifier-<h6>": {
-      "compose.yaml": {
-        "networks": {},
-        "services": {
-          "hud-base": {
-            "build": {
-              "context": "./compose-project/environment"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-base:<h5>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "hud-verifier": {
-            "build": {
-              "context": "./compose-project/verifier"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-verifier:separate-verifier-<h6>-<h3>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "main": {
-            "build": {
-              "additional_contexts": {
-                "hud-base": "service:hud-base",
-                "hud-verifier": "service:hud-verifier"
-              },
-              "args": {
-                "BASE_IMAGE": "hud-base",
-                "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-verifier"
-              },
-              "context": "./compose-project/main",
-              "target": "verifier"
-            },
-            "command": [
-              "/controller/venv/bin/hud",
-              "serve",
-              "hud.integrations.harbor.env:env",
-              "--host",
-              "0.0.0.0",
-              "--port",
-              "8765"
-            ],
-            "entrypoint": [],
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor:separate-verifier-<h6>-<h9>",
-            "ports": [],
-            "volumes": []
-          }
-        }
-      },
+    "separate-verifier-<h3>": {
       "tasks.json": [
         {
           "args": {
@@ -502,7 +173,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "separate-verifier-<h6>",
+          "env": "separate-verifier-<h3>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -528,7 +199,7 @@
                 "verifier_timeout": 600.0
               }
             },
-            "env": "separate-verifier-<h6>",
+            "env": "separate-verifier-<h3>",
             "id": "verify",
             "slug": "same-placement:verify"
           }

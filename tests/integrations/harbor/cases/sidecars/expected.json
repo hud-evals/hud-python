@@ -1,424 +1,10 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/main-process/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "entrypoint": [
-                "/compose-init"
-              ],
-              "environment": {
-                "FROM_COMPOSE": "yes"
-              },
-              "expose": [
-                "8080"
-              ],
-              "healthcheck": {
-                "interval": "2s",
-                "retries": 5,
-                "start_period": "1s",
-                "test": [
-                  "CMD-SHELL",
-                  "curl -f http://localhost:8080/health"
-                ],
-                "timeout": "3s"
-              },
-              "ports": [],
-              "user": "1001:1002",
-              "volumes": [],
-              "working_dir": "/compose-work"
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/implicit-main/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "cache": {
-              "build": "./cache",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "command": [
-                "redis-server",
-                "--save",
-                ""
-              ],
-              "depends_on": {
-                "main": {
-                  "condition": "service_healthy",
-                  "restart": true
-                },
-                "seed": {
-                  "condition": "service_completed_successfully"
-                }
-              },
-              "environment": {
-                "SIDE": "car"
-              },
-              "expose": [
-                "6379"
-              ],
-              "healthcheck": {
-                "interval": "2s",
-                "test": [
-                  "CMD",
-                  "redis-cli",
-                  "ping"
-                ]
-              },
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            },
-            "seed": {
-              "build": "./seed",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "worker": {
-              "environment": {},
-              "expose": [],
-              "image": "busybox:1.37",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "cache": {
-              "image": "hud-harbor-sidecar:<h3>"
-            },
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h2>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h2>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/implicit-main/environment --file <resolve>/compose.json --file <resolve>/override.json build cache",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "cache": {
-              "build": "./cache",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "command": [
-                "redis-server",
-                "--save",
-                ""
-              ],
-              "depends_on": {
-                "main": {
-                  "condition": "service_healthy",
-                  "restart": true
-                },
-                "seed": {
-                  "condition": "service_completed_successfully"
-                }
-              },
-              "environment": {
-                "SIDE": "car"
-              },
-              "expose": [
-                "6379"
-              ],
-              "healthcheck": {
-                "interval": "2s",
-                "test": [
-                  "CMD",
-                  "redis-cli",
-                  "ping"
-                ]
-              },
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            },
-            "seed": {
-              "build": "./seed",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "worker": {
-              "environment": {},
-              "expose": [],
-              "image": "busybox:1.37",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "cache": {
-              "image": "hud-harbor-sidecar:<h3>"
-            },
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h2>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-sidecar:<h3>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/implicit-main/environment --file <resolve>/compose.json --file <resolve>/override.json pull worker",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "cache": {
-              "build": "./cache",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "command": [
-                "redis-server",
-                "--save",
-                ""
-              ],
-              "depends_on": {
-                "main": {
-                  "condition": "service_healthy",
-                  "restart": true
-                },
-                "seed": {
-                  "condition": "service_completed_successfully"
-                }
-              },
-              "environment": {
-                "SIDE": "car"
-              },
-              "expose": [
-                "6379"
-              ],
-              "healthcheck": {
-                "interval": "2s",
-                "test": [
-                  "CMD",
-                  "redis-cli",
-                  "ping"
-                ]
-              },
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            },
-            "seed": {
-              "build": "./seed",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "worker": {
-              "environment": {},
-              "expose": [],
-              "image": "busybox:1.37",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "cache": {
-              "image": "hud-harbor-sidecar:<h3>"
-            },
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h2>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect busybox:1.37"
-    }
-  ],
   "failures": [],
   "projects": {
-    "sidecars-<h4>": {
+    "sidecars-<h1>": {
       "compose.yaml": {
         "networks": {},
         "services": {
-          "hud-base": {
-            "build": {
-              "context": "./compose-project/environment"
-            },
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-base:<h1>",
-            "ports": [],
-            "scale": 0,
-            "volumes": []
-          },
-          "main": {
-            "build": {
-              "additional_contexts": {
-                "hud-base": "service:hud-base"
-              },
-              "args": {
-                "BASE_IMAGE": "hud-base",
-                "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
-              },
-              "context": "./compose-project/main",
-              "target": "plain"
-            },
-            "command": [
-              "/controller/venv/bin/hud",
-              "serve",
-              "hud.integrations.harbor.env:env",
-              "--host",
-              "0.0.0.0",
-              "--port",
-              "8765"
-            ],
-            "entrypoint": [],
-            "environment": {
-              "FROM_COMPOSE": "yes"
-            },
-            "expose": [
-              "8080"
-            ],
-            "image": "hud-harbor:sidecars-<h4>-<h5>",
-            "ports": [],
-            "volumes": [
-              "./compose-project/tests:/controller/tests:ro"
-            ]
-          }
-        }
-      },
-      "tasks.json": [
-        {
-          "args": {
-            "instruction": "Solve the task.\n",
-            "task": {
-              "artifacts": [],
-              "collect": [],
-              "description": "",
-              "id": "main-process",
-              "separate_verifier": false,
-              "verifier_timeout": 600.0
-            }
-          },
-          "env": "sidecars-<h4>",
-          "id": "run",
-          "runtime_config": {
-            "compose": {
-              "document": "compose.yaml",
-              "root": ".",
-              "service_access": null
-            },
-            "limits": null,
-            "resources": null
-          },
-          "slug": "main-process"
-        }
-      ],
-      "tree": [
-        "compose-project/environment/Dockerfile",
-        "compose-project/environment/docker-compose.yaml",
-        "compose-project/main/Dockerfile",
-        "compose-project/main/config.json",
-        "compose-project/main/install.sh",
-        "compose-project/tests/main-process/test.sh",
-        "compose.yaml",
-        "env.py",
-        "tasks.json"
-      ]
-    },
-    "sidecars-<h6>": {
-      "compose.yaml": {
-        "networks": {},
-        "services": {
-          "cache": {
-            "build": "./compose-project/environment/cache",
-            "environment": {},
-            "expose": [],
-            "image": "hud-harbor-sidecar:<h3>",
-            "ports": [],
-            "volumes": []
-          },
           "hud-base": {
             "build": {
               "context": "./compose-project/environment"
@@ -453,9 +39,108 @@
               "8765"
             ],
             "entrypoint": [],
+            "environment": {
+              "FROM_COMPOSE": "yes"
+            },
+            "expose": [
+              "8080"
+            ],
+            "image": "hud-harbor:sidecars-<h1>-<h3>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "main-process",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "sidecars-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "main-process"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/environment/docker-compose.yaml",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/main-process/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "sidecars-<h4>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "cache": {
+            "build": "./compose-project/environment/cache",
             "environment": {},
             "expose": [],
-            "image": "hud-harbor:sidecars-<h6>-<h7>",
+            "image": "hud-harbor-sidecar:<h5>",
+            "ports": [],
+            "volumes": []
+          },
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h6>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h6>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:sidecars-<h4>-<h7>",
             "ports": [],
             "volumes": [
               "./compose-project/tests:/controller/tests:ro"
@@ -524,7 +209,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "sidecars-<h6>",
+          "env": "sidecars-<h4>",
           "id": "run",
           "runtime_config": {
             "compose": {

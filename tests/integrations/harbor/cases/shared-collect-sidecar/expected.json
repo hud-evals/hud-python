@@ -1,51 +1,7 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/task-a/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "environment": {},
-              "expose": [
-                "6379"
-              ],
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    }
-  ],
   "failures": [],
   "projects": {
-    "shared-collect-sidecar-<h2>": {
+    "shared-collect-sidecar-<h1>": {
       "compose.yaml": {
         "networks": {},
         "services": {
@@ -55,7 +11,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h2>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -68,7 +24,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
               },
               "context": "./compose-project/main",
               "target": "service-access"
@@ -85,7 +41,7 @@
             "entrypoint": [],
             "environment": {},
             "expose": [],
-            "image": "hud-harbor:shared-collect-sidecar-<h2>-<h3>",
+            "image": "hud-harbor:shared-collect-sidecar-<h1>-<h3>",
             "ports": [],
             "volumes": [
               "./compose-project/tests:/controller/tests:ro"
@@ -126,7 +82,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "shared-collect-sidecar-<h2>",
+          "env": "shared-collect-sidecar-<h1>",
           "id": "run",
           "runtime_config": {
             "compose": {

@@ -1,132 +1,7 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/budget/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/gpu/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/cpu-only/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/windows-tpu/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    }
-  ],
   "failures": [],
   "projects": {
-    "resources-and-budgets-<h2>": {
+    "resources-and-budgets-<h1>": {
       "compose.yaml": {
         "networks": {},
         "services": {
@@ -136,7 +11,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h2>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -149,7 +24,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
               },
               "context": "./compose-project/main",
               "target": "plain"
@@ -166,7 +41,7 @@
             "entrypoint": [],
             "environment": {},
             "expose": [],
-            "image": "hud-harbor:resources-and-budgets-<h2>-<h3>",
+            "image": "hud-harbor:resources-and-budgets-<h1>-<h3>",
             "ports": [],
             "volumes": [
               "./compose-project/tests:/controller/tests:ro"
@@ -187,7 +62,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "resources-and-budgets-<h2>",
+          "env": "resources-and-budgets-<h1>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -222,7 +97,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h2>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -235,7 +110,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
               },
               "context": "./compose-project/main",
               "target": "plain"
@@ -314,7 +189,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h2>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -327,7 +202,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
               },
               "context": "./compose-project/main",
               "target": "plain"
@@ -405,7 +280,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h2>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -418,7 +293,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
               },
               "context": "./compose-project/main",
               "target": "plain"

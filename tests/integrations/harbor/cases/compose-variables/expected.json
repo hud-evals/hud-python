@@ -1,62 +1,7 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/task-a/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "build": {
-                "context": "."
-              },
-              "deploy": {
-                "resources": {
-                  "limits": {
-                    "cpus": "2",
-                    "memory": "4096M"
-                  }
-                }
-              },
-              "environment": {
-                "FROM_DOTENV": "dotenv",
-                "FROM_ENV": "from-task"
-              },
-              "expose": [],
-              "image": "hud-harbor-base:<h1>",
-              "ports": [],
-              "volumes": []
-            },
-            "redis": {
-              "environment": {},
-              "expose": [
-                "6379"
-              ],
-              "image": "redis:7-alpine",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    }
-  ],
   "failures": [],
   "projects": {
-    "compose-variables-<h2>": {
+    "compose-variables-<h1>": {
       "compose.yaml": {
         "networks": {},
         "services": {
@@ -66,7 +11,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h2>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -79,7 +24,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
               },
               "context": "./compose-project/main",
               "target": "plain"
@@ -107,7 +52,7 @@
               "FROM_ENV": "from-task"
             },
             "expose": [],
-            "image": "hud-harbor:compose-variables-<h2>-<h3>",
+            "image": "hud-harbor:compose-variables-<h1>-<h3>",
             "ports": [],
             "volumes": [
               "./compose-project/tests:/controller/tests:ro"
@@ -137,7 +82,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "compose-variables-<h2>",
+          "env": "compose-variables-<h1>",
           "id": "run",
           "runtime_config": {
             "compose": {

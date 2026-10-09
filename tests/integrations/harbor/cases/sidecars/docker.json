@@ -18,5 +18,8 @@
       }
     },
     "busybox:1.37": {}
-  }
+  },
+  "observe": [
+    "compose"
+  ]
 }

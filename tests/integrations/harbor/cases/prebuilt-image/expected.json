@@ -1,35 +1,4 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-missing --project-directory <case>/task-a/environment --file <resolve>/compose.json --file <resolve>/override.json pull main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "image": "registry.example/base:latest"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect registry.example/base:latest"
-    }
-  ],
   "failures": [],
   "projects": {
     "prebuilt-image-<h1>": {

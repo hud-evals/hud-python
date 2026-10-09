@@ -4,8 +4,10 @@ Each directory under ``cases/`` is a Harbor dataset plus a ``docker.json`` that
 says what the docker daemon holds: the OCI config each build context and pulled
 image produces, the server platform, and the commands that fail. The scenario
 adapts a copy of the dataset and compares what a user and the runtime observe
-(the failures, the generated tree, each project's ``compose.yaml`` and
-``tasks.json``, and every docker command) with the case's ``expected.json``.
+(the failures, the generated tree and each project's ``tasks.json``) with the
+case's ``expected.json``. A case about Compose output or docker commands lists
+``"compose"`` or ``"docker"`` under ``observe`` in its ``docker.json`` to record
+those too.
 Record a new case with ``--inline-snapshot=create``.
 """
 
@@ -34,8 +36,10 @@ HASH = re.compile(r"\b[0-9a-f]{12}(?:[0-9a-f]{4})?\b")
 RESOLVE_DIR = re.compile(r"[^\s\"']*/hud-harbor-resolve-[^/\s\"']+")
 
 
-def load_case(case: str, tmp_path: Path, fake_docker: FakeDocker, hud_env: HudEnv) -> Path:
-    """Copy ``case`` into ``tmp_path`` and load its ``docker.json`` into the fake docker."""
+def load_case(
+    case: str, tmp_path: Path, fake_docker: FakeDocker, hud_env: HudEnv
+) -> tuple[Path, set[str]]:
+    """Copy ``case`` into ``tmp_path``, load its ``docker.json``, and return what it observes."""
     dataset = tmp_path / case
     shutil.copytree(
         CASES / case,
@@ -54,7 +58,7 @@ def load_case(case: str, tmp_path: Path, fake_docker: FakeDocker, hud_env: HudEn
         fake_docker.on(failure["match"], stderr=failure["stderr"], exit=1)
     # A host value a template names must never reach anything adapt writes.
     hud_env.set(HARBOR_JUDGE_KEY=SECRET)
-    return dataset
+    return dataset, set(spec.get("observe", []))
 
 
 def mask(document: Any) -> Any:
@@ -114,16 +118,19 @@ def assert_stock_compose_complete(compose_path: Path) -> dict[str, Any]:
     return project
 
 
-def observe(result: harbor.AdaptResult, dataset: Path, fake_docker: FakeDocker) -> Any:
+def observe(
+    result: harbor.AdaptResult, dataset: Path, fake_docker: FakeDocker, extra: set[str]
+) -> Any:
     def scrub(text: str) -> str:
         return RESOLVE_DIR.sub("<resolve>", text.replace(str(dataset), "<case>"))
 
     projects: dict[str, Any] = {}
     adapted = dataset / ".hud-adapt"
     for context in sorted(adapted.iterdir()) if adapted.is_dir() else []:
+        compose = assert_stock_compose_complete(context / "compose.yaml")
         projects[context.name] = {
             "tree": listing(context),
-            "compose.yaml": assert_stock_compose_complete(context / "compose.yaml"),
+            **({"compose.yaml": compose} if "compose" in extra else {}),
             "tasks.json": json.loads((context / "tasks.json").read_text("utf-8")),
         }
     docker = [
@@ -149,7 +156,7 @@ def observe(result: harbor.AdaptResult, dataset: Path, fake_docker: FakeDocker) 
                 for finding in failure.findings
             ],
             "projects": projects,
-            "docker": docker,
+            **({"docker": docker} if "docker" in extra else {}),
         }
     )
 
@@ -158,11 +165,11 @@ def observe(result: harbor.AdaptResult, dataset: Path, fake_docker: FakeDocker) 
 def test_adapting_a_harbor_dataset_writes_its_projects_and_reports_its_failures(
     case: str, tmp_path: Path, fake_docker: FakeDocker, hud_env: HudEnv
 ) -> None:
-    dataset = load_case(case, tmp_path, fake_docker, hud_env)
+    dataset, extra = load_case(case, tmp_path, fake_docker, hud_env)
 
     result = harbor.adapt(dataset, hud_requirement="hud")
 
-    assert observe(result, dataset, fake_docker) == external_file(
+    assert observe(result, dataset, fake_docker, extra) == external_file(
         CASES / case / "expected.json", format=".json"
     )
     rows = list(result.taskset)
@@ -208,7 +215,7 @@ def test_adapt_aborts_without_a_docker_daemon_instead_of_failing_tasks(
     fake_docker: FakeDocker,
     hud_env: HudEnv,
 ) -> None:
-    dataset = load_case("plain-image", tmp_path, fake_docker, hud_env)
+    dataset, _ = load_case("plain-image", tmp_path, fake_docker, hud_env)
     if docker_state == "daemon unreachable":
         fake_docker.on(r"^version", stderr="Cannot connect to the Docker daemon", exit=1)
     else:
@@ -254,7 +261,7 @@ def test_the_environment_image_identity_follows_only_what_the_image_contains(
     hud_env: HudEnv,
 ) -> None:
     del change
-    dataset = load_case("plain-image", tmp_path, fake_docker, hud_env)
+    dataset, _ = load_case("plain-image", tmp_path, fake_docker, hud_env)
     task = dataset / "task-a"
     (dataset / "outside.txt").write_text("first\n", encoding="utf-8")
     (task / "environment" / "outside").symlink_to(dataset / "outside.txt")

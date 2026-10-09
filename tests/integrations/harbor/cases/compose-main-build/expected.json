@@ -1,76 +1,7 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/containerfile/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "build": {
-                "args": {
-                  "FLAVOR": "compose"
-                },
-                "context": ".",
-                "dockerfile": "Containerfile"
-              },
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/image-and-dockerfile/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "main": {
-              "environment": {},
-              "expose": [],
-              "image": "authored/main:latest",
-              "ports": [],
-              "volumes": []
-            }
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h2>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h2>"
-    }
-  ],
   "failures": [],
   "projects": {
-    "compose-main-build-<h3>": {
+    "compose-main-build-<h1>": {
       "compose.yaml": {
         "networks": {},
         "services": {
@@ -110,7 +41,7 @@
             "entrypoint": [],
             "environment": {},
             "expose": [],
-            "image": "hud-harbor:compose-main-build-<h3>-<h4>",
+            "image": "hud-harbor:compose-main-build-<h1>-<h3>",
             "ports": [],
             "volumes": [
               "./compose-project/tests:/controller/tests:ro"
@@ -131,7 +62,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "compose-main-build-<h3>",
+          "env": "compose-main-build-<h1>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -157,7 +88,7 @@
         "tasks.json"
       ]
     },
-    "compose-main-build-<h5>": {
+    "compose-main-build-<h4>": {
       "compose.yaml": {
         "networks": {},
         "services": {
@@ -171,7 +102,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h5>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -184,7 +115,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h5>"
               },
               "context": "./compose-project/main",
               "target": "plain"
@@ -201,7 +132,7 @@
             "entrypoint": [],
             "environment": {},
             "expose": [],
-            "image": "hud-harbor:compose-main-build-<h5>-<h6>",
+            "image": "hud-harbor:compose-main-build-<h4>-<h6>",
             "ports": [],
             "volumes": [
               "./compose-project/tests:/controller/tests:ro"
@@ -222,7 +153,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "compose-main-build-<h5>",
+          "env": "compose-main-build-<h4>",
           "id": "run",
           "runtime_config": {
             "compose": {

@@ -1,69 +1,7 @@
 {
-  "docker": [
-    {
-      "argv": "version --format {{.Server.Version}}"
-    },
-    {
-      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/task-a/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
-      "files": {
-        "compose.json": {
-          "networks": {},
-          "services": {
-            "database": {
-              "build": {
-                "context": "./database"
-              },
-              "env_file": "./database/db.env",
-              "environment": {},
-              "expose": [
-                "5432"
-              ],
-              "ports": [],
-              "volumes": [
-                "./database/data:/var/lib/postgresql/data"
-              ]
-            },
-            "main": {
-              "env_file": "./main.env",
-              "environment": {},
-              "expose": [],
-              "ports": [],
-              "volumes": [
-                "./main-data:/var/lib/main",
-                {
-                  "read_only": true,
-                  "source": "./readonly",
-                  "target": "/etc/authored",
-                  "type": "bind"
-                },
-                "outputs:/app/outputs"
-              ]
-            }
-          },
-          "volumes": {
-            "outputs": {}
-          }
-        },
-        "override.json": {
-          "services": {
-            "main": {
-              "build": {
-                "context": ".",
-                "dockerfile": "Dockerfile"
-              },
-              "image": "hud-harbor-base:<h1>"
-            }
-          }
-        }
-      }
-    },
-    {
-      "argv": "image inspect hud-harbor-base:<h1>"
-    }
-  ],
   "failures": [],
   "projects": {
-    "source-builds-and-volumes-<h2>": {
+    "source-builds-and-volumes-<h1>": {
       "compose.yaml": {
         "networks": {},
         "services": {
@@ -76,7 +14,7 @@
             "expose": [
               "5432"
             ],
-            "image": "hud-harbor-sidecar:<h3>",
+            "image": "hud-harbor-sidecar:<h2>",
             "ports": [],
             "volumes": [
               "./compose-project/environment/database/data:/var/lib/postgresql/data"
@@ -88,7 +26,7 @@
             },
             "environment": {},
             "expose": [],
-            "image": "hud-harbor-base:<h1>",
+            "image": "hud-harbor-base:<h3>",
             "ports": [],
             "scale": 0,
             "volumes": []
@@ -101,7 +39,7 @@
               "args": {
                 "BASE_IMAGE": "hud-base",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+                "VERIFIER_IMAGE": "hud-harbor-base:<h3>"
               },
               "context": "./compose-project/main",
               "target": "plain"
@@ -119,7 +57,7 @@
             "env_file": "./compose-project/environment/main.env",
             "environment": {},
             "expose": [],
-            "image": "hud-harbor:source-builds-and-volumes-<h2>-<h4>",
+            "image": "hud-harbor:source-builds-and-volumes-<h1>-<h4>",
             "ports": [],
             "volumes": [
               "./compose-project/environment/main-data:/mounts/0",
@@ -151,7 +89,7 @@
               "verifier_timeout": 600.0
             }
           },
-          "env": "source-builds-and-volumes-<h2>",
+          "env": "source-builds-and-volumes-<h1>",
           "id": "run",
           "runtime_config": {
             "compose": {
