@@ -94,7 +94,11 @@ async def test_serve_answers_tasks_until_interrupted(hud: Hud, argv: list[str], 
             2,
             {"error": "usage", "message": "--arg expects key=value, got 'name'"},
         ),
-        (["missing.py"], 1, {"error": "failure", "message": "No module named 'missing'"}),
+        (
+            ["missing.py"],
+            1,
+            {"error": "not_found", "message": "no environment source at missing.py"},
+        ),
     ],
 )
 def test_serve_rejects_a_bad_target_before_serving(
