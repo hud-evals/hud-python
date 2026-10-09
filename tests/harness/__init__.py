@@ -10,6 +10,7 @@ from .asgi import serve_asgi
 from .cdp import Command, FakeBrowser, fake_browser
 from .cli import Hud, Result, scrub
 from .config import HudEnv
+from .control import ControlPeer, answer, control_peer, hang_up, hold
 from .docker import FakeDocker
 from .models import ModelRequest, Models, ToolCall, Turn, call, calls, fail, say
 from .relay import FlakyRelay, relay
@@ -20,6 +21,7 @@ from .spans import spans, steps
 
 __all__ = [
     "Command",
+    "ControlPeer",
     "FakeBrowser",
     "FakeDocker",
     "FakeScreen",
@@ -38,12 +40,16 @@ __all__ = [
     "ScriptedAgent",
     "ToolCall",
     "Turn",
+    "answer",
     "call",
     "calls",
+    "control_peer",
     "eventually",
     "fail",
     "fake_browser",
     "fake_screen",
+    "hang_up",
+    "hold",
     "relay",
     "say",
     "scrub",
