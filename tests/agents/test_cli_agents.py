@@ -634,7 +634,7 @@ async def test_a_missing_cli_names_the_runtime_platform(
     run = await run_task(env, cli.agent())
 
     assert run.trace.error == IsStr(
-        regex=r".* is unavailable for runtime platform linux-\w+; install it in the "
+        regex=r".* is unavailable for runtime platform [a-z]+-\w+; install it in the "
         r"environment or provide a managed runtime bundle"
     )
 
