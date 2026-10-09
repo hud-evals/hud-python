@@ -297,15 +297,26 @@ class Answering(Agent):
         run.trace.content = "done"
 
 
-DUMPED = {
-    "claude-cli": ClaudeCLIAgent(ClaudeCLIConfig(reasoning_effort="max", max_steps=3)),
-    "codex-cli": CodexCLIAgent(CodexCLIConfig(sandbox="read-only")),
-    "custom": Answering(AgentConfig(model="custom", timeout_seconds=30)),
+DUMPED: dict[str, Callable[[], Agent]] = {
+    "claude": lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", max_steps=5)),
+    "openai": lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6", prompt_cache_key="shared")),
+    "gemini": lambda: GeminiAgent(GeminiConfig(model="gemini-m", max_output_tokens=512)),
+    "chat": lambda: OpenAIChatAgent(
+        OpenAIChatConfig(model="m", completion_kwargs={"temperature": 0.2}, gateway=True)
+    ),
+    "claude-cli": lambda: ClaudeCLIAgent(ClaudeCLIConfig(reasoning_effort="max", max_steps=3)),
+    "codex-cli": lambda: CodexCLIAgent(CodexCLIConfig(sandbox="read-only")),
+    "custom": lambda: Answering(AgentConfig(model="custom", timeout_seconds=30)),
 }
 
 
-@pytest.mark.parametrize("agent", DUMPED.values(), ids=DUMPED.keys())
-def test_a_dumped_agent_loads_back_to_the_same_configuration(agent: Agent) -> None:
+@pytest.mark.parametrize("build", DUMPED.values(), ids=DUMPED.keys())
+def test_a_dumped_agent_loads_back_to_the_same_configuration(
+    build: Callable[[], Agent], hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY="hud-key")
+    agent = build()
+
     loaded = type(agent).load(agent.dump())
 
     assert (type(loaded), loaded.dump()) == (type(agent), agent.dump())
