@@ -1,437 +1,267 @@
+"""``SSHClient`` against a served workspace, through a relay that fails on demand.
+
+Every test serves a real ``env.workspace`` on loopback and connects to its
+``ssh`` binding through :func:`tests.harness.relay`, which can sever the
+connection mid-command, refuse reconnects, or stall a handshake.
+"""
+
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, cast
-from unittest.mock import AsyncMock
+import os
+import sys
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
-import asyncssh
 import pytest
 
-from hud.capabilities.base import Capability
-from hud.capabilities.connection import Connection
-from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST, SSHClient, SSHConnectionError
+from hud import Environment
+from hud.capabilities import Connection, SSHClient
+from tests.harness import FlakyRelay, eventually, relay, served
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the workspace shell is POSIX")
+
+POWERSHELL = """\
+#!{python}
+import base64, pathlib, re, sys
+
+script = base64.b64decode(sys.argv[-1]).decode("utf-16-le")
+with open({log!r}, "a") as log:
+    log.write(script + "\\n")
+literals = [text.replace("''", "'") for text in re.findall(r"'((?:[^']|'')*)'", script)]
+path = literals[-1]
+if "ReadAllBytes" in script:
+    print(base64.b64encode(pathlib.Path(path).read_bytes()).decode())
+elif "Get-ChildItem" in script:
+    print("\\n".join(sorted(entry.name for entry in pathlib.Path(path).iterdir())))
+elif "WriteAllBytes" in script:
+    pathlib.Path(path).write_bytes(b"")
+else:
+    with open(path, "ab") as file:
+        file.write(base64.b64decode(literals[0]))
+"""
 
 
-class _Completed:
-    stdout = "ok"
-    stderr = ""
-    exit_status = 0
-    returncode: int | None = 0
-
-
-class _Process:
-    def __init__(
-        self,
-        *,
-        completed: _Completed | None = None,
-        wait_error: BaseException | None = None,
-        block: bool = False,
-    ) -> None:
-        self.completed = completed or _Completed()
-        self.wait_error = wait_error
-        self.block = block
-        self.on_wait: Callable[[], None] | None = None
-        self.started = asyncio.Event()
-        self.closed = False
-        self.terminated = False
-        self.waited_closed = False
-
-    async def wait(self, *, check: bool, **kwargs: Any) -> _Completed:
-        assert kwargs == {"timeout": None}
-        del check
-        self.started.set()
-        if self.on_wait is not None:
-            self.on_wait()
-        if self.block:
-            await asyncio.Event().wait()
-        if self.wait_error is not None:
-            raise self.wait_error
-        return self.completed
-
-    def close(self) -> None:
-        self.closed = True
-
-    def terminate(self) -> None:
-        self.terminated = True
-
-    async def wait_closed(self) -> None:
-        self.waited_closed = True
-
-
-class _Connection:
-    def __init__(
-        self,
-        *,
-        closed: bool = False,
-        run_error: Exception | None = None,
-        process: _Process | None = None,
-        stall_open: bool = False,
-        open_error: Exception | None = None,
-    ) -> None:
-        self.closed = closed
-        self.run_error = run_error
-        self.process = process or _Process()
-        self.stall_open = stall_open
-        self.open_error = open_error
-        self.open_cancelled = False
-        self.commands: list[str] = []
-        self.process_kwargs: dict[str, Any] = {}
-
-    def is_closed(self) -> bool:
-        return self.closed
-
-    def close(self) -> None:
-        self.closed = True
-
-    async def wait_closed(self) -> None:
-        pass
-
-    async def run(self, command: str, **kwargs: Any) -> _Completed:
-        del kwargs
-        self.commands.append(command)
-        if self.run_error is not None:
-            if isinstance(self.run_error, asyncssh.ConnectionLost):
-                self.closed = True
-            raise self.run_error
-        return _Completed()
-
-    async def create_process(self, *args: object, **kwargs: Any) -> _Process:
-        self.process_kwargs = kwargs
-        self.commands.append(str(args[0]))
-        if self.stall_open:
+@asynccontextmanager
+async def shell(
+    tmp_path: Path, *, env: dict[str, str] | None = None
+) -> AsyncIterator[tuple[SSHClient, FlakyRelay, Path]]:
+    """A client connected to a served workspace's ``ssh`` binding through a relay."""
+    root = tmp_path / "workspace"
+    root.mkdir()
+    environment = Environment("ssh-faults")
+    environment.workspace(root, track_files=False, env=env)
+    async with served(environment) as control:
+        binding = control.binding("shell")
+        parts = urlsplit(binding.url)
+        assert parts.hostname is not None and parts.port is not None
+        async with relay(parts.hostname, parts.port) as flaky:
+            capability = replace(binding, url=f"ssh://{parts.username}@127.0.0.1:{flaky.port}")
+            client = await SSHClient.connect(capability)
             try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                self.open_cancelled = True
-                raise
-        if self.open_error is not None:
-            raise self.open_error
-        if self.run_error is not None:
-            if isinstance(self.run_error, asyncssh.ConnectionLost):
-                self.closed = True
-            raise self.run_error
-        return self.process
+                yield client, flaky, root
+            finally:
+                await client.close()
 
 
-def _capability() -> Capability:
-    return Capability(
-        name="shell",
-        protocol="ssh/2",
-        url="ssh://workspace.example:2222",
-        params={"user": "agent", "client_key_path": "/tmp/key"},
-    )
+def written(path: Path) -> bool:
+    return path.is_file() and bool(path.read_text().strip())
 
 
-def _client(connection: object) -> SSHClient:
-    return SSHClient(_capability(), cast("asyncssh.SSHClientConnection", connection))
+def running(pid: int) -> bool:
+    """Whether ``pid`` is a live process (an unreaped zombie counts as gone)."""
+    stat = Path(f"/proc/{pid}/stat")
+    try:
+        return stat.read_text().split(") ", 1)[1][0] != "Z"
+    except FileNotFoundError:
+        return False
 
 
-async def test_connect_keeps_tunneled_connection_active(monkeypatch: pytest.MonkeyPatch) -> None:
-    connection = cast("asyncssh.SSHClientConnection", object())
-    connect = AsyncMock(return_value=connection)
-    monkeypatch.setattr(asyncssh, "connect", connect)
-
-    client = await SSHClient.connect(
-        Capability(name="shell", protocol="ssh/2", url="ssh://sandbox.example:8765")
-    )
-
-    assert client.conn is connection
-    connect.assert_awaited_once_with(
-        host="sandbox.example",
-        port=8765,
-        username="agent",
-        client_keys=None,
-        known_hosts=None,
-        errors="replace",
-        keepalive_interval=15,
-        keepalive_count_max=4,
-    )
+async def remote_pid(root: Path) -> int:
+    """The pid a command wrote to ``pid`` in the workspace."""
+    await eventually(lambda: written(root / "pid"))
+    return int((root / "pid").read_text())
 
 
-async def test_connect_classifies_a_lost_handshake_as_retryable(
-    monkeypatch: pytest.MonkeyPatch,
+async def drop(client: SSHClient, flaky: FlakyRelay) -> None:
+    """Sever the relayed connection and wait until the client has seen it close."""
+    flaky.sever()
+    await eventually(client.conn.is_closed)
+
+
+async def test_files_round_trip_through_the_exec_channel(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, _, root):
+        await client.write_text("empty.txt", "")
+        await client.write_text("it's here.txt", "héllo\nwörld\n")
+        (root / "raw.bin").write_bytes(b"\x00\xff\x10")
+
+        assert (root / "empty.txt").read_text() == ""
+        assert await client.read_text("empty.txt") == ""
+        assert await client.read_text(str(root / "it's here.txt")) == "héllo\nwörld\n"
+        assert await client.read_bytes("raw.bin") == b"\x00\xff\x10"
+        assert await client.listdir(".") == ["empty.txt", "it's here.txt", "raw.bin"]
+
+
+async def test_windows_shells_move_files_as_base64_through_encoded_powershell(
+    tmp_path: Path,
 ) -> None:
-    connect = AsyncMock(side_effect=asyncssh.ConnectionLost("dropped"))
-    monkeypatch.setattr(SSHClient, "_connect", connect)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "powershell.log"
+    stub = tools / "powershell"
+    stub.write_text(POWERSHELL.format(python=sys.executable, log=str(log)), encoding="utf-8")
+    stub.chmod(0o755)
+    async with shell(tmp_path, env={"PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"}) as (
+        client,
+        _,
+        root,
+    ):
+        windows_client = SSHClient(
+            replace(client.capability, params={**client.capability.params, "shell": "powershell"}),
+            client.conn,
+        )
+        content = "x" * 7000 + "é"
+        target = str(root / "it's.txt")
 
-    with pytest.raises(SSHConnectionError, match="failed during handshake"):
-        await SSHClient.connect(_capability())
+        await windows_client.write_text(target, content)
+        read = await windows_client.read_text(target)
+        listing = await windows_client.listdir(str(root))
+
+    assert (read, listing) == (content, ["it's.txt"])
+    scripts = log.read_text("utf-8").splitlines()
+    assert [script.split("(", 1)[0] for script in scripts] == [
+        "[IO.File]::WriteAllBytes",
+        "$b=[Convert]::FromBase64String",
+        "$b=[Convert]::FromBase64String",
+        "[Convert]::ToBase64String",
+        "Get-ChildItem -Force -Name -LiteralPath '" + str(root) + "'",
+    ]
+    assert f"'{root}/it''s.txt'" in scripts[0]
 
 
-async def test_run_does_not_replay_a_command_lost_in_flight(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_timed_out_command_is_killed_and_the_next_one_runs(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, _, root):
+        with pytest.raises(TimeoutError):
+            await client.run("echo $$ > pid; exec sleep 30", timeout=0.5)
+        pid = await remote_pid(root)
+        await eventually(lambda: not running(pid))
+
+        result = await client.run("echo next", timeout=10)
+
+    assert result.stdout == "next\n"
+
+
+async def test_a_cancelled_command_kills_its_remote_process(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, _, root):
+        command = asyncio.create_task(client.run("echo $$ > pid; exec sleep 30"))
+        pid = await remote_pid(root)
+
+        command.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await command
+
+        await eventually(lambda: not running(pid))
+
+
+async def test_a_command_lost_in_flight_is_not_replayed_and_the_next_one_reconnects(
+    tmp_path: Path,
 ) -> None:
-    dropped = _Connection(run_error=asyncssh.ConnectionLost("dropped"))
-    replacement = _Connection()
-    client = _client(dropped)
-    reconnect = AsyncMock(return_value=replacement)
-    monkeypatch.setattr(client, "_connect", reconnect)
+    async with shell(tmp_path) as (client, flaky, root):
+        command = asyncio.create_task(client.run("echo ran >> marker; exec sleep 30"))
+        await eventually(lambda: written(root / "marker"))
 
-    with pytest.raises(SSHConnectionError, match="lost during operation"):
-        await client.run("apply-side-effect")
+        flaky.sever()
+        with pytest.raises(ConnectionError, match="SSH command ended without an exit status"):
+            await command
+        result = await client.run("cat marker", timeout=10)
+        process = await client.create_process("echo opened")
+        opened = await process.wait()
 
-    reconnect.assert_not_awaited()
-    assert dropped.commands == ["apply-side-effect"]
-
-    await client.run("next-command")
-    reconnect.assert_awaited_once_with(client.capability)
-    assert replacement.commands == ["next-command"]
+    assert result.stdout == "ran\n"
+    assert opened.stdout == b"opened\n"
+    assert flaky.accepted == 2
 
 
-async def test_create_process_reconnects_before_opening_channel(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_reconnecting_gives_up_after_three_refused_attempts(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, flaky, _):
+        flaky.refuse(3)
+        await drop(client, flaky)
+
+        with pytest.raises(ConnectionError, match="SSH reconnect failed after 3 attempts"):
+            await client.run("true")
+
+    assert flaky.accepted == 4
+
+
+async def test_a_command_timeout_covers_a_stalled_reconnect(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, flaky, _):
+        flaky.stall()
+        await drop(client, flaky)
+
+        with pytest.raises(TimeoutError):
+            await client.run("true", timeout=0.5)
+        flaky.release()
+        result = await client.run("echo back", timeout=10)
+
+    assert result.stdout == "back\n"
+
+
+async def test_closing_during_a_reconnect_discards_the_new_connection(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, flaky, _):
+        flaky.stall()
+        await drop(client, flaky)
+        command = asyncio.create_task(client.run("true"))
+        await flaky.wait_until(stalled=1)
+
+        closing = asyncio.create_task(client.close())
+        await asyncio.sleep(0)
+        flaky.release()
+        with pytest.raises(ConnectionError, match="SSH client is closed"):
+            await command
+        await closing
+
+        await flaky.wait_until(accepted=2)
+        await eventually(lambda: flaky.open == 0)
+
+
+async def test_a_handshake_the_server_drops_is_a_connection_error(tmp_path: Path) -> None:
+    async with shell(tmp_path) as (client, flaky, _):
+        flaky.refuse(1)
+
+        with pytest.raises(ConnectionError, match="SSH connection failed during handshake"):
+            await SSHClient.connect(client.capability)
+
+
+@pytest.mark.parametrize(
+    ("advertised", "connection_capability", "message"),
+    [
+        (False, "shell", "SSH capability does not support process-bound connections"),
+        (True, "browser", "connections do not belong to SSH capability 'shell': inference"),
+    ],
+)
+async def test_process_bound_connections_must_be_advertised_and_belong_to_the_shell(
+    advertised: bool, connection_capability: str, message: str, tmp_path: Path
 ) -> None:
-    dropped = _Connection(closed=True)
-    replacement = _Connection()
-    client = _client(dropped)
-    reconnect = AsyncMock(return_value=replacement)
-    monkeypatch.setattr(client, "_connect", reconnect)
-
-    process = await client.create_process("bridge")
-
-    assert process is replacement.process
-    reconnect.assert_awaited_once_with(client.capability)
-    assert dropped.commands == []
-    assert replacement.commands == ["bridge"]
-
-
-async def test_create_process_sends_only_connection_names() -> None:
-    transport = _Connection()
-    capability = _capability()
-    capability.params["process_connections"] = True
-    client = SSHClient(capability, cast("Any", transport))
     connection = Connection(
         name="inference",
-        capability="ssh",
-        url="https://inference.hud.so",
-        headers={"Authorization": "Bearer scoped-secret"},
+        capability=connection_capability,
+        url="https://inference.example",
+        headers={"Authorization": "Bearer secret"},
     )
+    async with shell(tmp_path) as (client, _, _):
+        bound = SSHClient(
+            replace(
+                client.capability,
+                params={**client.capability.params, "process_connections": advertised},
+            ),
+            client.conn,
+        )
 
-    await client.create_process("agent", connections=(connection,))
-
-    assert transport.process_kwargs["env"] == {PROCESS_CONNECTIONS_REQUEST: '["inference"]'}
-    assert "scoped-secret" not in str(transport.process_kwargs)
-
-
-async def test_create_process_rejects_connections_the_server_did_not_advertise() -> None:
-    client = _client(_Connection())
-    connection = Connection(
-        name="inference",
-        capability="ssh",
-        url="https://inference.hud.so",
-        headers={"Authorization": "Bearer scoped-secret"},
-    )
-
-    with pytest.raises(ValueError, match="does not support"):
-        await client.create_process("agent", connections=(connection,))
-
-
-async def test_create_process_rejects_connections_for_another_capability() -> None:
-    transport = _Connection()
-    capability = _capability()
-    capability.params["process_connections"] = True
-    client = SSHClient(capability, cast("Any", transport))
-    connection = Connection(
-        name="inference",
-        capability="other-workspace",
-        url="https://inference.hud.so",
-        headers={"Authorization": "Bearer scoped-secret"},
-    )
-
-    with pytest.raises(ValueError, match="do not belong"):
-        await client.create_process("agent", connections=(connection,))
-
-
-async def test_create_process_preserves_reconnect_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _client(_Connection(closed=True))
-    reconnect = AsyncMock(side_effect=OSError("unreachable"))
-    monkeypatch.setattr(client, "_connect", reconnect)
-    monkeypatch.setattr("hud.capabilities.ssh.asyncio.sleep", AsyncMock())
-
-    with pytest.raises(SSHConnectionError, match="reconnect failed after 3 attempts"):
-        await client.create_process("bridge")
-
-
-async def test_run_classifies_rejected_session_as_connection_error() -> None:
-    connection = _Connection(
-        open_error=asyncssh.ChannelOpenError(asyncssh.OPEN_RESOURCE_SHORTAGE, "busy")
-    )
-    client = _client(connection)
-
-    with pytest.raises(SSHConnectionError, match="rejected the session"):
-        await client.run("echo never", timeout=1)
-
-    assert connection.closed is False
-
-
-async def test_run_timeout_includes_opening_the_process() -> None:
-    connection = _Connection(stall_open=True)
-    client = _client(connection)
-
-    with pytest.raises(TimeoutError):
-        await client.run("echo never", timeout=0.01)
-
-    assert connection.open_cancelled is True
-
-
-async def test_run_timeout_includes_reconnecting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connection = _Connection(closed=True)
-    client = _client(connection)
-    cancelled = False
-
-    async def reconnect(capability: Capability) -> asyncssh.SSHClientConnection:
-        nonlocal cancelled
-        assert capability is client.capability
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            cancelled = True
-            raise
-        raise AssertionError("reconnect unexpectedly completed")
-
-    monkeypatch.setattr(client, "_connect", reconnect)
-
-    with pytest.raises(TimeoutError):
-        await client.run("echo never", timeout=0.01)
-
-    assert cancelled is True
-
-
-async def test_run_preserves_timeout_when_the_connection_closes() -> None:
-    process = _Process(wait_error=TimeoutError())
-    connection = _Connection(process=process)
-    process.on_wait = lambda: setattr(connection, "closed", True)
-    client = _client(connection)
-
-    with pytest.raises(TimeoutError):
-        await client.run("echo never", timeout=1)
-
-
-@pytest.mark.parametrize("command_timeout", [None, 300])
-async def test_run_cancellation_terminates_the_remote_process(
-    command_timeout: float | None,
-) -> None:
-    connection = _Connection(process=_Process(block=True))
-    client = _client(connection)
-    run = asyncio.create_task(client.run("echo never", timeout=command_timeout))
-    await connection.process.started.wait()
-
-    run.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await run
-    assert connection.process.terminated is True
-    assert connection.process.closed is False
-    assert connection.process.waited_closed is True
-
-
-async def test_run_rejects_a_completed_process_without_a_returncode() -> None:
-    completed = _Completed()
-    completed.returncode = None
-    connection = _Connection(process=_Process(completed=completed))
-    client = _client(connection)
-
-    with pytest.raises(SSHConnectionError, match="without an exit status"):
-        await client.run("echo incomplete", timeout=1)
-
-    assert connection.closed is True
-
-
-async def test_windows_write_uses_one_timeout_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = SSHClient(
-        Capability(
-            name="shell",
-            protocol="ssh/2",
-            url="ssh://workspace.example:2222",
-            params={"shell": "powershell"},
-        ),
-        cast("asyncssh.SSHClientConnection", _Connection()),
-    )
-    timeouts: list[float] = []
-
-    async def run(*args: object, **kwargs: Any) -> _Completed:
-        del args
-        timeout = kwargs["timeout"]
-        assert isinstance(timeout, float)
-        timeouts.append(timeout)
-        await asyncio.sleep(0.01)
-        return _Completed()
-
-    monkeypatch.setattr(client, "run", run)
-
-    await client.write_text("C:\\file.txt", "x" * 7000, timeout_s=1)
-
-    assert len(timeouts) == 3
-    assert timeouts[0] > timeouts[1] > timeouts[2]
-
-
-async def test_posix_empty_write_supplies_eof(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _client(_Connection())
-    run = AsyncMock(return_value=_Completed())
-    monkeypatch.setattr(client, "run", run)
-
-    await client.write_text("empty.txt", "")
-
-    run.assert_awaited_once_with(
-        "cat > empty.txt",
-        check=True,
-        timeout=None,
-        input="",
-        stdin=asyncssh.DEVNULL,
-    )
-
-
-async def test_close_during_reconnect_discards_the_replacement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    dropped = _Connection(closed=True)
-    replacement = _Connection()
-    reconnect_started = asyncio.Event()
-    allow_reconnect = asyncio.Event()
-
-    async def reconnect(capability: Capability) -> asyncssh.SSHClientConnection:
-        assert capability is client.capability
-        reconnect_started.set()
-        await allow_reconnect.wait()
-        return cast("asyncssh.SSHClientConnection", replacement)
-
-    client = _client(dropped)
-    monkeypatch.setattr(client, "_connect", reconnect)
-
-    run = asyncio.create_task(client.run("echo never"))
-    await reconnect_started.wait()
-    close = asyncio.create_task(client.close())
-    await asyncio.sleep(0)
-    allow_reconnect.set()
-
-    with pytest.raises(SSHConnectionError, match="client is closed"):
-        await run
-    await close
-
-    assert replacement.closed is True
-    assert replacement.commands == []
-
-
-async def test_reconnect_exhaustion_raises_connection_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _client(_Connection(closed=True))
-    reconnect = AsyncMock(side_effect=OSError("unreachable"))
-    sleep = AsyncMock()
-    monkeypatch.setattr(client, "_connect", reconnect)
-    monkeypatch.setattr("hud.capabilities.ssh.asyncio.sleep", sleep)
-
-    with pytest.raises(SSHConnectionError, match="failed after 3 attempts"):
-        await client.run("echo never")
-
-    assert reconnect.await_count == 3
-    assert [call.args for call in sleep.await_args_list] == [(0.25,), (0.5,)]
+        with pytest.raises(ValueError, match=message):
+            await bound.create_process("true", connections=(connection,))
