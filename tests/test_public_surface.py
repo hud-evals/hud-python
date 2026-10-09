@@ -1,0 +1,266 @@
+"""The names each package exports, and the CLI's identity."""
+
+from __future__ import annotations
+
+import importlib
+from importlib.metadata import version
+from typing import TYPE_CHECKING
+
+import pytest
+from inline_snapshot import snapshot
+
+from hud import __version__
+
+if TYPE_CHECKING:
+    from tests.harness import Hud
+
+PACKAGES = [
+    "hud",
+    "hud.environment",
+    "hud.environment.robot",
+    "hud.eval",
+    "hud.eval.runtime",
+    "hud.agents",
+    "hud.agents.robot",
+    "hud.agents.tools",
+    "hud.capabilities",
+    "hud.clients",
+    "hud.graders",
+    "hud.integrations.harbor",
+    "hud.telemetry",
+    "hud.train",
+    "hud.utils",
+]
+
+
+def test_each_package_exports_the_documented_names() -> None:
+    exports = {name: sorted(importlib.import_module(name).__all__) for name in PACKAGES}
+
+    assert exports == snapshot(
+        {
+            "hud": [
+                "Chat",
+                "ComposeProject",
+                "Connection",
+                "DockerRuntime",
+                "Environment",
+                "Grade",
+                "HUDRuntime",
+                "HostedRuntime",
+                "Job",
+                "LocalRuntime",
+                "Run",
+                "Runtime",
+                "RuntimeConfig",
+                "RuntimeGPU",
+                "RuntimeLimits",
+                "RuntimeResources",
+                "RuntimeTPU",
+                "SubprocessRuntime",
+                "SyncPlan",
+                "Task",
+                "Taskset",
+                "Trace",
+                "TrainingClient",
+                "__version__",
+                "connect",
+                "instrument",
+            ],
+            "hud.environment": [
+                "Answer",
+                "Capability",
+                "DEFAULT_SYSTEM_MOUNTS",
+                "DataFileArg",
+                "DataFileRef",
+                "DataFilesArg",
+                "Environment",
+                "GradingArg",
+                "Mount",
+                "MountKind",
+                "Peer",
+                "PromptArg",
+                "Workspace",
+                "WorkspaceRoute",
+                "load_environment",
+            ],
+            "hud.environment.robot": [
+                "DirectControl",
+                "GymBridge",
+                "RobotBridge",
+                "RobotEndpoint",
+                "TracedEnv",
+                "serve_bridge",
+                "wrap",
+            ],
+            "hud.eval": [
+                "Chat",
+                "ComposeProject",
+                "DaytonaRuntime",
+                "DockerRuntime",
+                "Grade",
+                "HUDRuntime",
+                "HostedRuntime",
+                "Job",
+                "LocalRuntime",
+                "ModalRuntime",
+                "Provider",
+                "Run",
+                "Runtime",
+                "RuntimeConfig",
+                "RuntimeGPU",
+                "RuntimeLimits",
+                "RuntimeResources",
+                "RuntimeTPU",
+                "Shared",
+                "SubprocessRuntime",
+                "SyncPlan",
+                "Task",
+                "Taskset",
+                "Trace",
+                "rollout",
+            ],
+            "hud.eval.runtime": [
+                "ComposeProject",
+                "DaytonaRuntime",
+                "DockerBindMount",
+                "DockerRuntime",
+                "HUDRuntime",
+                "HostedRuntime",
+                "LocalRuntime",
+                "ModalRuntime",
+                "Provider",
+                "Runtime",
+                "RuntimeConfig",
+                "RuntimeGPU",
+                "RuntimeLimits",
+                "RuntimeResources",
+                "RuntimeTPU",
+                "Shared",
+                "SubprocessRuntime",
+            ],
+            "hud.agents": [
+                "ClaudeAgent",
+                "ClaudeCLIAgent",
+                "ClaudeCLIConfig",
+                "CodexCLIAgent",
+                "CodexCLIConfig",
+                "GeminiAgent",
+                "MCPAgent",
+                "OpenAIAgent",
+                "OpenAIChatAgent",
+                "create_agent",
+            ],
+            "hud.agents.robot": [
+                "Adapter",
+                "BatchedAgent",
+                "BatchedModel",
+                "DatasetWriter",
+                "LeRobotAdapter",
+                "LeRobotModel",
+                "Model",
+                "OpenPIAdapter",
+                "ROBOT_PROTOCOL",
+                "RemoteModel",
+                "RobotAgent",
+            ],
+            "hud.agents.tools": [
+                "AgentTool",
+                "AgentToolSpec",
+                "ClientT",
+                "HostedTool",
+                "MCPTool",
+                "RFBTool",
+                "SSHTool",
+                "result_text",
+                "tool_err",
+                "tool_ok",
+            ],
+            "hud.capabilities": [
+                "CDPClient",
+                "Capability",
+                "CapabilityClient",
+                "Connection",
+                "MCPClient",
+                "RFBClient",
+                "RobotClient",
+                "SSHClient",
+            ],
+            "hud.clients": ["HudClient", "HudProtocolError", "Manifest", "ServerInfo", "connect"],
+            "hud.graders": [
+                "BashGrader",
+                "EvaluationResult",
+                "Grader",
+                "LLMJudgeGrader",
+                "SubScore",
+                "combine",
+                "combine_all",
+                "combine_any",
+                "contains",
+                "contains_all",
+                "contains_any",
+                "exact_match",
+                "f1_score",
+                "normalize",
+                "numeric_match",
+            ],
+            "hud.integrations.harbor": [
+                "AdaptFailure",
+                "AdaptFinding",
+                "AdaptResult",
+                "adapt",
+                "export",
+            ],
+            "hud.telemetry": ["flush", "instrument", "queue_span"],
+            "hud.train": [
+                "BackwardRequest",
+                "BaseTrainingClient",
+                "BuiltinLoss",
+                "CheckpointResponse",
+                "DatumTensors",
+                "ForwardBackwardRequest",
+                "ForwardBackwardResult",
+                "ForwardRequest",
+                "ForwardResult",
+                "LossFn",
+                "OptimStepRequest",
+                "OptimStepResult",
+                "TrainInput",
+                "TrainingClient",
+                "TrainingDatum",
+                "TrajectoryPayload",
+                "TrajectorySample",
+            ],
+            "hud.utils": [
+                "HUDConsole",
+                "PlatformClient",
+                "hud_console",
+                "make_request",
+                "make_request_sync",
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("package", PACKAGES)
+def test_every_exported_name_resolves_and_none_is_private(package: str) -> None:
+    module = importlib.import_module(package)
+
+    assert [name for name in module.__all__ if not hasattr(module, name)] == []
+    assert [name for name in module.__all__ if name.startswith("_") and name != "__version__"] == []
+
+
+def test_the_cli_reports_the_installed_version(hud: Hud) -> None:
+    result = hud("version", "--json")
+
+    assert result.exit_code == 0, result
+    assert result.json == {"name": "hud", "version": __version__}
+    assert __version__ == version("hud")
+
+
+def test_help_lists_the_commands_without_writing_to_stderr(hud: Hud) -> None:
+    result = hud("--help")
+
+    assert result.exit_code == 0, result
+    assert result.stderr == ""
+    for command in ("init", "serve", "deploy", "eval", "task", "sync", "jobs", "trace", "models"):
+        assert f" {command} " in result.stdout
