@@ -9,7 +9,6 @@ model saw next.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -21,7 +20,7 @@ from inline_snapshot import snapshot
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIConfig
 from hud.capabilities import Capability
-from tests.agents.support import run_task, tool_results, wire, workspace_env
+from tests.agents.support import result_line, run_task, tool_results, wire, workspace_env
 from tests.harness import (
     KeyEvent,
     Turn,
@@ -60,22 +59,6 @@ def events(screen: FakeScreen) -> str:
         else:
             rendered.append(f"{event.x},{event.y} b{event.buttons}")
     return " ".join(rendered)
-
-
-def seen(entry: dict[str, Any]) -> str:
-    """One tool result entry as the model sees it, in a line: images as ``<mime WxH>``."""
-    entry = wire(entry)
-    if entry.get("type") == "tool_result":
-        parts = [block.get("text") or block["source"]["data"] for block in entry["content"]]
-        return ("error: " if entry["is_error"] else "") + " ".join(parts)
-    if entry.get("type") == "computer_call_output":
-        acknowledged = [check["id"] for check in entry.get("acknowledged_safety_checks", [])]
-        return " ".join([entry["output"]["image_url"], *(f"ack {id}" for id in acknowledged)])
-    if "functionResponse" in entry:
-        response = entry["functionResponse"]
-        images = [part["inline_data"]["data"] for part in response.get("parts", [])]
-        return " ".join([response["name"], json.dumps(response["response"]), *images])
-    return "user: " + " ".join(block["text"] for block in entry["content"])
 
 
 @dataclass(frozen=True)
@@ -519,7 +502,7 @@ async def test_a_computer_action_reaches_the_screen_as_rfb_input(
     assert run.trace.status == "completed"
     observed = {
         "events": events(screen),
-        "results": [seen(entry) for entry in tool_results(models.requests())],
+        "results": [result_line(entry) for entry in tool_results(models.requests())],
     }
     assert observed == row.observed
 

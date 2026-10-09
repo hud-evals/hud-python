@@ -234,5 +234,29 @@ def tool_results(requests: list[ModelRequest]) -> list[Any]:
     return [message for message in last.body["messages"] if message["role"] == "tool"]
 
 
+def result_line(entry: dict[str, Any], *paths: Path) -> str:
+    """One tool result entry from :func:`tool_results` as the model sees it, in a line.
+
+    Images read ``<mime WxH>``; an Anthropic error result starts ``error:``.
+    """
+    entry = wire(entry, *paths)
+    if entry.get("role") == "tool":
+        return entry["content"]
+    if entry.get("type") == "tool_result":
+        parts = [block.get("text") or block["source"]["data"] for block in entry["content"]]
+        return ("error: " if entry["is_error"] else "") + " ".join(parts)
+    if entry.get("type") == "computer_call_output":
+        acknowledged = [check["id"] for check in entry.get("acknowledged_safety_checks", [])]
+        return " ".join([entry["output"]["image_url"], *(f"ack {id}" for id in acknowledged)])
+    if entry.get("type") == "shell_call_output":
+        limit = entry.get("max_output_length")
+        return json.dumps(entry["output"]) + ("" if limit is None else f" limit={limit}")
+    if "functionResponse" in entry:
+        response = entry["functionResponse"]
+        images = [part["inline_data"]["data"] for part in response.get("parts", [])]
+        return " ".join([response["name"], json.dumps(response["response"]), *images])
+    return "user: " + " ".join(block["text"] for block in entry["content"])
+
+
 def json_lines(text: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
