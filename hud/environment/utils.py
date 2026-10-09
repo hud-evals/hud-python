@@ -94,11 +94,17 @@ def error(msg_id: int | str | None, code: int, message: str) -> dict[str, Any]:
 async def _pump(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     # Resets/aborts are a normal way for tunneled streams to end (an SSH
     # client hanging up, a container dying); they end the pump, not the world.
-    with contextlib.suppress(OSError):
+    # A reset carries no EOF, so close the far side instead: otherwise it
+    # waits for bytes that will never come.
+    try:
         while data := await reader.read(65536):
             writer.write(data)
             await writer.drain()
-        if writer.can_write_eof():
+    except OSError:
+        writer.close()
+        return
+    if writer.can_write_eof():
+        with contextlib.suppress(OSError):
             writer.write_eof()
 
 

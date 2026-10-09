@@ -243,7 +243,7 @@ async def test_opening_a_protocol_without_a_client_points_at_binding() -> None:
             await client.open("custom")
 
 
-async def test_an_opened_ssh_client_tunnels_to_its_upstream_and_closes_with_the_connection(
+async def test_an_opened_ssh_client_retries_an_upstream_that_resets_and_closes_with_the_connection(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "workspace"
@@ -256,6 +256,7 @@ async def test_an_opened_ssh_client_tunnels_to_its_upstream_and_closes_with_the_
         address = urlsplit(shell.url)
         assert address.hostname is not None and address.port is not None
         async with relay(address.hostname, address.port) as flaky:
+            flaky.refuse(2)
             binding = {**shell.to_manifest(), "url": "ssh://agent@environment:22"}
             async with control_peer(
                 [answer(hello(binding))], upstreams={"shell": ("127.0.0.1", flaky.port)}
@@ -271,7 +272,7 @@ async def test_an_opened_ssh_client_tunnels_to_its_upstream_and_closes_with_the_
                 await eventually(lambda: flaky.open == 0)
 
     assert result.stdout == "through the tunnel\n"
-    assert (flaky.accepted, peer.tunnels) == (1, 1)
+    assert (flaky.accepted, peer.tunnels) == (3, 3)
 
 
 @pytest.mark.parametrize(
