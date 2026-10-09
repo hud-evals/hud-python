@@ -626,6 +626,50 @@ def test_a_redeploy_keeps_the_link_and_the_registry_secrets(
     assert ("Registry secrets: kept" in again.stderr) is kept
 
 
+@pytest.mark.parametrize(
+    ("argv", "linked", "machine_default", "body"),
+    [
+        pytest.param(
+            ["--project", "browser-evals"],
+            None,
+            "default",
+            {"project_id": BROWSER_PROJECT_ID},
+            id="the-flag-beats-the-machine-default",
+        ),
+        pytest.param(
+            [],
+            "browser-evals",
+            "locked-down",
+            {"project_id": BROWSER_PROJECT_ID},
+            id="the-directory-link-beats-the-machine-default",
+        ),
+        pytest.param(
+            [], None, "browser-evals", {"project_id": BROWSER_PROJECT_ID}, id="the-machine-default"
+        ),
+        pytest.param([], None, None, {}, id="the-team-default"),
+    ],
+)
+def test_a_first_deploy_lands_in_the_project_its_selection_order_picks(
+    hud: Hud,
+    builds: FakeServices,
+    hud_env: HudEnv,
+    argv: list[str],
+    linked: str | None,
+    machine_default: str | None,
+    body: dict[str, Any],
+) -> None:
+    environment(hud.cwd)
+    if linked is not None:
+        assert hud("project", "use", linked).exit_code == 0
+    hud_env.set(HUD_DEFAULT_PROJECT=machine_default)
+
+    result = hud("deploy", *argv, "--json")
+
+    assert result.exit_code == 0, result
+    (trigger,) = builds.bodies("api", "POST", "/v2/builds/trigger")
+    assert {key: trigger[key] for key in trigger if key not in FIXED} == body
+
+
 # ─── failures ───────────────────────────────────────────────────────────
 
 
