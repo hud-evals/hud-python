@@ -20,19 +20,22 @@ CI runs the full suite; locally, run what you touched:
 
 ```bash
 uv run pytest tests/cli -n auto        # one area, in parallel
-uv run pytest -n auto                  # everything that needs nothing outside the process
+uv run pytest -n auto                  # everything not marked e2e
 ```
 
-Tests run on Python 3.11 and 3.12 in CI.
+Tests run on Python 3.11 and 3.12 in CI. The template scenarios in
+`tests/e2e/test_templates.py` take each `hud init` template to a graded rollout
+and install its packages, so they need network access to PyPI.
 
 Tests that need something outside the process are marked `e2e` and run only
 when selected. They skip themselves when what they need is missing:
 
 ```bash
-uv run pytest -m "e2e and docker"      # a running Docker daemon
-uv run pytest -m "e2e and sandbox"     # Linux, root and bubblewrap
-uv run pytest -m "e2e and live"        # a real HUD account: HUD_API_KEY; spends credits
-uv run pytest -m "e2e and hosted"      # deploys and runs on the HUD platform
+uv run pytest -m "e2e and docker"                  # a running Docker daemon
+uv run pytest -m "e2e and sandbox"                 # Linux, root and bubblewrap
+uv run pytest -m "e2e and live and not hosted"     # HUD_API_KEY; spends credits
+uv run pytest -m "e2e and hosted"                  # deploys and runs on the HUD platform
+uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks; CI checks them nightly
 ```
 
 ### Writing Tests
