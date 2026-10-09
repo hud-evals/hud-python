@@ -1,0 +1,282 @@
+{
+  "docker": [
+    {
+      "argv": "version --format {{.Server.Version}}"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/missing-sidecar-image/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "cache": {
+              "environment": {},
+              "expose": [],
+              "image": "registry.invalid/cache:1",
+              "ports": [],
+              "volumes": []
+            },
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h1>"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/missing-sidecar-image/environment --file <resolve>/compose.json --file <resolve>/override.json pull cache",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "cache": {
+              "environment": {},
+              "expose": [],
+              "image": "registry.invalid/cache:1",
+              "ports": [],
+              "volumes": []
+            },
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/verifier-on-arm/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h2>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h2>"
+    },
+    {
+      "argv": "image inspect --format {{.Os}}/{{.Architecture}} hud-harbor-base:<h2>"
+    },
+    {
+      "argv": "build --platform linux/amd64 --tag hud-harbor-verifier:image-failures-<h3>-<h4> <case>/verifier-on-arm/tests"
+    },
+    {
+      "argv": "version --format {{.Server.Os}}/{{.Server.Arch}}"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/working/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h2>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h2>"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h5> --project-directory <case>/broken/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h5>"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "failures": [
+    [
+      "missing-sidecar-image",
+      "harbor.invalid.image",
+      "invalid",
+      "docker compose --project-name hud-adapt-<h1> --project-directory <case>/missing-sidecar-image/environment --file <resolve>/compose.json --file <resolve>/override.json pull cache failed: Error response from daemon: pull access denied for registry.invalid/cache:1"
+    ],
+    [
+      "verifier-on-arm",
+      "harbor.invalid.image",
+      "invalid",
+      "docker build --platform linux/amd64 --tag hud-harbor-verifier:image-failures-<h3>-<h4> <case>/verifier-on-arm/tests failed: no matching distribution for numpy==1.21\nThe docker server builds for linux/arm64. Tasks authored for linux/amd64 often pin dependencies that publish no wheels for other architectures; set DOCKER_DEFAULT_PLATFORM=linux/amd64 to adapt the task for one architecture throughout."
+    ],
+    [
+      "broken",
+      "harbor.invalid.image",
+      "invalid",
+      "docker compose --project-name hud-adapt-<h5> --project-directory <case>/broken/environment --file <resolve>/compose.json --file <resolve>/override.json build main failed: failed to resolve source metadata for registry.invalid/missing"
+    ]
+  ],
+  "projects": {
+    "image-failures-<h6>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h2>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:image-failures-<h6>-<h7>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "working",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "image-failures-<h6>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "working"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/working/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "pulls": {
+    "registry.example/base:latest": {
+      "config": {
+        "WorkingDir": "/srv"
+      }
+    }
+  }
+}

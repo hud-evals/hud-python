@@ -1,0 +1,10 @@
+{
+  "builds": {
+    "placement/environment": {
+      "platform": "linux/arm64"
+    }
+  },
+  "pulls": {
+    "redis:7-alpine": {}
+  }
+}

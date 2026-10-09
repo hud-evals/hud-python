@@ -1,0 +1,1 @@
+FROM registry.invalid/missing

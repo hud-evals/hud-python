@@ -1,0 +1,7 @@
+services:
+  main:
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        FLAVOR: compose

@@ -1,0 +1,171 @@
+{
+  "docker": [
+    {
+      "argv": "version --format {{.Server.Version}}"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/task-a/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "build": {
+                "context": "."
+              },
+              "deploy": {
+                "resources": {
+                  "limits": {
+                    "cpus": "2",
+                    "memory": "4096M"
+                  }
+                }
+              },
+              "environment": {
+                "FROM_DOTENV": "dotenv",
+                "FROM_ENV": "from-task"
+              },
+              "expose": [],
+              "image": "hud-harbor-base:<h1>",
+              "ports": [],
+              "volumes": []
+            },
+            "redis": {
+              "environment": {},
+              "expose": [
+                "6379"
+              ],
+              "image": "redis:7-alpine",
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h1>"
+    }
+  ],
+  "failures": [],
+  "projects": {
+    "compose-variables-<h2>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h1>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "deploy": {
+              "resources": {
+                "limits": {
+                  "cpus": "2",
+                  "memory": "4096M"
+                }
+              }
+            },
+            "entrypoint": [],
+            "environment": {
+              "FROM_DOTENV": "dotenv",
+              "FROM_ENV": "from-task"
+            },
+            "expose": [],
+            "image": "hud-harbor:compose-variables-<h2>-<h3>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          },
+          "redis": {
+            "environment": {},
+            "expose": [
+              "6379"
+            ],
+            "image": "redis:7-alpine",
+            "ports": [],
+            "volumes": []
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "task-a",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "compose-variables-<h2>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": {
+              "cpu": 2.0,
+              "memory_mb": 4096
+            }
+          },
+          "slug": "task-a"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/.env",
+        "compose-project/environment/Dockerfile",
+        "compose-project/environment/docker-compose.yaml",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/task-a/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

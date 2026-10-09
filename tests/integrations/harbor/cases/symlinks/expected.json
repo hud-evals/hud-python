@@ -1,0 +1,128 @@
+{
+  "docker": [
+    {
+      "argv": "version --format {{.Server.Version}}"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/task-a/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h1>"
+    }
+  ],
+  "failures": [],
+  "projects": {
+    "symlinks-<h2>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h1>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:symlinks-<h2>-<h3>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "task-a",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "symlinks-<h2>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "task-a"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/environment/Dockerfile.link -> Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/task-a/host-file -> /etc/hostname",
+        "compose-project/tests/task-a/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}
