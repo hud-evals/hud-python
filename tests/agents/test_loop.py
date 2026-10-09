@@ -76,7 +76,7 @@ def sequence(*turns: Turn) -> Callable[[ModelRequest], Turn]:
 @dataclass(frozen=True)
 class Row:
     agent: Callable[[], Agent]
-    script: list[Turn] | Callable[[ModelRequest], Turn]
+    turns: list[Turn]
     ending: Any
 
 
@@ -331,7 +331,7 @@ $ exit 3
     ),
     "responses-empty-shell-call-resampled": Row(
         responses(),
-        sequence(shell_call(), say("done")),
+        [shell_call(), say("done")],
         snapshot(
             {
                 "status": "completed",
@@ -345,7 +345,7 @@ $ exit 3
     ),
     "responses-empty-shell-call-on-last-step": Row(
         responses(max_steps=1),
-        sequence(shell_call()),
+        [shell_call()],
         snapshot(
             {
                 "status": "error",
@@ -365,10 +365,7 @@ async def test_a_rollout_ends_for_the_reason_its_last_turn_gives(
     row: Row, models: Models, hud_env: HudEnv, tmp_path: Path
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
-    if callable(row.script):
-        models.respond(row.script)
-    else:
-        models.script(row.script)
+    models.respond(sequence(*row.turns))
 
     run = await run_task(workspace_env(tmp_path / "ws"), row.agent())
 
@@ -570,8 +567,8 @@ async def test_a_lost_workspace_ends_the_rollout_after_three_consecutive_failure
         port = await relay.start(address.hostname, address.port)
         env.add_capability(replace(shell, url=f"ssh://127.0.0.1:{port}"))
 
-    async with mcp_server(cutter(relay)) as tools:
-        env.add_capability(tools)
+    async with mcp_server(cutter(relay)) as cut:
+        env.add_capability(cut)
         run = await run_task(env, chat(max_steps=10)())
 
     assert ending(run, models.requests()) == expected
