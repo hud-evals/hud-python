@@ -22,7 +22,8 @@ class ScriptedAgent(Agent):
     """Answers every run with ``answer``, or ``answer(prompt)`` when it is callable.
 
     ``delay`` waits before answering; ``fail_before`` raises instead of answering
-    and ``fail_after`` raises after the answer is recorded.
+    and ``fail_after`` raises after the answer is recorded. ``linger`` keeps the
+    agent running that long after answering, so a deadline can land on it.
     """
 
     def __init__(
@@ -32,6 +33,7 @@ class ScriptedAgent(Agent):
         delay: float = 0.0,
         fail_before: BaseException | None = None,
         fail_after: BaseException | None = None,
+        linger: float = 0.0,
     ) -> None:
         super().__init__()
         self._answer: Callable[[str], str] = (
@@ -40,6 +42,7 @@ class ScriptedAgent(Agent):
         self._delay = delay
         self._fail_before = fail_before
         self._fail_after = fail_after
+        self._linger = linger
         self.prompts: list[str] = []
 
     async def __call__(self, run: Run) -> None:
@@ -49,6 +52,8 @@ class ScriptedAgent(Agent):
         if self._fail_before is not None:
             raise self._fail_before
         run.trace.content = self._answer(run.prompt_text)
+        if self._linger:
+            await asyncio.sleep(self._linger)
         if self._fail_after is not None:
             raise self._fail_after
 
