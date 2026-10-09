@@ -32,15 +32,16 @@ class Result:
 
 
 class Hud:
-    """``hud`` bound to a working directory. Use the ``hud`` fixture.
+    """``hud`` bound to a working directory and a terminal width. Use the ``hud`` fixture.
 
     The subprocess inherits this process's environment, which the ``hud_env``
     fixture has already isolated: a temporary home, no developer credentials,
     and every service URL pointed at the fake services or a closed port.
     """
 
-    def __init__(self, cwd: Path) -> None:
+    def __init__(self, cwd: Path, *, columns: int = 120) -> None:
         self.cwd = cwd
+        self.columns = columns
         cwd.mkdir(parents=True, exist_ok=True)
 
     def __call__(
@@ -54,7 +55,7 @@ class Hud:
         completed = subprocess.run(
             [sys.executable, "-m", "hud.cli", *args],
             cwd=cwd or self.cwd,
-            env={**os.environ, "COLUMNS": "120", "NO_COLOR": "1", "TERM": "dumb", **(env or {})},
+            env=self._env(env),
             input=input,
             capture_output=True,
             text=True,
@@ -62,6 +63,27 @@ class Hud:
             check=False,
         )
         return Result(completed.returncode, completed.stdout, completed.stderr)
+
+    def start(
+        self, *args: str, cwd: Path | None = None, env: dict[str, str] | None = None
+    ) -> subprocess.Popen[str]:
+        """Start ``hud`` without waiting, for commands that run until signalled.
+
+        Stdout and stderr are pipes; the caller stops the process and reads them.
+        """
+        return subprocess.Popen(
+            [sys.executable, "-m", "hud.cli", *args],
+            cwd=cwd or self.cwd,
+            env=self._env(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def _env(self, extra: dict[str, str] | None) -> dict[str, str]:
+        terminal = {"COLUMNS": str(self.columns), "NO_COLOR": "1", "TERM": "dumb"}
+        return {**os.environ, **terminal, **(extra or {})}
 
 
 def scrub(text: str, *paths: Path) -> str:
