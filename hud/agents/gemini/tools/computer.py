@@ -14,6 +14,11 @@ from hud.agents.tools.base import tool_err
 from .base import GeminiToolSpec
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from hud.agents.tools.base import AgentToolSpec
+    from hud.capabilities import RFBClient
+    from hud.capabilities.rfb import ScreenshotEncoding
     from hud.types import MCPToolResult
 
 logger = logging.getLogger(__name__)
@@ -50,9 +55,16 @@ class GeminiComputerTool(RFBTool):
 
     name = "computer_use"
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.excluded_predefined_functions: list[str] = []
+    def __init__(
+        self,
+        *,
+        spec: AgentToolSpec,
+        client: RFBClient,
+        screenshot_encoding: ScreenshotEncoding,
+        excluded_predefined_functions: Sequence[str] = (),
+    ) -> None:
+        super().__init__(spec=spec, client=client, screenshot_encoding=screenshot_encoding)
+        self.excluded_predefined_functions = list(excluded_predefined_functions)
 
     @classmethod
     def default_spec(cls, model: str) -> GeminiToolSpec:

@@ -729,3 +729,24 @@ async def test_gemini_keeps_screenshots_for_the_three_latest_computer_turns(
 
     responses = [part["functionResponse"] for part in tool_results(models.requests())]
     assert ["parts" in response for response in responses] == [False, False, True, True, True]
+
+
+async def test_gemini_withholds_the_predefined_functions_it_is_configured_to_exclude(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("done")])
+    agent = gemini(excluded_predefined_functions=["drag_and_drop", "search"])()
+
+    async with fake_screen() as screen:
+        screen_capability = Capability.rfb(url=screen.url)
+        await run_task(workspace_env(tmp_path / "ws", capabilities=(screen_capability,)), agent)
+
+    (request,) = models.requests()
+    computer = next(tool for tool in request.body["tools"] if "computerUse" in tool)
+    assert computer == {
+        "computerUse": {
+            "environment": "ENVIRONMENT_BROWSER",
+            "excluded_predefined_functions": ["drag_and_drop", "search"],
+        }
+    }
