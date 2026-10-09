@@ -415,11 +415,10 @@ class _ControlChannel:
                         if not isinstance(args, dict):
                             await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
-                        try:
-                            prompt = await self.start(session_id, task_id, args)
-                        except KeyError:
+                        if task_id not in env.tasks:
                             await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
                             continue
+                        prompt = await self.start(session_id, task_id, args)
                         try:
                             await reply_to(msg_id, prompt)
                         except FrameTooLargeError:

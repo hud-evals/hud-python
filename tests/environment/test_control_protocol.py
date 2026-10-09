@@ -775,6 +775,22 @@ async def test_a_template_starts_and_grades_over_the_wire(
             id="start-signature-mismatch",
         ),
         pytest.param(
+            [("tasks.start", {"id": "lookup"})],
+            snapshot(
+                (
+                    [
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "error": {"code": -32000, "message": "'missing'"},
+                        }
+                    ],
+                    [],
+                )
+            ),
+            id="start-template-raises-keyerror",
+        ),
+        pytest.param(
             [("tasks.grade", {"answer": "x"})],
             snapshot(
                 (
