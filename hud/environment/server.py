@@ -409,7 +409,9 @@ class _ControlChannel:
                         if not isinstance(task_id, str):
                             await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
                             continue
-                        args = params.get("args") or {}
+                        args = params.get("args")
+                        if args is None:
+                            args = {}
                         if not isinstance(args, dict):
                             await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
