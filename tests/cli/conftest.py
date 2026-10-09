@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -39,7 +39,7 @@ def hud(tmp_path: Path) -> Hud:
 DEFAULT_PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000001"
 BROWSER_PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000002"
 LOCKED_PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000003"
-PROJECTS = [
+PROJECTS: list[dict[str, Any]] = [
     {
         "id": DEFAULT_PROJECT_ID,
         "name": "default",
