@@ -279,6 +279,7 @@ Tip: hud qa results <trace-id> for summaries and findings
 """),
         ),
     ],
+    ids=["settled", "polls-until-done", "ignores-other-checks", "errored", "markdown-headline"],
 )
 def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     hud: Hud,
