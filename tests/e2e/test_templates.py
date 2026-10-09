@@ -145,7 +145,7 @@ async def test_a_template_completes_a_rollout_with_a_real_model(
 @pytest.mark.e2e
 @pytest.mark.live
 @pytest.mark.hosted
-@pytest.mark.timeout(2700)
+@pytest.mark.timeout(2400)
 @pytest.mark.parametrize("template", TEMPLATES)
 def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
     template: str, live: HudEnv, hud: Hud, uv: Uv, sdk_wheel: Path, tmp_path: Path
