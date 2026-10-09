@@ -574,11 +574,28 @@ async def _shutdown(server: asyncio.Server) -> None:
 
 
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
-    """Start *env*'s daemons and serve its control channel until cancelled or SIGTERM.
+    """Start *env*'s daemons and serve its control channel until cancelled."""
+    await env.start()
+    server: asyncio.Server | None = None
+    try:
+        server = await bind(env, host, port)
+        port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
+        print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
+        async with server:
+            await server.serve_forever()
+    finally:
+        if server is not None:
+            await _shutdown(server)
+        await env.stop()
+
+
+async def serve_until_terminated(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
+    """``serve`` as a process's main task: SIGTERM stops it cleanly and it returns.
 
     SIGTERM (a container stop, the spawn provider's teardown) ends serving the
     way cancellation does, so shutdown hooks run and backing daemons don't
-    orphan, and then returns normally.
+    orphan. The handler is process-wide, so only entry points that own the
+    process call this.
     """
     main_task = asyncio.current_task()
     assert main_task is not None
@@ -594,7 +611,7 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
     with contextlib.suppress(NotImplementedError):
         loop.add_signal_handler(signal.SIGTERM, terminate)
     try:
-        await _serve(env, host, port)
+        await serve(env, host, port)
     except asyncio.CancelledError:
         if not terminated:
             raise
@@ -602,21 +619,6 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
     finally:
         with contextlib.suppress(NotImplementedError):
             loop.remove_signal_handler(signal.SIGTERM)
-
-
-async def _serve(env: Environment, host: str, port: int) -> None:
-    await env.start()
-    server: asyncio.Server | None = None
-    try:
-        server = await bind(env, host, port)
-        port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
-        print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
-        async with server:
-            await server.serve_forever()
-    finally:
-        if server is not None:
-            await _shutdown(server)
-        await env.stop()
 
 
 def main() -> None:
@@ -630,7 +632,9 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
-    asyncio.run(serve(load_environment(args.path, name=args.env), args.host, args.port))
+    asyncio.run(
+        serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
+    )
 
 
 if __name__ == "__main__":
