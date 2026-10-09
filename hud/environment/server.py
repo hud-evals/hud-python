@@ -574,7 +574,37 @@ async def _shutdown(server: asyncio.Server) -> None:
 
 
 async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
-    """Start *env*'s daemons and serve its control channel until cancelled."""
+    """Start *env*'s daemons and serve its control channel until cancelled or SIGTERM.
+
+    SIGTERM (a container stop, the spawn provider's teardown) ends serving the
+    way cancellation does, so shutdown hooks run and backing daemons don't
+    orphan, and then returns normally.
+    """
+    main_task = asyncio.current_task()
+    assert main_task is not None
+    loop = asyncio.get_running_loop()
+    terminated = False
+
+    def terminate() -> None:
+        nonlocal terminated
+        terminated = True
+        main_task.cancel()
+
+    # Signal handlers are not available on Windows loops.
+    with contextlib.suppress(NotImplementedError):
+        loop.add_signal_handler(signal.SIGTERM, terminate)
+    try:
+        await _serve(env, host, port)
+    except asyncio.CancelledError:
+        if not terminated:
+            raise
+        main_task.uncancel()
+    finally:
+        with contextlib.suppress(NotImplementedError):
+            loop.remove_signal_handler(signal.SIGTERM)
+
+
+async def _serve(env: Environment, host: str, port: int) -> None:
     await env.start()
     server: asyncio.Server | None = None
     try:
@@ -589,17 +619,6 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         await env.stop()
 
 
-async def _serve_until_terminated(env: Environment, host: str, port: int) -> None:
-    main_task = asyncio.current_task()
-    assert main_task is not None
-    # SIGTERM (the spawn provider's teardown) cancels serving so env.stop()
-    # runs and backing daemons don't orphan. Not available on Windows loops.
-    with contextlib.suppress(NotImplementedError):
-        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
-    with contextlib.suppress(asyncio.CancelledError):
-        await serve(env, host, port)
-
-
 def main() -> None:
     from hud.environment import load_environment
 
@@ -611,9 +630,7 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
-    asyncio.run(
-        _serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
-    )
+    asyncio.run(serve(load_environment(args.path, name=args.env), args.host, args.port))
 
 
 if __name__ == "__main__":
