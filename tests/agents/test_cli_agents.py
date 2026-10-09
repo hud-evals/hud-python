@@ -21,7 +21,8 @@ from inline_snapshot import snapshot
 
 from hud.agents import ClaudeCLIAgent, CodexCLIAgent
 from hud.agents.types import ClaudeCLIConfig, CodexCLIConfig
-from hud.capabilities import Capability
+from hud.capabilities import Capability, Connection
+from hud.environment.egress import ANY_HOST
 from tests.agents.cli_stub import Stub, jsonl, process_exited
 from tests.agents.support import run_task, workspace_env
 from tests.harness import fake_screen, steps
@@ -1102,3 +1103,61 @@ async def test_how_codex_exits_decides_how_the_run_ends(
     run = await run_task(cli_env(tmp_path, stub), CodexCLIAgent())
 
     assert outcome(run) == expected
+
+
+# ─── process-bound inference connections (sandbox lane) ─────────────────
+
+CONNECTION = Connection(
+    name="inference",
+    capability="ssh",
+    url="https://inference.hud.so/v1",
+    headers={"Authorization": "Bearer scoped-runtime-token"},
+)
+
+
+def isolated_env(tmp_path: Path, stub: Stub) -> Environment:
+    stub.install()
+    return workspace_env(
+        tmp_path / "ws",
+        env=stub.shell_env(),
+        allowed_hosts={ANY_HOST},
+        require_isolation=True,
+        track_files=False,
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_the_claude_cli_reaches_a_bound_connection_without_its_credential(
+    hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="hud-key")
+    stub = claude_stub(tmp_path)
+
+    run = await run_task(isolated_env(tmp_path, stub), ClaudeCLIAgent(), connections=(CONNECTION,))
+
+    (capture,) = stub.captures()
+    env = capture["env"]
+    assert run.trace.status == "completed"
+    assert (env["ANTHROPIC_BASE_URL"], env["ANTHROPIC_AUTH_TOKEN"]) == (
+        CONNECTION.client_url,
+        "hud-process-bound",
+    )
+    assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS"} & env.keys()
+    assert "scoped-runtime-token" not in str(capture) and "hud-key" not in str(capture)
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_codex_refuses_a_launcher_script_for_a_bound_connection(
+    hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="hud-key")
+    stub = codex_stub(tmp_path)
+
+    run = await run_task(isolated_env(tmp_path, stub), CodexCLIAgent(), connections=(CONNECTION,))
+
+    assert (run.trace.error, stub.captures()) == (
+        IsStr(regex=r".*/codex is a launcher script, but a process-bound inference connection .*"),
+        [],
+    )
