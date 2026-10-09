@@ -1,0 +1,14 @@
+[
+  {
+    "env": "libbet",
+    "id": "play-game",
+    "args": {
+      "game": "test",
+      "max_steps": 40
+    },
+    "slug": "libbet-explore-40",
+    "agent_config": {
+      "max_steps": 40
+    }
+  }
+]

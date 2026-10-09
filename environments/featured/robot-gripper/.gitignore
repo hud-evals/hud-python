@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.claude/
+.env
+*.egg-info/
+.uv/
+.hud/
+.hud_eval.toml
+datasets/
+results/
+telemetry-dump/
+*.mp4
+*.gif
+.DS_Store
+
+# This featured example ships the tested dependency resolution.
+!uv.lock

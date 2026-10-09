@@ -1,0 +1,29 @@
+{
+  "prompt": "You are reviewing the September supplier-payment batch for Atelier Demo Ltd as of 2026-10-06. All attached records, suppliers, identifiers, and amounts are fictional demo data; all amounts are EUR.\n\nReconcile each of the four invoices against settled bank payments, signed vendor terms, and the receiving log. Determine which invoices reconcile and which need investigation. Do not assume that two payments always mean a duplicate, or that an invoice total is necessarily the valid contractual charge. Apply 20% VAT to net price adjustments. There are no other payments, refunds, credit notes, replacement deliveries, or fees outside these attachments.\n\nWrite a concise reconciliation report to /workspace/reconciliation-report.md and include the report in your final answer. Include:\n1. A table for all four invoices showing invoiced amount, paid amount, valid charge, and any recoverable amount.\n2. An explanation of each discrepancy with source filenames and payment/receiving record IDs, showing the calculation including VAT.\n3. The totals invoiced, paid, valid, and recoverable; distinguish requested credits/refunds from amounts already received.\n4. Practical next actions per exception and confirmation of any clean invoice.\n\nInvestigate and report only; do not move funds or contact suppliers.",
+  "criteria": [
+    {
+      "requirement": "NORTH-1048: identifies DEMO-P001 and DEMO-P004 as two distinct settled EUR 900 payments, with EUR 1800 paid against a valid EUR 900 invoice, making EUR 900 recoverable as duplicate payment. Cites the bank ledger and accepted receipt DEMO-R101; does not treat either payment as a reversal.",
+      "weight": 2
+    },
+    {
+      "requirement": "ORBIT-771: applies the unconditional 10% discount to 12 x EUR45 = EUR540 before VAT. Calculates net EUR486, VAT EUR97.20, valid gross EUR583.20, and EUR64.80 recoverable against EUR648 paid in DEMO-P002. Connects the invoice to Orbit's signed terms and requests a credit/refund rather than claiming one already exists.",
+      "weight": 2
+    },
+    {
+      "requirement": "LUMA-309: uses DEMO-R103 and vendor terms to identify six damaged returned units with no replacement. Calculates 24 accepted x EUR24 = EUR576 net + EUR115.20 VAT = EUR691.20 valid; EUR864 paid in DEMO-P003 means EUR172.80 credit/refund due (6 x24 x1.20).",
+      "weight": 2
+    },
+    {
+      "requirement": "CLEAR-552: correctly marks this clean, with EUR600 invoiced and valid, and two permitted installments DEMO-P005 EUR400 plus DEMO-P006 EUR200 totaling EUR600. Says no recoverable amount; does not mistake these installments for a duplicate.",
+      "weight": 1
+    },
+    {
+      "requirement": "Provides a four-invoice reconciliation table and correct batch totals: EUR3012 originally invoiced, EUR3912 settled payments, EUR2774.40 valid contractual charges, and EUR1137.60 recoverable (900 + 64.80 + 172.80). Treats recoverable credits/refunds as pending, not cash already received, and does not recommend another payment on these invoices.",
+      "weight": 2
+    },
+    {
+      "requirement": "For all three exceptions, cites relevant source filenames and record IDs and recommends concrete follow-up: verify and recover North's duplicate payment, request Orbit's discount credit/refund, and request Luma's return credit/refund with receiving evidence. Recommendations stay within investigation/reporting and do not claim to have executed payments or contacted suppliers.",
+      "weight": 1
+    }
+  ]
+}

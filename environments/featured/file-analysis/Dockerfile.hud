@@ -1,0 +1,14 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends git util-linux bubblewrap && rm -rf /var/lib/apt/lists/*
+WORKDIR /hud
+COPY pyproject.toml uv.lock env.py ./
+COPY fixtures ./fixtures
+COPY .hud-sdk/ .hud-sdk/
+ARG HUD_SDK_VERSION=0.6.19
+RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project --no-dev && chmod -R a+rX /usr/local/venv && chmod -R go-rwx /hud
+ENV PATH="/usr/local/venv/bin:${PATH}" WORKSPACE_DIR=/workspace
+RUN python -c "from importlib.metadata import version; import os; assert version('hud') == os.environ['HUD_SDK_VERSION']; print('HUD SDK', version('hud'))"
+RUN mkdir -p /workspace && chown 1000:1000 /workspace
+EXPOSE 8765
+CMD ["hud", "serve", "/hud/env.py", "--host", "0.0.0.0", "--port", "8765"]

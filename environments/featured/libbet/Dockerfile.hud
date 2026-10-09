@@ -1,0 +1,26 @@
+FROM python:3.11-bookworm
+
+# SDL2 runtime libs for PyBoy (it links SDL even in headless "null" mode).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsdl2-2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv for a reproducible, lockfile-pinned install.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Dependency layer first (cached across game-config / ROM changes): the manifest,
+# the lock, and the runtime modules the wheel build needs (pyproject `only-include`).
+COPY pyproject.toml uv.lock env.py tasks.py emulator.py scoring.py games_loader.py ./
+COPY .hud-sdk/ .hud-sdk/
+ARG HUD_SDK_VERSION=0.6.19
+RUN uv sync --frozen --no-dev
+RUN /app/.venv/bin/python -c "import importlib.metadata; import os; version = importlib.metadata.version('hud'); print('HUD_SDK_VERSION=' + version); assert version == os.environ['HUD_SDK_VERSION']"
+
+# Game configs + ROMs (mount real ones at deploy — see README).
+COPY games/ ./games/
+COPY roms/ ./roms/
+
+# Serve the v6 control channel; @env.initialize brings up the in-process game mcp capability.
+CMD ["/app/.venv/bin/hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
