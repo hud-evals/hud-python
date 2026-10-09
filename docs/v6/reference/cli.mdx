@@ -149,6 +149,14 @@ own environment must include an image or Compose configuration.
 
 **Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
 
+`hud eval` exits `0` when every run was graded, whatever the rewards: a low
+reward is a result, not a failure. It exits `1` when any run ended without a
+valid grade (the environment reported a grading error, the grader raised, or
+the rollout failed before grading); `--json` still prints the result document
+first. In that document, `error_count` counts those runs and each run's
+`is_error` says whether it is one of them; errored runs are left out of
+`mean_reward`.
+
 | Option | Description |
 |--------|-------------|
 | `--full` | Run the whole dataset (`--all --auto-respond --max-steps 100`). |

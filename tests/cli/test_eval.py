@@ -88,6 +88,26 @@ def run(hud: Hud, *argv: str, env: dict[str, str] | None = None) -> Any:
             },
             id="low-reward-is-not-an-error",
         ),
+        pytest.param(
+            'yield {"score": 0.0, "isError": True, "content": "grader unavailable"}',
+            1,
+            {
+                "mean_reward": 1.0,
+                "error_count": 1,
+                "runs": [("solve-5fe4d610", 1.0, False), ("solve-bae34777", 0.0, True)],
+            },
+            id="grade-error",
+        ),
+        pytest.param(
+            'raise RuntimeError("grader crashed")',
+            1,
+            {
+                "mean_reward": 1.0,
+                "error_count": 1,
+                "runs": [("solve-5fe4d610", 1.0, False), ("solve-bae34777", 0.0, True)],
+            },
+            id="grader-crash",
+        ),
     ],
 )
 def test_eval_reports_every_run_and_fails_when_one_errored(
