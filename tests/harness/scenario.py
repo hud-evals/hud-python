@@ -78,6 +78,15 @@ async def served(env: Environment, *, row: Task | None = None) -> AsyncIterator[
         yield client
 
 
+async def eventually(condition: Callable[[], bool], *, within: float = 10.0) -> None:
+    """Poll until ``condition()`` holds; raise ``TimeoutError`` after ``within`` seconds."""
+    async with asyncio.timeout(within):
+        while True:
+            if condition():
+                return
+            await asyncio.sleep(0.01)
+
+
 def task_row(env: Environment, template: str, **args: Any) -> Task:
     """The data row for ``template`` on ``env``, as a taskset file would carry it."""
     return Task(env=env.name, id=template, args=args)

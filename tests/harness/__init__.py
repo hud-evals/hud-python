@@ -23,8 +23,9 @@ from .models import (
     shell_call,
     stream_error,
 )
+from .relay import FlakyRelay, relay
 from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
-from .scenario import RecordingProvider, ScriptedAgent, served, task_row
+from .scenario import RecordingProvider, ScriptedAgent, eventually, served, task_row
 from .services import FakeServices, Reply, Request
 from .spans import ROBOT_STEP_SCHEMA, spans, steps
 
@@ -33,6 +34,7 @@ __all__ = [
     "FakeDocker",
     "FakeScreen",
     "FakeServices",
+    "FlakyRelay",
     "Hud",
     "HudEnv",
     "KeyEvent",
@@ -49,9 +51,11 @@ __all__ = [
     "call",
     "calls",
     "computer_call",
+    "eventually",
     "fail",
     "fake_screen",
     "interrupted",
+    "relay",
     "say",
     "scrub",
     "served",
