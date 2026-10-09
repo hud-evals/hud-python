@@ -1,76 +1,59 @@
+"""``RFBClient`` against the harness VNC server."""
+
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-from unittest.mock import ANY, AsyncMock, Mock, patch
+import io
 
-import mcp.types as mcp_types
+import pytest
 from PIL import Image
 
-from hud.agents.tools.rfb import RFBTool
-from hud.capabilities.rfb import RFBClient, WebPScreenshotEncoding
+from hud.capabilities import Capability, RFBClient
+from hud.capabilities.rfb import ScreenshotMimeType, WebPScreenshotEncoding
+from tests.harness import fake_screen
+
+COLOR = (10, 200, 30)
 
 
-class RecordingRFBTool(RFBTool):
-    name = "rfb-test"
-    client: Any
+@pytest.mark.parametrize(
+    ("encoding", "mime_type", "image_format"),
+    [
+        ("image/png", "image/png", "PNG"),
+        ("image/webp", "image/webp", "WEBP"),
+        (WebPScreenshotEncoding(quality=100), "image/webp", "WEBP"),
+    ],
+)
+async def test_a_screenshot_encodes_the_framebuffer_as_requested(
+    encoding: ScreenshotMimeType | WebPScreenshotEncoding, mime_type: str, image_format: str
+) -> None:
+    async with fake_screen(width=8, height=6, color=COLOR) as screen:
+        client = await RFBClient.connect(Capability.rfb(url=screen.url))
+        try:
+            data, encoded_as = await client.screenshot_png(encoding)
+        finally:
+            await client.close()
 
-    def __init__(self) -> None:
-        self.screenshot_encoding = WebPScreenshotEncoding(quality=42)
-        self.client = SimpleNamespace(
-            screenshot_png=AsyncMock(return_value=(b"webp", "image/webp")),
-        )
-
-    async def execute(self, arguments: dict[str, Any]) -> Any:
-        del arguments
-        raise NotImplementedError
-
-    def to_params(self) -> Any:
-        raise NotImplementedError
-
-
-async def test_screenshot_uses_requested_webp_mime_type() -> None:
-    client = object.__new__(RFBClient)
-    object.__setattr__(
-        client,
-        "_conn",
-        SimpleNamespace(
-            screenshot=AsyncMock(return_value=object()),
-        ),
-    )
-
-    save = Mock(side_effect=lambda buffer, **_kwargs: buffer.write(b"webp"))
-    with patch("hud.capabilities.rfb.Image.fromarray", return_value=SimpleNamespace(save=save)):
-        data, mime_type = await client.screenshot_png(WebPScreenshotEncoding(quality=42))
-
-    assert mime_type == "image/webp"
-    assert data == b"webp"
-    save.assert_called_once_with(ANY, format="WEBP", quality=42)
+    image = Image.open(io.BytesIO(data))
+    assert (encoded_as, image.format, image.size) == (mime_type, image_format, (8, 6))
+    colors = image.convert("RGB").getcolors()
+    assert colors is not None
+    ((count, pixel),) = colors
+    assert count == 48
+    assert max(abs(channel - expected) for channel, expected in zip(pixel, COLOR, strict=True)) <= 4
 
 
-async def test_screenshot_uses_requested_png_mime_type() -> None:
-    client = object.__new__(RFBClient)
-    object.__setattr__(
-        client,
-        "_conn",
-        SimpleNamespace(
-            screenshot=AsyncMock(return_value=object()),
-        ),
-    )
+async def test_a_screenshot_reconnects_when_the_stream_drops() -> None:
+    # The first update is the warm-up on connect; the second is dropped.
+    async with fake_screen(width=4, height=4, color=COLOR, drop_on_update=2) as screen:
+        client = await RFBClient.connect(Capability.rfb(url=screen.url))
+        try:
+            data, _ = await client.screenshot_png()
+        finally:
+            await client.close()
 
-    with patch("hud.capabilities.rfb.Image.fromarray", return_value=Image.new("RGB", (8, 8))):
-        data, mime_type = await client.screenshot_png("image/png")
-
-    assert mime_type == "image/png"
-    assert data.startswith(b"\x89PNG")
+    assert screen.connections == 2
+    assert Image.open(io.BytesIO(data)).convert("RGB").getpixel((0, 0)) == COLOR
 
 
-async def test_screenshot_reports_encoded_mime_type() -> None:
-    tool = RecordingRFBTool()
-
-    result = await tool.screenshot()
-
-    image = result.content[0]
-    assert isinstance(image, mcp_types.ImageContent)
-    assert image.mimeType == "image/webp"
-    tool.client.screenshot_png.assert_awaited_once_with(tool.screenshot_encoding)
+async def test_connecting_needs_a_host_and_port() -> None:
+    with pytest.raises(ValueError, match="rfb capability missing host or port"):
+        await RFBClient.connect(Capability(name="screen", protocol="rfb/3.8", url="rfb://host"))

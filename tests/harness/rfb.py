@@ -40,6 +40,10 @@ class FakeScreen:
     events: list[KeyEvent | PointerEvent] = field(default_factory=list)
     connections: int = 0
     port: int = 0
+    #: Close the connection instead of answering this framebuffer update request
+    #: (counted across connections, from 1); 0 never drops.
+    drop_on_update: int = 0
+    updates: int = 0
 
     @property
     def url(self) -> str:
@@ -74,6 +78,9 @@ class FakeScreen:
                     await reader.readexactly(4 * count)
                 elif kind == 3:  # FramebufferUpdateRequest
                     await reader.readexactly(9)
+                    self.updates += 1
+                    if self.updates == self.drop_on_update:
+                        return
                     pixel = bytes([*self.color, 255])
                     writer.write(struct.pack(">BxH", 0, 1))
                     writer.write(struct.pack(">HHHHi", 0, 0, self.width, self.height, 0))
@@ -98,10 +105,14 @@ class FakeScreen:
 
 @asynccontextmanager
 async def fake_screen(
-    width: int = 64, height: int = 48, color: tuple[int, int, int] = (40, 120, 200)
+    width: int = 64,
+    height: int = 48,
+    color: tuple[int, int, int] = (40, 120, 200),
+    *,
+    drop_on_update: int = 0,
 ) -> AsyncIterator[FakeScreen]:
     """Serve a :class:`FakeScreen` on loopback for the duration of the block."""
-    screen = FakeScreen(width, height, color)
+    screen = FakeScreen(width, height, color, drop_on_update=drop_on_update)
     server = await asyncio.start_server(screen._session, "127.0.0.1", 0)
     screen.port = server.sockets[0].getsockname()[1]
     async with server:
