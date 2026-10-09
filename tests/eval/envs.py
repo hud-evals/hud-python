@@ -1,0 +1,170 @@
+"""Fixture environments for the rollout engine scenarios.
+
+Each template's reward proves the path it names ran: ``add`` pays 1.0 only for
+the right sum, so a graded run shows the prompt reached the agent and the answer
+reached the grader. Hooks append to an ``events`` list the test owns.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING, Any
+
+from hud import Environment
+from hud.environment.env import current_session_id
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+SUMS_SOURCE = """
+from hud import Environment
+
+env = Environment("lab")
+
+
+@env.template()
+async def add(a: int, b: int):
+    answer = yield f"add {a} {b}"
+    yield 1.0 if answer == str(a + b) else 0.0
+"""
+
+
+async def eventually(condition: Callable[[], bool], *, within: float = 10.0) -> None:
+    """Wait for work a rollout left running in the background to finish."""
+    deadline = asyncio.get_running_loop().time() + within
+    while not condition():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(f"condition still false after {within}s")
+        await asyncio.sleep(0.01)
+
+
+def solve(prompt: str) -> str:
+    """The right answer to an ``add`` prompt."""
+    _, a, b = prompt.split()
+    return str(int(a) + int(b))
+
+
+def lab(events: list[str] | None = None) -> Environment:
+    """The ``lab`` environment: one template per way a task can start or grade."""
+    log = events if events is not None else []
+    env = Environment("lab")
+
+    @env.initialize
+    async def initialize() -> None:
+        log.append("initialize")
+
+    @env.shutdown
+    async def shutdown() -> None:
+        log.append("shutdown")
+
+    @env.template()
+    async def add(a: int, b: int):
+        log.append(f"start add {a} {b}")
+        try:
+            answer = yield f"add {a} {b}"
+            log.append(f"grade {answer}")
+            yield 1.0 if answer == str(a + b) else 0.0
+        finally:
+            log.append("end add")
+
+    @env.template()
+    async def chat(messages: list[dict[str, Any]]):
+        yield messages
+        yield 1.0
+
+    @env.template()
+    async def silent():
+        yield None
+        yield 1.0
+
+    @env.template()
+    async def claim(published: Any):
+        yield {"prompt": "go", "bindings": published}
+        yield 1.0
+
+    @env.template()
+    async def grade_raises():
+        yield "go"
+        raise RuntimeError("grader exploded")
+        yield 0.0
+
+    @env.template()
+    async def frame(result: dict[str, Any]):
+        yield "go"
+        yield result
+
+    @env.template()
+    async def hang_grading():
+        try:
+            yield "go"
+            await asyncio.Event().wait()
+            yield 1.0
+        finally:
+            log.append("grading cancelled")
+
+    @env.template()
+    async def hang_start():
+        try:
+            await asyncio.Event().wait()
+            yield "never"
+            yield 0.0
+        finally:
+            log.append("start cancelled")
+
+    @env.template()
+    async def large(criteria: str):
+        log.append("large started")
+        yield f"{len(criteria)}"
+        yield 1.0
+
+    return env
+
+
+def actor(answers: list[str], *, grade: str = "score", sessions: Any = None) -> Environment:
+    """The ``actor`` side of a verifier pair: ``solve`` grades 0.25 and carries the answer.
+
+    ``grade="raise"`` makes its grading raise and ``grade="scoreless"`` yields a
+    frame without a score. With ``sessions``, the template writes the answer into
+    its control session's directory under that root, as a container would.
+    """
+    env = Environment("actor")
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        answers.append(str(answer))
+        if sessions is not None:
+            session = sessions / "runtime" / "sessions" / str(current_session_id.get())
+            session.mkdir(parents=True)
+            (session / "work.txt").write_text(str(answer))
+        if grade == "raise":
+            raise RuntimeError("actor grade exploded")
+        yield {"score": 0.25, "answer": answer} if grade == "score" else {"answer": answer}
+
+    return env
+
+
+def judge(*, verdict: str = "check", sessions: Any = None) -> Environment:
+    """The ``judge`` side: ``verify`` pays 1.0 when the actor's answer was ``secret``.
+
+    ``verdict`` picks a failure instead: ``"raise"``, ``"scoreless"`` or ``"zero"``.
+    With ``sessions``, it reads the answer from its restored session directory.
+    """
+    env = Environment("judge")
+
+    @env.template()
+    async def verify():
+        result = yield ""
+        if verdict == "raise":
+            raise RuntimeError("verifier exploded")
+        if verdict == "scoreless":
+            yield {"verdict": "pass"}
+        elif verdict == "zero":
+            yield 0.0
+        elif sessions is not None:
+            session = sessions / "runtime" / "sessions" / str(current_session_id.get())
+            yield 1.0 if (session / "work.txt").read_text() == "secret" else 0.0
+        else:
+            yield 1.0 if result["answer"] == "secret" else 0.0
+
+    return env
