@@ -6,6 +6,7 @@ services, model providers, docker and VNC servers. The fixtures wiring these in
 live in ``tests/conftest.py``.
 """
 
+from .asgi import serve_asgi
 from .cdp import Command, FakeBrowser, fake_browser
 from .cli import Hud, Result, scrub
 from .config import HudEnv
@@ -62,6 +63,7 @@ __all__ = [
     "relay",
     "say",
     "scrub",
+    "serve_asgi",
     "served",
     "shell_call",
     "spans",

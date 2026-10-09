@@ -12,18 +12,16 @@ browser sends an unsolicited ``Page.frameNavigated`` event.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import uvicorn
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route, WebSocketRoute
 
-from .scenario import eventually
+from .asgi import serve_asgi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -112,16 +110,6 @@ async def fake_browser(
             WebSocketRoute("/devtools/page/{page}", browser._session),
         ]
     )
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app, host="127.0.0.1", port=0, log_level="error", lifespan="off", ws="websockets-sansio"
-        )
-    )
-    serving = asyncio.create_task(server.serve())
-    await eventually(lambda: server.started)
-    browser.port = server.servers[0].sockets[0].getsockname()[1]
-    try:
+    async with serve_asgi(app) as port:
+        browser.port = port
         yield browser
-    finally:
-        server.should_exit = True
-        await serving
