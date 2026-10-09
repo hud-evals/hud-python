@@ -10,6 +10,7 @@ from typing import Any
 from hud.settings import settings
 
 STEP_SCHEMA = "hud.step.v1"
+ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
 
 def spans(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, Any]]:
@@ -29,10 +30,12 @@ def spans(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, 
     return sorted(records, key=lambda span: span.get("start_time", ""))
 
 
-def steps(trace_id: str | None, span_dir: Path | None = None) -> list[dict[str, Any]]:
-    """The step payloads of a run, in order."""
+def steps(
+    trace_id: str | None, span_dir: Path | None = None, *, schema: str = STEP_SCHEMA
+) -> list[dict[str, Any]]:
+    """The step payloads of a run, in order; ``schema=ROBOT_STEP_SCHEMA`` for robot telemetry."""
     return [
         span["attributes"]["hud.payload"]
         for span in spans(trace_id, span_dir)
-        if span.get("attributes", {}).get("hud.schema") == STEP_SCHEMA
+        if span.get("attributes", {}).get("hud.schema") == schema
     ]

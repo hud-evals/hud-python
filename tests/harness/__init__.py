@@ -13,9 +13,10 @@ from .models import ModelRequest, Models, ToolCall, Turn, call, calls, fail, say
 from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
 from .scenario import RecordingProvider, ScriptedAgent, served, task_row
 from .services import FakeServices, Reply, Request
-from .spans import spans, steps
+from .spans import ROBOT_STEP_SCHEMA, spans, steps
 
 __all__ = [
+    "ROBOT_STEP_SCHEMA",
     "FakeDocker",
     "FakeScreen",
     "FakeServices",
