@@ -10,6 +10,7 @@ from .asgi import serve_asgi
 from .cdp import Command, FakeBrowser, fake_browser
 from .cli import Hud, Result, scrub
 from .config import HudEnv
+from .control import ControlPeer, answer, control_peer, hang_up, hold
 from .docker import FakeDocker
 from .models import (
     ModelRequest,
@@ -34,6 +35,7 @@ from .spans import ROBOT_STEP_SCHEMA, spans, steps
 __all__ = [
     "ROBOT_STEP_SCHEMA",
     "Command",
+    "ControlPeer",
     "FakeBrowser",
     "FakeDocker",
     "FakeScreen",
@@ -52,13 +54,17 @@ __all__ = [
     "ScriptedAgent",
     "ToolCall",
     "Turn",
+    "answer",
     "call",
     "calls",
     "computer_call",
+    "control_peer",
     "eventually",
     "fail",
     "fake_browser",
     "fake_screen",
+    "hang_up",
+    "hold",
     "interrupted",
     "relay",
     "say",
