@@ -2,15 +2,16 @@
 
 Each outcome runs under every placement, against a fixture environment served
 from source: in this process, in a child process, in a container started through
-the fake docker, and attached by address (the last two served from a child
-process, as in production). The same row must end the same way in all of them.
-Rollout contracts that do not depend on placement follow the matrix.
+the fake docker, attached by address, and over the HUD runtime's tunnel (the
+last three served from a child process, as in production). The same row must
+end the same way in all of them. Rollout contracts that do not depend on
+placement follow the matrix.
 """
 
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,7 @@ from hud.agents.base import Agent
 from hud.capabilities import Connection
 from hud.eval import (
     DockerRuntime,
+    HUDRuntime,
     LocalRuntime,
     Run,
     Runtime,
@@ -32,6 +34,7 @@ from hud.telemetry.context import get_current_trace_id
 from tests.eval.envs import SUMS_SOURCE, eventually, lab, solve
 from tests.fixtures.envs import source
 from tests.harness import ScriptedAgent, steps
+from tests.harness.runtime import host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -39,21 +42,17 @@ if TYPE_CHECKING:
 
     from hud.environment import Environment
     from hud.eval import Provider
-    from tests.harness import FakeDocker
+    from tests.harness import FakeDocker, FakeServices, HudEnv
 
 
-@asynccontextmanager
-async def in_process(
-    path: Path, fake_docker: FakeDocker, tmp_path: Path
-) -> AsyncIterator[Provider]:
-    yield LocalRuntime(path)
+@dataclass(frozen=True)
+class World:
+    """What a placement may stand up around the fixture: fake docker and fake HUD services."""
 
-
-@asynccontextmanager
-async def child_process(
-    path: Path, fake_docker: FakeDocker, tmp_path: Path
-) -> AsyncIterator[Provider]:
-    yield SubprocessRuntime(path)
+    path: Path
+    fake_docker: FakeDocker
+    services: FakeServices
+    hud_env: HudEnv
 
 
 @asynccontextmanager
@@ -64,24 +63,43 @@ async def served_apart(path: Path) -> AsyncIterator[str]:
 
 
 @asynccontextmanager
-async def container(path: Path, fake_docker: FakeDocker, tmp_path: Path) -> AsyncIterator[Provider]:
-    async with served_apart(path) as address:
-        fake_docker.on(r"^run .* fixture:1$", stdout="fixture-1\n")
-        fake_docker.on(r"^port fixture-1 8765$", stdout=f"{address}\n")
+async def in_process(world: World) -> AsyncIterator[Provider]:
+    yield LocalRuntime(world.path)
+
+
+@asynccontextmanager
+async def child_process(world: World) -> AsyncIterator[Provider]:
+    yield SubprocessRuntime(world.path)
+
+
+@asynccontextmanager
+async def container(world: World) -> AsyncIterator[Provider]:
+    async with served_apart(world.path) as address:
+        world.fake_docker.on(r"^run .* fixture:1$", stdout="fixture-1\n")
+        world.fake_docker.on(r"^port fixture-1 8765$", stdout=f"{address}\n")
         yield DockerRuntime("fixture:1")
 
 
 @asynccontextmanager
-async def attached(path: Path, fake_docker: FakeDocker, tmp_path: Path) -> AsyncIterator[Provider]:
-    async with served_apart(path) as address:
+async def attached(world: World) -> AsyncIterator[Provider]:
+    async with served_apart(world.path) as address:
         yield Runtime(f"tcp://{address}")
 
 
-PLACEMENTS = {
+@asynccontextmanager
+async def hud_tunnel(world: World) -> AsyncIterator[Provider]:
+    world.hud_env.set(HUD_API_KEY="k")
+    async with served_apart(world.path) as address:
+        host_on_runtime(world.services, int(address.rsplit(":", 1)[1]))
+        yield HUDRuntime()
+
+
+PLACEMENTS: dict[str, Callable[[World], AbstractAsyncContextManager[Provider]]] = {
     "in-process": in_process,
     "child-process": child_process,
     "container": container,
     "attached": attached,
+    "hud-tunnel": hud_tunnel,
 }
 
 
@@ -194,7 +212,11 @@ OUTCOMES = {
 @pytest.mark.parametrize("placement", PLACEMENTS)
 @pytest.mark.parametrize("outcome", OUTCOMES.values(), ids=OUTCOMES.keys())
 async def test_a_rollout_ends_the_same_way_wherever_it_runs(
-    outcome: Outcome, placement: str, fake_docker: FakeDocker, tmp_path: Path
+    outcome: Outcome,
+    placement: str,
+    fake_docker: FakeDocker,
+    services: FakeServices,
+    hud_env: HudEnv,
 ) -> None:
     row = Task(
         env=outcome.fixture,
@@ -203,7 +225,8 @@ async def test_a_rollout_ends_the_same_way_wherever_it_runs(
         agent_config=outcome.agent_config,
     )
 
-    async with PLACEMENTS[placement](source(outcome.fixture), fake_docker, tmp_path) as runtime:
+    world = World(source(outcome.fixture), fake_docker, services, hud_env)
+    async with PLACEMENTS[placement](world) as runtime:
         job = await row.run(
             outcome.agent(), runtime=runtime, rollout_timeout=outcome.rollout_timeout
         )

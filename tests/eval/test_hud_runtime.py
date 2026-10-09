@@ -7,7 +7,6 @@ this process, so a tunneled rollout really completes and its reward proves it.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import uuid
@@ -28,47 +27,16 @@ from hud.eval import (
 )
 from tests.eval.envs import eventually, lab, solve
 from tests.harness import Reply, ScriptedAgent
+from tests.harness.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator
 
     from starlette.websockets import WebSocket
 
     from tests.harness import FakeServices, HudEnv
 
-SESSIONS = "/runtime/sessions"
-SESSION = "/runtime/sessions/{id}"
-TUNNEL = "/runtime/tunnels/{id}"
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
-
-
-def relay(port: int) -> Callable[[WebSocket, dict[str, str]], Awaitable[None]]:
-    """A tunnel endpoint splicing each WebSocket to the control channel on ``port``."""
-
-    async def handler(websocket: WebSocket, params: dict[str, str]) -> None:
-        del params
-        await websocket.accept()
-        reader, writer = await asyncio.open_connection("127.0.0.1", port)
-
-        async def upstream() -> None:
-            while (message := await websocket.receive())["type"] != "websocket.disconnect":
-                writer.write(message.get("bytes") or message.get("text", "").encode())
-                await writer.drain()
-
-        async def downstream() -> None:
-            while data := await reader.read(65536):
-                await websocket.send_bytes(data)
-
-        tasks = [asyncio.create_task(upstream()), asyncio.create_task(downstream())]
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        writer.close()
-        with contextlib.suppress(Exception):
-            await websocket.close()
-
-    return handler
 
 
 async def dropped(websocket: WebSocket, params: dict[str, str]) -> None:
@@ -81,10 +49,8 @@ async def dropped(websocket: WebSocket, params: dict[str, str]) -> None:
 async def hosted_env(services: FakeServices, hud_env: HudEnv) -> AsyncIterator[None]:
     """Serve ``lab`` here and let the fake runtime service tunnel to it."""
     hud_env.set(HUD_API_KEY="k")
-    services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
-    services.route("runtime", "DELETE", SESSION, json={})
     async with LocalRuntime(lab())(Task(env="lab", id="serve")) as served:
-        services.websocket("runtime", TUNNEL, relay(int(served.url.rsplit(":", 1)[1])))
+        host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
         yield
 
 
