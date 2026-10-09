@@ -37,10 +37,13 @@ class Hud:
     The subprocess inherits this process's environment, which the ``hud_env``
     fixture has already isolated: a temporary home, no developer credentials,
     and every service URL pointed at the fake services or a closed port.
+    ``python`` runs the CLI from another interpreter, such as a project's own
+    virtual environment; it defaults to this one.
     """
 
-    def __init__(self, cwd: Path) -> None:
+    def __init__(self, cwd: Path, *, python: Path | None = None) -> None:
         self.cwd = cwd
+        self.python = str(python) if python is not None else sys.executable
         cwd.mkdir(parents=True, exist_ok=True)
 
     def __call__(
@@ -52,7 +55,7 @@ class Hud:
         timeout: float = 120,
     ) -> Result:
         completed = subprocess.run(
-            [sys.executable, "-m", "hud.cli", *args],
+            [self.python, "-m", "hud.cli", *args],
             cwd=cwd or self.cwd,
             env={**os.environ, "COLUMNS": "120", "NO_COLOR": "1", "TERM": "dumb", **(env or {})},
             input=input,
