@@ -303,7 +303,7 @@ async def test_a_bedrock_inference_profile_is_invoked_on_bedrock_without_streami
     (request,) = services.requests("gateway", "POST")
     assert run.trace.content == "from bedrock"
     assert (request.path, request.headers["authorization"].split(" ")[0]) == (
-        "/model/arn:aws:bedrock:us-east-1:123456789012:inference-profile%2Fclaude/invoke",
+        f"/model/{profile}/invoke",
         "AWS4-HMAC-SHA256",
     )
     body = request.json
