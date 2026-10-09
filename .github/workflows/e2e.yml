@@ -57,8 +57,9 @@ jobs:
           --security-opt apparmor=unconfined
           --volume "$PWD:/src" --workdir /src
           --env UV_PROJECT_ENVIRONMENT=/opt/venv
-          ghcr.io/astral-sh/uv:python3.12-bookworm
+          python:3.12-bookworm
           sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client >/dev/null
+          && pip install -q "uv>=0.12.2"
           && uv run --all-extras pytest -m "e2e and sandbox" -n 4 --timeout 600'
 
   live:
