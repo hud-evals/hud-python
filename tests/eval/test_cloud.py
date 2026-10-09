@@ -318,8 +318,10 @@ async def test_a_modal_sandbox_boots_from_the_image_the_row_resolves_to(
 async def test_a_caller_image_is_built_once_in_the_callers_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image = UserImage()
-    provider = ModalRuntime(image=image, app="app:mine")
+    # Stand-ins for the SDK's own Image and App objects.
+    image: Any = UserImage()
+    app: Any = "app:mine"
+    provider = ModalRuntime(image=image, app=app)
 
     async with serving({"lab": lab()}) as addresses:
         modal = FakeModal({image: addresses["lab"]}).install(monkeypatch)
@@ -593,7 +595,7 @@ async def test_a_verifier_on_a_modal_compose_project_receives_the_actors_session
     )
 
 
-MODAL_REFUSALS: dict[str, tuple[dict[str, Any], RuntimeConfig | None, type[Exception], str]] = {
+MODAL_REFUSALS: dict[str, tuple[dict[str, Any], Any, type[Exception], str]] = {
     "an app and an app name": (
         {"app": "app:mine", "app_name": "other"},
         None,
@@ -898,7 +900,7 @@ async def test_a_daytona_snapshot_follows_its_image(
     context = tmp_path / "context"
     context.mkdir()
     (context / "env.py").write_text("v1")
-    built = BuiltImage(context)
+    built: Any = BuiltImage(context)  # stands in for the SDK's daytona.Image
     sized = RuntimeConfig(resources=RuntimeResources(cpu=2, memory_mb=4096))
 
     async with serving({"lab": lab()}) as addresses:

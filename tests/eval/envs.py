@@ -127,6 +127,18 @@ def lab(events: list[str] | None = None) -> Environment:
     return env
 
 
+def minted(events: list[str] | None = None) -> Task:
+    """A row minted by a live ``lab`` environment, which places it by default."""
+    env = lab(events)
+
+    @env.template()
+    async def total(a: int, b: int):
+        answer = yield f"add {a} {b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    return total(a=2, b=3)
+
+
 def actor(
     env: Environment | None = None,
     *,
