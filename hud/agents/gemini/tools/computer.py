@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import platform
 from typing import TYPE_CHECKING, Any
 
 from google.genai import types as genai_types
@@ -26,7 +25,6 @@ logger = logging.getLogger(__name__)
 GEMINI_DRAG_INSET = 25
 #: Gemini places every coordinate on a 1000x1000 grid regardless of the screen size.
 GEMINI_COORDINATE_SCALE = 1000
-IS_MAC = platform.system().lower() == "darwin"
 
 PREDEFINED_COMPUTER_USE_FUNCTIONS = (
     "open_web_browser",
@@ -51,7 +49,12 @@ GEMINI_COMPUTER_SPEC = GeminiToolSpec(
 
 
 class GeminiComputerTool(RFBTool):
-    """Translate Gemini predefined computer functions into RFBTool primitives."""
+    """Translate Gemini predefined computer functions into RFBTool primitives.
+
+    Browser chords (select all, back, forward, the address bar) are the Linux
+    and Windows ones: the keys land on the environment's display, which the
+    RFB capability does not describe, and environments run Linux.
+    """
 
     name = "computer_use"
 
@@ -109,10 +112,8 @@ class GeminiComputerTool(RFBTool):
                 await self.move(x, y)
                 await self.click(x, y)
             if args.get("clear_before_typing", True):
-                select_all = ["Super_L", "a"] if IS_MAC else ["Control_L", "a"]
-                delete_key = "BackSpace" if IS_MAC else "Delete"
-                await self.press_keys(select_all)
-                await self.press_keys([delete_key])
+                await self.press_keys(["Control_L", "a"])
+                await self.press_keys(["Delete"])
             text = args.get("text")
             if isinstance(text, str) and text:
                 await self.type_text(text)
@@ -141,26 +142,22 @@ class GeminiComputerTool(RFBTool):
             return await self.screenshot()
 
         if action == "go_back":
-            keys = ["Super_L", "bracketleft"] if IS_MAC else ["Alt_L", "Left"]
-            await self.press_keys(keys)
+            await self.press_keys(["Alt_L", "Left"])
             return await self.screenshot()
 
         if action == "go_forward":
-            keys = ["Super_L", "bracketright"] if IS_MAC else ["Alt_L", "Right"]
-            await self.press_keys(keys)
+            await self.press_keys(["Alt_L", "Right"])
             return await self.screenshot()
 
         if action == "search":
             target = args.get("url") or "https://www.google.com"
-            keys = ["Super_L", "l"] if IS_MAC else ["Control_L", "l"]
-            await self.press_keys(keys)
+            await self.press_keys(["Control_L", "l"])
             await self.type_text(str(target))
             await self.press_keys(["Return"])
             return await self.screenshot()
 
         if action == "navigate":
-            keys = ["Super_L", "l"] if IS_MAC else ["Control_L", "l"]
-            await self.press_keys(keys)
+            await self.press_keys(["Control_L", "l"])
             url = args.get("url") or ""
             await self.type_text(str(url))
             await self.press_keys(["Return"])
@@ -175,7 +172,7 @@ class GeminiComputerTool(RFBTool):
                 "ctrl": "Control_L",
                 "cmd": "Super_L",
                 "command": "Super_L",
-                "meta": "Super_L" if IS_MAC else "Control_L",
+                "meta": "Control_L",
                 "alt": "Alt_L",
                 "shift": "Shift_L",
                 "return": "Return",
