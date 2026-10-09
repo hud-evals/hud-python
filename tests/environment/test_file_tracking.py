@@ -22,6 +22,7 @@ from tests.harness import served
 from .conftest import wire
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -73,7 +74,7 @@ DELIVERABLES = {
 }
 
 
-def write(root: Path, files: dict[str, str | None]) -> None:
+def write(root: Path, files: Mapping[str, str | None]) -> None:
     for name, content in files.items():
         path = root / name
         if content is None:

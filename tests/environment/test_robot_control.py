@@ -1,9 +1,11 @@
-"""Direct control gates: an LLM-style agent drives a robot sim through MCP motion tools.
+"""Direct control: a tool-calling agent drives a robot sim through MCP motion tools.
 
-Each test is a whole rollout: an in-process bridge serving the ``openpi/0`` wire,
-an env publishing it plus :class:`DirectControl`'s ``mcp`` capability, and a
-scripted agent calling the tools through the tunneled manifest binding, graded
-by the sim.
+Each row is a whole rollout. A bridge in this process serves the ``openpi/0``
+wire and its control channel; an env publishes it through ``RobotEndpoint`` with
+:class:`DirectControl` attached; a scripted agent calls the motion tool over the
+tunneled ``mcp`` binding, and the sim grades the episode. A row asserts what the
+sim was commanded, what each tool call answered, the reward, and the trace the
+episode streamed to the span file.
 """
 
 from __future__ import annotations
@@ -14,7 +16,6 @@ import copy
 import io
 import itertools
 import math
-import time
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -23,17 +24,18 @@ from typing import TYPE_CHECKING, Any, cast
 import av
 import numpy as np
 import pytest
+from fastmcp import FastMCP  # noqa: TC002 - the override signature is resolved by FastMCP
+from inline_snapshot import snapshot
 
 from hud.agents.base import Agent
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task, rollout
-from hud.telemetry.robot import TraceRecorder
-from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
+from tests.harness import ROBOT_STEP_SCHEMA, steps
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from numpy.typing import NDArray
 
@@ -42,13 +44,10 @@ if TYPE_CHECKING:
     from hud.types import MCPToolResult
 
 
-def _contract(
-    action_type: str,
-    low: list[float],
-    high: list[float],
-    names: list[str] | None = None,
+def contract(
+    action_type: str, low: list[float], high: list[float], names: list[str] | None = None
 ) -> dict[str, Any]:
-    """One camera, a state, and an action of *action_type*. Default action is ``[x, grip]``."""
+    """One camera, a state as wide as the action, and an action of ``action_type``."""
     labels = names or ["x", "grip"]
     return {
         "control_rate": 10,
@@ -65,8 +64,8 @@ def _contract(
     }
 
 
-class _Arm(RobotBridge):
-    """A 1-D arm plus gripper: succeeds (and terminates) holding ``x >= 0.5`` closed."""
+class Arm(RobotBridge):
+    """A 1-D arm and gripper that succeeds, ending the episode, at ``x >= 0.5`` closed."""
 
     def __init__(self, contract: dict[str, Any]) -> None:
         super().__init__()
@@ -93,163 +92,8 @@ class _Arm(RobotBridge):
         return data, np.array([self.success])
 
 
-class _ScriptedLLM(Agent):
-    """Stands in for a tool-calling LLM: plays fixed MCP calls, keeps their results."""
-
-    def __init__(self, *calls: tuple[str, dict[str, Any]]) -> None:
-        super().__init__()
-        self.calls = calls
-        self.tools: set[str] = set()
-        self.schemas: dict[str, dict[str, Any]] = {}
-        self.results: list[MCPToolResult] = []
-
-    async def __call__(self, run: Run) -> None:
-        client = cast("MCPClient", await run.client.open("control"))
-        listed = await client.list_tools()
-        self.tools = {tool.name for tool in listed}
-        self.schemas = {tool.name: tool.inputSchema for tool in listed}
-        for name, arguments in self.calls:
-            self.results.append(await client.call_tool(name, arguments))
-        run.trace.content = "done"
-
-
-@asynccontextmanager
-async def _served(sim: RobotBridge, control: DirectControl) -> AsyncIterator[Environment]:
-    """The docs' custom-bridge env with direct control attached; *sim* runs in this process."""
-    await sim.start()
-    server = await sim.serve_control()
-    env = Environment("arm")
-    endpoint = RobotEndpoint.remote("127.0.0.1", server.sockets[0].getsockname()[1]).attach(env)
-    control.attach(endpoint)
-
-    @env.initialize
-    async def _up() -> None:
-        await endpoint.start()
-        for cap in await endpoint.capabilities():
-            env.add_capability(cap)
-
-    @env.shutdown
-    async def _down() -> None:
-        await endpoint.stop()
-
-    @env.template()
-    async def reach() -> AsyncGenerator[Any, Any]:
-        ep = await endpoint.reset()
-        yield {"prompt": ep["prompt"]}
-        yield await endpoint.result()
-
-    try:
-        yield env
-    finally:
-        await env.stop()
-        server.close()
-        await sim.stop()
-
-
-def _text(result: MCPToolResult) -> str:
-    return "\n".join(block.text for block in result.content if block.type == "text")
-
-
-def _move(tool: str, **values: float) -> tuple[str, dict[str, Any]]:
-    """One required ``target`` plus any further dimensions in ``others``."""
-    items = [{"name": name, "value": value} for name, value in values.items()]
-    target, *others = items
-    return tool, {"target": target, "others": others, "note": "move toward the goal"}
-
-
-async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(
-        _move("move_to", x=0.5),
-        _move("move_to", grip=1.0),
-    )
-
-    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert agent.tools == {"move_to"}  # the ee_abs contract picked the tool; no observe
-    schema = agent.schemas["move_to"]
-    assert set(schema["required"]) == {"target", "others", "note"}
-    strict = ensure_strict_json_schema(copy.deepcopy(schema))
-    assert "target" in strict["required"]  # survives strict mode, unlike minItems on a list
-    assert run.reward == 1.0  # graded by the sim, not the tools
-    # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
-    # The sim matches the command, so the call returns when the target is reached.
-    reach_x, close = np.array(sim.actions[:50]), sim.actions[50:]
-    np.testing.assert_allclose(reach_x[:, 0], np.linspace(0.01, 0.5, 50), rtol=1e-6)
-    np.testing.assert_allclose(reach_x[:, 1], 0.0)
-    # max_step lets the gripper switch in one tick while x holds its commanded target;
-    # the sim succeeds on that tick, which ends the episode.
-    np.testing.assert_allclose(close, [[0.5, 1.0]])
-    reached, closed = agent.results
-    assert [block.type for block in reached.content] == ["text", "text", "image"]
-    # The trace viewer parses this opening line to map tool calls to ticks.
-    assert _text(reached).startswith("Played 50 steps (5.0 s).")
-    assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
-    assert "pose: x=0.5000, grip=0.0000" in _text(reached)
-    assert "The episode has ended" in _text(closed)
-
-
-async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box() -> None:
-    sim = _Arm(_contract("ee_del", [-0.1, -1.0], [0.1, 1.0]))
-    agent = _ScriptedLLM(_move("move_by", x=0.35))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert agent.tools == {"move_by"}
-    # Four in-box steps, then two still ticks once the arm has stopped.
-    np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4 + [[0.0, 0.0]] * 2)
-    assert "observation/state: x=0.3500" in _text(agent.results[0])
-
-
-@pytest.mark.parametrize(
-    ("call", "error"),
-    [
-        (_move("move_to", z=0.1), "unknown dimension(s) ['z']"),
-        (_move("move_to", grip=1.0), "unknown dimension(s) ['grip']; valid: x"),
-        (_move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
-        (
-            ("move_to", {"target": {"name": "x", "value": 0.1}, "others": [], "note": "  "}),
-            "note must say",
-        ),
-    ],
-)
-async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
-    call: tuple[str, dict[str, Any]], error: str
-) -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(call)
-
-    async with _served(sim, DirectControl(dims=["x"], speed=0.05)) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    (result,) = agent.results
-    assert result.isError
-    assert error in _text(result)
-    assert sim.actions == []
-
-
-class _GraspTool(DirectControl):
-    """Stands in for an env that serves its own motion tool on this wire."""
-
-    def _bind_tools(self, server) -> None:
-        server.tool(self.move, name="move_eef", description="grasp targets", output_schema=None)
-
-
-async def test_an_env_can_replace_the_contract_motion_tool() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_eef", x=0.5))
-
-    async with _served(sim, _GraspTool(max_step={"grip": 2.0})) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert agent.tools == {"move_eef"}
-    assert sim.actions  # the replacement tool still plays through the shared wire
-
-
-class _Pose(RobotBridge):
-    """Tracks an absolute action. ``lag`` of 1 snaps to the command; less lags behind."""
+class Pose(RobotBridge):
+    """Tracks an absolute action: ``lag`` 1 snaps to the command, less trails it."""
 
     def __init__(self, contract: dict[str, Any], home: list[float], lag: float = 1.0) -> None:
         super().__init__()
@@ -268,248 +112,839 @@ class _Pose(RobotBridge):
         target = np.asarray(action[0], dtype=np.float64)
         self.actions.append(target.copy())
         self.state = self.state + self.lag * (target - self.state)
-        self.success = False
 
     def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
         data = {
             "observation/image": np.zeros((1, 8, 8, 3), dtype=np.uint8),
             "observation/state": self.state[None].astype(np.float32),
         }
-        return data, np.array([self.success])
+        return data, np.array([False])
 
 
-async def test_an_empty_target_list_is_rejected_and_does_not_move() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("move_to", {"targets": [], "note": "move toward the goal"}))
+class GraspTool(DirectControl):
+    """An env serving its own motion tool on the same wire."""
 
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    (result,) = agent.results
-    assert result.isError
-    assert sim.actions == []
+    def _bind_tools(self, server: FastMCP) -> None:
+        server.tool(self.move, name="move_eef", description="grasp targets", output_schema=None)
 
 
-async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> None:
-    """VLABench was rejected at 10.1 s. The cap is a 60 s safety timeout, not that reject."""
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to", x=0.6))
+class ToolCaller(Agent):
+    """Stands in for a tool-calling LLM: makes fixed MCP calls and keeps the results."""
 
-    async with _served(sim, DirectControl(speed=0.05, max_step={"grip": 2.0})) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    def __init__(self, *calls: tuple[str, dict[str, Any]]) -> None:
+        super().__init__()
+        self.calls = calls
+        self.schemas: dict[str, dict[str, Any]] = {}
+        self.results: list[MCPToolResult] = []
 
-    (result,) = agent.results
-    assert not result.isError
-    # 0.6 / 0.05 s = 12 s at 10 Hz, which used to exceed the 10 s cap.
-    assert len(sim.actions) >= 120
-    assert sim.state[0] == pytest.approx(0.6)
-    assert "safety timeout" not in _text(result)
-
-
-async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to", x=1.0))
-
-    async with _served(sim, DirectControl(dims=["x"], speed=0.05, timeout=0.3)) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    (result,) = agent.results
-    assert not result.isError
-    assert len(sim.actions) == 3  # 0.3 s at 10 Hz
-    assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
-    assert "safety timeout" in _text(result)
-    assert "pose:" in _text(result)
-    assert "commanded:" in _text(result)
+    async def __call__(self, run: Run) -> None:
+        client = cast("MCPClient", await run.client.open("control"))
+        self.schemas = {tool.name: tool.inputSchema for tool in await client.list_tools()}
+        for name, arguments in self.calls:
+            self.results.append(await client.call_tool(name, arguments))
+        run.trace.content = "done"
 
 
-async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
-    sim = _Pose(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], lag=0.25)
-    agent = _ScriptedLLM(_move("move_to", x=0.5))
+@asynccontextmanager
+async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncIterator[Environment]:
+    """The docs' custom-bridge env with direct control attached; ``sim`` runs in this process."""
+    await sim.start()
+    server = await sim.serve_control()
+    env = Environment("arm")
+    endpoint = RobotEndpoint.remote("127.0.0.1", server.sockets[0].getsockname()[1]).attach(env)
+    control.attach(endpoint)
 
-    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    @env.initialize
+    async def connect_sim() -> None:
+        await endpoint.start()
+        for capability in await endpoint.capabilities():
+            env.add_capability(capability)
 
-    assert len(sim.actions) > 50  # interpolation, then a hold while the arm catches up
-    assert sim.state[0] == pytest.approx(0.5, abs=0.01)
-    assert "pose:" in _text(agent.results[0])
-    assert "off:" in _text(agent.results[0])
+    @env.shutdown
+    async def disconnect_sim() -> None:
+        await endpoint.stop()
 
+    @env.template()
+    async def reach() -> AsyncGenerator[Any, Any]:
+        episode = await endpoint.reset()
+        yield {"prompt": episode["prompt"]}
+        yield await endpoint.result()
 
-def _quat_names(order: str) -> list[str]:
-    parts = ("qx", "qy", "qz", "qw") if order == "xyzw" else ("qw", "qx", "qy", "qz")
-    return [f"tcp_quat.{part}" for part in parts]
-
-
-async def test_a_yaw_slerps_an_xyzw_quaternion_instead_of_lerping_components() -> None:
-    names = _quat_names("xyzw")
-    sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [0.0, 0.0, 0.0, 1.0])
-    agent = _ScriptedLLM(_move("move_to", **{"tcp.yaw": math.pi / 2}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    actions = np.array(sim.actions)
-    norms = np.linalg.norm(actions, axis=1)
-    np.testing.assert_allclose(norms, 1.0, atol=1e-5)
-    np.testing.assert_allclose(
-        actions[-1], [0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)], atol=1e-5
-    )
-    # Component lerp of the endpoints is not unit length; slerp stays on the arc.
-    assert len(actions) > 2
+    try:
+        yield env
+    finally:
+        await env.stop()
+        server.close()
+        await sim.stop()
 
 
-async def test_a_roll_writes_a_wxyz_quaternion() -> None:
-    names = _quat_names("wxyz")
-    sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [1.0, 0.0, 0.0, 0.0])
-    agent = _ScriptedLLM(_move("move_to", **{"tcp.roll": math.pi / 2}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    np.testing.assert_allclose(
-        sim.actions[-1],
-        [np.cos(np.pi / 4), np.sin(np.pi / 4), 0.0, 0.0],
-        atol=1e-5,
-    )
+async def drive(sim: RobotBridge, control: DirectControl, agent: Agent) -> Run:
+    async with arm_env(sim, control) as env:
+        return await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
 
-async def test_an_unnamed_quaternion_is_copied_unchanged() -> None:
-    names = ["x", "tcp_quat.qx", "tcp_quat.qy", "tcp_quat.qz", "tcp_quat.qw"]
-    home = [0.0, 0.0, 0.2, 0.0, 0.9]  # not a unit quaternion
-    sim = _Pose(_contract("ee_abs", [0.0, -1, -1, -1, -1], [1, 1, 1, 1, 1], names), home)
-    agent = _ScriptedLLM(_move("move_to", x=0.2))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    actions = np.array(sim.actions)
-    assert len(actions) > 1
-    held = np.broadcast_to(actions[0, 1:], actions[:, 1:].shape)
-    np.testing.assert_array_equal(actions[:, 1:], held)
-    assert abs(np.linalg.norm(actions[0, 1:]) - 1.0) > 1e-3
+def move(tool: str, **values: float) -> tuple[str, dict[str, Any]]:
+    """One required ``target`` and any further dimensions in ``others``."""
+    target, *others = [{"name": name, "value": value} for name, value in values.items()]
+    return tool, {"target": target, "others": others, "note": "move toward the goal"}
 
 
-async def test_euler_commands_slerp_onto_axis_angle() -> None:
-    names = [
-        "target_eef_axis_angle.rx",
-        "target_eef_axis_angle.ry",
-        "target_eef_axis_angle.rz",
-    ]
-    sim = _Pose(_contract("ee_abs", [-np.pi] * 3, [np.pi] * 3, names), [0.0, 0.0, 0.0])
-    agent = _ScriptedLLM(
-        _move("move_to", **{"target_eef.roll": math.pi / 2, "target_eef.yaw": math.pi / 2})
-    )
+def rpy(roll: float, pitch: float, yaw: float) -> list[float]:
+    """The xyzw quaternion of rotation Rz(yaw) Ry(pitch) Rx(roll)."""
 
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    def product(a: list[float], b: list[float]) -> list[float]:
+        ax, ay, az, aw = a
+        bx, by, bz, bw = b
+        return [
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz,
+        ]
 
-    # Intrinsic XYZ of roll=yaw=pi/2 is the quaternion (0.5, 0.5, 0.5, 0.5), angle 2pi/3.
-    component = (2.0 * np.pi / 3.0) / np.sqrt(3.0)
-    np.testing.assert_allclose(sim.actions[-1], [component, component, component], atol=1e-4)
-    angles = np.linalg.norm(sim.actions, axis=1)
-    gaps = np.diff(angles)
-    assert gaps.min() > 0
-    np.testing.assert_allclose(gaps, gaps[0], rtol=0.05)
+    def axis(index: int, angle: float) -> list[float]:
+        quaternion = [0.0, 0.0, 0.0, math.cos(angle / 2)]
+        quaternion[index] = math.sin(angle / 2)
+        return quaternion
+
+    return product(product(axis(2, yaw), axis(1, pitch)), axis(0, roll))
 
 
-async def test_an_euler_contract_is_addressed_as_roll_pitch_yaw() -> None:
-    names = [
-        "ee_pos.x",
-        "ee_pos.y",
-        "ee_pos.z",
-        "ee_euler.x",
-        "ee_euler.y",
-        "ee_euler.z",
-        "gripper",
-    ]
-    low = [-1.0, -1.0, 0.0, -np.pi, -np.pi, -np.pi, 0.0]
-    high = [1.0, 1.0, 2.0, np.pi, np.pi, np.pi, 0.04]
-    sim = _Pose(_contract("ee_abs", low, high, names), [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.04])
-    agent = _ScriptedLLM(_move("move_to", **{"ee_pos.z": 1.2, "ee.yaw": 0.4}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    final = sim.actions[-1]
-    assert final[2] == pytest.approx(1.2, abs=1e-4)
-    assert final[5] == pytest.approx(0.4, abs=1e-4)
-    np.testing.assert_allclose(final[3:5], 0.0, atol=1e-4)
-    assert final[6] == pytest.approx(0.04)
-    assert "ee.yaw" not in sim.contract["features"]["action"]["names"]
+XYZW = [f"tcp_quat.{part}" for part in ("qx", "qy", "qz", "qw")]
+WXYZ = [f"tcp_quat.{part}" for part in ("qw", "qx", "qy", "qz")]
+AXIS_ANGLE = [f"target_eef_axis_angle.{part}" for part in ("rx", "ry", "rz")]
+EULER = ["ee_pos.x", "ee_pos.y", "ee_pos.z", "ee_euler.x", "ee_euler.y", "ee_euler.z", "gripper"]
 
 
-async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    sim.contract["features"]["action"]["type"] = "joint_vel"
+def unit_quaternions(actions: NDArray[Any]) -> bool:
+    return bool(np.allclose(np.linalg.norm(actions, axis=1), 1.0, atol=1e-5))
 
-    with pytest.raises(ValueError, match="direct control needs an action type"):
-        async with _served(sim, DirectControl()) as env:
+
+def even_rotation(actions: NDArray[Any]) -> list[float]:
+    """Distinct per-tick changes of the rotation angle: one value for a constant rate."""
+    return sorted({round(float(gap), 2) for gap in np.diff(np.linalg.norm(actions, axis=1))})
+
+
+def tick_lengths(actions: NDArray[Any]) -> list[float]:
+    """Distinct distances commanded per tick: a constant pace has one value per phase."""
+    return sorted({round(float(np.linalg.norm(gap)), 4) for gap in np.diff(actions, axis=0)})
+
+
+def quaternion_alignment(target: list[float]) -> Callable[[NDArray[Any]], float]:
+    """|cos| of the half-angle between the final command and ``target`` (1.0 is equal)."""
+    return lambda actions: round(abs(float(np.dot(actions[-1], target))), 6)
+
+
+ARM = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
+
+ROWS = [
+    pytest.param(
+        Arm(ARM),
+        DirectControl(max_step={"grip": 2.0}),
+        [move("move_to", x=0.5), move("move_to", grip=1.0)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 50 steps (5.0 s)."],
+                            ["observation/state: x=0.5000", "grip=0.0000"],
+                            ["pose: x=0.5000", "grip=0.0000"],
+                            ["commanded: x=0.5000", "grip=0.0000"],
+                            ["off: x=0.0000", "grip=0.0000"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    },
+                    {
+                        "lines": [
+                            ["Played 1 steps (0.1 s)."],
+                            ["observation/state: x=0.5000", "grip=1.0000"],
+                            ["pose: x=0.5000", "grip=1.0000"],
+                            ["commanded: x=0.5000", "grip=1.0000"],
+                            ["off: x=0.0000", "grip=0.0000"],
+                            ["The episode has ended; stop calling tools."],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    },
+                ],
+                "ticks": 51,
+                "first": [0.01, 0.0],
+                "last": [0.5, 1.0],
+                "measure": [0.01, 1.0],
+                "reward": 1.0,
+            }
+        ),
+        id="move-to-interpolates-until-the-sim-succeeds",
+    ),
+    pytest.param(
+        Arm(contract("ee_del", [-0.1, -1.0], [0.1, 1.0])),
+        DirectControl(),
+        [move("move_by", x=0.35)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_by"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 6 steps (0.6 s)."],
+                            ["observation/state: x=0.3500", "grip=0.0000"],
+                            ["pose: x=0.3500", "grip=0.0000"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 6,
+                "first": [0.0875, 0.0],
+                "last": [0.0, 0.0],
+                "measure": [0.0, 0.0875],
+                "reward": 0.0,
+            }
+        ),
+        id="move-by-splits-a-displacement-into-in-box-steps",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(dims=["x"], speed=0.05),
+        [move("move_to", z=0.1)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [{"error": "unknown dimension(s) ['z']; valid: x"}],
+                "ticks": 0,
+                "first": None,
+                "last": None,
+                "measure": None,
+                "reward": 0.0,
+            }
+        ),
+        id="unknown-dimension-is-a-correctable-error",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(dims=["x"], speed=0.05),
+        [move("move_to", grip=1.0)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [{"error": "unknown dimension(s) ['grip']; valid: x"}],
+                "ticks": 0,
+                "first": None,
+                "last": None,
+                "measure": None,
+                "reward": 0.0,
+            }
+        ),
+        id="dimension-outside-dims-is-a-correctable-error",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(dims=["x"], speed=0.05),
+        [move("move_to", x=1.5)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [{"error": "x=1.5 is outside [0, 1]"}],
+                "ticks": 0,
+                "first": None,
+                "last": None,
+                "measure": None,
+                "reward": 0.0,
+            }
+        ),
+        id="target-out-of-range-is-a-correctable-error",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(dims=["x"], speed=0.05),
+        [("move_to", {"target": {"name": "x", "value": 0.1}, "others": [], "note": "  "})],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [{"error": "note must say what you see and why you chose this motion"}],
+                "ticks": 0,
+                "first": None,
+                "last": None,
+                "measure": None,
+                "reward": 0.0,
+            }
+        ),
+        id="blank-note-is-a-correctable-error",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(),
+        [("move_to", {"targets": [], "note": "move toward the goal"})],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [{"error": "3 validation errors for call[move]"}],
+                "ticks": 0,
+                "first": None,
+                "last": None,
+                "measure": None,
+                "reward": 0.0,
+            }
+        ),
+        id="missing-target-is-rejected",
+    ),
+    pytest.param(
+        Arm(ARM),
+        GraspTool(max_step={"grip": 2.0}),
+        [move("move_eef", x=0.5)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_eef"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 50 steps (5.0 s)."],
+                            ["observation/state: x=0.5000", "grip=0.0000"],
+                            ["pose: x=0.5000", "grip=0.0000"],
+                            ["commanded: x=0.5000", "grip=0.0000"],
+                            ["off: x=0.0000", "grip=0.0000"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 50,
+                "first": [0.01, 0.0],
+                "last": [0.5, 0.0],
+                "measure": [0.01],
+                "reward": 0.0,
+            }
+        ),
+        id="env-replaces-the-contract-motion-tool",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(speed=0.05, max_step={"grip": 2.0}),
+        [move("move_to", x=0.6)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 120 steps (12.0 s)."],
+                            ["observation/state: x=0.6000", "grip=0.0000"],
+                            ["pose: x=0.6000", "grip=0.0000"],
+                            ["commanded: x=0.6000", "grip=0.0000"],
+                            ["off: x=0.0000", "grip=0.0000"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 120,
+                "first": [0.005, 0.0],
+                "last": [0.6, 0.0],
+                "measure": [0.005],
+                "reward": 0.0,
+            }
+        ),
+        id="a-twelve-second-move-plays-until-arrival",
+    ),
+    pytest.param(
+        Arm(ARM),
+        DirectControl(dims=["x"], speed=0.05, timeout=0.3),
+        [move("move_to", x=1.0)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 3 steps (0.3 s)."],
+                            ["Stopped at the 0.3 s safety timeout before the motion finished."],
+                            ["observation/state: x=0.0150", "grip=0.0000"],
+                            ["pose: x=0.0150"],
+                            ["commanded: x=1.0000"],
+                            ["off: x=-0.9850"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 3,
+                "first": [0.005, 0.0],
+                "last": [0.015, 0.0],
+                "measure": [0.005],
+                "reward": 0.0,
+            }
+        ),
+        id="safety-timeout-returns-the-pose",
+    ),
+    pytest.param(
+        Pose(ARM, [0.0, 0.0], lag=0.25),
+        DirectControl(max_step={"grip": 2.0}),
+        [move("move_to", x=0.5)],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 54 steps (5.4 s)."],
+                            ["observation/state: x=0.4905", "grip=0.0000"],
+                            ["pose: x=0.4905", "grip=0.0000"],
+                            ["commanded: x=0.5000", "grip=0.0000"],
+                            ["off: x=-0.0095", "grip=0.0000"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 54,
+                "first": [0.01, 0.0],
+                "last": [0.5, 0.0],
+                "measure": [0.0, 0.01],
+                "reward": 0.0,
+            }
+        ),
+        id="a-lagging-arm-is-held-until-it-arrives",
+    ),
+    pytest.param(
+        Pose(contract("ee_abs", [-1.0] * 4, [1.0] * 4, XYZW), rpy(0, 0, 0)),
+        DirectControl(),
+        [move("move_to", **{"tcp.yaw": math.pi / 2})],
+        unit_quaternions,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 25 steps (2.5 s)."],
+                            [
+                                "observation/state: tcp_quat.qx=0.0000",
+                                "tcp_quat.qy=0.0000",
+                                "tcp_quat.qz=0.7071",
+                                "tcp_quat.qw=0.7071",
+                            ],
+                            ["pose: tcp.roll=0.0000", "tcp.pitch=-0.0000", "tcp.yaw=1.5708"],
+                            ["commanded: tcp.roll=0.0000", "tcp.pitch=-0.0000", "tcp.yaw=1.5708"],
+                            ["off: orientation=0.0000 rad"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 25,
+                "first": [0.0, 0.0, 0.0314, 0.9995],
+                "last": [0.0, 0.0, 0.7071, 0.7071],
+                "measure": True,
+                "reward": 0.0,
+            }
+        ),
+        id="yaw-slerps-an-xyzw-quaternion",
+    ),
+    pytest.param(
+        Pose(contract("ee_abs", [-1.0] * 4, [1.0] * 4, WXYZ), [1.0, 0.0, 0.0, 0.0]),
+        DirectControl(),
+        [move("move_to", **{"tcp.roll": math.pi / 2})],
+        unit_quaternions,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 25 steps (2.5 s)."],
+                            [
+                                "observation/state: tcp_quat.qw=0.7071",
+                                "tcp_quat.qx=0.7071",
+                                "tcp_quat.qy=0.0000",
+                                "tcp_quat.qz=0.0000",
+                            ],
+                            ["pose: tcp.roll=1.5708", "tcp.pitch=-0.0000", "tcp.yaw=0.0000"],
+                            ["commanded: tcp.roll=1.5708", "tcp.pitch=-0.0000", "tcp.yaw=0.0000"],
+                            ["off: orientation=0.0000 rad"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 25,
+                "first": [0.9995, 0.0314, 0.0, 0.0],
+                "last": [0.7071, 0.7071, 0.0, 0.0],
+                "measure": True,
+                "reward": 0.0,
+            }
+        ),
+        id="roll-writes-a-wxyz-quaternion",
+    ),
+    pytest.param(
+        Pose(contract("ee_abs", [-1.0] * 4, [1.0] * 4, XYZW), rpy(0.4, math.pi / 2, 0)),
+        DirectControl(),
+        [move("move_to", **{"tcp.yaw": -0.25})],
+        quaternion_alignment(rpy(0.4, math.pi / 2, -0.25)),
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 4 steps (0.4 s)."],
+                            [
+                                "observation/state: tcp_quat.qx=0.2258",
+                                "tcp_quat.qy=0.6701",
+                                "tcp_quat.qz=-0.2258",
+                                "tcp_quat.qw=0.6701",
+                            ],
+                            ["pose: tcp.roll=0.6500", "tcp.pitch=1.5708", "tcp.yaw=0.0000"],
+                            ["commanded: tcp.roll=0.6500", "tcp.pitch=1.5708", "tcp.yaw=0.0000"],
+                            ["off: orientation=0.0000 rad"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 4,
+                "first": [0.1621, 0.6883, -0.1621, 0.6883],
+                "last": [0.2258, 0.6701, -0.2258, 0.6701],
+                "measure": 1.0,
+                "reward": 0.0,
+            }
+        ),
+        id="yaw-at-pitch-up-keeps-the-wrist-roll",
+    ),
+    pytest.param(
+        Pose(contract("ee_abs", [-1.0] * 4, [1.0] * 4, XYZW), rpy(0.4, -math.pi / 2, 0)),
+        DirectControl(),
+        [move("move_to", **{"tcp.yaw": -0.25})],
+        quaternion_alignment(rpy(0.4, -math.pi / 2, -0.25)),
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 4 steps (0.4 s)."],
+                            [
+                                "observation/state: tcp_quat.qx=0.0530",
+                                "tcp_quat.qy=-0.7051",
+                                "tcp_quat.qz=0.0530",
+                                "tcp_quat.qw=0.7051",
+                            ],
+                            ["pose: tcp.roll=0.1500", "tcp.pitch=-1.5708", "tcp.yaw=0.0000"],
+                            ["commanded: tcp.roll=0.1500", "tcp.pitch=-1.5708", "tcp.yaw=0.0000"],
+                            ["off: orientation=0.0000 rad"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 4,
+                "first": [0.1188, -0.6971, 0.1188, 0.6971],
+                "last": [0.053, -0.7051, 0.053, 0.7051],
+                "measure": 1.0,
+                "reward": 0.0,
+            }
+        ),
+        id="yaw-at-pitch-down-keeps-the-wrist-roll",
+    ),
+    pytest.param(
+        Pose(
+            contract("ee_abs", [0.0, -1, -1, -1, -1], [1, 1, 1, 1, 1], ["x", *XYZW]),
+            [0.0, 0.0, 0.2, 0.0, 0.9],
+        ),
+        DirectControl(),
+        [move("move_to", x=0.2)],
+        lambda actions: sorted({tuple(row) for row in np.round(actions[:, 1:], 6).tolist()}),
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 20 steps (2.0 s)."],
+                            [
+                                "observation/state: x=0.2000",
+                                "tcp_quat.qx=0.0000",
+                                "tcp_quat.qy=0.2000",
+                                "tcp_quat.qz=0.0000",
+                                "tcp_quat.qw=0.9000",
+                            ],
+                            [
+                                "pose: x=0.2000",
+                                "tcp.roll=0.0000",
+                                "tcp.pitch=0.4373",
+                                "tcp.yaw=0.0000",
+                            ],
+                            [
+                                "commanded: x=0.2000",
+                                "tcp.roll=0.0000",
+                                "tcp.pitch=0.4373",
+                                "tcp.yaw=0.0000",
+                            ],
+                            ["off: x=0.0000", "orientation=0.0000 rad"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 20,
+                "first": [0.01, 0.0, 0.2, 0.0, 0.9],
+                "last": [0.2, 0.0, 0.2, 0.0, 0.9],
+                "measure": [(0.0, 0.2, 0.0, 0.9)],
+                "reward": 0.0,
+            }
+        ),
+        id="an-unnamed-quaternion-is-held-unchanged",
+    ),
+    pytest.param(
+        Pose(contract("ee_abs", [-np.pi] * 3, [np.pi] * 3, AXIS_ANGLE), [0.0, 0.0, 0.0]),
+        DirectControl(),
+        [move("move_to", **{"target_eef.roll": math.pi / 2, "target_eef.yaw": math.pi / 2})],
+        even_rotation,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 34 steps (3.4 s)."],
+                            [
+                                "observation/state: target_eef_axis_angle.rx=1.2092",
+                                "target_eef_axis_angle.ry=1.2092",
+                                "target_eef_axis_angle.rz=1.2092",
+                            ],
+                            [
+                                "pose: target_eef.roll=1.5708",
+                                "target_eef.pitch=0.0000",
+                                "target_eef.yaw=1.5708",
+                            ],
+                            [
+                                "commanded: target_eef.roll=1.5708",
+                                "target_eef.pitch=-0.0000",
+                                "target_eef.yaw=1.5708",
+                            ],
+                            ["off: orientation=0.0000 rad"],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 34,
+                "first": [0.0356, 0.0356, 0.0356],
+                "last": [1.2092, 1.2092, 1.2092],
+                "measure": [0.06],
+                "reward": 0.0,
+            }
+        ),
+        id="euler-commands-slerp-onto-axis-angle",
+    ),
+    pytest.param(
+        Pose(
+            contract(
+                "ee_abs",
+                [-1.0, -1.0, 0.0, -np.pi, -np.pi, -np.pi, 0.0],
+                [1.0, 1.0, 2.0, np.pi, np.pi, np.pi, 0.04],
+                EULER,
+            ),
+            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.04],
+        ),
+        DirectControl(),
+        [move("move_to", **{"ee_pos.z": 1.2, "ee.yaw": 0.4})],
+        tick_lengths,
+        snapshot(
+            {
+                "tools": ["move_to"],
+                "results": [
+                    {
+                        "lines": [
+                            ["Played 10 steps (1.0 s)."],
+                            [
+                                "observation/state: ee_pos.x=0.0000",
+                                "ee_pos.y=0.0000",
+                                "ee_pos.z=1.2000",
+                                "ee_euler.x=0.0000",
+                                "ee_euler.y=0.0000",
+                                "ee_euler.z=0.4000",
+                                "gripper=0.0400",
+                            ],
+                            [
+                                "pose: ee_pos.x=0.0000",
+                                "ee_pos.y=0.0000",
+                                "ee_pos.z=1.2000",
+                                "ee.roll=0.0000",
+                                "ee.pitch=-0.0000",
+                                "ee.yaw=0.4000",
+                                "gripper=0.0400",
+                            ],
+                            [
+                                "commanded: ee_pos.x=0.0000",
+                                "ee_pos.y=0.0000",
+                                "ee_pos.z=1.2000",
+                                "ee.roll=0.0000",
+                                "ee.pitch=-0.0000",
+                                "ee.yaw=0.4000",
+                                "gripper=0.0400",
+                            ],
+                            [
+                                "off: ee_pos.x=0.0000",
+                                "ee_pos.y=0.0000",
+                                "ee_pos.z=0.0000",
+                                "orientation=0.0000 rad",
+                                "gripper=0.0000",
+                            ],
+                            ["camera observation/image:"],
+                        ],
+                        "images": 1,
+                    }
+                ],
+                "ticks": 10,
+                "first": [0.0, 0.0, 1.02, 0.0, 0.0, 0.04, 0.04],
+                "last": [0.0, 0.0, 1.2, 0.0, 0.0, 0.4, 0.04],
+                "measure": [0.0447],
+                "reward": 0.0,
+            }
+        ),
+        id="an-euler-contract-is-addressed-as-roll-pitch-yaw",
+    ),
+]
+
+
+def answered(result: MCPToolResult) -> dict[str, Any]:
+    """A tool result as the model reads it: an error's first line, or the reply's lines."""
+    texts = [block.text for block in result.content if block.type == "text"]
+    if result.isError:
+        return {"error": texts[0].splitlines()[0]}
+    return {
+        "lines": [line.split(", ") for text in texts for line in text.splitlines()],
+        "images": sum(block.type == "image" for block in result.content),
+    }
+
+
+def rounded(action: NDArray[Any]) -> list[float]:
+    return (np.round(action, 4) + 0.0).tolist()
+
+
+@pytest.mark.parametrize(("sim", "control", "calls", "measure", "expected"), ROWS)
+async def test_a_motion_tool_call_plays_out_on_the_sim(
+    sim: Arm | Pose,
+    control: DirectControl,
+    calls: list[tuple[str, dict[str, Any]]],
+    measure: Callable[[NDArray[Any]], Any],
+    expected: Any,
+) -> None:
+    agent = ToolCaller(*calls)
+
+    run = await drive(sim, control, agent)
+
+    actions = np.array(sim.actions, dtype=np.float64)
+    assert {
+        "tools": sorted(agent.schemas),
+        "results": [answered(result) for result in agent.results],
+        "ticks": len(actions),
+        "first": rounded(actions[0]) if len(actions) else None,
+        "last": rounded(actions[-1]) if len(actions) else None,
+        "measure": measure(actions) if len(actions) else None,
+        "reward": run.reward,
+    } == expected
+
+
+async def test_the_motion_tool_schema_keeps_its_target_required_under_strict_mode() -> None:
+    agent = ToolCaller()
+
+    await drive(Arm(ARM), DirectControl(), agent)
+
+    schema = agent.schemas["move_to"]
+    assert sorted(schema["required"]) == ["note", "others", "target"]
+    assert "target" in ensure_strict_json_schema(copy.deepcopy(schema))["required"]
+
+
+async def test_a_contract_without_a_motion_action_type_is_refused_at_start() -> None:
+    sim = Arm(contract("joint_vel", [0.0, -1.0], [1.0, 1.0]))
+
+    with pytest.raises(ValueError, match="direct control needs an action type in"):
+        async with arm_env(sim, DirectControl()) as env:
             await env.start()
 
 
-@pytest.mark.parametrize(("control_rate", "tick_seconds"), [(10, 0.1), (0.4, 1.0)])
-async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per_camera(
-    monkeypatch: pytest.MonkeyPatch, control_rate: float, tick_seconds: float
-) -> None:
-    spans: list[dict[str, Any]] = []
-    monkeypatch.setattr("hud.types.queue_span", spans.append)
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    sim.contract["control_rate"] = control_rate
-    agent = _ScriptedLLM(_move("move_to", x=0.3), _move("move_to", x=0.5))
-
-    async with _served(sim, DirectControl()) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    payloads = [
-        span["attributes"][PAYLOAD_ATTRIBUTE]
-        for span in spans
-        if span["attributes"][TASK_RUN_ID_ATTRIBUTE] == run.trace_id
-    ]
-    segments = [p for p in payloads if p.get("source") == "video_segment"]
-    assert {segment["camera"] for segment in segments} == {"observation/image"}
+def frames_in(segments: list[dict[str, Any]]) -> int:
     mp4 = b"".join(base64.b64decode(segment["segment"]["data"]) for segment in segments)
     with av.open(io.BytesIO(mp4), mode="r") as container:
-        frames = sum(1 for _ in container.decode(video=0))
-    assert frames == 1 + len(sim.actions)  # the opening scene, then every tick of both moves
+        return sum(1 for _ in container.decode(video=0))
+
+
+@pytest.mark.parametrize(("control_rate", "tick_seconds"), [(10, 0.1), (0.4, 1.0)])
+async def test_every_played_tick_streams_to_the_trace_as_state_and_video(
+    control_rate: float, tick_seconds: float
+) -> None:
+    sim = Arm(ARM | {"control_rate": control_rate})
+
+    run = await drive(
+        sim, DirectControl(), ToolCaller(move("move_to", x=0.3), move("move_to", x=0.5))
+    )
+
+    payloads = steps(run.trace_id, schema=ROBOT_STEP_SCHEMA)
     observations = [p for p in payloads if p.get("source") == "observation"]
-    assert [obs["tick"] for obs in observations] == list(range(frames))
-    assert observations[-1]["state"]
-    # The viewer's clock is the stamps' span: the video's length, not the calls' latency.
+    segments = [p for p in payloads if p.get("source") == "video_segment"]
     starts = [datetime.fromisoformat(obs["started_at"]) for obs in observations]
+    # The opening scene, then one observation and one frame per tick of both moves.
+    assert [obs["tick"] for obs in observations] == list(range(1 + len(sim.actions)))
+    assert {segment["camera"] for segment in segments} == {"observation/image"}
+    assert frames_in(segments) == 1 + len(sim.actions)
+    assert observations[-1]["state"]
     assert [(b - a).total_seconds() for a, b in itertools.pairwise(starts)] == pytest.approx(
-        [tick_seconds] * (frames - 1)
+        [tick_seconds] * len(sim.actions)
     )
 
 
-async def test_ending_the_episode_mid_move_closes_the_recording_after_the_tick_in_flight(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("hud.types.queue_span", lambda _span: None)
-    events: list[str] = []
-    ends: list[asyncio.Task[None]] = []
-    control = DirectControl()
+class WatchedArm(Arm):
+    """An arm that announces its third tick."""
 
-    class _Recorder(TraceRecorder):
-        def record_observation(self, data: dict[str, Any], *, tick: int) -> None:
-            if tick == 2:  # mid-move, the episode is ended (as a cancel would)
-                loop.call_soon_threadsafe(
-                    lambda: ends.append(loop.create_task(control.end_episode()))
-                )
-                time.sleep(0.2)
-            super().record_observation(data, tick=tick)
-            events.append("record")
+    def __init__(self, contract: dict[str, Any]) -> None:
+        super().__init__(contract)
+        self.moving = asyncio.Event()
 
-        def close(self) -> None:
-            events.append("close")
-            super().close()
+    def step(self, action: NDArray[Any]) -> None:
+        super().step(action)
+        if len(self.actions) >= 3:
+            self.moving.set()
 
-    monkeypatch.setattr("hud.environment.robot.control.TraceRecorder", _Recorder)
-    loop = asyncio.get_running_loop()
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to", x=0.5))
 
-    async with _served(sim, control) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-    await asyncio.gather(*ends)
+class AbandonsMidMove(Agent):
+    """Starts a long move, then fails once the sim has stepped a few ticks."""
 
-    assert events == ["record"] * 3 + ["close"]  # ticks 0-2, then nothing after the close
+    def __init__(self, sim: WatchedArm) -> None:
+        super().__init__()
+        self.sim = sim
+
+    async def __call__(self, run: Run) -> None:
+        client = cast("MCPClient", await run.client.open("control"))
+        moving = asyncio.create_task(client.call_tool(*move("move_to", x=0.5)))
+        await asyncio.wait_for(self.sim.moving.wait(), timeout=30)
+        moving.cancel()
+        raise RuntimeError("the agent gave up")
+
+
+async def test_cancelling_the_session_mid_move_ends_the_recording() -> None:
+    sim = WatchedArm(ARM)
+
+    run = await drive(sim, DirectControl(speed=0.001), AbandonsMidMove(sim))
+
+    payloads = steps(run.trace_id, schema=ROBOT_STEP_SCHEMA)
+    observations = [p["tick"] for p in payloads if p.get("source") == "observation"]
+    segments = [p for p in payloads if p.get("source") == "video_segment"]
+    assert run.trace.status == "error"
+    assert observations == list(range(len(observations)))
+    assert 3 <= len(observations) < 1 + len(sim.actions)
+    assert frames_in(segments) == len(observations)
