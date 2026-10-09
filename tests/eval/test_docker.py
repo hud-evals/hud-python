@@ -227,7 +227,7 @@ def volumes_left(fake_docker: FakeDocker) -> set[str]:
 
 
 IMAGE_FAILURES: dict[
-    str, tuple[RuntimeConfig, list[tuple[str, dict[str, Any]]], str, list[str]]
+    str, tuple[RuntimeConfig, list[tuple[str, dict[str, Any]]], Any, list[str]]
 ] = {
     "a GPU type it cannot select": (
         RuntimeConfig(image="lab:1", resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
