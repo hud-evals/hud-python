@@ -41,7 +41,9 @@ FAKE_LEROBOT = Path(__file__).parent / "fake_lerobot"
 TICKS = 3
 
 
-def contract(*, rate: int = 5, robot: str = "arm", **features: dict[str, Any]) -> dict[str, Any]:
+def contract(
+    *, rate: int = 5, robot: str = "arm", features: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
     return {
         "control_rate": rate,
         "robot_type": robot,
@@ -264,7 +266,7 @@ async def test_a_failed_rollout_keeps_the_frames_it_recorded(recording: Path) ->
 
 async def test_nested_camera_names_stay_distinct_features(recording: Path) -> None:
     stereo = contract(
-        **{
+        features={
             "left/image": {"role": "observation", "type": "rgb"},
             "right/image": {"role": "observation", "type": "rgb"},
             "state": {"role": "observation", "names": ["tick", "half"]},
@@ -286,7 +288,7 @@ async def test_nested_camera_names_stay_distinct_features(recording: Path) -> No
 
 async def test_features_that_flatten_to_one_key_fail_the_rollout(recording: Path) -> None:
     clash = contract(
-        **{
+        features={
             "cam/rgb": {"role": "observation", "type": "rgb"},
             "cam_rgb": {"role": "observation", "type": "rgb"},
             "state": {"role": "observation", "names": ["tick", "half"]},

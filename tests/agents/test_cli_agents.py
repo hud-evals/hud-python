@@ -101,11 +101,13 @@ CLAUDE_STREAM = jsonl(WRITE, WROTE, DONE, result())
 
 
 def claude_stub(root: Path, **behavior: Any) -> Stub:
-    return Stub(root / "stub", "claude", **{"stdout": CLAUDE_STREAM, **behavior})
+    behavior.setdefault("stdout", CLAUDE_STREAM)
+    return Stub(root / "stub", "claude", **behavior)
 
 
 def codex_stub(root: Path, **behavior: Any) -> Stub:
-    return Stub(root / "stub", "codex", **{"stdout": CODEX_STREAM, **behavior})
+    behavior.setdefault("stdout", CODEX_STREAM)
+    return Stub(root / "stub", "codex", **behavior)
 
 
 def cli_env(root: Path, stub: Stub, **options: Any) -> Environment:
