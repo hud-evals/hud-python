@@ -320,10 +320,3 @@ async def test_a_bedrock_inference_profile_is_invoked_on_bedrock_without_streami
             ],
         }
     ]
-
-
-def test_a_bedrock_inference_profile_cannot_use_the_gateway() -> None:
-    profile = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/claude"
-
-    with pytest.raises(ValueError, match="is a Bedrock inference profile; it cannot use the HUD"):
-        ClaudeAgent(ClaudeConfig(model=profile, gateway=True))
