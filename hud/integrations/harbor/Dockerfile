@@ -13,10 +13,12 @@ FROM python:3.12-slim AS runtime
 USER root
 ARG HUD_REQUIREMENT=hud
 COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /controller/bin/uv
-COPY install.sh config.json /controller/
+COPY install.sh /controller/
 COPY packages /controller/packages
-COPY --from=authored-root / /rootfs
 RUN sh /controller/install.sh "${HUD_REQUIREMENT}" && mkdir -p /runtime
+# Task-specific inputs follow the install, so every task reuses its layer.
+COPY config.json /controller/
+COPY --from=authored-root / /rootfs
 
 ENV HUD_SKIP_VERSION_CHECK=1
 EXPOSE 8765
