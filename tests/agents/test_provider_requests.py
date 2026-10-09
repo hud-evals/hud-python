@@ -693,6 +693,42 @@ HOSTED = {
             ]
         ),
     ),
+    "claude-tool-search-over-threshold": HostedRow(
+        agent=lambda: ClaudeAgent(
+            ClaudeConfig(
+                model="claude-sonnet-4-6", hosted_tools=[ClaudeToolSearchTool(threshold=1)]
+            )
+        ),
+        tools=snapshot(
+            [
+                {"type": "bash_20250124", "name": "bash"},
+                {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
+                {
+                    "name": "lookup",
+                    "input_schema": {
+                        "additionalProperties": False,
+                        "properties": {"key": {"type": "string"}},
+                        "required": ["key"],
+                        "type": "object",
+                    },
+                    "eager_input_streaming": True,
+                    "defer_loading": True,
+                },
+                {
+                    "name": "store",
+                    "input_schema": {
+                        "additionalProperties": False,
+                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
+                        "required": ["key", "value"],
+                        "type": "object",
+                    },
+                    "eager_input_streaming": True,
+                    "defer_loading": True,
+                },
+                {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"},
+            ]
+        ),
+    ),
     "claude-tool-search-under-threshold": HostedRow(
         agent=lambda: ClaudeAgent(
             ClaudeConfig(

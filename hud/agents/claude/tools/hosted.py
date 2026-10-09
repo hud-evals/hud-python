@@ -81,7 +81,11 @@ class ClaudeWebFetchTool(ClaudeHostedTool):
 
 @dataclass(frozen=True, kw_only=True)
 class ClaudeToolSearchTool(ClaudeHostedTool):
-    """Claude tool search for large tool sets."""
+    """Claude tool search for large tool sets.
+
+    When the request carries more custom tools than ``threshold``, the agent
+    marks them ``defer_loading`` so the model finds them through search.
+    """
 
     threshold: int = 10
 
