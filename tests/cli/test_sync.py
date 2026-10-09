@@ -1,396 +1,607 @@
-"""Tests for ``hud.cli.sync``."""
+"""``hud sync``: push local tasks to a platform taskset, export it, and link an environment."""
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from typer.testing import CliRunner
+from inline_snapshot import snapshot
 
-from hud.cli import AuthScope, CliError, DirectoryState
-from hud.cli.__main__ import app
-from hud.cli.sync import RegistryEnvironment
-from hud.eval import Task, Taskset
-from hud.utils.exceptions import HudRequestError
-from hud.utils.platform import PlatformClient
+from tests.harness import Reply, scrub
+
+from .conftest import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests.harness import FakeServices, Hud, Request
 
-_TASKSET_ID = "44444444-4444-4444-8444-444444444444"
-_READONLY_PROJECT = "33333333-3333-4333-8333-333333333333"
-_WRITABLE_PROJECT = "22222222-2222-4222-8222-222222222222"
-_ROW = {"env": "example", "id": "solve", "slug": "one"}
+DEMO_ID = "eeeeeeee-0000-4000-8000-000000000001"
+OTHER_ID = "eeeeeeee-0000-4000-8000-000000000002"
+REGISTRY_ID = "bbbbbbbb-0000-4000-8000-000000000001"
+ENVIRONMENT = {"id": REGISTRY_ID, "name": "browser", "latest_build": {"version": 2}}
+TASKS_PY = """\
+from hud import Environment
+
+env = Environment("example")
 
 
-def _stub_platform(
-    monkeypatch: pytest.MonkeyPatch, *, remote_rows: list[dict[str, Any]], uploads: list[Any]
+@env.template(id="solve")
+async def solve(n: int = 0):
+    yield f"solve {n}"
+    yield 1.0
+
+
+tasks = [solve(n=1), solve(n=2)]
+"""
+
+
+class Tasksets:
+    """The platform's tasksets: lookup by name or id, export, and upload."""
+
+    def __init__(self, services: FakeServices) -> None:
+        self.records: dict[str, dict[str, Any]] = {}
+        services.route("api", "GET", "/v2/tasksets/by-name/{name}", handler=self.by_name)
+        services.route("api", "GET", "/v2/tasksets/{id}", handler=self.get)
+        services.route("api", "GET", "/v2/tasksets/{id}/export", handler=self.export)
+        services.route("api", "POST", "/v2/tasks/upload", handler=self.upload)
+
+    def add(self, taskset_id: str, name: str, tasks: list[dict[str, Any]] | None = None) -> None:
+        self.records[taskset_id] = {"name": name, "tasks": {t["name"]: t for t in tasks or []}}
+
+    def by_name(self, request: Request) -> Reply:
+        for taskset_id, record in self.records.items():
+            if record["name"] == request.params["name"]:
+                return Reply(json={"taskset_id": taskset_id, "name": record["name"]})
+        return Reply(status=404, json={"detail": "Taskset not found"})
+
+    def get(self, request: Request) -> Reply:
+        record = self.records.get(request.params["id"])
+        if record is None:
+            return Reply(status=404, json={"detail": "Taskset not found"})
+        return Reply(json={"id": request.params["id"], "name": record["name"]})
+
+    def export(self, request: Request) -> Reply:
+        record = self.records.get(request.params["id"])
+        if record is None:
+            return Reply(status=404, json={"detail": "Taskset not found"})
+        return Reply(json={"name": record["name"], "tasks": list(record["tasks"].values())})
+
+    def upload(self, request: Request) -> Reply:
+        body = request.json
+        taskset_id = (
+            body.get("taskset_id") or f"eeeeeeee-0000-4000-8000-{len(self.records) + 1:012d}"
+        )
+        record = self.records.setdefault(taskset_id, {"name": body["taskset_name"], "tasks": {}})
+        created = updated = 0
+        for task in body["tasks"]:
+            exported = {
+                "name": task["name"],
+                "env": task["env"]["name"],
+                "scenario": task["task_id"],
+                "args": task.get("args") or {},
+            }
+            updated += task["name"] in record["tasks"]
+            created += task["name"] not in record["tasks"]
+            record["tasks"][task["name"]] = exported
+        return Reply(
+            json={"taskset_id": taskset_id, "tasks_created": created, "tasks_updated": updated}
+        )
+
+
+@pytest.fixture
+def tasksets(projects: FakeServices) -> Tasksets:
+    return Tasksets(projects)
+
+
+@pytest.fixture
+def source(hud: Hud) -> Path:
+    path = hud.cwd / "tasks.py"
+    path.write_text(TASKS_PY)
+    return path
+
+
+def uploads(services: FakeServices) -> list[Any]:
+    return services.bodies("api", "POST", "/v2/tasks/upload")
+
+
+def link(hud: Hud) -> Any:
+    path = hud.cwd / ".hud" / "config.json"
+    return json.loads(path.read_text())["taskset_id"] if path.exists() else None
+
+
+def test_a_taskset_round_trip(
+    hud: Hud, projects: FakeServices, tasksets: Tasksets, source: Path
 ) -> None:
-    """A platform holding taskset ``demo`` with ``remote_rows`` and two projects."""
+    plan = hud("sync", "tasks", "demo", "tasks.py", "--dry-run", "--json")
+    assert (plan.exit_code, plan.json, uploads(projects), link(hud)) == (
+        0,
+        snapshot(
+            {
+                "taskset": "demo",
+                "create_count": 2,
+                "update_count": 0,
+                "unchanged_count": 0,
+                "remote_only_count": 0,
+                "to_apply": ["solve", "solve"],
+                "dry_run": True,
+                "action": "sync_tasks",
+            }
+        ),
+        [],
+        None,
+    )
 
-    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        if url.endswith("/auth/me"):
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": _WRITABLE_PROJECT,
-            }
-        if url.endswith(f"/projects/{_READONLY_PROJECT}"):
-            return {"id": _READONLY_PROJECT, "name": "locked-down", "capabilities": {}}
-        if url.endswith(f"/projects/{_WRITABLE_PROJECT}"):
-            return {
-                "id": _WRITABLE_PROJECT,
-                "name": "browser-evals",
-                "capabilities": {"create": True},
-            }
-        if url.endswith("/tasksets/by-name/demo"):
-            return {"taskset_id": _TASKSET_ID, "name": "demo"}
-        if url.endswith(f"/tasksets/{_TASKSET_ID}"):
-            return {"id": _TASKSET_ID, "name": "demo"}
-        if url.endswith(f"/tasksets/{_TASKSET_ID}/export"):
-            return {
-                "name": "demo",
+    first = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+    assert first.exit_code == 0, first
+    assert first.json == snapshot(
+        {
+            "taskset": "demo",
+            "create_count": 2,
+            "update_count": 0,
+            "unchanged_count": 0,
+            "remote_only_count": 0,
+            "to_apply": ["solve", "solve"],
+            "status": "synced",
+            "tasks_created": 2,
+            "tasks_updated": 0,
+            "taskset_id": "eeeeeeee-0000-4000-8000-000000000001",
+        }
+    )
+    assert uploads(projects) == snapshot(
+        [
+            {
+                "taskset_name": "demo",
                 "tasks": [
-                    {"env": row["env"], "scenario": row["id"], "name": row["slug"]}
-                    for row in remote_rows
+                    {
+                        "name": "solve-bae34777",
+                        "env": {"name": "example"},
+                        "task_id": "solve",
+                        "args": {"n": 1},
+                    },
+                    {
+                        "name": "solve-99dd84a6",
+                        "env": {"name": "example"},
+                        "task_id": "solve",
+                        "args": {"n": 2},
+                    },
                 ],
             }
-        if url.endswith("/tasks/upload"):
-            uploads.append(kwargs["json"])
-            return {"taskset_id": _TASKSET_ID, "tasks_created": 1}
-        raise AssertionError((method, url))
-
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.settings.settings.default_project", None)
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-
-
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_read_only_project_allows_no_op_and_preview(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dry_run: bool
-) -> None:
-    """A read-only project is only refused when something would actually upload."""
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "tasks.json").write_text(json.dumps([_ROW]))
-    uploads: list[Any] = []
-    # Up to date: identical remote row; dry run: empty remote, so a create is planned.
-    _stub_platform(monkeypatch, remote_rows=[] if dry_run else [_ROW], uploads=uploads)
-
-    args = [
-        "sync",
-        "tasks",
-        "demo",
-        "tasks.json",
-        "--project",
-        _READONLY_PROJECT,
-        "--yes",
-        "--json",
-    ]
-    result = CliRunner().invoke(app, [*args, "--dry-run"] if dry_run else args)
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["dry_run"] is dry_run
-    assert uploads == []
-
-    if dry_run:
-        refused = CliRunner().invoke(app, args)
-        assert refused.exit_code == 1, refused.output
-        assert json.loads(refused.stdout)["error"] == "permission_denied"
-        assert uploads == []
-
-
-def test_project_override_does_not_pin_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "tasks.json").write_text(json.dumps([_ROW]))
-    uploads: list[Any] = []
-    _stub_platform(monkeypatch, remote_rows=[], uploads=uploads)
-
-    result = CliRunner().invoke(
-        app,
-        ["sync", "tasks", "demo", "tasks.json", "--project", _WRITABLE_PROJECT, "--yes", "--json"],
+        ]
     )
+    taskset_id = first.json["taskset_id"]
+    assert link(hud) == taskset_id
 
-    assert result.exit_code == 0, result.output
-    assert uploads[0]["project_id"] == _WRITABLE_PROJECT
-    assert not (tmp_path / ".hud" / "config.json").exists()
+    again = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+    assert (again.json["status"], len(uploads(projects))) == ("up_to_date", 1)
 
-
-@pytest.mark.parametrize("stale", [False, True])
-def test_sync_uses_stored_id_after_rename_and_never_recreates_stale_link(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stale: bool
-) -> None:
-    source = tmp_path / "tasks.py"
-    source.write_text(
-        "from hud.eval import Task\ntasks = [Task(env='example', id='solve', slug='one')]\n"
+    source.write_text(TASKS_PY.replace("solve(n=2)]", "solve(n=2), solve(n=3)]"))
+    edited = hud("sync", "tasks", "--yes", "--json")
+    assert edited.exit_code == 0, edited
+    assert edited.json == snapshot(
+        {
+            "taskset": "demo",
+            "create_count": 1,
+            "update_count": 0,
+            "unchanged_count": 2,
+            "remote_only_count": 0,
+            "to_apply": ["solve"],
+            "status": "synced",
+            "tasks_created": 1,
+            "tasks_updated": 0,
+            "taskset_id": "eeeeeeee-0000-4000-8000-000000000001",
+        }
     )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.settings.settings.default_project", None)
-    taskset_id = "55555555-5555-4555-8555-555555555555"
-    uploads: list[dict[str, Any]] = []
+    assert uploads(projects)[-1]["taskset_id"] == taskset_id
 
-    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        if url.endswith("/auth/me"):
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            }
-        if "/by-name/" in url:
-            raise HudRequestError("missing", status_code=404)
-        if url.endswith("/tasks/upload"):
-            uploads.append(kwargs["json"])
-            return {"taskset_id": kwargs["json"].get("taskset_id", taskset_id), "tasks_created": 1}
-        if "/tasksets/" in url:
-            if stale:
-                raise HudRequestError("deleted", status_code=404)
-            return {"id": taskset_id, "name": "renamed", "tasks": []}
-        raise AssertionError(url)
+    tasksets.records[taskset_id]["name"] = "renamed"
+    bare = hud("sync", "--json")
+    assert (bare.exit_code, bare.json["status"], bare.json["taskset"]) == (
+        0,
+        "up_to_date",
+        "renamed",
+    )
+    forced = hud("sync", "tasks", "--force", "--yes", "--json")
+    assert forced.exit_code == 0, forced
+    assert uploads(projects)[-1]["taskset_name"] == "renamed"
+    assert len(uploads(projects)[-1]["tasks"]) == 3
+    assert link(hud) == taskset_id
 
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    first = CliRunner().invoke(app, ["sync", "tasks", "demo", str(source), "--yes", "--json"])
-    assert first.exit_code == 0, first.output
-    state = DirectoryState(AuthScope.resolve(PlatformClient.from_settings()), tmp_path)
-    before = state.load()
-    second = CliRunner().invoke(app, ["sync", "tasks", "--yes", "--json", "--force"])
-    assert state.load() == before
-    if stale:
-        assert second.exit_code == 1, second.output
-        assert json.loads(second.stdout)["error"] == "not_found"
-        assert len(uploads) == 1
-    else:
-        assert second.exit_code == 0, second.output
-        assert uploads[-1]["taskset_id"] == taskset_id
-        assert uploads[-1]["taskset_name"] == "renamed"
+    slug = uploads(projects)[0]["tasks"][0]["name"]
+    one = hud("sync", "tasks", "--task", slug, "--force", "--yes", "--json")
+    assert one.exit_code == 0, one
+    assert [task["name"] for task in uploads(projects)[-1]["tasks"]] == [slug]
 
-        other = "66666666-6666-4666-8666-666666666666"
-        args = ["sync", "tasks", other, str(source), "--force", "--yes", "--json"]
-        override = CliRunner().invoke(app, args)
-        assert override.exit_code == 0, override.output
-        assert uploads[-1]["taskset_id"] == other
-        assert state.load() == before
-        planned_link = CliRunner().invoke(app, [*args, "--link", "--dry-run"])
-        assert planned_link.exit_code == 0, planned_link.output
-        assert state.load() == before
-        relinked = CliRunner().invoke(app, [*args, "--link"])
-        assert relinked.exit_code == 0, relinked.output
-        assert str(state.load().taskset_id) == other
+    tasksets.add(OTHER_ID, "other")
+    elsewhere = hud("sync", "tasks", OTHER_ID, "tasks.py", "--force", "--yes", "--json")
+    planned = hud("sync", "tasks", OTHER_ID, "tasks.py", "--link", "--dry-run", "--json")
+    assert (elsewhere.exit_code, planned.exit_code, link(hud)) == (0, 0, taskset_id)
+    assert uploads(projects)[-1]["taskset_id"] == OTHER_ID
+    relinked = hud("sync", "tasks", OTHER_ID, "tasks.py", "--link", "--yes", "--json")
+    assert (relinked.exit_code, link(hud)) == (0, OTHER_ID)
 
-        alias = CliRunner().invoke(app, ["sync", "tasks", "--yes", "--json", "--force"])
-        assert alias.exit_code == 0, alias.output
-        assert json.loads(alias.stdout)["taskset_id"] == other
+
+def test_a_stored_taskset_that_was_deleted_is_never_recreated(
+    hud: Hud, projects: FakeServices, tasksets: Tasksets, source: Path
+) -> None:
+    assert hud("sync", "tasks", "demo", "tasks.py", "--yes").exit_code == 0
+    tasksets.records.clear()
+
+    result = hud("sync", "tasks", "--force", "--yes", "--json")
+
+    assert result.exit_code == 1, result
+    assert scrub(result.stdout) == snapshot("""\
+{
+  "error": "not_found",
+  "message": "Request failed: Taskset not found",
+  "suggestion": "Check the resource id, or list existing ones."
+}
+""")
+    assert len(uploads(projects)) == 1
 
 
 @pytest.mark.parametrize(
-    ("status_code", "exit_code", "error"),
+    ("target", "expected"),
     [
-        (400, 1, "failure"),
-        (403, 1, "permission_denied"),
-        (500, 1, "server_error"),
+        (
+            "tasks.csv",
+            snapshot("""\
+slug,id,env,arg:n
+one,solve,e,1
+two,solve,e,"{""x"": 2}"
+"""),
+        ),
+        (
+            "tasks.json",
+            snapshot("""\
+[
+  {
+    "env": "e",
+    "id": "solve",
+    "args": {
+      "n": 1
+    },
+    "slug": "one"
+  },
+  {
+    "env": "e",
+    "id": "solve",
+    "args": {
+      "n": {
+        "x": 2
+      }
+    },
+    "slug": "two"
+  }
+]
+"""),
+        ),
+        (
+            "out/tasks.jsonl",
+            snapshot("""\
+{"env": "e", "id": "solve", "args": {"n": 1}, "slug": "one"}
+{"env": "e", "id": "solve", "args": {"n": {"x": 2}}, "slug": "two"}
+"""),
+        ),
     ],
 )
-def test_rejected_upload_exits_with_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    status_code: int,
-    exit_code: int,
-    error: str,
+def test_export_writes_the_remote_taskset_to_a_file(
+    hud: Hud, tasksets: Tasksets, target: str, expected: str
 ) -> None:
-    project_id = "22222222-2222-4222-8222-222222222222"
-    detail = "Taskset belongs to another Project" if status_code == 400 else "Upload rejected"
-    source = tmp_path / "tasks.json"
-    source.write_text(json.dumps([{"env": "example", "id": "solve", "slug": "one"}]))
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.settings.settings.default_project", None)
-
-    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        if url.endswith("/auth/me"):
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            }
-        if url.endswith(f"/projects/{project_id}"):
-            return {"id": project_id, "name": "browser-evals", "capabilities": {"create": True}}
-        if "/by-name/" in url:
-            raise HudRequestError("missing", status_code=404)
-        if url.endswith("/tasks/upload"):
-            raise HudRequestError(detail, status_code=status_code, response_json={"detail": detail})
-        raise AssertionError(url)
-
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    result = CliRunner().invoke(
-        app,
-        [
-            "sync",
-            "tasks",
-            "demo",
-            str(source),
-            "--project",
-            project_id,
-            "--force",
-            "--yes",
-            "--json",
-        ],
-    )
-
-    assert result.exit_code == exit_code, result.output
-    payload = json.loads(result.stdout)
-    assert payload["error"] == error
-    assert detail in payload["message"]
-    assert "Sync complete" not in result.output
-    assert not (tmp_path / ".hud" / "config.json").exists()
-
-
-def test_export_csv_flattens_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    remote = Taskset(
+    tasksets.add(
+        DEMO_ID,
         "demo",
         [
-            Task(env="e", id="solve", args={"n": 1}, slug="one"),
-            Task(env="e", id="solve", args={"n": {"x": 2}}, slug="two"),
+            {"name": "one", "env": "e", "scenario": "solve", "args": {"n": 1}},
+            {"name": "two", "env": "e", "scenario": "solve", "args": {"n": {"x": 2}}},
         ],
     )
-    monkeypatch.setattr(Taskset, "from_api", classmethod(lambda cls, name: remote))
-    monkeypatch.setattr(
-        "hud.utils.platform.make_request_sync",
-        lambda method, url, **kw: {
-            "user_id": "11111111-1111-4111-8111-111111111111",
-            "team_id": _WRITABLE_PROJECT,
-        },
-    )
 
-    result = CliRunner().invoke(app, ["sync", "tasks", "demo", "--export", "tasks.csv", "--json"])
+    result = hud("sync", "tasks", "demo", "--export", target, "--json")
 
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == {
-        "action": "export",
-        "taskset": "demo",
-        "path": "tasks.csv",
-        "task_count": 2,
-    }
-    csv_text = (tmp_path / "tasks.csv").read_text()
-    assert "slug,id,env,arg:n" in csv_text
-    assert "one,solve,e,1" in csv_text
-    assert 'two,solve,e,"{""x"": 2}"' in csv_text
+    assert result.exit_code == 0, result
+    assert result.json == {"action": "export", "taskset": "demo", "path": target, "task_count": 2}
+    assert (hud.cwd / target).read_text() == expected
 
 
-def test_sync_env_noninteractive_requires_name(tmp_path: Path) -> None:
-    result = CliRunner().invoke(app, ["sync", "env", "--json"])
-    assert result.exit_code == 2, result.output
-    assert json.loads(result.stdout)["error"] == "usage"
-
-
-@pytest.mark.parametrize("failure", ["source", "export", "upload", "registry"])
-def test_sync_failures_render_one_structured_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+@pytest.mark.parametrize(
+    ("argv", "exit_code", "document"),
+    [
+        (
+            ["sync", "tasks", "demo", "--export", "t.json", "--link"],
+            2,
+            snapshot({"error": "usage", "message": "--link cannot be combined with --export"}),
+        ),
+        (
+            ["sync", "tasks", "demo", "tasks.py"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": "Confirmation required in a non-interactive terminal.",
+                    "suggestion": "Re-run with --yes to continue.",
+                }
+            ),
+        ),
+        (
+            ["sync", "tasks"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": (
+                        "No taskset specified. Pass a taskset name/ID or run 'hud sync tasks "
+                        "<name>' first to store it."
+                    ),
+                }
+            ),
+        ),
+        (
+            ["sync"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": (
+                        "No taskset specified. Pass a taskset name/ID or run 'hud sync tasks "
+                        "<name>' first to store it."
+                    ),
+                }
+            ),
+        ),
+        (
+            ["sync", "tasks", "demo", "missing.json"],
+            1,
+            snapshot(
+                {
+                    "error": "not_found",
+                    "message": "[Errno 2] No such file or directory: 'missing.json'",
+                }
+            ),
+        ),
+        (
+            ["sync", "tasks", "demo", "tasks.py", "--task", "nope", "--yes"],
+            2,
+            snapshot({"error": "usage", "message": "No task found with slug 'nope'"}),
+        ),
+        (
+            ["sync", "tasks", "nope", "--export", "t.json"],
+            2,
+            snapshot({"error": "usage", "message": "taskset not found: nope"}),
+        ),
+    ],
+)
+def test_sync_refusals_upload_nothing(
+    hud: Hud,
+    projects: FakeServices,
+    tasksets: Tasksets,
+    source: Path,
+    argv: list[str],
+    exit_code: int,
+    document: dict[str, Any],
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.settings.settings.default_project", None)
-    source = tmp_path / "tasks.py"
-    source.write_text("from hud.eval import Task\ntasks = [Task(env='e', id='solve')]\n")
-    registry_id = "33333333-3333-4333-8333-333333333333"
+    result = hud(*argv, "--json")
 
-    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        if url.endswith("/auth/me"):
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            }
-        if failure == "upload" and "/by-name/" in url:
-            raise HudRequestError("missing", status_code=404)
-        raise HudRequestError("Access denied", status_code=403)
-
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    args = {
-        "source": ["tasks", "demo", str(tmp_path / "missing.json")],
-        "export": ["tasks", "demo", "--export", str(tmp_path / "out.json")],
-        "upload": ["tasks", "demo", str(source), "--yes"],
-        "registry": ["env", registry_id],
-    }[failure]
-    result = CliRunner().invoke(app, ["sync", *args, "--json"])
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.stdout)
-    assert payload["error"] == ("not_found" if failure == "source" else "permission_denied")
-    assert payload["message"] not in (result.stderr or "")
+    assert result.exit_code == exit_code, result
+    assert json.loads(scrub(result.stdout, hud.cwd)) == document
+    assert uploads(projects) == []
+    assert link(hud) is None
 
 
-def test_relinking_same_environment_reports_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("reply", "document"),
+    [
+        (
+            Reply(status=400, json={"detail": "Taskset belongs to another Project"}),
+            snapshot(
+                {
+                    "error": "failure",
+                    "message": "Request failed: Taskset belongs to another Project",
+                    "input": {"taskset": "demo"},
+                }
+            ),
+        ),
+        (
+            Reply(status=403, json={"detail": "Upload rejected"}),
+            snapshot(
+                {
+                    "error": "permission_denied",
+                    "message": "Request failed: Upload rejected",
+                    "input": {"taskset": "demo"},
+                    "suggestion": "Check that this API key can access the resource.",
+                }
+            ),
+        ),
+        (
+            Reply(status=500, json={"detail": "Upload rejected"}),
+            snapshot(
+                {
+                    "error": "server_error",
+                    "message": "Request failed: Upload rejected",
+                    "input": {"taskset": "demo"},
+                    "suggestion": "Retry; this error is often transient.",
+                }
+            ),
+        ),
+    ],
+)
+def test_a_rejected_upload_fails_and_links_nothing(
+    hud: Hud,
+    projects: FakeServices,
+    tasksets: Tasksets,
+    source: Path,
+    reply: Reply,
+    document: dict[str, Any],
 ) -> None:
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    registry_id = "33333333-3333-4333-8333-333333333333"
+    projects.route("api", "POST", "/v2/tasks/upload", reply)
 
-    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        if url.endswith("/auth/me"):
-            return {
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            }
-        assert url.endswith(f"/registry/{registry_id}")
-        return {"id": registry_id, "name": "example"}
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
 
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    args = ["sync", "env", registry_id, str(tmp_path), "--json"]
-    for changed in (True, False):
-        result = CliRunner().invoke(app, args)
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.stdout)["changed"] is changed
+    assert result.exit_code == 1, result
+    assert result.json == document
+    assert "Sync complete" not in result.stderr
+    assert link(hud) is None
 
 
-def test_resolve_verifies_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
-    def request(method: str, url: str, **kwargs: object) -> dict[str, str]:
-        assert url.endswith("/registry/12345678-1234-5678-1234-567812345678")
-        return {"id": "12345678-1234-5678-1234-567812345678", "name": "verified"}
-
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    env = RegistryEnvironment.resolve(
-        PlatformClient("https://api.example", "key"),
-        "12345678-1234-5678-1234-567812345678",
-    )
-
-    assert env == RegistryEnvironment(
-        id="12345678-1234-5678-1234-567812345678",
-        name="verified",
-    )
-
-
-def test_get_registry_environment_treats_404_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_request(method: str, url: str, **kwargs: object) -> dict[str, Any]:
-        raise HudRequestError("not found", status_code=404)
-
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake_request)
-
-    with pytest.raises(CliError, match="inaccessible or deleted") as error:
-        RegistryEnvironment.resolve(
-            PlatformClient("https://api.example", "key"), "12345678-1234-5678-1234-567812345678"
-        )
-    assert error.value.exit_code == 1
-
-
-def test_resolve_matches_a_name_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
-    records = [
-        {"id": "12345678-1234-5678-1234-567812345678", "name": "browser"},
-        {"id": "87654321-4321-8765-4321-876543218765", "name": "browser-anchor"},
+@pytest.mark.parametrize(
+    ("argv", "remote", "exit_code", "status"),
+    [
+        (["--project", LOCKED_PROJECT_ID, "--yes"], "same", 0, "up_to_date"),
+        (["--project", LOCKED_PROJECT_ID, "--dry-run"], "empty", 0, None),
+        (["--project", LOCKED_PROJECT_ID, "--yes"], "empty", 1, "permission_denied"),
+        (["--project", BROWSER_PROJECT_ID, "--yes"], "empty", 0, "synced"),
+    ],
+)
+def test_the_project_option_places_the_upload_without_pinning_the_directory(
+    hud: Hud,
+    projects: FakeServices,
+    tasksets: Tasksets,
+    source: Path,
+    argv: list[str],
+    remote: str,
+    exit_code: int,
+    status: str | None,
+) -> None:
+    rows = json.loads(hud("task", "list", "--source", "tasks.py", "--json").stdout)
+    synced = [
+        {"name": r["slug"], "env": "example", "scenario": r["id"], "args": r["args"]} for r in rows
     ]
+    tasksets.add(DEMO_ID, "demo", synced if remote == "same" else [])
 
-    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-        parts = urlsplit(url)
-        assert parts.path.endswith("/registry")
-        search = parse_qs(parts.query)["search"][0]
-        items = [record for record in records if search in record["name"]]
-        return {"items": items, "total": len(items)}
+    result = hud("sync", "tasks", "demo", "tasks.py", *argv, "--json")
 
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", request)
-    platform = PlatformClient("https://api.example", "key")
+    assert result.exit_code == exit_code, result
+    assert result.json.get("status", result.json.get("error")) == status
+    expected = [BROWSER_PROJECT_ID] if status == "synced" else []
+    assert [body["project_id"] for body in uploads(projects)] == expected
+    assert link(hud) is None
 
-    assert RegistryEnvironment.resolve(platform, "Browser").id == records[0]["id"]
-    assert RegistryEnvironment.resolve(platform, "browser_anchor").id == records[1]["id"]
-    with pytest.raises(CliError, match="No environment named 'anchor'") as error:
-        RegistryEnvironment.resolve(platform, "anchor")
-    assert error.value.error == "not_found"
+
+def test_a_mismatched_linked_environment_warns(
+    hud: Hud, projects: FakeServices, tasksets: Tasksets, source: Path
+) -> None:
+    projects.route("api", "GET", "/v2/registry", json={"items": [ENVIRONMENT], "total": 1})
+    projects.route("api", "GET", f"/v2/registry/{REGISTRY_ID}", json=ENVIRONMENT)
+    assert hud("sync", "env", "browser").exit_code == 0
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--dry-run")
+
+    assert result.exit_code == 0, result
+    assert (
+        "Local task env names do not match the linked platform environment 'browser': example"
+        in " ".join(result.stderr.split())
+    )
+
+
+# ─── sync env ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("argv", "records", "exit_code", "document"),
+    [
+        (
+            ["browser_anchor"],
+            [ENVIRONMENT, {**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
+            0,
+            snapshot(
+                {
+                    "name": "browser-anchor",
+                    "id": "eeeeeeee-0000-4000-8000-000000000002",
+                    "short_id": "eeeeeeee",
+                    "changed": True,
+                }
+            ),
+        ),
+        (
+            ["Browser", "--dry-run"],
+            [ENVIRONMENT, {**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
+            0,
+            snapshot(
+                {
+                    "dry_run": True,
+                    "action": "link_environment",
+                    "id": "bbbbbbbb-0000-4000-8000-000000000001",
+                    "name": "browser",
+                }
+            ),
+        ),
+        (
+            ["anchor"],
+            [{**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
+            1,
+            snapshot(
+                {
+                    "error": "not_found",
+                    "message": "No environment named 'anchor'.",
+                    "input": {"environment": "anchor"},
+                    "suggestion": "Run 'hud sync env' to pick from your environments.",
+                }
+            ),
+        ),
+        (
+            [REGISTRY_ID],
+            [],
+            0,
+            snapshot(
+                {
+                    "name": "browser",
+                    "id": "bbbbbbbb-0000-4000-8000-000000000001",
+                    "short_id": "bbbbbbbb",
+                    "changed": True,
+                }
+            ),
+        ),
+        (
+            [OTHER_ID],
+            [],
+            1,
+            snapshot(
+                {
+                    "error": "not_found",
+                    "message": (
+                        "Environment eeeeeeee-0000-4000-8000-000000000002 is inaccessible or "
+                        "deleted."
+                    ),
+                    "suggestion": (
+                        "Run 'hud sync env <name-or-id>' to link an accessible environment."
+                    ),
+                }
+            ),
+        ),
+        (
+            [],
+            [],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": (
+                        "Pass an environment name or ID for a dry run or noninteractive link."
+                    ),
+                }
+            ),
+        ),
+    ],
+)
+def test_sync_env_links_an_environment_by_name_or_id(
+    hud: Hud,
+    projects: FakeServices,
+    argv: list[str],
+    records: list[dict[str, Any]],
+    exit_code: int,
+    document: dict[str, Any],
+) -> None:
+    def search(request: Request) -> Reply:
+        term = request.query["search"][0]
+        matches = [record for record in records if term in record["name"]]
+        return Reply(json={"items": matches, "total": len(matches)})
+
+    projects.route("api", "GET", "/v2/registry", handler=search)
+    projects.route("api", "GET", f"/v2/registry/{REGISTRY_ID}", json=ENVIRONMENT)
+    projects.route("api", "GET", f"/v2/registry/{OTHER_ID}", status=404, json={"detail": "gone"})
+
+    result = hud("sync", "env", *argv, "--json")
+
+    assert result.exit_code == exit_code, result
+    assert result.json == document
