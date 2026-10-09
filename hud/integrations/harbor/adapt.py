@@ -241,7 +241,7 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
         return None, (
             AdaptFinding(code="harbor.invalid.task_config_io", kind="invalid", message=str(error)),
         )
-    except tomllib.TOMLDecodeError as error:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
         return None, (
             AdaptFinding(
                 code="harbor.invalid.task_config_toml", kind="invalid", message=str(error)
