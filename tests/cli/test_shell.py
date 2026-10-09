@@ -399,6 +399,21 @@ def test_analytics_opt_out_posts_nothing(
     assert analytics.requests("telemetry") == []
 
 
+def test_a_stalled_analytics_endpoint_does_not_hold_up_the_command(
+    hud: Hud, analytics: FakeServices
+) -> None:
+    analytics.route("telemetry", "POST", "/sdk-events/cli", Reply(json={}, delay=4))
+
+    started = time.monotonic()
+    result = hud("version")
+    elapsed = time.monotonic() - started
+
+    assert result.exit_code == 0
+    assert len(analytics.requests("telemetry")) == 1
+    # Without the bound the command would outlast the 4 s stall; with it, about 2 s.
+    assert elapsed < 4, elapsed
+
+
 def test_an_interrupted_command_reports_exit_130(
     hud: Hud, analytics: FakeServices, hud_env: HudEnv
 ) -> None:
