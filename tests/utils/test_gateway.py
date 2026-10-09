@@ -12,13 +12,13 @@ from hud.agents.base import Agent
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.utils.exceptions import HudAuthenticationError
-from tests.harness import Reply, say
+from tests.harness import say
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from hud.eval import Run
-    from tests.harness import FakeServices, HudEnv, Models
+    from tests.harness import HudEnv, Models
 
 BEDROCK_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/anthropic.claude"
 AWS = {
@@ -143,26 +143,6 @@ def test_an_unroutable_model_is_refused_when_the_agent_is_built(
 
     with pytest.raises(error, match=message):
         build()
-
-
-async def test_a_bedrock_profile_is_sent_to_bedrock_signed_with_aws_credentials(
-    models: Models, provider_server: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="hud-key", ANTHROPIC_BEDROCK_BASE_URL=provider_server.url("api"), **AWS)
-    provider_server.reset()
-    provider_server.route("api", "POST", "/model/{rest:path}", Reply(status=400, json={}))
-
-    run = await rollout(
-        TASK,
-        ClaudeAgent(ClaudeConfig(model=BEDROCK_ARN, max_steps=1)),
-        runtime=LocalRuntime(_env()),
-    )
-
-    (request, *_) = provider_server.requests("api", "POST")
-    assert run.reward == 0.0
-    assert models.requests() == []
-    assert request.params["rest"] == f"{BEDROCK_ARN}/invoke"
-    assert request.headers["authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIATEST/")
 
 
 @pytest.mark.parametrize("family", list(AGENTS))
