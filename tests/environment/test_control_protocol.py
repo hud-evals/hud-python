@@ -186,40 +186,19 @@ async def converse(env: Environment, frames: list[tuple[str, dict[str, Any] | No
 
 
 async def test_tasks_list_publishes_each_templates_argument_and_io_contract(tmp_path: Path) -> None:
-    (reply,) = await converse(protocol_env(tmp_path / "log"), [("tasks.list", None)])
+    env = protocol_env(tmp_path / "log")
+    (reply,) = await converse(env, [("tasks.list", None)])
+    listed = {task["id"]: task for task in reply["result"]["tasks"]}
+    empty = {"properties": {}, "type": "object", "additionalProperties": False}
 
-    assert {task["id"]: task for task in reply["result"]["tasks"]} == snapshot(
+    assert sorted(listed) == sorted(env.tasks)
+    assert listed["plain"]["description"] == "Grades 1.0 when the answer is 42."
+    assert {
+        name: task
+        for name, task in listed.items()
+        if task["args"] != empty or "input" in task or "returns" in task
+    } == snapshot(
         {
-            "plain": {
-                "id": "plain",
-                "description": "Grades 1.0 when the answer is 42.",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-            },
-            "rich": {
-                "id": "rich",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-            },
-            "model": {
-                "id": "model",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-            },
-            "bad_dict": {
-                "id": "bad_dict",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-            },
-            "stringy": {
-                "id": "stringy",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-            },
-            "no_grade": {
-                "id": "no_grade",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-            },
             "typed": {
                 "id": "typed",
                 "description": "",
@@ -367,11 +346,6 @@ async def test_tasks_list_publishes_each_templates_argument_and_io_contract(tmp_
                     "type": "object",
                     "additionalProperties": False,
                 },
-            },
-            "lookup": {
-                "id": "lookup",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
             },
         }
     )
