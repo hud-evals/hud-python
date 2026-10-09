@@ -1,6 +1,6 @@
 """Cloud runtimes: what ModalRuntime and DaytonaRuntime ask their SDKs to do.
 
-The SDKs are faked at the module boundary (``tests/eval/cloud.py``); every
+The SDKs are faked at the module boundary (``tests/harness/cloud.py``); every
 sandbox they create connects to an environment served in this process, so each
 acquisition below also runs a rollout whose reward proves the placement worked.
 """
@@ -35,9 +35,9 @@ from hud.eval import (
     Task,
     rollout,
 )
-from tests.eval.cloud import BuiltImage, Exec, FakeDaytona, FakeModal, aio
 from tests.eval.envs import actor, judge, lab, solve
 from tests.harness import ScriptedAgent
+from tests.harness.cloud import BuiltImage, Exec, FakeDaytona, FakeModal, aio
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -2,8 +2,9 @@
 
 Each outcome runs under every placement, against a fixture environment served
 from source: in this process, in a child process, in a container started through
-the fake docker, attached by address, and over the HUD runtime's tunnel (the
-last three served from a child process, as in production). The same row must
+the fake docker, attached by address, over the HUD runtime's tunnel, and in
+Modal and Daytona sandboxes through their fake SDKs (all but the first two served
+from a child process, as in production). The same row must
 end the same way in all of them. Rollout contracts that do not depend on
 placement follow the matrix.
 """
@@ -21,9 +22,11 @@ from dirty_equals import IsStr
 from hud.agents.base import Agent
 from hud.capabilities import Connection
 from hud.eval import (
+    DaytonaRuntime,
     DockerRuntime,
     HUDRuntime,
     LocalRuntime,
+    ModalRuntime,
     Run,
     Runtime,
     SubprocessRuntime,
@@ -34,6 +37,7 @@ from hud.telemetry.context import get_current_trace_id
 from tests.eval.envs import SUMS_SOURCE, eventually, lab, solve
 from tests.fixtures.envs import source
 from tests.harness import ScriptedAgent, steps
+from tests.harness.cloud import FakeDaytona, FakeModal
 from tests.harness.runtime import host_on_runtime
 
 if TYPE_CHECKING:
@@ -53,6 +57,7 @@ class World:
     fake_docker: FakeDocker
     services: FakeServices
     hud_env: HudEnv
+    monkeypatch: pytest.MonkeyPatch
 
 
 @asynccontextmanager
@@ -94,12 +99,29 @@ async def hud_tunnel(world: World) -> AsyncIterator[Provider]:
         yield HUDRuntime()
 
 
+@asynccontextmanager
+async def modal(world: World) -> AsyncIterator[Provider]:
+    async with served_apart(world.path) as address:
+        host, port = address.rsplit(":", 1)
+        FakeModal({"hud-fixture": (host, int(port))}).install(world.monkeypatch)
+        yield ModalRuntime("hud-fixture")
+
+
+@asynccontextmanager
+async def daytona(world: World) -> AsyncIterator[Provider]:
+    async with served_apart(world.path) as address:
+        FakeDaytona(int(address.rsplit(":", 1)[1])).install(world.monkeypatch)
+        yield DaytonaRuntime("hud-fixture")
+
+
 PLACEMENTS: dict[str, Callable[[World], AbstractAsyncContextManager[Provider]]] = {
     "in-process": in_process,
     "child-process": child_process,
     "container": container,
     "attached": attached,
     "hud-tunnel": hud_tunnel,
+    "modal": modal,
+    "daytona": daytona,
 }
 
 
@@ -217,6 +239,7 @@ async def test_a_rollout_ends_the_same_way_wherever_it_runs(
     fake_docker: FakeDocker,
     services: FakeServices,
     hud_env: HudEnv,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     row = Task(
         env=outcome.fixture,
@@ -225,7 +248,7 @@ async def test_a_rollout_ends_the_same_way_wherever_it_runs(
         agent_config=outcome.agent_config,
     )
 
-    world = World(source(outcome.fixture), fake_docker, services, hud_env)
+    world = World(source(outcome.fixture), fake_docker, services, hud_env, monkeypatch)
     async with PLACEMENTS[placement](world) as runtime:
         job = await row.run(
             outcome.agent(), runtime=runtime, rollout_timeout=outcome.rollout_timeout
