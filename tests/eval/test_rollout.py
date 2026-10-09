@@ -332,6 +332,21 @@ PROMPTS = {
         [("user", "first"), ("user", None), ("user", "second")],
         "first\n\nsecond",
     ),
+    "a turn of several blocks is one message per block": (
+        chat_row(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is this?"},
+                        {"type": "image", "data": "aW1n", "mimeType": "image/png"},
+                    ],
+                }
+            ]
+        ),
+        [("user", "what is this?"), ("user", None)],
+        "what is this?",
+    ),
 }
 
 
