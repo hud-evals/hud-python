@@ -37,9 +37,13 @@ def test_a_lossless_encoder_keeps_every_frame_while_its_queue_is_full() -> None:
 
 def test_a_lossy_encoder_finalizes_on_time_with_a_full_queue_and_a_stalled_encoder() -> None:
     released = threading.Event()
+
+    def stall(_index: int, _data: bytes) -> None:
+        released.wait()
+
     encoder = SegmentEncoder(
         "cam",
-        lambda _index, _data: released.wait(),
+        stall,
         fps=10,
         segment_seconds=0.1,
         max_queued_frames=1,

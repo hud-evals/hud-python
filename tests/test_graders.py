@@ -32,8 +32,11 @@ from hud.graders import (
 from tests.harness import ScriptedAgent, Turn, say
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
+    from typing import TypeAlias
+
+    Grade: TypeAlias = Callable[[str], Awaitable[EvaluationResult]]
 
     from hud.eval import Run
     from tests.harness import HudEnv, ModelRequest, Models
@@ -153,12 +156,18 @@ class Measured(Grader):
 def _graders_env(root: Path) -> Environment:
     env = Environment("graders")
 
-    def task(grade: Callable[[str], Any]) -> None:
-        @env.template(id=grade.__name__)
-        async def template():
-            answer = yield "Name the capital of France."
-            yield await grade(answer)
+    def graded(name: str) -> Callable[[Grade], Grade]:
+        def register(grade: Grade) -> Grade:
+            @env.template(id=name)
+            async def template():
+                answer = yield "Name the capital of France."
+                yield await grade(answer)
 
+            return grade
+
+        return register
+
+    @graded("bash_pair")
     async def bash_pair(answer: str) -> EvaluationResult:
         del answer
         return await combine(
@@ -166,6 +175,7 @@ def _graders_env(root: Path) -> Environment:
             BashGrader.grade(weight=0.5, command="echo oops >&2; false"),
         )
 
+    @graded("any_tree")
     async def any_tree(answer: str) -> EvaluationResult:
         either = combine_any(
             weight=0.5,
@@ -183,6 +193,7 @@ def _graders_env(root: Path) -> Environment:
             either, both, SubScore(name="format", value=exact_match(answer, ANSWER), weight=0.25)
         )
 
+    @graded("weighted")
     async def weighted(answer: str) -> EvaluationResult:
         return await combine(
             SubScore(name="mentions", value=contains(answer, "paris"), weight=0.6),
@@ -190,6 +201,7 @@ def _graders_env(root: Path) -> Environment:
             SubScore(name="penalty", value=1.0, weight=-0.2),
         )
 
+    @graded("penalty_only_fails")
     async def penalty_only_fails(answer: str) -> EvaluationResult:
         del answer
         return await combine(
@@ -197,6 +209,7 @@ def _graders_env(root: Path) -> Environment:
             SubScore(name="penalty", value=1.0, weight=-0.2),
         )
 
+    @graded("suffixed")
     async def suffixed(answer: str) -> EvaluationResult:
         del answer
         return await combine(
@@ -205,6 +218,7 @@ def _graders_env(root: Path) -> Environment:
             SubScore(name="x", value=0.0, weight=0.4),
         )
 
+    @graded("custom")
     async def custom(answer: str) -> EvaluationResult:
         del answer
         return await combine(
@@ -216,6 +230,7 @@ def _graders_env(root: Path) -> Environment:
             ),
         )
 
+    @graded("concurrent")
     async def concurrent(answer: str) -> EvaluationResult:
         del answer
         # Each command waits for the file the other writes, so they pass only in parallel.
@@ -229,6 +244,7 @@ def _graders_env(root: Path) -> Environment:
             ),
         )
 
+    @graded("in_cwd")
     async def in_cwd(answer: str) -> EvaluationResult:
         del answer
         (root / "marker.txt").write_text("here")
@@ -236,12 +252,14 @@ def _graders_env(root: Path) -> Environment:
             BashGrader.grade(weight=1.0, command="cat marker.txt", cwd=str(root)),
         )
 
+    @graded("detached_child")
     async def detached_child(answer: str) -> EvaluationResult:
         del answer
         return await combine(
             BashGrader.grade(weight=1.0, command="echo started; sleep 30 & exit 0"),
         )
 
+    @graded("overrun")
     async def overrun(answer: str) -> EvaluationResult:
         del answer
         return await combine(
@@ -250,12 +268,14 @@ def _graders_env(root: Path) -> Environment:
             ),
         )
 
+    @graded("chatty")
     async def chatty(answer: str) -> EvaluationResult:
         del answer
         return await combine(
             BashGrader.grade(weight=1.0, command="yes hud | head -c 500000"),
         )
 
+    @graded("judged")
     async def judged(answer: str) -> EvaluationResult:
         return await combine(
             LLMJudgeGrader.grade(
@@ -266,31 +286,16 @@ def _graders_env(root: Path) -> Environment:
             )
         )
 
+    @graded("judged_negative_only")
     async def judged_negative_only(answer: str) -> EvaluationResult:
         return await combine(
             LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[("invents facts", -1.0)])
         )
 
+    @graded("judged_without_criteria")
     async def judged_without_criteria(answer: str) -> EvaluationResult:
         return await combine(LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[]))
 
-    for grade in (
-        bash_pair,
-        any_tree,
-        weighted,
-        penalty_only_fails,
-        suffixed,
-        custom,
-        concurrent,
-        in_cwd,
-        detached_child,
-        overrun,
-        chatty,
-        judged,
-        judged_negative_only,
-        judged_without_criteria,
-    ):
-        task(grade)
     return env
 
 
