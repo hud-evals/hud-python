@@ -1,0 +1,4 @@
+services:
+  main: {}
+  web:
+    extends: {file: base.yaml, service: web}

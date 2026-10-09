@@ -25,6 +25,7 @@ from hud.eval.runtime.compose import (
     ComposeProject,
     ComposeService,
     ComposeUnboundVariableError,
+    ComposeUnsupportedError,
 )
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__
@@ -296,6 +297,9 @@ def _inspect_task(task_dir: Path) -> tuple[HarborTask | None, tuple[AdaptFinding
             )
         except ComposeUnboundVariableError as error:
             add("harbor.unsupported.host_compose_variable", str(error))
+            compose = None
+        except ComposeUnsupportedError as error:
+            add("harbor.unsupported.compose_include_extends", str(error))
             compose = None
         except (OSError, ValueError, ValidationError) as error:
             add("harbor.invalid.compose", str(error))

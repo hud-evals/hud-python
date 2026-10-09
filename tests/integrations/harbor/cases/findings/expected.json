@@ -96,6 +96,18 @@
       "Invalid value (at line 1, column 8)"
     ],
     [
+      "compose-extends",
+      "harbor.unsupported.compose_include_extends",
+      "contract",
+      "remote adaptation does not support Compose include or extends"
+    ],
+    [
+      "compose-include",
+      "harbor.unsupported.compose_include_extends",
+      "contract",
+      "remote adaptation does not support Compose include or extends"
+    ],
+    [
       "compose-not-mapping",
       "harbor.invalid.compose",
       "invalid",
