@@ -10,8 +10,9 @@ from .cli import Hud, Result, scrub
 from .config import HudEnv
 from .docker import FakeDocker
 from .models import ModelRequest, Models, ToolCall, Turn, call, calls, fail, say
+from .relay import FlakyRelay, relay
 from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
-from .scenario import RecordingProvider, ScriptedAgent, served, task_row
+from .scenario import RecordingProvider, ScriptedAgent, eventually, served, task_row
 from .services import FakeServices, Reply, Request
 from .spans import spans, steps
 
@@ -19,6 +20,7 @@ __all__ = [
     "FakeDocker",
     "FakeScreen",
     "FakeServices",
+    "FlakyRelay",
     "Hud",
     "HudEnv",
     "KeyEvent",
@@ -34,8 +36,10 @@ __all__ = [
     "Turn",
     "call",
     "calls",
+    "eventually",
     "fail",
     "fake_screen",
+    "relay",
     "say",
     "scrub",
     "served",
