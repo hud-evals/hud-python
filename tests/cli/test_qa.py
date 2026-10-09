@@ -1,480 +1,586 @@
-"""CLI behavior for HUD's QA checks on evaluation traces."""
+"""``hud qa``: list QA checks, run them on traces, and read their results."""
 
 from __future__ import annotations
 
 import json
-from typing import Any
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from typer.testing import CliRunner
+from inline_snapshot import snapshot
 
-from hud.cli.__main__ import app
-from hud.cli.qa import presentation_for_result
+from tests.harness import Reply
 
-runner = CliRunner()
+if TYPE_CHECKING:
+    from tests.harness import FakeServices, Hud
 
-_TRACE_ID = "00000000-0000-4000-a000-000000000002"
-_RESULT_ID = "00000000-0000-4000-a000-000000000003"
-_ANALYSIS_TRACE_ID = "00000000-0000-4000-a000-000000000004"
-_CHECK = "failure_analysis"
-_OTHER_CHECK = "reward_hacking"
-
-
-def _check(key: str = _CHECK, title: str = "Failure Analysis") -> dict[str, object]:
-    return {
-        "key": key,
-        "title": title,
+TRACE_ID = "00000000-0000-4000-a000-000000000002"
+ANALYSIS_TRACE_ID = "00000000-0000-4000-a000-000000000004"
+CHECK = "failure_analysis"
+OTHER_CHECK = "reward_hacking"
+CHECKS = [
+    {
+        "key": CHECK,
+        "title": "Failure Analysis",
         "question": "Why did the agent fail?",
         "description": "Attributes each failure to the agent, the evaluation, or the platform.",
-    }
+    },
+    {
+        "key": OTHER_CHECK,
+        "title": "Reward Hacking",
+        "question": "Did the agent game the grader?",
+        "description": "Looks for answers that satisfy the grader without solving the task.",
+    },
+]
 
 
-def _row(
-    status: str = "completed",
-    *,
-    check_key: str = _CHECK,
-    verdict: str | None = None,
-    result: dict[str, object] | None = None,
-    legacy_result: dict[str, object] | None = None,
-    **fields: object,
-) -> dict[str, Any]:
+def row(status: str = "completed", **fields: Any) -> dict[str, Any]:
+    """One ``/v2/qa/results`` row as the platform returns it."""
     return {
-        "id": _RESULT_ID,
-        "check_key": check_key,
-        "subject_trace_id": _TRACE_ID,
+        "id": "00000000-0000-4000-a000-000000000003",
+        "check_key": CHECK,
+        "subject_trace_id": TRACE_ID,
         "source": "analysis",
         "status": status,
-        "verdict": verdict,
-        "result": result,
-        "legacy_result": legacy_result,
+        "verdict": None,
+        "result": None,
+        "legacy_result": None,
         "note": None,
         "error": None,
-        "created_at": "2026-10-02T00:00:00Z",
-        "completed_at": None,
-        "run_id": None,
         **fields,
     }
 
 
-def _result(verdict: str = "passed", *, check_key: str = _CHECK) -> dict[str, Any]:
-    return _row(
+def verdict(tag: str, *, check_key: str = CHECK, summary: str | None = None) -> dict[str, Any]:
+    """A completed ``qa_agent_result.v1`` row."""
+    return row(
         check_key=check_key,
-        verdict=verdict,
+        verdict=tag,
         result={
             "schema_version": "qa_agent_result.v1",
-            "verdict": verdict,
-            "summary": "Looks good." if verdict == "passed" else "A gap was found.",
+            "verdict": tag,
+            "summary": summary or ("Looks good." if tag == "passed" else "A gap was found."),
             "findings": [],
             "metadata": {},
         },
     )
 
 
-def _invoke(platform: MagicMock, args: list[str]):
-    with patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform):
-        return runner.invoke(app, args, env={"TERM": "xterm", "COLUMNS": "200"})
-
-
-def _table_row(output: str, *cells: str) -> str:
-    """The table line holding every given cell."""
-    return next(line for line in output.splitlines() if all(cell in line for cell in cells))
-
-
-@pytest.mark.parametrize("args", [["qa"], ["qa", "list"]])
-def test_qa_lists_checks_as_a_table(args: list[str]) -> None:
-    platform = MagicMock()
-    platform.get.return_value = {"checks": [_check()]}
-
-    result = _invoke(platform, args)
-
-    assert result.exit_code == 0
-    assert "QA Checks" in result.output
-    assert _table_row(result.output, _CHECK, "Failure Analysis", "Why did the agent fail?")
-    platform.get.assert_called_once_with("/qa/checks")
-
-
-def test_qa_list_quiet_prints_keys() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {"checks": [_check(), _check(_OTHER_CHECK, "Reward Hacking")]}
-
-    result = _invoke(platform, ["qa", "list", "--quiet"])
-
-    assert result.exit_code == 0
-    assert result.output.split() == [_CHECK, _OTHER_CHECK]
-
-
-@pytest.mark.parametrize("args", [[_CHECK], [" , ", _TRACE_ID]])
-def test_qa_run_requires_checks_and_traces(args: list[str]) -> None:
-    platform = MagicMock()
-
-    result = _invoke(platform, ["qa", "run", *args])
-
-    assert result.exit_code == 2
-    platform.post.assert_not_called()
-
-
-def test_qa_run_rejects_non_uuid_traces() -> None:
-    platform = MagicMock()
-
-    result = _invoke(platform, ["qa", "run", _CHECK, "not-a-trace"])
-
-    assert result.exit_code == 2
-    platform.post.assert_not_called()
-
-
-def test_qa_run_no_wait_posts_comma_separated_checks_as_one_run() -> None:
-    platform = MagicMock()
-    platform.post.return_value = {
-        "results": [_row("queued"), _row("queued", check_key=_OTHER_CHECK)]
-    }
-
-    result = _invoke(
-        platform,
-        [
-            "qa",
-            "run",
-            f"{_CHECK}, {_OTHER_CHECK},{_CHECK}",
-            _TRACE_ID.upper(),
-            "--no-wait",
-            "--json",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert [row["status"] for row in json.loads(result.output)] == ["queued", "queued"]
-    platform.post.assert_called_once_with(
-        "/qa/runs",
-        json={"check_keys": [_CHECK, _OTHER_CHECK], "trace_ids": [_TRACE_ID], "overwrite": False},
-    )
-    platform.get.assert_not_called()
-
-
-def test_qa_run_forwards_overwrite() -> None:
-    platform = MagicMock()
-    platform.post.return_value = {"results": [_result()]}
-
-    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID, "--overwrite"])
-
-    assert result.exit_code == 0
-    assert platform.post.call_args.kwargs["json"]["overwrite"] is True
-
-
-@pytest.mark.parametrize(("verdict", "exit_code"), [("failed", 1), ("passed", 0)])
-def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
-    platform = MagicMock()
-    platform.post.return_value = {"results": [_row("queued")]}
-    platform.get.side_effect = [
-        {"results": [_row("running")]},
-        {"results": [_result(verdict)]},
-    ]
-
-    with patch("hud.cli.qa.time.sleep"):
-        result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
-
-    assert result.exit_code == exit_code
-    assert _table_row(result.output, _TRACE_ID, _CHECK, verdict)
-    platform.get.assert_called_with("/qa/results", params={"trace_ids": [_TRACE_ID]})
-
-
-def test_qa_run_does_not_poll_settled_results() -> None:
-    platform = MagicMock()
-    platform.post.return_value = {"results": [_result("passed")]}
-
-    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
-
-    assert result.exit_code == 0
-    platform.get.assert_not_called()
-
-
-def test_qa_run_table_shows_the_summary_headline_as_markdown() -> None:
-    row = _result("failed")
-    row["result"] = {
-        **row["result"],
-        "summary": "**Verdict:** The grader missed it.\n\n- The answer was right.",
-    }
-    platform = MagicMock()
-    platform.post.return_value = {"results": [row]}
-
-    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
-
-    assert result.exit_code == 1
-    assert _table_row(result.output, _TRACE_ID, _CHECK, "failed", "Verdict: The grader missed it.")
-    assert "**" not in result.output
-    assert "The answer was right." not in result.output
-
-
-def test_qa_run_wait_ignores_unrequested_checks() -> None:
-    platform = MagicMock()
-    platform.post.return_value = {"results": [_row("queued")]}
-    platform.get.return_value = {
-        "results": [_result("failed", check_key=_OTHER_CHECK), _result("passed")]
-    }
-
-    with patch("hud.cli.qa.time.sleep"):
-        result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
-
-    assert result.exit_code == 0
-    assert _OTHER_CHECK not in result.output
-
-
-def test_qa_run_errored_check_fails() -> None:
-    platform = MagicMock()
-    platform.post.return_value = {
-        "results": [_row("error", error="The QA check produced an invalid result.")]
-    }
-
-    result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
-
-    assert result.exit_code == 1
-    assert "The QA check produced an invalid result." in result.output
-
-
-def test_qa_run_times_out() -> None:
-    platform = MagicMock()
-    platform.post.return_value = {"results": [_row("queued")]}
-    platform.get.return_value = {"results": [_row("running")]}
-    clock = [0.0]
-
-    def sleep(seconds: float) -> None:
-        clock[0] += seconds
-
-    with (
-        patch("hud.cli.qa.time.sleep", side_effect=sleep),
-        patch("hud.cli.qa.time.monotonic", side_effect=lambda: clock[0]),
-    ):
-        result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID, "--timeout", "1"])
-
-    assert result.exit_code != 0
-    assert "Timed out" in result.output
-
-
-def test_qa_results_queries_traces() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {"results": [_result()]}
-
-    result = _invoke(platform, ["qa", "results", _TRACE_ID, "--json"])
-
-    assert result.exit_code == 0
-    assert json.loads(result.output)[0]["verdict"] == "passed"
-    platform.get.assert_called_once_with("/qa/results", params={"trace_ids": [_TRACE_ID]})
-
-
-def test_qa_results_tui_renders_findings_and_trace_link() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {
-        "results": [
-            _row(
-                verdict="failed",
-                result={
-                    "schema_version": "qa_agent_result.v1",
-                    "verdict": "failed",
-                    "summary": "**Verdict:** The agent never wrote /app/[regex].txt.",
-                    "findings": [
-                        {
-                            "finding_type": "missing_output",
-                            "severity": "error",
-                            "summary": "Required [/output] file was never created",
-                            "recommended_action": "Write the regex to /app/regex.txt.",
-                            "evidence_refs": ["trajectory.json"],
-                        }
-                    ],
-                    "metadata": {"confidence": 0.9},
-                },
-            )
-        ]
-    }
-
-    result = _invoke(platform, ["qa", "results", _TRACE_ID])
-
-    assert result.exit_code == 0
-    assert _CHECK in result.output
-    assert "Verdict: failed" in result.output
-    assert "Confidence: 90%" in result.output
-    assert "Verdict: The agent never wrote /app/[regex].txt." in result.output
-    assert "**" not in result.output
-    assert "1. Required [/output] file was never created" in result.output
-    assert "Action: Write the regex to /app/regex.txt." in result.output
-    assert "severity: error" in result.output
-    assert "evidence: trajectory.json" in result.output
-    assert f"View: https://hud.ai/trace/{_TRACE_ID}" in result.output
-    assert "Analysis:" not in result.output
-
-
-def test_qa_results_links_the_analysis_trace_when_returned() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {
-        "results": [{**_result(), "analysis_trace_id": _ANALYSIS_TRACE_ID}]
-    }
-
-    result = _invoke(platform, ["qa", "results", _TRACE_ID])
-
-    assert result.exit_code == 0
-    assert f"https://hud.ai/trace/{_ANALYSIS_TRACE_ID}" in result.output
-
-
-def test_qa_results_skipped_check_shows_source_and_note() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {
-        "results": [
-            _row(
-                verdict="passed",
-                source="skipped",
-                note="A full reward passes this check without analysis.",
-            )
-        ]
-    }
-
-    result = _invoke(platform, ["qa", "results", _TRACE_ID])
-
-    assert result.exit_code == 0
-    assert "Verdict: passed" in result.output
-    assert "Source: skipped" in result.output
-    assert "A full reward passes this check without analysis." in result.output
-
-
-def test_qa_results_legacy_failure_analysis() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {
-        "results": [
-            _row(
-                legacy_result={
-                    "content": json.dumps(
-                        {
-                            "summary": "The agent never wrote /app/regex.txt.",
-                            "confidence": "high",
-                            "problems": [
-                                {
-                                    "problem": "Required output file was never created",
-                                    "description": "The agent did not save any regex.",
-                                    "fault": "agent",
-                                }
-                            ],
-                        }
-                    ),
-                    "reward": 0.0,
+@pytest.mark.parametrize("argv", [["qa"], ["qa", "list"]])
+def test_qa_lists_the_checks(hud: Hud, platform: FakeServices, argv: list[str]) -> None:
+    platform.route("api", "GET", "/v2/qa/checks", json={"checks": CHECKS})
+
+    result = hud(*argv)
+
+    assert result.exit_code == 0, result
+    assert result.stdout == snapshot("""\
+╭───────────╮
+│ QA Checks │
+╰───────────╯
+┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Key              ┃ Title            ┃ Question                       ┃
+┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ failure_analysis │ Failure Analysis │ Why did the agent fail?        │
+│ reward_hacking   │ Reward Hacking   │ Did the agent game the grader? │
+└──────────────────┴──────────────────┴────────────────────────────────┘
+
+Tip: hud qa run <check>[,<check>...] <trace-id>... to run checks
+""")
+
+
+@pytest.mark.parametrize(
+    ("argv", "checks", "stdout"),
+    [
+        (["qa", "list", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n"),
+        (["qa", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n"),
+        (["qa", "list", "--json"], CHECKS, json.dumps({"checks": CHECKS}, indent=2) + "\n"),
+        (["qa", "list"], [], "No QA checks are available.\n"),
+    ],
+)
+def test_qa_list_modes(
+    hud: Hud, platform: FakeServices, argv: list[str], checks: list[Any], stdout: str
+) -> None:
+    platform.route("api", "GET", "/v2/qa/checks", json={"checks": checks})
+
+    result = hud(*argv)
+
+    assert (result.exit_code, result.stdout) == (0, stdout)
+
+
+@pytest.mark.parametrize(
+    ("argv", "document"),
+    [
+        (
+            ["qa", "run", CHECK],
+            snapshot({"error": "usage", "message": "Missing parameter: trace_ids"}),
+        ),
+        (
+            ["qa", "run", " , ", TRACE_ID],
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": "Name at least one QA check; `hud qa list` shows them.",
+                    "input": {"checks": " , "},
                 }
-            )
-        ]
-    }
+            ),
+        ),
+        (
+            ["qa", "run", CHECK, "not-a-trace"],
+            snapshot({"error": "usage", "message": "'not-a-trace' is not a valid UUID."}),
+        ),
+    ],
+)
+def test_qa_run_needs_checks_and_trace_ids(
+    hud: Hud, platform: FakeServices, argv: list[str], document: dict[str, Any]
+) -> None:
+    result = hud(*argv, "--json")
 
-    result = _invoke(platform, ["qa", "results", _TRACE_ID])
-
-    assert result.exit_code == 0
-    assert "Verdict: failed" in result.output
-    assert "Cause: Agent failure" in result.output
-    assert "Required output file was never created" in result.output
-    assert "The agent did not save any regex." in result.output
-
-
-def test_qa_results_legacy_boolean_omits_findings() -> None:
-    platform = MagicMock()
-    platform.get.return_value = {
-        "results": [
-            _row(
-                check_key="false_negative",
-                legacy_result={
-                    "content": json.dumps(
-                        {
-                            "is_false_negative": False,
-                            "reasoning": "The zero reward matches the missing file.",
-                            "confidence": "high",
-                        }
-                    ),
-                },
-            )
-        ]
-    }
-
-    result = _invoke(platform, ["qa", "results", _TRACE_ID])
-
-    assert result.exit_code == 0
-    assert "Verdict: passed" in result.output
-    assert "False Negative: no" in result.output
-    assert "1. " not in result.output
-    assert "The zero reward matches the missing file." in result.output
+    assert result.exit_code == 2, result
+    assert result.json == document
+    assert platform.requests("api", "POST") == []
 
 
-def test_row_verdict_overrides_the_output_verdict() -> None:
-    view = presentation_for_result(
+@pytest.mark.parametrize(
+    ("argv", "body"),
+    [
+        (
+            ["qa", "run", f"{CHECK}, {OTHER_CHECK},{CHECK}", TRACE_ID.upper(), "--no-wait"],
+            {"check_keys": [CHECK, OTHER_CHECK], "trace_ids": [TRACE_ID], "overwrite": False},
+        ),
+        (
+            ["qa", "run", CHECK, TRACE_ID, "--no-wait", "--overwrite"],
+            {"check_keys": [CHECK], "trace_ids": [TRACE_ID], "overwrite": True},
+        ),
+    ],
+)
+def test_qa_run_without_waiting_posts_one_run(
+    hud: Hud, platform: FakeServices, argv: list[str], body: dict[str, Any]
+) -> None:
+    queued = [row("queued", check_key=key) for key in body["check_keys"]]
+    platform.route("api", "POST", "/v2/qa/runs", json={"results": queued})
+
+    result = hud(*argv, "--json")
+
+    assert result.exit_code == 0, result
+    assert result.json == queued
+    assert platform.bodies("api", "POST", "/v2/qa/runs") == [body]
+    assert platform.requests("api", "GET") == []
+
+
+def test_qa_run_dry_run_posts_nothing(hud: Hud, platform: FakeServices) -> None:
+    result = hud("qa", "run", f"{CHECK},{OTHER_CHECK}", TRACE_ID, "--dry-run", "--json")
+
+    assert result.exit_code == 0, result
+    assert result.json == snapshot(
         {
-            **_result("failed"),
-            "source": "manual",
-            "verdict": "passed",
-            "note": "Reviewed.",
+            "dry_run": True,
+            "action": "qa_run",
+            "check_keys": ["failure_analysis", "reward_hacking"],
+            "trace_ids": ["00000000-0000-4000-a000-000000000002"],
+            "overwrite": False,
+            "wait": True,
+        }
+    )
+    assert platform.requests("api") == []
+
+
+@pytest.mark.parametrize(
+    ("posted", "polled", "exit_code", "stdout"),
+    [
+        (
+            [verdict("passed")],
+            [],
+            0,
+            snapshot("""\
+╭────────────╮
+│ QA Results │
+╰────────────╯
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Trace                                ┃ Check            ┃ Verdict ┃ Summary                  ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 00000000-0000-4000-a000-000000000002 │ failure_analysis │ passed  │ Looks good.              │
+└──────────────────────────────────────┴──────────────────┴─────────┴──────────────────────────┘
+
+Tip: hud qa results <trace-id> for summaries and findings
+"""),
+        ),
+        (
+            [row("queued")],
+            [[row("running")], [verdict("failed")]],
+            1,
+            snapshot("""\
+╭────────────╮
+│ QA Results │
+╰────────────╯
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Trace                                ┃ Check            ┃ Verdict ┃ Summary                  ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 00000000-0000-4000-a000-000000000002 │ failure_analysis │ failed  │ A gap was found.         │
+└──────────────────────────────────────┴──────────────────┴─────────┴──────────────────────────┘
+
+Tip: hud qa results <trace-id> for summaries and findings
+"""),
+        ),
+        (
+            [row("queued")],
+            [[verdict("failed", check_key=OTHER_CHECK), verdict("passed")]],
+            0,
+            snapshot("""\
+╭────────────╮
+│ QA Results │
+╰────────────╯
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Trace                                ┃ Check            ┃ Verdict ┃ Summary                  ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 00000000-0000-4000-a000-000000000002 │ failure_analysis │ passed  │ Looks good.              │
+└──────────────────────────────────────┴──────────────────┴─────────┴──────────────────────────┘
+
+Tip: hud qa results <trace-id> for summaries and findings
+"""),
+        ),
+        (
+            [row("error", error="The QA check produced an invalid result.")],
+            [],
+            1,
+            snapshot("""\
+╭────────────╮
+│ QA Results │
+╰────────────╯
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Trace                                ┃ Check            ┃ Verdict ┃ Summary                  ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 00000000-0000-4000-a000-000000000002 │ failure_analysis │ failed  │ The QA check produced an │
+│                                      │                  │         │ invalid result.          │
+└──────────────────────────────────────┴──────────────────┴─────────┴──────────────────────────┘
+
+Tip: hud qa results <trace-id> for summaries and findings
+"""),
+        ),
+        (
+            [
+                verdict(
+                    "failed",
+                    summary="**Verdict:** The grader missed it.\n\n- The answer was right.",
+                )
+            ],
+            [],
+            1,
+            snapshot("""\
+╭────────────╮
+│ QA Results │
+╰────────────╯
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Trace                                ┃ Check            ┃ Verdict ┃ Summary                  ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 00000000-0000-4000-a000-000000000002 │ failure_analysis │ failed  │ Verdict: The grader      │
+│                                      │                  │         │ missed it.               │
+└──────────────────────────────────────┴──────────────────┴─────────┴──────────────────────────┘
+
+Tip: hud qa results <trace-id> for summaries and findings
+"""),
+        ),
+    ],
+)
+def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
+    hud: Hud,
+    platform: FakeServices,
+    posted: list[dict[str, Any]],
+    polled: list[list[dict[str, Any]]],
+    exit_code: int,
+    stdout: str,
+) -> None:
+    platform.route("api", "POST", "/v2/qa/runs", json={"results": posted})
+    platform.route(
+        "api", "GET", "/v2/qa/results", *[Reply(json={"results": rows}) for rows in polled]
+    )
+
+    result = hud("qa", "run", CHECK, TRACE_ID)
+
+    assert result.exit_code == exit_code, result
+    assert result.stdout == stdout
+    assert [request.query for request in platform.requests("api", "GET")] == [
+        {"trace_ids": [TRACE_ID]}
+    ] * len(polled)
+
+
+def test_qa_run_times_out_while_checks_are_running(hud: Hud, platform: FakeServices) -> None:
+    platform.route("api", "POST", "/v2/qa/runs", json={"results": [row("queued")]})
+    platform.route("api", "GET", "/v2/qa/results", json={"results": [row("running")]})
+
+    result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--json")
+
+    assert result.exit_code == 1, result
+    assert result.json == snapshot(
+        {
+            "error": "timeout",
+            "message": "Timed out after 1s waiting for QA checks.",
+            "suggestion": "Retry; the failure may be transient. Increase --timeout if set.",
         }
     )
 
-    assert view.tag == "passed"
-    assert view.summary == "A gap was found."
 
-
-def test_legacy_failure_analysis_problems_are_a_failed_agent_finding() -> None:
-    view = presentation_for_result(
-        _row(
-            legacy_result={
-                "content": (
-                    '{"summary": "Missing file.", "problems": ['
-                    '{"problem": "No regex", "fault": "agent", "description": "Never wrote it."}'
-                    '], "confidence": "high"}'
+@pytest.mark.parametrize(
+    "results",
+    [
+        pytest.param(
+            [
+                row(
+                    verdict="failed",
+                    analysis_trace_id=ANALYSIS_TRACE_ID,
+                    result={
+                        "schema_version": "qa_agent_result.v1",
+                        "verdict": "failed",
+                        "summary": "**Verdict:** The agent never wrote /app/[regex].txt.",
+                        "findings": [
+                            {
+                                "finding_type": "missing_output",
+                                "severity": "error",
+                                "summary": "Required [/output] file was never created",
+                                "recommended_action": "Write the regex to /app/regex.txt.",
+                                "evidence_refs": ["trajectory.json"],
+                            }
+                        ],
+                        "metadata": {"confidence": 0.9},
+                    },
                 )
-            }
-        )
-    )
+            ],
+            id="findings",
+        ),
+        pytest.param(
+            [
+                row(
+                    verdict="passed",
+                    source="skipped",
+                    note="A full reward passes this check without analysis.",
+                )
+            ],
+            id="skipped",
+        ),
+        pytest.param(
+            [{**verdict("failed"), "source": "manual", "verdict": "passed", "note": "Reviewed."}],
+            id="manual-verdict-wins",
+        ),
+        pytest.param(
+            [
+                row(
+                    legacy_result={
+                        "content": json.dumps(
+                            {
+                                "summary": "The agent never wrote /app/regex.txt.",
+                                "confidence": "high",
+                                "problems": [
+                                    {
+                                        "problem": "Required output file was never created",
+                                        "description": "The agent did not save any regex.",
+                                        "fault": "agent",
+                                    }
+                                ],
+                            }
+                        ),
+                        "reward": 0.0,
+                    }
+                )
+            ],
+            id="legacy-failure-analysis",
+        ),
+        pytest.param(
+            [row(legacy_result={"summary": "Clean.", "problems": [], "confidence": "high"})],
+            id="legacy-no-problems",
+        ),
+        pytest.param(
+            [
+                row(
+                    legacy_result={
+                        "problems": [
+                            {"problem": "Bad regex", "fault": "agent"},
+                            {"problem": "Cut off", "fault": "unclear"},
+                        ]
+                    }
+                )
+            ],
+            id="legacy-mixed-faults",
+        ),
+        pytest.param(
+            [
+                row(
+                    check_key="false_negative",
+                    legacy_result={
+                        "content": json.dumps(
+                            {
+                                "is_false_negative": False,
+                                "reasoning": "The zero reward matches the missing file.",
+                                "confidence": "high",
+                            }
+                        )
+                    },
+                ),
+                row(
+                    check_key="false_negative",
+                    legacy_result={
+                        "content": '{"is_false_negative": true, "reasoning": "Grader missed it."}'
+                    },
+                ),
+            ],
+            id="legacy-boolean",
+        ),
+        pytest.param(
+            [row("queued"), row("error", error="Analysis crashed.")],
+            id="pending-and-errored",
+        ),
+    ],
+)
+def test_qa_results_render_each_result_shape(
+    hud: Hud, platform: FakeServices, request: pytest.FixtureRequest, results: list[dict[str, Any]]
+) -> None:
+    platform.route("api", "GET", "/v2/qa/results", json={"results": results})
 
-    assert view.kind == "problems"
-    assert view.tag == "failed"
-    assert view.answer == "Agent failure"
-    assert view.findings[0].title == "No regex"
-    assert view.findings[0].fault == "agent"
+    text = hud("qa", "results", TRACE_ID)
+    document = hud("qa", "results", TRACE_ID, "--json")
+
+    assert text.exit_code == document.exit_code == 0
+    assert document.json == results
+    assert text.stdout == RENDERED[request.node.callspec.id]
+    assert [sent.query for sent in platform.requests("api", "GET")] == [
+        {"trace_ids": [TRACE_ID]}
+    ] * 2
 
 
-def test_legacy_failure_analysis_empty_problems_is_passed() -> None:
-    view = presentation_for_result(
-        _row(legacy_result={"summary": "Clean.", "problems": [], "confidence": "high"})
-    )
+RENDERED = snapshot(
+    {
+        "findings": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: failed
+Confidence: 90%
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ Verdict: The agent never wrote /app/[regex].txt.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ 1. Required [/output] file was never created ───────────────────────────────────────────────╮
+│ Action: Write the regex to /app/regex.txt.                                                   │
+│ severity: error                                                                              │
+│ evidence: trajectory.json                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 
-    assert view.tag == "passed"
-    assert view.answer == "No failure"
-    assert view.findings == ()
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+Analysis: https://hud.example/trace/00000000-0000-4000-a000-000000000004
+""",
+        "skipped": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: passed
+Source: skipped
+Note: A full reward passes this check without analysis.
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+        "manual-verdict-wins": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: passed
+Source: manual
+Note: Reviewed.
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ A gap was found.                                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+        "legacy-failure-analysis": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: failed
+Cause: Agent failure
+Confidence: high
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ The agent never wrote /app/regex.txt.                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ 1. Required output file was never created ──────────────────────────────────────────────────╮
+│ The agent did not save any regex.                                                            │
+│ fault: agent                                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+        "legacy-no-problems": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: passed
+Cause: No failure
+Confidence: high
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ Clean.                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+        "legacy-mixed-faults": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: failed
+Cause: Mixed failure
+╭─ 1. Bad regex ───────────────────────────────────────────────────────────────────────────────╮
+│ fault: agent                                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ 2. Cut off ─────────────────────────────────────────────────────────────────────────────────╮
+│ fault: unclear                                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+        "legacy-boolean": """\
+╭─────────────────────────────────────────────────────╮
+│ false_negative 00000000-0000-4000-a000-000000000002 │
+╰─────────────────────────────────────────────────────╯
+Verdict: passed
+False Negative: no
+Confidence: high
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ The zero reward matches the missing file.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+
+╭─────────────────────────────────────────────────────╮
+│ false_negative 00000000-0000-4000-a000-000000000002 │
+╰─────────────────────────────────────────────────────╯
+Verdict: failed
+False Negative: yes
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ Grader missed it.                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+        "pending-and-errored": """\
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Status: queued
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+
+╭───────────────────────────────────────────────────────╮
+│ failure_analysis 00000000-0000-4000-a000-000000000002 │
+╰───────────────────────────────────────────────────────╯
+Verdict: failed
+╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
+│ Analysis crashed.                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
+""",
+    }
+)
 
 
-def test_legacy_mixed_faults_are_labeled_mixed_failure() -> None:
-    view = presentation_for_result(
-        _row(
-            legacy_result={
-                "problems": [
-                    {"problem": "Bad regex", "fault": "agent"},
-                    {"problem": "Cut off", "fault": "unclear"},
-                ]
-            }
-        )
-    )
+def test_qa_results_without_results_says_so(hud: Hud, platform: FakeServices) -> None:
+    platform.route("api", "GET", "/v2/qa/results", json={"results": []})
 
-    assert view.tag == "failed"
-    assert view.answer == "Mixed failure"
+    result = hud("qa", "results", TRACE_ID)
 
-
-def test_legacy_false_negative_yes_is_failed_without_findings() -> None:
-    view = presentation_for_result(
-        _row(
-            legacy_result={
-                "content": '{"is_false_negative": true, "reasoning": "Grader missed it."}'
-            }
-        )
-    )
-
-    assert view.kind == "boolean"
-    assert view.tag == "failed"
-    assert view.label == "False Negative"
-    assert view.answer == "yes"
-    assert view.findings == ()
-    assert view.summary == "Grader missed it."
-
-
-def test_queued_results_are_pending_not_passed() -> None:
-    view = presentation_for_result(_row("queued"))
-
-    assert view.kind == "pending"
-    assert view.tag == "unknown"
-    assert view.label == "queued"
+    assert (result.exit_code, result.stdout) == (0, "No QA results found.\n")
