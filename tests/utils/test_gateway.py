@@ -1,319 +1,213 @@
+"""Which server a model request reaches, with which credentials and trace headers."""
+
 from __future__ import annotations
 
-import asyncio
-from functools import partial
-from typing import TYPE_CHECKING, cast
-from unittest.mock import AsyncMock, MagicMock
+from typing import TYPE_CHECKING, Any
 
-import httpx
 import pytest
 
-from hud.settings import settings
-from hud.telemetry.context import set_trace_context
-from hud.utils import gateway
+from hud import Environment
+from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
+from hud.agents.base import Agent
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.utils.exceptions import HudAuthenticationError
+from tests.harness import Reply, say
 
 if TYPE_CHECKING:
-    from google.genai import Client as GenaiClient
-    from openai import AsyncOpenAI
+    from collections.abc import Callable
+
+    from hud.eval import Run
+    from tests.harness import FakeServices, HudEnv, Models
+
+BEDROCK_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/anthropic.claude"
+AWS = {
+    "AWS_ACCESS_KEY_ID": "AKIATEST",
+    "AWS_SECRET_ACCESS_KEY": "secret",
+    "AWS_REGION": "us-east-1",
+}
 
 
-@pytest.fixture(autouse=True)
-def _gateway_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "api_key", "sk-hud-test")
-    monkeypatch.setattr(settings, "hud_gateway_url", "https://gateway.test")
+def _env() -> Environment:
+    env = Environment("routing")
+
+    @env.template()
+    async def answer():
+        reply = yield "Reply with ok."
+        yield 1.0 if reply == "ok" else 0.0
+
+    return env
 
 
-@pytest.mark.asyncio
-async def test_openai_client_resolves_trace_id_per_request(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seen_headers: dict[str, str] = {}
+TASK = Task(env="routing", id="answer")
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        trace_id = request.headers["Trace-Id"]
-        await asyncio.sleep(0)
-        seen_headers[request.url.path] = trace_id
-        return httpx.Response(200, json={"object": "list", "data": []})
+AGENTS: dict[str, Callable[[bool], Agent]] = {
+    "openai": lambda gateway: OpenAIAgent(OpenAIConfig(model="m", max_steps=2, gateway=gateway)),
+    "anthropic": lambda gateway: ClaudeAgent(
+        ClaudeConfig(model="claude-m", max_steps=2, gateway=gateway)
+    ),
+    "gemini": lambda gateway: GeminiAgent(
+        GeminiConfig(model="gemini-m", max_steps=2, gateway=gateway)
+    ),
+}
+PROVIDER_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+AUTH_HEADERS = {"openai": "authorization", "anthropic": "x-api-key", "gemini": "x-goog-api-key"}
 
-    transport = httpx.MockTransport(handler)
-    real_client_factory = gateway.DefaultAsyncHttpxClient
-    monkeypatch.setattr(
-        gateway,
-        "DefaultAsyncHttpxClient",
-        partial(real_client_factory, transport=transport),
+
+def _point_provider_sdks_at(hud_env: HudEnv, provider: Models) -> None:
+    hud_env.set(
+        OPENAI_BASE_URL=provider.url,
+        ANTHROPIC_BASE_URL=provider.url,
+        GOOGLE_GEMINI_BASE_URL=provider.url,
     )
-    client = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))
 
-    async def request_in_trace(trace_id: str) -> None:
-        with set_trace_context(trace_id):
-            await client.get(f"/models/{trace_id}", cast_to=object)
 
-    try:
-        await asyncio.gather(
-            request_in_trace("11111111-1111-4111-8111-111111111111"),
-            request_in_trace("22222222-2222-4222-8222-222222222222"),
-        )
-    finally:
-        await client.close()
+@pytest.mark.parametrize(
+    ("family", "provider_key", "gateway", "reached"),
+    [
+        pytest.param(family, key, gateway, reached, id=f"{family}-{label}")
+        for family in AGENTS
+        for key, gateway, reached, label in [
+            (True, False, "provider", "own-key"),
+            (False, False, "gateway", "hud-key-only"),
+            (True, True, "gateway", "forced-gateway"),
+        ]
+    ],
+)
+async def test_a_provider_key_routes_direct_unless_the_gateway_is_forced(
+    models: Models,
+    provider: Models,
+    hud_env: HudEnv,
+    family: str,
+    provider_key: bool,
+    gateway: bool,
+    reached: str,
+) -> None:
+    _point_provider_sdks_at(hud_env, provider)
+    hud_env.set(
+        HUD_API_KEY="hud-key", **{PROVIDER_KEYS[family]: "own-key" if provider_key else None}
+    )
+    models.script([say("ok")])
+    provider.script([say("ok")])
 
-    assert seen_headers == {
-        "/models/11111111-1111-4111-8111-111111111111": ("11111111-1111-4111-8111-111111111111"),
-        "/models/22222222-2222-4222-8222-222222222222": ("22222222-2222-4222-8222-222222222222"),
+    run = await rollout(TASK, AGENTS[family](gateway), runtime=LocalRuntime(_env()))
+
+    served = {"gateway": models.requests(), "provider": provider.requests()}
+    assert run.reward == 1.0
+    assert {name: len(requests) for name, requests in served.items()} == {
+        name: int(name == reached) for name in served
     }
+    (request,) = served[reached]
+    credential = request.headers[AUTH_HEADERS[family]].removeprefix("Bearer ")
+    assert credential == ("hud-key" if reached == "gateway" else "own-key")
 
 
-@pytest.mark.asyncio
-async def test_openai_client_trace_context_overrides_empty_header(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("build", "settings", "error", "message"),
+    [
+        pytest.param(
+            lambda: OpenAIAgent(OpenAIConfig(model="m")),
+            {},
+            HudAuthenticationError,
+            "No API key for openai",
+            id="no-key-at-all",
+        ),
+        pytest.param(
+            lambda: ClaudeAgent(ClaudeConfig(model=BEDROCK_ARN)),
+            {"HUD_API_KEY": "hud-key"},
+            HudAuthenticationError,
+            "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION are required",
+            id="bedrock-without-aws-credentials",
+        ),
+        pytest.param(
+            lambda: ClaudeAgent(ClaudeConfig(model=BEDROCK_ARN, gateway=True)),
+            {"HUD_API_KEY": "hud-key", **AWS},
+            ValueError,
+            "is a Bedrock inference profile; it cannot use the HUD gateway",
+            id="bedrock-through-the-gateway",
+        ),
+    ],
+)
+def test_an_unroutable_model_is_refused_when_the_agent_is_built(
+    hud_env: HudEnv,
+    build: Callable[[], Agent],
+    settings: dict[str, str],
+    error: type[Exception],
+    message: str,
 ) -> None:
-    seen_trace_id: str | None = None
+    hud_env.set(**settings)
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal seen_trace_id
-        seen_trace_id = request.headers["Trace-Id"]
-        return httpx.Response(200, json={"object": "list", "data": []})
-
-    transport = httpx.MockTransport(handler)
-    real_client_factory = gateway.DefaultAsyncHttpxClient
-    monkeypatch.setattr(
-        gateway,
-        "DefaultAsyncHttpxClient",
-        partial(real_client_factory, transport=transport),
-    )
-    client = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))
-    trace_id = "11111111-1111-4111-8111-111111111111"
-
-    try:
-        with set_trace_context(trace_id):
-            await client.get(
-                "/models/explicit",
-                cast_to=object,
-                options={"headers": {"Trace-Id": ""}},
-            )
-    finally:
-        await client.close()
-
-    assert seen_trace_id == trace_id
+    with pytest.raises(error, match=message):
+        build()
 
 
-@pytest.mark.asyncio
-async def test_openai_client_sends_child_and_parent_trace_ids(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_bedrock_profile_is_sent_to_bedrock_signed_with_aws_credentials(
+    models: Models, provider_server: FakeServices, hud_env: HudEnv
 ) -> None:
-    seen_headers: dict[str, str] = {}
+    hud_env.set(HUD_API_KEY="hud-key", ANTHROPIC_BEDROCK_BASE_URL=provider_server.url("api"), **AWS)
+    provider_server.reset()
+    provider_server.route("api", "POST", "/model/{rest:path}", Reply(status=400, json={}))
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        seen_headers["Trace-Id"] = request.headers["Trace-Id"]
-        seen_headers["X-HUD-Parent-Trace-Id"] = request.headers["X-HUD-Parent-Trace-Id"]
-        return httpx.Response(200, json={"object": "list", "data": []})
-
-    transport = httpx.MockTransport(handler)
-    real_client_factory = gateway.DefaultAsyncHttpxClient
-    monkeypatch.setattr(
-        gateway,
-        "DefaultAsyncHttpxClient",
-        partial(real_client_factory, transport=transport),
+    run = await rollout(
+        TASK,
+        ClaudeAgent(ClaudeConfig(model=BEDROCK_ARN, max_steps=1)),
+        runtime=LocalRuntime(_env()),
     )
-    client = cast("AsyncOpenAI", gateway.build_gateway_client("openai"))
 
-    try:
-        with set_trace_context("child", parent_trace_id="parent"):
-            await client.get("/models/nested", cast_to=object)
-    finally:
-        await client.close()
-
-    assert seen_headers == {
-        "Trace-Id": "child",
-        "X-HUD-Parent-Trace-Id": "parent",
-    }
+    (request, *_) = provider_server.requests("api", "POST")
+    assert run.reward == 0.0
+    assert models.requests() == []
+    assert request.params["rest"] == f"{BEDROCK_ARN}/invoke"
+    assert request.headers["authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIATEST/")
 
 
-_BEDROCK_ARN = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/anthropic.claude"
-
-
-def test_list_gateway_models_reads_every_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    gateway.list_gateway_models.cache_clear()
-    rows = [{"id": f"m{i}", "model_name": f"m{i}"} for i in range(103)]
-
-    def get(path: str, *, params: dict[str, int]) -> dict[str, object]:
-        assert path == "/models"
-        start = params["offset"]
-        return {"items": rows[start : start + params["limit"]], "total": len(rows)}
-
-    platform = MagicMock()
-    platform.get.side_effect = get
-    monkeypatch.setattr(gateway.PlatformClient, "from_settings", lambda: platform)
-    try:
-        models = gateway.list_gateway_models()
-    finally:
-        gateway.list_gateway_models.cache_clear()
-
-    assert [m.model_name for m in models] == [f"m{i}" for i in range(103)]
-    assert platform.get.call_count == 2
-
-
-def test_model_recency_prefers_release_over_catalog_date() -> None:
-    released = gateway.GatewayModelInfo(
-        id="released", created_at="2026-09-01T00:00:00Z", released_at="2026-01-01T00:00:00Z"
-    )
-    added = gateway.GatewayModelInfo(id="added", created_at="2026-06-01T00:00:00Z")
-    undated = gateway.GatewayModelInfo(id="undated")
-    assert sorted([added, released, undated], key=lambda m: m.recency) == [
-        undated,
-        released,
-        added,
-    ]
-
-
-def test_bedrock_arn_model_gets_a_bedrock_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "aws_access_key_id", "AKIATEST")
-    monkeypatch.setattr(settings, "aws_secret_access_key", "secret")
-    monkeypatch.setattr(settings, "aws_region", "us-east-1")
-    bedrock = MagicMock(return_value=object())
-    monkeypatch.setattr("anthropic.AsyncAnthropicBedrock", bedrock)
-    gateway_client = MagicMock()
-    monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
-
-    client = gateway.build_model_client("anthropic", model=_BEDROCK_ARN)
-
-    assert client is bedrock.return_value
-    bedrock.assert_called_once_with(
-        aws_access_key="AKIATEST", aws_secret_key="secret", aws_region="us-east-1"
-    )
-    gateway_client.assert_not_called()
-
-
-def test_bedrock_arn_model_requires_aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "aws_access_key_id", None)
-    monkeypatch.setattr(settings, "aws_secret_access_key", None)
-    monkeypatch.setattr(settings, "aws_region", None)
-
-    with pytest.raises(HudAuthenticationError, match="AWS Bedrock"):
-        gateway.build_model_client("anthropic", model=_BEDROCK_ARN)
-
-
-def test_bedrock_arn_model_cannot_be_forced_through_the_gateway(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("family", list(AGENTS))
+async def test_each_gateway_request_carries_its_own_runs_trace_id(
+    models: Models, hud_env: HudEnv, family: str
 ) -> None:
-    monkeypatch.setattr(settings, "aws_access_key_id", "AKIATEST")
-    monkeypatch.setattr(settings, "aws_secret_access_key", "secret")
-    monkeypatch.setattr(settings, "aws_region", "us-east-1")
-    bedrock = MagicMock()
-    monkeypatch.setattr("anthropic.AsyncAnthropicBedrock", bedrock)
+    hud_env.set(HUD_API_KEY="hud-key")
+    models.script([say("ok")])
 
-    with pytest.raises(ValueError, match="cannot use the HUD gateway"):
-        gateway.build_model_client("anthropic", model=_BEDROCK_ARN, gateway=True)
-    bedrock.assert_not_called()
-
-
-def test_provider_key_wins_over_hud_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
-    direct = MagicMock(return_value=object())
-    monkeypatch.setattr("anthropic.AsyncAnthropic", direct)
-    gateway_client = MagicMock()
-    monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
-
-    client = gateway.build_model_client("anthropic", model="claude-sonnet-4-6")
-
-    assert client is direct.return_value
-    direct.assert_called_once_with(api_key="sk-ant-test")
-    gateway_client.assert_not_called()
-
-
-def test_hud_key_alone_routes_through_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "anthropic_api_key", None)
-    gateway_client = MagicMock(return_value=object())
-    monkeypatch.setattr(gateway, "build_gateway_client", gateway_client)
-
-    client = gateway.build_model_client("anthropic", model="claude-sonnet-4-6")
-
-    assert client is gateway_client.return_value
-    gateway_client.assert_called_once_with("anthropic")
-
-
-def test_no_key_at_all_is_an_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "api_key", None)
-    monkeypatch.setattr(settings, "openai_api_key", None)
-    with pytest.raises(HudAuthenticationError, match="No API key for openai"):
-        gateway.build_model_client("openai")
-
-
-@pytest.mark.asyncio
-async def test_anthropic_client_receives_trace_aware_http_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client_factory = MagicMock(return_value=object())
-    monkeypatch.setattr("anthropic.AsyncAnthropic", client_factory)
-
-    gateway.build_gateway_client("anthropic")
-
-    kwargs = client_factory.call_args.kwargs
-    http_client = kwargs["http_client"]
-    assert http_client.event_hooks["request"]
-    await http_client.aclose()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("initial_status", [200, 429, 503])
-async def test_gemini_async_request_includes_trace_id(
-    monkeypatch: pytest.MonkeyPatch,
-    initial_status: int,
-) -> None:
-    sleep = AsyncMock()
-    monkeypatch.setattr(asyncio, "sleep", sleep)
-    seen_trace_id: str | None = None
-    attempts = 0
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal seen_trace_id, attempts
-        seen_trace_id = request.headers["Trace-Id"]
-        attempts += 1
-        if attempts == 1 and initial_status != 200:
-            return httpx.Response(
-                initial_status, json={"error": {"code": initial_status, "message": "busy"}}
-            )
-        return httpx.Response(
-            200,
-            json={
-                "candidates": [
-                    {
-                        "content": {"parts": [{"text": "ok"}], "role": "model"},
-                        "finishReason": "STOP",
-                        "index": 0,
-                    }
-                ],
-                "modelVersion": "gemini-test",
-                "usageMetadata": {
-                    "candidatesTokenCount": 1,
-                    "promptTokenCount": 1,
-                    "totalTokenCount": 2,
-                },
-            },
-        )
-
-    monkeypatch.setattr(
-        gateway.httpx,
-        "AsyncHTTPTransport",
-        MagicMock(return_value=httpx.MockTransport(handler)),
+    job = await Taskset("t", [TASK]).run(
+        AGENTS[family](True), runtime=LocalRuntime(_env()), group=3
     )
-    client = cast("GenaiClient", gateway.build_gateway_client("gemini"))
-    trace_id = "11111111-1111-4111-8111-111111111111"
 
-    try:
-        with set_trace_context(trace_id):
-            response = await client.aio.models.generate_content(
-                model="gemini-test",
-                contents="hi",
-            )
-    finally:
-        await client.aio.aclose()
+    assert sorted(request.headers["trace-id"] for request in models.requests()) == sorted(
+        str(run.trace_id) for run in job.runs
+    )
+    assert all("x-hud-parent-trace-id" not in r.headers for r in models.requests())
 
-    assert response.text == "ok"
-    assert seen_trace_id == trace_id
-    assert attempts == (1 if initial_status == 200 else 2)
-    if initial_status != 200:
-        sleep.assert_awaited_once()
-        assert 10 <= sleep.await_args_list[0].args[0] <= 11
-    else:
-        sleep.assert_not_awaited()
+
+class Delegating(Agent):
+    """Answers by running a nested rollout, as a subagent would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.inner: list[Run] = []
+
+    async def __call__(self, run: Run) -> None:
+        agent = OpenAIChatAgent(OpenAIChatConfig(model="m", max_steps=2))
+        inner = await rollout(TASK, agent, runtime=LocalRuntime(_env()))
+        self.inner.append(inner)
+        run.trace.content = inner.trace.content
+
+
+async def test_a_nested_rollout_names_its_parent_trace(models: Models, hud_env: HudEnv) -> None:
+    hud_env.set(HUD_API_KEY="hud-key")
+    models.script([say("ok")])
+    agent = Delegating()
+
+    outer = await rollout(TASK, agent, runtime=LocalRuntime(_env()))
+
+    (request,) = models.requests()
+    (inner,) = agent.inner
+    headers: dict[str, Any] = request.headers
+    assert outer.reward == 1.0
+    assert (headers["trace-id"], headers["x-hud-parent-trace-id"]) == (
+        str(inner.trace_id),
+        str(outer.trace_id),
+    )
