@@ -56,7 +56,7 @@ def test_slug_default_is_deterministic_with_args() -> None:
     a = Task(env="e", id="solve", args={"b": 2, "a": 1})
     b = Task(env="e", id="solve", args={"a": 1, "b": 2})  # key order differs
     assert a.slug == b.slug  # stable: keys sorted
-    assert a.slug.startswith("solve-")
+    assert a.slug == "solve-1744f53e"
     assert a.slug != Task(env="e", id="solve", args={"a": 9}).slug
 
 
