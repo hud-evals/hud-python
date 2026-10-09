@@ -1,0 +1,2 @@
+FROM python:3.11-alpine
+EXPOSE 5678 5679

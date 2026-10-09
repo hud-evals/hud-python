@@ -1,0 +1,5 @@
+[task]
+name = "fedora-bootstrap"
+
+[verifier]
+timeout_sec = 30

@@ -1,0 +1,5 @@
+artifacts = [{ source = "/opt/result", service = "main" }]
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30

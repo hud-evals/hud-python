@@ -1,0 +1,2 @@
+# The controller refuses to serve.
+startup_error = "HARBOR_MISSING_KEY"
