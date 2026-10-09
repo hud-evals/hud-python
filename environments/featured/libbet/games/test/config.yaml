@@ -1,0 +1,12 @@
+# Bundled smoke-test game: "Libbet and the Magic Floor" (homebrew, zlib license).
+# Ships with the template so the environment runs end-to-end with no copyrighted
+# ROM. Scored with the generic, ROM-agnostic exploration reward.
+emulator: gba
+rom: libbet.gb
+boot_frames: 400
+action_frames: 15
+scoring:
+  - type: exploration
+    target: 20
+    threshold: 4
+    weight: 1.0

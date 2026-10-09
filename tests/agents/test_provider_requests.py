@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fastmcp import FastMCP
 from inline_snapshot import snapshot
+from pydantic import ValidationError
 
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
@@ -1193,3 +1194,43 @@ async def test_citations_ask_the_provider_for_sources(
 
     (request,) = models.requests()
     assert part(request) == expected
+
+
+@pytest.mark.parametrize(
+    ("config", "error"),
+    [
+        pytest.param(
+            {"max_tool_result_images": 1},
+            "requires explicit adaptive or enabled thinking",
+            id="image-history-without-thinking",
+        ),
+        pytest.param(
+            {"max_tool_result_images": 1, "thinking": {"type": "disabled"}},
+            "requires explicit adaptive or enabled thinking",
+            id="image-history-with-thinking-disabled",
+        ),
+        pytest.param(
+            {"max_tokens": 2048, "thinking": {"type": "enabled", "budget_tokens": 2048}},
+            "budget_tokens must be less than max_tokens",
+            id="a-budget-equal-to-max-tokens",
+        ),
+        pytest.param(
+            {"max_tokens": 2048, "thinking": {"type": "enabled", "budget_tokens": 2049}},
+            "budget_tokens must be less than max_tokens",
+            id="a-budget-above-max-tokens",
+        ),
+        pytest.param(
+            {"max_tokens": 2048, "thinking": {"type": "enabled", "budget_tokens": 2047}},
+            None,
+            id="a-budget-below-max-tokens",
+        ),
+    ],
+)
+def test_claude_refuses_thinking_settings_it_cannot_send(
+    config: dict[str, Any], error: str | None
+) -> None:
+    if error is None:
+        assert ClaudeConfig.model_validate(config).thinking == config["thinking"]
+        return
+    with pytest.raises(ValidationError, match=error):
+        ClaudeConfig.model_validate(config)

@@ -1,0 +1,7 @@
+payment_id,settled_date,invoice_reference,vendor,amount,currency,status,bank_reference,note
+DEMO-P001,2026-09-25,NORTH-1048,North Paperworks,900.00,EUR,settled,DEMO-BANK-A101,September payment batch
+DEMO-P002,2026-09-27,ORBIT-771,Orbit Desk,648.00,EUR,settled,DEMO-BANK-A102,September subscription
+DEMO-P003,2026-09-28,LUMA-309,Luma Workshop,864.00,EUR,settled,DEMO-BANK-A103,September payment batch
+DEMO-P004,2026-09-30,NORTH-1048,North Paperworks,900.00,EUR,settled,DEMO-BANK-A104,Manual payment
+DEMO-P005,2026-09-30,CLEAR-552,Clear Room Services,400.00,EUR,settled,DEMO-BANK-A105,First installment
+DEMO-P006,2026-10-03,CLEAR-552,Clear Room Services,200.00,EUR,settled,DEMO-BANK-A106,Second installment

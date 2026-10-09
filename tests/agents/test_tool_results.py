@@ -14,7 +14,7 @@ import json
 import random
 import struct
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import mcp.types as mcp_types
@@ -22,11 +22,13 @@ import pytest
 from dirty_equals import IsStr
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.tools import ToolResult
 from inline_snapshot import snapshot
 from PIL import Image
 
+from hud import Environment
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig, ToolStep
 from tests.agents.support import image, mcp_server, run_task, wire, workspace_env
 from tests.harness import call, say
 
@@ -605,3 +607,84 @@ async def test_chat_models_see_a_read_image_as_it_is_on_disk(
         {"type": "text", "text": "Tool returned the following:"},
         {"type": "image_url", "image_url": {"url": expected}},
     ]
+
+
+def screenshots() -> FastMCP:
+    server = FastMCP("screenshots")
+
+    @server.tool
+    def screenshot() -> ToolResult:
+        """Capture the current screen."""
+        return ToolResult(
+            content=[
+                mcp_types.TextContent(type="text", text="screen"),
+                mcp_types.ImageContent(type="image", mimeType="image/png", data=png_base64()),
+            ]
+        )
+
+    return server
+
+
+def png_base64() -> str:
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 24), "white").save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+@pytest.mark.parametrize("limit", [None, 1], ids=["unlimited", "newest-image-only"])
+async def test_claude_keeps_only_its_newest_tool_result_images_when_asked(
+    limit: int | None, models: Models, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script(
+        [
+            replace(call("screenshot"), reasoning="reason-1"),
+            replace(call("screenshot"), reasoning="reason-2"),
+            say("done"),
+        ]
+    )
+    agent = ClaudeAgent(
+        ClaudeConfig(
+            model="claude-sonnet-4-6",
+            max_tool_result_images=limit,
+            thinking={"type": "adaptive"} if limit is not None else None,
+        )
+    )
+
+    async with mcp_server(screenshots(), name="screenshots") as tools:
+        env = Environment("shots", capabilities=[tools])
+
+        @env.template()
+        async def task():
+            yield "Take two screenshots."
+            yield 1.0
+
+        run = await run_task(env, agent)
+
+    last = models.requests()[-1]
+    sent = [
+        [block["type"] for block in message["content"][0]["content"]]
+        for message in last.body["messages"][2::2]
+    ]
+    thinking = [message["content"][0] for message in last.body["messages"][1::2]]
+    kept = [
+        [block.type for block in step.result.content]
+        for step in run.trace.steps
+        if isinstance(step, ToolStep) and step.result is not None
+    ]
+    assert run.trace.status == "completed"
+    assert kept == [["text", "image"], ["text", "image"]]
+    assert [(block["type"], block["thinking"]) for block in thinking] == [
+        ("thinking", "reason-1"),
+        ("thinking", "reason-2"),
+    ]
+    if limit is None:
+        assert sent == [["text", "image"], ["text", "image"]]
+        assert ("thinking" in last.body, "anthropic-beta" in last.headers) == (False, False)
+    else:
+        assert sent == [["text", "text"], ["text", "image"]]
+        assert "thinking-binding-controls-2026-08-01" in last.headers["anthropic-beta"]
+        assert last.body["thinking"] == {
+            "type": "adaptive",
+            "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+        }

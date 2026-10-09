@@ -16,7 +16,7 @@ schema understands this family's payload.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal, cast
+from typing import Annotated, Any, ClassVar, Literal, NotRequired, Self, cast
 from uuid import uuid4
 
 from mcp.types import ContentBlock, ImageContent, TextContent
@@ -26,7 +26,10 @@ from pydantic import (
     ConfigDict,
     Field,
     field_serializer,
+    model_validator,
+    with_config,
 )
+from typing_extensions import TypedDict
 
 from hud.agents.tools.hosted import HostedTool
 from hud.capabilities.rfb import (
@@ -83,6 +86,29 @@ class ToolAgentConfig(AgentConfig):
 # -----------------------------------------------------------------------------
 
 
+@with_config(ConfigDict(extra="forbid"))
+class ClaudeAdaptiveThinkingConfig(TypedDict):
+    type: Literal["adaptive"]
+    display: NotRequired[Literal["summarized", "omitted"]]
+
+
+@with_config(ConfigDict(extra="forbid"))
+class ClaudeEnabledThinkingConfig(TypedDict):
+    type: Literal["enabled"]
+    budget_tokens: Annotated[int, Field(ge=1024)]
+    display: NotRequired[Literal["summarized", "omitted"]]
+
+
+@with_config(ConfigDict(extra="forbid"))
+class ClaudeDisabledThinkingConfig(TypedDict):
+    type: Literal["disabled"]
+
+
+ClaudeThinkingConfig = (
+    ClaudeAdaptiveThinkingConfig | ClaudeEnabledThinkingConfig | ClaudeDisabledThinkingConfig
+)
+
+
 class ClaudeConfig(ToolAgentConfig):
     model_name: str = "Claude"
     model: str = Field(default="claude-sonnet-4-6", validation_alias=_model_alias)
@@ -90,6 +116,24 @@ class ClaudeConfig(ToolAgentConfig):
     max_tokens: int = 16384
     use_computer_beta: bool = True
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
+    thinking: ClaudeThinkingConfig | None = None
+    max_tool_result_images: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_thinking(self) -> Self:
+        if (
+            self.thinking is not None
+            and self.thinking["type"] == "enabled"
+            and self.thinking["budget_tokens"] >= self.max_tokens
+        ):
+            raise ValueError("enabled thinking budget_tokens must be less than max_tokens")
+        if self.max_tool_result_images is not None and (
+            self.thinking is None or self.thinking["type"] == "disabled"
+        ):
+            raise ValueError(
+                "max_tool_result_images requires explicit adaptive or enabled thinking"
+            )
+        return self
 
 
 # -----------------------------------------------------------------------------

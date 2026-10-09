@@ -1,0 +1,5 @@
+record_id,record_date,invoice_reference,item,quantity_received,quantity_accepted,quantity_returned,unit,notes
+DEMO-R101,2026-09-04,NORTH-1048,recycled notebooks,40,40,0,units,All units accepted
+DEMO-R102,2026-09-30,ORBIT-771,monthly collaboration seats,12,12,0,seats,All twelve seats active throughout September
+DEMO-R103,2026-09-18,LUMA-309,adjustable desk stands,30,24,6,units,Six damaged units returned on 2026-09-19; no replacement accepted as of 2026-10-06
+DEMO-R104,2026-09-20,CLEAR-552,office cleaning visits,5,5,0,visits,All five visits signed off

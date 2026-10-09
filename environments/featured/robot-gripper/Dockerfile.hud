@@ -1,0 +1,43 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+# Headless software GL so MuJoCo's render()/render_depth tools work without a display/GPU.
+ENV MUJOCO_GL=osmesa
+ENV PYOPENGL_PLATFORM=osmesa
+
+# build-essential: Warp JIT-compiles CPU kernels on first reset. The lib* packages are
+# the headless OpenGL stack MuJoCo renders through (osmesa = pure software).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      libgl1 \
+      libglx-mesa0 \
+      libegl1 \
+      libosmesa6 \
+      libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv for a reproducible, lockfile-pinned install.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Dependency layer first (cached across code edits): the manifest, the lock, and the
+# bundled Newton wheel the lock points at. The LLM-task path needs only the default deps
+# (no viewer extra), so --no-dev with no extras.
+COPY pyproject.toml uv.lock ./
+COPY wheels/ wheels/
+COPY .hud-sdk/ .hud-sdk/
+ARG HUD_SDK_VERSION=0.6.19
+RUN uv sync --frozen --no-dev
+RUN /app/.venv/bin/python -c "from importlib.metadata import version; import os; assert version('hud') == os.environ['HUD_SDK_VERSION']; print('HUD SDK:', version('hud'))"
+
+# The env, its MCP simulator, and the tabletop scene.
+COPY environment/ environment/
+COPY sim/ sim/
+COPY scenes/ scenes/
+
+EXPOSE 8765
+# Serve the v6 control channel. The env spawns the Newton sim (sim/host.py) as an mcp
+# capability in @env.initialize; the sim subprocess inherits this venv's interpreter.
+CMD ["/app/.venv/bin/hud", "serve", "environment/env:env", "--host", "0.0.0.0", "--port", "8765"]
