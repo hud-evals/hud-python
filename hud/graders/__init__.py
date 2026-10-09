@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from .base import Grader
 from .bash import BashGrader
-from .combine import _combine_subscores, combine, combine_all, combine_any
+from .combine import combine, combine_all, combine_any
 from .judge import LLMJudgeGrader
 from .results import EvaluationResult, SubScore
 from .text import (
@@ -44,7 +44,6 @@ __all__ = [
     "Grader",
     "LLMJudgeGrader",
     "SubScore",
-    "_combine_subscores",
     "combine",
     "combine_all",
     "combine_any",
