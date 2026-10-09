@@ -349,7 +349,7 @@ def slow_initialize(events: list[str]) -> Environment:
 
 
 ACQUISITION_ERRORS: dict[
-    str, tuple[Callable[[Path, list[str]], Provider], Task, Any, str, list]
+    str, tuple[Callable[[Path, list[str]], Provider], Task, Any, str | None, list[str]]
 ] = {
     "a source without the row's env": (
         lambda tmp, events: LocalRuntime(write(tmp / "env.py", "from hud import Environment\n")),

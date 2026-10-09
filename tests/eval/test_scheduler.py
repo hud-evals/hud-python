@@ -21,7 +21,7 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.eval.envs import containers, lab, solve
+from tests.eval.envs import containers, lab, minted, solve
 from tests.harness import RecordingProvider, ScriptedAgent
 
 if TYPE_CHECKING:
@@ -324,9 +324,7 @@ INVALID: dict[str, tuple[Callable[[Provider], Any], str]] = {
         "no placement: pass runtime=",
     ),
     "a row minted by a template, serialized and reloaded": (
-        lambda runtime: Task.model_validate(lab().tasks["add"](a=1, b=2).model_dump()).run(
-            ScriptedAgent()
-        ),
+        lambda runtime: Task.model_validate(minted().model_dump()).run(ScriptedAgent()),
         "no placement: pass runtime=",
     ),
     "container rows mixed with portable rows": (
@@ -362,8 +360,7 @@ async def test_an_empty_taskset_needs_no_placement() -> None:
 
 async def test_rows_minted_by_a_live_environment_run_against_it() -> None:
     events: list[str] = []
-    env = lab(events)
-    row = env.tasks["add"](a=2, b=3)
+    row = minted(events)
 
     job = await Taskset("live", [row]).run(ScriptedAgent(solve), group=2, max_concurrent=2)
 

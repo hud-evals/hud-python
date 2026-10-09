@@ -80,24 +80,17 @@ async def test_a_taskset_reports_one_job_and_each_rollout_under_it(
     )
     assert f"job: https://hud.test/jobs/{uuid.UUID(job.id)}" in caplog.messages
     enters = platform.requests("api", "POST", TRACE_ENTER)
-    assert sorted(request.params["id"] for request in enters) == sorted(
-        run.trace_id for run in job.runs
+    assert len(enters) == 4
+    assert {request.params["id"] for request in enters} == {run.trace_id for run in job.runs}
+    bodies = [request.json for request in enters]
+    assert sorted(body.pop("task_slug") for body in bodies) == sorted(
+        row.slug for row in rows for _ in range(2)
     )
-    assert sorted(
-        (request.json for request in enters), key=lambda body: body["task_slug"]
-    ) == sorted(
-        (
-            {"job_id": job.id, "group_id": HEX_ID, "task_slug": row.slug, "model": "claude-test"}
-            for row in rows
-            for _ in range(2)
-        ),
-        key=lambda body: body["task_slug"],
-    )
+    assert bodies == [{"job_id": job.id, "group_id": HEX_ID, "model": "claude-test"}] * 4
     assert {body["job_id"] for body in platform.bodies("api", "POST", TRACE_ENTER)} == {job.id}
     exits = platform.requests("api", "POST", TRACE_EXIT)
-    assert sorted(request.params["id"] for request in exits) == sorted(
-        run.trace_id for run in job.runs
-    )
+    assert len(exits) == 4
+    assert {request.params["id"] for request in exits} == {run.trace_id for run in job.runs}
     assert [request.json for request in exits] == [
         {"status": "completed", "reward": 1.0, "evaluation_result": {"score": 1.0}}
     ] * 4

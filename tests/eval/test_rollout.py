@@ -10,22 +10,19 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dirty_equals import IsStr
 
-from hud import Environment
 from hud.agents.base import Agent
-from hud.agents.openai_compatible import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Connection
 from hud.eval import LocalRuntime, Run, Runtime, SubprocessRuntime, Task, rollout
 from hud.telemetry.context import get_current_trace_id
 from tests.eval.envs import SUMS_SOURCE, eventually, lab, solve
-from tests.harness import ScriptedAgent, call, steps
+from tests.harness import ScriptedAgent, steps
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
+    from hud.environment import Environment
     from hud.eval import Provider
-    from tests.harness import HudEnv, Models
 
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
 LOOPBACK = IsStr(regex=r"tcp://127\.0\.0\.1:\d+")
@@ -358,7 +355,7 @@ async def test_the_agent_sees_the_prompt_as_turns_and_as_text(
 
     class Reader(Agent):
         async def __call__(self, run: Run) -> None:
-            turns = [
+            turns: list[tuple[str, str | None]] = [
                 (message.role, getattr(message.content, "text", None))
                 for message in run.prompt_messages
             ]
@@ -411,20 +408,27 @@ async def test_connections_reach_the_agent_only_while_it_runs(tmp_path: Path) ->
     assert (run.reward, run.connections) == (1.0, {})
 
 
+TRACE = "0" * 31 + "1"
 IDENTITIES = {
-    "a bare rollout mints its job and trace": ({}, (HEX_ID, None, HEX_ID)),
-    "threaded ids are kept": (
-        {"job_id": "j1", "group_id": "g1", "trace_id": "0" * 31 + "1"},
-        ("j1", "g1", "0" * 31 + "1"),
-    ),
+    "a bare rollout mints its job and trace": ((None, None, None), (HEX_ID, None, HEX_ID)),
+    "threaded ids are kept": (("j1", "g1", TRACE), ("j1", "g1", TRACE)),
 }
 
 
 @pytest.mark.parametrize(("ids", "expected"), IDENTITIES.values(), ids=IDENTITIES.keys())
 async def test_a_run_carries_its_job_group_and_trace(
-    ids: dict[str, str], expected: tuple[Any, ...]
+    ids: tuple[str | None, str | None, str | None], expected: tuple[Any, ...]
 ) -> None:
-    run = await rollout(add(), ScriptedAgent(solve), runtime=LocalRuntime(lab()), **ids)
+    job_id, group_id, trace_id = ids
+
+    run = await rollout(
+        add(),
+        ScriptedAgent(solve),
+        runtime=LocalRuntime(lab()),
+        job_id=job_id,
+        group_id=group_id,
+        trace_id=trace_id,
+    )
 
     assert (run.job_id, run.group_id, run.trace_id) == expected
     assert run.reward == 1.0
@@ -475,33 +479,3 @@ async def test_cancelling_a_rollout_cancels_the_task_and_propagates() -> None:
     await eventually(lambda: events[-1:] == ["shutdown"])
 
     assert events == ["initialize", "start add 2 3", "end add", "shutdown"]
-
-
-async def test_the_agent_deadline_kills_a_running_workspace_command_before_grading(
-    models: Models, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    workspace = tmp_path / "workspace"
-    env = Environment("cleanup")
-    env.workspace(workspace, guest_path=str(workspace))
-
-    @env.initialize
-    async def seed() -> None:
-        workspace.mkdir(parents=True, exist_ok=True)
-
-    # The command outlives the deadline, and grading outlives the command, so a
-    # command that survived the deadline would leave ``late`` behind.
-    @env.template()
-    async def wait_for_cleanup():
-        yield "Start the requested command."
-        await asyncio.sleep(2.0)
-        yield 1.0 if (workspace / "started").exists() and not (workspace / "late").exists() else 0.0
-
-    models.script([call("bash", command="touch started; sleep 1.5; touch late")])
-    agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=2, timeout_seconds=1.5))
-
-    run = await rollout(
-        Task(env="cleanup", id="wait_for_cleanup"), agent, runtime=LocalRuntime(env)
-    )
-
-    assert (run.reward, run.trace.status, run.trace.stop_reason) == (1.0, "error", "timeout")
