@@ -19,13 +19,31 @@ from urllib.parse import urlsplit
 
 import pytest
 from dirty_equals import IsStr
+from fastmcp import FastMCP
 
 from hud import Environment
-from hud.capabilities import Connection, SSHClient
+from hud.capabilities import (
+    Capability,
+    CDPClient,
+    Connection,
+    MCPClient,
+    RFBClient,
+    SSHClient,
+)
 from hud.clients import HudClient, HudProtocolError, connect
 from hud.environment import WorkspaceRoute
 from hud.eval.runtime import Runtime
-from tests.harness import answer, control_peer, eventually, hang_up, relay, served
+from tests.harness import (
+    answer,
+    control_peer,
+    eventually,
+    fake_browser,
+    fake_screen,
+    hang_up,
+    relay,
+    serve_asgi,
+    served,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -382,3 +400,38 @@ async def test_a_reply_to_another_request_aborts_the_connection() -> None:
             await client.cancel()
 
     assert [request["method"] for request in peer.requests()] == ["hello", "tasks.grade"]
+
+
+async def test_each_protocol_opens_as_its_own_client_through_the_env_port() -> None:
+    tools = FastMCP("tools")
+
+    @tools.tool
+    def ping() -> str:
+        """Answer pong."""
+        return "pong"
+
+    async with (
+        fake_screen(width=4, height=2) as screen,
+        fake_browser(replies={"Page.navigate": {"result": {"frameId": "f-1"}}}) as browser,
+        serve_asgi(tools.http_app(path="/mcp")) as mcp_port,
+    ):
+        env = Environment(
+            "multi",
+            capabilities=[
+                Capability.rfb(name="screen", url=screen.url),
+                Capability.cdp(name="browser", url=browser.url),
+                Capability.mcp(name="tools", url=f"http://127.0.0.1:{mcp_port}/mcp"),
+            ],
+        )
+        async with served(env) as client:
+            rfb = await client.open("screen")
+            cdp = await client.open("browser")
+            mcp = await client.open("tools")
+            assert isinstance(rfb, RFBClient)
+            assert isinstance(cdp, CDPClient)
+            assert isinstance(mcp, MCPClient)
+            _, mime = await rfb.screenshot_png()
+            navigated = await cdp.send("Page.navigate", {"url": "https://example.com"})
+            listed = [tool.name for tool in await mcp.list_tools()]
+
+    assert (mime, navigated, listed) == ("image/png", {"frameId": "f-1"}, ["ping"])
