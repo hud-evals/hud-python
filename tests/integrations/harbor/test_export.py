@@ -17,7 +17,6 @@ import sys
 import textwrap
 import tomllib
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -27,10 +26,9 @@ from hud.integrations.harbor import export
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from tests.harness import HudEnv
-
-REPO = Path(__file__).resolve().parents[3]
 
 ENV_PY = """\
 import os
@@ -658,18 +656,6 @@ async def test_the_entrypoint_refuses_to_run_the_agent_when_task_setup_fails(
             ],
         }
     )
-
-
-@pytest.fixture(scope="module")
-def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    wheels = tmp_path_factory.mktemp("wheels")
-    subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(wheels)],
-        cwd=REPO,
-        check=True,
-        capture_output=True,
-    )
-    return next(wheels.glob("*.whl"))
 
 
 def docker(*args: str, timeout: float = 600) -> subprocess.CompletedProcess[str]:

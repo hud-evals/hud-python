@@ -1,0 +1,7 @@
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
+
+[[verifier.collect]]
+command = "echo broken >&2; exit 3"
+timeout_sec = 1

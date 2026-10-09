@@ -1,0 +1,56 @@
+# reward.json wins over reward.txt; only a finite, non-boolean number counts.
+[[case]]
+name = "reward.json over reward.txt"
+reward = 0.75
+runtime.env_vars = { REWARD_SHAPE = "json-preferred" }
+
+[[case]]
+name = "a score key"
+reward = 0.5
+runtime.env_vars = { REWARD_SHAPE = "json-score" }
+
+[[case]]
+name = "a bare number"
+reward = 0.25
+runtime.env_vars = { REWARD_SHAPE = "json-number" }
+
+[[case]]
+name = "a boolean"
+reward = 0.0
+error = "Harbor verifier did not write a numeric reward"
+runtime.env_vars = { REWARD_SHAPE = "json-bool" }
+
+[[case]]
+name = "an infinite reward"
+reward = 0.0
+error = "Harbor verifier did not write a numeric reward"
+runtime.env_vars = { REWARD_SHAPE = "json-infinite" }
+
+[[case]]
+name = "invalid json"
+reward = 0.0
+error = "Harbor verifier did not write a numeric reward"
+runtime.env_vars = { REWARD_SHAPE = "json-invalid" }
+
+[[case]]
+name = "padded text"
+reward = 0.5
+runtime.env_vars = { REWARD_SHAPE = "text" }
+
+[[case]]
+name = "nan text"
+reward = 0.0
+error = "Harbor verifier did not write a numeric reward"
+runtime.env_vars = { REWARD_SHAPE = "text-nan" }
+
+[[case]]
+name = "words"
+reward = 0.0
+error = "Harbor verifier did not write a numeric reward"
+runtime.env_vars = { REWARD_SHAPE = "text-words" }
+
+[[case]]
+name = "no reward file"
+reward = 0.0
+error = "Harbor verifier did not write a numeric reward"
+runtime.env_vars = { REWARD_SHAPE = "none" }

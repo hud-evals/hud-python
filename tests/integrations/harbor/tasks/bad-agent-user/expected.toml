@@ -1,0 +1,2 @@
+# The controller refuses to serve.
+startup_error = "Harbor user 'ghost' does not exist"

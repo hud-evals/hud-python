@@ -1,0 +1,4 @@
+# An empty runtime value falls back to the template default.
+[runtime.env_vars]
+HARBOR_GREETING = ""
+HARBOR_JUDGE_KEY = "judge-secret"

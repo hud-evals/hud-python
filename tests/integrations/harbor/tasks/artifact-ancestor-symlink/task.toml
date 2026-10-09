@@ -1,0 +1,8 @@
+artifacts = [{ source = "/app/linked/tests", service = "main" }]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
