@@ -30,5 +30,4 @@ The rules are under "Testing" in `AGENTS.md`. Treat each of these as a finding:
 For changes to `hud/environment`, the runtimes, egress, or Harbor, ask what an
 agent inside the sandbox could now do: read the host's credentials, reach the
 control channel, run code outside the sandbox, or keep a process alive past
-teardown. Each new angle becomes a row in the sandbox scenarios, scored 1 only
-when the attempt is denied.
+teardown. Anything it newly could is a finding.

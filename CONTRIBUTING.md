@@ -56,10 +56,14 @@ provides them as fixtures:
 - `hud`: the real `hud` CLI in a subprocess. `hud("jobs", "list", "--json")`
   returns the exit code, stdout and stderr.
 - `fake_docker`: a `docker` executable on `PATH` that logs every invocation and
-  answers from rules.
+  answers from rules, an image store (`images`), or container directories
+  (`rootfs`).
 - `ScriptedAgent`, `RecordingProvider`, `served`, `fake_screen`, and `steps` for
   agents with fixed answers, observed placements, served environments, a VNC
   screen, and the step spans a run exported.
+- `fake_browser`, `control_peer`, and `relay` for a DevTools endpoint, a scripted
+  control-channel peer, and a TCP relay that severs, refuses or stalls
+  connections; `eventually` polls for a condition instead of sleeping.
 
 For example:
 
