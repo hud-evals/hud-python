@@ -31,7 +31,8 @@ TASKS = Path(__file__).parent / "tasks"
 REPO = Path(__file__).resolve().parents[3]
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.docker,
     pytest.mark.skipif(sys.platform == "win32", reason="adapted images are Linux containers"),
 ]
 

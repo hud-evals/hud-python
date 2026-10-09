@@ -134,6 +134,10 @@ dev = [
     "pytest-asyncio",
     "pytest-mock",
     "pytest-cov",
+    "pytest-xdist",
+    "pytest-timeout",
+    "inline-snapshot",
+    "dirty-equals",
     "ty==0.0.67",
 ]
 
@@ -263,7 +267,12 @@ fail_under = 58
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-m 'not integration'"
+addopts = "-m 'not e2e'"
+timeout = 120
 markers = [
-    "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
+    "e2e: needs something outside the test process; runs only when selected with -m",
+    "docker: needs a running Docker daemon",
+    "sandbox: needs Linux, root, and bubblewrap",
+    "live: needs a real HUD account (HUD_API_KEY) and spends credits",
+    "hosted: deploys to and runs on the HUD platform",
 ]

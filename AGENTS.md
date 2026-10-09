@@ -55,14 +55,15 @@ Use the commands in `CONTRIBUTING.md` as the source of truth. Common commands:
 
 ```bash
 uv sync --extra dev
-uv run pytest -q
 uv run ruff format . --check
 uv run ruff check .
 uv run --extra dev --extra train ty check
+uv run python scripts/check_tests.py
+uv run pytest -n auto
 ```
 
-The shared pre-push hook lives in `.githooks/pre-push`, but agents should not
-change local git config unless explicitly asked.
+Locally, ruff and ty are the loop; CI runs the test suite. Run the tests you
+touched, and leave the full suite and the `e2e` lanes to CI.
 
 Tests run on Python 3.11 and 3.12 in CI. `pyproject.toml` currently supports
 Python `>=3.11, <3.13`.
@@ -121,27 +122,33 @@ Python `>=3.11, <3.13`.
 - Use `TYPE_CHECKING` imports for type-only imports that would otherwise add
   runtime dependency cost or cycles.
 
-## Testing Expectations
+## Testing
 
-- Add or update focused tests for behavior changes. Put them in the `tests/`
-  package that mirrors the module they cover.
-- Test behavior and contracts, not private implementation details.
-- Regression tests should fail on the old behavior through the normal lifecycle
-  or public boundary. Do not manually seed private state such as internal maps,
-  caches, cursors, or prepared containers just to prove a changed line.
-- If a bug involves internal state, reach it through real setup and execution:
-  construction, configuration, preparation, run loop, provider response, tool
-  execution, or public API call.
-- Do not add hooks, helper methods, or abstraction layers only to make tests
-  easier. If a test needs that, reconsider the behavior boundary instead.
-- Test names should describe the observable behavior or contract, not the
-  private mechanism.
-- Mock external services, provider APIs, network, Docker, browser, and filesystem
-  boundaries as needed. Do not mock core logic just to make a test easy.
-- Mark tests that require `HUD_API_KEY`, network access, or deployed services as
-  integration tests.
-- Run the narrowest relevant tests first, then broader checks when the blast
-  radius is shared or user-facing.
+Tests are black-box: they drive the SDK through a public boundary and fake only
+what lies outside it. The harness in `tests/harness` holds those fakes: the HUD
+services, scripted model providers, a `docker` executable, a VNC screen, and the
+real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
+
+- Enter through a public boundary: the `hud` CLI, an exported name, the control
+  channel or another wire protocol, a file format, or a process effect.
+- Fake only the outside world: HUD services, model providers, Docker, cloud SDKs,
+  the clock. Never patch a `hud` name, import a private one, or touch a private
+  attribute; `scripts/check_tests.py` enforces this in CI. Configure the SDK the
+  way a user does, through environment variables (`hud_env.set(...)`).
+- Never hand-build what a producer emits. Run the producer, so the test covers
+  the seam between it and its consumer.
+- Assert what a user or a peer observes: the reward, run and trace fields,
+  output and exit codes, files, request bodies, wire frames. Prefer fixture
+  environments whose reward proves the path ran.
+- Write a scenario once per contract, as a table; a new case is a new row. Use
+  inline snapshots only where a whole output is the contract: request bodies the
+  platform parses, `--json` documents, docker and cloud-SDK transcripts.
+- Do not add tests to check your own change. Check it with a temporary script,
+  and extend a scenario only when the change adds or fixes a contract; a bug fix
+  lands with the scenario row that failed before it.
+- Tests needing something outside the process are marked `e2e` plus `docker`,
+  `sandbox`, `live` (a real HUD account) or `hosted`, and run only when selected.
+- Test names describe the observable behavior, not the mechanism.
 
 ## Operational Debugging
 
