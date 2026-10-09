@@ -1,1538 +1,492 @@
-"""The rollout engine: ``rollout(task, agent)`` and its schedulers.
-
-These drive the engine end-to-end through the real placement path: a pure-data
-``Task`` row plus ``runtime=SubprocessRuntime(env_file)`` — a child process serves the env, the
-engine connects over the wire, the agent answers, grading comes back. The
-engine contract is a graded :class:`Run` with a trace id (always under a job —
-there are no standalone traces), and failure isolation that never raises: a
-pre-launch failure yields a synthesized ``Run.failed``; a mid-run failure
-keeps the real run and its evidence. ``Task.run`` / ``Taskset.run`` schedule
-the atom and return a :class:`Job`.
-"""
+"""The rollout atom: one task driven to a graded ``Run``, whatever fails along the way."""
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
-import os
-import signal
-import subprocess
-import sys
-import textwrap
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import mcp.types as mcp_types
 import pytest
-from pydantic import BaseModel
+from dirty_equals import IsStr
 
-import hud.eval.run as run_module
+from hud import Environment
 from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Connection
-from hud.clients.client import HudClient
-from hud.environment import Answer, Environment
-from hud.eval import (
-    Job,
-    LocalRuntime,
-    Runtime,
-    RuntimeConfig,
-    RuntimeLimits,
-    SubprocessRuntime,
-    Task,
-    Taskset,
-)
-from hud.eval.run import Run, rollout
-from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
-
-
-async def test_taskset_rejects_zero_group_before_execution():
-    with pytest.raises(ValueError, match="group must be >= 1"):
-        await Taskset("empty", []).run(_FnAgent(lambda _: "answer"), group=0)
-
+from hud.eval import LocalRuntime, Run, Runtime, SubprocessRuntime, Task, rollout
+from hud.telemetry.context import get_current_trace_id
+from tests.eval.envs import SUMS_SOURCE, eventually, lab, solve
+from tests.harness import ScriptedAgent, call, steps
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from hud.eval.task import Task as TaskRow
+    from hud.eval import Provider
+    from tests.harness import HudEnv, Models
 
-_SUMS_ENV = """\
-from hud import Environment
+HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
+LOOPBACK = IsStr(regex=r"tcp://127\.0\.0\.1:\d+")
+GRADED_SPANS = ["task", "user", "task"]
 
-env = Environment("sums")
 
-
-@env.template()
-async def add(a: int, b: int):
-    answer = yield f"add:{a}:{b}"
-    yield 1.0 if answer == str(a + b) else 0.0
-"""
-
-
-@pytest.fixture(scope="module")
-def env_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    path = tmp_path_factory.mktemp("sums") / "env.py"
-    path.write_text(textwrap.dedent(_SUMS_ENV), encoding="utf-8")
-    return path
-
-
-class _FnAgent(Agent):
-    """Stateless agent: answers each run by applying ``fn`` to ``run.prompt``."""
-
-    def __init__(self, fn: Any) -> None:
-        super().__init__()
-        self._fn = fn
-
-    async def __call__(self, run: Any) -> None:
-        run.trace.content = self._fn(run.prompt)
-
-
-class _SequencedCompletions:
-    def __init__(self, responses: list[Any]) -> None:
-        self._responses = responses
-        self.requests: list[dict[str, Any]] = []
-
-    async def create(self, **kwargs: Any) -> Any:
-        self.requests.append(kwargs)
-        return self._responses.pop(0)
-
-
-class _FakeOpenAI:
-    def __init__(self, responses: list[Any]) -> None:
-        self.chat = SimpleNamespace(completions=_SequencedCompletions(responses))
-
-
-def _chat_response(content: str, tool_calls: list[Any] | None = None) -> Any:
-    message = SimpleNamespace(
-        content=content,
-        tool_calls=tool_calls or [],
-        refusal=None,
-        model_dump=lambda exclude_none=True: {"role": "assistant", "content": content},
-    )
-    choice = SimpleNamespace(message=message, finish_reason="stop", logprobs=None)
-    return SimpleNamespace(
-        choices=[choice],
-        model="fake-openai-compatible",
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, prompt_tokens_details=None),
-    )
-
-
-def _tool_call(name: str, arguments: str) -> Any:
-    return SimpleNamespace(
-        type="function",
-        id=f"call_{name}",
-        function=SimpleNamespace(name=name, arguments=arguments),
-    )
-
-
-def _add_task(a: int, b: int) -> Task:
-    """A pure data row; the env it names is defined by the spawned file."""
-    return Task(env="sums", id="add", args={"a": a, "b": b})
-
-
-def _solve_add(prompt: str) -> str:
-    _, a, b = prompt.split(":")
-    return str(int(a) + int(b))
-
-
-def _pid_status(pid: int) -> str | None:
-    result = subprocess.run(
-        ["ps", "-o", "stat=", "-p", str(pid)],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    return result.stdout.strip() or None
-
-
-def _pid_is_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    status = _pid_status(pid)
-    if status is None:
-        return False
-    return not status.startswith("Z")
-
-
-async def _wait_for_pid_inactive(pid: int, max_wait: float = 2.0) -> bool:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + max_wait
-    while loop.time() < deadline:
-        if not _pid_is_running(pid):
-            return True
-        await asyncio.sleep(0.05)
-    return not _pid_is_running(pid)
-
-
-async def test_rollout_returns_graded_run_with_trace_id(env_file: Path) -> None:
-    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file))
-
-    assert run.reward == 1.0
-    assert run.trace.content == "5"
-    assert run.trace_id is not None
-    # No standalone traces: a bare rollout registers a single-run job itself.
-    assert run.job_id is not None
-    # The factual placement record: the runtime this run executed against.
-    assert run.runtime is not None
-    assert run.runtime.startswith("tcp://127.0.0.1:")
-
-
-def test_run_owns_named_controller_connections() -> None:
-    connection = Connection(
-        name="inference",
-        capability="ssh",
-        url="https://inference.hud.so",
-        headers={"Authorization": "Bearer scoped-runtime-token"},
-    )
-    run = Run(None, "task", {}, connections=(connection,))
-
-    assert run.connections == {"inference": connection}
-    assert "scoped-runtime-token" not in repr(connection)
-
-
-async def test_verifier_task_replaces_the_actor_grade_in_the_same_runtime() -> None:
-    env = Environment("reviewed")
-    completed: list[str] = []
-
-    @env.template()
-    async def solve():
-        answer = yield "answer secret"
-        completed.append(f"actor:{answer}")
-        yield {"score": 0.25, "answer": answer}
-
-    @env.template()
-    async def verify(expected: str):
-        result = yield ""
-        completed.append(f"verifier:{result['answer']}")
-        yield 1.0 if result["answer"] == expected else 0.0
-
-    task = Task(
-        env="reviewed",
-        id="solve",
-        verifier=Task(env="reviewed", id="verify", args={"expected": "secret"}),
-    )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
-
-    assert run.reward == 1.0
-    assert completed == ["actor:secret", "verifier:secret"]
-    evaluations = [
-        step.task_call.name
-        for step in run.trace.steps
-        if step.task_call is not None and step.task_call.phase == "evaluate"
-    ]
-    assert evaluations == ["solve", "verify"]
-
-
-async def test_actor_result_is_forwarded_to_the_verifier() -> None:
-    env = Environment("reviewed")
-    received: list[str] = []
-
-    class ActorResult(BaseModel):
-        score: float
-        answer: str
-
-    @env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.0, "answer": answer}
-
-    @env.template(returns=ActorResult)
-    async def verify():
-        answer = yield ""
-        assert isinstance(answer, Answer)
-        assert isinstance(answer.content, ActorResult)
-        received.append(answer.content.answer)
-        yield 1.0
-
-    task = Task(
-        env="reviewed",
-        id="solve",
-        verifier=Task(env="reviewed", id="verify"),
-    )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
-
-    assert run.reward == 1.0
-    assert received == ["secret"]
-
-
-async def test_malformed_subscores_fail_inside_the_rollout_boundary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from hud.clients import HudClient
-
-    env = Environment("malformed-grade")
-
-    @env.template()
-    async def solve():
-        yield "answer"
-        yield 1.0
-
-    async def malformed_grade(
-        _client: HudClient,
-        _payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        return {"score": 1.0, "subscores": [{"name": "missing-value"}]}
-
-    reported: list[dict[str, Any]] = []
-
-    async def report(run: Run) -> None:
-        reported.append(run.evaluation)
-
-    monkeypatch.setattr(HudClient, "grade", malformed_grade)
-    monkeypatch.setattr("hud.eval.run.trace_exit", report)
-
-    run = await rollout(
-        Task(env="malformed-grade", id="solve"),
-        _FnAgent(lambda _prompt: "done"),
-        runtime=LocalRuntime(env),
-    )
-
-    assert run.trace.is_error
-    assert "value" in (run.trace.error or "")
-    assert reported == [{}]
-
-
-async def test_independent_verifier_receives_runtime_session_files(tmp_path: Path) -> None:
-    actor_env = Environment("actor")
-    verifier_env = Environment("judge")
-    transfers: list[tuple[str, str]] = []
-
-    @actor_env.template()
-    async def solve():
-        yield "answer secret"
-        yield {"score": 0.0}
-
-    @verifier_env.template()
-    async def verify():
-        yield ""
-        yield 1.0
-
-    class ActorRuntime(Runtime):
-        @asynccontextmanager
-        async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-            destination = tmp_path / "session.tar.gz"
-            await asyncio.to_thread(destination.write_text, session_id, encoding="utf-8")
-            transfers.append(("actor", session_id))
-            yield destination
-
-    class VerifierRuntime(Runtime):
-        async def restore_session(self, session_id: str, source: Path) -> None:
-            content = await asyncio.to_thread(source.read_text, encoding="utf-8")
-            assert content.startswith("sess-")
-            transfers.append(("verifier", session_id))
-
+def broken_provider(error: BaseException) -> Provider:
     @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        env = actor_env if row.env == "actor" else verifier_env
-        async with LocalRuntime(env)(row) as runtime:
-            yield (
-                ActorRuntime(runtime.url) if row.env == "actor" else VerifierRuntime(runtime.url)
+    async def provider(task: Task) -> AsyncIterator[Runtime]:
+        raise error
+        yield Runtime("tcp://127.0.0.1:1")
+
+    return provider
+
+
+def hanging_provider(task: Task) -> Any:
+    @asynccontextmanager
+    async def provider() -> AsyncIterator[Runtime]:
+        await asyncio.Event().wait()
+        yield Runtime("tcp://127.0.0.1:1")
+
+    return provider()
+
+
+def noted(message: str, note: str) -> BaseException:
+    error = EOFError(message)
+    error.add_note(note)
+    return error
+
+
+@dataclass
+class Case:
+    task: Task
+    agent: ScriptedAgent
+    expected: dict[str, Any]
+    events: list[str] = field(default_factory=list)
+    provider: str = "live"
+    rollout_timeout: float | None = None
+
+
+def add(a: int = 2, b: int = 3, **row: Any) -> Task:
+    return Task(env="lab", id="add", args={"a": a, "b": b}, **row)
+
+
+def failed(error: Any, *, stop_reason: str | None = None) -> dict[str, Any]:
+    """A run that never went live: no prompt, no placement, no grade."""
+    return {
+        "status": "error",
+        "stop_reason": stop_reason,
+        "reward": 0.0,
+        "raw": {},
+        "error": error,
+        "prompt": None,
+        "runtime": None,
+        "spans": ["system"],
+    }
+
+
+def errored(error: Any, *, stop_reason: str | None = None) -> dict[str, Any]:
+    """A run whose grading failed: the prompt and placement survive, the grade does not."""
+    return {
+        "status": "error",
+        "stop_reason": stop_reason,
+        "reward": 0.0,
+        "raw": {},
+        "error": error,
+        "prompt": "go",
+        "runtime": LOOPBACK,
+        "spans": ["task", "user", "system"],
+    }
+
+
+COMPLETED = {
+    "status": "completed",
+    "stop_reason": None,
+    "reward": 1.0,
+    "raw": {"score": 1.0},
+    "error": None,
+    "prompt": "add 2 3",
+    "runtime": LOOPBACK,
+    "spans": GRADED_SPANS,
+}
+HOOKS = ["initialize", "start add 2 3", "grade 5", "end add", "shutdown"]
+
+CASES = {
+    "an answer is graded": Case(add(), ScriptedAgent(solve), COMPLETED, HOOKS),
+    "a constructor source serves the row": Case(
+        add(), ScriptedAgent(solve), COMPLETED, HOOKS, provider="constructor"
+    ),
+    # The child process logs its hooks in its own memory.
+    "a subprocess source serves the row": Case(
+        add(), ScriptedAgent(solve), COMPLETED, provider="subprocess"
+    ),
+    "an agent raising before it answers is graded on no answer": Case(
+        add(),
+        ScriptedAgent(fail_before=RuntimeError("agent exploded")),
+        COMPLETED
+        | {
+            "status": "error",
+            "reward": 0.0,
+            "raw": {"score": 0.0},
+            "error": "[agent loop] RuntimeError: agent exploded",
+            "spans": [*GRADED_SPANS, "system"],
+        },
+        ["initialize", "start add 2 3", "grade None", "end add", "shutdown"],
+    ),
+    "an agent raising after it answers keeps its grade": Case(
+        add(),
+        ScriptedAgent(solve, fail_after=RuntimeError("agent exploded")),
+        COMPLETED
+        | {
+            "status": "error",
+            "error": "[agent loop] RuntimeError: agent exploded",
+            "spans": [*GRADED_SPANS, "system"],
+        },
+        HOOKS,
+    ),
+    "an agent's own TimeoutError is an ordinary failure": Case(
+        add(),
+        ScriptedAgent(solve, fail_after=TimeoutError("provider timed out")),
+        COMPLETED
+        | {
+            "status": "error",
+            "error": "[agent loop] TimeoutError: provider timed out",
+            "spans": [*GRADED_SPANS, "system"],
+        },
+        HOOKS,
+    ),
+    "an agent's own TimeoutError under an unexpired deadline is an ordinary failure": Case(
+        add(agent_config={"timeout_seconds": 10.0}),
+        ScriptedAgent(solve, fail_after=TimeoutError("provider timed out")),
+        COMPLETED
+        | {
+            "status": "error",
+            "error": "[agent loop] TimeoutError: provider timed out",
+            "spans": [*GRADED_SPANS, "system"],
+        },
+        HOOKS,
+    ),
+    "the agent deadline stops the agent and still grades": Case(
+        add(agent_config={"timeout_seconds": 0.1}),
+        ScriptedAgent(solve, linger=30),
+        COMPLETED
+        | {
+            "status": "error",
+            "stop_reason": "timeout",
+            "error": "agent timed out after 0.1s",
+            "spans": ["task", "user", "system", "task"],
+        },
+        HOOKS,
+    ),
+    "the rollout deadline during the agent loop leaves the run ungraded": Case(
+        add(),
+        ScriptedAgent(solve, linger=30),
+        COMPLETED
+        | {
+            "status": "error",
+            "stop_reason": "timeout",
+            "raw": {},
+            "reward": 0.0,
+            "error": "rollout timed out after 0.2s during agent loop",
+            "spans": ["task", "user", "system"],
+        },
+        ["initialize", "start add 2 3", "end add", "shutdown"],
+        rollout_timeout=0.2,
+    ),
+    "the rollout deadline covers grading": Case(
+        Task(env="lab", id="hang_grading"),
+        ScriptedAgent("x"),
+        errored("rollout timed out after 0.2s during grading", stop_reason="timeout"),
+        ["initialize", "grading cancelled", "shutdown"],
+        rollout_timeout=0.2,
+    ),
+    "the rollout deadline covers provisioning": Case(
+        add(),
+        ScriptedAgent(solve),
+        failed("rollout timed out after 0.2s during provisioning", stop_reason="timeout"),
+        provider="hanging",
+        rollout_timeout=0.2,
+    ),
+    "a grader that raises fails grading": Case(
+        Task(env="lab", id="grade_raises"),
+        ScriptedAgent("x"),
+        errored(IsStr(regex=r"\[grading\] .*HudProtocolError: .*grader exploded")),
+        ["initialize", "shutdown"],
+    ),
+    "a grade frame without a score fails grading": Case(
+        Task(env="lab", id="frame", args={"result": {"done": True}}),
+        ScriptedAgent("x"),
+        errored(IsStr(regex=r"\[grading\] .*missing a numeric 'score' \(keys: \['done'\]\)")),
+        ["initialize", "shutdown"],
+    ),
+    "a boolean score fails grading": Case(
+        Task(env="lab", id="frame", args={"result": {"score": True}}),
+        ScriptedAgent("x"),
+        errored(IsStr(regex=r"\[grading\] .*result must include a numeric 'score'")),
+        ["initialize", "shutdown"],
+    ),
+    "a subscore without a value fails grading": Case(
+        Task(env="lab", id="frame", args={"result": {"score": 1.0, "subscores": [{"name": "m"}]}}),
+        ScriptedAgent("x"),
+        errored(IsStr(regex=r"(?s)\[grading\] .*ValidationError: .*SubScore\nvalue\n.*")),
+        ["initialize", "shutdown"],
+    ),
+    "malformed bindings fail the start": Case(
+        Task(env="lab", id="claim", args={"published": {"robot": "slot-2"}}),
+        ScriptedAgent("x"),
+        failed(
+            "[starting task] TypeError: task start frame 'bindings' must map capability "
+            "name -> object, got {'robot': 'slot-2'}"
+        ),
+        ["initialize", "shutdown"],
+    ),
+    "args over the frame limit fail the start before the template runs": Case(
+        Task(env="lab", id="large", args={"criteria": "x" * (16 * 1024 * 1024)}),
+        ScriptedAgent("x"),
+        failed(
+            IsStr(
+                regex=r"(?s)\[starting task\] .*'tasks\.start' request.*"
+                r"limit is 16777216 bytes.*file ID.*"
             )
-
-    task = Task(
-        env="actor",
-        id="solve",
-        verifier=Task(env="judge", id="verify"),
-    )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
-
-    assert run.reward == 1.0
-    assert [runtime for runtime, _ in transfers] == ["actor", "verifier"]
-    assert transfers[0][1].startswith("sess-")
-    assert transfers[1][1].startswith("sess-")
-    assert transfers[0][1] != transfers[1][1]
-
-
-async def test_same_env_verifier_runs_beside_an_actor_that_cannot_transport_its_session() -> None:
-    env = Environment("solo")
-
-    @env.template()
-    async def solve():
-        yield "answer secret"
-        yield {"score": 0.0}
-
-    @env.template()
-    async def verify():
-        yield ""
-        yield 1.0
-
-    placements: list[str] = []
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.id)
-        async with LocalRuntime(env)(row) as runtime:
-            yield runtime
-
-    verifier_config = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=60))
-    task = Task(
-        env="solo",
-        id="solve",
-        verifier=Task(env="solo", id="verify", runtime_config=verifier_config),
-    )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
-
-    assert run.reward == 1.0
-    assert placements == ["solve"]
+        ),
+        ["initialize", "shutdown"],
+    ),
+    "args over the frame limit once JSON-escaped fail the start": Case(
+        Task(env="lab", id="large", args={"criteria": "é" * (16 * 1024 * 1024 // 6 + 1)}),
+        ScriptedAgent("x"),
+        failed(IsStr(regex=r"(?s)\[starting task\] .*limit is 16777216 bytes.*")),
+        ["initialize", "shutdown"],
+    ),
+    "a provider that fails reports its notes": Case(
+        add(),
+        ScriptedAgent(solve),
+        failed("[provisioning] EOFError: sandbox closed\nenv output: ImportError: bugs"),
+        provider="broken",
+    ),
+}
 
 
-async def test_same_env_verifier_gets_its_own_runtime_when_the_session_transports(
-    tmp_path: Path,
+@pytest.mark.parametrize("case", CASES.values(), ids=CASES.keys())
+async def test_a_rollout_always_returns_a_run_that_says_where_it_failed(
+    case: Case, tmp_path: Path
 ) -> None:
-    env = Environment("solo")
+    events: list[str] = []
+    env = lab(events)
+    source = tmp_path / "env.py"
+    source.write_text(SUMS_SOURCE)
+    providers: dict[str, Provider] = {
+        "live": LocalRuntime(env),
+        "constructor": LocalRuntime(lambda task: env),
+        "subprocess": SubprocessRuntime(source),
+        "hanging": hanging_provider,
+        "broken": broken_provider(noted("sandbox closed", "env output: ImportError: bugs")),
+    }
 
-    @env.template()
-    async def solve():
-        yield "answer secret"
-        yield {"score": 0.0}
-
-    @env.template()
-    async def verify():
-        yield ""
-        yield 1.0
-
-    placements: list[str] = []
-
-    class TransportingRuntime(Runtime):
-        transports_sessions = True
-
-        @asynccontextmanager
-        async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-            destination = tmp_path / "session.tar.gz"
-            await asyncio.to_thread(destination.write_text, session_id, encoding="utf-8")
-            yield destination
-
-        async def restore_session(self, session_id: str, source: Path) -> None:
-            pass
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.id)
-        async with LocalRuntime(env)(row.model_copy(update={"runtime_config": None})) as runtime:
-            yield TransportingRuntime(runtime.url)
-
-    verifier_config = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=60))
-    task = Task(
-        env="solo",
-        id="solve",
-        verifier=Task(env="solo", id="verify", runtime_config=verifier_config),
-    )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
-
-    assert run.reward == 1.0
-    assert placements == ["solve", "verify"]
-
-
-async def test_runtime_session_transfer_rejects_invalid_ids(tmp_path: Path) -> None:
-    runtime = Runtime("tcp://127.0.0.1:8765")
-
-    with pytest.raises(ValueError, match="single path component"):
-        async with runtime.snapshot_session("../actor"):
-            pass
-    with pytest.raises(ValueError, match="single path component"):
-        await runtime.restore_session("", tmp_path / "session.tar.gz")
-
-
-async def test_verifier_with_its_own_environment_is_placed_after_the_actor() -> None:
-    actor_env = Environment("actor")
-    verifier_env = Environment("judge")
-    placements: list[str] = []
-
-    @actor_env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @verifier_env.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(f"start:{row.env}")
-        try:
-            async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(
-                row
-            ) as runtime:
-                yield runtime
-        finally:
-            placements.append(f"stop:{row.env}")
-
-    task = Task(
-        env="actor",
-        id="solve",
-        verifier=Task(env="judge", id="verify"),
-    )
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
-
-    assert run.reward == 1.0
-    assert placements == ["start:actor", "stop:actor", "start:judge", "stop:judge"]
-
-
-async def test_verifier_remains_authoritative_after_an_agent_error() -> None:
-    actor_env = Environment("actor")
-    verifier_env = Environment("judge")
-    placements: list[str] = []
-
-    @actor_env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @verifier_env.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.env)
-        async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(row) as runtime:
-            yield runtime
-
-    task = Task(
-        env="actor",
-        id="solve",
-        verifier=Task(env="judge", id="verify"),
-    )
-    run = await rollout(task, _AnswerThenBoomAgent(lambda _prompt: "secret"), runtime=provider)
-
-    assert run.trace.is_error
-    assert "agent exploded after answering" in (run.trace.error or "")
-    assert run.reward == 1.0
-    assert placements == ["actor", "judge"]
-
-
-@pytest.mark.parametrize("agent_fails", [False, True])
-async def test_verifier_remains_authoritative_when_actor_grading_fails(
-    agent_fails: bool,
-) -> None:
-    actor_env = Environment("actor")
-    verifier_env = Environment("judge")
-    placements: list[str] = []
-
-    @actor_env.template()
-    async def solve():
-        yield "answer secret"
-        raise RuntimeError("actor grade exploded")
-
-    @verifier_env.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.env)
-        async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(row) as runtime:
-            yield runtime
-
-    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
-    agent = (
-        _AnswerThenBoomAgent(lambda _prompt: "secret")
-        if agent_fails
-        else _FnAgent(lambda _prompt: "secret")
-    )
-    run = await rollout(task, agent, runtime=provider)
-
-    assert run.trace.is_error
-    assert "actor grade exploded" in (run.trace.error or "")
-    assert run.reward == 1.0
-    assert placements == ["actor", "judge"]
-
-
-async def test_verifier_remains_authoritative_when_actor_grade_is_scoreless(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from hud.clients import HudClient
-
-    actor_env = Environment("actor")
-    verifier_env = Environment("judge")
-    placements: list[str] = []
-
-    @actor_env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @verifier_env.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.env)
-        async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(row) as runtime:
-            yield runtime
-
-    original_grade = HudClient.grade
-    grade_calls = 0
-
-    async def return_scoreless_actor_grade(
-        self: HudClient, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        nonlocal grade_calls
-        grade_calls += 1
-        if grade_calls == 1:
-            return {"reward": 1.0}
-        return await original_grade(self, payload)
-
-    monkeypatch.setattr(HudClient, "grade", return_scoreless_actor_grade)
-    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
-
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
-    job = Job(id="actor-scoreless", name="actor-scoreless", runs=[run])
-
-    assert run.trace.is_error
-    assert "numeric 'score'" in (run.trace.error or "")
-    assert run.reward == 1.0
-    assert run.grade.raw["score"] == 1.0
-    assert placements == ["actor", "judge"]
-    assert job.errors == []
-
-
-async def test_verifier_provisioning_failure_leaves_the_run_ungraded() -> None:
-    actor_env = Environment("actor")
-
-    @actor_env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        if row.env == "judge":
-            raise RuntimeError("verifier unavailable")
-        async with LocalRuntime(actor_env)(row) as runtime:
-            yield runtime
-
-    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=provider)
-
-    assert run.trace.is_error
-    assert "verifier unavailable" in (run.trace.error or "")
-    assert run.grade.raw == {}
-    assert run.reward == 0.0
-
-
-async def test_verifier_channel_failure_leaves_the_run_ungraded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from hud.clients import HudClient
-
-    env = Environment("reviewed")
-
-    @env.template()
-    async def solve():
-        yield "answer secret"
-        yield 0.25
-
-    @env.template()
-    async def verify():
-        yield ""
-        yield 1.0
-
-    original_grade = HudClient.grade
-    grade_calls = 0
-
-    async def fail_verifier_grade(self: HudClient, payload: dict[str, Any]) -> dict[str, Any]:
-        nonlocal grade_calls
-        grade_calls += 1
-        if grade_calls == 2:
-            raise ConnectionError("channel died after a partial grade frame")
-        return await original_grade(self, payload)
-
-    monkeypatch.setattr(HudClient, "grade", fail_verifier_grade)
-    task = Task(
-        env="reviewed",
-        id="solve",
-        verifier=Task(env="reviewed", id="verify"),
-    )
-
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
-    job = Job(id="verify-failed", name="verify-failed", runs=[run])
-
-    assert run.trace.is_error
-    assert "channel died after a partial grade frame" in (run.trace.error or "")
-    assert run.grade.raw == {}
-    assert job.errors == [run]
-
-
-async def test_scoreless_verifier_frame_is_an_ungraded_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from hud.clients import HudClient
-
-    env = Environment("reviewed")
-
-    @env.template()
-    async def solve():
-        yield "answer secret"
-        yield 0.25
-
-    @env.template()
-    async def verify():
-        yield ""
-        yield 1.0
-
-    original_grade = HudClient.grade
-    grade_calls = 0
-
-    async def return_scoreless_frame(self: HudClient, payload: dict[str, Any]) -> dict[str, Any]:
-        nonlocal grade_calls
-        grade_calls += 1
-        if grade_calls == 2:
-            return {"reward": 1.0}
-        return await original_grade(self, payload)
-
-    monkeypatch.setattr(HudClient, "grade", return_scoreless_frame)
-    task = Task(
-        env="reviewed",
-        id="solve",
-        verifier=Task(env="reviewed", id="verify"),
-    )
-
-    run = await rollout(task, _FnAgent(lambda _prompt: "secret"), runtime=LocalRuntime(env))
-    job = Job(id="verify-scoreless", name="verify-scoreless", runs=[run])
-
-    assert run.trace.is_error
-    assert "numeric 'score'" in (run.trace.error or "")
-    assert run.grade.raw == {}
-    assert job.errors == [run]
-
-
-async def test_zero_score_verifier_grade_counts_an_errored_rollout() -> None:
-    env = Environment("reviewed")
-
-    @env.template()
-    async def solve():
-        yield "answer secret"
-        yield 0.25
-
-    @env.template()
-    async def verify():
-        yield ""
-        yield 0.0
-
-    task = Task(
-        env="reviewed",
-        id="solve",
-        verifier=Task(env="reviewed", id="verify"),
-    )
     run = await rollout(
-        task,
-        _AnswerThenBoomAgent(lambda _prompt: "secret"),
-        runtime=LocalRuntime(env),
+        case.task,
+        case.agent,
+        runtime=providers[case.provider],
+        rollout_timeout=case.rollout_timeout,
     )
-    job = Job(id="verify-zero", name="verify-zero", runs=[run])
+    await eventually(lambda: events[-1:] in ([], ["shutdown"]))
 
-    assert run.trace.is_error
-    assert run.grade.raw["score"] == 0.0
-    assert job.reward == 0.0
-    assert job.errors == []
+    assert {
+        "status": run.trace.status,
+        "stop_reason": run.trace.stop_reason,
+        "reward": run.reward,
+        "raw": run.grade.raw,
+        "error": run.trace.error,
+        "prompt": run.prompt_text if run.prompt is not None else None,
+        "runtime": run.runtime,
+        "spans": [step["source"] for step in steps(run.trace_id)],
+    } == case.expected
+    assert events == case.events
+    assert (run.trace_id, run.job_id, run.slug) == (HEX_ID, HEX_ID, case.task.slug)
 
 
-def _bindings_env(published: Any) -> Environment:
-    """An env whose task publishes per-episode binding data alongside the prompt."""
-    env = Environment("slots")
+def chat_row(messages: list[Any]) -> Task:
+    return Task(env="lab", id="chat", args={"messages": messages})
 
-    @env.template()
-    async def claim():
-        yield {"prompt": "go", "bindings": published}
-        yield 1.0
 
-    return env
+PROMPTS = {
+    "text is one user turn": (add(), [("user", "add 2 3")], "add 2 3"),
+    "no prompt is one empty user turn": (Task(env="lab", id="silent"), [("user", "")], ""),
+    "chat turns keep their roles and system becomes user": (
+        chat_row(
+            [
+                {"role": "system", "content": "be brief"},
+                {"role": "assistant", "content": {"type": "text", "text": "hi"}},
+                {"role": "user", "content": "add 2 3"},
+            ]
+        ),
+        [("user", "be brief"), ("assistant", "hi"), ("user", "add 2 3")],
+        "be brief\n\nhi\n\nadd 2 3",
+    ),
+    "non-text turns are dropped from the text": (
+        chat_row(
+            [
+                {"role": "user", "content": "first"},
+                {"role": "user", "content": {"type": "image", "data": "aW1n", "mimeType": "x"}},
+                "second",
+            ]
+        ),
+        [("user", "first"), ("user", None), ("user", "second")],
+        "first\n\nsecond",
+    ),
+}
+
+
+@pytest.mark.parametrize(("row", "messages", "text"), PROMPTS.values(), ids=PROMPTS.keys())
+async def test_the_agent_sees_the_prompt_as_turns_and_as_text(
+    row: Task, messages: list[tuple[str, str | None]], text: str
+) -> None:
+    seen: list[tuple[list[tuple[str, str | None]], str]] = []
+
+    class Reader(Agent):
+        async def __call__(self, run: Run) -> None:
+            turns = [
+                (message.role, getattr(message.content, "text", None))
+                for message in run.prompt_messages
+            ]
+            seen.append((turns, run.prompt_text))
+
+    run = await rollout(row, Reader(), runtime=LocalRuntime(lab()))
+
+    assert seen == [(messages, text)]
+    assert run.trace.status == "completed"
 
 
 async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
-    seen: dict[str, dict[str, Any]] = {}
+    seen: list[tuple[dict[str, Any], str | None]] = []
 
-    class _Claiming(Agent):
-        async def __call__(self, run: Any) -> None:
-            seen.update(run.bindings)
+    class Inspector(Agent):
+        async def __call__(self, run: Run) -> None:
+            seen.append((run.bindings, get_current_trace_id()))
 
-    env = _bindings_env({"robot": {"token": "slot-2"}})
-    run = await rollout(Task(env="slots", id="claim"), _Claiming(), runtime=LocalRuntime(env))
+    run = await rollout(
+        Task(env="lab", id="claim", args={"published": {"robot": {"token": "slot-2"}}}),
+        Inspector(),
+        runtime=LocalRuntime(lab()),
+    )
 
-    # Episode-scoped connection data reaches the agent by capability name,
-    # without reading it back off the recorded setup step.
-    assert seen == {"robot": {"token": "slot-2"}}
+    assert seen == [({"robot": {"token": "slot-2"}}, run.trace_id)]
     assert run.bindings == {"robot": {"token": "slot-2"}}
 
 
-async def test_a_malformed_bindings_frame_fails_the_rollout_loudly() -> None:
-    env = _bindings_env({"robot": "slot-2"})  # capability data must be an object
-    run = await rollout(
-        Task(env="slots", id="claim"), _FnAgent(lambda _p: ""), runtime=LocalRuntime(env)
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_connections_reach_the_agent_only_while_it_runs(tmp_path: Path) -> None:
+    env = lab()
+    env.workspace(tmp_path / "ws")
+    search = Connection(
+        name="search",
+        capability="shell",
+        url="https://search.example/v1",
+        headers={"Authorization": "Bearer secret"},
     )
+    seen: list[list[str]] = []
 
-    assert run.trace.status == "error"
-    assert "bindings" in str(run.trace.steps[-1].error)
+    class Inspector(Agent):
+        async def __call__(self, run: Run) -> None:
+            seen.append(sorted(run.connections))
+            run.trace.content = "5"
 
+    run = await rollout(add(), Inspector(), runtime=LocalRuntime(env), connections=[search])
 
-async def test_openai_compatible_write_reaches_workspace_grader(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    report = workspace / "REPORT.md"
-    env = Environment("opencode_report")
-    env.workspace(workspace, guest_path=str(workspace))
-
-    @env.initialize
-    async def seed() -> None:
-        workspace.mkdir(parents=True, exist_ok=True)
-        report.unlink(missing_ok=True)
-
-    @env.template()
-    async def write_report():
-        yield "Write PASS to REPORT.md."
-        yield 1.0 if report.exists() and report.read_text().strip() == "PASS" else 0.0
-
-    model_client = _FakeOpenAI(
-        [
-            _chat_response(
-                "",
-                [_tool_call("write", json.dumps({"filePath": str(report), "content": "PASS"}))],
-            ),
-            _chat_response("done"),
-        ]
-    )
-    agent = OpenAIChatAgent(
-        OpenAIChatConfig(model="qwen3.6-plus", model_client=model_client, max_steps=4)
-    )
-
-    run = await rollout(
-        Task(env="opencode_report", id="write_report"),
-        agent,
-        runtime=LocalRuntime(env),
-    )
-
-    assert run.reward == 1.0
-    assert report.read_text() == "PASS"
-    tools = model_client.chat.completions.requests[0]["extra_body"]["tools"]
-    assert [tool["function"]["name"] for tool in tools] == [
-        "bash",
-        "read",
-        "glob",
-        "grep",
-        "edit",
-        "write",
-    ]
+    assert seen == [["search"]]
+    assert (run.reward, run.connections) == (1.0, {})
 
 
-async def test_tool_agent_timeout_stops_running_workspace_command_before_grading(
-    tmp_path: Path,
+IDENTITIES = {
+    "a bare rollout mints its job and trace": ({}, (HEX_ID, None, HEX_ID)),
+    "threaded ids are kept": (
+        {"job_id": "j1", "group_id": "g1", "trace_id": "0" * 31 + "1"},
+        ("j1", "g1", "0" * 31 + "1"),
+    ),
+}
+
+
+@pytest.mark.parametrize(("ids", "expected"), IDENTITIES.values(), ids=IDENTITIES.keys())
+async def test_a_run_carries_its_job_group_and_trace(
+    ids: dict[str, str], expected: tuple[Any, ...]
 ) -> None:
+    run = await rollout(add(), ScriptedAgent(solve), runtime=LocalRuntime(lab()), **ids)
+
+    assert (run.job_id, run.group_id, run.trace_id) == expected
+    assert run.reward == 1.0
+
+
+def blocking_teardown(env: Environment, release: asyncio.Event, stopped: list[str]) -> Provider:
+    """Places rows on ``env`` and holds teardown until ``release`` is set."""
+
+    @asynccontextmanager
+    async def provider(task: Task) -> AsyncIterator[Runtime]:
+        try:
+            async with LocalRuntime(env)(task) as runtime:
+                yield runtime
+        finally:
+            await release.wait()
+            stopped.append(task.env)
+
+    return provider
+
+
+async def test_a_rollout_deadline_returns_without_waiting_for_teardown() -> None:
+    release = asyncio.Event()
+    stopped: list[str] = []
+
+    run = await rollout(
+        add(),
+        ScriptedAgent(solve),
+        runtime=blocking_teardown(lab(), release, stopped),
+        rollout_timeout=0.2,
+    )
+    assert stopped == []
+    release.set()
+    await eventually(lambda: stopped == ["lab"])
+
+    assert (run.reward, run.trace.status, run.trace.stop_reason) == (1.0, "error", "timeout")
+    assert run.trace.error == "rollout timed out after 0.2s during actor cleanup"
+
+
+async def test_cancelling_a_rollout_cancels_the_task_and_propagates() -> None:
+    events: list[str] = []
+    agent = ScriptedAgent(solve, delay=30)
+    pending = asyncio.create_task(rollout(add(), agent, runtime=LocalRuntime(lab(events))))
+    await eventually(lambda: agent.prompts != [])
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    await eventually(lambda: events[-1:] == ["shutdown"])
+
+    assert events == ["initialize", "start add 2 3", "end add", "shutdown"]
+
+
+async def test_the_agent_deadline_kills_a_running_workspace_command_before_grading(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
     workspace = tmp_path / "workspace"
-    started = workspace / "started"
-    late = workspace / "late"
-    env = Environment("timeout_cleanup")
+    env = Environment("cleanup")
     env.workspace(workspace, guest_path=str(workspace))
 
     @env.initialize
     async def seed() -> None:
         workspace.mkdir(parents=True, exist_ok=True)
-        started.unlink(missing_ok=True)
-        late.unlink(missing_ok=True)
 
-    # Timing contract, sized to survive loaded CI: the command must start
-    # within the 2s agent budget, still be running when that budget expires
-    # (it sleeps 3s), and the grading delay must outlast the sleep so a
-    # command that survived the timeout provably leaves `late` behind.
+    # The command outlives the deadline, and grading outlives the command, so a
+    # command that survived the deadline would leave ``late`` behind.
     @env.template()
     async def wait_for_cleanup():
         yield "Start the requested command."
-        await asyncio.sleep(4.0)
-        yield 1.0 if started.exists() and not late.exists() else 0.0
+        await asyncio.sleep(2.0)
+        yield 1.0 if (workspace / "started").exists() and not (workspace / "late").exists() else 0.0
 
-    model_client = _FakeOpenAI(
-        [
-            _chat_response(
-                "",
-                [_tool_call("bash", '{"command":"touch started; sleep 3; touch late"}')],
-            ),
-        ]
-    )
-    agent = OpenAIChatAgent(
-        OpenAIChatConfig(
-            model="qwen3.6-plus",
-            model_client=model_client,
-            max_steps=2,
-            timeout_seconds=2.0,
-        )
-    )
+    models.script([call("bash", command="touch started; sleep 1.5; touch late")])
+    agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=2, timeout_seconds=1.5))
 
     run = await rollout(
-        Task(env="timeout_cleanup", id="wait_for_cleanup"),
-        agent,
-        runtime=LocalRuntime(env),
+        Task(env="cleanup", id="wait_for_cleanup"), agent, runtime=LocalRuntime(env)
     )
 
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert started.exists()
-    assert not late.exists()
-    assert run.reward == 1.0
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group regression")
-async def test_local_runtime_startup_failure_kills_spawned_children(tmp_path: Path) -> None:
-    env_file = tmp_path / "env.py"
-    env_file.write_text(
-        textwrap.dedent(
-            """
-            import asyncio
-            from pathlib import Path
-
-            from hud import Environment
-
-            env = Environment("leaky")
-
-
-            @env.initialize
-            async def start_child():
-                proc = await asyncio.create_subprocess_exec(
-                    "sleep",
-                    "120",
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                Path("child.pid").write_text(str(proc.pid), encoding="utf-8")
-                raise RuntimeError("startup boom")
-            """
-        ),
-        encoding="utf-8",
-    )
-    pid_file = tmp_path / "child.pid"
-    pid: int | None = None
-
-    try:
-        with pytest.raises(RuntimeError, match="startup boom"):
-            async with SubprocessRuntime(env_file, ready_timeout=30.0)(
-                Task(env="leaky", id="noop")
-            ):
-                pass
-        pid = int(pid_file.read_text())
-        assert await _wait_for_pid_inactive(pid)
-    finally:
-        if pid is not None and _pid_is_running(pid):
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
-
-
-async def test_mid_run_failure_keeps_the_real_run_and_its_evidence(env_file: Path) -> None:
-    def boom(prompt: str) -> str:
-        raise RuntimeError("agent exploded")
-
-    run = await rollout(_add_task(2, 3), _FnAgent(boom), runtime=SubprocessRuntime(env_file))
-
-    assert run.trace.is_error
-    assert "agent exploded" in (run.trace.error or "")
-    assert run.trace_id is not None  # failed runs still key a trajectory
-    # The session was live, so the receipt keeps the evidence: the prompt the
-    # agent saw and the runtime the rollout executed against.
-    assert run.prompt == "add:2:3"
-    assert run.runtime is not None
-    assert run.reward == 0.0  # graded best-effort, but the agent never answered → 0.0
-
-
-class _AnswerThenBoomAgent(Agent):
-    """Records a correct answer, then raises — a mid-run failure after the env
-    already has a gradable answer in hand."""
-
-    def __init__(self, fn: Any) -> None:
-        super().__init__()
-        self._fn = fn
-
-    async def __call__(self, run: Any) -> None:
-        run.trace.content = self._fn(run.prompt)
-        raise RuntimeError("agent exploded after answering")
-
-
-async def test_mid_run_failure_still_grades_best_effort(env_file: Path) -> None:
-    # The agent answers correctly, then fails. The env is still alive, so the
-    # run is graded best-effort: the reward is captured even though it errored.
-    run = await rollout(
-        _add_task(2, 3), _AnswerThenBoomAgent(_solve_add), runtime=SubprocessRuntime(env_file)
-    )
-
-    assert run.trace.is_error
-    assert "agent exploded after answering" in (run.trace.error or "")
-    assert run.reward == 1.0  # graded despite the failure
-    assert run.trace.status == "error"  # the failure is preserved, not masked
-
-
-class _SlowAgent(Agent):
-    """Answers, then hangs — to exercise the agent-loop timeout."""
-
-    def __init__(self, fn: Any) -> None:
-        super().__init__()
-        self._fn = fn
-        self.cancelled = asyncio.Event()
-
-    async def __call__(self, run: Any) -> None:
-        run.trace.content = self._fn(run.prompt)
-        try:
-            await asyncio.sleep(30)
-        finally:
-            self.cancelled.set()
-
-
-async def test_agent_loop_timeout_is_an_explicit_failure() -> None:
-    env = Environment("sums")
-    task_cancelled = asyncio.Event()
-
-    @env.template()
-    async def add(a: int, b: int):
-        try:
-            yield f"add:{a}:{b}"
-            yield 1.0
-        finally:
-            task_cancelled.set()
-
-    agent = _SlowAgent(_solve_add)
-    run = await rollout(
-        _add_task(2, 3),
-        agent,
-        runtime=LocalRuntime(env),
-        rollout_timeout=0.2,
-    )
-
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert run.grade.raw == {}
-    await asyncio.wait_for(agent.cancelled.wait(), 1.0)
-    await asyncio.wait_for(task_cancelled.wait(), 1.0)
-    assert run.trace_id is not None
-
-
-async def test_task_agent_timeout_still_grades_completed_work() -> None:
-    env = Environment("sums")
-
-    @env.template()
-    async def add(a: int, b: int):
-        answer = yield f"add:{a}:{b}"
-        yield 1.0 if answer == str(a + b) else 0.0
-
-    agent = _SlowAgent(_solve_add)
-    task = _add_task(2, 3).model_copy(update={"agent_config": {"timeout_seconds": 0.05}})
-
-    run = await rollout(task, agent, runtime=LocalRuntime(env))
-
-    assert run.reward == 1.0
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert any("agent timed out" in (step.error or "") for step in run.trace.steps)
-    assert agent.cancelled.is_set()
-    job = Job(id="timeout-job", name="timeout", runs=[run])
-    assert job.reward == 1.0
-    assert job.errors == []
-
-
-@pytest.mark.parametrize("agent_timeout", [None, 10.0])
-async def test_agent_timeout_error_is_not_the_phase_deadline(agent_timeout: float | None) -> None:
-    env = Environment("sums")
-
-    @env.template()
-    async def add(a: int, b: int):
-        answer = yield f"add:{a}:{b}"
-        yield 1.0 if answer == str(a + b) else 0.0
-
-    class TimeoutAgent(Agent):
-        async def __call__(self, run: Any) -> None:
-            run.trace.content = _solve_add(run.prompt)
-            raise TimeoutError("provider timed out")
-
-    task = _add_task(2, 3).model_copy(
-        update={"agent_config": {"timeout_seconds": agent_timeout} if agent_timeout else None}
-    )
-    run = await rollout(task, TimeoutAgent(), runtime=LocalRuntime(env))
-
-    assert run.reward == 1.0
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason != "timeout"
-    assert "provider timed out" in (run.trace.error or "")
-    assert not any("agent timed out after" in (step.error or "") for step in run.trace.steps)
-
-
-async def test_timeout_includes_grading() -> None:
-    env = Environment("sums")
-    grading_cancelled = asyncio.Event()
-    never = asyncio.Event()
-
-    @env.template()
-    async def add(a: int, b: int):
-        yield f"add:{a}:{b}"
-        try:
-            await never.wait()
-        finally:
-            grading_cancelled.set()
-        yield 1.0
-
-    run = await rollout(
-        _add_task(2, 3),
-        _FnAgent(_solve_add),
-        runtime=LocalRuntime(env),
-        rollout_timeout=0.2,
-    )
-
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert run.grade.raw == {}
-    await asyncio.wait_for(grading_cancelled.wait(), 1.0)
-
-
-async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
-    env = Environment("sums")
-    agent_started = asyncio.Event()
-    cancel_started = asyncio.Event()
-
-    @env.template()
-    async def add(a: int, b: int):
-        yield f"add:{a}:{b}"
-        await asyncio.Event().wait()
-
-    class WaitingAgent(Agent):
-        async def __call__(self, run: Run) -> None:
-            agent_started.set()
-            await asyncio.Event().wait()
-
-    aborted: list[bool] = []
-
-    async def hang_cancel(self: HudClient) -> None:
-        cancel_started.set()
-        await asyncio.Event().wait()
-
-    real_abort = HudClient.abort
-    real_wait = asyncio.wait
-
-    def track_abort(self: HudClient) -> None:
-        aborted.append(True)
-        real_abort(self)
-
-    async def wait_after_agent_starts(
-        tasks: set[asyncio.Task[None]], **kwargs: Any
-    ) -> tuple[set[asyncio.Task[None]], set[asyncio.Task[None]]]:
-        # Exercise cancel/abort after connection setup, independent of startup speed.
-        await asyncio.wait_for(agent_started.wait(), timeout=5.0)
-        return await real_wait(tasks, **kwargs)
-
-    monkeypatch.setattr(HudClient, "cancel", hang_cancel)
-    monkeypatch.setattr(HudClient, "abort", track_abort)
-    monkeypatch.setattr(run_module.asyncio, "wait", wait_after_agent_starts)
-
-    run = await asyncio.wait_for(
-        rollout(
-            _add_task(2, 3),
-            WaitingAgent(),
-            runtime=LocalRuntime(env),
-            rollout_timeout=0.2,
-        ),
-        timeout=10.0,
-    )
-
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert cancel_started.is_set()
-    assert aborted
-
-
-async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
-    env = Environment("sums")
-    cleanup_started = asyncio.Event()
-    cleanup_finished = asyncio.Event()
-    release_cleanup = asyncio.Event()
-
-    @env.template()
-    async def add(a: int, b: int):
-        yield f"add:{a}:{b}"
-        yield 1.0
-
-    @asynccontextmanager
-    async def provider(_task: TaskRow) -> AsyncIterator[Runtime]:
-        try:
-            async with LocalRuntime(env)(_task) as runtime:
-                yield runtime
-        finally:
-            cleanup_started.set()
-            await release_cleanup.wait()
-            cleanup_finished.set()
-
-    run = await rollout(
-        _add_task(2, 3),
-        _FnAgent(_solve_add),
-        runtime=provider,
-        rollout_timeout=0.2,
-    )
-
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert run.reward == 1.0
-    assert cleanup_started.is_set()
-    assert not cleanup_finished.is_set()
-
-    release_cleanup.set()
-    await asyncio.wait_for(cleanup_finished.wait(), 1.0)
-
-
-async def test_timeout_during_actor_cleanup_does_not_start_the_verifier() -> None:
-    actor_env = Environment("actor")
-    cleanup_started = asyncio.Event()
-    cleanup_finished = asyncio.Event()
-    release_cleanup = asyncio.Event()
-    placements: list[str] = []
-
-    @actor_env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        placements.append(row.env)
-        if row.env == "judge":
-            raise AssertionError("verifier started after the rollout returned")
-        try:
-            async with LocalRuntime(actor_env)(row) as runtime:
-                yield runtime
-        finally:
-            cleanup_started.set()
-            await release_cleanup.wait()
-            cleanup_finished.set()
-
-    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
-    run = await rollout(
-        task,
-        _FnAgent(lambda _prompt: "secret"),
-        runtime=provider,
-        rollout_timeout=0.2,
-    )
-
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert placements == ["actor"]
-    release_cleanup.set()
-    await asyncio.wait_for(cleanup_finished.wait(), 1.0)
-    await asyncio.sleep(0)
-    assert placements == ["actor"]
-
-
-async def test_timeout_does_not_cancel_verifier_provider_cleanup() -> None:
-    actor_env = Environment("actor")
-    verifier_env = Environment("judge")
-    cleanup_started = asyncio.Event()
-    cleanup_finished = asyncio.Event()
-    release_cleanup = asyncio.Event()
-
-    @actor_env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @verifier_env.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    @asynccontextmanager
-    async def provider(row: TaskRow) -> AsyncIterator[Runtime]:
-        try:
-            async with LocalRuntime(actor_env if row.env == "actor" else verifier_env)(
-                row
-            ) as runtime:
-                yield runtime
-        finally:
-            if row.env == "judge":
-                cleanup_started.set()
-                await release_cleanup.wait()
-                cleanup_finished.set()
-
-    task = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
-    run = await rollout(
-        task,
-        _FnAgent(lambda _prompt: "secret"),
-        runtime=provider,
-        rollout_timeout=0.2,
-    )
-
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-    assert run.reward == 1.0
-    assert cleanup_started.is_set()
-    assert not cleanup_finished.is_set()
-
-    release_cleanup.set()
-    await asyncio.wait_for(cleanup_finished.wait(), 1.0)
-
-
-async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
-    @asynccontextmanager
-    async def broken_provider(task: TaskRow) -> AsyncIterator[Runtime]:
-        raise RuntimeError("no substrate for you")
-        yield  # pragma: no cover
-
-    run = await rollout(_add_task(1, 1), _FnAgent(_solve_add), runtime=broken_provider)
-
-    assert run.trace.is_error
-    assert "no substrate for you" in (run.trace.error or "")
-    assert run.trace_id is not None
-    assert run.prompt is None  # nothing ever started
-    assert run.runtime is None
-
-
-async def test_pre_launch_failure_keeps_the_notes_the_provider_attached() -> None:
-    # A provider attaches what only it can see — the env's output inside a remote
-    # sandbox — as a note, and str(exc) drops those on the way to the receipt.
-    @asynccontextmanager
-    async def broken_provider(task: TaskRow) -> AsyncIterator[Runtime]:
-        exc = EOFError("env closed connection during 'hello'")
-        exc.add_note("env output in sandbox ae964e25:\nModuleNotFoundError: No module named 'bugs'")
-        raise exc
-        yield  # pragma: no cover
-
-    run = await rollout(_add_task(1, 1), _FnAgent(_solve_add), runtime=broken_provider)
-
-    assert "No module named 'bugs'" in (run.trace.error or "")
-
-
-async def test_provider_is_called_with_the_task_row_being_placed(env_file: Path) -> None:
-    placed: list[str] = []
-
-    def placer(task: TaskRow) -> Any:
-        # The scheduler half of placement: the row is the request, so a
-        # provider can size/route each substrate per task.
-        placed.append(f"{task.env}/{task.id}:{task.args['a']}")
-        return SubprocessRuntime(env_file)(task)
-
-    run = await rollout(_add_task(2, 3), _FnAgent(_solve_add), runtime=placer)
-
-    assert run.reward == 1.0
-    assert placed == ["sums/add:2"]
-
-
-async def test_task_run_schedules_a_single_task_job(env_file: Path) -> None:
-    job = await _add_task(2, 3).run(_FnAgent(_solve_add), runtime=SubprocessRuntime(env_file))
-
-    (run,) = job.runs
-    assert job.reward == 1.0
-    assert run.trace.content == "5"
-    assert run.job_id == job.id  # the run's trace reports under the job
-
-
-async def test_task_run_has_taskset_scheduling_semantics(env_file: Path) -> None:
-    job = await _add_task(1, 2).run(
-        _FnAgent(_solve_add), runtime=SubprocessRuntime(env_file), group=2, max_concurrent=1
-    )
-
-    assert job.group == 2
-    assert [run.reward for run in job.runs] == [1.0, 1.0]
-    # The group repeats one task, so they share a GRPO group id.
-    assert len({run.group_id for run in job.runs}) == 1
-
-
-async def test_open_job_spans_multiple_scheduler_calls(env_file: Path) -> None:
-    session = await Job.start("session", group=2)
-    provider = SubprocessRuntime(env_file)
-
-    job1 = await _add_task(1, 1).run(_FnAgent(_solve_add), runtime=provider, job=session)
-    job2 = await _add_task(2, 2).run(_FnAgent(_solve_add), runtime=provider, job=session)
-
-    # Both calls accumulate into the one open job (group defaults to the job's).
-    assert job1 is session
-    assert job2 is session
-    assert len(session.runs) == 4
-    assert {run.job_id for run in session.runs} == {session.id}
-    assert session.reward == 1.0
-
-
-_TWO_ENVS = """\
-from hud import Environment
-
-alpha = Environment("alpha")
-beta = Environment("beta")
-
-
-@alpha.template()
-async def add_a(a: int, b: int):
-    answer = yield f"alpha:{a}:{b}"
-    yield 1.0 if answer == str(a + b) else 0.0
-
-
-@beta.template()
-async def add_b(a: int, b: int):
-    answer = yield f"beta:{a}:{b}"
-    yield 1.0 if answer == str(a + b) else 0.0
-"""
-
-
-async def test_one_spawn_serves_each_rows_env_in_a_mixed_taskset(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> None:
-    path = tmp_path_factory.mktemp("zoo") / "envs.py"
-    path.write_text(_TWO_ENVS, encoding="utf-8")
-    rows = [
-        Task(env="alpha", id="add_a", args={"a": 1, "b": 2}),
-        Task(env="beta", id="add_b", args={"a": 3, "b": 4}),
-    ]
-
-    # One provider, two envs: each acquisition serves the row it was called
-    # with (the task ids only exist on their own env, so a misplacement
-    # would fail the rollout).
-    job = await Taskset("zoo", rows).run(_FnAgent(_solve_add), runtime=SubprocessRuntime(path))
-
-    assert [run.reward for run in job.runs] == [1.0, 1.0]
-    assert [run.prompt for run in job.runs] == ["alpha:1:2", "beta:3:4"]
-
-
-async def test_rollout_threads_job_and_group_ids(env_file: Path) -> None:
-    run = await rollout(
-        _add_task(1, 1),
-        _FnAgent(_solve_add),
-        runtime=SubprocessRuntime(env_file),
-        job_id="j1",
-        group_id="g1",
-    )
-
-    assert run.reward == 1.0
-    assert run.job_id == "j1"
-    assert run.group_id == "g1"
-
-
-@pytest.mark.parametrize(
-    ("ambient_trace_id", "trace_id", "expected_parent_trace_id"),
-    [
-        ("parent-trace", "child-trace", "parent-trace"),
-        (
-            "00000000-0000-0000-0000-000000000001",
-            "00000000000000000000000000000001",
-            None,
-        ),
-    ],
-)
-async def test_nested_rollout_binds_child_and_parent_trace_context(
-    monkeypatch: pytest.MonkeyPatch,
-    ambient_trace_id: str,
-    trace_id: str,
-    expected_parent_trace_id: str | None,
-) -> None:
-    entered: dict[str, Any] = {}
-    active: dict[str, str | None] = {}
-    env = Environment("nested")
-
-    @env.template(id="add")
-    async def add(a: int, b: int):
-        answer = yield f"add:{a}:{b}"
-        yield 1.0 if answer == str(a + b) else 0.0
-
-    async def capture_enter(trace_id: str, **kwargs: Any) -> None:
-        entered["trace_id"] = trace_id
-        entered.update(kwargs)
-
-    class ContextAgent(Agent):
-        async def __call__(self, run: Run) -> None:
-            active["trace_id"] = get_current_trace_id()
-            active["parent_trace_id"] = get_trace_headers().get("X-HUD-Parent-Trace-Id")
-            run.trace.content = "2"
-
-    monkeypatch.setattr(run_module, "trace_enter", capture_enter)
-
-    with set_trace_context(ambient_trace_id):
-        run = await rollout(
-            Task(env="nested", id="add", args={"a": 1, "b": 1}),
-            ContextAgent(),
-            runtime=LocalRuntime(env),
-            job_id="job-1",
-            trace_id=trace_id,
-        )
-
-    assert run.trace_id == trace_id
-    assert active == {
-        "trace_id": trace_id,
-        "parent_trace_id": expected_parent_trace_id,
-    }
-    assert entered["trace_id"] == trace_id
-    assert entered["parent_trace_id"] == expected_parent_trace_id
-
-
-# ─── Run prompt views (what agents consume) ───────────────────────────
-
-
-def _run_with_prompt(prompt: Any) -> Run:
-    run = Run(None, "t", {})
-    run.prompt = prompt
-    return run
-
-
-def test_prompt_messages_wraps_plain_text_as_one_user_turn() -> None:
-    (msg,) = _run_with_prompt("hello").prompt_messages
-    assert msg.role == "user"
-    assert isinstance(msg.content, mcp_types.TextContent)
-    assert msg.content.text == "hello"
-
-
-def test_prompt_messages_no_prompt_is_one_empty_user_turn() -> None:
-    (msg,) = _run_with_prompt(None).prompt_messages
-    assert isinstance(msg.content, mcp_types.TextContent)
-    assert msg.content.text == ""
-
-
-def test_prompt_messages_normalizes_chat_dicts_and_passes_through() -> None:
-    existing = mcp_types.PromptMessage(
-        role="assistant", content=mcp_types.TextContent(type="text", text="prior")
-    )
-    msgs = _run_with_prompt(
-        [
-            {"role": "user", "content": {"type": "text", "text": "hi"}},
-            {"role": "system", "content": "be nice"},  # outside MCP vocab → user
-            existing,
-        ]
-    ).prompt_messages
-    assert [m.role for m in msgs] == ["user", "user", "assistant"]
-    assert msgs[2] is existing
-
-
-def test_prompt_text_flattens_text_turns_and_drops_non_text() -> None:
-    image = mcp_types.PromptMessage(
-        role="user",
-        content=mcp_types.ImageContent(type="image", data="aGk=", mimeType="image/png"),
-    )
-    run = _run_with_prompt([{"role": "user", "content": "first"}, image, "second"])
-    assert run.prompt_text == "first\n\nsecond"
-
-
-@pytest.mark.parametrize("character", ["x", "é"])
-async def test_oversized_task_args_become_trace_error_before_setup(character: str) -> None:
-    encoded_character_bytes = len(json.dumps(character)) - 2
-    data = character * (16 * 1024 * 1024 // encoded_character_bytes + 1)
-    env = Environment("large-task")
-    started = False
-
-    @env.template()
-    async def task(criteria: str):
-        nonlocal started
-        started = True
-        yield "ready"
-        yield 1.0
-
-    run = await rollout(
-        Task(env=env.name, id="task", args={"criteria": data}),
-        _FnAgent(lambda _: pytest.fail("agent must not launch")),
-        runtime=LocalRuntime(env),
-    )
-    assert not started
-    assert run.trace.is_error
-    assert "[starting task]" in (run.trace.error or "")
-    assert "'tasks.start' request" in (run.trace.error or "")
-    assert "limit is 16777216 bytes" in (run.trace.error or "")
-    assert "file ID" in (run.trace.error or "")
-    assert "EOFError" not in (run.trace.error or "")
+    assert (run.reward, run.trace.status, run.trace.stop_reason) == (1.0, "error", "timeout")
