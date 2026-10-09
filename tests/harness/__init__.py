@@ -6,6 +6,7 @@ services, model providers, docker and VNC servers. The fixtures wiring these in
 live in ``tests/conftest.py``.
 """
 
+from .cdp import Command, FakeBrowser, fake_browser
 from .cli import Hud, Result, scrub
 from .config import HudEnv
 from .docker import FakeDocker
@@ -31,6 +32,8 @@ from .spans import ROBOT_STEP_SCHEMA, spans, steps
 
 __all__ = [
     "ROBOT_STEP_SCHEMA",
+    "Command",
+    "FakeBrowser",
     "FakeDocker",
     "FakeScreen",
     "FakeServices",
@@ -53,6 +56,7 @@ __all__ = [
     "computer_call",
     "eventually",
     "fail",
+    "fake_browser",
     "fake_screen",
     "interrupted",
     "relay",
