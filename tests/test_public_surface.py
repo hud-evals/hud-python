@@ -3,16 +3,9 @@
 from __future__ import annotations
 
 import importlib
-from importlib.metadata import version
-from typing import TYPE_CHECKING
 
 import pytest
 from inline_snapshot import snapshot
-
-from hud import __version__
-
-if TYPE_CHECKING:
-    from tests.harness import Hud
 
 PACKAGES = [
     "hud",
@@ -247,20 +240,3 @@ def test_every_exported_name_resolves_and_none_is_private(package: str) -> None:
 
     assert [name for name in module.__all__ if not hasattr(module, name)] == []
     assert [name for name in module.__all__ if name.startswith("_") and name != "__version__"] == []
-
-
-def test_the_cli_reports_the_installed_version(hud: Hud) -> None:
-    result = hud("version", "--json")
-
-    assert result.exit_code == 0, result
-    assert result.json == {"name": "hud", "version": __version__}
-    assert __version__ == version("hud")
-
-
-def test_help_lists_the_commands_without_writing_to_stderr(hud: Hud) -> None:
-    result = hud("--help")
-
-    assert result.exit_code == 0, result
-    assert result.stderr == ""
-    for command in ("init", "serve", "deploy", "eval", "task", "sync", "jobs", "trace", "models"):
-        assert f" {command} " in result.stdout

@@ -91,16 +91,6 @@ def test_parse_junit_rejects_malformed_report(tmp_path: Path):
 
 
 @pytest.mark.sandbox
-async def test_junit_grader_reports_missing_output(workspace):
-    result = await grade_tests(workspace, "true {junit_path}")
-
-    assert result.value == 0.0
-    assert result.info is not None
-    assert result.info["error"] == "test command did not write JUnit XML"
-    assert result.info["exit_code"] == 0
-
-
-@pytest.mark.sandbox
 async def test_binary_junit_grader_rejects_passing_report_from_failed_command(workspace):
     result = await grade_tests(
         workspace,

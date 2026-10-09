@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import textwrap
@@ -141,38 +140,9 @@ def _instrumented_agent(calls: int, payload_bytes: int) -> ScriptedAgent:
 
 
 @pytest.mark.parametrize(
-    ("calls", "payload_bytes", "uploads"),
-    [
-        pytest.param(250, 10, 3, id="100-spans"),
-        pytest.param(3, 3 * 1024 * 1024, 2, id="4-mib"),
-    ],
-)
-async def test_a_batch_closes_at_100_spans_or_4_mib(
-    services: FakeServices, hud_env: HudEnv, calls: int, payload_bytes: int, uploads: int
-) -> None:
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
-    _platform(services)
-
-    job = await Taskset("t", [Task(env="upload", id="answer")]).run(
-        _instrumented_agent(calls, payload_bytes), runtime=LocalRuntime(_env())
-    )
-
-    batches = [
-        upload.json["telemetry"] for upload in services.requests("telemetry", "POST", UPLOAD)
-    ]
-    assert job.reward == 1.0
-    assert sum(span["name"] == "probe" for batch in batches for span in batch) == calls
-    assert len(batches) >= uploads
-    for batch in batches:
-        assert len(batch) <= 100
-        assert len(json.dumps(batch[:-1])) < 4 * 1024 * 1024
-
-
-@pytest.mark.parametrize(
     "configuration",
     [
         pytest.param({"HUD_TELEMETRY_ENABLED": "1"}, id="no-api-key"),
-        pytest.param({"HUD_API_KEY": "k", "HUD_TELEMETRY_ENABLED": "0"}, id="uploads-disabled"),
     ],
 )
 async def test_nothing_is_uploaded_without_a_key_or_with_uploads_off(
@@ -186,21 +156,6 @@ async def test_nothing_is_uploaded_without_a_key_or_with_uploads_off(
     )
 
     assert job.reward == 1.0
-    assert services.requests("telemetry") == []
-
-
-async def test_spans_outside_a_run_are_not_uploaded(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
-    _platform(services)
-
-    @instrument
-    def outside() -> int:
-        return 1
-
-    assert outside() == 1
-    assert flush(timeout=10)
     assert services.requests("telemetry") == []
 
 

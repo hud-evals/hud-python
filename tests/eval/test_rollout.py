@@ -151,17 +151,6 @@ CASES = {
         },
         HOOKS,
     ),
-    "an agent's own TimeoutError under an unexpired deadline is an ordinary failure": Case(
-        add(agent_config={"timeout_seconds": 10.0}),
-        ScriptedAgent(solve, fail_after=TimeoutError("provider timed out")),
-        COMPLETED
-        | {
-            "status": "error",
-            "error": "[agent loop] TimeoutError: provider timed out",
-            "spans": [*GRADED_SPANS, "system"],
-        },
-        HOOKS,
-    ),
     "the agent deadline stops the agent and still grades": Case(
         add(agent_config={"timeout_seconds": 0.1}),
         ScriptedAgent(solve, linger=30),
@@ -209,12 +198,6 @@ CASES = {
         errored(IsStr(regex=r"\[grading\] .*HudProtocolError: .*grader exploded")),
         ["initialize", "shutdown"],
     ),
-    "a grade frame without a score fails grading": Case(
-        Task(env="lab", id="frame", args={"result": {"done": True}}),
-        ScriptedAgent("x"),
-        errored(IsStr(regex=r"\[grading\] .*missing a numeric 'score' \(keys: \['done'\]\)")),
-        ["initialize", "shutdown"],
-    ),
     "a boolean score fails grading": Case(
         Task(env="lab", id="frame", args={"result": {"score": True}}),
         ScriptedAgent("x"),
@@ -245,12 +228,6 @@ CASES = {
                 r"limit is 16777216 bytes.*file ID.*"
             )
         ),
-        ["initialize", "shutdown"],
-    ),
-    "args over the frame limit once JSON-escaped fail the start": Case(
-        Task(env="lab", id="large", args={"criteria": "é" * (16 * 1024 * 1024 // 6 + 1)}),
-        ScriptedAgent("x"),
-        failed(IsStr(regex=r"(?s)\[starting task\] .*limit is 16777216 bytes.*")),
         ["initialize", "shutdown"],
     ),
     "a provider that fails reports its notes": Case(

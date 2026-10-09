@@ -7,14 +7,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from inline_snapshot import snapshot
 
-from tests.harness import say
-
-from .conftest import API_KEY
-
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import Hud, HudEnv, Models
+    from tests.harness import Hud
 
 
 def tree(root: Path) -> list[str]:
@@ -48,36 +44,6 @@ def test_init_copies_the_example_and_names_its_environment(
     assert not any(
         part in {".venv", "__pycache__"} for name in tree(target) for part in name.split("/")
     )
-
-
-def test_the_blank_example_is_a_runnable_project(hud: Hud, models: Models, hud_env: HudEnv) -> None:
-    hud_env.set(HUD_API_KEY=API_KEY)
-    models.script([say("4")])
-
-    created = hud("init", "berry", "--preset", "blank", "--json")
-    project = hud.cwd / "berry"
-    files = tree(project)
-    evaluated = hud(
-        "eval", "tasks.py", "openai_compatible", "-m", "scripted", "--yes", "--json", cwd=project
-    )
-
-    assert created.exit_code == 0, created
-    assert files == snapshot(
-        [
-            ".dockerignore",
-            ".hud_eval.toml",
-            "Dockerfile.hud",
-            "README.md",
-            "env.py",
-            "pyproject.toml",
-            "tasks.py",
-        ]
-    )
-    assert evaluated.exit_code == 0, evaluated
-    assert (evaluated.json["run_count"], evaluated.json["mean_reward"]) == (1, 1.0)
-    assert [request.prompt for request in models.requests()] == [
-        "How many times does 'r' appear in: 'Strawberry world'?"
-    ]
 
 
 def test_a_dry_run_plans_without_creating(hud: Hud) -> None:

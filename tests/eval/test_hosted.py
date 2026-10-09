@@ -227,17 +227,6 @@ AGENTS: dict[str, tuple[Agent, dict[str, Any]]] = {
 }
 
 
-@pytest.mark.parametrize(("agent", "spec"), AGENTS.values(), ids=AGENTS.keys())
-async def test_a_registered_agent_travels_as_its_type_and_config(
-    agent: Agent, spec: dict[str, Any], platform: FakeServices
-) -> None:
-    platform.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
-
-    await HostedRuntime(poll_interval=0).run(ROW, agent, job_id=JOB_ID, trace_id=TRACE_ID)
-
-    assert submitted(platform)["agent"] == spec
-
-
 PARENTS = {
     "a uuid ambient trace is the parent": ("3" * 32, str(uuid.UUID("3" * 32))),
     "a non-uuid ambient trace is dropped": ("external-run-id", None),

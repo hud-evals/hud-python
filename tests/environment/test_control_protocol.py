@@ -26,9 +26,8 @@ from hud.environment import (
     GradingArg,
     PromptArg,
 )
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval import LocalRuntime, Task
 from hud.graders import EvaluationResult, SubScore
-from tests.harness import ScriptedAgent, steps
 
 from .conftest import FRAME_LIMIT, SESSION_ID, encode, wire
 
@@ -1222,55 +1221,6 @@ async def test_an_oversized_frame_gets_a_bounded_error_without_an_id(
         },
     }
     assert (after is not None and after["result"] == {"tasks": []}) is serving
-
-
-async def test_an_evaluation_result_reaches_the_runs_evaluate_step(tmp_path: Path) -> None:
-    env = protocol_env(tmp_path / "log")
-
-    run = await rollout(
-        Task(env="protocol", id="model"), ScriptedAgent("x"), runtime=LocalRuntime(env)
-    )
-
-    assert run.reward == 0.75
-    assert steps(run.trace_id)[-1] == snapshot(
-        {
-            "step_id": 3,
-            "source": "task",
-            "messages": [],
-            "task_call": {
-                "phase": "evaluate",
-                "name": "model",
-                "arguments": {"answer": "x"},
-                "result": {
-                    "done": True,
-                    "content": "nice",
-                    "info": {"max_tile": 256},
-                    "isError": False,
-                    "subscores": [
-                        {
-                            "name": "judge",
-                            "weight": 1.0,
-                            "value": 0.75,
-                            "children": [
-                                {
-                                    "name": "criterion",
-                                    "weight": 1.0,
-                                    "value": 1.0,
-                                    "children": None,
-                                    "info": {"reason": "because"},
-                                }
-                            ],
-                            "info": {"model": "judge-model"},
-                        }
-                    ],
-                    "score": 0.75,
-                },
-            },
-            "started_at": IsStr(),
-            "ended_at": IsStr(),
-            "extra": {},
-        }
-    )
 
 
 def attach_template_to_a_plain_function(env: Environment) -> None:

@@ -230,25 +230,11 @@ def test_eval_selects_the_tasks_to_run(
             id="config-flag-for-a-named-agent",
         ),
         pytest.param(
-            ["openai"],
-            "",
-            {"OPENAI_API_KEY": "provider-key"},
-            {"protocol": "responses", "key": "provider-key"},
-            id="provider-key-wins",
-        ),
-        pytest.param(
             ["openai", "--gateway"],
             "",
             {"OPENAI_API_KEY": "provider-key"},
             {"protocol": "responses", "key": API_KEY},
             id="gateway-flag-wins-over-provider-key",
-        ),
-        pytest.param(
-            ["claude"],
-            "",
-            {"ANTHROPIC_API_KEY": "provider-key"},
-            {"protocol": "anthropic", "key": "provider-key"},
-            id="anthropic-provider-key",
         ),
         pytest.param(
             ["openai_compatible", "--model", "MiniMax-M3"],

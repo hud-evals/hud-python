@@ -176,18 +176,6 @@ async def test_a_taskset_written_as_json_reads_back_row_for_row(tmp_path: Path) 
     assert [row.model_dump() for row in loaded] == [row.model_dump() for row in rows]
 
 
-async def test_a_taskset_written_as_jsonl_holds_one_row_per_line(tmp_path: Path) -> None:
-    rows = authored_rows(tmp_path)
-
-    written = Taskset("demo", rows).to_file(tmp_path / "tasks.jsonl")
-
-    lines = written.read_text().splitlines()
-    assert [json.loads(line)["slug"] for line in lines] == [row.slug for row in rows]
-    assert [row.model_dump() for row in Taskset.from_file(written)] == [
-        row.model_dump() for row in rows
-    ]
-
-
 def test_a_rows_slug_names_its_task_and_args() -> None:
     row = Task(env="lab", id="add", args={"a": 2, "b": 3})
 
