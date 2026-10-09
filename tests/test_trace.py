@@ -1,131 +1,68 @@
-"""Core trajectory contract tests: ``Trace`` invariants + step span emission."""
+"""What a run's ``Trace`` answers about the steps it recorded."""
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import patch
+import pytest
 
-from mcp import types as mcp_types
-
-from hud.telemetry.context import set_trace_context
-from hud.types import Step, Trace
+from hud import Environment, Trace
+from hud.eval import LocalRuntime, Task, rollout
+from tests.harness import ScriptedAgent
 
 
-def test_trace_final_returns_newest_non_none_answer():
-    """final() asks newest-first; None means "no answer", falsy answers win."""
-    trace = Trace()
-    trace.record(Step(source="agent", extra={"note": "first"}))
-    trace.record(Step(source="agent", extra={"note": ""}))
-    trace.record(Step(source="tool"))
+def _env() -> Environment:
+    env = Environment("trace")
 
-    assert trace.final(lambda s: s.extra.get("note")) == ""
-    assert trace.final(lambda s: s.error) is None
+    @env.template()
+    async def answer(broken: bool = False):
+        reply = yield "Reply with ok."
+        if broken:
+            raise RuntimeError("grader broke")
+        yield 1.0 if reply == "ok" else 0.0
 
-
-def test_trace_collect_gathers_answers_in_step_order():
-    """collect() keeps step order and skips steps that answer None."""
-    trace = Trace()
-    trace.record(Step(source="agent", extra={"n": 1}))
-    trace.record(Step(source="tool"))
-    trace.record(Step(source="agent", extra={"n": 2}))
-
-    assert trace.collect(lambda s: s.extra.get("n")) == [1, 2]
+    return env
 
 
-def test_trace_append_numbers_steps():
-    """Trace.append assigns sequential 1-based step ids."""
-    trace = Trace()
-    trace.record(Step(source="user"))
-    trace.record(Step(source="agent"))
-    assert len(trace) == 2
-    assert [step.step_id for step in trace.steps] == [1, 2]
+@pytest.mark.parametrize(
+    ("broken", "sources", "status", "error"),
+    [
+        pytest.param(False, ["task", "user", "task"], "completed", None, id="graded"),
+        pytest.param(
+            True,
+            ["task", "user", "system"],
+            "error",
+            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: grader broke",
+            id="broken",
+        ),
+    ],
+)
+async def test_a_runs_trace_answers_from_its_recorded_steps(
+    broken: bool, sources: list[str], status: str, error: str | None
+) -> None:
+    task = Task(env="trace", id="answer", args={"broken": broken})
 
+    run = await rollout(task, ScriptedAgent("ok"), runtime=LocalRuntime(_env()))
 
-def test_trace_validator_numbers_preloaded_steps():
-    """Steps passed to the constructor are renumbered on validation."""
-    trace = Trace(steps=[Step(source="user"), Step(source="agent"), Step(source="tool")])
+    trace = run.trace
+    assert len(trace) == len(sources)
+    assert trace.collect(lambda step: step.source) == sources
     assert [step.step_id for step in trace.steps] == [1, 2, 3]
+    assert trace.final(lambda step: step.source) == sources[-1]
+    assert trace.final(lambda step: step.extra.get("missing")) is None
+    assert trace.status == status
+    assert trace.is_error is (status == "error")
+    assert trace.error == error
+    assert all(step.ended_at is not None for step in trace.steps)
 
 
-def test_trace_error_surfaces_last_step_error():
-    """Trace.error reads the most recent step error; is_error follows status."""
-    trace = Trace()
-    assert trace.error is None
-    assert trace.is_error is False
-
-    trace.record(Step(source="tool", error="first"))
-    trace.record(Step(source="agent"))
-    trace.record(Step(source="system", error="second"))
-    trace.status = "error"
-
-    assert trace.error == "second"
-    assert trace.is_error is True
-
-
-def test_step_emit_wraps_step_in_schema_tagged_span():
-    captured: list[dict[str, Any]] = []
-    step = Step(
-        source="user",
-        messages=[
-            mcp_types.PromptMessage(
-                role="user",
-                content=mcp_types.TextContent(type="text", text="do the thing"),
-            ),
-        ],
+async def test_a_dumped_trace_reloads_with_its_steps_renumbered() -> None:
+    run = await rollout(
+        Task(env="trace", id="answer"), ScriptedAgent("ok"), runtime=LocalRuntime(_env())
     )
+    dumped = run.trace.model_dump(mode="json")
+    for step in dumped["steps"]:
+        step.pop("step_id")
 
-    with (
-        patch("hud.types.queue_span", side_effect=captured.append),
-        set_trace_context("run-1"),
-    ):
-        step.emit()
+    reloaded = Trace.model_validate(dumped)
 
-    (span,) = captured
-    assert span["name"] == "step.user"
-    assert span["attributes"]["hud.schema"] == "hud.step.v1"
-    assert span["attributes"]["hud.task_run_id"] == "run-1"
-    payload = span["attributes"]["hud.payload"]
-    assert payload["source"] == "user"
-    assert payload["messages"][0]["content"]["text"] == "do the thing"
-    assert span["status_code"] == "OK"
-
-
-def test_step_emit_marks_error_status():
-    captured: list[dict[str, Any]] = []
-
-    with (
-        patch("hud.types.queue_span", side_effect=captured.append),
-        set_trace_context("run-1"),
-    ):
-        Step(source="system", error="boom").emit()
-
-    (span,) = captured
-    assert span["status_code"] == "ERROR"
-    assert span["status_message"] == "boom"
-
-
-def test_step_emit_without_context_is_noop():
-    captured: list[dict[str, Any]] = []
-
-    with patch("hud.types.queue_span", side_effect=captured.append):
-        Step(source="system", error="boom").emit()
-
-    assert captured == []
-
-
-def test_trace_record_emits_and_stamps_end():
-    """record = number + stamp end + append + emit, in one call."""
-    captured: list[dict[str, Any]] = []
-    trace = Trace()
-
-    with (
-        patch("hud.types.queue_span", side_effect=captured.append),
-        set_trace_context("run-1"),
-    ):
-        trace.record(Step(source="user"))
-        trace.record(Step(source="agent", ended_at="2026-05-14T20:00:05Z"))
-
-    assert [span["attributes"]["hud.payload"]["step_id"] for span in captured] == [1, 2]
-    assert trace.steps[0].ended_at is not None  # stamped at record time
-    assert trace.steps[1].ended_at == "2026-05-14T20:00:05Z"  # explicit timing kept
-    assert captured[1]["end_time"] == "2026-05-14T20:00:05Z"
+    assert [step.step_id for step in reloaded.steps] == [1, 2, 3]
+    assert reloaded.content == "ok"
