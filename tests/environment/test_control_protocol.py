@@ -9,6 +9,7 @@ template ran and whether it was torn down.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -28,6 +29,7 @@ from hud.environment import (
 )
 from hud.eval import LocalRuntime, Task
 from hud.graders import EvaluationResult, SubScore
+from tests.harness import served
 
 from .conftest import FRAME_LIMIT, SESSION_ID, encode, wire
 
@@ -1261,3 +1263,32 @@ async def test_publishing_a_capability_after_initialize_warns(
     await env.stop()
 
     assert "add_capability('browser') called after @env.initialize hooks" in caplog.text
+
+
+async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_reverse() -> None:
+    env = Environment("ordered")
+    log: list[str] = []
+
+    @env.initialize
+    async def first_up() -> None:
+        await asyncio.sleep(0.1)
+        log.append("first up")
+
+    @env.initialize
+    async def second_up() -> None:
+        log.append("second up")
+
+    @env.shutdown
+    async def first_down() -> None:
+        log.append("first down")
+
+    @env.shutdown
+    async def second_down() -> None:
+        log.append("second down")
+
+    async with served(env) as client:
+        seen_at_hello = list(log)
+        assert await client.list_tasks() == []
+
+    assert seen_at_hello == ["first up", "second up"]
+    assert log == ["first up", "second up", "second down", "first down"]
