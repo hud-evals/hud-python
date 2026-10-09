@@ -45,12 +45,14 @@ def workspace_env(
     passes: Callable[[Path], bool] = lambda _root: True,
     capabilities: tuple[Capability, ...] = (),
     name: str = "ws",
+    settle: float = 0.0,
     **workspace: Any,
 ) -> Environment:
     """An environment serving ``root`` over SSH with one template, ``task``.
 
     ``files`` seed the workspace before each run; the task scores 1.0 when
-    ``passes(root)`` holds after the agent finishes. ``workspace`` goes to
+    ``passes(root)`` holds ``settle`` seconds after the agent finishes, long
+    enough for anything the agent left running to show. ``workspace`` goes to
     :meth:`Environment.workspace` (``env=`` for the shell environment).
     """
     env = Environment(name, capabilities=capabilities)
@@ -63,6 +65,7 @@ def workspace_env(
     @env.template()
     async def task(prompt: str = PROMPT):
         yield prompt
+        await asyncio.sleep(settle)
         yield 1.0 if passes(root) else 0.0
 
     return env
@@ -74,6 +77,41 @@ async def run_task(env: Environment, agent: Agent, *, prompt: str = PROMPT, **op
     return await rollout(
         Task(env=env.name, id="task", args=args), agent, runtime=LocalRuntime(env), **options
     )
+
+
+class Relay:
+    """A TCP relay to one address that a test can cut, dropping every connection."""
+
+    def __init__(self) -> None:
+        self._server: asyncio.Server | None = None
+        self._writers: list[asyncio.StreamWriter] = []
+
+    async def start(self, host: str, port: int) -> int:
+        """Relay to ``host:port``; return the loopback port the relay listens on."""
+
+        async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            while chunk := await reader.read(65536):
+                writer.write(chunk)
+                await writer.drain()
+            writer.close()
+
+        async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            upstream_reader, upstream_writer = await asyncio.open_connection(host, port)
+            self._writers += [writer, upstream_writer]
+            await asyncio.gather(
+                pipe(reader, upstream_writer),
+                pipe(upstream_reader, writer),
+                return_exceptions=True,
+            )
+
+        self._server = await asyncio.start_server(accept, "127.0.0.1", 0)
+        return self._server.sockets[0].getsockname()[1]
+
+    def cut(self) -> None:
+        assert self._server is not None
+        self._server.close()
+        for writer in self._writers:
+            writer.transport.abort()
 
 
 def write_files(root: Path, files: Mapping[str, bytes | str]) -> None:
