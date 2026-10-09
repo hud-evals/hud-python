@@ -15,7 +15,7 @@ import pytest
 
 from hud.capabilities import Connection, SSHClient
 from hud.clients import connect
-from hud.environment import Environment, Peer
+from hud.environment import Environment, Peer, process_guard
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.workspace import usable_bwrap
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
     reason="process connection guards are unavailable",
 )
 
-_GUARD_PATH = Path(__file__).parents[1] / "process_guard.py"
+_GUARD_PATH = Path(process_guard.__file__)
 _PTRACE_SUPPORTED = (
     sys.platform == "linux"
     and subprocess.run(

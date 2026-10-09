@@ -16,7 +16,7 @@ adding local workarounds.
 - `CONTRIBUTING.md` for setup, test, lint, and type-check commands.
 - `pyproject.toml` for supported Python versions, dependencies, optional extras,
   ruff, ty, pytest, and coverage configuration.
-- Source files and colocated tests for exact behavior. Trust code and tests over
+- Source files and their tests for exact behavior. Trust code and tests over
   stale prose.
 - `cookbooks/` for runnable end-to-end examples (each is its own uv project).
 
@@ -31,6 +31,8 @@ inventory of current incidents.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
+- `tests/` mirrors the `hud` package layout: tests for `hud/cli/` live in
+  `tests/cli/`, tests for top-level modules in `tests/` itself.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
@@ -121,8 +123,8 @@ Python `>=3.11, <3.13`.
 
 ## Testing Expectations
 
-- Add or update focused tests for behavior changes. Put tests near the module
-  they cover, following the existing `*/tests/` layout.
+- Add or update focused tests for behavior changes. Put them in the `tests/`
+  package that mirrors the module they cover.
 - Test behavior and contracts, not private implementation details.
 - Regression tests should fail on the old behavior through the normal lifecycle
   or public boundary. Do not manually seed private state such as internal maps,

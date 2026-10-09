@@ -1610,7 +1610,7 @@ def test_adapt_hashes_links_not_their_targets(
 
 
 def test_authored_runtime_assets_are_valid_source() -> None:
-    integration = Path(__file__).parents[1]
+    integration = Path(harbor.__file__).parent
     compile((integration / "env.py").read_text("utf-8"), "env.py", "exec")
     installer = (integration / "install.sh").read_text("utf-8")
     assert "python_version=3.12" in installer

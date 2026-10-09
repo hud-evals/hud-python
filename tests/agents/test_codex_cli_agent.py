@@ -13,14 +13,15 @@ from mcp.types import TextContent
 
 from hud.agents.cli import resolve_executable
 from hud.agents.codex import CodexCLIAgent
-from hud.agents.tests.cli_fakes import FakeClient as _FakeClient
-from hud.agents.tests.cli_fakes import FakeProcess as _FakeProcess
-from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
 from hud.capabilities import Capability, Connection
 from hud.eval.runtime import RuntimeConfig, RuntimeResources
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
+
+from .cli_fakes import FakeClient as _FakeClient
+from .cli_fakes import FakeProcess as _FakeProcess
+from .cli_fakes import fake_run as _fake_run
 
 
 @pytest.fixture(autouse=True)

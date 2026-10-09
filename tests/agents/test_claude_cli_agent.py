@@ -27,15 +27,16 @@ from hud.agents import create_agent
 from hud.agents.claude.sdk import computer_mcp
 from hud.agents.claude.sdk.agent import ClaudeCLIAgent
 from hud.agents.claude.sdk.events import ClaudeEvents
-from hud.agents.tests.cli_fakes import FakeClient as _FakeClient
-from hud.agents.tests.cli_fakes import FakeProcess as _FakeStreamProcess
-from hud.agents.tests.cli_fakes import fake_run as _fake_run
 from hud.agents.types import AgentStep, ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability, Connection, SSHClient
 from hud.capabilities.rfb import WebPScreenshotEncoding
 from hud.settings import settings
 from hud.telemetry.context import set_trace_context
 from hud.types import MCPToolResult
+
+from .cli_fakes import FakeClient as _FakeClient
+from .cli_fakes import FakeProcess as _FakeStreamProcess
+from .cli_fakes import fake_run as _fake_run
 
 
 @pytest.fixture(autouse=True)

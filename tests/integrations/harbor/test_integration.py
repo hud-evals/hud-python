@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
 
 TASKS = Path(__file__).parent / "tasks"
-REPO = Path(__file__).resolve().parents[4]
+REPO = Path(__file__).resolve().parents[3]
 
 pytestmark = [
     pytest.mark.integration,

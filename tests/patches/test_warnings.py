@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
+
+from hud.patches import warnings as warnings_module
 
 # Loads the suppression helper in a pristine interpreter without importing the rest
 # of ``hud`` (which would register unrelated filters). A custom showwarning() runs
@@ -85,9 +86,8 @@ print("SPECIFIC")
 
 
 def _run_pristine(code: str) -> subprocess.CompletedProcess[str]:
-    warnings_module = Path(__file__).resolve().parents[1] / "warnings.py"
     return subprocess.run(
-        [sys.executable, "-c", code, str(warnings_module)],
+        [sys.executable, "-c", code, str(warnings_module.__file__)],
         capture_output=True,
         text=True,
         timeout=60,
