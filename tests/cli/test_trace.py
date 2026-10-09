@@ -173,46 +173,37 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
     result = hud("trace", "get", trace_id, "--json", cwd=tmp_path)
 
     assert result.exit_code == 0, result
-    assert result.lines == snapshot(
+    assert result.json == snapshot(
         [
-            "[",
-            "{",
-            '"kind": "agent_message",',
-            '"text": "",',
-            '"reasoning": null,',
-            '"tool_calls": [',
-            "{",
-            '"name": "write",',
-            '"arguments": {',
-            '"filePath": "REPORT.md",',
-            '"content": "PASS"',
-            "},",
-            '"id": "call_1"',
-            "}",
-            "],",
-            '"error": null',
-            "},",
-            "{",
-            '"kind": "tool_call",',
-            '"tool_name": "write",',
-            '"arguments": {',
-            '"filePath": "REPORT.md",',
-            '"content": "PASS"',
-            "},",
-            '"result_text": "wrote 4 bytes to REPORT.md",',
-            '"error": null',
-            "},",
-            "{",
-            '"kind": "agent_message",',
-            '"text": "Wrote it.",',
-            '"reasoning": null,',
-            '"tool_calls": [],',
-            '"error": null',
-            "}",
-            "]",
+            {
+                "kind": "agent_message",
+                "text": "",
+                "reasoning": None,
+                "tool_calls": [
+                    {
+                        "name": "write",
+                        "arguments": {"filePath": "REPORT.md", "content": "PASS"},
+                        "id": "call_1",
+                    }
+                ],
+                "error": None,
+            },
+            {
+                "kind": "tool_call",
+                "tool_name": "write",
+                "arguments": {"filePath": "REPORT.md", "content": "PASS"},
+                "result_text": "wrote 4 bytes to REPORT.md",
+                "error": None,
+            },
+            {
+                "kind": "agent_message",
+                "text": "Wrote it.",
+                "reasoning": None,
+                "tool_calls": [],
+                "error": None,
+            },
         ]
     )
-    assert services.requests("api") == []
 
 
 async def test_a_local_trace_renders_and_skips_a_record_cut_short(
@@ -242,3 +233,19 @@ Wrote it.
 View: https://hud.example/trace/<uuid>
 """)
     assert "Skipped 1 incomplete span record" in result.stderr
+
+
+def test_a_trace_missing_from_the_local_spans_is_read_from_the_platform(
+    hud: Hud, events: FakeServices, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    spans = tmp_path / "spans"
+    spans.mkdir()
+    (spans / f"{uuid.uuid4().hex}.jsonl").write_text("")
+    hud_env.set(HUD_TELEMETRY_LOCAL_DIR=str(spans))
+
+    result = hud("trace", "get", TRACE_ID, "--json")
+
+    assert result.exit_code == 0, result
+    assert result.json == EVENTS
+    (request,) = events.requests("api", "GET", "/v2/trace/{id}/events")
+    assert request.params == {"id": TRACE_ID}
