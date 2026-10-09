@@ -1,0 +1,5 @@
+services:
+  main: {}
+  redis:
+    image: redis:7-alpine
+    expose: [6379]

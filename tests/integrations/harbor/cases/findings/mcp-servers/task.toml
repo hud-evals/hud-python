@@ -1,0 +1,18 @@
+[[environment.mcp_servers]]
+name = "tools"
+transport = "sse"
+url = "http://tools:8000/sse"
+
+[[environment.mcp_servers]]
+name = "tools"
+transport = "streamable-http"
+
+[[environment.mcp_servers]]
+name = "shell"
+transport = "stdio"
+command = "shell-mcp"
+
+[[environment.mcp_servers]]
+name = "filetracking"
+transport = "stdio"
+command = "ft-mcp"

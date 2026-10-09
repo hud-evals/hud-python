@@ -1,0 +1,21 @@
+services:
+  redis:
+    image: redis:7-alpine
+    depends_on:
+      main:
+        condition: service_healthy
+        restart: true
+      seed:
+        condition: service_completed_successfully
+    command: [redis-server, --save, ""]
+    environment: {SIDE: car}
+    expose: [6379]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+  worker:
+    image: busybox:1.37
+  cache:
+    build: ./cache
+  seed:
+    build: ./seed

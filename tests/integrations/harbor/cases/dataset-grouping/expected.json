@@ -1,0 +1,447 @@
+{
+  "docker": [
+    {
+      "argv": "version --format {{.Server.Version}}"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/cancel-async-tasks/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h1>"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/build-pmars/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h1>"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h2> --project-directory <case>/caffe-cifar-10/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h2>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h2>"
+    }
+  ],
+  "failures": [],
+  "projects": {
+    "dataset-grouping-<h3>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h1>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:dataset-grouping-<h3>-<h4>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "cancel-async-tasks",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "columns": {
+            "category": "systems"
+          },
+          "env": "dataset-grouping-<h3>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "cancel-async-tasks"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/cancel-async-tasks/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "dataset-grouping-<h5>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h1>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:dataset-grouping-<h5>-<h6>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "agent_config": {
+            "timeout_seconds": 45.0
+          },
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [
+                {
+                  "service": "main",
+                  "source": "/tmp/result"
+                },
+                {
+                  "destination": "results/outputs",
+                  "exclude": [
+                    "*.tmp",
+                    "cache"
+                  ],
+                  "service": "main",
+                  "source": "/app/outputs"
+                }
+              ],
+              "collect": [],
+              "description": "Build pMARS.",
+              "id": "build-pmars",
+              "separate_verifier": false,
+              "verifier_timeout": 30.0
+            }
+          },
+          "columns": {
+            "category": "systems",
+            "difficulty": "medium",
+            "keywords": [
+              "c",
+              "build"
+            ]
+          },
+          "env": "dataset-grouping-<h5>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "build-pmars"
+        },
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "chess-best-move",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "columns": {
+            "category": "games"
+          },
+          "env": "dataset-grouping-<h5>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "chess-best-move"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/build-pmars/test.sh",
+        "compose-project/tests/chess-best-move/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "dataset-grouping-<h7>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h2>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:dataset-grouping-<h7>-<h8>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "caffe-cifar-10",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "columns": {
+            "category": "machine-learning"
+          },
+          "env": "dataset-grouping-<h7>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "caffe-cifar-10"
+        },
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "sam-cell-seg",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "columns": {
+            "category": "machine-learning"
+          },
+          "env": "dataset-grouping-<h7>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "sam-cell-seg"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/caffe-cifar-10/test.sh",
+        "compose-project/tests/sam-cell-seg/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

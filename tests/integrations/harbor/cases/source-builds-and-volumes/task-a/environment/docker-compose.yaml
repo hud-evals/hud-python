@@ -1,0 +1,18 @@
+services:
+  main:
+    env_file: ./main.env
+    volumes:
+      - ./main-data:/var/lib/main
+      - type: bind
+        source: ./readonly
+        target: /etc/authored
+        read_only: true
+      - outputs:/app/outputs
+  database:
+    build:
+      context: ./database
+    env_file: ./database/db.env
+    volumes: [./database/data:/var/lib/postgresql/data]
+    expose: [5432]
+volumes:
+  outputs: {}

@@ -1,0 +1,2 @@
+[environment]
+docker_image = "registry.example/base:latest"

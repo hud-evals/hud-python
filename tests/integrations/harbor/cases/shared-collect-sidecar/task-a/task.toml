@@ -1,0 +1,5 @@
+artifacts = [{ source = "/data/dump.rdb", service = "redis" }]
+
+[[verifier.collect]]
+service = "redis"
+command = "redis-cli save"

@@ -1,0 +1,18 @@
+{
+  "platform": "linux/arm64",
+  "builds": {
+    "verifier-on-arm/environment": {
+      "platform": "linux/amd64"
+    }
+  },
+  "fail": [
+    {
+      "match": "/broken/environment .* build main$",
+      "stderr": "failed to resolve source metadata for registry.invalid/missing"
+    },
+    {
+      "match": "^build ",
+      "stderr": "no matching distribution for numpy==1.21"
+    }
+  ]
+}

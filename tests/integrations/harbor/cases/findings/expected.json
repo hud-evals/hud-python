@@ -1,0 +1,331 @@
+{
+  "docker": [
+    {
+      "argv": "version --format {{.Server.Version}}"
+    },
+    {
+      "argv": "compose --project-name hud-adapt-<h1> --project-directory <case>/supported/environment --file <resolve>/compose.json --file <resolve>/override.json build main",
+      "files": {
+        "compose.json": {
+          "networks": {},
+          "services": {
+            "main": {
+              "environment": {},
+              "expose": [],
+              "ports": [],
+              "volumes": []
+            }
+          }
+        },
+        "override.json": {
+          "services": {
+            "main": {
+              "build": {
+                "context": ".",
+                "dockerfile": "Dockerfile"
+              },
+              "image": "hud-harbor-base:<h1>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "argv": "image inspect hud-harbor-base:<h1>"
+    }
+  ],
+  "failures": [
+    [
+      "artifact-absolute-destination",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.destination: Value error, artifact destination must be a relative path"
+    ],
+    [
+      "artifact-backslash-destination",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.destination: Value error, artifact destination must use forward slashes"
+    ],
+    [
+      "artifact-dotdot",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.source: Value error, artifact source must name a path beneath /"
+    ],
+    [
+      "artifact-dotdot-destination",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.destination: Value error, artifact destination must be a relative path"
+    ],
+    [
+      "artifact-double-slash",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.source: Value error, artifact source must name a path beneath /"
+    ],
+    [
+      "artifact-manifest-destination",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.destination: Value error, artifact destination 'manifest.json' is reserved"
+    ],
+    [
+      "artifact-root",
+      "harbor.invalid.task_config",
+      "invalid",
+      "artifacts.0.source: Value error, artifact source must name a path beneath /"
+    ],
+    [
+      "bad-config",
+      "harbor.invalid.task_config",
+      "invalid",
+      "environment.cpus: Input should be greater than 0"
+    ],
+    [
+      "bad-config",
+      "harbor.invalid.task_config",
+      "invalid",
+      "environment.network_mode: Input should be 'public', 'no-network' or 'allowlist'"
+    ],
+    [
+      "bad-toml",
+      "harbor.invalid.task_config_toml",
+      "invalid",
+      "Invalid value (at line 1, column 8)"
+    ],
+    [
+      "compose-not-mapping",
+      "harbor.invalid.compose",
+      "invalid",
+      "docker-compose.yaml is not a Compose document"
+    ],
+    [
+      "compose-path-escape",
+      "harbor.invalid.compose_project_path",
+      "invalid",
+      "Compose path '../../secret.env' escapes its project directory"
+    ],
+    [
+      "healthcheck-duration",
+      "harbor.invalid.healthcheck",
+      "invalid",
+      "invalid Compose healthcheck duration '2 seconds'"
+    ],
+    [
+      "healthcheck-test",
+      "harbor.invalid.healthcheck",
+      "invalid",
+      "Compose main healthcheck test must be CMD or CMD-SHELL"
+    ],
+    [
+      "host-variable",
+      "harbor.unsupported.host_compose_variable",
+      "contract",
+      "Compose variable 'HARBOR_JUDGE_KEY' is not set by the project .env"
+    ],
+    [
+      "main-build-escape",
+      "harbor.invalid.compose_project_path",
+      "invalid",
+      "Compose path '../..' escapes its project directory"
+    ],
+    [
+      "main-build-escape",
+      "harbor.invalid.compose_main_build_escape",
+      "invalid",
+      "Compose main build escapes environment"
+    ],
+    [
+      "main-build-escape",
+      "harbor.invalid.missing_compose_main_dockerfile",
+      "invalid",
+      "Compose main Dockerfile does not exist"
+    ],
+    [
+      "main-build-path-type",
+      "harbor.invalid.compose_main_build_path",
+      "invalid",
+      "Compose main build paths must be strings"
+    ],
+    [
+      "mcp-servers",
+      "harbor.invalid.duplicate_mcp_name",
+      "invalid",
+      "MCP server names must be unique"
+    ],
+    [
+      "mcp-servers",
+      "harbor.invalid.reserved_mcp_name",
+      "invalid",
+      "MCP server name 'filetracking' is reserved by the workspace"
+    ],
+    [
+      "mcp-servers",
+      "harbor.invalid.reserved_mcp_name",
+      "invalid",
+      "MCP server name 'shell' is reserved by the workspace"
+    ],
+    [
+      "mcp-servers",
+      "harbor.invalid.mcp_url",
+      "invalid",
+      "MCP server 'tools' requires a URL"
+    ],
+    [
+      "missing-instruction",
+      "harbor.invalid.missing_instruction",
+      "invalid",
+      "missing-instruction has no instruction.md"
+    ],
+    [
+      "missing-main-dockerfile",
+      "harbor.invalid.missing_compose_main_dockerfile",
+      "invalid",
+      "Compose main Dockerfile does not exist"
+    ],
+    [
+      "missing-tests",
+      "harbor.invalid.missing_tests",
+      "invalid",
+      "task requires a tests directory"
+    ],
+    [
+      "missing-verifier-dockerfile",
+      "harbor.invalid.missing_verifier_dockerfile",
+      "invalid",
+      "separate verifier requires tests/Dockerfile"
+    ],
+    [
+      "multi-step",
+      "harbor.unsupported.multi_step",
+      "contract",
+      "multi-step tasks are not supported"
+    ],
+    [
+      "no-recipe",
+      "harbor.invalid.environment_recipe",
+      "invalid",
+      "main has no environment/Dockerfile, docker_image, or Compose image or build"
+    ],
+    [
+      "reserved-ports",
+      "harbor.invalid.reserved_main_port",
+      "invalid",
+      "Harbor main service port 3128 conflicts with a HUD reserved port"
+    ],
+    [
+      "reserved-ports",
+      "harbor.invalid.reserved_main_port",
+      "invalid",
+      "Harbor main service port 3129 conflicts with a HUD reserved port"
+    ],
+    [
+      "reserved-ports",
+      "harbor.invalid.reserved_main_port",
+      "invalid",
+      "Harbor main service port 8765 conflicts with a HUD reserved port"
+    ],
+    [
+      "reserved-services",
+      "harbor.invalid.reserved_compose_service",
+      "invalid",
+      "Compose service names 'hud-base' and 'hud-verifier' are reserved"
+    ],
+    [
+      "sidecar-without-recipe",
+      "harbor.invalid.sidecar_recipe",
+      "invalid",
+      "Compose service 'worker' has neither image nor build"
+    ]
+  ],
+  "projects": {
+    "findings-<h2>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h1>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h1>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:findings-<h2>-<h3>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "supported",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "findings-<h2>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "supported"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/supported/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

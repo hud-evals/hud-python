@@ -1,0 +1,6 @@
+services:
+  main: {}
+  hud-base:
+    image: busybox
+  hud-verifier:
+    image: busybox
