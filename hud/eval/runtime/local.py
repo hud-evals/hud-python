@@ -251,6 +251,11 @@ class SubprocessRuntime:
             finally:
                 finish_stdout()
             if port is None:
+                # Stdout ends as the child exits; give it a moment to be reaped
+                # so the error reports its exit code rather than a closed pipe.
+                with contextlib.suppress(TimeoutError):
+                    async with asyncio.timeout(1.0):
+                        await proc.wait()
                 await finish_output(stderr_drain)
                 tail = "\n".join((*output_tail, *error_tail)).strip()
                 detail = f":\n{tail}" if tail else " (no output captured)"
