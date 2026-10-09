@@ -83,6 +83,43 @@ class UserImage:
         return aio(build)
 
 
+SERVE_ARGS = [
+    "sh",
+    "-c",
+    'mkdir -p /runtime/sessions /media/hud && rm -rf /media/hud/sessions && ln -s /runtime/sessions /media/hud/sessions && exec "$@"',
+    "hud-runtime",
+    *("hud", "serve", "env.py", "--host", "0.0.0.0", "--port", "8765"),
+]
+
+
+def modal_launch(calls: list[Any]) -> dict[str, Any]:
+    """What a Modal launch asked for beyond what every launch asks for.
+
+    Every launch looks up the ``hud-envs`` app, serves ``env.py`` on 8765 behind a
+    TCP readiness probe, and terminates its sandbox; this checks that and returns
+    the image source, the sandbox options that vary, and the ready timeout.
+    """
+    (image, app, (create_name, create), (ready_name, ready), terminate) = calls
+    assert app == ("App.lookup", {"name": "hud-envs", "create_if_missing": True})
+    assert (create_name, ready_name, terminate) == (
+        "Sandbox.create",
+        "sb-1.wait_until_ready",
+        ("sb-1.terminate", {}),
+    )
+    options = dict(create)
+    assert (
+        options.pop("args"),
+        options.pop("unencrypted_ports"),
+        options.pop("readiness_probe"),
+    ) == (
+        SERVE_ARGS,
+        [8765],
+        "tcp:8765",
+    )
+    assert options.pop("app") == "app:hud-envs"
+    return {"image": image, "sandbox": options, "ready_timeout": ready["timeout"]}
+
+
 MODAL: dict[str, tuple[dict[str, Any], RuntimeConfig | None, dict[str, Any] | None, Any]] = {
     "a registry image whose row resources and limits replace the provider's": (
         {"runtime_config": RuntimeConfig(resources=RuntimeResources(cpu=2, memory_mb=4096))},
@@ -93,37 +130,16 @@ MODAL: dict[str, tuple[dict[str, Any], RuntimeConfig | None, dict[str, Any] | No
         ),
         None,
         snapshot(
-            [
-                ("Image.from_registry", ["registry.test/lab:1"]),
-                ("App.lookup", {"name": "hud-envs", "create_if_missing": True}),
-                (
-                    "Sandbox.create",
-                    {
-                        "args": [
-                            "sh",
-                            "-c",
-                            'mkdir -p /runtime/sessions /media/hud && rm -rf /media/hud/sessions && ln -s /runtime/sessions /media/hud/sessions && exec "$@"',
-                            "hud-runtime",
-                            "hud",
-                            "serve",
-                            "env.py",
-                            "--host",
-                            "0.0.0.0",
-                            "--port",
-                            "8765",
-                        ],
-                        "app": "app:hud-envs",
-                        "image": "registry.test/lab:1",
-                        "workdir": None,
-                        "unencrypted_ports": [8765],
-                        "readiness_probe": "tcp:8765",
-                        "timeout": 120,
-                        "gpu": "A10G:2",
-                    },
-                ),
-                ("sb-1.wait_until_ready", {"timeout": 30}),
-                ("sb-1.terminate", {}),
-            ]
+            {
+                "image": ("Image.from_registry", ["registry.test/lab:1"]),
+                "sandbox": {
+                    "image": "registry.test/lab:1",
+                    "workdir": None,
+                    "timeout": 120,
+                    "gpu": "A10G:2",
+                },
+                "ready_timeout": 30,
+            }
         ),
     ),
     "a published image by name outlives the agent's budget": (
@@ -131,36 +147,11 @@ MODAL: dict[str, tuple[dict[str, Any], RuntimeConfig | None, dict[str, Any] | No
         None,
         {"timeout_seconds": 90.5},
         snapshot(
-            [
-                ("Image.from_name", ["hud-lab"]),
-                ("App.lookup", {"name": "hud-envs", "create_if_missing": True}),
-                (
-                    "Sandbox.create",
-                    {
-                        "args": [
-                            "sh",
-                            "-c",
-                            'mkdir -p /runtime/sessions /media/hud && rm -rf /media/hud/sessions && ln -s /runtime/sessions /media/hud/sessions && exec "$@"',
-                            "hud-runtime",
-                            "hud",
-                            "serve",
-                            "env.py",
-                            "--host",
-                            "0.0.0.0",
-                            "--port",
-                            "8765",
-                        ],
-                        "app": "app:hud-envs",
-                        "image": "hud-lab",
-                        "workdir": None,
-                        "unencrypted_ports": [8765],
-                        "readiness_probe": "tcp:8765",
-                        "timeout": 3691,
-                    },
-                ),
-                ("sb-1.wait_until_ready", {"timeout": 600}),
-                ("sb-1.terminate", {}),
-            ]
+            {
+                "image": ("Image.from_name", ["hud-lab"]),
+                "sandbox": {"image": "hud-lab", "workdir": None, "timeout": 3691},
+                "ready_timeout": 600,
+            }
         ),
     ),
     "a modal image id with any GPU and a best-effort storage request": (
@@ -171,37 +162,11 @@ MODAL: dict[str, tuple[dict[str, Any], RuntimeConfig | None, dict[str, Any] | No
         ),
         None,
         snapshot(
-            [
-                ("Image.from_id", ["im-123"]),
-                ("App.lookup", {"name": "hud-envs", "create_if_missing": True}),
-                (
-                    "Sandbox.create",
-                    {
-                        "args": [
-                            "sh",
-                            "-c",
-                            'mkdir -p /runtime/sessions /media/hud && rm -rf /media/hud/sessions && ln -s /runtime/sessions /media/hud/sessions && exec "$@"',
-                            "hud-runtime",
-                            "hud",
-                            "serve",
-                            "env.py",
-                            "--host",
-                            "0.0.0.0",
-                            "--port",
-                            "8765",
-                        ],
-                        "app": "app:hud-envs",
-                        "image": "im-123",
-                        "workdir": None,
-                        "unencrypted_ports": [8765],
-                        "readiness_probe": "tcp:8765",
-                        "timeout": 3600,
-                        "gpu": "any",
-                    },
-                ),
-                ("sb-1.wait_until_ready", {"timeout": 600}),
-                ("sb-1.terminate", {}),
-            ]
+            {
+                "image": ("Image.from_id", ["im-123"]),
+                "sandbox": {"image": "im-123", "workdir": None, "timeout": 3600, "gpu": "any"},
+                "ready_timeout": 600,
+            }
         ),
     ),
     "the row's image beats the published name": (
@@ -209,36 +174,11 @@ MODAL: dict[str, tuple[dict[str, Any], RuntimeConfig | None, dict[str, Any] | No
         RuntimeConfig(image="registry.test/lab:1"),
         None,
         snapshot(
-            [
-                ("Image.from_registry", ["registry.test/lab:1"]),
-                ("App.lookup", {"name": "hud-envs", "create_if_missing": True}),
-                (
-                    "Sandbox.create",
-                    {
-                        "args": [
-                            "sh",
-                            "-c",
-                            'mkdir -p /runtime/sessions /media/hud && rm -rf /media/hud/sessions && ln -s /runtime/sessions /media/hud/sessions && exec "$@"',
-                            "hud-runtime",
-                            "hud",
-                            "serve",
-                            "env.py",
-                            "--host",
-                            "0.0.0.0",
-                            "--port",
-                            "8765",
-                        ],
-                        "app": "app:hud-envs",
-                        "image": "registry.test/lab:1",
-                        "workdir": None,
-                        "unencrypted_ports": [8765],
-                        "readiness_probe": "tcp:8765",
-                        "timeout": 3600,
-                    },
-                ),
-                ("sb-1.wait_until_ready", {"timeout": 600}),
-                ("sb-1.terminate", {}),
-            ]
+            {
+                "image": ("Image.from_registry", ["registry.test/lab:1"]),
+                "sandbox": {"image": "registry.test/lab:1", "workdir": None, "timeout": 3600},
+                "ready_timeout": 600,
+            }
         ),
     ),
     "workdir, env vars, secrets and a registry secret reach the sandbox": (
@@ -253,38 +193,17 @@ MODAL: dict[str, tuple[dict[str, Any], RuntimeConfig | None, dict[str, Any] | No
         None,
         None,
         snapshot(
-            [
-                ("Image.from_registry", ["registry.test/lab:1", "secret:registry"]),
-                ("App.lookup", {"name": "hud-envs", "create_if_missing": True}),
-                (
-                    "Sandbox.create",
-                    {
-                        "args": [
-                            "sh",
-                            "-c",
-                            'mkdir -p /runtime/sessions /media/hud && rm -rf /media/hud/sessions && ln -s /runtime/sessions /media/hud/sessions && exec "$@"',
-                            "hud-runtime",
-                            "hud",
-                            "serve",
-                            "env.py",
-                            "--host",
-                            "0.0.0.0",
-                            "--port",
-                            "8765",
-                        ],
-                        "app": "app:hud-envs",
-                        "image": "registry.test/lab:1",
-                        "workdir": "/srv",
-                        "unencrypted_ports": [8765],
-                        "readiness_probe": "tcp:8765",
-                        "timeout": 3600,
-                        "env": {"MODE": "eval"},
-                        "secrets": ("secret:api",),
-                    },
-                ),
-                ("sb-1.wait_until_ready", {"timeout": 600}),
-                ("sb-1.terminate", {}),
-            ]
+            {
+                "image": ("Image.from_registry", ["registry.test/lab:1", "secret:registry"]),
+                "sandbox": {
+                    "image": "registry.test/lab:1",
+                    "workdir": "/srv",
+                    "timeout": 3600,
+                    "env": {"MODE": "eval"},
+                    "secrets": ("secret:api",),
+                },
+                "ready_timeout": 600,
+            }
         ),
     ),
 }
@@ -312,7 +231,7 @@ async def test_a_modal_sandbox_boots_from_the_image_the_row_resolves_to(
         "tcp://{}:{}".format(*addresses["lab"]),
         {"provider": "modal", "instance_id": "sb-1"},
     )
-    assert modal.calls == transcript
+    assert modal_launch(modal.calls) == transcript
 
 
 async def test_a_caller_image_is_built_once_in_the_callers_app(
@@ -720,6 +639,38 @@ async def test_a_modal_sandbox_streams_its_output_and_exit_does_not_wait_on_it(
     assert [name for name, _ in modal.calls][-1] == "sb-1.terminate"
 
 
+def daytona_launch(calls: list[Any]) -> dict[str, Any]:
+    """What a Daytona launch asked for beyond what every launch asks for.
+
+    Every launch starts ``hud serve`` in a ``hud-serve`` session, forwards port
+    its port over SSH, and deletes its sandbox; this checks that and returns the
+    create request, the serve command, and the SSH access and port it asked for.
+    """
+    (create, session, (run_name, (run_session, run)), (_, expires), (_, ssh), forward, *rest) = (
+        calls
+    )
+    assert session == ("sandbox-1.create_session", "hud-serve")
+    assert (run_name, run_session, run["run_async"]) == (
+        "sandbox-1.execute_session_command",
+        "hud-serve",
+        True,
+    )
+    (forward_name, (local_host, local_port, remote_host, remote_port)) = forward
+    assert (forward_name, local_host, local_port, remote_host) == (
+        "ssh.forward_local_port",
+        "127.0.0.1",
+        0,
+        "127.0.0.1",
+    )
+    assert rest == [("ssh.close", {}), ("delete", "sandbox-1"), ("close", {})]
+    assert ssh["username"] == "token-sandbox-1"
+    return {
+        "create": create,
+        "command": run["command"],
+        "ssh": {"host": ssh["host"], "expires_minutes": expires, "port": remote_port},
+    }
+
+
 DAYTONA: dict[str, tuple[dict[str, Any], RuntimeConfig | None, Any]] = {
     "an image row sized to whole cores and gibibytes": (
         {},
@@ -734,8 +685,8 @@ DAYTONA: dict[str, tuple[dict[str, Any], RuntimeConfig | None, Any]] = {
             limits=RuntimeLimits(startup_timeout_s=45),
         ),
         snapshot(
-            [
-                (
+            {
+                "create": (
                     "create",
                     {
                         "params": {
@@ -755,39 +706,17 @@ DAYTONA: dict[str, tuple[dict[str, Any], RuntimeConfig | None, Any]] = {
                         "timeout": 45,
                     },
                 ),
-                ("sandbox-1.create_session", "hud-serve"),
-                (
-                    "sandbox-1.execute_session_command",
-                    [
-                        "hud-serve",
-                        {
-                            "command": 'cd /app && PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765',
-                            "run_async": True,
-                        },
-                    ],
-                ),
-                ("sandbox-1.create_ssh_access", 1440),
-                (
-                    "ssh.connect",
-                    {
-                        "host": "ssh.app.daytona.io",
-                        "username": "token-sandbox-1",
-                        "known_hosts": None,
-                    },
-                ),
-                ("ssh.forward_local_port", ["127.0.0.1", 0, "127.0.0.1", 8765]),
-                ("ssh.close", {}),
-                ("delete", "sandbox-1"),
-                ("close", {}),
-            ]
+                "command": 'cd /app && PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765',
+                "ssh": {"host": "ssh.app.daytona.io", "expires_minutes": 1440, "port": 8765},
+            }
         ),
     ),
     "a prebuilt snapshot": (
         {"snapshot_name": "hud-lab"},
         None,
         snapshot(
-            [
-                (
+            {
+                "create": (
                     "create",
                     {
                         "params": {
@@ -800,39 +729,17 @@ DAYTONA: dict[str, tuple[dict[str, Any], RuntimeConfig | None, Any]] = {
                         "timeout": 120,
                     },
                 ),
-                ("sandbox-1.create_session", "hud-serve"),
-                (
-                    "sandbox-1.execute_session_command",
-                    [
-                        "hud-serve",
-                        {
-                            "command": 'cd /app && PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765',
-                            "run_async": True,
-                        },
-                    ],
-                ),
-                ("sandbox-1.create_ssh_access", 1440),
-                (
-                    "ssh.connect",
-                    {
-                        "host": "ssh.app.daytona.io",
-                        "username": "token-sandbox-1",
-                        "known_hosts": None,
-                    },
-                ),
-                ("ssh.forward_local_port", ["127.0.0.1", 0, "127.0.0.1", 8765]),
-                ("ssh.close", {}),
-                ("delete", "sandbox-1"),
-                ("close", {}),
-            ]
+                "command": 'cd /app && PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765',
+                "ssh": {"host": "ssh.app.daytona.io", "expires_minutes": 1440, "port": 8765},
+            }
         ),
     ),
     "the row's image overlays the provider's sizing": (
         {"runtime_config": {"resources": {"cpu": 4}}, "workdir": None, "port": 9000},
         RuntimeConfig(image="registry.test/lab:1"),
         snapshot(
-            [
-                (
+            {
+                "create": (
                     "create",
                     {
                         "params": {
@@ -846,31 +753,9 @@ DAYTONA: dict[str, tuple[dict[str, Any], RuntimeConfig | None, Any]] = {
                         "timeout": 120,
                     },
                 ),
-                ("sandbox-1.create_session", "hud-serve"),
-                (
-                    "sandbox-1.execute_session_command",
-                    [
-                        "hud-serve",
-                        {
-                            "command": 'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 9000',
-                            "run_async": True,
-                        },
-                    ],
-                ),
-                ("sandbox-1.create_ssh_access", 1440),
-                (
-                    "ssh.connect",
-                    {
-                        "host": "ssh.app.daytona.io",
-                        "username": "token-sandbox-1",
-                        "known_hosts": None,
-                    },
-                ),
-                ("ssh.forward_local_port", ["127.0.0.1", 0, "127.0.0.1", 9000]),
-                ("ssh.close", {}),
-                ("delete", "sandbox-1"),
-                ("close", {}),
-            ]
+                "command": 'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 9000',
+                "ssh": {"host": "ssh.app.daytona.io", "expires_minutes": 1440, "port": 9000},
+            }
         ),
     ),
 }
@@ -891,7 +776,7 @@ async def test_a_daytona_sandbox_serves_over_an_ssh_forward(
 
     assert reward == 1.0
     assert runtime.params == {"provider": "daytona", "instance_id": "sandbox-1"}
-    assert daytona.calls == transcript
+    assert daytona_launch(daytona.calls) == transcript
 
 
 async def test_a_daytona_snapshot_follows_its_image(
