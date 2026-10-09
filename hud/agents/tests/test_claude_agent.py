@@ -8,23 +8,33 @@ import base64
 import random
 import struct
 import zlib
+from contextlib import AsyncExitStack
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, Mock, call
 
+import fastmcp
 import httpx
 import httpx2
+import mcp.types as mcp_types
 import pytest
-from anthropic import APIStatusError
+from anthropic import APIStatusError, Omit
+from fastmcp.tools import ToolResult
 from mcp.types import ImageContent
 from PIL import Image
+from pydantic import ValidationError
 
 from hud.agents.claude.agent import ClaudeAgent
 from hud.agents.claude.tools.computer import ClaudeComputerTool
 from hud.agents.tool_agent import RunState
-from hud.capabilities import RFBClient
-from hud.types import MCPToolCall, MCPToolResult
+from hud.agents.types import ClaudeConfig, ToolStep
+from hud.capabilities import Capability, MCPClient, RFBClient
+from hud.settings import settings
+from hud.types import MCPToolCall, MCPToolResult, Trace
+
+if TYPE_CHECKING:
+    from hud.eval.run import Run
 
 
 class FakeStream:
@@ -53,8 +63,10 @@ class FakeMessages:
     def __init__(self, *outcomes: Any) -> None:
         self._outcomes = list(outcomes)
         self.calls = 0
+        self.requests: list[dict[str, Any]] = []
 
-    def stream(self, **_kwargs: Any) -> FakeStream:
+    def stream(self, **kwargs: Any) -> FakeStream:
+        self.requests.append(kwargs)
         outcome = self._outcomes[self.calls]
         self.calls += 1
         return FakeStream(outcome)
@@ -461,3 +473,124 @@ def test_claude_preserves_computer_screenshot_coordinate_space() -> None:
     source = result["content"][0]["source"]
     assert source["media_type"] == "image/png"
     assert base64.b64decode(source["data"]) == data
+
+
+@pytest.mark.parametrize("limit", [None, 1])
+async def test_image_history_preserves_tool_results_and_thinking(
+    limit: int | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "telemetry_enabled", False)
+    buffer = BytesIO()
+    Image.new("RGB", (32, 24), "white").save(buffer, format="PNG")
+    image = ImageContent(
+        type="image", mimeType="image/png", data=base64.b64encode(buffer.getvalue()).decode()
+    )
+    server = fastmcp.FastMCP("screenshots")
+
+    @server.tool
+    def screenshot() -> ToolResult:
+        """Capture the current screen."""
+        return ToolResult(content=[mcp_types.TextContent(type="text", text="screen"), image])
+
+    client = FakeAnthropic(
+        *(
+            _final(
+                SimpleNamespace(
+                    type="thinking", thinking=f"reason-{turn}", signature=f"sig-{turn}"
+                ),
+                SimpleNamespace(type="tool_use", id=f"shot-{turn}", name="screenshot", input={}),
+                stop_reason="tool_use",
+            )
+            for turn in (1, 2)
+        ),
+        _final(SimpleNamespace(type="text", text="done", citations=None), stop_reason="end_turn"),
+    )
+    config = ClaudeConfig(
+        model="claude-test",
+        model_client=client,
+        max_steps=3,
+        max_tool_result_images=limit,
+        thinking={"type": "adaptive"} if limit is not None else None,
+    )
+    restored = ClaudeConfig.model_validate(config.model_dump(mode="json"))
+    assert restored.max_tool_result_images == limit
+    assert restored.thinking == config.thinking
+    async with fastmcp.Client(server) as mcp_client:
+        cap = Capability.mcp(name="screenshots", url="https://tools.invalid/mcp")
+        connection = MCPClient(cap, mcp_client, AsyncExitStack())
+        trace = Trace()
+        run = cast(
+            "Run",
+            SimpleNamespace(
+                trace=trace,
+                record=trace.record,
+                client=SimpleNamespace(
+                    manifest=SimpleNamespace(bindings=[cap]),
+                    open=AsyncMock(return_value=connection),
+                ),
+                prompt_messages=[
+                    mcp_types.PromptMessage(
+                        role="user", content=mcp_types.TextContent(type="text", text="go")
+                    )
+                ],
+            ),
+        )
+        await ClaudeAgent(config)(run)
+
+    assert trace.status == "completed"
+    requests = client.beta.messages.requests
+    assert len(requests) == 3
+    for request in requests:
+        if limit is None:
+            assert isinstance(request.get("thinking", Omit()), Omit)
+            assert isinstance(request.get("betas", Omit()), Omit)
+        else:
+            assert "thinking-binding-controls-2026-08-01" in request["betas"]
+            assert request["thinking"] == {
+                "type": "adaptive",
+                "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+            }
+    messages = requests[-1]["messages"]
+    results = [message["content"][0] for message in messages[2::2]]
+    assert [result["tool_use_id"] for result in results] == ["shot-1", "shot-2"]
+    assert [result["content"][0]["text"] for result in results] == ["screen", "screen"]
+    assert [result["content"][1]["type"] for result in results] == (
+        ["image", "image"] if limit is None else ["text", "image"]
+    )
+    assert [
+        (message["content"][0].thinking, message["content"][0].signature)
+        for message in messages[1::2]
+    ] == [("reason-1", "sig-1"), ("reason-2", "sig-2")]
+    for step in trace.steps:
+        if isinstance(step, ToolStep):
+            assert step.result is not None
+            recorded_image = step.result.content[1]
+            assert isinstance(recorded_image, ImageContent)
+            assert recorded_image.data == image.data
+
+
+@pytest.mark.parametrize("thinking", [None, {"type": "disabled"}])
+def test_image_history_requires_enabled_thinking(thinking: dict[str, str] | None) -> None:
+    with pytest.raises(ValidationError, match="requires explicit adaptive or enabled thinking"):
+        ClaudeConfig.model_validate({"max_tool_result_images": 1, "thinking": thinking})
+
+
+@pytest.mark.parametrize(
+    ("max_tokens", "budget_tokens"),
+    [(16384, 16384), (16384, 16385), (2048, 2048), (2048, 2049)],
+)
+def test_enabled_thinking_budget_must_be_below_max_tokens(
+    max_tokens: int, budget_tokens: int
+) -> None:
+    with pytest.raises(ValidationError, match="budget_tokens must be less than max_tokens"):
+        ClaudeConfig(
+            max_tokens=max_tokens, thinking={"type": "enabled", "budget_tokens": budget_tokens}
+        )
+
+
+@pytest.mark.parametrize("max_tokens", [1025, 2048])
+def test_enabled_thinking_budget_below_max_tokens_is_allowed(max_tokens: int) -> None:
+    config = ClaudeConfig(
+        max_tokens=max_tokens, thinking={"type": "enabled", "budget_tokens": max_tokens - 1}
+    )
+    assert config.thinking == {"type": "enabled", "budget_tokens": max_tokens - 1}
