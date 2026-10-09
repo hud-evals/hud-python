@@ -91,21 +91,32 @@ async def run_on(provider: DockerRuntime, row: Task) -> tuple[Runtime, float]:
     return runtime, run.reward
 
 
+def docker_run(fake_docker: FakeDocker) -> tuple[list[str], str]:
+    """What ``docker run`` was asked for: the options before the sandbox profile, and the image."""
+    (argv,) = [call.argv for call in fake_docker.calls if call.argv[:1] == ["run"]]
+    return argv[2 : argv.index("--security-opt")], argv[-1]
+
+
+async def test_an_image_row_runs_in_a_sandboxed_container_that_is_removed_after(
+    fake_docker: FakeDocker, tmp_path: Path
+) -> None:
+    async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
+        runtime, reward = await run_on(DockerRuntime("lab:1"), ADD)
+
+    assert reward == 1.0
+    assert runtime.params == {}
+    assert transcript(fake_docker, tmp_path) == snapshot(
+        [
+            "volume create <volume>",
+            "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
+            "port lab-1 8765",
+            "rm --force lab-1",
+            "volume rm --force <volume>",
+        ]
+    )
+
+
 IMAGES: dict[str, tuple[dict[str, Any], RuntimeConfig | None, list[str], dict[str, Any]]] = {
-    "an image row starts its image with the sandbox security profile": (
-        {"image": "lab:1"},
-        None,
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
-        {},
-    ),
     "run args, env vars, bind mounts and resources reach docker run": (
         {
             "image": "lab:1",
@@ -117,98 +128,47 @@ IMAGES: dict[str, tuple[dict[str, Any], RuntimeConfig | None, list[str], dict[st
             ),
         },
         None,
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --network host --env MODE=eval --cpus 2 --memory 4096m --gpus 1 --mount type=bind,source=/opt/data,target=/data,readonly --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        [
+            *("--network", "host", "--env", "MODE=eval"),
+            *("--cpus", "2", "--memory", "4096m", "--gpus", "1"),
+            *("--mount", "type=bind,source=/opt/data,target=/data,readonly"),
+        ],
         {},
     ),
     "the row's image replaces the provider's and keeps its resources": (
         {"image": "lab:old", "runtime_config": {"resources": {"cpu": 1.5}}},
         RuntimeConfig(image="lab:1"),
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --cpus 1.5 --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        ["--cpus", "1.5"],
         {},
     ),
     "the row's resources replace the provider's whole": (
         {"image": "lab:1", "runtime_config": {"resources": {"cpu": 2, "memory_mb": 4096}}},
         RuntimeConfig(resources=RuntimeResources(cpu=4)),
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --cpus 4 --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        ["--cpus", "4"],
         {},
     ),
     "a constructor runtime_config image beats the positional one": (
         {"image": "lab:old", "runtime_config": {"image": "lab:1"}},
         None,
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
-        {},
-    ),
-    "a storage request is admitted against the container's free disk": (
-        {"image": "lab:1"},
-        RuntimeConfig(resources=RuntimeResources(storage_mb=1024)),
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "exec lab-1 df -Pk /",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        [],
         {},
     ),
     "a startup limit becomes the runtime's ready timeout": (
         {"image": "lab:1"},
         RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=300)),
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port lab-1 8765",
-                "rm --force lab-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        [],
         {"ready_timeout": 300},
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("options", "config", "commands", "params"), IMAGES.values(), ids=IMAGES.keys()
+    ("options", "config", "run_options", "params"), IMAGES.values(), ids=IMAGES.keys()
 )
-async def test_an_image_row_runs_in_a_container_that_is_removed_after(
+async def test_a_row_and_its_provider_decide_what_docker_run_is_asked_for(
     options: dict[str, Any],
     config: RuntimeConfig | None,
-    commands: list[str],
+    run_options: list[str],
     params: dict[str, Any],
     fake_docker: FakeDocker,
     tmp_path: Path,
@@ -219,8 +179,22 @@ async def test_an_image_row_runs_in_a_container_that_is_removed_after(
         runtime, reward = await run_on(DockerRuntime(**options), row)
 
     assert reward == 1.0
-    assert transcript(fake_docker, tmp_path) == commands
+    assert docker_run(fake_docker) == (run_options, "lab:1")
     assert runtime.params == params
+
+
+async def test_a_storage_request_is_admitted_against_the_containers_free_disk(
+    fake_docker: FakeDocker, tmp_path: Path
+) -> None:
+    row = ADD.model_copy(
+        update={"runtime_config": RuntimeConfig(resources=RuntimeResources(storage_mb=1024))}
+    )
+
+    async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
+        _, reward = await run_on(DockerRuntime("lab:1"), row)
+
+    assert reward == 1.0
+    assert fake_docker.commands("exec ") == ["exec lab-1 df -Pk /"]
 
 
 async def test_a_container_streams_its_logs_to_the_terminal(
@@ -243,6 +217,15 @@ async def test_a_container_streams_its_logs_to_the_terminal(
 
 
 LOW_DISK = "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 0 0 4194304 0% /\n"
+
+
+def volumes_left(fake_docker: FakeDocker) -> set[str]:
+    """Session volumes created and never removed."""
+    created = {call.argv[2] for call in fake_docker.calls if call.argv[:2] == ["volume", "create"]}
+    removed = {call.argv[-1] for call in fake_docker.calls if call.argv[:2] == ["volume", "rm"]}
+    return created - removed
+
+
 IMAGE_FAILURES: dict[
     str, tuple[RuntimeConfig, list[tuple[str, dict[str, Any]]], str, list[str]]
 ] = {
@@ -262,70 +245,37 @@ IMAGE_FAILURES: dict[
         RuntimeConfig(image="lab:1"),
         [(r"^logs --tail 40 ", {"stderr": "ImportError: boom\n"})],
         "container for image 'lab:1' exited before serving port 8765:\nImportError: boom",
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "port cid-1 8765",
-                "logs --tail 40 cid-1",
-                "rm --force cid-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        ["rm --force cid-1"],
     ),
     "less free disk than requested": (
         RuntimeConfig(image="lab:1", resources=RuntimeResources(storage_mb=8192)),
         [(r"^exec \S+ df -Pk /$", {"stdout": LOW_DISK})],
         "DockerRuntime requires 8192 MB of free disk; the environment has 4096 MB",
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "exec cid-1 df -Pk /",
-                "rm --force cid-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        ["rm --force cid-1"],
     ),
     "free disk it cannot read": (
         RuntimeConfig(image="lab:1", resources=RuntimeResources(storage_mb=8192)),
         [(r"^exec \S+ df -Pk /$", {"stdout": "df: not found\n"})],
         "DockerRuntime could not measure the environment's free disk",
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "exec cid-1 df -Pk /",
-                "rm --force cid-1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        ["rm --force cid-1"],
     ),
     "a start slower than its startup limit": (
         RuntimeConfig(image="lab:1", limits=RuntimeLimits(startup_timeout_s=1)),
         [(r"^run ", {"stdout": "cid-1\n", "delay": 3})],
-        snapshot(
-            "docker run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1 timed out after 1s"
-        ),
-        snapshot(
-            [
-                "volume create <volume>",
-                "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-                "volume rm --force <volume>",
-            ]
-        ),
+        IsStr(regex=r"docker run --detach .* lab:1 timed out after 1s"),
+        [],
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("config", "rules", "error", "commands"), IMAGE_FAILURES.values(), ids=IMAGE_FAILURES.keys()
+    ("config", "rules", "error", "removed"), IMAGE_FAILURES.values(), ids=IMAGE_FAILURES.keys()
 )
 async def test_an_image_that_cannot_serve_fails_its_acquisition_and_is_cleaned_up(
     config: RuntimeConfig,
     rules: list[tuple[str, dict[str, Any]]],
-    error: str,
-    commands: list[str],
+    error: Any,
+    removed: list[str],
     fake_docker: FakeDocker,
     tmp_path: Path,
 ) -> None:
@@ -337,7 +287,10 @@ async def test_an_image_that_cannot_serve_fails_its_acquisition_and_is_cleaned_u
             pytest.fail("the acquisition should fail")
 
     assert scrub(str(raised.value), tmp_path) == error
-    assert transcript(fake_docker, tmp_path) == commands
+    assert fake_docker.commands("rm --force ") == removed
+    assert volumes_left(fake_docker) == set()
+    if not rules:
+        assert fake_docker.calls == []
 
 
 async def test_a_container_past_its_run_limit_is_removed(
@@ -433,45 +386,25 @@ COMPOSE: dict[str, tuple[str, bool, dict[str, Any], RuntimeConfig | None, dict[s
         snapshot(
             {
                 "commands": [
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --wait --no-deps --no-recreate --no-build main db",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port main 8765",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml ps --quiet main",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
+                    "up --detach --build --remove-orphans",
+                    "up --wait --no-deps --no-recreate --no-build main db",
+                    "port main 8765",
+                    "ps --quiet main",
+                    "down --volumes --remove-orphans",
                 ],
-                "override": {
-                    "services": {
-                        "main": {
-                            "security_opt": [
-                                "seccomp=<seccomp>",
-                                "systempaths=unconfined",
-                                "apparmor=unconfined",
-                            ],
-                            "volumes": [
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/runtime/sessions",
-                                },
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/media/hud/sessions",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/opt/data",
-                                    "target": "/data",
-                                    "read_only": True,
-                                },
-                            ],
-                            "environment": {"MODE": "override"},
-                            "cpus": 2.0,
-                            "mem_limit": "4096m",
-                            "gpus": 2,
+                "main": {
+                    "environment": {"MODE": "override"},
+                    "cpus": 2.0,
+                    "mem_limit": "4096m",
+                    "gpus": 2,
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "/opt/data",
+                            "target": "/data",
+                            "read_only": True,
                         }
-                    },
-                    "volumes": {"hud-runtime-sessions": {}},
+                    ],
                 },
                 "ports": """\
 services:
@@ -490,35 +423,12 @@ services:
         snapshot(
             {
                 "commands": [
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port gateway 8765",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml ps --quiet main",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
+                    "up --detach --build --remove-orphans",
+                    "port gateway 8765",
+                    "ps --quiet main",
+                    "down --volumes --remove-orphans",
                 ],
-                "override": {
-                    "services": {
-                        "main": {
-                            "security_opt": [
-                                "seccomp=<seccomp>",
-                                "systempaths=unconfined",
-                                "apparmor=unconfined",
-                            ],
-                            "volumes": [
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/runtime/sessions",
-                                },
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/media/hud/sessions",
-                                },
-                            ],
-                        }
-                    },
-                    "volumes": {"hud-runtime-sessions": {}},
-                },
+                "main": {},
                 "ports": """\
 services:
   gateway:
@@ -536,44 +446,24 @@ services:
         snapshot(
             {
                 "commands": [
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port gateway 8765",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml ps --quiet main",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
+                    "up --detach --build --remove-orphans",
+                    "port gateway 8765",
+                    "ps --quiet main",
+                    "down --volumes --remove-orphans",
                 ],
-                "override": {
-                    "services": {
-                        "main": {
-                            "security_opt": [
-                                "seccomp=<seccomp>",
-                                "systempaths=unconfined",
-                                "apparmor=unconfined",
-                            ],
-                            "volumes": [
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/runtime/sessions",
-                                },
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/media/hud/sessions",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/run/user/docker.sock",
-                                    "target": "/var/run/docker.sock",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/run/user/docker.sock",
-                                    "target": "/media/hud/docker.sock",
-                                },
-                            ],
-                        }
-                    },
-                    "volumes": {"hud-runtime-sessions": {}},
+                "main": {
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "/run/user/docker.sock",
+                            "target": "/var/run/docker.sock",
+                        },
+                        {
+                            "type": "bind",
+                            "source": "/run/user/docker.sock",
+                            "target": "/media/hud/docker.sock",
+                        },
+                    ]
                 },
                 "ports": """\
 services:
@@ -593,44 +483,24 @@ services:
             {
                 "commands": [
                     "context inspect --format {{.Endpoints.docker.Host}}",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port gateway 8765",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml ps --quiet main",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
+                    "up --detach --build --remove-orphans",
+                    "port gateway 8765",
+                    "ps --quiet main",
+                    "down --volumes --remove-orphans",
                 ],
-                "override": {
-                    "services": {
-                        "main": {
-                            "security_opt": [
-                                "seccomp=<seccomp>",
-                                "systempaths=unconfined",
-                                "apparmor=unconfined",
-                            ],
-                            "volumes": [
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/runtime/sessions",
-                                },
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/media/hud/sessions",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/var/run/docker.sock",
-                                    "target": "/var/run/docker.sock",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/var/run/docker.sock",
-                                    "target": "/media/hud/docker.sock",
-                                },
-                            ],
-                        }
-                    },
-                    "volumes": {"hud-runtime-sessions": {}},
+                "main": {
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "/var/run/docker.sock",
+                            "target": "/var/run/docker.sock",
+                        },
+                        {
+                            "type": "bind",
+                            "source": "/var/run/docker.sock",
+                            "target": "/media/hud/docker.sock",
+                        },
+                    ]
                 },
                 "ports": """\
 services:
@@ -649,44 +519,24 @@ services:
         snapshot(
             {
                 "commands": [
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port gateway 8765",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml ps --quiet main",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
+                    "up --detach --build --remove-orphans",
+                    "port gateway 8765",
+                    "ps --quiet main",
+                    "down --volumes --remove-orphans",
                 ],
-                "override": {
-                    "services": {
-                        "main": {
-                            "security_opt": [
-                                "seccomp=<seccomp>",
-                                "systempaths=unconfined",
-                                "apparmor=unconfined",
-                            ],
-                            "volumes": [
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/runtime/sessions",
-                                },
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/media/hud/sessions",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/vm/run/docker.sock",
-                                    "target": "/var/run/docker.sock",
-                                },
-                                {
-                                    "type": "bind",
-                                    "source": "/vm/run/docker.sock",
-                                    "target": "/media/hud/docker.sock",
-                                },
-                            ],
-                        }
-                    },
-                    "volumes": {"hud-runtime-sessions": {}},
+                "main": {
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "/vm/run/docker.sock",
+                            "target": "/var/run/docker.sock",
+                        },
+                        {
+                            "type": "bind",
+                            "source": "/vm/run/docker.sock",
+                            "target": "/media/hud/docker.sock",
+                        },
+                    ]
                 },
                 "ports": """\
 services:
@@ -705,36 +555,13 @@ services:
         snapshot(
             {
                 "commands": [
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml exec -T main df -Pk /",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port gateway 8765",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml ps --quiet main",
-                    "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
+                    "up --detach --build --remove-orphans",
+                    "exec -T main df -Pk /",
+                    "port gateway 8765",
+                    "ps --quiet main",
+                    "down --volumes --remove-orphans",
                 ],
-                "override": {
-                    "services": {
-                        "main": {
-                            "security_opt": [
-                                "seccomp=<seccomp>",
-                                "systempaths=unconfined",
-                                "apparmor=unconfined",
-                            ],
-                            "volumes": [
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/runtime/sessions",
-                                },
-                                {
-                                    "type": "volume",
-                                    "source": "hud-runtime-sessions",
-                                    "target": "/media/hud/sessions",
-                                },
-                            ],
-                        }
-                    },
-                    "volumes": {"hud-runtime-sessions": {}},
-                },
+                "main": {},
                 "ports": """\
 services:
   gateway:
@@ -744,6 +571,40 @@ services:
         ),
     ),
 }
+
+
+SANDBOX_OPTIONS = ["seccomp=<seccomp>", "systempaths=unconfined", "apparmor=unconfined"]
+SESSION_VOLUMES = [
+    {"type": "volume", "source": "hud-runtime-sessions", "target": target}
+    for target in ("/runtime/sessions", "/media/hud/sessions")
+]
+COMPOSE_PREFIX = re.compile(r"^compose --project-name \S+ --project-directory \S+ (?:--file \S+ )+")
+
+
+def launch(fake_docker: FakeDocker, tmp_path: Path) -> dict[str, Any]:
+    """What a Compose launch asked for beyond what every launch asks for.
+
+    Every launch runs ``main`` under the sandbox profile with the session volumes
+    mounted; this checks that and returns the compose verbs, the rest of the
+    override, and the published ports.
+    """
+    override = staged(fake_docker, tmp_path, "override.json")
+    services = dict(override["services"])
+    main = dict(services.pop("main"))
+    assert main.pop("security_opt") == SANDBOX_OPTIONS
+    volumes = main.pop("volumes")
+    assert volumes[:2] == SESSION_VOLUMES
+    if volumes[2:]:
+        main["volumes"] = volumes[2:]
+    assert override["volumes"] == {"hud-runtime-sessions": {}}
+    return {
+        "commands": [
+            COMPOSE_PREFIX.sub("", command) for command in transcript(fake_docker, tmp_path)
+        ],
+        "main": main,
+        **({"services": services} if services else {}),
+        "ports": staged(fake_docker, tmp_path, "ports.yaml"),
+    }
 
 
 @pytest.mark.parametrize(
@@ -781,11 +642,7 @@ async def test_a_compose_row_starts_its_project_with_a_provider_override(
 
     assert reward == 1.0
     assert runtime.config == row.runtime_config
-    assert {
-        "commands": transcript(fake_docker, tmp_path),
-        "override": staged(fake_docker, tmp_path, "override.json"),
-        "ports": staged(fake_docker, tmp_path, "ports.yaml"),
-    } == launched
+    assert launch(fake_docker, tmp_path) == launched
 
 
 INTERPOLATED = """
