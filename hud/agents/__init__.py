@@ -51,7 +51,7 @@ def create_agent(model: str, **kwargs: Any) -> GatewayAgent:
     else:
         entry = resolve_gateway_model(model)
         agent_type = AgentType(entry.sdk_agent_type)
-        kwargs.setdefault("model", entry.model_name or model)
+        kwargs.setdefault("model", entry.model_name or entry.id)
     kwargs["gateway"] = True
     return cast("GatewayAgent", agent_type.cls.load(kwargs))
 

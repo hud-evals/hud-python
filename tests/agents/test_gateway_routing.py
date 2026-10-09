@@ -151,6 +151,17 @@ ROUTES = {
             }
         ),
     ),
+    "create-agent-catalog-display-name": (
+        lambda _url: create_agent("Claude Sonnet 4.6"),
+        snapshot(
+            {
+                "protocol": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "credential": "hud-key",
+                "trace_id": True,
+            }
+        ),
+    ),
     "reloaded-gateway-agent": (
         lambda _url: OpenAIAgent.load(create_agent("openai").dump()),
         snapshot(
