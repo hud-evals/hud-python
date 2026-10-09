@@ -1,1052 +1,418 @@
-"""HUD-hosted placement: agent spec, submission/polling, and scheduler dispatch.
-
-The hosted path never opens a local connection — :class:`HostedRuntime` submits the
-rollout to the platform, polls the trace until terminal, and folds the result
-into a ``Run``. The scheduler (:meth:`Taskset.run`) chooses between ``HostedRuntime``
-and a local provider. These tests fake the platform client at the
-``PlatformClient`` seam, so they cover everything local: spec serialization,
-payload shape, id canonicalization, terminal detection, timeout cancel, the
-Run the caller gets back, and the dispatch.
-"""
+"""Hosted execution: the platform runs the whole rollout; this process submits it,
+polls its trace to a terminal state, and folds the result into a ``Run``."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from dirty_equals import IsStr
+from inline_snapshot import snapshot
 
-from hud.agents.base import Agent
 from hud.agents.claude import ClaudeCLIAgent, ClaudeCLIConfig
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval.job import Job
-from hud.eval.run import Run
-from hud.eval.runtime import (
+from hud.eval import (
     ComposeProject,
     HostedRuntime,
-    HUDRuntime,
-    ModalRuntime,
-    Runtime,
     RuntimeConfig,
     RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
+    Task,
+    Taskset,
 )
-from hud.eval.runtime.core import resolve_runtime_config
-from hud.eval.runtime.hud import _splice_websocket
-from hud.eval.task import Task
-from hud.eval.taskset import Taskset
+from hud.telemetry.context import set_trace_context
+from tests.eval.envs import eventually
+from tests.harness import Reply, ScriptedAgent
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-from hud.settings import settings
-from hud.telemetry.context import set_trace_context
+    from hud.agents.base import Agent
+    from tests.harness import FakeServices, HudEnv
+
+SUBMIT = "/v2/rollouts/submit"
+CANCEL = "/v2/rollouts/cancel"
+POLL = "/v2/trace/{id}"
+TRACE_ID = "1" * 32
+JOB_ID = "2" * 32
+ROW = Task(env="sums", id="add", args={"a": 1, "b": 2})
 
 
-class _FakePlatform:
-    """Scripted PlatformClient: records posts, serves trace states in order."""
-
-    api_key = "test-key"
-
-    def __init__(self, states: list[dict[str, Any]]) -> None:
-        self.states = states
-        self.posts: list[tuple[str, dict[str, Any]]] = []
-        self.polled = 0
-
-    async def apost(self, path: str, *, json: Any | None = None) -> Any:
-        self.posts.append((path, json or {}))
-        return {"status": "queued"}
-
-    async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        assert path.startswith("/trace/") and path.count("/") == 2
-        state = self.states[min(self.polled, len(self.states) - 1)]
-        self.polled += 1
-        return state
+@pytest.fixture
+def platform(services: FakeServices, hud_env: HudEnv) -> FakeServices:
+    """The fake platform accepting submissions, with a key set."""
+    hud_env.set(HUD_API_KEY="k")
+    services.route("api", "POST", SUBMIT, json={"status": "queued"})
+    services.route("api", "POST", CANCEL, json={})
+    return services
 
 
-class _FakeResponse:
-    def __init__(self, body: dict[str, Any]) -> None:
-        self.body = body
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict[str, Any]:
-        return self.body
-
-
-def _agent() -> OpenAIChatAgent:
+def chat_agent() -> OpenAIChatAgent:
     return OpenAIChatAgent(
-        OpenAIChatConfig(model="test-model", api_key="k", base_url="http://localhost")
+        OpenAIChatConfig(model="test-model", api_key="secret", base_url="http://model.test")
     )
 
 
-@pytest.mark.parametrize("runtime_type", [HostedRuntime, HUDRuntime])
-def test_runtime_constructor_timeout_is_a_deprecated_alias(runtime_type: type[Any]) -> None:
-    with pytest.warns(DeprecationWarning, match="rollout_timeout"):
-        runtime = runtime_type(run_timeout=90.0)
-
-    assert runtime.run_timeout == 90.0
+def submitted(platform: FakeServices) -> dict[str, Any]:
+    (request,) = platform.requests("api", "POST", SUBMIT)
+    assert request.bearer == "k"
+    return request.json
 
 
-def test_dump_serializes_full_config() -> None:
-    agent = _agent()
-    agent.config.system_prompt = "be brief"
-    agent.config.max_steps = 7
-    agent.config.timeout_seconds = 3600
-    agent.config.tool_timeout_seconds = 1800
-
-    config = agent.dump()
-
-    # The full config travels, so every knob is preserved...
-    assert config["model"] == "test-model"
-    assert config["max_steps"] == 7
-    assert config["system_prompt"] == "be brief"
-    assert config["timeout_seconds"] == 3600
-    assert config["tool_timeout_seconds"] == 1800
-    # ...minus what can't or shouldn't cross the wire.
-    assert "model_client" not in config
-    assert "api_key" not in config
-    assert "base_url" not in config
-    assert "hosted_tools" not in config
-
-
-def test_dump_preserves_training_config(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completion(
+    platform: FakeServices, tmp_path: Path
 ) -> None:
-    """The constructor builds the runtime client without putting it in config."""
-    from hud.agents import create_agent
-    from hud.utils.gateway import GatewayModelInfo, GatewayProviderInfo
-
-    class _GatewayStub:
-        pass
-
-    client = _GatewayStub()
-    model = GatewayModelInfo(
-        id="arith-rl",
-        model_name="arith-rl",
-        sdk_agent_type="openai_compatible",
-        provider=GatewayProviderInfo(name="openai"),
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: sums:latest\n")
+    platform.route(
+        "api",
+        "GET",
+        POLL,
+        Reply(json={"status": "pending"}),
+        Reply(json={"status": "running"}),
+        Reply(json={"status": "completed", "reward": 0.5}),
     )
-    monkeypatch.setattr("hud.utils.gateway.list_gateway_models", lambda *_: [model])
-    monkeypatch.setattr("hud.agents.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda _provider: client)
-
-    agent = create_agent(
-        "arith-rl",
-        system_prompt="/no_think",
-        completion_kwargs={
-            "extra_body": {
-                "return_token_ids": True,
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-        },
-    )
-    assert isinstance(agent, OpenAIChatAgent)
-    assert agent.config.model_client is None
-    assert agent.oai is client
-
-    config = agent.dump()
-    assert config["model"] == "arith-rl"
-    assert config["system_prompt"] == "/no_think"
-    assert config["completion_kwargs"] == {
-        "extra_body": {
-            "return_token_ids": True,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-    }
-    assert "model_client" not in config
-
-
-def test_dump_rejects_custom_model_client() -> None:
-    agent = _agent()
-    agent.config = OpenAIChatConfig(model="m", model_client=object())
-    with pytest.raises(ValueError, match=r"custom model_client.*HUDRuntime"):
-        agent.dump()
-
-
-@pytest.mark.asyncio
-async def test_run_rejects_unregistered_agent() -> None:
-    """An agent that can't serialize its identity yields a failed Run, not a crash."""
-
-    class _LocalOnlyAgent(Agent):
-        async def __call__(self, run: Run) -> None:
-            run.trace.content = "done"
-
-    run = await HostedRuntime(poll_interval=0.0).run(
-        Task(env="e", id="x"),
-        _LocalOnlyAgent(),
-        job_id="j",
-    )
-    assert run.trace.is_error
-    assert "registered agent types" in (run.trace.error or "")
-    assert "_LocalOnlyAgent" in (run.trace.error or "")
-
-
-@pytest.mark.asyncio
-async def test_run_submits_and_polls_to_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform(
-        [
-            {"status": "pending"},
-            {"status": "running"},
-            {"status": "completed", "reward": 0.5},
-        ]
-    )
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    hosted = HostedRuntime(poll_interval=0.0)
-    trace_id = uuid.uuid4().hex
-    job_id = uuid.uuid4().hex
-    parent_trace_id = uuid.uuid4().hex
-    task = Task(
+    row = Task(
         env="sums",
         id="add",
         slug="sums-add",
         args={"a": 1, "b": 2},
         agent_config={"timeout_seconds": 45.0},
         runtime_config=RuntimeConfig(
-            image="registry.example/sums:latest",
-            resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4", count=1)),
+            compose=ComposeProject(document=compose, service_access=True),
+            resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4"), memory_mb=None),
             limits=RuntimeLimits(startup_timeout_s=120, run_timeout_s=900),
         ),
         verifier=Task(
             env="judge",
             id="verify",
             args={"expected": 3},
-            runtime_config=RuntimeConfig(resources=RuntimeResources(memory_mb=4096)),
+            runtime_config=RuntimeConfig(resources=None),
         ),
     )
 
-    with set_trace_context(parent_trace_id):
-        run = await hosted.run(task, _agent(), job_id=job_id, group_id="g1", trace_id=trace_id)
-
-    assert run.reward == 0.5
-    assert run.trace.status == "completed"
-    assert run.trace.trace_id == trace_id
-    assert run.job_id == job_id
-    assert run.group_id == "g1"
-    assert run.slug == task.slug
-    assert Job(id="job", name="test", runs=[run]).results == {"sums-add": [run]}
-    assert platform.polled == 3
-    (path, payload) = platform.posts[0]
-    assert path == "/rollouts/submit"
-    # Hex ids travel as canonical UUID strings.
-    assert payload["trace_id"] == str(uuid.UUID(trace_id))
-    assert payload["job_id"] == str(uuid.UUID(job_id))
-    assert payload["parent_trace_id"] == str(uuid.UUID(parent_trace_id))
-    assert payload["env"] == "sums"
-    assert payload["task"] == "add"
-    assert payload["slug"] == "sums-add"
-    assert payload["args"] == {"a": 1, "b": 2}
-    assert payload["runtime_config"] == {
-        "image": "registry.example/sums:latest",
-        "resources": {"cpu": 2.0, "gpu": {"type": "L4", "count": 1}},
-        "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
-    }
-    assert payload["verifier"] == {
-        "env": "judge",
-        "id": "verify",
-        "args": {"expected": 3},
-        "slug": "verify-5579a3e5",
-        "runtime_config": {"resources": {"memory_mb": 4096}},
-    }
-    assert payload["group_id"] == "g1"
-    assert payload["agent"]["type"] == "openai_compatible"
-    assert payload["agent"]["config"]["model"] == "test-model"
-    assert payload["agent"]["config"]["timeout_seconds"] == 45.0
-
-
-@pytest.mark.asyncio
-async def test_run_submits_registered_cli_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    agent = ClaudeCLIAgent(
-        ClaudeCLIConfig(
-            model="claude-sonnet-4-6",
-            max_steps=23,
-            gateway=True,
-        )
-    )
-
-    run = await HostedRuntime(poll_interval=0.0).run(
-        Task(env="coding", id="solve"),
-        agent,
-        job_id=uuid.uuid4().hex,
-        trace_id=uuid.uuid4().hex,
-    )
-
-    assert run.reward == 1.0
-    submitted = platform.posts[0][1]["agent"]
-    assert submitted["type"] == "claude_cli"
-    assert submitted["config"]["model"] == "claude-sonnet-4-6"
-    assert submitted["config"]["max_steps"] == 23
-    assert submitted["config"]["gateway"] is True
-
-
-@pytest.mark.asyncio
-async def test_run_preserves_runtime_config_null_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    await HostedRuntime(poll_interval=0.0).run(
-        Task(env="sums", id="add", runtime_config=RuntimeConfig(resources=None)),
-        _agent(),
-        job_id=uuid.uuid4().hex,
-        trace_id=uuid.uuid4().hex,
-    )
-
-    assert platform.posts[0][1]["runtime_config"] == {"resources": None}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("parent_trace_id", "trace_id"),
-    [
-        ("external-run-id", "00000000000000000000000000000001"),
-        (
-            "00000000-0000-0000-0000-000000000001",
-            "00000000000000000000000000000001",
-        ),
-        (
-            "{00000000-0000-0000-0000-000000000001}",
-            "00000000000000000000000000000001",
-        ),
-        (
-            "urn:uuid:00000000-0000-0000-0000-000000000001",
-            "00000000000000000000000000000001",
-        ),
-    ],
-)
-async def test_run_omits_unusable_parent_trace_id(
-    monkeypatch: pytest.MonkeyPatch,
-    parent_trace_id: str,
-    trace_id: str,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    with set_trace_context(parent_trace_id):
-        run = await HostedRuntime(poll_interval=0.0).run(
-            Task(env="sums", id="add"),
-            _agent(),
-            job_id=uuid.uuid4().hex,
-            trace_id=trace_id,
+    with set_trace_context("3" * 32):
+        run = await HostedRuntime(poll_interval=0).run(
+            row, chat_agent(), job_id=JOB_ID, group_id="g1", trace_id=TRACE_ID
         )
 
-    assert run.trace.status == "completed"
-    assert "parent_trace_id" not in platform.posts[0][1]
-
-
-@pytest.mark.asyncio
-async def test_run_submits_compose_document(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    compose = tmp_path / "compose.json"
-    compose.write_text(
-        json.dumps(
-            {
-                "services": {
-                    "main": {"image": "ghcr.io/hud-evals/harbor-main:latest"},
-                    "database": {"image": "postgres:16"},
-                }
-            }
-        ),
-        encoding="utf-8",
+    assert submitted(platform) == snapshot(
+        {
+            "trace_id": "11111111-1111-1111-1111-111111111111",
+            "job_id": "22222222-2222-2222-2222-222222222222",
+            "env": "sums",
+            "task": "add",
+            "slug": "sums-add",
+            "args": {"a": 1, "b": 2},
+            "agent": {
+                "type": "openai_compatible",
+                "config": {
+                    "timeout_seconds": 45.0,
+                    "model_name": "OpenAI Chat",
+                    "model": "test-model",
+                    "gateway": False,
+                    "auto_respond": False,
+                    "max_steps": 10,
+                    "tool_timeout_seconds": None,
+                    "system_prompt": None,
+                    "citations_enabled": False,
+                    "stop_on": [],
+                    "screenshot_encoding": {"mime_type": "image/png"},
+                    "checkpoint": None,
+                    "completion_kwargs": {},
+                },
+            },
+            "group_id": "g1",
+            "parent_trace_id": "33333333-3333-3333-3333-333333333333",
+            "runtime_config": {
+                "compose": {
+                    "document": {
+                        "services": {
+                            "main": {
+                                "image": "sums:latest",
+                                "environment": {},
+                                "expose": [],
+                                "ports": [],
+                                "volumes": [],
+                            }
+                        },
+                        "networks": {},
+                    },
+                    "service_access": True,
+                },
+                "resources": {"cpu": 2.0, "gpu": {"type": "L4"}},
+                "limits": {"startup_timeout_s": 120, "run_timeout_s": 900},
+            },
+            "verifier": {
+                "env": "judge",
+                "id": "verify",
+                "args": {"expected": 3},
+                "slug": "verify-5579a3e5",
+                "runtime_config": {"resources": None},
+            },
+        }
     )
-    platform = _FakePlatform([{"status": "completed", "reward": 0.5}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
+    polls = platform.requests("api", "GET", POLL)
+    assert [poll.params["id"] for poll in polls] == [str(uuid.UUID(TRACE_ID))] * 3
+    assert (run.reward, run.trace.status, run.trace_id, run.job_id, run.group_id, run.slug) == (
+        0.5,
+        "completed",
+        TRACE_ID,
+        JOB_ID,
+        "g1",
+        "sums-add",
     )
-
-    await HostedRuntime(poll_interval=0.0).run(
-        Task(
-            env="harbor",
-            id="solve",
-            runtime_config=RuntimeConfig(
-                compose=ComposeProject(document=compose, service_access=True)
-            ),
-        ),
-        _agent(),
-        job_id=uuid.uuid4().hex,
-        trace_id=uuid.uuid4().hex,
-    )
-
-    runtime_config = platform.posts[0][1]["runtime_config"]
-    assert runtime_config["compose"]["document"]["services"]["database"]["image"] == "postgres:16"
-    assert runtime_config["compose"]["service_access"] is True
-    assert str(compose) not in json.dumps(runtime_config)
-
-
-@pytest.mark.asyncio
-async def test_run_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform([{"status": "running"}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    hosted = HostedRuntime(poll_interval=0.0)
-    task = Task(env="sums", id="add", args={})
-
-    run = await hosted.run(
-        task,
-        _agent(),
-        job_id=uuid.uuid4().hex,
-        rollout_timeout=0.001,
-    )
-    await asyncio.sleep(0)
-
-    cancel_posts = [(p, b) for p, b in platform.posts if p == "/rollouts/cancel"]
-    assert len(cancel_posts) == 1
-    assert run.trace.status == "error"
-    assert run.trace.stop_reason == "timeout"
-
-
-@pytest.mark.asyncio
-async def test_omitted_rollout_timeout_allows_long_environment_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    task = Task(
-        env="sums",
-        id="add",
-        runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=18_000)),
-    )
-
-    run = await HostedRuntime(poll_interval=0.0).run(
-        task,
-        _agent(),
-        job_id=uuid.uuid4().hex,
-    )
-
-    assert run.trace.status == "completed"
-    assert platform.posts[0][0] == "/rollouts/submit"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("environment_timeout", [3_600, 18_000])
-async def test_explicit_rollout_timeout_rejects_environment_timeout_at_or_beyond_it(
-    monkeypatch: pytest.MonkeyPatch,
-    environment_timeout: int,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    task = Task(
-        env="sums",
-        id="add",
-        runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=environment_timeout)),
-    )
-
-    with pytest.raises(ValueError, match=r"actor runtime_config\.limits\.run_timeout_s"):
-        await HostedRuntime().run(
-            task,
-            _agent(),
-            job_id=uuid.uuid4().hex,
-            rollout_timeout=3_600,
-        )
-
-    assert platform.posts == []
-
-
-@pytest.mark.asyncio
-async def test_taskset_rollout_timeout_reaches_hosted_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    task = Task(
-        env="sums",
-        id="add",
-        runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=18_000)),
-    )
-
-    job = await Taskset("sums", [task]).run(
-        _agent(),
-        runtime=HostedRuntime(poll_interval=0.0),
-        rollout_timeout=18_600,
-    )
-
-    assert job.runs[0].trace.status == "completed"
-    assert platform.posts[0][0] == "/rollouts/submit"
-
-
-@pytest.mark.asyncio
-async def test_agent_timeout_must_fit_explicit_environment_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    task = Task(
-        env="sums",
-        id="add",
-        agent_config={"timeout_seconds": 5_000},
-        runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=3_600)),
-    )
-
-    with pytest.raises(ValueError, match=r"agent timeout \(5000s\).+run_timeout_s \(3600s\)"):
-        await HostedRuntime().run(task, _agent(), job_id=uuid.uuid4().hex)
-
-    assert platform.posts == []
-
-
-@pytest.mark.asyncio
-async def test_agent_timeout_must_fit_explicit_rollout_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    task = Task(
-        env="sums",
-        id="add",
-        agent_config={"timeout_seconds": 5_000},
-    )
-
-    with pytest.raises(ValueError, match=r"agent timeout \(5000s\).+rollout_timeout \(3600s\)"):
-        await HostedRuntime().run(
-            task,
-            _agent(),
-            job_id=uuid.uuid4().hex,
-            rollout_timeout=3_600,
-        )
-
-    assert platform.posts == []
-
-
-@pytest.mark.asyncio
-async def test_agent_timeout_must_fit_provider_runtime_timeout() -> None:
-    task = Task(
-        env="sums",
-        id="add",
-        agent_config={"timeout_seconds": 900},
-    )
-    runtime = ModalRuntime(runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=600)))
-
-    with pytest.raises(ValueError, match=r"agent timeout \(900s\).+run_timeout_s \(600s\)"):
-        await Taskset("sums", [task]).run(
-            _agent(),
-            runtime=runtime,
-            rollout_timeout=1_200,
-        )
-
-
-def test_task_runtime_timeout_overrides_provider_runtime_timeout() -> None:
-    runtime = ModalRuntime(runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=600)))
-    task = Task(
-        env="sums",
-        id="add",
-        runtime_config=RuntimeConfig(limits=RuntimeLimits(run_timeout_s=1_000)),
-    )
-
-    config = resolve_runtime_config(runtime, task)
-
-    assert config is not None
-    assert config.limits == RuntimeLimits(run_timeout_s=1_000)
-
-
-@pytest.mark.asyncio
-async def test_provider_startup_timeout_must_fit_rollout_timeout() -> None:
-    task = Task(
-        env="sums",
-        id="add",
-        agent_config={"timeout_seconds": 30},
-    )
-    runtime = ModalRuntime(
-        runtime_config=RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=600))
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=r"actor runtime_config\.limits\.startup_timeout_s \(600s\)",
-    ):
-        await Taskset("sums", [task]).run(
-            _agent(),
-            runtime=runtime,
-            rollout_timeout=600,
-        )
-
-
-@pytest.mark.asyncio
-async def test_rollout_timeout_validates_separable_verifier_limits() -> None:
-    task = Task(
-        env="actor",
-        id="solve",
-        verifier=Task(
-            env="judge",
-            id="verify",
-            runtime_config=RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=90)),
-        ),
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=r"verifier runtime_config\.limits\.startup_timeout_s \(90s\)",
-    ):
-        await Taskset("separable", [task]).run(
-            _agent(),
-            runtime=Runtime("tcp://127.0.0.1:1"),
-            rollout_timeout=90,
-        )
-
-
-@pytest.mark.asyncio
-async def test_submit_timeout_requests_platform_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    never = asyncio.Event()
-
-    class _StuckSubmitPlatform(_FakePlatform):
-        async def apost(self, path: str, *, json: Any | None = None) -> Any:
-            self.posts.append((path, json or {}))
-            if path == "/rollouts/submit":
-                await never.wait()
-            return {"status": "queued"}
-
-    platform = _StuckSubmitPlatform([])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    run = await HostedRuntime().run(
-        Task(env="sums", id="add"),
-        _agent(),
-        job_id=uuid.uuid4().hex,
-        rollout_timeout=0.001,
-    )
-    await asyncio.sleep(0)
-
-    assert run.trace.stop_reason == "timeout"
-    assert any(path == "/rollouts/cancel" for path, _ in platform.posts)
-
-
-@pytest.mark.asyncio
-async def test_run_folds_completed_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform([{"status": "completed", "reward": 1.0, "error": None}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    task = Task(env="sums", id="add", args={"a": 2, "b": 3})
-    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
-
-    assert run.reward == 1.0
-    assert run.trace.status == "completed"
-    assert not run.trace.is_error
-    assert run.runtime == f"hud://trace/{run.trace.trace_id}"
-    # The platform owns the trace lifecycle: no local client ever existed.
+    assert run.runtime == f"hud://trace/{TRACE_ID}"
     with pytest.raises(RuntimeError, match="no live client"):
-        _ = run.client
+        run.client
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("is_error", [False, True])
-async def test_run_preserves_structured_grade(
-    monkeypatch: pytest.MonkeyPatch, is_error: bool
-) -> None:
-    result = {
-        "score": 0.5,
-        "info": {"passed": 3},
-        "content": "verifier failed" if is_error else "partial credit",
-        "isError": is_error,
-        "subscores": [{"name": "accuracy", "weight": 1.0, "value": 0.5}],
-    }
-    platform = _FakePlatform(
-        [
+AGENTS: dict[str, tuple[Agent, dict[str, Any]]] = {
+    "a chat agent travels without its credentials": (
+        chat_agent(),
+        snapshot(
             {
-                "status": "error" if is_error else "completed",
-                "reward": 0.5,
-                "evaluation_result": result,
+                "type": "openai_compatible",
+                "config": {
+                    "timeout_seconds": None,
+                    "model_name": "OpenAI Chat",
+                    "model": "test-model",
+                    "gateway": False,
+                    "auto_respond": False,
+                    "max_steps": 10,
+                    "tool_timeout_seconds": None,
+                    "system_prompt": None,
+                    "citations_enabled": False,
+                    "stop_on": [],
+                    "screenshot_encoding": {"mime_type": "image/png"},
+                    "checkpoint": None,
+                    "completion_kwargs": {},
+                },
             }
-        ]
-    )
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    run = await HostedRuntime(poll_interval=0.0).run(
-        Task(env="sums", id="add"), _agent(), job_id=uuid.uuid4().hex
-    )
-    assert run.reward == 0.5
-    assert run.grade.raw == result
-    assert run.grade.info == {"passed": 3}
-    assert run.grade.is_error is is_error
-    assert run.grade.content == result["content"]
-    assert platform.polled == 1
+        ),
+    ),
+    "a CLI agent travels as its registered type": (
+        ClaudeCLIAgent(ClaudeCLIConfig(model="claude-sonnet-4-6", max_steps=23, gateway=True)),
+        snapshot(
+            {
+                "type": "claude_cli",
+                "config": {
+                    "timeout_seconds": None,
+                    "model_name": "Claude CLI",
+                    "model": "claude-sonnet-4-6",
+                    "gateway": True,
+                    "system_prompt": None,
+                    "permission_mode": "bypassPermissions",
+                    "max_steps": 23,
+                    "reasoning_effort": None,
+                    "screenshot_encoding": {"mime_type": "image/webp", "quality": 85},
+                    "allowed_tools": [
+                        "Read",
+                        "Write",
+                        "Edit",
+                        "Bash",
+                        "Glob",
+                        "Grep",
+                        "WebSearch",
+                        "WebFetch",
+                    ],
+                },
+            }
+        ),
+    ),
+}
 
 
-@pytest.mark.asyncio
-async def test_run_reports_malformed_grade_as_a_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform([{"status": "completed", "evaluation_result": {"score": "bad"}}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-    task = Task(env="sums", id="add")
-    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
-    assert run.trace.is_error
-    assert "numeric 'score'" in (run.trace.error or "")
-    assert run.slug == task.slug
-
-
-@pytest.mark.asyncio
-async def test_run_folds_error_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
-    platform = _FakePlatform([{"status": "error", "reward": None, "error": "env exploded"}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
-
-    task = Task(env="sums", id="add", args={})
-    run = await HostedRuntime(poll_interval=0.0).run(task, _agent(), job_id=uuid.uuid4().hex)
-
-    assert run.reward == 0.0
-    assert run.trace.is_error
-    assert "env exploded" in (run.trace.error or "")
-
-
-@pytest.mark.asyncio
-async def test_run_keeps_a_grade_from_an_errored_hosted_trace(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(("agent", "spec"), AGENTS.values(), ids=AGENTS.keys())
+async def test_a_registered_agent_travels_as_its_type_and_config(
+    agent: Agent, spec: dict[str, Any], platform: FakeServices
 ) -> None:
-    platform = _FakePlatform([{"status": "error", "reward": 0.75, "error": "agent timed out"}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
+    platform.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
 
-    task = Task(env="sums", id="add", args={})
-    run = await HostedRuntime(poll_interval=0.0).run(
-        task,
-        _agent(),
-        job_id=uuid.uuid4().hex,
-    )
-    job = Job(id="job", name="test", runs=[run])
+    await HostedRuntime(poll_interval=0).run(ROW, agent, job_id=JOB_ID, trace_id=TRACE_ID)
 
-    assert run.trace.is_error
-    assert not run.grade.is_error
-    assert run.evaluation == {"score": 0.75}
-    assert job.reward == 0.75
-    assert job.errors == []
+    assert submitted(platform)["agent"] == spec
 
 
-@pytest.mark.asyncio
-async def test_run_folds_ungraded_cancellation_as_an_error(
-    monkeypatch: pytest.MonkeyPatch,
+PARENTS = {
+    "a uuid ambient trace is the parent": ("3" * 32, str(uuid.UUID("3" * 32))),
+    "a non-uuid ambient trace is dropped": ("external-run-id", None),
+    "the rollout's own id is not its parent": (str(uuid.UUID(TRACE_ID)), None),
+    "the rollout's own id in braces is not its parent": (
+        "{" + str(uuid.UUID(TRACE_ID)) + "}",
+        None,
+    ),
+    "the rollout's own id as a urn is not its parent": (f"urn:uuid:{uuid.UUID(TRACE_ID)}", None),
+}
+
+
+@pytest.mark.parametrize(("ambient", "parent"), PARENTS.values(), ids=PARENTS.keys())
+async def test_a_hosted_rollout_names_its_parent_trace_only_when_it_is_another_trace(
+    ambient: str, parent: str | None, platform: FakeServices
 ) -> None:
-    platform = _FakePlatform([{"status": "cancelled", "reward": None, "error": None}])
-    monkeypatch.setattr(
-        "hud.eval.runtime.hosted.PlatformClient.from_settings", classmethod(lambda cls: platform)
-    )
+    platform.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
 
-    task = Task(env="sums", id="add", args={})
-    run = await HostedRuntime(poll_interval=0.0).run(
-        task,
-        _agent(),
-        job_id=uuid.uuid4().hex,
-    )
-    job = Job(id="job", name="test", runs=[run])
-
-    assert run.trace.status == "cancelled"
-    assert run.grade.is_error
-    assert job.reward == 0.0
-    assert job.errors == [run]
-
-
-@pytest.mark.asyncio
-async def test_scheduler_drives_provider_locally(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Provider placement goes through the local rollout atom, not HostedRuntime."""
-    import hud.eval.taskset as taskset_mod
-
-    seen: dict[str, Any] = {}
-
-    async def fake_rollout(task: Task, agent: Any, **kwargs: Any) -> Run:
-        seen.update(kwargs)
-        run = Run(None, task.id, {})
-        run.trace.status = "completed"
-        return run
-
-    monkeypatch.setattr(taskset_mod, "rollout", fake_rollout)
-
-    job = await Taskset("t", [Task(env="e", id="x")]).run(
-        _agent(), runtime=Runtime("tcp://127.0.0.1:1")
-    )
-
-    assert len(job.runs) == 1
-    assert isinstance(seen["runtime"], Runtime)
-    assert "job_id" in seen and "group_id" in seen
-
-
-@pytest.mark.asyncio
-async def test_scheduler_delegates_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A HostedRuntime placement is delegated to via HostedRuntime.run, not the local atom."""
-    seen: dict[str, Any] = {}
-
-    class _RecordingHostedRuntime(HostedRuntime):
-        async def run(self, task: Task, agent: Agent, **kwargs: Any) -> Run:
-            seen.update(kwargs)
-            run = Run(None, task.id, {})
-            run.trace.status = "completed"
-            return run
-
-    job = await Taskset("t", [Task(env="e", id="x")]).run(
-        _agent(), runtime=_RecordingHostedRuntime(), rollout_timeout=90.0
-    )
-
-    assert len(job.runs) == 1
-    assert "job_id" in seen and "group_id" in seen
-    assert seen["rollout_timeout"] == 90.0
-
-
-@pytest.mark.asyncio
-async def test_hud_runtime_drives_local_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-
-    async def fake_rollout(task: Task, agent: Any, **kwargs: Any) -> Run:
-        seen.update(kwargs)
-        run = Run(None, task.id, {})
-        run.trace.status = "completed"
-        return run
-
-    monkeypatch.setattr("hud.eval.runtime.hud.rollout", fake_rollout)
-
-    runtime = HUDRuntime()
-    job_id = uuid.uuid4().hex
-    trace_id = uuid.uuid4().hex
-    run = await runtime.run(
-        Task(env="e", id="x"),
-        _agent(),
-        job_id=job_id,
-        group_id="g1",
-        trace_id=trace_id,
-        rollout_timeout=90.0,
-    )
-
-    assert run.trace.status == "completed"
-    assert seen["runtime"] is runtime
-    assert seen["job_id"] == job_id
-    assert seen["group_id"] == "g1"
-    assert seen["trace_id"] == trace_id
-    assert seen["rollout_timeout"] == 90.0
-
-    with pytest.raises(ValueError, match="placement requirements"):
-        async with runtime(
-            Task(
-                env="e",
-                id="x",
-                runtime_config=RuntimeConfig(resources=RuntimeResources(gpu=RuntimeGPU())),
-            )
-        ):
-            pass
-
-
-@pytest.mark.asyncio
-async def test_runtime_session_create_payload_omits_trace_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    posts: list[dict[str, Any]] = []
-    session_id = str(uuid.uuid4())
-
-    class _RecordingAsyncClient:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        async def __aenter__(self) -> _RecordingAsyncClient:
-            return self
-
-        async def __aexit__(self, *args: Any) -> None:
-            return None
-
-        async def post(
-            self,
-            path: str,
-            *,
-            headers: dict[str, str],
-            json: dict[str, Any],
-        ) -> _FakeResponse:
-            posts.append({"path": path, "headers": headers, "json": json})
-            return _FakeResponse({"id": session_id})
-
-    monkeypatch.setattr("hud.eval.runtime.hud.httpx.AsyncClient", _RecordingAsyncClient)
-
-    created = await HUDRuntime()._create_runtime_session(
-        "https://mcp.hud.ai",
-        "sk-hud-test",
-        Task(env="e", id="x"),
-    )
-
-    assert created == session_id
-    assert posts == [
-        {
-            "path": "https://mcp.hud.ai/runtime/sessions",
-            "headers": {"Authorization": "Bearer sk-hud-test"},
-            "json": {"environment": "e"},
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_runtime_session_create_payload_includes_current_trace_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    posts: list[dict[str, Any]] = []
-    session_id = str(uuid.uuid4())
-    trace_id = uuid.uuid4().hex
-
-    class _RecordingAsyncClient:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        async def __aenter__(self) -> _RecordingAsyncClient:
-            return self
-
-        async def __aexit__(self, *args: Any) -> None:
-            return None
-
-        async def post(
-            self,
-            path: str,
-            *,
-            headers: dict[str, str],
-            json: dict[str, Any],
-        ) -> _FakeResponse:
-            posts.append({"path": path, "headers": headers, "json": json})
-            return _FakeResponse({"id": session_id})
-
-    monkeypatch.setattr("hud.eval.runtime.hud.httpx.AsyncClient", _RecordingAsyncClient)
-
-    with set_trace_context(trace_id):
-        created = await HUDRuntime()._create_runtime_session(
-            "https://mcp.hud.ai",
-            "sk-hud-test",
-            Task(env="e", id="x"),
+    with set_trace_context(ambient):
+        await HostedRuntime(poll_interval=0).run(
+            ROW, chat_agent(), job_id=JOB_ID, trace_id=TRACE_ID
         )
 
-    assert created == session_id
-    assert posts == [
+    assert submitted(platform).get("parent_trace_id") == parent
+
+
+TERMINAL = {
+    "a completed trace": (
+        {"status": "completed", "reward": 1.0, "error": None},
+        (1.0, "completed", None, {"score": 1.0}, False),
+    ),
+    "a completed trace with its evaluation": (
         {
-            "path": "https://mcp.hud.ai/runtime/sessions",
-            "headers": {"Authorization": "Bearer sk-hud-test"},
-            "json": {"environment": "e", "trace_id": str(uuid.UUID(trace_id))},
-        }
-    ]
+            "status": "completed",
+            "reward": 0.5,
+            "evaluation_result": {"score": 0.5, "content": "half", "info": {"k": 1}},
+        },
+        (0.5, "completed", None, {"score": 0.5, "content": "half", "info": {"k": 1}}, False),
+    ),
+    "an errored trace with an errored evaluation": (
+        {"status": "error", "evaluation_result": {"score": 0.0, "isError": True}},
+        (0.0, "error", None, {"score": 0.0, "isError": True}, True),
+    ),
+    "an errored trace without a reward": (
+        {"status": "error", "reward": None, "error": "env exploded"},
+        (0.0, "error", "env exploded", {}, True),
+    ),
+    "an errored trace that was still graded": (
+        {"status": "error", "reward": 0.75, "error": "agent exploded"},
+        (0.75, "error", "agent exploded", {"score": 0.75}, False),
+    ),
+    "a trace cancelled before grading": (
+        {"status": "cancelled", "reward": None},
+        (0.0, "cancelled", None, {}, True),
+    ),
+    "a trace whose evaluation has no numeric score": (
+        {"status": "completed", "evaluation_result": {"score": "high"}},
+        (
+            0.0,
+            "error",
+            "hud rpc error -32603: tasks.grade: result must include a numeric 'score'",
+            {},
+            True,
+        ),
+    ),
+}
 
 
-@pytest.mark.asyncio
-async def test_runtime_session_sets_runtime_connection_params(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(("state", "folded"), TERMINAL.values(), ids=TERMINAL.keys())
+async def test_a_terminal_trace_folds_into_the_run_and_its_job(
+    state: dict[str, Any], folded: tuple[Any, ...], platform: FakeServices
 ) -> None:
-    session_id = str(uuid.uuid4())
-    deleted: list[tuple[str, str, str]] = []
+    platform.route("api", "GET", POLL, json=state)
 
-    class _Socket:
-        def getsockname(self) -> tuple[str, int]:
-            return ("127.0.0.1", 4321)
+    job = await Taskset("hosted", [ROW]).run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
-    class _Server:
-        sockets: ClassVar[list[_Socket]] = [_Socket()]
-
-        def __init__(self) -> None:
-            self.closed = False
-            self.waited = False
-
-        def close(self) -> None:
-            self.closed = True
-
-        async def wait_closed(self) -> None:
-            self.waited = True
-
-    server = _Server()
-
-    async def fake_start_server(*args: Any, **kwargs: Any) -> _Server:
-        return server
-
-    async def fake_create_runtime_session(
-        self: HUDRuntime,
-        runtime_url: str,
-        api_key: str,
-        task: Task,
-    ) -> str:
-        assert runtime_url == "https://mcp.hud.ai"
-        assert api_key == "sk-hud-test"
-        assert task.env == "e"
-        return session_id
-
-    async def fake_delete_runtime_session(
-        self: HUDRuntime,
-        runtime_url: str,
-        api_key: str,
-        session: str,
-    ) -> None:
-        deleted.append((runtime_url, api_key, session))
-
-    monkeypatch.setattr(settings, "api_key", "sk-hud-test")
-    monkeypatch.setattr("hud.eval.runtime.hud.asyncio.start_server", fake_start_server)
-    monkeypatch.setattr(HUDRuntime, "_create_runtime_session", fake_create_runtime_session)
-    monkeypatch.setattr(HUDRuntime, "_delete_runtime_session", fake_delete_runtime_session)
-
-    with pytest.warns(DeprecationWarning, match="rollout_timeout"):
-        cloud = HUDRuntime(runtime_url="https://mcp.hud.ai/", run_timeout=30.0)
-    async with cloud._runtime_session(Task(env="e", id="x")) as runtime:
-        assert runtime.url == "tcp://127.0.0.1:4321"
-        assert runtime.params == {
-            "session_id": session_id,
-            "gateway_url": "https://mcp.hud.ai",
-            "ready_timeout": 300.0,
-        }
-
-    assert deleted == [("https://mcp.hud.ai", "sk-hud-test", session_id)]
-    assert server.closed
-    assert server.waited
+    (run,) = job.runs
+    assert (run.reward, run.trace.status, run.trace.error, run.grade.raw, run in job.errors) == (
+        folded
+    )
+    assert run.slug == ROW.slug
+    body = submitted(platform)
+    assert (body["job_id"], body["group_id"]) == (str(uuid.UUID(job.id)), run.group_id)
 
 
-@pytest.mark.asyncio
-async def test_splice_websocket_propagates_relay_errors() -> None:
-    class _Reader:
-        def __init__(self) -> None:
-            self.reads = [b"payload", b""]
+STALLS = {
+    "a trace that never finishes": (
+        Reply(json={"status": "queued"}),
+        Reply(json={"status": "running"}),
+    ),
+    "a submission that never returns": (Reply(json={"status": "queued"}, delay=5), None),
+}
 
-        async def read(self, _limit: int) -> bytes:
-            return self.reads.pop(0)
 
-    class _Writer:
-        def write(self, _data: bytes) -> None:
-            pass
+@pytest.mark.parametrize(("submit", "poll"), STALLS.values(), ids=STALLS.keys())
+async def test_a_hosted_rollout_past_its_deadline_is_cancelled_remotely(
+    submit: Reply, poll: Reply | None, platform: FakeServices
+) -> None:
+    platform.route("api", "POST", SUBMIT, submit)
+    if poll is not None:
+        platform.route("api", "GET", POLL, poll)
 
-        async def drain(self) -> None:
-            pass
+    job = await ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0), rollout_timeout=0.2)
+    await eventually(lambda: platform.requests("api", "POST", CANCEL) != [])
 
-    class _WebSocket:
-        async def send(self, _data: bytes) -> None:
-            raise RuntimeError("relay failed")
+    (run,) = job.runs
+    assert (run.trace.status, run.trace.stop_reason, run.trace.error) == (
+        "error",
+        "timeout",
+        IsStr(regex=r"hosted rollout [0-9a-f]{32} did not finish within 0\.2s"),
+    )
+    assert platform.bodies("api", "POST", CANCEL) == [{"trace_id": str(uuid.UUID(run.trace_id))}]
 
-        def __aiter__(self) -> _WebSocket:
-            return self
 
-        async def __anext__(self) -> bytes:
-            await asyncio.sleep(60.0)
-            raise StopAsyncIteration
+async def test_the_deprecated_constructor_timeout_is_the_default_deadline(
+    platform: FakeServices,
+) -> None:
+    platform.route("api", "GET", POLL, json={"status": "running"})
+    with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
+        runtime = HostedRuntime(poll_interval=0, run_timeout=0.2)
 
-    with pytest.raises(RuntimeError, match="relay failed"):
-        await _splice_websocket(
-            cast("asyncio.StreamReader", _Reader()),
-            cast("asyncio.StreamWriter", _Writer()),
-            _WebSocket(),
-        )
+    job = await ROW.run(chat_agent(), runtime=runtime)
+
+    assert job.runs[0].trace.stop_reason == "timeout"
+    await eventually(lambda: platform.requests("api", "POST", CANCEL) != [])
+
+
+async def test_cancelling_a_hosted_rollout_cancels_it_remotely(platform: FakeServices) -> None:
+    platform.route("api", "GET", POLL, json={"status": "running"})
+    pending = asyncio.create_task(ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0)))
+    await eventually(lambda: platform.requests("api", "GET", POLL) != [])
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    await eventually(lambda: platform.requests("api", "POST", CANCEL) != [])
+
+    trace_id = submitted(platform)["trace_id"]
+    assert platform.bodies("api", "POST", CANCEL) == [{"trace_id": trace_id}]
+
+
+REFUSALS: dict[str, tuple[Agent, dict[str, str | None], str]] = {
+    "an agent the platform cannot run": (
+        ScriptedAgent("3"),
+        {"HUD_API_KEY": "k"},
+        "hosted execution supports the registered agent types (claude, claude_cli, codex_cli, "
+        "openai, gemini, openai_compatible); got ScriptedAgent",
+    ),
+    "no API key": (chat_agent(), {"HUD_API_KEY": None}, "HUD_API_KEY is required"),
+}
+
+
+@pytest.mark.parametrize(("agent", "variables", "error"), REFUSALS.values(), ids=REFUSALS.keys())
+async def test_a_hosted_rollout_that_cannot_be_submitted_is_a_failed_run(
+    agent: Agent,
+    variables: dict[str, str | None],
+    error: str,
+    services: FakeServices,
+    hud_env: HudEnv,
+) -> None:
+    hud_env.set(**variables)
+
+    job = await ROW.run(agent, runtime=HostedRuntime(poll_interval=0))
+
+    (run,) = job.runs
+    assert (run.trace.status, run.trace.error, run in job.errors) == ("error", error, True)
+    assert services.requests() == []
+
+
+async def test_a_rejected_submission_is_a_failed_run(platform: FakeServices) -> None:
+    platform.route("api", "POST", SUBMIT, json={"detail": "unknown env 'sums'"}, status=422)
+
+    job = await ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
+
+    (run,) = job.runs
+    assert run.trace.status == "error"
+    assert "unknown env 'sums'" in str(run.trace.error)
+    assert platform.requests("api", "GET", POLL) == []
