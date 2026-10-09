@@ -99,16 +99,17 @@ def result_tools() -> FastMCP:
 ALL_TOOLS = ("note", "nothing", "broken", "picture", "report", "figures")
 
 
-def conversation(requests: list[ModelRequest]) -> Any:
-    """Everything after the prompt: the last request's history, or every Responses input."""
+def tool_results(requests: list[ModelRequest]) -> Any:
+    """What the agent sent back to the model after the prompt, without the model's own turns."""
     last = requests[-1]
     if last.protocol == "responses":
-        return [item for request in requests[1:] for item in request.body["input"]]
+        entries = [item for request in requests[1:] for item in request.body["input"]]
+        return [item for item in entries if item.get("type") != "function_call"]
     if last.protocol == "gemini":
-        return last.body["contents"][1:]
+        return [content for content in last.body["contents"][1:] if content["role"] != "model"]
     messages = last.body["messages"]
     start = 2 if messages[0]["role"] == "system" else 1
-    return messages[start:]
+    return [message for message in messages[start:] if message["role"] != "assistant"]
 
 
 @dataclass(frozen=True)
@@ -126,10 +127,6 @@ ROWS = {
         results=snapshot(
             [
                 {
-                    "role": "assistant",
-                    "content": [{"id": "toolu_1", "input": {}, "name": "note", "type": "tool_use"}],
-                },
-                {
                     "role": "user",
                     "content": [
                         {
@@ -138,12 +135,6 @@ ROWS = {
                             "content": [{"type": "text", "text": "the note"}],
                             "is_error": False,
                         }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_3", "input": {}, "name": "nothing", "type": "tool_use"}
                     ],
                 },
                 {
@@ -158,12 +149,6 @@ ROWS = {
                     ],
                 },
                 {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_5", "input": {}, "name": "broken", "type": "tool_use"}
-                    ],
-                },
-                {
                     "role": "user",
                     "content": [
                         {
@@ -172,12 +157,6 @@ ROWS = {
                             "content": [{"type": "text", "text": "Error: broken tool"}],
                             "is_error": True,
                         }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_7", "input": {}, "name": "picture", "type": "tool_use"}
                     ],
                 },
                 {
@@ -201,12 +180,6 @@ ROWS = {
                     ],
                 },
                 {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_9", "input": {}, "name": "report", "type": "tool_use"}
-                    ],
-                },
-                {
                     "role": "user",
                     "content": [
                         {
@@ -224,12 +197,6 @@ ROWS = {
                             ],
                             "is_error": False,
                         }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_11", "input": {}, "name": "figures", "type": "tool_use"}
                     ],
                 },
                 {
@@ -252,10 +219,6 @@ ROWS = {
         tools=("note", "report", "broken"),
         results=snapshot(
             [
-                {
-                    "role": "assistant",
-                    "content": [{"id": "toolu_1", "input": {}, "name": "note", "type": "tool_use"}],
-                },
                 {
                     "role": "user",
                     "content": [
@@ -280,12 +243,6 @@ ROWS = {
                             "title": "note",
                             "citations": {"enabled": True},
                         }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_3", "input": {}, "name": "report", "type": "tool_use"}
                     ],
                 },
                 {
@@ -320,12 +277,6 @@ ROWS = {
                             },
                             "citations": {"enabled": True},
                         }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"id": "toolu_5", "input": {}, "name": "broken", "type": "tool_use"}
                     ],
                 },
                 {
@@ -406,7 +357,6 @@ ROWS = {
         tools=ALL_TOOLS,
         results=snapshot(
             [
-                {"parts": [{"functionCall": {"args": {}, "name": "note"}}], "role": "model"},
                 {
                     "parts": [
                         {
@@ -418,14 +368,12 @@ ROWS = {
                     ],
                     "role": "user",
                 },
-                {"parts": [{"functionCall": {"args": {}, "name": "nothing"}}], "role": "model"},
                 {
                     "parts": [
                         {"functionResponse": {"name": "nothing", "response": {"success": True}}}
                     ],
                     "role": "user",
                 },
-                {"parts": [{"functionCall": {"args": {}, "name": "broken"}}], "role": "model"},
                 {
                     "parts": [
                         {
@@ -437,7 +385,6 @@ ROWS = {
                     ],
                     "role": "user",
                 },
-                {"parts": [{"functionCall": {"args": {}, "name": "picture"}}], "role": "model"},
                 {
                     "parts": [
                         {
@@ -457,14 +404,12 @@ ROWS = {
                     ],
                     "role": "user",
                 },
-                {"parts": [{"functionCall": {"args": {}, "name": "report"}}], "role": "model"},
                 {
                     "parts": [
                         {"functionResponse": {"name": "report", "response": {"success": True}}}
                     ],
                     "role": "user",
                 },
-                {"parts": [{"functionCall": {"args": {}, "name": "figures"}}], "role": "model"},
                 {
                     "parts": [
                         {
@@ -484,49 +429,9 @@ ROWS = {
         tools=ALL_TOOLS,
         results=snapshot(
             [
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_1",
-                            "type": "function",
-                            "function": {"name": "note", "arguments": "{}"},
-                        }
-                    ],
-                },
                 {"role": "tool", "tool_call_id": "call_1", "content": "the note"},
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_3",
-                            "type": "function",
-                            "function": {"name": "nothing", "arguments": "{}"},
-                        }
-                    ],
-                },
                 {"role": "tool", "tool_call_id": "call_3", "content": "Tool executed successfully"},
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_5",
-                            "type": "function",
-                            "function": {"name": "broken", "arguments": "{}"},
-                        }
-                    ],
-                },
                 {"role": "tool", "tool_call_id": "call_5", "content": "broken tool"},
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_7",
-                            "type": "function",
-                            "function": {"name": "picture", "arguments": "{}"},
-                        }
-                    ],
-                },
                 {"role": "tool", "tool_call_id": "call_7", "content": "Tool executed successfully"},
                 {
                     "role": "user",
@@ -535,27 +440,7 @@ ROWS = {
                         {"type": "image_url", "image_url": {"url": "<image/png 20x10>"}},
                     ],
                 },
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_9",
-                            "type": "function",
-                            "function": {"name": "report", "arguments": "{}"},
-                        }
-                    ],
-                },
                 {"role": "tool", "tool_call_id": "call_9", "content": "Tool executed successfully"},
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_11",
-                            "type": "function",
-                            "function": {"name": "figures", "arguments": "{}"},
-                        }
-                    ],
-                },
                 {"role": "tool", "tool_call_id": "call_11", "content": '{"total":3}'},
             ]
         ),
@@ -577,7 +462,7 @@ async def test_each_kind_of_tool_result_reaches_the_model_in_its_provider_shape(
         "completed" if row.error is None else "error",
         row.error,
     )
-    assert wire(conversation(models.requests())) == row.results
+    assert wire(tool_results(models.requests())) == row.results
 
 
 async def test_gemini_bounds_a_long_tool_output_to_its_head_and_tail(
