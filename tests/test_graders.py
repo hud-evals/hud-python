@@ -1,16 +1,17 @@
-"""Tests for hud.graders: comparison helpers, combine, graders."""
+"""Graders as task authors use them: text helpers, and graded templates in real rollouts."""
 
 from __future__ import annotations
 
-import json
-import os
+import time
 import warnings
-from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from dirty_equals import IsStr
+from inline_snapshot import snapshot
 
+from hud import Environment
+from hud.eval import LocalRuntime, Task, rollout
 from hud.graders import (
     BashGrader,
     EvaluationResult,
@@ -28,621 +29,788 @@ from hud.graders import (
     normalize,
     numeric_match,
 )
+from tests.harness import ScriptedAgent, Turn, say
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from hud.eval import Run
+    from tests.harness import HudEnv, ModelRequest, Models
+
+# ─── text helpers ────────────────────────────────────────────────────────────
 
 
-class TestResultShapes:
-    def test_subscore_score_aliases_value(self) -> None:
-        s = SubScore(name="acc", value=0.75, weight=1.0)
-        assert s.score == 0.75
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Hello World", "hello world"),
+        ("answer: 42!", "answer 42"),
+        ("The answer is a test", "answer is test"),
+        ("  lots   of    space  ", "lots of space"),
+        (42, "42"),
+    ],
+)
+def test_normalize_lowercases_and_strips_punctuation_articles_and_spaces(
+    text: Any, expected: str
+) -> None:
+    assert normalize(text) == expected
 
-    def test_evaluation_result_from_float(self) -> None:
-        r = EvaluationResult.from_float(0.25)
-        assert r.reward == 0.25
-        assert r.done is True
 
-    def test_evaluation_result_warns_when_subscores_disagree_with_reward(self) -> None:
-        with pytest.warns(UserWarning):
-            EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [
+        pytest.param(lambda: exact_match("The Answer!", "answer"), 1.0, id="exact-normalized"),
+        pytest.param(lambda: exact_match("Germany", "france"), 0.0, id="exact-differs"),
+        pytest.param(lambda: exact_match("Paris.", "Paris"), 1.0, id="exact-punctuation"),
+        pytest.param(
+            lambda: exact_match("The capital is Paris", "capital is Paris"), 1.0, id="exact-article"
+        ),
+        pytest.param(
+            lambda: exact_match("Paris", "Paris", normalize_text=False), 1.0, id="exact-raw-same"
+        ),
+        pytest.param(
+            lambda: exact_match("The Paris!", "Paris", normalize_text=False),
+            0.0,
+            id="exact-raw-differs",
+        ),
+        pytest.param(lambda: exact_match(42, "42"), 1.0, id="exact-non-string"),
+        pytest.param(lambda: exact_match("", ""), 1.0, id="exact-empty"),
+        pytest.param(lambda: contains("The capital is Paris", "paris"), 1.0, id="contains"),
+        pytest.param(lambda: contains("The capital is Paris", "berlin"), 0.0, id="contains-not"),
+        pytest.param(
+            lambda: contains("Paris", "paris", case_sensitive=True), 0.0, id="contains-case"
+        ),
+        pytest.param(
+            lambda: contains("Paris", "Paris", case_sensitive=True), 1.0, id="contains-case-same"
+        ),
+        pytest.param(
+            lambda: contains_any("I like Toyota cars", ["toyota", "honda"]), 1.0, id="any-one"
+        ),
+        pytest.param(
+            lambda: contains_any("I like BMW cars", ["toyota", "honda"]), 0.0, id="any-none"
+        ),
+        pytest.param(lambda: contains_any("anything", []), 0.0, id="any-empty"),
+        pytest.param(
+            lambda: contains_any("Toyota", ["toyota"], case_sensitive=True), 0.0, id="any-case"
+        ),
+        pytest.param(
+            lambda: contains_all("Toyota and Honda", ["toyota", "honda"]), 1.0, id="all-present"
+        ),
+        pytest.param(
+            lambda: contains_all("Toyota is Japanese", ["toyota", "honda"]), 0.0, id="all-missing"
+        ),
+        pytest.param(lambda: contains_all("anything", []), 1.0, id="all-empty"),
+        pytest.param(lambda: numeric_match("The answer is 42", 42), 1.0, id="number-int"),
+        pytest.param(lambda: numeric_match("Result: 3.14", 3.14), 1.0, id="number-float"),
+        pytest.param(lambda: numeric_match("no numbers", 42), 0.0, id="number-none"),
+        pytest.param(lambda: numeric_match("The answer is 41", 42), 0.0, id="number-wrong"),
+        pytest.param(
+            lambda: numeric_match("It is 41.5", 42, tolerance=1.0), 1.0, id="number-tolerance"
+        ),
+        pytest.param(
+            lambda: numeric_match("It is 40", 42, tolerance=1.0), 0.0, id="number-out-of-tolerance"
+        ),
+        pytest.param(lambda: numeric_match("It is -5 degrees", -5), 1.0, id="number-negative"),
+        pytest.param(lambda: numeric_match("3 items and 5 left", 3), 1.0, id="number-first"),
+        pytest.param(lambda: f1_score("Paris", "Paris"), 1.0, id="f1-exact"),
+        pytest.param(lambda: f1_score("The capital is Paris, France", "Paris"), 0.4, id="f1-part"),
+        pytest.param(lambda: f1_score("Berlin", "Paris"), 0.0, id="f1-none"),
+        pytest.param(lambda: f1_score("", "Paris"), 0.0, id="f1-empty-prediction"),
+        pytest.param(lambda: f1_score("Paris", ""), 0.0, id="f1-empty-reference"),
+        pytest.param(lambda: f1_score("New York City", "New York City"), 1.0, id="f1-words"),
+        pytest.param(lambda: f1_score("I think 42 degrees", "42 degrees"), 2 / 3, id="f1-superset"),
+        pytest.param(lambda: f1_score("42", "42 degrees celsius"), 0.5, id="f1-subset"),
+        pytest.param(lambda: f1_score("The PARIS!", "paris"), 1.0, id="f1-normalized"),
+    ],
+)
+def test_text_comparisons_score_between_zero_and_one(
+    score: Callable[[], float], expected: float
+) -> None:
+    assert score() == pytest.approx(expected)
 
-    def test_subscore_summary_omits_recursive_info(self) -> None:
-        node = SubScore(
-            name="any",
-            value=1.0,
-            children=[SubScore(name="tests", value=1.0, info={"exit_code": 0})],
+
+# ─── graded templates ────────────────────────────────────────────────────────
+
+ANSWER = "Paris is the capital."
+
+
+class Measured(Grader):
+    """A custom grader whose ``kind`` picks which result shape it returns."""
+
+    name = "measured"
+
+    @classmethod
+    async def compute_score(cls, kind: str = "float", **kwargs: Any) -> Any:
+        del kwargs
+        if kind == "tuple":
+            return 0.75, {"source": "tuple"}
+        if kind == "subscore":
+            return SubScore(name="ignored", value=1.0, info={"reason": "did it"})
+        return 0.75
+
+
+def _graders_env(root: Path) -> Environment:
+    env = Environment("graders")
+
+    def task(grade: Callable[[str], Any]) -> None:
+        @env.template(id=grade.__name__)
+        async def template():
+            answer = yield "Name the capital of France."
+            yield await grade(answer)
+
+    async def bash_pair(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            BashGrader.grade(weight=0.5, command="echo pass"),
+            BashGrader.grade(weight=0.5, command="echo oops >&2; false"),
         )
-        assert node.model_dump(mode="json")["children"][0]["info"] == {"exit_code": 0}
 
-        dumped = node.to_summary()
-        assert dumped["children"][0]["name"] == "tests"
-        assert "info" not in dumped
-        assert "info" not in dumped["children"][0]
-
-    def test_evaluation_result_serializes_recursive_info(self) -> None:
-        result = EvaluationResult(
-            reward=1.0,
+    async def any_tree(answer: str) -> EvaluationResult:
+        either = combine_any(
+            weight=0.5,
             subscores=[
-                SubScore(
-                    name="judge",
-                    value=1.0,
-                    children=[
-                        SubScore(
-                            name="Mentions Paris",
-                            value=1.0,
-                            info={"reason": "says Paris"},
-                        )
-                    ],
-                    info={"model": "judge-model"},
-                )
+                await BashGrader.grade(weight=0.5, command="false"),
+                await BashGrader.grade(weight=0.5, command="true"),
             ],
         )
-        dumped = result.model_dump(mode="json")
-        assert dumped["subscores"][0]["info"] == {"model": "judge-model"}
-        assert dumped["subscores"][0]["children"][0]["info"] == {"reason": "says Paris"}
-
-    def test_subscore_accepts_metadata_alias(self) -> None:
-        subscore = SubScore.model_validate(
-            {"name": "legacy", "value": 1.0, "metadata": {"source": "legacy"}}
+        both = combine_all(
+            weight=0.25,
+            subscores=[SubScore(name="lint", value=1.0), SubScore(name="types", value=0.0)],
+            name="checks",
         )
-        assert subscore.info == {"source": "legacy"}
-        assert subscore.metadata == subscore.info
-        assert subscore.model_dump(mode="json")["info"] == {"source": "legacy"}
-        subscore.metadata = {"source": "updated"}
-        assert subscore.info == {"source": "updated"}
-
-
-class TestNormalize:
-    def test_lowercases(self) -> None:
-        assert normalize("Hello World") == "hello world"
-
-    def test_strips_punctuation(self) -> None:
-        assert normalize("answer: 42!") == "answer 42"
-
-    def test_strips_articles(self) -> None:
-        assert normalize("The answer is a test") == "answer is test"
-
-    def test_collapses_whitespace(self) -> None:
-        assert normalize("  lots   of    space  ") == "lots of space"
-
-    def test_non_string_input(self) -> None:
-        assert normalize(42) == "42"
-
-
-class TestExactMatch:
-    def test_match_normalized(self) -> None:
-        assert exact_match("The Answer!", "answer") == 1.0
-
-    def test_no_match(self) -> None:
-        assert exact_match("Germany", "france") == 0.0
-
-    def test_punctuation_stripped(self) -> None:
-        assert exact_match("Paris.", "Paris") == 1.0
-
-    def test_articles_stripped(self) -> None:
-        assert exact_match("The capital is Paris", "capital is Paris") == 1.0
-
-    def test_no_normalize(self) -> None:
-        assert exact_match("Paris", "Paris", normalize_text=False) == 1.0
-        assert exact_match("The Paris!", "Paris", normalize_text=False) == 0.0
-
-    def test_non_string_answer(self) -> None:
-        assert exact_match(42, "42") == 1.0
-
-    def test_empty_strings(self) -> None:
-        assert exact_match("", "") == 1.0
-
-    def test_different_content(self) -> None:
-        assert exact_match("hello", "world") == 0.0
-
-
-class TestContains:
-    def test_contains_substring(self) -> None:
-        assert contains("The capital of France is Paris", "paris") == 1.0
-
-    def test_not_contains(self) -> None:
-        assert contains("The capital of France is Paris", "berlin") == 0.0
-
-    def test_case_sensitive(self) -> None:
-        assert contains("Paris", "paris", case_sensitive=True) == 0.0
-        assert contains("Paris", "Paris", case_sensitive=True) == 1.0
-
-
-class TestContainsAny:
-    def test_matches_one(self) -> None:
-        assert contains_any("I like Toyota cars", ["toyota", "honda", "nissan"]) == 1.0
-
-    def test_matches_none(self) -> None:
-        assert contains_any("I like BMW cars", ["toyota", "honda", "nissan"]) == 0.0
-
-    def test_empty_list(self) -> None:
-        assert contains_any("anything", []) == 0.0
-
-    def test_case_sensitive(self) -> None:
-        assert contains_any("Toyota", ["toyota"], case_sensitive=True) == 0.0
-
-
-class TestContainsAll:
-    def test_all_present(self) -> None:
-        assert contains_all("Toyota and Honda are Japanese", ["toyota", "honda"]) == 1.0
-
-    def test_some_missing(self) -> None:
-        assert contains_all("Toyota is Japanese", ["toyota", "honda"]) == 0.0
-
-    def test_empty_list(self) -> None:
-        assert contains_all("anything", []) == 1.0
-
-
-class TestNumericMatch:
-    def test_exact_integer(self) -> None:
-        assert numeric_match("The answer is 42", 42) == 1.0
-
-    def test_exact_float(self) -> None:
-        assert numeric_match("Result: 3.14", 3.14) == 1.0
-
-    def test_no_number(self) -> None:
-        assert numeric_match("no numbers", 42) == 0.0
-
-    def test_wrong_number(self) -> None:
-        assert numeric_match("The answer is 41", 42) == 0.0
-
-    def test_tolerance(self) -> None:
-        assert numeric_match("The answer is 41.5", 42, tolerance=1.0) == 1.0
-        assert numeric_match("The answer is 40", 42, tolerance=1.0) == 0.0
-
-    def test_negative_number(self) -> None:
-        assert numeric_match("Temperature is -5 degrees", -5) == 1.0
-
-    def test_extracts_first_number(self) -> None:
-        assert numeric_match("There are 3 items and 5 left", 3) == 1.0
-
-
-class TestF1Score:
-    def test_exact_match(self) -> None:
-        assert f1_score("Paris", "Paris") == pytest.approx(1.0)
-
-    def test_partial_overlap(self) -> None:
-        # pred=["capital", "is", "paris", "france"], ref=["paris"]
-        # common=1, precision=1/4, recall=1/1, f1=2*(0.25*1)/(0.25+1)=0.4
-        assert f1_score("The capital is Paris, France", "Paris") == pytest.approx(0.4)
-
-    def test_no_overlap(self) -> None:
-        assert f1_score("Berlin", "Paris") == pytest.approx(0.0)
-
-    def test_empty_prediction(self) -> None:
-        assert f1_score("", "Paris") == pytest.approx(0.0)
-
-    def test_empty_reference(self) -> None:
-        assert f1_score("Paris", "") == pytest.approx(0.0)
-
-    def test_multi_word_match(self) -> None:
-        assert f1_score("New York City", "New York City") == pytest.approx(1.0)
-
-    def test_superset_answer(self) -> None:
-        # pred has all ref tokens plus extras -> recall=1.0, precision<1.0
-        result = f1_score("I believe the answer is 42 degrees", "42 degrees")
-        assert 0.0 < result < 1.0
-
-    def test_subset_answer(self) -> None:
-        # pred has fewer tokens than ref -> precision=1.0, recall<1.0
-        result = f1_score("42", "42 degrees celsius")
-        assert 0.0 < result < 1.0
-
-    def test_normalization_applied(self) -> None:
-        assert f1_score("The PARIS!", "paris") == pytest.approx(1.0)
-
-
-class TestCombineParallelism:
-    async def test_combine_sync_subscores(self) -> None:
-        result = await combine(
-            SubScore(name="a", value=1.0, weight=0.5),
-            SubScore(name="b", value=0.0, weight=0.5),
+        return await combine(
+            either, both, SubScore(name="format", value=exact_match(answer, ANSWER), weight=0.25)
         )
-        assert result.reward == pytest.approx(0.5)
 
-    async def test_combine_with_awaitables(self) -> None:
-        import asyncio
-
-        order: list[str] = []
-
-        async def slow_check_a() -> SubScore:
-            order.append("a_start")
-            await asyncio.sleep(0.05)
-            order.append("a_end")
-            return SubScore(name="a", value=1.0, weight=0.5)
-
-        async def slow_check_b() -> SubScore:
-            order.append("b_start")
-            await asyncio.sleep(0.05)
-            order.append("b_end")
-            return SubScore(name="b", value=0.0, weight=0.5)
-
-        result = await combine(slow_check_a(), slow_check_b())
-        assert result.reward == pytest.approx(0.5)
-        assert order.index("b_start") < order.index("a_end")
-
-    async def test_combine_mixed(self) -> None:
-        import asyncio
-
-        async def async_score() -> SubScore:
-            await asyncio.sleep(0.01)
-            return SubScore(name="async", value=1.0, weight=0.5)
-
-        result = await combine(
-            SubScore(name="sync", value=0.0, weight=0.5),
-            async_score(),
-        )
-        assert result.reward == pytest.approx(0.5)
-
-
-#: ``BashGrader`` shells out to ``/bin/bash``; skip its tests where it's absent (Windows).
-_HAS_BASH = os.path.exists("/bin/bash")
-
-
-class TestCombine:
-    async def test_combine_returns_evaluation_result(self) -> None:
-        result = await combine(SubScore(name="alpha", value=1.0, weight=1.0))
-        assert isinstance(result, EvaluationResult)
-        assert result.reward == 1.0
-        assert result.done is True
-
-    async def test_combine_normalizes_positive_weights(self) -> None:
-        result = await combine(
-            SubScore(name="alpha", value=1.0, weight=2.0),
-            SubScore(name="beta", value=0.0, weight=1.0),
-        )
-        assert result.reward == pytest.approx(2.0 / 3.0)
-        assert result.subscores is not None
-        by_name = {subscore.name: subscore for subscore in result.subscores}
-        assert by_name["alpha"].weight == pytest.approx(2.0 / 3.0)
-        assert by_name["beta"].weight == pytest.approx(1.0 / 3.0)
-
-    async def test_combine_preserves_negative_penalties(self) -> None:
-        result = await combine(
-            SubScore(name="correct", value=1.0, weight=1.0),
+    async def weighted(answer: str) -> EvaluationResult:
+        return await combine(
+            SubScore(name="mentions", value=contains(answer, "paris"), weight=0.6),
+            SubScore(name="numbers", value=numeric_match(answer, 7), weight=0.4),
             SubScore(name="penalty", value=1.0, weight=-0.2),
         )
-        assert result.reward == pytest.approx(0.8)
-        assert result.subscores is not None
-        by_name = {subscore.name: subscore for subscore in result.subscores}
-        assert by_name["correct"].weight == pytest.approx(1.0)
-        assert by_name["penalty"].weight == pytest.approx(-0.2)
 
-    async def test_combine_duplicate_names_are_deduped(self) -> None:
-        result = await combine(
-            SubScore(name="same", value=1.0, weight=0.5),
-            SubScore(name="same", value=0.0, weight=0.5),
+    async def penalty_only_fails(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            SubScore(name="correct", value=0.0, weight=1.0),
+            SubScore(name="penalty", value=1.0, weight=-0.2),
         )
-        assert result.subscores is not None
-        assert [subscore.name for subscore in result.subscores] == ["same-1", "same-2"]
 
-    async def test_combine_duplicate_names_avoid_existing_suffix_collisions(self) -> None:
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            result = await combine(
-                SubScore(name="x-1", value=1.0, weight=0.3),
-                SubScore(name="x", value=1.0, weight=0.4),
-                SubScore(name="x", value=0.0, weight=0.6),
-            )
-
-        assert result.subscores is not None
-        assert [subscore.name for subscore in result.subscores] == ["x-1", "x-2", "x-3"]
-        assert set(result.info) == set()
-        assert not [
-            warning for warning in caught if "Duplicate subscore names" in str(warning.message)
-        ]
-
-    async def test_combine_propagates_info(self) -> None:
-        info = {"stdout": "ok"}
-        result = await combine(SubScore(name="grader", value=1.0, weight=1.0, info=info))
-        assert result.info == {}
-        assert result.subscores is not None
-        assert result.subscores[0].info == info
-        assert result.model_dump(mode="json")["subscores"][0]["info"] == info
-
-    async def test_combine_keeps_rubric_children_on_subscores(self) -> None:
-        verdicts = [
-            SubScore(name="Mentions Paris", value=1.0, info={"reason": "says Paris"}),
-            SubScore(name="Names the river", value=0.0, info={"reason": "no river"}),
-        ]
-        result = await combine(
-            SubScore(name="judge", value=0.5, weight=0.5, children=verdicts),
-            SubScore(name="tests", value=0.0, weight=0.5),
+    async def suffixed(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            SubScore(name="x-1", value=1.0, weight=0.3),
+            SubScore(name="x", value=1.0, weight=0.3),
+            SubScore(name="x", value=0.0, weight=0.4),
         )
-        assert result.subscores is not None
-        by_name = {subscore.name: subscore for subscore in result.subscores}
-        assert by_name["judge"].children == verdicts
-        assert by_name["tests"].children is None
 
-    async def test_combine_preserves_combinator_children(self) -> None:
-        result = await combine(
-            combine_any(
-                weight=0.5,
-                subscores=[
-                    SubScore(name="pytest", value=1.0),
-                    SubScore(name="make", value=0.0),
-                ],
+    async def custom(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            Measured.grade(weight=0.25, kind="float", payload=object()),
+            Measured.grade(weight=0.25, kind="tuple"),
+            Measured.grade(weight=0.25, kind="subscore", name="renamed"),
+            SubScore.model_validate(
+                {"name": "legacy", "value": 1.0, "weight": 0.25, "metadata": {"from": "metadata"}}
             ),
-            SubScore(name="format", value=1.0, weight=0.5),
         )
-        assert result.subscores is not None
-        by_name = {subscore.name: subscore for subscore in result.subscores}
-        any_node = by_name["any"]
-        assert any_node.children is not None
-        assert [child.name for child in any_node.children] == ["pytest", "make"]
-        assert by_name["format"].children is None
 
-    async def test_combine_preserves_negative_reward_without_validator_warning(self) -> None:
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            result = await combine(
-                SubScore(name="correct", value=0.0, weight=1.0),
-                SubScore(name="penalty", value=1.0, weight=-0.2),
-            )
-
-        assert result.reward == pytest.approx(-0.2)
-        assert not [
-            warning for warning in caught if "Subscores don't match reward" in str(warning.message)
-        ]
-
-
-class TestGrader:
-    async def test_grade_wraps_float_and_stores_parameters(self) -> None:
-        class DummyGrader(Grader):
-            name = "DummyGrader"
-
-            @classmethod
-            async def compute_score(cls, **kwargs: object) -> Any:
-                return 0.75
-
-        subscore = await DummyGrader.grade(weight=0.4, marker="ok", payload=object())
-        assert isinstance(subscore, SubScore)
-        assert subscore.name == "DummyGrader"
-        assert subscore.value == pytest.approx(0.75)
-        assert subscore.weight == pytest.approx(0.4)
-        assert subscore.info is not None
-        assert subscore.info["_parameters"]["marker"] == "ok"
-        assert subscore.info["_parameters"]["payload"] == "<object: not serializable>"
-
-    async def test_grade_coerces_legacy_tuple_metadata(self) -> None:
-        class TupleGrader(Grader):
-            name = "tuple"
-
-            @classmethod
-            async def compute_score(cls, **kwargs: object) -> Any:
-                return 0.75, {"source": "released-contract"}
-
-        subscore = await TupleGrader.grade(weight=0.4, marker="ok")
-        assert subscore.name == "tuple"
-        assert subscore.value == pytest.approx(0.75)
-        assert subscore.weight == pytest.approx(0.4)
-        assert subscore.info is not None
-        assert subscore.info["source"] == "released-contract"
-        assert subscore.info["_parameters"]["marker"] == "ok"
-
-    async def test_grade_uses_grader_name_without_override(self) -> None:
-        class RubricGrader(Grader):
-            name = "rubric"
-
-            @classmethod
-            async def compute_score(cls, **kwargs: object) -> SubScore:
-                return SubScore(name="specific-rubric", value=1.0)
-
-        subscore = await RubricGrader.grade(weight=0.7)
-        assert subscore.name == "rubric"
-        assert subscore.weight == pytest.approx(0.7)
-
-    async def test_grade_stamps_name_and_weight_on_returned_subscore(self) -> None:
-        class RubricGrader(Grader):
-            name = "rubric"
-
-            @classmethod
-            async def compute_score(cls, **kwargs: object) -> SubScore:
-                return SubScore(
-                    name="ignored",
-                    value=1.0,
-                    info={"reason": "did the thing", "extra": "kept"},
-                )
-
-        subscore = await RubricGrader.grade(weight=0.7, name="my-rubric")
-        assert subscore.name == "my-rubric"
-        assert subscore.weight == pytest.approx(0.7)
-        assert subscore.info is not None
-        assert subscore.info["reason"] == "did the thing"
-        assert subscore.info["extra"] == "kept"
-        assert "_parameters" in subscore.info
-
-
-class TestBooleanCombinators:
-    def test_combine_any_picks_max(self) -> None:
-        combined = combine_any(
-            weight=1.0,
-            subscores=[
-                SubScore(name="a", value=1.0, weight=0.5),
-                SubScore(name="b", value=0.0, weight=0.5),
-            ],
+    async def concurrent(answer: str) -> EvaluationResult:
+        del answer
+        # Each command waits for the file the other writes, so they pass only in parallel.
+        wait = "for _ in $(seq 50); do [ -e {mine} ] && exit 0; sleep 0.1; done; exit 1"
+        return await combine(
+            BashGrader.grade(
+                weight=0.5, command=f"touch {root}/a; " + wait.format(mine=f"{root}/b")
+            ),
+            BashGrader.grade(
+                weight=0.5, command=f"touch {root}/b; " + wait.format(mine=f"{root}/a")
+            ),
         )
-        assert combined.name == "any"
-        assert combined.value == 1.0
 
-    def test_combine_any_keeps_inputs_as_children(self) -> None:
-        rubric = SubScore(
-            name="judge",
-            value=1.0,
-            weight=0.5,
-            children=[SubScore(name="c1", value=1.0, info={"reason": "met"})],
+    async def in_cwd(answer: str) -> EvaluationResult:
+        del answer
+        (root / "marker.txt").write_text("here")
+        return await combine(
+            BashGrader.grade(weight=1.0, command="cat marker.txt", cwd=str(root)),
         )
-        combined = combine_any(
-            weight=1.0,
-            subscores=[rubric, SubScore(name="tests", value=0.0, weight=0.5)],
+
+    async def detached_child(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            BashGrader.grade(weight=1.0, command="echo started; sleep 30 & exit 0"),
         )
-        assert combined.children is not None
-        assert combined.children[0].children == rubric.children
-        assert combined.children[1].children is None
 
-    def test_combine_any_dedupes_child_names(self) -> None:
-        combined = combine_any(
-            weight=1.0,
-            subscores=[
-                SubScore(name="BashGrader", value=1.0, weight=0.5, info={"exit_code": 0}),
-                SubScore(name="BashGrader", value=0.0, weight=0.5, info={"exit_code": 1}),
-            ],
+    async def overrun(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            BashGrader.grade(
+                weight=1.0, command="echo progress; echo stuck >&2; sleep 30", timeout_seconds=1
+            ),
         )
-        assert combined.children is not None
-        assert [child.name for child in combined.children] == ["BashGrader-1", "BashGrader-2"]
-        assert [child.info for child in combined.children] == [
-            {"exit_code": 0},
-            {"exit_code": 1},
-        ]
-        assert combined.info is None
 
-    def test_combine_all_picks_min(self) -> None:
-        combined = combine_all(
-            weight=1.0,
-            subscores=[
-                SubScore(name="a", value=1.0, weight=0.5),
-                SubScore(name="b", value=0.0, weight=0.5),
-            ],
-            name="tests_all",
+    async def chatty(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            BashGrader.grade(weight=1.0, command="yes hud | head -c 500000"),
         )
-        assert combined.name == "tests_all"
-        assert combined.value == 0.0
 
-    def test_nested_combinators_build_a_tree(self) -> None:
-        combined = combine_all(
-            weight=1.0,
-            subscores=[
-                combine_any(
-                    weight=1.0,
-                    subscores=[
-                        SubScore(name="pytest", value=0.0),
-                        SubScore(name="make", value=1.0),
-                    ],
-                ),
-                SubScore(name="lint", value=1.0),
-            ],
-        )
-        assert combined.value == 1.0
-        assert combined.children is not None
-        inner = combined.children[0]
-        assert inner.children is not None
-        assert [child.name for child in inner.children] == ["pytest", "make"]
-
-
-class _FakeGatewayClient:
-    """Judges MET when the criterion text (inside the user prompt) contains 'met:'."""
-
-    def __init__(self) -> None:
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    async def _create(self, **kwargs: Any) -> Any:
-        user_prompt: str = kwargs["messages"][1]["content"]
-        status = "MET" if "met:" in user_prompt else "UNMET"
-        content = json.dumps({"criterion_status": status, "explanation": "because"})
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
-
-
-class TestLLMJudgeGrader:
-    async def test_compute_score_returns_rubric_node(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
-        )
-        subscore = await LLMJudgeGrader.compute_score(
-            answer="some answer",
-            criteria=["met: mentions Paris", ("names the river", 3.0)],
-        )
-        assert subscore.value == pytest.approx(0.25)
-        assert subscore.children is not None
-        assert [(c.name, c.value, c.weight, c.info) for c in subscore.children] == [
-            ("met: mentions Paris", 1.0, 1.0, {"reason": "because"}),
-            ("names the river", 0.0, 3.0, {"reason": "because"}),
-        ]
-
-    async def test_compute_score_applies_negative_criterion_penalty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
-        )
-        subscore = await LLMJudgeGrader.compute_score(
-            answer="some answer",
-            criteria=[("met: positive", 1.0), ("met: error", -0.5)],
-        )
-        assert subscore.value == pytest.approx(0.5)
-
-    async def test_grade_puts_verdicts_on_children(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
-        )
-        subscore = await LLMJudgeGrader.grade(
-            weight=1.0, answer="some answer", criteria=["met: correct"]
-        )
-        assert subscore.children == [
-            SubScore(
-                name="met: correct",
-                value=1.0,
+    async def judged(answer: str) -> EvaluationResult:
+        return await combine(
+            LLMJudgeGrader.grade(
                 weight=1.0,
-                info={"reason": "because"},
+                answer=answer,
+                criteria=["names Paris", ("cites a source", 2.0), ("invents facts", -1.0)],
+                question="Name the capital of France.",
             )
+        )
+
+    async def judged_negative_only(answer: str) -> EvaluationResult:
+        return await combine(
+            LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[("invents facts", -1.0)])
+        )
+
+    async def judged_without_criteria(answer: str) -> EvaluationResult:
+        return await combine(LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[]))
+
+    for grade in (
+        bash_pair,
+        any_tree,
+        weighted,
+        penalty_only_fails,
+        suffixed,
+        custom,
+        concurrent,
+        in_cwd,
+        detached_child,
+        overrun,
+        chatty,
+        judged,
+        judged_negative_only,
+        judged_without_criteria,
+    ):
+        task(grade)
+    return env
+
+
+async def _grade(template: str, tmp_path: Path, answer: str = ANSWER) -> Run:
+    root = tmp_path / "grader"
+    root.mkdir(exist_ok=True)
+    task = Task(env="graders", id=template)
+    return await rollout(task, ScriptedAgent(answer), runtime=LocalRuntime(_graders_env(root)))
+
+
+def _evaluated(run: Run) -> dict[str, Any]:
+    """The evaluation the platform receives: the evaluate step's full grade."""
+    step = run.trace.steps[-1]
+    assert step.task_call is not None
+    assert step.task_call.phase == "evaluate"
+    result = step.task_call.result
+    assert isinstance(result, dict)
+    return result
+
+
+@pytest.mark.parametrize(
+    ("template", "reward", "summary"),
+    [
+        pytest.param(
+            "bash_pair",
+            0.5,
+            snapshot(
+                [
+                    {"name": "BashGrader-1", "weight": 0.5, "value": 1.0, "children": None},
+                    {"name": "BashGrader-2", "weight": 0.5, "value": 0.0, "children": None},
+                ]
+            ),
+            id="bash-pair",
+        ),
+        pytest.param(
+            "any_tree",
+            0.75,
+            snapshot(
+                [
+                    {
+                        "name": "any",
+                        "weight": 0.5,
+                        "value": 1.0,
+                        "children": [
+                            {"name": "BashGrader-1", "weight": 0.5, "value": 0.0, "children": None},
+                            {"name": "BashGrader-2", "weight": 0.5, "value": 1.0, "children": None},
+                        ],
+                    },
+                    {
+                        "name": "checks",
+                        "weight": 0.25,
+                        "value": 0.0,
+                        "children": [
+                            {"name": "lint", "weight": 1.0, "value": 1.0, "children": None},
+                            {"name": "types", "weight": 1.0, "value": 0.0, "children": None},
+                        ],
+                    },
+                    {"name": "format", "weight": 0.25, "value": 1.0, "children": None},
+                ]
+            ),
+            id="any-all-tree",
+        ),
+        pytest.param(
+            "weighted",
+            0.4,
+            snapshot(
+                [
+                    {"name": "mentions", "weight": 0.6, "value": 1.0, "children": None},
+                    {"name": "numbers", "weight": 0.4, "value": 0.0, "children": None},
+                    {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
+                ]
+            ),
+            id="penalty",
+        ),
+        pytest.param(
+            "penalty_only_fails",
+            -0.2,
+            snapshot(
+                [
+                    {"name": "correct", "weight": 1.0, "value": 0.0, "children": None},
+                    {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
+                ]
+            ),
+            id="negative-reward",
+        ),
+        pytest.param(
+            "suffixed",
+            0.6,
+            snapshot(
+                [
+                    {"name": "x-1", "weight": 0.3, "value": 1.0, "children": None},
+                    {"name": "x-2", "weight": 0.3, "value": 1.0, "children": None},
+                    {"name": "x-3", "weight": 0.4, "value": 0.0, "children": None},
+                ]
+            ),
+            id="name-collisions",
+        ),
+        pytest.param(
+            "custom",
+            0.875,
+            snapshot(
+                [
+                    {"name": "measured-1", "weight": 0.25, "value": 0.75, "children": None},
+                    {"name": "measured-2", "weight": 0.25, "value": 0.75, "children": None},
+                    {"name": "renamed", "weight": 0.25, "value": 1.0, "children": None},
+                    {"name": "legacy", "weight": 0.25, "value": 1.0, "children": None},
+                ]
+            ),
+            id="custom-grader-shapes",
+        ),
+    ],
+)
+async def test_a_combined_grade_reaches_the_run_as_a_named_weighted_tree(
+    tmp_path: Path, template: str, reward: float, summary: list[dict[str, Any]]
+) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        run = await _grade(template, tmp_path)
+
+    assert run.reward == pytest.approx(reward)
+    assert run.evaluation["subscores"] == summary
+
+
+async def test_the_evaluate_step_keeps_each_graders_details(tmp_path: Path) -> None:
+    run = await _grade("bash_pair", tmp_path)
+
+    assert [subscore["info"] for subscore in _evaluated(run)["subscores"]] == snapshot(
+        [
+            {
+                "exit_code": 0,
+                "stdout": "pass\n",
+                "stderr": "",
+                "_parameters": {"command": "echo pass"},
+            },
+            {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "oops\n",
+                "_parameters": {"command": "echo oops >&2; false"},
+            },
         ]
-        assert subscore.info is not None
-        assert subscore.info["model"] == "claude-haiku-4-5"
+    )
 
 
-@pytest.mark.skipif(not _HAS_BASH, reason="/bin/bash not available (e.g. Windows)")
-class TestBashGrader:
-    async def test_compute_score_requires_command(self) -> None:
-        with pytest.raises(ValueError, match="requires command"):
-            await BashGrader.compute_score()
+async def test_custom_graders_record_their_parameters_and_info(tmp_path: Path) -> None:
+    run = await _grade("custom", tmp_path)
 
-    async def test_compute_score_for_passing_command(self) -> None:
-        subscore = await BashGrader.compute_score(command="echo hello")
-        assert subscore.value == 1.0
-        assert subscore.info is not None
-        assert subscore.info["exit_code"] == 0
-        assert "hello" in subscore.info["stdout"]
+    assert {s["name"]: s["info"] for s in _evaluated(run)["subscores"]} == snapshot(
+        {
+            "measured-1": {
+                "_parameters": {"kind": "float", "payload": "<object: not serializable>"}
+            },
+            "measured-2": {"source": "tuple", "_parameters": {"kind": "tuple"}},
+            "renamed": {"reason": "did it", "_parameters": {"kind": "subscore"}},
+            "legacy": {"from": "metadata"},
+        }
+    )
 
-    async def test_compute_score_for_failing_command(self) -> None:
-        subscore = await BashGrader.compute_score(command="echo oops >&2 && false")
-        assert subscore.value == 0.0
-        assert subscore.info is not None
-        assert subscore.info["exit_code"] != 0
-        assert "oops" in subscore.info["stderr"]
 
-    async def test_compute_score_timeout(self) -> None:
-        subscore = await BashGrader.compute_score(command="sleep 2", timeout_seconds=1)
-        assert subscore.value == 0.0
-        assert subscore.info is not None
-        assert subscore.info["timed_out"] is True
-        assert subscore.info["timeout"] == 1
+@pytest.mark.parametrize(
+    ("template", "value", "info"),
+    [
+        pytest.param(
+            "in_cwd",
+            1.0,
+            {"exit_code": 0, "stdout": "here", "stderr": ""},
+            id="cwd",
+        ),
+        pytest.param(
+            "detached_child",
+            1.0,
+            {"exit_code": 0, "stdout": "started\n", "stderr": ""},
+            id="background-child-does-not-hold-the-grade",
+        ),
+        pytest.param(
+            "overrun",
+            0.0,
+            {
+                "exit_code": None,
+                "stdout": "progress\n",
+                "stderr": "stuck\n",
+                "timed_out": True,
+                "timeout": 1,
+            },
+            id="overrun-keeps-its-output",
+        ),
+    ],
+)
+async def test_bash_grader_scores_by_exit_code_and_reports_what_ran(
+    tmp_path: Path, template: str, value: float, info: dict[str, Any]
+) -> None:
+    started = time.monotonic()
 
-    async def test_compute_score_timeout_keeps_partial_output(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from hud.graders import bash as bash_mod
-        from hud.utils.process import ProcessResult
+    run = await _grade(template, tmp_path)
 
-        process = SimpleNamespace(
-            complete=AsyncMock(
-                return_value=ProcessResult(None, b"progress\n", b"still working\n", timed_out=True)
-            )
+    (subscore,) = _evaluated(run)["subscores"]
+    assert run.reward == value
+    assert {key: subscore["info"][key] for key in info} == info
+    assert time.monotonic() - started < 15
+
+
+async def test_bash_grader_reads_a_large_output_without_blocking(tmp_path: Path) -> None:
+    run = await _grade("chatty", tmp_path)
+
+    (subscore,) = _evaluated(run)["subscores"]
+    assert run.reward == 1.0
+    assert len(subscore["info"]["stdout"]) == 500_000
+
+
+async def test_combined_graders_run_concurrently(tmp_path: Path) -> None:
+    run = await _grade("concurrent", tmp_path)
+
+    assert run.reward == 1.0
+
+
+# ─── authoring mistakes ──────────────────────────────────────────────────────
+
+
+NOT_SUBSCORES: list[Any] = [0.5]
+
+
+def _mistakes_env() -> Environment:
+    env = Environment("mistakes")
+    cases: dict[str, Callable[[], Any]] = {
+        "empty_combine": lambda: combine(),
+        "no_positive_weight": lambda: combine(SubScore(name="p", value=1.0, weight=-1.0)),
+        "not_a_subscore": lambda: combine(*NOT_SUBSCORES),
+        "missing_command": lambda: combine(BashGrader.grade(weight=1.0)),
+        "empty_any": lambda: _awaitable(lambda: combine_any(weight=1.0, subscores=[])),
+        "empty_all": lambda: _awaitable(lambda: combine_all(weight=1.0, subscores=[])),
+    }
+    for name, grade in cases.items():
+
+        def register(grade: Callable[[], Any] = grade, name: str = name) -> None:
+            @env.template(id=name)
+            async def template():
+                yield "go"
+                yield await grade()
+
+        register()
+    return env
+
+
+async def _awaitable(build: Callable[[], SubScore]) -> EvaluationResult:
+    return await combine(build())
+
+
+@pytest.mark.parametrize(
+    ("template", "error"),
+    [
+        ("empty_combine", "subscores must not be empty"),
+        ("no_positive_weight", "subscores must include at least one positive weight"),
+        ("not_a_subscore", "Expected SubScore or Awaitable[SubScore], got float"),
+        ("missing_command", "BashGrader requires command"),
+        ("empty_any", "subscores must not be empty"),
+        ("empty_all", "subscores must not be empty"),
+    ],
+)
+async def test_an_authoring_mistake_fails_the_grade_with_its_message(
+    template: str, error: str
+) -> None:
+    task = Task(env="mistakes", id=template)
+
+    run = await rollout(task, ScriptedAgent("x"), runtime=LocalRuntime(_mistakes_env()))
+
+    assert run.trace.status == "error"
+    assert run.trace.error == IsStr(regex=rf"\[grading\] .*: {_escaped(error)}")
+
+
+def _escaped(text: str) -> str:
+    return "".join(f"\\{char}" if char in "[]()." else char for char in text)
+
+
+def _warning_env() -> Environment:
+    env = Environment("warnings")
+
+    @env.template()
+    async def misweighted():
+        yield "go"
+        yield await combine(
+            SubScore(name="a", value=1.0, weight=0.5),
+            SubScore(name="b", value=1.0, weight=0.3),
+            SubScore(name="c", value=0.0, weight=0.3),
         )
-        monkeypatch.setattr(bash_mod, "create_process_group_exec", AsyncMock(return_value=process))
 
-        subscore = await BashGrader.compute_score(command="slow", timeout_seconds=1)
+    @env.template()
+    async def mismatched():
+        yield "go"
+        yield EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
 
-        assert subscore.info is not None
-        assert subscore.info["stdout"] == "progress\n"
-        assert subscore.info["stderr"] == "still working\n"
+    return env
 
-    async def test_grade_and_combine_compose(self) -> None:
-        result = await combine(
-            BashGrader.grade(weight=0.5, command="true"),
-            BashGrader.grade(weight=0.5, command="false"),
-        )
-        assert result.reward == pytest.approx(0.5)
-        assert result.subscores is not None
-        by_name = {subscore.name: subscore for subscore in result.subscores}
-        assert by_name["BashGrader-1"].info is not None
-        assert by_name["BashGrader-1"].info["exit_code"] == 0
-        assert by_name["BashGrader-2"].info is not None
-        assert by_name["BashGrader-2"].info["exit_code"] != 0
-        assert result.info == {}
+
+@pytest.mark.parametrize(
+    ("template", "warning", "reward"),
+    [
+        ("misweighted", "grader weights sum to 1.1000, not 1.0", 0.8 / 1.1),
+        ("mismatched", "Subscores don't match reward", 1.0),
+    ],
+)
+async def test_inconsistent_weights_warn_the_author(
+    template: str, warning: str, reward: float
+) -> None:
+    task = Task(env="warnings", id=template)
+
+    with pytest.warns(UserWarning, match=warning):
+        run = await rollout(task, ScriptedAgent("x"), runtime=LocalRuntime(_warning_env()))
+
+    assert run.reward == pytest.approx(reward)
+
+
+# ─── the LLM judge ───────────────────────────────────────────────────────────
+
+VERDICTS = {
+    "json": '{"criterion_status": "MET", "explanation": "plainly stated"}',
+    "fenced": '```json\n{"criterion_status": "UNMET", "explanation": "no source"}\n```',
+    "prose": "Verdict: UNMET, although the word MET appears here.",
+    "prose-met": "The criterion is MET.",
+}
+
+
+def _judge(verdicts: dict[str, str]) -> Callable[[ModelRequest], Turn]:
+    def reply(request: ModelRequest) -> Turn:
+        prompt = request.body["messages"][1]["content"]
+        criterion = prompt.split("<criterion>\n", 1)[1].split("\n", 1)[0]
+        return say(VERDICTS[verdicts[criterion]])
+
+    return reply
+
+
+@pytest.mark.parametrize(
+    ("template", "verdicts", "reward", "children"),
+    [
+        pytest.param(
+            "judged",
+            {"names Paris": "json", "cites a source": "fenced", "invents facts": "prose"},
+            1 / 3,
+            snapshot(
+                [
+                    {
+                        "name": "names Paris",
+                        "weight": 1.0,
+                        "value": 1.0,
+                        "children": None,
+                        "info": {"reason": "plainly stated"},
+                    },
+                    {
+                        "name": "cites a source",
+                        "weight": 2.0,
+                        "value": 0.0,
+                        "children": None,
+                        "info": {"reason": "no source"},
+                    },
+                    {
+                        "name": "invents facts",
+                        "weight": -1.0,
+                        "value": 0.0,
+                        "children": None,
+                        "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
+                    },
+                ]
+            ),
+            id="json-fenced-prose",
+        ),
+        pytest.param(
+            "judged_negative_only",
+            {"invents facts": "prose-met"},
+            0.0,
+            snapshot(
+                [
+                    {
+                        "name": "invents facts",
+                        "weight": -1.0,
+                        "value": 1.0,
+                        "children": None,
+                        "info": {"reason": "The criterion is MET."},
+                    }
+                ]
+            ),
+            id="negative-only-met",
+        ),
+        pytest.param(
+            "judged_negative_only",
+            {"invents facts": "prose"},
+            1.0,
+            snapshot(
+                [
+                    {
+                        "name": "invents facts",
+                        "weight": -1.0,
+                        "value": 0.0,
+                        "children": None,
+                        "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
+                    }
+                ]
+            ),
+            id="negative-only-unmet",
+        ),
+    ],
+)
+async def test_the_judge_scores_each_criterion_by_weight(
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+    template: str,
+    verdicts: dict[str, str],
+    reward: float,
+    children: list[dict[str, Any]],
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.respond(_judge(verdicts))
+
+    run = await _grade(template, tmp_path)
+
+    (judge,) = _evaluated(run)["subscores"]
+    assert run.reward == pytest.approx(reward)
+    assert judge["info"]["model"] == "claude-haiku-4-5"
+    assert judge["children"] == children
+
+
+async def test_the_judge_sends_one_request_per_criterion(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.respond(
+        _judge({"names Paris": "json", "cites a source": "json", "invents facts": "prose"})
+    )
+
+    await _grade("judged", tmp_path)
+
+    requests = sorted(models.requests(), key=lambda request: request.body["messages"][1]["content"])
+    assert [request.headers["authorization"] for request in requests] == ["Bearer k"] * 3
+    assert {request.model for request in requests} == {"claude-haiku-4-5"}
+    assert {request.body["messages"][0]["content"][:40] for request in requests} == {
+        "You evaluate a response against a single"
+    }
+    assert [request.body["messages"][1]["content"] for request in requests] == snapshot(
+        [
+            """\
+<criterion_type>
+negative
+</criterion_type>
+
+<criterion>
+invents facts
+</criterion>
+
+<query>
+Name the capital of France.
+</query>
+
+<response>
+Paris is the capital.
+</response>\
+""",
+            """\
+<criterion_type>
+positive
+</criterion_type>
+
+<criterion>
+cites a source
+</criterion>
+
+<query>
+Name the capital of France.
+</query>
+
+<response>
+Paris is the capital.
+</response>\
+""",
+            """\
+<criterion_type>
+positive
+</criterion_type>
+
+<criterion>
+names Paris
+</criterion>
+
+<query>
+Name the capital of France.
+</query>
+
+<response>
+Paris is the capital.
+</response>\
+""",
+        ]
+    )
+
+
+async def test_the_judge_without_a_question_omits_the_query(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.respond(_judge({"invents facts": "prose"}))
+
+    await _grade("judged_negative_only", tmp_path)
+
+    (request,) = models.requests()
+    assert "<query>" not in request.body["messages"][1]["content"]
+
+
+async def test_the_judge_without_criteria_scores_zero_without_calling_a_model(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+
+    run = await _grade("judged_without_criteria", tmp_path)
+
+    (judge,) = _evaluated(run)["subscores"]
+    assert run.reward == 0.0
+    assert judge["info"]["error"] == "no criteria provided"
+    assert models.requests() == []
+
+
+async def test_the_judge_without_a_hud_api_key_fails_the_grade(tmp_path: Path) -> None:
+    run = await _grade("judged", tmp_path)
+
+    assert run.trace.status == "error"
+    assert run.trace.error == IsStr(regex=r".*HUD_API_KEY is required for HUD gateway clients")
