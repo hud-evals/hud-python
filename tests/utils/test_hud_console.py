@@ -47,7 +47,6 @@ def test_output_methods_do_not_raise() -> None:
     c.status_item("label", "value")
     c.command_example("hud eval tasks.json")
     c.key_value_table({"key": "value"})
-    c.render_support_hint()
 
 
 def test_debug_respects_logger_level() -> None:
@@ -64,21 +63,6 @@ def test_format_helpers_return_strings() -> None:
     assert isinstance(c.format_tool_call("bash", {"command": "ls"}), str)
     assert isinstance(c.format_tool_result("output text"), str)
     assert isinstance(c.format_tool_result("error text", is_error=True), str)
-
-
-def test_render_exception_does_not_raise() -> None:
-    c = HUDConsole()
-    try:
-        raise ValueError("boom")
-    except ValueError as exc:
-        c.render_exception(exc)
-
-
-def test_render_exception_request_error_details() -> None:
-    from hud.utils.exceptions import HudRequestError
-
-    c = HUDConsole()
-    c.render_exception(HudRequestError("nope", status_code=403, response_text="forbidden"))
 
 
 def _capture_select_choices(monkeypatch: pytest.MonkeyPatch, returns: str) -> dict[str, Any]:

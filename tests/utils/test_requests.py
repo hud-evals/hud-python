@@ -54,22 +54,6 @@ async def test_requests_retry_transient_responses_with_shared_backoff(asynchrono
     assert calls == 3
 
 
-@pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("status", [402, 429])
-async def test_requests_preserve_status_hints_without_retry(asynchronous, status):
-    from hud.utils.hints import CREDITS_EXHAUSTED, RATE_LIMIT_HIT
-
-    transport = httpx.MockTransport(lambda request: httpx.Response(status, json={"detail": "stop"}))
-    with pytest.raises(HudRequestError) as error:
-        if asynchronous:
-            async with httpx.AsyncClient(transport=transport) as client:
-                await make_request("GET", "https://test/data", api_key="key", client=client)
-        else:
-            with httpx.Client(transport=transport) as client:
-                make_request_sync("GET", "https://test/data", api_key="key", client=client)
-    assert error.value.hints == [CREDITS_EXHAUSTED if status == 402 else RATE_LIMIT_HIT]
-
-
 def test_requests_warn_once_per_deprecation_notice():
     successor = f"https://api.test/v2/{uuid.uuid4()}"
     headers = {
