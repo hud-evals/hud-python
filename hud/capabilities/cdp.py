@@ -113,9 +113,12 @@ class CDPClient(CapabilityClient):
         self._pending[msg_id] = future
         await self._ws.send(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
         try:
-            return await future
+            reply = await future
         finally:
             self._pending.pop(msg_id, None)
+        if "error" in reply:
+            raise CDPError(method, reply["error"])
+        return reply.get("result", {})
 
     async def _read_loop(self) -> None:
         try:
@@ -125,10 +128,7 @@ class CDPClient(CapabilityClient):
                 future = self._pending.get(msg_id) if msg_id is not None else None
                 if future is None or future.done():
                     continue  # protocol event (no waiter) — ignored for now
-                if "error" in msg:
-                    future.set_exception(CDPError(str(msg.get("method", "")), msg["error"]))
-                else:
-                    future.set_result(msg.get("result", {}))
+                future.set_result(msg)
         except (ConnectionClosed, OSError) as exc:
             LOGGER.debug("CDP read loop ended: %s", exc)
         finally:
