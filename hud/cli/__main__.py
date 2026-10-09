@@ -119,6 +119,19 @@ def root_command(
         raise typer.Exit(2)
 
 
+def underlying_error(error: BaseException) -> BaseException | None:
+    """The exception a command failed with, beneath the exits that report it.
+
+    Typer turns every failure into ``sys.exit(code)``; the original exception
+    survives only on the chain: ``raise Exit(code) from exc`` sets the cause, and
+    exiting inside an ``except`` block sets the context.
+    """
+    current: BaseException | None = error
+    while isinstance(current, (SystemExit, typer.Exit)):
+        current = current.__cause__ or current.__context__
+    return current
+
+
 @contextlib.contextmanager
 def recorded_invocation(argv: list[str], cli: typer.Typer) -> Iterator[None]:
     """Record one CLI invocation around the wrapped block, then re-raise as-is."""
@@ -128,17 +141,12 @@ def recorded_invocation(argv: list[str], cli: typer.Typer) -> Iterator[None]:
     try:
         yield
     except BaseException as error:
-        if isinstance(error, KeyboardInterrupt):
-            exit_code, error_class = 130, "KeyboardInterrupt"
+        if isinstance(error, SystemExit):
+            exit_code = error.code if isinstance(error.code, int) else 1
         else:
-            exit_code = getattr(error, "exit_code", None)
-            if exit_code is None and isinstance(error, SystemExit):
-                exit_code = error.code if isinstance(error.code, int) else 1
-            if isinstance(exit_code, int):
-                cause = error.__cause__
-                error_class = type(cause).__name__ if cause is not None else None
-            else:
-                exit_code, error_class = 1, type(error).__name__
+            exit_code = 130 if isinstance(error, KeyboardInterrupt) else 1
+        underlying = underlying_error(error)
+        error_class = type(underlying).__name__ if underlying is not None else None
         raise
     finally:
         with contextlib.suppress(Exception):
