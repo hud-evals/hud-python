@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import signal
+import sys
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -354,7 +355,7 @@ def event(
         "duration_ms": IsInt(ge=0),
         "cli_version": __version__,
         "python_version": IsStr(regex=r"3\.\d+\.\d+"),
-        "os": "linux",
+        "os": sys.platform,
         "is_ci": False,
         "install_id": IsUUID,
     }
