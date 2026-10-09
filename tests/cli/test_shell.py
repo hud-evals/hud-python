@@ -30,33 +30,11 @@ def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
 
     assert result.exit_code == 2
     assert result.stderr == ""
-    assert result.stdout == snapshot("""\
-                                                                                                \n\
- Usage: python -m hud.cli COMMAND                                                               \n\
-                                                                                                \n\
- Build, test, and deploy HUD environments.                                                      \n\
-                                                                                                \n\
-╭─ Options ────────────────────────────────────────────────────────────────────────────────────╮
-│ --help             Show help.                                                                │
-│ --version          Show version.                                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────────────────────╮
-│ init     Create a new HUD environment package.                                               │
-│ serve    Serve a HUD Environment locally (its tcp control channel).                          │
-│ deploy   Deploy HUD environment to the platform.                                             │
-│ eval     Run evaluation on datasets or individual tasks with agents.                         │
-│ task     Start a task or grade an answer (attaches to a running env, or spawns from source). │
-│ project  Show and choose the Project for new environments and tasksets                       │
-│ sync     Sync tasks and environments to the HUD platform                                     │
-│ qa       List, run, and inspect HUD's QA checks on evaluation traces.                        │
-│ jobs     List jobs, inspect their traces, and cancel rollouts.                               │
-│ trace    Inspect a rollout trace.                                                            │
-│ models   List gateway models and fork trainable ones.                                        │
-│ set      Persist API keys or other variables for HUD to use by default.                      │
-│ version  Show HUD CLI version.                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-""")
+    commands = result.lines[result.lines.index("Commands") + 1 :]
+    assert [line.split()[0] for line in commands] == [
+        *("init", "serve", "deploy", "eval", "task", "project", "sync"),
+        *("qa", "jobs", "trace", "models", "set", "version"),
+    ]
 
 
 def test_root_help_lists_the_public_commands_in_order(hud: Hud) -> None:

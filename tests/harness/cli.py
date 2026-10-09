@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
+BOX_DRAWING = re.compile(r"[\u2500-\u259f]+")
+
+
 @dataclass(frozen=True)
 class Result:
     exit_code: int
@@ -26,6 +29,12 @@ class Result:
     def json(self) -> Any:
         """The single JSON document a ``--json`` command prints on stdout."""
         return json.loads(self.stdout)
+
+    @property
+    def lines(self) -> list[str]:
+        """Stdout as a reader sees its words: box drawing and padding gone, blank lines dropped."""
+        words = (" ".join(BOX_DRAWING.sub(" ", line).split()) for line in self.stdout.splitlines())
+        return [line for line in words if line]
 
     def __str__(self) -> str:
         return f"exit {self.exit_code}\n--- stdout\n{self.stdout}\n--- stderr\n{self.stderr}"

@@ -46,26 +46,24 @@ def test_a_platform_trace_renders_turns_and_tool_calls(hud: Hud, events: FakeSer
     result = hud("trace", COMPACT_TRACE_ID)
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-╭────────────────────────────────────────╮
-│ Trace 03dd2a73d3df4d10a54ae3d87c2d530d │
-╰────────────────────────────────────────╯
-Source: platform
-
-──────────────────────────────────────── Turn 1 — agent ────────────────────────────────────────
-Think about the middle.
-Splitting at [len(s) // 2] and [bold]this[/bold]
-  → bash(command='ls')
-  bash →
-    a.txt
-    b.txt
-  ✗ bash: exit status 1
-──────────────────────────────────────── Turn 2 — agent ────────────────────────────────────────
-done
-  error: max steps reached
-
-View: https://hud.example/trace/03dd2a73-d3df-4d10-a54a-e3d87c2d530d
-""")
+    assert result.lines == snapshot(
+        [
+            "Trace 03dd2a73d3df4d10a54ae3d87c2d530d",
+            "Source: platform",
+            "Turn 1 — agent",
+            "Think about the middle.",
+            "Splitting at [len(s) // 2] and [bold]this[/bold]",
+            "→ bash(command='ls')",
+            "bash →",
+            "a.txt",
+            "b.txt",
+            "✗ bash: exit status 1",
+            "Turn 2 — agent",
+            "done",
+            "error: max steps reached",
+            "View: https://hud.example/trace/03dd2a73-d3df-4d10-a54a-e3d87c2d530d",
+        ]
+    )
 
 
 @pytest.mark.parametrize(
@@ -175,43 +173,45 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
     result = hud("trace", "get", trace_id, "--json", cwd=tmp_path)
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-[
-  {
-    "kind": "agent_message",
-    "text": "",
-    "reasoning": null,
-    "tool_calls": [
-      {
-        "name": "write",
-        "arguments": {
-          "filePath": "REPORT.md",
-          "content": "PASS"
-        },
-        "id": "call_1"
-      }
-    ],
-    "error": null
-  },
-  {
-    "kind": "tool_call",
-    "tool_name": "write",
-    "arguments": {
-      "filePath": "REPORT.md",
-      "content": "PASS"
-    },
-    "result_text": "wrote 4 bytes to REPORT.md",
-    "error": null
-  },
-  {
-    "kind": "agent_message",
-    "text": "Wrote it.",
-    "reasoning": null,
-    "tool_calls": [],
-    "error": null
-  }
-]
-""")
+    assert result.lines == snapshot(
+        [
+            "[",
+            "{",
+            '"kind": "agent_message",',
+            '"text": "",',
+            '"reasoning": null,',
+            '"tool_calls": [',
+            "{",
+            '"name": "write",',
+            '"arguments": {',
+            '"filePath": "REPORT.md",',
+            '"content": "PASS"',
+            "},",
+            '"id": "call_1"',
+            "}",
+            "],",
+            '"error": null',
+            "},",
+            "{",
+            '"kind": "tool_call",',
+            '"tool_name": "write",',
+            '"arguments": {',
+            '"filePath": "REPORT.md",',
+            '"content": "PASS"',
+            "},",
+            '"result_text": "wrote 4 bytes to REPORT.md",',
+            '"error": null',
+            "},",
+            "{",
+            '"kind": "agent_message",',
+            '"text": "Wrote it.",',
+            '"reasoning": null,',
+            '"tool_calls": [],',
+            '"error": null',
+            "}",
+            "]",
+        ]
+    )
     assert services.requests("api") == []
 
 

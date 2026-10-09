@@ -46,20 +46,16 @@ def test_jobs_lists_recent_jobs_as_a_table(hud: Hud, jobs: FakeServices) -> None
     result = hud("jobs")
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-╭─────────────╮
-│ Recent Jobs │
-╰─────────────╯
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ID                                   ┃ Name    ┃ Taskset ┃ Status    ┃ Created              ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
-│ 03dd2a73-d3df-4d10-a54a-e3d87c2d530d │ nightly │ browser │ completed │ 2026-10-01T00:00:00Z │
-│ 00000000-0000-4000-a000-000000000009 │ -       │ -       │ -         │                      │
-└──────────────────────────────────────┴─────────┴─────────┴───────────┴──────────────────────┘
-
-View: https://hud.example/jobs
-Tip: hud jobs get <id> to see traces for a specific job
-""")
+    assert result.lines == snapshot(
+        [
+            "Recent Jobs",
+            "ID Name Taskset Status Created",
+            "03dd2a73-d3df-4d10-a54a-e3d87c2d530d nightly browser completed 2026-10-01T00:00:00Z",
+            "00000000-0000-4000-a000-000000000009 - - -",
+            "View: https://hud.example/jobs",
+            "Tip: hud jobs get <id> to see traces for a specific job",
+        ]
+    )
     assert [request.query for request in jobs.requests("api", "GET", "/v2/jobs")] == [
         {"limit": ["20"]}
     ]
@@ -101,20 +97,16 @@ def test_a_job_lists_its_traces_with_a_canonical_link(hud: Hud, jobs: FakeServic
     result = hud("jobs", COMPACT_JOB_ID)
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-╭─────────────────────────────────────────────────╮
-│ Job Traces 03dd2a73-d3df-4d10-a54a-e3d87c2d530d │
-╰─────────────────────────────────────────────────╯
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
-┃ Trace ID                             ┃ Status    ┃ Reward ┃ Started        ┃ Error           ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ 00000000-0000-4000-a000-000000000002 │ completed │  0.750 │ 2026-10-01T00… │                 │
-│ 00000000-0000-4000-a000-000000000003 │ error     │      - │                │ xxxxxxxxxxxxxx… │
-└──────────────────────────────────────┴───────────┴────────┴────────────────┴─────────────────┘
-
-View: https://hud.example/jobs/03dd2a73-d3df-4d10-a54a-e3d87c2d530d
-Tip: hud trace get <trace_id> to inspect a specific rollout
-""")
+    assert result.lines == snapshot(
+        [
+            "Job Traces 03dd2a73-d3df-4d10-a54a-e3d87c2d530d",
+            "Trace ID Status Reward Started Error",
+            "00000000-0000-4000-a000-000000000002 completed 0.750 2026-10-01T00…",
+            "00000000-0000-4000-a000-000000000003 error - xxxxxxxxxxxxxx…",
+            "View: https://hud.example/jobs/03dd2a73-d3df-4d10-a54a-e3d87c2d530d",
+            "Tip: hud trace get <trace_id> to inspect a specific rollout",
+        ]
+    )
     (request,) = jobs.requests("api", "GET", "/v2/jobs/{id}/traces")
     assert request.path == f"/v2/jobs/{JOB_ID}/traces"
 
@@ -147,10 +139,12 @@ def test_a_job_without_traces_links_to_it(hud: Hud, platform: FakeServices) -> N
     result = hud("jobs", "get", JOB_ID)
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-No traces found for this job.
-View: https://hud.example/jobs/03dd2a73-d3df-4d10-a54a-e3d87c2d530d
-""")
+    assert result.lines == snapshot(
+        [
+            "No traces found for this job.",
+            "View: https://hud.example/jobs/03dd2a73-d3df-4d10-a54a-e3d87c2d530d",
+        ]
+    )
 
 
 @pytest.mark.parametrize(

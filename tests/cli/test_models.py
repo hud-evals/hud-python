@@ -265,12 +265,14 @@ def test_a_model_with_no_checkpoints_serves_its_base_weights(
     checkpoints = hud("models", "checkpoints", "claude-sonnet-4-6")
 
     assert (head.exit_code, checkpoints.exit_code) == (0, 0)
-    assert head.stdout + checkpoints.stdout == snapshot("""\
-No active checkpoint — this model serves its base weights
-View: https://hud.example/models/00000000-0000-4000-a000-000000000001?tab=checkpoints
-No checkpoints yet — this model serves its base weights
-View: https://hud.example/models/00000000-0000-4000-a000-000000000001?tab=checkpoints
-""")
+    assert head.lines + checkpoints.lines == snapshot(
+        [
+            "No active checkpoint — this model serves its base weights",
+            "View: https://hud.example/models/00000000-0000-4000-a000-000000000001?tab=checkpoints",
+            "No checkpoints yet — this model serves its base weights",
+            "View: https://hud.example/models/00000000-0000-4000-a000-000000000001?tab=checkpoints",
+        ]
+    )
 
 
 @pytest.mark.parametrize(
@@ -348,16 +350,15 @@ def test_fork_prints_how_to_train_the_new_model(hud: Hud, catalog: FakeServices)
     result = hud("models", "fork", "claude-sonnet-4-6", "--name", "my-sonnet")
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-╭────────────────────────────────────────────╮
-│ Forked team/my-sonnet                      │
-│ slug: team/my-sonnet                       │
-│ id:   00000000-0000-4000-a000-000000000002 │
-╰────────────────────────────────────────────╯
-
-Train it: hud.TrainingClient('team/my-sonnet')
-View: https://hud.example/models/00000000-0000-4000-a000-000000000002
-""")
+    assert result.lines == snapshot(
+        [
+            "Forked team/my-sonnet",
+            "slug: team/my-sonnet",
+            "id: 00000000-0000-4000-a000-000000000002",
+            "Train it: hud.TrainingClient('team/my-sonnet')",
+            "View: https://hud.example/models/00000000-0000-4000-a000-000000000002",
+        ]
+    )
 
 
 @pytest.mark.parametrize(

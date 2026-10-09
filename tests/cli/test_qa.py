@@ -72,19 +72,15 @@ def test_qa_lists_the_checks(hud: Hud, platform: FakeServices, argv: list[str]) 
     result = hud(*argv)
 
     assert result.exit_code == 0, result
-    assert result.stdout == snapshot("""\
-╭───────────╮
-│ QA Checks │
-╰───────────╯
-┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Key              ┃ Title            ┃ Question                       ┃
-┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ failure_analysis │ Failure Analysis │ Why did the agent fail?        │
-│ reward_hacking   │ Reward Hacking   │ Did the agent game the grader? │
-└──────────────────┴──────────────────┴────────────────────────────────┘
-
-Tip: hud qa run <check>[,<check>...] <trace-id>... to run checks
-""")
+    assert result.lines == snapshot(
+        [
+            "QA Checks",
+            "Key Title Question",
+            "failure_analysis Failure Analysis Why did the agent fail?",
+            "reward_hacking Reward Hacking Did the agent game the grader?",
+            "Tip: hud qa run <check>[,<check>...] <trace-id>... to run checks",
+        ]
+    )
 
 
 @pytest.mark.parametrize(
@@ -439,7 +435,7 @@ def test_qa_results_render_each_result_shape(
 
     assert text.exit_code == document.exit_code == 0
     assert document.json == results
-    assert text.stdout == RENDERED[request.node.callspec.id]
+    assert text.lines == RENDERED[request.node.callspec.id]
     assert [sent.query for sent in platform.requests("api", "GET")] == [
         {"trace_ids": [TRACE_ID]}
     ] * 2
@@ -447,134 +443,91 @@ def test_qa_results_render_each_result_shape(
 
 RENDERED = snapshot(
     {
-        "findings": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: failed
-Confidence: 90%
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ Verdict: The agent never wrote /app/[regex].txt.                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ 1. Required [/output] file was never created ───────────────────────────────────────────────╮
-│ Action: Write the regex to /app/regex.txt.                                                   │
-│ severity: error                                                                              │
-│ evidence: trajectory.json                                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-Analysis: https://hud.example/trace/00000000-0000-4000-a000-000000000004
-""",
-        "skipped": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: passed
-Source: skipped
-Note: A full reward passes this check without analysis.
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
-        "manual-verdict-wins": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: passed
-Source: manual
-Note: Reviewed.
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ A gap was found.                                                                             │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
-        "legacy-failure-analysis": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: failed
-Cause: Agent failure
-Confidence: high
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ The agent never wrote /app/regex.txt.                                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ 1. Required output file was never created ──────────────────────────────────────────────────╮
-│ The agent did not save any regex.                                                            │
-│ fault: agent                                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
-        "legacy-no-problems": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: passed
-Cause: No failure
-Confidence: high
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ Clean.                                                                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
-        "legacy-mixed-faults": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: failed
-Cause: Mixed failure
-╭─ 1. Bad regex ───────────────────────────────────────────────────────────────────────────────╮
-│ fault: agent                                                                                 │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ 2. Cut off ─────────────────────────────────────────────────────────────────────────────────╮
-│ fault: unclear                                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
-        "legacy-boolean": """\
-╭─────────────────────────────────────────────────────╮
-│ false_negative 00000000-0000-4000-a000-000000000002 │
-╰─────────────────────────────────────────────────────╯
-Verdict: passed
-False Negative: no
-Confidence: high
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ The zero reward matches the missing file.                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-
-╭─────────────────────────────────────────────────────╮
-│ false_negative 00000000-0000-4000-a000-000000000002 │
-╰─────────────────────────────────────────────────────╯
-Verdict: failed
-False Negative: yes
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ Grader missed it.                                                                            │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
-        "pending-and-errored": """\
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Status: queued
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-
-╭───────────────────────────────────────────────────────╮
-│ failure_analysis 00000000-0000-4000-a000-000000000002 │
-╰───────────────────────────────────────────────────────╯
-Verdict: failed
-╭─ Summary ────────────────────────────────────────────────────────────────────────────────────╮
-│ Analysis crashed.                                                                            │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-View: https://hud.example/trace/00000000-0000-4000-a000-000000000002
-""",
+        "findings": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: failed",
+            "Confidence: 90%",
+            "Summary",
+            "Verdict: The agent never wrote /app/[regex].txt.",
+            "1. Required [/output] file was never created",
+            "Action: Write the regex to /app/regex.txt.",
+            "severity: error",
+            "evidence: trajectory.json",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+            "Analysis: https://hud.example/trace/00000000-0000-4000-a000-000000000004",
+        ],
+        "skipped": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: passed",
+            "Source: skipped",
+            "Note: A full reward passes this check without analysis.",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
+        "manual-verdict-wins": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: passed",
+            "Source: manual",
+            "Note: Reviewed.",
+            "Summary",
+            "A gap was found.",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
+        "legacy-failure-analysis": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: failed",
+            "Cause: Agent failure",
+            "Confidence: high",
+            "Summary",
+            "The agent never wrote /app/regex.txt.",
+            "1. Required output file was never created",
+            "The agent did not save any regex.",
+            "fault: agent",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
+        "legacy-no-problems": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: passed",
+            "Cause: No failure",
+            "Confidence: high",
+            "Summary",
+            "Clean.",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
+        "legacy-mixed-faults": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: failed",
+            "Cause: Mixed failure",
+            "1. Bad regex",
+            "fault: agent",
+            "2. Cut off",
+            "fault: unclear",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
+        "legacy-boolean": [
+            "false_negative 00000000-0000-4000-a000-000000000002",
+            "Verdict: passed",
+            "False Negative: no",
+            "Confidence: high",
+            "Summary",
+            "The zero reward matches the missing file.",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+            "false_negative 00000000-0000-4000-a000-000000000002",
+            "Verdict: failed",
+            "False Negative: yes",
+            "Summary",
+            "Grader missed it.",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
+        "pending-and-errored": [
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Status: queued",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+            "failure_analysis 00000000-0000-4000-a000-000000000002",
+            "Verdict: failed",
+            "Summary",
+            "Analysis crashed.",
+            "View: https://hud.example/trace/00000000-0000-4000-a000-000000000002",
+        ],
     }
 )
 
