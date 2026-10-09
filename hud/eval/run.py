@@ -395,7 +395,8 @@ class Run:
         runtime, partial trace) with the error recorded on the trace.
         """
         run = cls(None, "", {})
-        run.trace = Trace(status="error", steps=[Step(source="system", error=error)])
+        run.trace.status = "error"
+        run.record(Step(source="system", error=error))
         return run
 
 
