@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import tarfile
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from dirty_equals import IsStr
 from inline_snapshot import snapshot
 
 from tests.harness import Reply, scrub
@@ -846,17 +848,15 @@ def test_a_redeploy_keeps_the_link_and_the_registry_secrets(
             {"env.py": 'env = Environment("a")\n', "runtime.json": '{"provider_config": {}}'},
             ["--runtime-config", "runtime.json"],
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": """\
-1 validation error for RuntimeConfig
-provider_config
-  Extra inputs are not permitted [type=extra_forbidden, input_value={}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.14/v/extra_forbidden\
-""",
-                }
-            ),
+            {
+                "error": "usage",
+                # pydantic's help link names its own version
+                "message": IsStr(
+                    regex=r"1 validation error for RuntimeConfig\nprovider_config\n"
+                    r"  Extra inputs are not permitted \[type=extra_forbidden, .*",
+                    regex_flags=re.DOTALL,
+                ),
+            },
             id="unknown-runtime-config-field",
         ),
         pytest.param(
