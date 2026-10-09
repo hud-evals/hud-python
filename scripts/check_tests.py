@@ -9,18 +9,26 @@ it (see "Testing" in AGENTS.md). This flags, in test modules outside the harness
 - importing a private name or module from hud;
 - touching a private attribute of anything other than ``self`` or ``cls``.
 
+Files that predate the rule are listed in ``check_tests_baseline.json`` with the
+number of findings they still hold. That number may only fall: a file above its
+baseline fails, and so does one below it until the baseline is lowered to match.
+Every other file must have none.
+
 Usage: uv run python scripts/check_tests.py [path ...]
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATHS = [ROOT / "tests", *sorted(ROOT.glob("environments/*/tests"))]
 HARNESS = ROOT / "tests" / "harness"
+BASELINE = Path(__file__).with_name("check_tests_baseline.json")
 PATCHERS = {"setattr", "delattr", "patch"}
 PATCH_METHODS = {"object", "dict", "multiple"}
 
@@ -110,12 +118,27 @@ def main(argv: list[str]) -> int:
         for file in ([root] if root.is_file() else root.rglob("*.py"))
         if HARNESS not in file.parents and "tasks" not in file.relative_to(ROOT).parts
     )
-    problems = [problem for file in files for problem in check(file)]
-    for problem in problems:
-        print(problem)
-    if problems:
-        print(f"\n{len(problems)} reach(es) into hud internals; see Testing in AGENTS.md.")
-    return 1 if problems else 0
+    baseline: dict[str, int] = json.loads(BASELINE.read_text("utf-8")) if BASELINE.exists() else {}
+    findings = {str(file.relative_to(ROOT)): check(file) for file in files}
+    failed = False
+    for name, problems in findings.items():
+        allowed = baseline.get(name, 0)
+        if len(problems) > allowed:
+            failed = True
+            for problem in problems:
+                print(problem)
+            print(f"{name}: {len(problems)} reach(es) into hud internals, {allowed} allowed\n")
+        elif len(problems) < allowed:
+            failed = True
+            print(f"{name}: {len(problems)} reach(es) left; lower its baseline from {allowed}\n")
+    counts = Counter({name: len(problems) for name, problems in findings.items()})
+    if failed:
+        print("See Testing in AGENTS.md; baselines live in scripts/check_tests_baseline.json.")
+    elif baseline:
+        print(
+            f"{sum(counts[name] for name in baseline)} known reach(es) in {len(baseline)} file(s)"
+        )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
