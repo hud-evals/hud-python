@@ -1,129 +1,124 @@
-"""``Chat`` — multi-turn conversation runner over a task.
-
-Turn tests place each turn's rollout with ``runtime=SubprocessRuntime(env_file)`` — a pure-data
-``Task`` row against a chat-style env served from a child process.
-"""
+"""Chat: a conversation folded over a chat-style task, one rollout per turn."""
 
 from __future__ import annotations
 
-import textwrap
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from mcp.types import TextContent
+from inline_snapshot import snapshot
+from mcp.types import ImageContent, TextContent
 
+from hud import Environment
 from hud.agents.base import Agent
-from hud.eval import SubprocessRuntime, Task
-from hud.eval.chat import Chat, _content_to_blocks
+from hud.agents.types import AgentStep, Citation
+from hud.eval import Chat, LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from hud.eval import Run
 
 
-class _EchoAgent(Agent):
-    """Replies with ``echo:<last user message>`` read from the prompt."""
+def assistant_env(prompts: list[Any]) -> Environment:
+    """A chat-style environment: its prompt is the whole conversation so far."""
+    env = Environment("chat")
 
-    async def __call__(self, run: Any) -> None:
-        last = run.prompt[-1]["content"]["text"]
-        run.trace.content = f"echo:{last}"
+    @env.template()
+    async def assistant(messages: list[dict[str, Any]]):
+        prompts.append(messages)
+        yield messages
+        yield 1.0
 
-
-@pytest.fixture()
-def dummy_task() -> Any:
-    """Minimal Task for Chat construction."""
-    return Task(env="chat", id="test_scenario")
-
-
-class TestContentHelpers:
-    def test_content_to_blocks_string(self) -> None:
-        blocks = _content_to_blocks("hello")
-        assert len(blocks) == 1
-        assert isinstance(blocks[0], TextContent)
-        assert blocks[0].text == "hello"
-
-    def test_content_to_blocks_passthrough(self) -> None:
-        original = [TextContent(type="text", text="x")]
-        assert _content_to_blocks(original) is original
+    return env
 
 
-class TestChatConstruction:
-    def test_messages_start_empty_and_are_the_public_history(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, _EchoAgent())
-        assert chat.messages == []
-        assert chat.job is None  # the conversation's job starts on the first send
-        # History is the plain ``messages`` list: persist/restore it directly.
-        chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
-        assert Chat(dummy_task, _EchoAgent()).messages == []
+class Echo(Agent):
+    """Echoes the last user turn; fails on ``fail`` and cites its source on ``cite``."""
+
+    async def __call__(self, run: Run) -> None:
+        last = run.prompt_messages[-1].content
+        text = last.text if isinstance(last, TextContent) else "<non-text>"
+        if text == "fail":
+            raise RuntimeError("model unavailable")
+        citations = [Citation(type="url_citation", text=text, source="https://docs.test")]
+        run.record(AgentStep(content=f"echo:{text}", citations=citations if text == "cite" else []))
+        run.trace.content = f"echo:{text}"
 
 
-_CHAT_ENV = """\
-from hud import Environment
+async def test_a_conversation_keeps_its_history_and_one_job_across_turns() -> None:
+    prompts: list[Any] = []
+    chat = Chat(
+        Task(env="chat", id="assistant"), Echo(), runtime=LocalRuntime(assistant_env(prompts))
+    )
+    blocks = [
+        TextContent(type="text", text="what is in this picture?"),
+        ImageContent(type="image", data="aW1n", mimeType="image/png"),
+    ]
 
-env = Environment("chat")
+    replies = [(await chat.send(turn)).content for turn in ("hello", blocks, "cite")]
+    with pytest.raises(RuntimeError, match=r"\[agent loop\] RuntimeError: model unavailable"):
+        await chat.send("fail")
+
+    assert replies == ["echo:hello", "echo:<non-text>", "echo:cite"]
+    assert chat.messages == snapshot(
+        [
+            {
+                "role": "user",
+                "content": {"type": "text", "text": "hello", "annotations": None, "meta": None},
+            },
+            {"role": "assistant", "content": {"type": "text", "text": "echo:hello"}},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "what is in this picture?",
+                        "annotations": None,
+                        "meta": None,
+                    },
+                    {
+                        "type": "image",
+                        "data": "aW1n",
+                        "mimeType": "image/png",
+                        "annotations": None,
+                        "meta": None,
+                    },
+                ],
+            },
+            {"role": "assistant", "content": {"type": "text", "text": "echo:<non-text>"}},
+            {
+                "role": "user",
+                "content": {"type": "text", "text": "cite", "annotations": None, "meta": None},
+            },
+            {
+                "role": "assistant",
+                "content": {"type": "text", "text": "echo:cite"},
+                "citations": [
+                    {"type": "url_citation", "text": "cite", "source": "https://docs.test"}
+                ],
+            },
+            {
+                "role": "user",
+                "content": {"type": "text", "text": "fail", "annotations": None, "meta": None},
+            },
+        ]
+    )
+    assert prompts[-1] == chat.messages
+    assert chat.job is not None
+    assert [run.job_id for run in chat.job.runs] == [chat.job.id] * 4
+    assert chat.job.name == "assistant"
 
 
-@env.template()
-async def assistant(messages: list):
-    _answer = yield messages
-    yield 1.0
-"""
+async def test_a_chat_without_a_runtime_says_how_to_place_it() -> None:
+    chat = Chat(Task(env="chat", id="assistant"), Echo())
 
-
-@pytest.fixture(scope="module")
-def chat_env_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    path = tmp_path_factory.mktemp("chat") / "env.py"
-    path.write_text(textwrap.dedent(_CHAT_ENV), encoding="utf-8")
-    return path
-
-
-def _chat_task() -> Task:
-    """A pure data row for the chat-style task the spawned file defines."""
-    return Task(env="chat", id="assistant", args={"messages": []})
-
-
-class TestSend:
-    async def test_send_runs_a_turn_and_stores_prompt_message_format(
-        self, chat_env_file: Path
-    ) -> None:
-        chat = Chat(_chat_task(), _EchoAgent(), runtime=SubprocessRuntime(chat_env_file))
-
-        trace = await chat.send("hello")
-
-        assert trace.content == "echo:hello"
-        assert len(chat.messages) == 2
-
-        user_msg = chat.messages[0]
-        assert user_msg["role"] == "user"
-        assert user_msg["content"]["type"] == "text"
-        assert user_msg["content"]["text"] == "hello"
-
-        assistant_msg = chat.messages[1]
-        assert assistant_msg["role"] == "assistant"
-        assert assistant_msg["content"]["type"] == "text"
-        assert assistant_msg["content"]["text"] == "echo:hello"
-
-    async def test_one_job_spans_the_conversation(self, chat_env_file: Path) -> None:
-        chat = Chat(_chat_task(), _EchoAgent(), runtime=SubprocessRuntime(chat_env_file))
-
+    with pytest.raises(RuntimeError, match=r"Chat needs a runtime to converse against"):
         await chat.send("hello")
-        await chat.send("again")
 
-        job = chat.job
-        assert job is not None
-        assert len(job.runs) == 2
-        # Every turn's trace reports under the conversation's job.
-        assert {run.job_id for run in job.runs} == {job.id}
-
-    async def test_failed_turn_raises_and_records_no_assistant_message(
-        self, chat_env_file: Path
-    ) -> None:
-        class _Boom(Agent):
-            async def __call__(self, run: Any) -> None:
-                raise RuntimeError("agent exploded")
-
-        chat = Chat(_chat_task(), _Boom(), runtime=SubprocessRuntime(chat_env_file))
-
-        with pytest.raises(RuntimeError, match="agent exploded"):
-            await chat.send("hello")
-
-        assert [m["role"] for m in chat.messages] == ["user"]
+    assert (chat.messages, chat.job) == (
+        [
+            {
+                "role": "user",
+                "content": {"type": "text", "text": "hello", "annotations": None, "meta": None},
+            }
+        ],
+        None,
+    )
