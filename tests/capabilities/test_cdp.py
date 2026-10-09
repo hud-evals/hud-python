@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from hud.capabilities import Capability, CDPClient
+from hud.capabilities.cdp import CDPError
 from tests.harness import Command, fake_browser
 
 ENABLED = ["Page.enable", "Runtime.enable", "DOM.enable"]
@@ -70,6 +71,23 @@ async def test_send_returns_the_command_result(
     assert returned == result
     assert browser.commands[-1] == Command(
         "page-1", "Page.navigate", {"url": "https://example.com"}
+    )
+
+
+async def test_an_error_reply_raises_cdp_error_naming_the_failed_command() -> None:
+    error = {"code": -32000, "message": "Cannot navigate to invalid URL"}
+    async with fake_browser(replies={"Page.navigate": {"error": error}}) as browser:
+        client = await CDPClient.connect(Capability.cdp(url=browser.url))
+        try:
+            with pytest.raises(CDPError) as raised:
+                await client.send("Page.navigate", {"url": "nope"})
+        finally:
+            await client.close()
+
+    assert (raised.value.code, raised.value.message, str(raised.value)) == (
+        -32000,
+        "Cannot navigate to invalid URL",
+        "CDP 'Page.navigate' failed [-32000]: Cannot navigate to invalid URL",
     )
 
 
