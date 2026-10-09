@@ -734,6 +734,25 @@ async def test_a_template_starts_and_grades_over_the_wire(
             id="start-list-args",
         ),
         pytest.param(
+            [("tasks.start", {"id": "guarded", "args": []})],
+            snapshot(
+                (
+                    [
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "error": {
+                                "code": -32602,
+                                "message": "tasks.start: 'args' must be an object",
+                            },
+                        }
+                    ],
+                    [],
+                )
+            ),
+            id="start-empty-list-args",
+        ),
+        pytest.param(
             [("tasks.start", {"id": "guarded", "args": {"nmae": "x"}})],
             snapshot(
                 (
