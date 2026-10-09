@@ -9,7 +9,20 @@ live in ``tests/conftest.py``.
 from .cli import Hud, Result, scrub
 from .config import HudEnv
 from .docker import FakeDocker
-from .models import ModelRequest, Models, ToolCall, Turn, call, calls, fail, say
+from .models import (
+    ModelRequest,
+    Models,
+    ToolCall,
+    Turn,
+    call,
+    calls,
+    computer_call,
+    fail,
+    interrupted,
+    say,
+    shell_call,
+    stream_error,
+)
 from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
 from .scenario import RecordingProvider, ScriptedAgent, served, task_row
 from .services import FakeServices, Reply, Request
@@ -34,12 +47,16 @@ __all__ = [
     "Turn",
     "call",
     "calls",
+    "computer_call",
     "fail",
     "fake_screen",
+    "interrupted",
     "say",
     "scrub",
     "served",
+    "shell_call",
     "spans",
     "steps",
+    "stream_error",
     "task_row",
 ]

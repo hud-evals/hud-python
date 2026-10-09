@@ -38,13 +38,23 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class Turn:
-    """One assistant turn. ``fail`` answers with an HTTP error instead, such as a 529 or 400."""
+    """One assistant turn. ``fail`` answers with an HTTP error instead, such as a 529 or 400.
+
+    ``native`` holds provider-native entries appended after the tool calls as they
+    are: Responses output items, Anthropic content blocks, Gemini parts or Chat
+    Completions tool calls. ``finish`` replaces the protocol's finish reason, and
+    ``extra`` is merged into the turn's envelope: the Chat Completions choice, the
+    Responses response, the Anthropic message or the Gemini candidate.
+    """
 
     text: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
     reasoning: str | None = None
     truncated: bool = False
     fail: Reply | None = None
+    native: tuple[dict[str, Any], ...] = ()
+    finish: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 def say(text: str, *, reasoning: str | None = None) -> Turn:
@@ -61,6 +71,60 @@ def calls(*tool_calls: ToolCall, text: str | None = None) -> Turn:
 
 def fail(status: int, message: str = "scripted provider error") -> Turn:
     return Turn(fail=Reply(status=status, json={"error": {"type": "error", "message": message}}))
+
+
+def computer_call(
+    *actions: dict[str, Any],
+    id: str = "call_computer",
+    pending_safety_checks: Sequence[dict[str, Any]] = (),
+) -> Turn:
+    """A Responses ``computer_call`` running ``actions`` in order."""
+    return Turn(
+        native=(
+            {
+                "type": "computer_call",
+                "id": f"cu_{id}",
+                "call_id": id,
+                "actions": list(actions),
+                "pending_safety_checks": list(pending_safety_checks),
+                "status": "completed",
+            },
+        )
+    )
+
+
+def shell_call(*commands: str, id: str = "call_shell", **action: Any) -> Turn:
+    """A Responses ``shell_call``; ``action`` adds ``timeout_ms`` or ``max_output_length``."""
+    return Turn(
+        native=(
+            {
+                "type": "shell_call",
+                "id": f"sh_{id}",
+                "call_id": id,
+                "action": {"commands": list(commands), **action},
+                "status": "completed",
+            },
+        )
+    )
+
+
+def stream_error(kind: str, *, headers: dict[str, str] | None = None) -> Turn:
+    """An Anthropic stream that opens and then reports an ``error`` event of type ``kind``."""
+    events = [
+        _sse("message_start", {"message": _message_start("m")}),
+        _sse("error", {"error": {"type": kind, "message": f"scripted {kind}"}}),
+    ]
+    return Turn(fail=Reply(stream=events, headers=headers or {}, content_type="text/event-stream"))
+
+
+def interrupted() -> Turn:
+    """An Anthropic stream whose connection drops after the message starts."""
+
+    def events() -> Iterator[bytes]:
+        yield _sse("message_start", {"message": _message_start("m")})
+        raise ConnectionResetError("scripted interruption")
+
+    return Turn(fail=Reply(stream=events(), content_type="text/event-stream"))
 
 
 @dataclass(frozen=True)
@@ -221,21 +285,23 @@ class Models:
             }
             for tool in turn.tool_calls
         ]
+        tool_calls.extend(turn.native)
         message: dict[str, Any] = {"role": "assistant", "content": turn.text}
         if tool_calls:
             message["tool_calls"] = tool_calls
         if turn.reasoning is not None:
             message["reasoning_content"] = turn.reasoning
-        finish = "length" if turn.truncated else ("tool_calls" if tool_calls else "stop")
+        finish = turn.finish or (
+            "length" if turn.truncated else ("tool_calls" if tool_calls else "stop")
+        )
+        choice = {"index": 0, "message": message, "finish_reason": finish, "logprobs": None}
         return Reply(
             json={
                 "id": self._id("chatcmpl"),
                 "object": "chat.completion",
                 "created": 0,
                 "model": body.get("model", ""),
-                "choices": [
-                    {"index": 0, "message": message, "finish_reason": finish, "logprobs": None}
-                ],
+                "choices": [{**choice, **turn.extra}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
         )
@@ -279,13 +345,15 @@ class Models:
             }
             for tool in turn.tool_calls
         )
+        output.extend(turn.native)
+        incomplete = turn.finish or ("max_output_tokens" if turn.truncated else None)
         return Reply(
             json={
                 "id": response_id,
                 "object": "response",
                 "created_at": 0,
-                "status": "incomplete" if turn.truncated else "completed",
-                "incomplete_details": {"reason": "max_output_tokens"} if turn.truncated else None,
+                "status": "incomplete" if incomplete else "completed",
+                "incomplete_details": {"reason": incomplete} if incomplete else None,
                 "model": body.get("model", ""),
                 "output": output,
                 "parallel_tool_calls": True,
@@ -298,6 +366,7 @@ class Models:
                     "input_tokens_details": {"cached_tokens": 0},
                     "output_tokens_details": {"reasoning_tokens": 0},
                 },
+                **turn.extra,
             }
         )
 
@@ -321,7 +390,10 @@ class Models:
             }
             for tool in turn.tool_calls
         )
-        stop = "max_tokens" if turn.truncated else ("tool_use" if turn.tool_calls else "end_turn")
+        blocks.extend(turn.native)
+        stop = turn.finish or (
+            "max_tokens" if turn.truncated else ("tool_use" if turn.tool_calls else "end_turn")
+        )
         message = {
             "id": self._id("msg"),
             "type": "message",
@@ -331,6 +403,7 @@ class Models:
             "stop_reason": stop,
             "stop_sequence": None,
             "usage": {"input_tokens": 1, "output_tokens": 1},
+            **turn.extra,
         }
         if not body.get("stream"):
             return Reply(json=message)
@@ -349,15 +422,15 @@ class Models:
             {"functionCall": {"name": tool.name, "args": tool.arguments}}
             for tool in turn.tool_calls
         )
+        parts.extend(turn.native)
+        candidate = {
+            "content": {"role": "model", "parts": parts},
+            "finishReason": turn.finish or ("MAX_TOKENS" if turn.truncated else "STOP"),
+            "index": 0,
+        }
         return Reply(
             json={
-                "candidates": [
-                    {
-                        "content": {"role": "model", "parts": parts},
-                        "finishReason": "MAX_TOKENS" if turn.truncated else "STOP",
-                        "index": 0,
-                    }
-                ],
+                "candidates": [{**candidate, **turn.extra}],
                 "usageMetadata": {
                     "promptTokenCount": 1,
                     "candidatesTokenCount": 1,
@@ -368,11 +441,27 @@ class Models:
         )
 
 
-def _anthropic_events(message: dict[str, Any]) -> Iterator[bytes]:
-    def event(kind: str, data: dict[str, Any]) -> bytes:
-        return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
+def _sse(kind: str, data: dict[str, Any]) -> bytes:
+    return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
 
+
+def _message_start(model: str) -> dict[str, Any]:
+    return {
+        "id": "msg_stream",
+        "type": "message",
+        "role": "assistant",
+        "model": model,
+        "content": [],
+        "stop_reason": None,
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+
+
+def _anthropic_events(message: dict[str, Any]) -> Iterator[bytes]:
+    event = _sse
     start = {**message, "content": [], "stop_reason": None}
+    start.pop("stop_details", None)
     yield event("message_start", {"message": start})
     for index, block in enumerate(message["content"]):
         if block["type"] == "text":
@@ -384,6 +473,11 @@ def _anthropic_events(message: dict[str, Any]) -> Iterator[bytes]:
                 "content_block_delta",
                 {"index": index, "delta": {"type": "text_delta", "text": block["text"]}},
             )
+            for citation in block.get("citations") or []:
+                yield event(
+                    "content_block_delta",
+                    {"index": index, "delta": {"type": "citations_delta", "citation": citation}},
+                )
         elif block["type"] == "thinking":
             yield event(
                 "content_block_start",
@@ -406,7 +500,9 @@ def _anthropic_events(message: dict[str, Any]) -> Iterator[bytes]:
                     "delta": {"type": "signature_delta", "signature": block["signature"]},
                 },
             )
-        else:
+        elif "input" in block:
+            # A string input streams verbatim, so a script can send malformed tool JSON.
+            partial = block["input"]
             yield event(
                 "content_block_start",
                 {"index": index, "content_block": {**block, "input": {}}},
@@ -417,15 +513,23 @@ def _anthropic_events(message: dict[str, Any]) -> Iterator[bytes]:
                     "index": index,
                     "delta": {
                         "type": "input_json_delta",
-                        "partial_json": json.dumps(block["input"]),
+                        "partial_json": partial
+                        if isinstance(partial, str)
+                        else json.dumps(partial),
                     },
                 },
             )
+        else:
+            yield event("content_block_start", {"index": index, "content_block": block})
         yield event("content_block_stop", {"index": index})
     yield event(
         "message_delta",
         {
-            "delta": {"stop_reason": message["stop_reason"], "stop_sequence": None},
+            "delta": {
+                "stop_reason": message["stop_reason"],
+                "stop_sequence": None,
+                "stop_details": message.get("stop_details"),
+            },
             "usage": {"output_tokens": 1},
         },
     )
