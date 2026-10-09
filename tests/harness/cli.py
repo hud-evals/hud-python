@@ -19,6 +19,15 @@ UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 BOX_DRAWING = re.compile(r"[\u2500-\u259f]+")
 
 
+def words(text: str) -> list[str]:
+    """``text`` as a reader sees it: box drawing and padding gone, blank lines dropped.
+
+    Rich lays panels out for the terminal's width, so output is compared by its words.
+    """
+    stripped = (" ".join(BOX_DRAWING.sub(" ", line).split()) for line in text.splitlines())
+    return [line for line in stripped if line]
+
+
 @dataclass(frozen=True)
 class Result:
     exit_code: int
@@ -32,9 +41,8 @@ class Result:
 
     @property
     def lines(self) -> list[str]:
-        """Stdout as a reader sees its words: box drawing and padding gone, blank lines dropped."""
-        words = (" ".join(BOX_DRAWING.sub(" ", line).split()) for line in self.stdout.splitlines())
-        return [line for line in words if line]
+        """Stdout as a reader sees its words; see :func:`words`."""
+        return words(self.stdout)
 
     def __str__(self) -> str:
         return f"exit {self.exit_code}\n--- stdout\n{self.stdout}\n--- stderr\n{self.stderr}"

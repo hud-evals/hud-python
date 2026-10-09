@@ -14,7 +14,7 @@ from dotenv import dotenv_values
 from inline_snapshot import snapshot
 
 from hud.version import __version__
-from tests.harness import Reply
+from tests.harness import Reply, words
 
 from .conftest import API_KEY
 
@@ -142,7 +142,11 @@ def test_output_contract_per_mode(
     """Text mode writes failures only to stderr; ``--json`` writes one document to stdout."""
     result = hud(*argv)
 
-    assert (result.exit_code, result.stdout, result.stderr) == (exit_code, stdout, stderr)
+    assert (result.exit_code, result.stdout, words(result.stderr)) == (
+        exit_code,
+        stdout,
+        words(stderr),
+    )
 
 
 def test_set_persists_values_without_echoing_them(hud: Hud, hud_env: HudEnv) -> None:

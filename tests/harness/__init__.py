@@ -8,7 +8,7 @@ live in ``tests/conftest.py``.
 
 from .asgi import serve_asgi
 from .cdp import Command, FakeBrowser, fake_browser
-from .cli import Hud, Result, scrub
+from .cli import Hud, Result, scrub, words
 from .config import HudEnv
 from .control import ControlPeer, answer, control_peer, hang_up, hold
 from .docker import FakeDocker
@@ -76,4 +76,5 @@ __all__ = [
     "steps",
     "stream_error",
     "task_row",
+    "words",
 ]
