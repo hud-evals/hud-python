@@ -58,6 +58,10 @@ TREE = {
     ),
     "pkg/env.py": declare("from-pkg-source"),
     "multi.py": declare("env-one", "first") + declare("env-two", "second"),
+    "stalls.py": declare("stalls")
+    + "import asyncio\n"
+    + '@env.template(id="stall")\nasync def stall():\n    yield "go"\n'
+    + "    await asyncio.Event().wait()\n    yield 1.0\n",
     "single.py": declare("only"),
     "alias.py": declare("shared") + "alias = env\n",
     "twins.py": declare("shared", "one") + declare("shared", "two"),
@@ -319,6 +323,31 @@ async def test_the_serving_process_announces_its_port_and_runs_shutdown_hooks(
     assert [name for name in os.listdir(tree) if name.startswith("stopped-")] == [
         f"stopped-{served}"
     ]
+
+
+async def test_sigterm_stops_a_server_whose_session_is_still_grading(tree: Path) -> None:
+    process = await asyncio.create_subprocess_exec(
+        *SERVER,
+        "stalls.py",
+        cwd=tree,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        port = await announced_port(process)
+        async with wire(f"tcp://127.0.0.1:{port}") as control:
+            await control.call("hello", {})
+            await control.call("tasks.start", {"id": "stall", "args": {}})
+            await control.send("tasks.grade", {"answer": "x"})
+            process.send_signal(signal.SIGTERM)
+            code = await asyncio.wait_for(process.wait(), timeout=5)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+    assert code == 0
+    assert (tree / "stopped-stalls").exists()
 
 
 async def announced_port(process: asyncio.subprocess.Process) -> int:
