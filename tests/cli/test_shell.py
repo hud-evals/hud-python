@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import signal
 import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from dirty_equals import IsInt, IsStr, IsUUID
 from dotenv import dotenv_values
 from inline_snapshot import snapshot
 
@@ -328,3 +330,109 @@ def test_an_outdated_install_prints_an_upgrade_notice(
 
     assert result.exit_code == 0, result
     assert result.stderr == notice
+
+
+# ─── analytics ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def analytics(services: FakeServices, hud_env: HudEnv) -> FakeServices:
+    """CLI analytics on, posting to the fake telemetry service."""
+    hud_env.set(HUD_CLI_ANALYTICS_ENABLED="1", CI=None)
+    services.route("telemetry", "POST", "/sdk-events/cli", json={})
+    return services
+
+
+def event(command: str, subcommand: str | None, exit_code: int, error: str | None) -> dict:
+    return {
+        "command": command,
+        "subcommand": subcommand,
+        "exit_code": exit_code,
+        "error_class": error,
+        "duration_ms": IsInt(ge=0),
+        "cli_version": __version__,
+        "python_version": IsStr(regex=r"3\.\d+\.\d+"),
+        "os": "linux",
+        "is_ci": False,
+        "install_id": IsUUID,
+    }
+
+
+@pytest.mark.parametrize(
+    ("argv", "key", "expected"),
+    [
+        (["version"], None, [event("version", None, 0, None)]),
+        (["--json", "version"], None, [event("version", None, 2, "NoSuchOption")]),
+        (["jobs", "list", "--json"], None, [event("jobs", "list", 1, "HudAuthenticationError")]),
+        (["jobs", "list"], API_KEY, [event("jobs", "list", 1, "HudRequestError")]),
+        (["set", "NOT_A_PAIR"], None, [event("set", None, 2, "CliError")]),
+        (["jobs", "list", "--limit", "many"], None, [event("jobs", "list", 2, "BadParameter")]),
+        (["secret-name", "arg"], None, [event("other", None, 2, "UsageError")]),
+        (["trace", "8b1f2c3d4e5f"], None, [event("trace", None, 2, "UsageError")]),
+        ([], None, [event("help", None, 2, None)]),
+        (["--version"], None, []),
+    ],
+)
+def test_each_invocation_posts_one_anonymous_event(
+    hud: Hud,
+    analytics: FakeServices,
+    hud_env: HudEnv,
+    argv: list[str],
+    key: str | None,
+    expected: list[dict],
+) -> None:
+    hud_env.set(HUD_API_KEY=key)
+    analytics.route("api", "GET", "/v2/jobs", status=403, json={"detail": "Not your team"})
+
+    hud(*argv)
+
+    posted = [body["events"] for body in analytics.bodies("telemetry", "POST", "/sdk-events/cli")]
+    assert [event for events in posted for event in events] == expected
+    assert "secret-name" not in json.dumps(posted)
+
+
+def test_the_install_id_is_created_once_and_announced_once(
+    hud: Hud, analytics: FakeServices
+) -> None:
+    first = hud("version")
+    second = hud("version")
+
+    ids = [
+        body["events"][0]["install_id"]
+        for body in analytics.bodies("telemetry", "POST", "/sdk-events/cli")
+    ]
+    assert len(set(ids)) == 1
+    assert first.stderr == snapshot(
+        "hud collects anonymous CLI usage. Disable: hud set HUD_CLI_ANALYTICS_ENABLED=0\n"
+    )
+    assert second.stderr == ""
+
+
+def test_analytics_opt_out_posts_nothing(
+    hud: Hud, analytics: FakeServices, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_CLI_ANALYTICS_ENABLED="0")
+
+    hud("version")
+
+    assert analytics.requests("telemetry") == []
+
+
+def test_an_interrupted_command_reports_exit_130(
+    hud: Hud, analytics: FakeServices, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY=API_KEY)
+    pending = {"subject_trace_id": TRACE_ID, "check_key": "failure_analysis", "status": "queued"}
+    analytics.route("api", "POST", "/v2/qa/runs", json={"results": [pending]})
+    process = hud.start("qa", "run", "failure_analysis", TRACE_ID)
+
+    deadline = time.monotonic() + 30
+    while not analytics.requests("api", "POST", "/v2/qa/runs"):
+        assert time.monotonic() < deadline, "hud qa run never posted the run"
+        time.sleep(0.05)
+    process.send_signal(signal.SIGINT)
+    process.communicate(timeout=30)
+
+    assert process.returncode == 130
+    (body,) = analytics.bodies("telemetry", "POST", "/sdk-events/cli")
+    assert body["events"] == [event("qa", "run", 130, "KeyboardInterrupt")]
