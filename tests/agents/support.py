@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.eval import Run
+    from tests.harness import ModelRequest
 
 PROMPT = "Do the task."
 DATA_URL = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.*)$", re.DOTALL)
@@ -164,6 +165,35 @@ def wire(value: Any, *paths: Path, descriptions: bool = False) -> Any:
             value = value.replace(str(path), f"<path{index}>")
         return value
     return value
+
+
+def tool_results(requests: list[ModelRequest]) -> list[Any]:
+    """The tool result entries a run handed back to its model, oldest first.
+
+    Responses requests carry only the items new since the previous response,
+    so their inputs are gathered from every request after the first; the other
+    protocols resend the whole conversation, so the last request holds them all.
+    ``cache_control`` markers, which move with the conversation, are dropped.
+    """
+    last = requests[-1]
+    if last.protocol == "responses":
+        return [item for request in requests[1:] for item in request.body["input"]]
+    if last.protocol == "gemini":
+        return [
+            part
+            for content in last.body["contents"]
+            if content["role"] == "user"
+            for part in content["parts"]
+            if "functionResponse" in part
+        ]
+    if last.protocol == "anthropic":
+        return [
+            {key: value for key, value in block.items() if key != "cache_control"}
+            for message in last.body["messages"][1:]
+            if message["role"] == "user"
+            for block in message["content"]
+        ]
+    return [message for message in last.body["messages"] if message["role"] == "tool"]
 
 
 def json_lines(text: str) -> list[dict[str, Any]]:
