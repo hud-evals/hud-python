@@ -90,9 +90,9 @@ def test_parse_junit_rejects_malformed_report(tmp_path: Path):
         parse_junit(report)
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_junit_grader_reports_missing_output(grading_workspace):
-    result = await grade_tests(grading_workspace, "true {junit_path}")
+@pytest.mark.sandbox
+async def test_junit_grader_reports_missing_output(workspace):
+    result = await grade_tests(workspace, "true {junit_path}")
 
     assert result.value == 0.0
     assert result.info is not None
@@ -100,10 +100,10 @@ async def test_junit_grader_reports_missing_output(grading_workspace):
     assert result.info["exit_code"] == 0
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_binary_junit_grader_rejects_passing_report_from_failed_command(grading_workspace):
+@pytest.mark.sandbox
+async def test_binary_junit_grader_rejects_passing_report_from_failed_command(workspace):
     result = await grade_tests(
-        grading_workspace,
+        workspace,
         command=(
             'printf \'<testsuite><testcase classname="tests.test_widget" '
             'name="test_fixed" /></testsuite>\' > {junit_path}; false'
@@ -118,14 +118,14 @@ async def test_binary_junit_grader_rejects_passing_report_from_failed_command(gr
     assert "all_testcases" not in result.info
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_grading_runs_as_agent_after_session_termination(grading_workspace):
-    session = await grading_workspace.run(["/bin/bash", "-lc", "echo agent > agent.txt"])
+@pytest.mark.sandbox
+async def test_grading_runs_as_agent_after_session_termination(workspace):
+    session = await workspace.run(["/bin/bash", "-lc", "echo agent > agent.txt"])
     assert session.returncode == 0
-    await grading_workspace.terminate_sessions()
+    await workspace.terminate_sessions()
 
     result = await grade_tests(
-        grading_workspace,
+        workspace,
         'test "$(id -u)" = 1000 && test "$(cat agent.txt)" = agent && '
         "grep -q localhost /etc/hosts && "
         'printf \'<testsuite><testcase classname="tests" name="passed" /></testsuite>\' > {junit_path}',
@@ -136,10 +136,10 @@ async def test_grading_runs_as_agent_after_session_termination(grading_workspace
     assert result.info["exit_code"] == 0
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_timed_out_grader_does_not_score_partial_report(grading_workspace):
+@pytest.mark.sandbox
+async def test_timed_out_grader_does_not_score_partial_report(workspace):
     result = await grade_tests(
-        grading_workspace,
+        workspace,
         'printf \'<testsuite><testcase classname="tests" name="passed" /></testsuite>\' > {junit_path}; sleep 30',
         timeout_seconds=1,
     )
