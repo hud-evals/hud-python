@@ -21,7 +21,7 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.eval.envs import containers, lab, minted, solve
+from tests.eval.envs import containers, eventually, lab, minted, solve
 from tests.harness import RecordingProvider, ScriptedAgent
 
 if TYPE_CHECKING:
@@ -120,6 +120,57 @@ async def test_an_open_job_collects_the_runs_of_several_calls() -> None:
     assert first is second is session
     assert [run.job_id for run in session.runs] == [session.id] * 4
     assert (session.name, session.group, session.reward) == ("training", 2, 1.0)
+
+
+class Lingering(Agent):
+    """Answers ``add`` rows (``add 1 2`` wrongly), then keeps running on ``add 3 4``."""
+
+    async def __call__(self, run: Run) -> None:
+        run.trace.content = "wrong" if run.prompt_text == "add 1 2" else solve(run.prompt_text)
+        if run.prompt_text == "add 3 4":
+            await asyncio.sleep(30)
+
+
+async def test_a_jobs_reward_averages_graded_runs_and_its_errors_are_the_ungraded_ones() -> None:
+    rows = [
+        Task(env="lab", id="add", args={"a": 1, "b": 2}, slug="graded-wrong"),
+        Task(
+            env="lab",
+            id="add",
+            args={"a": 3, "b": 4},
+            slug="timed-out-after-answering",
+            agent_config={"timeout_seconds": 0.2},
+        ),
+        Task(env="lab", id="grade_raises", slug="grader-raised"),
+    ]
+
+    job = await Taskset("mixed", rows).run(Lingering(), runtime=LocalRuntime(lambda task: lab()))
+
+    outcomes = {run.slug: (run.reward, run.trace.status, run.trace.stop_reason) for run in job.runs}
+    assert outcomes == {
+        "graded-wrong": (0.0, "completed", None),
+        "timed-out-after-answering": (1.0, "error", "timeout"),
+        "grader-raised": (0.0, "error", None),
+    }
+    assert [run.slug for run in job.errors] == ["grader-raised"]
+    assert job.reward == 0.5
+
+
+async def test_cancelling_a_taskset_run_cancels_every_rollout_and_shuts_their_envs_down() -> None:
+    events: list[str] = []
+    agent = ScriptedAgent(solve, delay=30)
+    pending = asyncio.create_task(
+        Taskset("pair", ROWS).run(agent, runtime=LocalRuntime(lambda task: lab(events)), group=2)
+    )
+    await eventually(lambda: len(agent.prompts) == 4)
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    await eventually(lambda: events.count("shutdown") == 4)
+    assert events.count("initialize") == 4
+    assert not any(event.startswith("grade") for event in events)
 
 
 async def test_an_open_pool_stays_warm_across_calls_and_closes_with_its_scope() -> None:
