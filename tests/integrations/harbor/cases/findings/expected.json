@@ -210,6 +210,12 @@
       "main has no environment/Dockerfile, docker_image, or Compose image or build"
     ],
     [
+      "non-utf8-toml",
+      "harbor.invalid.task_config_toml",
+      "invalid",
+      "'utf-8' codec can't decode byte 0xff in position 8: invalid start byte"
+    ],
+    [
       "reserved-ports",
       "harbor.invalid.reserved_main_port",
       "invalid",
