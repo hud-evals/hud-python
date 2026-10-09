@@ -385,12 +385,54 @@ GEMINI = {
             {"events": "", "results": ['open_web_browser {"success": true} <image/png 200x100>']}
         ),
     ),
+    "click-at": gemini_does(
+        call("click_at", x=500, y=500),
+        observed=snapshot(
+            {
+                "events": "100,50 b0 100,50 b1 100,50 b0",
+                "results": ['click_at {"success": true} <image/png 200x100>'],
+            }
+        ),
+    ),
+    "hover-at": gemini_does(
+        call("hover_at", x=250, y=750),
+        observed=snapshot(
+            {"events": "50,75 b0", "results": ['hover_at {"success": true} <image/png 200x100>']}
+        ),
+    ),
+    "type-text-at-clearing-first": gemini_does(
+        call("type_text_at", x=100, y=200, text="hi", press_enter=True),
+        observed=snapshot(
+            {
+                "events": "20,20 b0 20,20 b0 20,20 b1 20,20 b0 +Control_L a -Control_L Delete h i Return",
+                "results": ['type_text_at {"success": true} <image/png 200x100>'],
+            }
+        ),
+    ),
+    "type-text-at-without-clearing": gemini_does(
+        call("type_text_at", x=100, y=200, text="hi", clear_before_typing=False),
+        observed=snapshot(
+            {
+                "events": "20,20 b0 20,20 b0 20,20 b1 20,20 b0 h i",
+                "results": ['type_text_at {"success": true} <image/png 200x100>'],
+            }
+        ),
+    ),
     "scroll-document-down": gemini_does(
         call("scroll_document", direction="down"),
         observed=snapshot(
             {
                 "events": "0,0 b16 0,0 b0 0,0 b16 0,0 b0 0,0 b16 0,0 b0",
                 "results": ['scroll_document {"success": true} <image/png 200x100>'],
+            }
+        ),
+    ),
+    "scroll-at-up": gemini_does(
+        call("scroll_at", x=500, y=500, direction="up", magnitude=2),
+        observed=snapshot(
+            {
+                "events": "100,50 b0 100,50 b8 100,50 b0 100,50 b8 100,50 b0",
+                "results": ['scroll_at {"success": true} <image/png 200x100>'],
             }
         ),
     ),
@@ -431,6 +473,15 @@ GEMINI = {
             {
                 "events": "+Control_L a -Control_L",
                 "results": ['key_combination {"success": true} <image/png 200x100>'],
+            }
+        ),
+    ),
+    "drag-and-drop-near-the-edge": gemini_does(
+        call("drag_and_drop", x=0, y=500, destination_x=999, destination_y=500),
+        observed=snapshot(
+            {
+                "events": "25,50 b0 25,50 b1 41,50 b1 58,50 b1 75,50 b1 91,50 b1 108,50 b1 125,50 b1 141,50 b1 158,50 b1 175,50 b1 175,50 b0",
+                "results": ['drag_and_drop {"success": true} <image/png 200x100>'],
             }
         ),
     ),
