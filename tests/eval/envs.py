@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -127,14 +128,19 @@ def lab(events: list[str] | None = None) -> Environment:
 
 
 def actor(
-    env: Environment | None = None, *, grade: str = "score", sessions: Path | None = None
+    env: Environment | None = None,
+    *,
+    grade: str = "score",
+    sessions: Path | None = None,
+    link: bool = False,
 ) -> Environment:
     """Declare the actor side of a verifier pair: ``solve`` grades 0.25 and carries the answer.
 
     It goes on ``env``, or on a new ``actor`` environment. ``grade="raise"`` makes
     its grading raise and ``grade="scoreless"`` yields a frame without a score.
     With ``sessions``, the template writes the answer into its control session's
-    directory under that root, as an environment in a container would.
+    directory under that root, as an environment in a container would, plus a
+    symbolic link when ``link`` is set.
     """
     env = env or Environment("actor")
 
@@ -145,6 +151,8 @@ def actor(
             session = sessions / "runtime" / "sessions" / str(current_session_id.get())
             session.mkdir(parents=True)
             (session / "work.txt").write_text(str(answer))
+            if link:
+                (session / "escape").symlink_to("/etc/passwd")
         if grade == "raise":
             raise RuntimeError("actor grade exploded")
         yield {"score": 0.25, "answer": answer} if grade == "score" else {"answer": answer}
@@ -159,7 +167,8 @@ def judge(
 
     It goes on ``env``, or on a new ``judge`` environment. ``verdict`` picks a
     failure instead: ``"raise"``, ``"scoreless"`` or ``"zero"``. With
-    ``sessions``, it reads the answer from its restored session directory.
+    ``sessions``, it reads the answer from its restored session directory and
+    pays 0.0 when nothing was restored.
     """
     env = env or Environment("judge")
 
@@ -174,30 +183,45 @@ def judge(
             yield 0.0
         elif sessions is not None:
             session = sessions / "runtime" / "sessions" / str(current_session_id.get())
-            yield 1.0 if (session / "work.txt").read_text() == "secret" else 0.0
+            work = session / "work.txt"
+            yield 1.0 if work.exists() and work.read_text() == "secret" else 0.0
         else:
             yield 1.0 if result["answer"] == "secret" else 0.0
 
     return env
 
 
+DF_FREE = (
+    "Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+    "overlay 104857600 0 104857600 0% /\n"
+)
+
+
+def container(image: str) -> str:
+    """The name the fake docker gives a container started from ``image``."""
+    return re.sub(r"[^\w.-]", "-", image)
+
+
 @asynccontextmanager
 async def containers(
     fake_docker: FakeDocker, rootfs: Path, images: dict[str, Environment]
-) -> AsyncIterator[None]:
+) -> AsyncIterator[dict[str, str]]:
     """Make each image a container the fake docker starts, served in this process.
 
-    ``docker run <image>`` answers a container named after the image, ``docker
-    port`` answers the address its environment serves on here, and ``docker
-    cp``/``exec`` work on ``<rootfs>/<image>``.
+    ``docker run <image>`` answers the container :func:`container` names,
+    ``docker port`` the address its environment serves on here, and ``docker
+    cp``/``exec`` work on ``<rootfs>/<container>``. Yields each image's address.
     """
     fake_docker.on(r"^(cp|exec) ", rootfs=rootfs)
+    addresses: dict[str, str] = {}
     async with contextlib.AsyncExitStack() as stack:
         for image, env in images.items():
             runtime = await stack.enter_async_context(
                 LocalRuntime(env)(Task(env=env.name, id="serve"))
             )
-            address = runtime.url.removeprefix("tcp://")
-            fake_docker.on(rf"^run .* {image}$", stdout=f"{image}\n")
-            fake_docker.on(rf"^port {image} 8765$", stdout=f"{address}\n")
-        yield
+            name = container(image)
+            (rootfs / name).mkdir(parents=True, exist_ok=True)
+            addresses[image] = runtime.url.removeprefix("tcp://")
+            fake_docker.on(rf"^run .* {re.escape(image)}$", stdout=f"{name}\n")
+            fake_docker.on(rf"^port {re.escape(name)} 8765$", stdout=f"{addresses[image]}\n")
+        yield addresses
