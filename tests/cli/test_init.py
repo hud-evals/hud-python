@@ -1,255 +1,212 @@
-"""Tests for ``hud init``."""
+"""``hud init``: copy an example environment from this SDK checkout into a new project."""
 
 from __future__ import annotations
 
-import io
-import json
-import tarfile
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any
 
-import httpx
 import pytest
-from typer.testing import CliRunner
+from inline_snapshot import snapshot
 
-from hud.cli import CliError
-from hud.cli import init as init_module
-from hud.cli.__main__ import app
-from hud.cli.eval import EvalConfig
-from hud.cli.init import init_command
-from hud.types import AgentType
+from tests.harness import say
+
+from .conftest import API_KEY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-def _sdk_archive(source: str, files: dict[str, bytes]) -> bytes:
-    payload = io.BytesIO()
-    with tarfile.open(fileobj=payload, mode="w:gz") as archive:
-        for name, content in files.items():
-            info = tarfile.TarInfo(f"hud-python-release/environments/{source}/{name}")
-            info.size = len(content)
-            archive.addfile(info, io.BytesIO(content))
-    return payload.getvalue()
+    from tests.harness import Hud, HudEnv, Models
 
 
-@pytest.fixture
-def installed_sdk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make ``hud init`` behave as an installed release: no ``environments/`` beside the package."""
-    monkeypatch.setattr(init_module, "__file__", str(tmp_path / "site" / "hud" / "cli" / "init.py"))
-    monkeypatch.setattr(init_module, "__version__", "1.2.3")
+def tree(root: Path) -> list[str]:
+    return sorted(str(path.relative_to(root)) for path in root.rglob("*"))
 
 
-def _init(
-    tmp_path: Path,
-    name: str | None,
-    preset: str | None,
-    *,
-    force: bool = False,
-    dry_run: bool = False,
-) -> dict[str, object]:
-    """Call the command as the CLI would, with every option bound."""
-    return init_command(
-        name=name, directory=str(tmp_path), force=force, dry_run=dry_run, preset=preset
-    )
+@pytest.mark.parametrize(
+    ("argv", "directory", "declaration"),
+    [
+        (["berry", "--preset", "blank"], "berry", 'Environment(name="berry")'),
+        (["My Cool_Env", "--template", "blank"], "My Cool_Env", 'Environment(name="my-cool-env")'),
+        (["--preset", "coding"], "coding", 'Environment(name="coding")'),
+        (["my-cool-env"], "my-cool-env", 'Environment(name="my-cool-env")'),
+        (["custom", "-t", "cua"], "custom", 'Environment(name="custom")'),
+    ],
+)
+def test_init_copies_the_example_and_names_its_environment(
+    hud: Hud, argv: list[str], directory: str, declaration: str
+) -> None:
+    result = hud("init", *argv, "--dir", "projects", "--json")
 
-
-def _release(payload: bytes) -> MagicMock:
-    return MagicMock(
-        return_value=httpx.Response(
-            200, content=payload, request=httpx.Request("GET", "https://example.test")
-        )
-    )
-
-
-# ─── choosing the example ───────────────────────────────────────────────
-
-
-def test_name_alone_uses_the_coding_example(tmp_path: Path) -> None:
-    _init(tmp_path, "my-cool-env", None)
-
-    target = tmp_path / "my-cool-env"
-    assert (target / "README.md").exists()
-    assert 'Environment(name="my-cool-env")' in (target / "env.py").read_text()
-
-
-def test_example_without_name_uses_its_id_as_directory(tmp_path: Path) -> None:
-    _init(tmp_path, None, "coding")
-    assert (tmp_path / "coding" / "env.py").exists()
-
-
-def test_name_overrides_the_example_directory_and_env_name(tmp_path: Path) -> None:
-    _init(tmp_path, "custom", "cua")
-
-    assert 'Environment(name="custom")' in (tmp_path / "custom" / "env.py").read_text()
-    assert not (tmp_path / "cua").exists()
-
-
-def test_blank_materializes_a_runnable_example(tmp_path: Path) -> None:
-    _init(tmp_path, "berry", "blank")
-
-    target = tmp_path / "berry"
-    assert {path.name for path in target.iterdir()} == {
-        "README.md",
-        "pyproject.toml",
-        "env.py",
-        "tasks.py",
-        "Dockerfile.hud",
-        ".dockerignore",
-        ".hud_eval.toml",
+    target = hud.cwd / "projects" / directory
+    assert result.exit_code == 0, result
+    assert result.json == {
+        "path": f"projects/{directory}",
+        "preset": result.json["preset"],
+        "created": True,
     }
-    assert 'Environment(name="berry")' in (target / "env.py").read_text()
-    assert "package = false" in (target / "pyproject.toml").read_text()
-    assert 'CMD ["uv", "run", "hud", "serve"' in (target / "Dockerfile.hud").read_text()
-    assert ".venv" in (target / ".dockerignore").read_text()
-    # The template is all comments: a fresh project evaluates with built-in defaults.
-    assert EvalConfig.load(target / ".hud_eval.toml") == EvalConfig(
-        agent_config={agent.value: {} for agent in AgentType}
+    assert declaration in (target / "env.py").read_text()
+    assert (target / "README.md").exists()
+    assert not any(
+        part in {".venv", "__pycache__"} for name in tree(target) for part in name.split("/")
     )
 
 
-def test_env_name_is_normalized(tmp_path: Path) -> None:
-    _init(tmp_path, "My Cool_Env", "blank")
-    assert 'Environment(name="my-cool-env")' in (tmp_path / "My Cool_Env" / "env.py").read_text()
+def test_the_blank_example_is_a_runnable_project(hud: Hud, models: Models, hud_env: HudEnv) -> None:
+    hud_env.set(HUD_API_KEY=API_KEY)
+    models.script([say("4")])
+
+    created = hud("init", "berry", "--preset", "blank", "--json")
+    project = hud.cwd / "berry"
+    files = tree(project)
+    evaluated = hud(
+        "eval", "tasks.py", "openai_compatible", "-m", "scripted", "--yes", "--json", cwd=project
+    )
+
+    assert created.exit_code == 0, created
+    assert files == snapshot(
+        [
+            ".dockerignore",
+            ".hud_eval.toml",
+            "Dockerfile.hud",
+            "README.md",
+            "env.py",
+            "pyproject.toml",
+            "tasks.py",
+        ]
+    )
+    assert evaluated.exit_code == 0, evaluated
+    assert (evaluated.json["run_count"], evaluated.json["mean_reward"]) == (1, 1.0)
+    assert [request.prompt for request in models.requests()] == [
+        "How many times does 'r' appear in: 'Strawberry world'?"
+    ]
 
 
-def test_without_name_or_example_errors_when_noninteractive(tmp_path: Path) -> None:
-    with pytest.raises(CliError, match="Nothing to create"):
-        _init(tmp_path, None, None)
+def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
+    result = hud("init", "thing", "--dir", "projects", "--dry-run", "--json")
 
-
-def test_unknown_example_is_a_usage_error(tmp_path: Path) -> None:
-    with pytest.raises(CliError, match="Unknown example environment 'does-not-exist'"):
-        _init(tmp_path, None, "does-not-exist")
-
-
-def test_dry_run_never_prompts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(init_module.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(init_module.sys.stdout, "isatty", lambda: True)
-    plan = _init(tmp_path, "thing", None, dry_run=True)
-    assert plan == {
+    assert result.exit_code == 0, result
+    assert result.json == {
         "dry_run": True,
         "action": "init",
-        "path": str(tmp_path / "thing"),
+        "path": "projects/thing",
         "preset": "coding",
     }
-    assert not (tmp_path / "thing").exists()
+    assert not (hud.cwd / "projects").exists()
 
 
-# ─── destination safety ─────────────────────────────────────────────────
-
-
-def test_refuses_to_clobber_nonempty_directory(tmp_path: Path) -> None:
-    target = tmp_path / "taken"
-    target.mkdir()
-    (target / "precious.txt").write_text("data")
-
-    with pytest.raises(CliError, match="not empty"):
-        _init(tmp_path, "taken", "blank")
-    assert (target / "precious.txt").read_text() == "data"
-
-
-def test_force_overwrites_existing_files(tmp_path: Path) -> None:
-    target = tmp_path / "env"
-    target.mkdir()
-    (target / "env.py").write_text("old")
-
-    _init(tmp_path, "env", "blank", force=True)
-    assert "Environment" in (target / "env.py").read_text()
-
-
-def test_refuses_to_copy_over_a_symlinked_file(tmp_path: Path) -> None:
-    target = tmp_path / "project"
-    target.mkdir()
-    outside = tmp_path / "outside.py"
-    outside.write_text("original")
-    (target / "env.py").symlink_to(outside)
-
-    with pytest.raises(CliError, match="symlinks"):
-        _init(tmp_path, "project", "blank", force=True)
-    assert outside.read_text() == "original"
-
-
-def test_refuses_a_symlinked_destination(tmp_path: Path) -> None:
-    target = tmp_path / "project"
-    target.symlink_to(tmp_path / "outside", target_is_directory=True)
-
-    with pytest.raises(CliError, match="symlink"):
-        _init(tmp_path, "project", "blank")
-
-
-def test_failure_is_a_json_error_and_removes_the_partial_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("setup", "argv", "exit_code", "document", "after"),
+    [
+        pytest.param(
+            {"taken/precious.txt": "data"},
+            ["taken", "--preset", "blank"],
+            1,
+            snapshot(
+                {
+                    "error": "conflict",
+                    "message": "taken already exists and is not empty (use --force)",
+                }
+            ),
+            {"taken/precious.txt": "data"},
+            id="non-empty-directory",
+        ),
+        pytest.param(
+            {"outside.py": "original", "project/env.py": "->outside.py"},
+            ["project", "--preset", "blank", "--force"],
+            1,
+            snapshot(
+                {
+                    "error": "failure",
+                    "message": (
+                        "Failed to prepare example environment 'blank': cannot copy an example "
+                        "environment over symlinks in project"
+                    ),
+                }
+            ),
+            {"outside.py": "original"},
+            id="symlink-inside-target",
+        ),
+        pytest.param(
+            {"outside/": "", "project": "->outside"},
+            ["project", "--preset", "blank"],
+            1,
+            snapshot(
+                {
+                    "error": "failure",
+                    "message": (
+                        "Failed to prepare example environment 'blank': cannot copy an example "
+                        "environment over symlink project"
+                    ),
+                }
+            ),
+            {},
+            id="symlinked-target",
+        ),
+        pytest.param(
+            {},
+            ["--preset", "does-not-exist"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": (
+                        "Unknown example environment 'does-not-exist'. Available: coding, cua, "
+                        "argument-hints, blank"
+                    ),
+                }
+            ),
+            {},
+            id="unknown-example",
+        ),
+        pytest.param(
+            {},
+            [],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": (
+                        "Nothing to create. Pass a name (hud init my-env) or --template, or run in "
+                        "an interactive terminal to choose an example environment."
+                    ),
+                }
+            ),
+            {},
+            id="nothing-to-create",
+        ),
+    ],
+)
+def test_init_refuses_without_touching_existing_files(
+    hud: Hud,
+    setup: dict[str, str],
+    argv: list[str],
+    exit_code: int,
+    document: dict[str, Any],
+    after: dict[str, str],
 ) -> None:
-    def fail(source: Path, target: Path, **_: object) -> None:
-        target.mkdir()
-        (target / "partial").touch()
-        raise OSError("copy failed")
+    for name, content in setup.items():
+        path = hud.cwd / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if name.endswith("/"):
+            path.mkdir()
+        elif content.startswith("->"):
+            path.symlink_to(hud.cwd / content.removeprefix("->"))
+        else:
+            path.write_text(content)
+    before = tree(hud.cwd)
 
-    monkeypatch.setattr(init_module.shutil, "copytree", fail)
-    result = CliRunner().invoke(app, ["init", "example", "--dir", str(tmp_path), "--json"])
-    assert result.exit_code != 0
-    assert "copy failed" in json.loads(result.stdout)["message"]
-    assert not (tmp_path / "example").exists()
+    result = hud("init", *argv, "--json")
 
-
-# ─── installed SDK: the example comes from the release archive ─────────
-
-
-def test_local_copy_skips_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    repository = tmp_path / "repository"
-    source = repository / "environments" / "coding"
-    source.mkdir(parents=True)
-    (source / "env.py").write_text('env = Environment(name="coding")')
-    (source / ".venv").mkdir()
-    (source / ".venv" / "ignored").write_text("ignored")
-    (source / "__pycache__").mkdir()
-    (source / "__pycache__" / "ignored.pyc").write_bytes(b"ignored")
-    monkeypatch.setattr(init_module, "__file__", str(repository / "hud" / "cli" / "init.py"))
-
-    _init(tmp_path, "coding", "coding")
-
-    target = tmp_path / "coding"
-    assert (target / "env.py").read_text() == 'env = Environment(name="coding")'
-    assert not (target / ".venv").exists()
-    assert not (target / "__pycache__").exists()
+    assert result.exit_code == exit_code, result
+    assert result.json == document
+    assert tree(hud.cwd) == before
+    assert {name: (hud.cwd / name).read_text() for name in after} == after
 
 
-def test_release_archive_is_extracted_for_the_installed_version(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed_sdk: None
-) -> None:
-    get = _release(
-        _sdk_archive(
-            "coding",
-            {"README.md": b"# Coding", "scripts/run.sh": b"#!/bin/sh\n", "env.py": b"x"},
-        )
-    )
-    monkeypatch.setattr(init_module.httpx, "get", get)
+def test_force_overwrites_an_existing_project(hud: Hud) -> None:
+    (hud.cwd / "env").mkdir()
+    (hud.cwd / "env" / "env.py").write_text("old")
 
-    _init(tmp_path, "coding", "coding")
+    result = hud("init", "env", "--preset", "blank", "--force", "--json")
 
-    assert get.call_args.args[0].endswith("/tar.gz/refs/tags/v1.2.3")
-    target = tmp_path / "coding"
-    assert (target / "README.md").read_text() == "# Coding"
-    assert (target / "scripts" / "run.sh").read_text() == "#!/bin/sh\n"
-
-
-def test_release_archive_paths_cannot_escape_the_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed_sdk: None
-) -> None:
-    monkeypatch.setattr(
-        init_module.httpx, "get", _release(_sdk_archive("coding", {"../../escape": b"unsafe"}))
-    )
-
-    with pytest.raises(CliError, match="unsafe path"):
-        _init(tmp_path, "project", "coding")
-    assert not (tmp_path / "escape").exists()
-    assert not (tmp_path / "project").exists()
-
-
-def test_development_version_needs_a_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed_sdk: None
-) -> None:
-    monkeypatch.setattr(init_module, "__version__", "1.2.3.dev0")
-    with pytest.raises(CliError, match="development version"):
-        _init(tmp_path, "project", "coding")
+    assert result.exit_code == 0, result
+    assert 'Environment(name="env")' in (hud.cwd / "env" / "env.py").read_text()
