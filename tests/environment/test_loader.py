@@ -1,309 +1,343 @@
-"""``load_environment``: resolve env references — source paths, modules, factories."""
+"""Environment references: what ``load_environment`` and the serving process resolve.
+
+A fixture tree holds every shape of source a project has: an ``env.py``, a
+directory of modules, a package with a factory beside its ``env.py``, packages
+with relative imports and re-exports, a module shadowing a stdlib name, and task
+modules that export rows. Each row resolves one reference to an environment name
+or to the error a user sees. The serving rows run the real serving process on
+the same tree: it announces its port, answers ``hello``, and runs the
+environment's shutdown hook on SIGTERM.
+"""
 
 from __future__ import annotations
 
-import importlib
+import asyncio
 import json
+import os
+import signal
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from hud.environment import load_environment
 
+from .conftest import wire
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 
-def test_load_environment_selects_by_attr_or_env_name(tmp_path) -> None:
-    module = tmp_path / "envs.py"
-    module.write_text(
-        """
-from hud import Environment
-
-first = Environment("env-one")
-second = Environment("env-two")
-""".strip(),
-        encoding="utf-8",
+def declare(name: str, variable: str = "env") -> str:
+    """Source declaring Environment ``name``, whose shutdown hook leaves a marker in cwd."""
+    return (
+        "from pathlib import Path\n"
+        "from hud import Environment\n"
+        f"{variable} = Environment({name!r})\n"
+        f"@{variable}.shutdown\n"
+        f"async def _stopped_{variable}():\n"
+        f"    Path('stopped-{name}').write_text('stopped')\n"
     )
 
-    assert load_environment(module, name="first").name == "env-one"
-    assert load_environment(module, name="env-two").name == "env-two"
-    with pytest.raises(ValueError, match="multiple Environments"):
-        load_environment(module)
-    with pytest.raises(ValueError, match="no Environment named 'missing'"):
-        load_environment(module, name="missing")
 
-    single = tmp_path / "single.py"
-    single.write_text("from hud import Environment\nenv = Environment('only')\n", encoding="utf-8")
-    assert load_environment(single).name == "only"
+TEMPLATE = '@env.template(id="solve")\nasync def solve():\n    yield "ok"\n    yield 1.0\n'
 
-
-@pytest.fixture
-def factory_module(request):
-    """An importable module exposing an env and a factory, cleaned up after."""
-    import sys
-    from types import ModuleType
-
-    from hud.environment import Environment
-
-    name = f"_loader_target_{request.node.name}"
-    mod = ModuleType(name)
-    setattr(mod, "env", Environment("declared"))
-    setattr(mod, "make_env", lambda name="built": Environment(name))
-    sys.modules[name] = mod
-    yield name
-    del sys.modules[name]
-
-
-def test_module_factory_is_called_with_args(factory_module) -> None:
-    env = load_environment(factory_module, name="make_env", args={"name": "from-factory"})
-
-    assert env.name == "from-factory"
-
-
-def test_module_env_attribute_is_returned_not_called(factory_module) -> None:
-    import sys
-
-    from hud.environment import Environment
-
-    class CallableEnvironment(Environment):
-        def __call__(self) -> None:
-            raise AssertionError("Environment instance was called as a factory")
-
-    setattr(sys.modules[factory_module], "env", CallableEnvironment("callable"))
-
-    assert load_environment(factory_module).name == "callable"
-
-
-def test_module_factory_returning_non_environment_raises(factory_module) -> None:
-    import sys
-
-    setattr(sys.modules[factory_module], "make_env", lambda: object())
-
-    with pytest.raises(ValueError, match="not an Environment"):
-        load_environment(factory_module, name="make_env")
-
-
-def test_unresolvable_references_raise() -> None:
-    with pytest.raises(ModuleNotFoundError):
-        load_environment("no.such.module")
-    with pytest.raises(FileNotFoundError, match="no environment source"):
-        load_environment("missing/env.py")
-    with pytest.raises(ValueError, match="args= applies to factory targets"):
-        load_environment(__file__, args={"a": "b"})
-
-
-def test_package_dir_does_not_shadow_factory_target(tmp_path, monkeypatch) -> None:
-    # `mypkg:make_env` with a plain mypkg/ package in cwd is a module
-    # reference; source scanning is only for env-declaring source trees.
-    pkg = tmp_path / "shadowpkg"
-    pkg.mkdir()
-    (pkg / "__init__.py").write_text(
-        "from hud.environment import Environment\n\n"
-        "def make_env(name='shadowed'):\n    return Environment(name)\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.syspath_prepend(str(tmp_path))
-
-    env = load_environment("shadowpkg", name="make_env")
-
-    assert env.name == "shadowed"
-
-
-def test_named_attribute_resolves_a_package_that_also_has_env_py(tmp_path, monkeypatch) -> None:
-    # `pkg:make_env` addresses an attribute, so an env.py sitting inside the
-    # package must not capture it into a source scan.
-    pkg = tmp_path / "bothpkg"
-    pkg.mkdir()
-    (pkg / "__init__.py").write_text(
-        "from hud.environment import Environment\n\n"
-        "def make_env(name='from-factory'):\n    return Environment(name)\n",
-        encoding="utf-8",
-    )
-    (pkg / "env.py").write_text(
-        "from hud.environment import Environment\n\nenv = Environment('from-source')\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.syspath_prepend(str(tmp_path))
-
-    assert load_environment("bothpkg", name="make_env").name == "from-factory"
-    # ...while a bare reference still scans the source tree.
-    assert load_environment("bothpkg").name == "from-source"
-
-
-def test_every_reference_form_resolves(tmp_path, monkeypatch) -> None:
-    """The full matrix, in one place: the shapes that competed for the same
-    spelling are what made this resolution subtle."""
-    (tmp_path / "env.py").write_text(
-        "from hud.environment import Environment\n\nenv = Environment('from-env-py')\n",
-        encoding="utf-8",
-    )
-    envs = tmp_path / "envs"  # a plain directory: an importable namespace package
-    envs.mkdir()
-    (envs / "one.py").write_text(
-        "from hud.environment import Environment\n\nfoo = Environment('from-tree')\n",
-        encoding="utf-8",
-    )
-    pkg = tmp_path / "pkg"  # a real package exposing a factory
-    pkg.mkdir()
-    (pkg / "__init__.py").write_text(
-        "from hud.environment import Environment\n\n"
-        "def make_env(name='from-factory'):\n    return Environment(name)\n",
-        encoding="utf-8",
-    )
-    (pkg / "env.py").write_text(
-        "from hud.environment import Environment\n\nenv = Environment('from-pkg-source')\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.syspath_prepend(str(tmp_path))
-
-    # a source file, however it is spelled — including the common serve form
-    assert load_environment("env").name == "from-env-py"
-    assert load_environment("env", name="env").name == "from-env-py"
-    assert load_environment("env.py").name == "from-env-py"
-    assert load_environment(tmp_path / "env.py").name == "from-env-py"
-
-    # a source tree, with a name selecting inside it
-    assert load_environment("envs", name="foo").name == "from-tree"
-
-    # a package attribute: the factory wins over the env.py beside it
-    assert load_environment("pkg", name="make_env").name == "from-factory"
-    assert load_environment("pkg", name="make_env", args={"name": "x"}).name == "x"
-    # ...while a bare reference to the same package still scans its source
-    assert load_environment("pkg").name == "from-pkg-source"
-
-
-def test_environment_reexports_are_not_ambiguous(tmp_path) -> None:
-    source = tmp_path / "env.py"
-    source.write_text('from hud import Environment\nenv = Environment("shared")\nalias = env\n')
-    assert load_environment(source, name="shared").name == "shared"
-    assert load_environment(source).name == "shared"
-
-
-def test_distinct_environments_with_the_same_name_are_ambiguous(tmp_path) -> None:
-    source = tmp_path / "env.py"
-    source.write_text(
-        'from hud import Environment\none = Environment("shared")\ntwo = Environment("shared")\n'
-    )
-    with pytest.raises(ValueError, match="multiple Environments"):
-        load_environment(source, name="shared")
-
-
-def test_source_supports_package_relative_imports(tmp_path) -> None:
-    package = tmp_path / "relative_env_package"
-    package.mkdir()
-    (package / "__init__.py").write_text("")
-    (package / "world.py").write_text(
-        'from hud import Environment\nenv = Environment("relative")\n'
-    )
-    (package / "env.py").write_text("from .world import env\n")
-    assert load_environment(package / "env.py").name == "relative"
-
-
-def test_directory_imports_each_module_once(tmp_path) -> None:
-    (tmp_path / "scan_core.py").write_text(
-        'from hud import Environment\nenv = Environment("scanned")\n'
-    )
-    (tmp_path / "scan_templates.py").write_text(
-        "from scan_core import env\n"
-        '@env.template(id="solve")\nasync def solve():\n    yield "ok"\n    yield 1.0\n'
-    )
-    (tmp_path / "assembly.py").write_text(
-        "from scan_core import env\nfrom scan_templates import solve\n"
-    )
-    env = load_environment(tmp_path, name="scanned")
-    assert set(env.tasks) == {"solve"}
-    assert load_environment(tmp_path, name="scanned") is env
-
-
-@pytest.mark.parametrize("export", ["task", "list", "tuple", "taskset"])
-def test_source_resolves_environments_from_exported_tasks(tmp_path, request, export) -> None:
-    name = f"bound_source_{export}"
-    (tmp_path / f"{name}.py").write_text(
-        'from hud import Environment\nenv = Environment("bound")\n'
-        '@env.template(id="solve")\nasync def solve():\n    yield "ok"\n    yield 1.0\n'
-        "def make_task():\n    return solve()\n"
-    )
-    request.addfinalizer(lambda: sys.modules.pop(name, None))
-    expression = {
-        "task": "make_task()",
-        "list": "[make_task()]",
-        "tuple": "(make_task(),)",
-        "taskset": 'Taskset("rows", [make_task()])',
-    }[export]
-    source = tmp_path / "tasks.py"
-    source.write_text(
-        f"from {name} import make_task\nfrom hud.eval import Taskset\nrows = {expression}\n"
-    )
-    assert set(load_environment(source, name="bound").tasks) == {"solve"}
-
-
-@pytest.mark.parametrize("source", ["json.py", "."])
-def test_source_does_not_replace_an_imported_module(tmp_path, source) -> None:
-    (tmp_path / "json.py").write_text(
+TREE = {
+    "env.py": declare("from-env-py"),
+    "envs/one.py": declare("from-tree", "foo"),
+    "pkg/__init__.py": (
+        "from pathlib import Path\n"
+        "from hud.environment import Environment\n"
+        "def make_env(name='from-factory'):\n"
+        "    env = Environment(name)\n"
+        "    @env.shutdown\n"
+        "    async def _stopped():\n"
+        "        Path(f'stopped-{name}').write_text('stopped')\n"
+        "    return env\n"
+    ),
+    "pkg/env.py": declare("from-pkg-source"),
+    "multi.py": declare("env-one", "first") + declare("env-two", "second"),
+    "single.py": declare("only"),
+    "alias.py": declare("shared") + "alias = env\n",
+    "twins.py": declare("shared", "one") + declare("shared", "two"),
+    "relpkg/__init__.py": "",
+    "relpkg/world.py": declare("relative"),
+    "relpkg/env.py": "from .world import env\n",
+    "reexport/__init__.py": "from .env import env\n",
+    "reexport/core.py": declare("reexported"),
+    "reexport/env.py": "from .core import env\n" + TEMPLATE,
+    "scan/scan_core.py": declare("scanned"),
+    "scan/scan_templates.py": "from scan_core import env\n" + TEMPLATE,
+    "scan/assembly.py": "from scan_core import env\nfrom scan_templates import solve\n",
+    "shadow/json.py": (
         "import json\nfrom hud import Environment\nenv = Environment(json.loads('\"local\"'))\n"
-    )
-    assert load_environment(tmp_path / source).name == "local"
-    assert importlib.import_module("json") is json
-
-
-def test_package_init_can_reexport_its_environment(tmp_path) -> None:
-    package = tmp_path / "reexported_env_package"
-    package.mkdir()
-    (package / "__init__.py").write_text("from .env import env\n")
-    (package / "core.py").write_text(
-        'from hud import Environment\nenv = Environment("reexported")\n'
-    )
-    (package / "env.py").write_text(
-        'from .core import env\n@env.template(id="solve")\n'
-        'async def solve():\n    yield "ok"\n    yield 1.0\n'
-    )
-    env = load_environment(package / "env.py")
-    assert env.name == "reexported"
-    assert load_environment(package, name="reexported") is env
+    ),
+    "exports/bound_source.py": declare("bound")
+    + TEMPLATE
+    + "def make_task():\n    return solve()\n",
+    "exports/as_task.py": "from bound_source import make_task\nrows = make_task()\n",
+    "exports/as_list.py": "from bound_source import make_task\nrows = [make_task()]\n",
+    "exports/as_tuple.py": "from bound_source import make_task\nrows = (make_task(),)\n",
+    "exports/as_taskset.py": (
+        "from bound_source import make_task\nfrom hud.eval import Taskset\n"
+        "rows = Taskset('rows', [make_task()])\n"
+    ),
+    "modpkg/__init__.py": "",
+    "modpkg/factories.py": (
+        "from hud.environment import Environment\n"
+        "env = Environment('declared')\n"
+        "def make_env(name='built'):\n    return Environment(name)\n"
+        "class CallableEnvironment(Environment):\n"
+        "    def __call__(self):\n        raise AssertionError('called as a factory')\n"
+        "callable_env = CallableEnvironment('callable')\n"
+        "def not_env():\n    return object()\n"
+    ),
+}
 
 
 @pytest.fixture
-def package_sources(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
-    packages = tuple(tmp_path / label / "source_root_package" for label in ("first", "second"))
+def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """The source tree as the working directory and an import root, as in a project."""
+    root = tmp_path / "project"
+    for name, content in TREE.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    monkeypatch.chdir(root)
+    monkeypatch.syspath_prepend(str(root))
+    before = set(sys.modules)
+    yield root
+    for name in set(sys.modules) - before:
+        del sys.modules[name]
+
+
+ROWS = [
+    pytest.param("env", None, None, "from-env-py", id="bare-name-means-env-py"),
+    pytest.param("env", "env", None, "from-env-py", id="bare-name-with-attribute"),
+    pytest.param("env.py", None, None, "from-env-py", id="relative-file"),
+    pytest.param("{root}/env.py", None, None, "from-env-py", id="absolute-file"),
+    pytest.param("envs", "foo", None, "from-tree", id="directory-by-attribute"),
+    pytest.param("pkg", "make_env", None, "from-factory", id="package-factory"),
+    pytest.param("pkg", "make_env", {"name": "x"}, "x", id="package-factory-with-args"),
+    pytest.param("pkg", None, None, "from-pkg-source", id="bare-package-scans-its-source"),
+    pytest.param("multi.py", "first", None, "env-one", id="select-by-attribute"),
+    pytest.param("multi.py", "env-two", None, "env-two", id="select-by-env-name"),
+    pytest.param("single.py", None, None, "only", id="single-env-needs-no-name"),
+    pytest.param("alias.py", None, None, "shared", id="re-exported-env-is-one-env"),
+    pytest.param("alias.py", "shared", None, "shared", id="re-exported-env-by-name"),
+    pytest.param("relpkg/env.py", None, None, "relative", id="package-relative-import"),
+    pytest.param("reexport/env.py", None, None, "reexported", id="package-init-re-export"),
+    pytest.param("scan", "scanned", None, "scanned", id="directory-of-modules"),
+    pytest.param("exports/as_task.py", "bound", None, "bound", id="exported-task"),
+    pytest.param("exports/as_list.py", "bound", None, "bound", id="exported-task-list"),
+    pytest.param("exports/as_tuple.py", "bound", None, "bound", id="exported-task-tuple"),
+    pytest.param("exports/as_taskset.py", "bound", None, "bound", id="exported-taskset"),
+    pytest.param("shadow/json.py", None, None, "local", id="module-named-like-stdlib"),
+    pytest.param("shadow", None, None, "local", id="directory-with-stdlib-name"),
+    pytest.param("modpkg.factories", None, None, "declared", id="module-env-attribute"),
+    pytest.param(
+        "modpkg.factories", "make_env", {"name": "made"}, "made", id="module-factory-with-args"
+    ),
+    pytest.param(
+        "modpkg.factories", "callable_env", None, "callable", id="callable-env-is-not-called"
+    ),
+    pytest.param(
+        "multi.py",
+        None,
+        None,
+        (ValueError, "multiple Environments in multi.py; select one by name"),
+        id="several-envs-need-a-name",
+    ),
+    pytest.param(
+        "multi.py",
+        "missing",
+        None,
+        (ValueError, "no Environment named 'missing' found in multi.py"),
+        id="unknown-name",
+    ),
+    pytest.param(
+        "twins.py",
+        "shared",
+        None,
+        (ValueError, "multiple Environments in twins.py"),
+        id="distinct-envs-sharing-a-name",
+    ),
+    pytest.param(
+        "modpkg.factories",
+        "not_env",
+        None,
+        (ValueError, r"modpkg.factories:not_env resolved to <object object at .*>, not an Env"),
+        id="factory-returning-something-else",
+    ),
+    pytest.param(
+        "no.such.module", None, None, (ModuleNotFoundError, "No module named 'no'"), id="no-module"
+    ),
+    pytest.param(
+        "missing/env.py",
+        None,
+        None,
+        (FileNotFoundError, "no environment source at missing/env.py"),
+        id="missing-file",
+    ),
+    pytest.param(
+        "env.py",
+        None,
+        {"a": "b"},
+        (ValueError, "args= applies to factory targets, not source path env.py"),
+        id="args-on-a-source-file",
+    ),
+]
+
+
+@pytest.mark.parametrize(("reference", "name", "args", "expected"), ROWS)
+def test_a_reference_resolves_to_one_environment(
+    tree: Path,
+    reference: str,
+    name: str | None,
+    args: dict[str, Any] | None,
+    expected: str | tuple[type[Exception], str],
+) -> None:
+    target: str | Path = reference.format(root=tree)
+    if reference.startswith("{root}"):
+        target = Path(target)
+
+    if isinstance(expected, str):
+        assert load_environment(target, name=name, args=args).name == expected
+    else:
+        error, message = expected
+        with pytest.raises(error, match=message):
+            load_environment(target, name=name, args=args)
+
+
+def test_loading_a_source_again_returns_the_same_environment(tree: Path) -> None:
+    scanned = load_environment("scan", name="scanned")
+    package = load_environment("reexport/env.py")
+
+    assert set(scanned.tasks) == {"solve"}
+    assert load_environment("scan", name="scanned") is scanned
+    assert load_environment(tree / "reexport", name="reexported") is package
+
+
+@pytest.mark.parametrize("reference", ["shadow/json.py", "shadow"])
+def test_loading_a_module_named_like_the_stdlib_leaves_the_stdlib_imported(
+    tree: Path, reference: str
+) -> None:
+    load_environment(reference)
+
+    assert sys.modules["json"] is json
+
+
+@pytest.fixture
+def two_roots(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
+    """The same package name under two source roots."""
+    packages = tuple(tmp_path / root / "source_root_package" for root in ("first", "second"))
     for package in packages:
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("from .env import env\n")
-        (package / "core.py").write_text(
-            f"from hud import Environment\nenv = Environment({package.parent.name!r})\n"
-        )
+        (package / "core.py").write_text(declare(package.parent.name))
         (package / "env.py").write_text("from .core import env\n")
-    try:
-        yield packages[0], packages[1]
-    finally:
-        for name in list(sys.modules):
-            if name == "source_root_package" or name.startswith("source_root_package."):
-                del sys.modules[name]
+    before = set(sys.modules)
+    yield packages[0], packages[1]
+    for name in set(sys.modules) - before:
+        del sys.modules[name]
 
 
 @pytest.mark.parametrize("source", ["env.py", "__init__.py", "."])
-def test_package_sources_reject_a_cached_namespace_from_another_root(
-    package_sources: tuple[Path, Path], source: str
+def test_a_package_already_imported_from_another_root_is_refused(
+    two_roots: tuple[Path, Path], source: str
 ) -> None:
-    first, second = (package / source for package in package_sources)
-    assert load_environment(first).name == "first"
+    first, second = (package / source for package in two_roots)
 
+    assert load_environment(first).name == "first"
     with pytest.raises(ValueError, match="already imported from a different source root"):
         load_environment(second)
-
     assert load_environment(first).name == "first"
 
 
-def test_package_source_takes_precedence_over_other_import_roots(
-    package_sources: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+def test_a_package_source_wins_over_other_import_roots(
+    two_roots: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    first, second = package_sources
+    first, second = two_roots
     monkeypatch.syspath_prepend(str(second.parent))
     monkeypatch.syspath_prepend(str(first.parent))
 
     assert load_environment(second / "env.py").name == "second"
+
+
+SERVER = [sys.executable, "-m", "hud.environment.server"]
+HUD_SERVE = [sys.executable, "-m", "hud.cli", "serve", "--port", "0"]
+
+
+@pytest.mark.parametrize(
+    ("command", "served", "stop"),
+    [
+        pytest.param([*SERVER, "env.py"], "from-env-py", signal.SIGTERM, id="server-sigterm"),
+        pytest.param(
+            [*SERVER, "multi.py", "--env", "env-two"], "env-two", signal.SIGTERM, id="server-env"
+        ),
+        pytest.param([*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, id="hud-serve-ctrl-c"),
+        pytest.param(
+            [*HUD_SERVE, "pkg:make_env", "--arg", "name=demo"],
+            "demo",
+            signal.SIGINT,
+            id="hud-serve-factory",
+        ),
+    ],
+)
+async def test_the_serving_process_announces_its_port_and_runs_shutdown_hooks(
+    tree: Path, command: list[str], served: str, stop: signal.Signals
+) -> None:
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=tree,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    try:
+        port = await announced_port(process)
+        async with wire(f"tcp://127.0.0.1:{port}") as control:
+            hello = await control.call("hello", {})
+        process.send_signal(stop)
+        code = await asyncio.wait_for(process.wait(), timeout=60)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+    assert hello["result"]["env"]["name"] == served
+    assert code == 0
+    assert [name for name in os.listdir(tree) if name.startswith("stopped-")] == [
+        f"stopped-{served}"
+    ]
+
+
+async def announced_port(process: asyncio.subprocess.Process) -> int:
+    assert process.stdout is not None
+    async with asyncio.timeout(60):
+        while line := await process.stdout.readline():
+            text = line.decode().strip()
+            if text.startswith("HUD_SERVE_PORT="):
+                return int(text.removeprefix("HUD_SERVE_PORT="))
+    assert process.stderr is not None
+    raise AssertionError(f"exited without a port:\n{(await process.stderr.read()).decode()}")
+
+
+@pytest.mark.parametrize(
+    ("command", "error"),
+    [
+        pytest.param([*SERVER, "multi.py"], "multiple Environments in multi.py", id="ambiguous"),
+    ],
+)
+async def test_the_serving_process_exits_with_the_load_error(
+    tree: Path, command: list[str], error: str
+) -> None:
+    process = await asyncio.create_subprocess_exec(
+        *command, cwd=tree, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+
+    assert process.returncode == 1
+    assert b"HUD_SERVE_PORT=" not in stdout
+    assert error in stderr.decode()
