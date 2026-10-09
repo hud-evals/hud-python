@@ -1,258 +1,216 @@
-"""What the example promises: hinted arguments, safe staging, weighted grading."""
+"""What the example promises: hinted arguments, safe staging, weighted grading, the runtime key.
+
+Each test starts a fresh environment process against the stand-in platform in
+``conftest.py``, starts a task with the arguments a task row carries, and grades
+an answer: what a rollout does, without an agent.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import sys
-from functools import partial
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
-from threading import Barrier, Thread
 
-import httpx
 import pytest
-from hud import LocalRuntime, connect
+from hud import SubprocessRuntime, Task, connect
 from hud.clients import HudProtocolError
-from hud.graders import SubScore
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from env import review_files
 
-import env as env_module  # noqa: E402
-
-
-def test_every_editable_argument_declares_its_hint():
-    """The hints are the point of this environment; a rename must fail here."""
-    properties = env_module.review_files.manifest_entry()["args"]["properties"]
-    assert properties["prompt"]["x-hud-hint"] == "prompt"
-    assert properties["attachments"]["x-hud-hint"] == "data-files"
-    assert properties["criteria"]["x-hud-hint"] == "grading"
-    assert "hud_api_key" in properties
-    required = env_module.review_files.manifest_entry()["args"].get("required") or []
-    assert "hud_api_key" not in required
-    # The console resolves the reference through the $defs discovery bundles.
-    assert properties["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
-    assert "file_id" in env_module.review_files.manifest_entry()["args"]["$defs"]["DataFileRef"]["properties"]
+ENV_SOURCE = Path(__file__).resolve().parent.parent / "env.py"
+CRITERIA = [
+    {"requirement": "Names exactly three primes.", "weight": 2},
+    {"requirement": "Explains each one.", "weight": 1},
+    {"requirement": "Calls a composite number prime.", "weight": -2},
+]
 
 
-def test_staging_refuses_a_path_that_leaves_the_files_directory(tmp_path: Path):
-    """An uploaded file names its own destination, so the path is untrusted."""
-    assert env_module._destination(tmp_path, "notes/summary.md") == tmp_path / "notes/summary.md"
-    for hostile in ("../escape.md", "/etc/passwd", "..\\escape.md"):
-        with pytest.raises(env_module.DataFileError):
-            env_module._destination(tmp_path, hostile)
-
-
-async def test_criteria_reach_the_judge_unchanged(monkeypatch: pytest.MonkeyPatch):
-    """The argument is the grader's input, so nothing may be rewritten en route."""
-    seen: dict[str, object] = {}
-
-    async def fake_compute_score(**kwargs: object):
-        seen.update(kwargs)
-        return SubScore(name="LLMJudgeGrader", value=1.0)
-
-    monkeypatch.setattr(env_module.LLMJudgeGrader, "compute_score", fake_compute_score)
-    criteria = [
-        env_module.Criterion(requirement="Recommends an interview.", weight=3),
-        env_module.Criterion(requirement="Invents an employer.", weight=-2),
-    ]
-
-    result = await env_module._grade("Hire her.", "Should we interview her?", criteria)
-
-    assert seen["criteria"] == [("Recommends an interview.", 3.0), ("Invents an employer.", -2.0)]
-    assert seen["answer"] == "Hire her."
-    assert seen["question"] == "Should we interview her?"
-    assert result.reward == pytest.approx(1.0)
-
-
-async def test_no_criteria_scores_zero_without_raising():
-    """An empty list is a misconfigured task, not a crashed rollout."""
-    result = await env_module._grade("Hire her.", "", [])
-    assert result.reward == pytest.approx(0.0)
-
-
-async def test_staging_directory_is_cleared_between_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """A prior task's leftovers (including symlinks) must not survive into staging."""
-
-    async def fake_compute_score(**kwargs: object):
-        return SubScore(name="LLMJudgeGrader", value=1.0)
-
-    async def fake_stage(refs, root: Path):
-        return []
-
-    monkeypatch.setattr(env_module.LLMJudgeGrader, "compute_score", fake_compute_score)
-    monkeypatch.setattr(env_module, "_stage", fake_stage)
-    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
-
-    files_dir = tmp_path / env_module.FILES_DIRNAME
-    files_dir.mkdir(parents=True)
-    (files_dir / "escape").symlink_to(tmp_path / "outside")
-
-    task = env_module.review_files.func(prompt="p", attachments=[], criteria=[])
-    await task.asend(None)
-
-    assert files_dir.is_dir()
-    assert list(files_dir.iterdir()) == []
-
-
-async def test_arguments_arrive_as_plain_json(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """A task run sends JSON, not model instances, so the template must validate."""
-    seen: dict[str, object] = {}
-
-    async def fake_compute_score(**kwargs: object):
-        seen.update(kwargs)
-        return SubScore(name="LLMJudgeGrader", value=1.0)
-
-    staged: list[env_module.DataFileRef] = []
-
-    async def fake_stage(
-        refs: list[env_module.DataFileRef],
-        root: Path,
-    ):
-        staged.extend(refs)
-        return [{"path": "files/resume.pdf", "file_id": refs[0].file_id}]
-
-    monkeypatch.setattr(env_module.LLMJudgeGrader, "compute_score", fake_compute_score)
-    monkeypatch.setattr(env_module, "_stage", fake_stage)
-    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
-    monkeypatch.setattr(env_module.settings, "api_key", None)
-
-    task = env_module.review_files.func(
-        prompt="Summarise the role.",
-        attachments=[{"file_id": "8b1f", "path": "resume.pdf"}],
-        criteria=[{"requirement": "Recommends an interview.", "weight": 2}],
-        hud_api_key="test-key",
-    )
-    frame = await task.asend(None)
-
-    # Each argument reached its model rather than staying a bare dict.
-    assert staged == [env_module.DataFileRef(file_id="8b1f", path="resume.pdf")]
-    assert "Summarise the role." in frame["prompt"]
-    assert frame["data_files"] == [{"path": "files/resume.pdf", "file_id": "8b1f"}]
-
-    # A task run sends the agent's final text, the same as a real grade call.
-    result = await task.asend("Hire her.")
-
-    assert seen["criteria"] == [("Recommends an interview.", 2.0)]
-    assert result.reward == pytest.approx(1.0)
-
-
-@pytest.mark.parametrize("fail_second", [False, True])
-async def test_concurrent_sessions_use_the_runtime_credential(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fail_second: bool
-):
-    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
-    monkeypatch.setattr(env_module.settings, "api_key", "process-key")
-    arrived = Barrier(2, timeout=5)
-    seen = {}
-
-    class Gateway(BaseHTTPRequestHandler):
-        def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            prompt = body["messages"][-1]["content"]
-            answer = prompt.split("<response>\n", 1)[1].split("\n</response>", 1)[0]
-            seen[answer] = self.headers["Authorization"]
-            arrived.wait()
-            assert env_module.settings.api_key == "process-key"
-            rejected = fail_second and answer == "second"
-            payload = json.dumps(
-                {"error": {"message": "judge rejected request"}}
-                if rejected
-                else {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": '{"criterion_status":"MET","explanation":"fixture"}',
-                            }
-                        }
-                    ]
-                }
-            ).encode()
-            self.send_response(400 if rejected else 200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-    first_task = env_module.review_files(
-        prompt="Give an answer.",
-        attachments=[],
-        criteria=[{"requirement": "An answer is present.", "weight": 1}],
-        hud_api_key="first-key",
-    )
-    second_task = first_task.model_copy(update={"args": {**first_task.args, "hud_api_key": "second-key"}})
-    with ThreadingHTTPServer(("127.0.0.1", 0), Gateway) as server:
-        monkeypatch.setattr(env_module.settings, "hud_gateway_url", f"http://127.0.0.1:{server.server_port}")
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            async with (
-                LocalRuntime(env_module.env)(first_task) as runtime,
-                connect(runtime) as first,
-                connect(runtime) as second,
-            ):
-                await first.start_task(first_task.id, first_task.args)
-                await second.start_task(second_task.id, second_task.args)
-                results = await asyncio.gather(
-                    first.grade({"answer": "first"}),
-                    second.grade({"answer": "second"}),
-                    return_exceptions=True,
-                )
-        finally:
-            server.shutdown()
-            thread.join()
-
-    assert seen == {"first": "Bearer process-key", "second": "Bearer process-key"}
-    assert env_module.settings.api_key == "process-key"
-    for index, result in enumerate(results):
-        if fail_second and index == 1:
-            assert isinstance(result, HudProtocolError)
-            assert "judge rejected request" in str(result)
-            continue
-        assert isinstance(result, dict)
-        assert result["score"] == 1.0
-        assert "first-key" not in json.dumps(result)
-        assert "second-key" not in json.dumps(result)
-
-
-async def test_file_staging_uses_the_runtime_credential(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    monkeypatch.setattr(env_module, "WORKSPACE_ROOT", tmp_path)
-    monkeypatch.setattr(env_module.settings, "api_key", "runtime-key")
-    monkeypatch.setattr(env_module.settings, "hud_api_url", "https://api.test")
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "storage.test":
-            assert "Authorization" not in request.headers
-            return httpx.Response(200, content=b"notes")
-        assert request.headers["Authorization"] == "Bearer runtime-key"
-        if request.url.path.endswith("/download"):
-            return httpx.Response(200, json={"url": "https://storage.test/notes.txt"})
-        return httpx.Response(200, json={"filename": "notes.txt"})
-
-    monkeypatch.setattr(
-        env_module.httpx,
-        "AsyncClient",
-        partial(
-            httpx.AsyncClient,
-            transport=httpx.MockTransport(handler),
-        ),
-    )
-    task = env_module.review_files.func(
-        prompt="Read the file.",
-        attachments=[{"file_id": "notes"}],
-        criteria=[],
+def row(attachments: list[dict] | None = None, criteria: list[dict] | None = None) -> Task:
+    return review_files(
+        prompt="Name three primes.",
+        attachments=attachments or [],
+        criteria=CRITERIA if criteria is None else criteria,
         hud_api_key="task-key",
     )
-    try:
-        frame = await anext(task)
-        assert frame["data_files"] == [{"path": "files/notes.txt", "file_id": "notes"}]
-        assert (tmp_path / "files/notes.txt").read_text() == "notes"
-        assert env_module.settings.api_key == "runtime-key"
-    finally:
-        await task.aclose()
+
+
+@asynccontextmanager
+async def served(task: Task):
+    """A fresh environment process serving ``task``, and a client connected to it."""
+    async with SubprocessRuntime(ENV_SOURCE)(task) as runtime, connect(runtime) as client:
+        yield client
+
+
+async def test_every_editable_argument_declares_its_hint():
+    async with served(row()) as client:
+        (template,) = await client.list_tasks()
+
+    arguments = template["args"]
+    hints = {name: spec.get("x-hud-hint") for name, spec in arguments["properties"].items()}
+    assert hints == {
+        "prompt": "prompt",
+        "attachments": "data-files",
+        "criteria": "grading",
+        "hud_api_key": None,
+    }
+    assert "hud_api_key" not in arguments["required"]
+    # The console resolves the attachment reference through $defs.
+    assert arguments["properties"]["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
+    assert "file_id" in arguments["$defs"]["DataFileRef"]["properties"]
+
+
+async def test_attachments_are_staged_with_the_runtime_key_and_declared(platform, workspace):
+    platform.upload("notes", "notes.txt", b"three primes")
+    platform.upload("report", "report.pdf", b"%PDF")
+    task = row(attachments=[{"file_id": "notes", "path": "reading/notes.md"}, {"file_id": "report"}])
+
+    async with served(task) as client:
+        started = await client.start_task(task.id, task.args)
+
+    assert started["data_files"] == [
+        {"path": "files/reading/notes.md", "file_id": "notes"},
+        {"path": "files/report.pdf", "file_id": "report"},
+    ]
+    assert "- files/reading/notes.md\n- files/report.pdf" in started["prompt"]
+    assert started["prompt"].endswith("Name three primes.")
+    assert (workspace / "files/reading/notes.md").read_bytes() == b"three primes"
+    assert (workspace / "files/report.pdf").read_bytes() == b"%PDF"
+    assert {item.authorization for item in platform.requests("GET", "/v2/data")} == {"Bearer runtime-key"}
+    # The presigned URL carries its own credentials; the key never goes to storage.
+    assert {item.authorization for item in platform.requests("GET", "/storage")} == {None}
+
+
+@pytest.mark.parametrize(
+    ("upload", "attachment", "message"),
+    [
+        pytest.param(
+            {"filename": "notes.txt"},
+            {"file_id": "notes", "path": "../escape.md"},
+            "unsafe data file path",
+            id="hostile-destination",
+        ),
+        pytest.param(
+            {"filename": "../../escape.md"},
+            {"file_id": "notes"},
+            "unsafe data file path",
+            id="hostile-uploaded-filename",
+        ),
+        pytest.param(
+            {"filename": "..\\escape.md"},
+            {"file_id": "notes"},
+            "unsafe data file path",
+            id="backslash-filename",
+        ),
+        pytest.param(None, {"file_id": "notes"}, "GET /v2/data/notes failed: 404", id="unknown-file"),
+        pytest.param(
+            {"filename": "notes.txt", "downloadable": False},
+            {"file_id": "notes"},
+            "has no download url",
+            id="no-download-url",
+        ),
+    ],
+)
+async def test_a_file_that_cannot_be_staged_fails_the_start_before_anything_is_written(
+    upload, attachment, message, platform, workspace
+):
+    if upload is not None:
+        platform.upload("notes", **upload)
+    task = row(attachments=[attachment])
+
+    async with served(task) as client:
+        with pytest.raises(HudProtocolError) as failure:
+            await client.start_task(task.id, task.args)
+
+    assert message in failure.value.message
+    assert platform.requests("GET", "/storage") == []
+    assert list((workspace / "files").rglob("*")) == []
+    assert not (workspace / "escape.md").exists()
+
+
+async def test_staging_without_a_hud_key_fails_the_start(monkeypatch, platform):
+    monkeypatch.setenv("HUD_API_KEY", "")
+    platform.upload("notes", "notes.txt")
+    task = row(attachments=[{"file_id": "notes"}])
+
+    async with served(task) as client:
+        with pytest.raises(HudProtocolError) as failure:
+            await client.start_task(task.id, task.args)
+
+    assert "HUD_API_KEY is unset" in failure.value.message
+    assert platform.received == []
+
+
+async def test_a_previous_task_leaves_nothing_in_the_files_directory(workspace):
+    files = workspace / "files"
+    files.mkdir(parents=True)
+    (files / "escape").symlink_to(workspace.parent / "outside")
+    task = row()
+
+    async with served(task) as client:
+        started = await client.start_task(task.id, task.args)
+
+    assert started["data_files"] == []
+    assert "- (none)" in started["prompt"]
+    assert list(files.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("criteria", "score", "judged"),
+    [
+        pytest.param(
+            CRITERIA,
+            1.0,
+            [
+                ("positive", "Names exactly three primes."),
+                ("positive", "Explains each one."),
+                ("negative", "Calls a composite number prime."),
+            ],
+            id="weighted-criteria",
+        ),
+        pytest.param([], 0.0, [], id="no-criteria"),
+    ],
+)
+async def test_the_criteria_reach_the_judge_unchanged(criteria, score, judged, platform):
+    task = row(criteria=criteria)
+
+    async with served(task) as client:
+        await client.start_task(task.id, task.args)
+        grade = await client.grade({"answer": "2, 3 and 5"})
+
+    assert grade["score"] == pytest.approx(score)
+    prompts = [item.body["messages"][-1]["content"] for item in platform.requests("POST", "/")]
+    assert sorted(
+        (prompt.split("<criterion_type>\n")[1].split("\n")[0], prompt.split("<criterion>\n")[1].split("\n")[0])
+        for prompt in prompts
+    ) == sorted(judged)
+    assert all("<response>\n2, 3 and 5\n</response>" in prompt for prompt in prompts)
+    assert {item.authorization for item in platform.requests("POST", "/")} <= {"Bearer runtime-key"}
+
+
+@pytest.mark.parametrize("rejected", [set(), {"second"}], ids=["both-graded", "one-judge-rejects"])
+async def test_concurrent_sessions_grade_with_the_runtime_key(rejected, platform):
+    platform.rejected_answers = rejected
+    platform.judging = threading.Barrier(2)
+    first = row(criteria=[{"requirement": "An answer is present.", "weight": 1}])
+    second = first.model_copy(update={"args": {**first.args, "hud_api_key": "second-key"}})
+
+    async with (
+        SubprocessRuntime(ENV_SOURCE)(first) as runtime,
+        connect(runtime) as one,
+        connect(runtime) as two,
+    ):
+        await one.start_task(first.id, first.args)
+        await two.start_task(second.id, second.args)
+        grades = await asyncio.gather(
+            one.grade({"answer": "first"}), two.grade({"answer": "second"}), return_exceptions=True
+        )
+
+    assert {item.authorization for item in platform.requests("POST", "/")} == {"Bearer runtime-key"}
+    assert grades[0]["score"] == 1.0
+    if rejected:
+        assert isinstance(grades[1], HudProtocolError)
+        assert "judge rejected request" in grades[1].message
+    else:
+        assert grades[1]["score"] == 1.0
+    assert "task-key" not in str(grades) and "second-key" not in str(grades)
