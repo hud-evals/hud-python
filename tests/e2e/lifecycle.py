@@ -1,8 +1,15 @@
-"""What a cleanly completed task lifecycle looks like in a run's step spans."""
+"""Capped rollouts: the scripted answers they get and what a clean lifecycle leaves in the spans."""
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import TYPE_CHECKING, Any
+
+from tests.harness import say
+
+if TYPE_CHECKING:
+    from tests.harness import ModelRequest, Turn
+    from tests.harness.cli import Result
 
 # Tool steps may fail without failing the run: a real model can call a tool badly.
 LIFECYCLE_SOURCES = {"task", "agent", "system"}
@@ -27,3 +34,17 @@ def assert_clean_lifecycle(steps: list[dict[str, Any]]) -> tuple[dict[str, Any],
     assert isinstance(grade["score"], int | float), grade
     assert 0 <= grade["score"] <= 1, grade
     return setup, grade
+
+
+def scripted(request: ModelRequest) -> Turn:
+    """The agent answers at once; the LLM judge finds every criterion met."""
+    if request.protocol == "chat":
+        return say(json.dumps({"criterion_status": "MET", "explanation": "scripted judge"}))
+    return say("done")
+
+
+def evaluated(result: Result) -> dict[str, Any]:
+    assert result.exit_code == 0, result
+    assert result.json["error_count"] == 0, result
+    (run,) = result.json["runs"]
+    return run

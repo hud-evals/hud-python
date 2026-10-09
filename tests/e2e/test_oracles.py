@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -80,6 +80,7 @@ async def test_an_oracle_scores_one_only_through_its_whole_path(
     models.respond(oracle.answer)
     source = ORACLES / f"{oracle.module}.py"
 
+    run: dict[str, Any]
     if entry == "hud-eval":
         result = hud("eval", str(source), *EVAL_ARGS)
         assert result.exit_code == 0, result
