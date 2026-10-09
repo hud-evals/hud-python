@@ -44,6 +44,7 @@ from hud.utils import gateway
 from .images import image_source
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from .tools.computer import ClaudeComputerTool
+from .tools.hosted import ClaudeToolSearchTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
 
 if TYPE_CHECKING:
@@ -296,7 +297,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         }
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
-        tools = cast("list[BetaToolUnionParam]", list(state.params))
+        tools = self._defer_for_tool_search(cast("list[BetaToolUnionParam]", list(state.params)))
         system = system_prompt if system_prompt is not None else Omit()
         is_bedrock = isinstance(self.anthropic_client, AsyncAnthropicBedrock)
 
@@ -370,6 +371,27 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             raise ValueError("Claude response missing after retries")
 
         return self.message_to_agent_step(response, citations_enabled=citations_enabled)
+
+    def _defer_for_tool_search(self, tools: list[BetaToolUnionParam]) -> list[BetaToolUnionParam]:
+        """Defer custom tools to tool search once there are more than its threshold."""
+        search = next(
+            (
+                hosted
+                for hosted in self.config.hosted_tools
+                if isinstance(hosted, ClaudeToolSearchTool)
+                and hosted.supports_model(self.config.model)
+            ),
+            None,
+        )
+        custom = [tool for tool in tools if "type" not in tool or tool["type"] == "custom"]
+        if search is None or len(custom) <= search.threshold:
+            return tools
+        return [
+            cast("BetaToolUnionParam", {**tool, "defer_loading": True})
+            if "type" not in tool or tool["type"] == "custom"
+            else tool
+            for tool in tools
+        ]
 
     @classmethod
     def message_to_agent_step(
