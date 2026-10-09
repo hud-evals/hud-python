@@ -6,6 +6,11 @@ to a log; then it answers from the first rule whose regex matches the argv
 joined by spaces. Tests add rules ahead of the defaults with :meth:`FakeDocker.on`.
 :meth:`FakeDocker.images` adds an image store that answers ``version``,
 ``build``, ``compose build|pull`` and ``image inspect`` between the two.
+
+A rule given a ``rootfs`` directory emulates ``docker cp`` and ``docker exec``
+instead of answering: ``<rootfs>/<container>`` stands in for each container's
+filesystem, ``cp`` copies between it and the host, and ``exec`` runs the
+command on the host with its absolute-path arguments moved under it.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ if TYPE_CHECKING:
     import pytest
 
 SCRIPT = """#!{python}
-import json, os, pathlib, re, runpy, sys, time
+import json, os, pathlib, re, runpy, shutil, subprocess, sys, time
 
 state = pathlib.Path(os.environ["FAKE_DOCKER_STATE"])
 argv = sys.argv[1:]
@@ -33,11 +38,45 @@ for flag, value in zip(argv, argv[1:]):
 with (state / "calls.jsonl").open("a") as log:
     log.write(json.dumps({{"argv": argv, "files": files}}) + "\\n")
 joined = " ".join(argv)
+
+
+def inside(root, reference):
+    container, _, path = reference.partition(":")
+    return root / container / path.lstrip("/")
+
+
+def emulate(root):
+    if argv[0] == "cp":
+        source, target = (
+            inside(root, item) if re.match(r"^[^:/]+:/", item) else pathlib.Path(item)
+            for item in argv[-2:]
+        )
+        if argv[-2].endswith("/."):
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        else:
+            if target.is_dir():
+                target = target / source.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source, target)
+        return 0
+    index = 1
+    while argv[index].startswith("-"):
+        index += 2 if argv[index] in ("--user", "-u", "--env", "-e", "--workdir", "-w") else 1
+    container_root = root / argv[index]
+    command = [
+        str(container_root / item.lstrip("/")) if item.startswith("/") else item
+        for item in argv[index + 1 :]
+    ]
+    return subprocess.run(command, check=False).returncode
+
+
 rules = json.loads((state / "rules.json").read_text())
 for default in (False, True):
     for rule in rules:
         if rule.get("default", False) == default and re.search(rule["match"], joined):
             time.sleep(rule["delay"])
+            if rule.get("rootfs"):
+                sys.exit(emulate(pathlib.Path(rule["rootfs"])))
             sys.stdout.write(rule["stdout"])
             sys.stderr.write(rule["stderr"])
             sys.exit(rule["exit"])
@@ -170,9 +209,22 @@ class FakeDocker:
         stderr: str = "",
         exit: int = 0,
         delay: float = 0.0,
+        rootfs: Path | None = None,
     ) -> None:
-        """Answer invocations whose argv matches the regex ``match``; newest rules win."""
-        self._rule(match, stdout=stdout, stderr=stderr, exit=exit, delay=delay, default=False)
+        """Answer invocations whose argv matches the regex ``match``; newest rules win.
+
+        With ``rootfs``, a matching ``cp`` or ``exec`` runs against container
+        filesystems under that directory instead of answering.
+        """
+        self._rule(
+            match,
+            stdout=stdout,
+            stderr=stderr,
+            exit=exit,
+            delay=delay,
+            rootfs=rootfs,
+            default=False,
+        )
 
     def images(
         self,
@@ -212,6 +264,7 @@ class FakeDocker:
         stderr: str = "",
         exit: int = 0,
         delay: float = 0.0,
+        rootfs: Path | None = None,
         default: bool,
     ) -> None:
         self._rules.insert(
@@ -222,6 +275,7 @@ class FakeDocker:
                 "stderr": stderr,
                 "exit": exit,
                 "delay": delay,
+                "rootfs": str(rootfs) if rootfs is not None else None,
                 "default": default,
             },
         )
