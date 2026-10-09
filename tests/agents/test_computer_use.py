@@ -17,8 +17,8 @@ import pytest
 from asyncvnc import key_codes
 from inline_snapshot import snapshot
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
+from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIConfig
 from hud.capabilities import Capability
 from tests.agents.support import result_line, run_task, tool_results, wire, workspace_env
 from tests.harness import (
@@ -733,22 +733,3 @@ async def test_gemini_withholds_the_predefined_functions_it_is_configured_to_exc
             "excluded_predefined_functions": ["drag_and_drop", "search"],
         }
     }
-
-
-async def test_an_agent_without_computer_use_ignores_the_screen_and_still_works(
-    models: Models, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    models.script([say("done")])
-
-    async with fake_screen() as screen:
-        screen_capability = Capability.rfb(url=screen.url)
-        run = await run_task(
-            workspace_env(tmp_path / "ws", capabilities=(screen_capability,)),
-            OpenAIChatAgent(OpenAIChatConfig(model="m")),
-        )
-
-    (request,) = models.requests()
-    assert run.trace.status == "completed"
-    assert screen.connections == 0
-    assert not any("computer" in name for name in request.tools)

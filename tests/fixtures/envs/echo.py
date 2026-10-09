@@ -1,4 +1,4 @@
-"""The agent repeats a word: a reward of 1 proves the prompt reached it and its answer the grader."""
+"""The agent repeats a word: a reward of 1 proves the prompt and the answer both arrived."""
 
 from __future__ import annotations
 
