@@ -1,149 +1,277 @@
+"""``hud task``: list a source's tasks, start one for its prompt, grade an answer."""
+
+from __future__ import annotations
+
 import asyncio
 import json
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from typer.testing import CliRunner
+from dirty_equals import IsStr
+from inline_snapshot import snapshot
 
-from hud.cli import task as task_module
-from hud.cli.__main__ import app
-from hud.eval import Task, Taskset
+from hud import Environment
+from hud.clients import connect
+from hud.eval import LocalRuntime, Task
+from tests.harness import scrub
+
+if TYPE_CHECKING:
+    from tests.harness import Hud
+
+ENV_PY = """\
+from hud import Environment
+
+env = Environment("example")
 
 
-@pytest.mark.parametrize("override", [None, {}])
-async def test_source_resolves_authored_task_for_existing_runtime(tmp_path, override):
-    authored = Task(
-        env="coding",
-        id="coding-task",
-        slug="flask-4992",
-        args={"description": "Fix Flask", "test_script": "pytest"},
+@env.template(id="solve")
+async def solve(target: str = "answer"):
+    answer = yield f"Say {target}."
+    yield 1.0 if answer == target else 0.0
+"""
+ROWS = [
+    {"env": "example", "id": "solve", "slug": "say-answer"},
+    {"env": "example", "id": "solve", "slug": "say-hello", "args": {"target": "hello"}},
+]
+
+
+@pytest.fixture
+def project(hud: Hud) -> Any:
+    """An env with a Python task source (``tasks.py``) and authored rows (``tasks.json``)."""
+    (hud.cwd / "env.py").write_text(ENV_PY)
+    (hud.cwd / "tasks.py").write_text(
+        'from env import solve\ntasks = [solve(), solve(target="hello")]\n'
     )
-    source = Taskset("authored", [authored]).to_file(tmp_path / "tasks.json")
-
-    task_id, args, placement = task_module._resolve(
-        "flask-4992",
-        str(source),
-        "tcp://127.0.0.1:9000",
-        override,
-    )
-
-    assert task_id == "coding-task"
-    assert args == (authored.args if override is None else override)
-    async with placement as runtime:
-        assert runtime.url == "tcp://127.0.0.1:9000"
+    (hud.cwd / "tasks.json").write_text(json.dumps(ROWS))
+    return hud.cwd
 
 
-async def test_url_without_source_uses_raw_task_and_args(monkeypatch):
-    def fail(cls, source):
-        raise AssertionError(f"unexpected task source: {source}")
+@pytest.mark.parametrize(
+    ("argv", "stdout"),
+    [
+        (["--source", "tasks.json"], 'say-answer\tsolve\nsay-hello\tsolve {"target": "hello"}\n'),
+        (["--source", "tasks.json", "--quiet"], "say-answer\nsay-hello\n"),
+        (
+            ["-s", "tasks.py"],
+            snapshot("""\
+solve	solve
+solve-8da35614	solve {"target": "hello"}
+"""),
+        ),
+    ],
+)
+def test_task_list_prints_slug_id_and_args(
+    hud: Hud, project: Any, argv: list[str], stdout: str
+) -> None:
+    result = hud("task", "list", *argv)
 
-    monkeypatch.setattr(Taskset, "from_file", classmethod(fail))
-
-    task_id, args, placement = task_module._resolve(
-        "coding-task",
-        None,
-        "tcp://127.0.0.1:9000",
-        {"description": "Fix Flask"},
-    )
-
-    assert task_id == "coding-task"
-    assert args == {"description": "Fix Flask"}
-    async with placement as runtime:
-        assert runtime.url == "tcp://127.0.0.1:9000"
-
-
-async def test_task_source_uses_sibling_environment_for_start_and_grade(tmp_path, monkeypatch):
-    import sys
-
-    from hud.clients import connect
-
-    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
-    monkeypatch.delitem(sys.modules, "env", raising=False)
-    (tmp_path / "env.py").write_text(
-        'from hud import Environment\nenv = Environment("example")\n'
-        '@env.template(id="solve")\nasync def solve():\n'
-        '    answer = yield "question"\n    yield 1.0 if answer == "answer" else 0.0\n'
-    )
-    source = tmp_path / "tasks.py"
-    source.write_text("from env import solve\n\ntasks = [solve()]\n")
-    try:
-        task_id, args, placement = task_module._resolve("solve", str(source), None, {})
-        async with placement as runtime, connect(runtime) as client:
-            await client.start_task(task_id, args)
-            result = await client.grade({"answer": "answer"})
-    finally:
-        sys.modules.pop("env", None)
-    assert result["score"] == 1.0
+    assert (result.exit_code, result.stdout) == (0, stdout)
 
 
-@pytest.mark.parametrize("mode", ["empty", "parked", "failed_grade", "ambiguous"])
-async def test_grade_only_starts_when_no_task_is_in_progress(mode):
-    from hud.clients import connect
-    from hud.environment import Environment
-    from hud.eval import LocalRuntime
+def test_task_list_json_is_one_entry_per_task(hud: Hud, project: Any) -> None:
+    result = hud("task", "list", "--source", "tasks.json", "--json")
 
-    env = Environment("grading")
-    starts = 0
+    assert result.exit_code == 0, result
+    assert result.json == [
+        {"slug": "say-answer", "id": "solve", "args": {}},
+        {"slug": "say-hello", "id": "solve", "args": {"target": "hello"}},
+    ]
 
-    @env.template()
-    async def solve():
-        nonlocal starts
-        starts += 1
-        yield "question"
-        if mode == "failed_grade":
+
+@pytest.mark.parametrize(
+    ("argv", "stdout"),
+    [
+        (["start", "say-hello", "--source", "tasks.json"], "Say hello.\n"),
+        (["start", "1", "--source", "tasks.py"], "Say hello.\n"),
+        (["grade", "say-hello", "--source", "tasks.json", "--answer", "hello"], "1.0\n"),
+        (["grade", "say-hello", "--source", "tasks.json", "--answer", "nope"], "0.0\n"),
+        (["grade", "0", "-s", "tasks.py", "--answer-file", "answer.txt"], "1.0\n"),
+        (["grade", "say-answer", "-s", "tasks.json", "--answer-file", "-"], "1.0\n"),
+        (["grade", "0", "-s", "tasks.py", "--args", '{"target": "x"}', "--answer", "x"], "1.0\n"),
+    ],
+)
+def test_a_task_spawned_from_its_source_starts_and_grades(
+    hud: Hud, project: Any, argv: list[str], stdout: str
+) -> None:
+    (project / "answer.txt").write_text("answer")
+
+    result = hud("task", *argv, input="answer")
+
+    assert (result.exit_code, result.stdout) == (0, stdout), result
+
+
+def test_task_start_json_is_the_start_frame(hud: Hud, project: Any) -> None:
+    result = hud("task", "start", "say-answer", "--source", "tasks.json", "--json")
+
+    assert result.exit_code == 0, result
+    assert result.json["prompt"] == "Say answer."
+
+
+@pytest.mark.parametrize(
+    ("argv", "exit_code", "document"),
+    [
+        (
+            ["start", "solve", "--source", "tasks.json"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": "Ambiguous task 'solve'; use a unique slug shown by hud task list.",
+                }
+            ),
+        ),
+        (
+            ["start", "missing", "--source", "tasks.json"],
+            1,
+            snapshot(
+                {
+                    "error": "not_found",
+                    "message": "No task matching 'missing' (available: solve)",
+                    "input": {"task": "missing", "source": "tasks.json"},
+                    "suggestion": "Run 'hud task list' to see available slugs.",
+                }
+            ),
+        ),
+        (
+            ["grade", "solve", "--args", "[]"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": "--args must be a JSON object",
+                    "input": {"args": "[]"},
+                }
+            ),
+        ),
+        (
+            ["grade", "solve", "--args", "{bad"],
+            2,
+            snapshot(
+                {
+                    "error": "usage",
+                    "message": (
+                        "--args must be valid JSON: Expecting property name enclosed in double "
+                        "quotes: line 1 column 2 (char 1)"
+                    ),
+                    "input": {"args": "{bad"},
+                    "suggestion": 'Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
+                }
+            ),
+        ),
+        (
+            ["grade", "say-answer", "-s", "tasks.json", "--answer-file", "no.txt"],
+            1,
+            snapshot(
+                {
+                    "error": "not_found",
+                    "message": "File not found: no.txt",
+                    "input": {"path": "no.txt"},
+                    "suggestion": "Check the path, or pass - to read from stdin.",
+                }
+            ),
+        ),
+        (
+            ["start", "solve", "--source", "empty.json"],
+            1,
+            snapshot(
+                {
+                    "error": "not_found",
+                    "message": "No tasks found in empty.json",
+                    "input": {"source": "empty.json"},
+                }
+            ),
+        ),
+    ],
+)
+def test_task_errors_are_documents(
+    hud: Hud, project: Any, argv: list[str], exit_code: int, document: dict[str, Any]
+) -> None:
+    (project / "empty.json").write_text("[]")
+
+    result = hud("task", *argv, "--json")
+
+    assert result.exit_code == exit_code, result
+    assert json.loads(scrub(result.stdout, project)) == document
+
+
+# ─── attached to a served environment ───────────────────────────────────
+
+
+def counting_env(starts: list[str], *, failing: bool = False) -> Environment:
+    env = Environment("example")
+
+    @env.template(id="solve")
+    async def solve(target: str = "answer"):
+        starts.append(target)
+        answer = yield f"Say {target}."
+        if failing:
             raise ValueError("grader failed")
-        yield 1.0
+        yield 1.0 if answer == target else 0.0
 
-    async with LocalRuntime(env)(Task(env="grading", id="solve")) as runtime:
-        for _ in range(2 if mode == "ambiguous" else int(mode != "empty")):
+    return env
+
+
+@pytest.mark.parametrize(
+    ("parked", "failing", "starts", "document"),
+    [
+        pytest.param(0, False, 1, {"score": 1.0}, id="starts-when-nothing-is-parked"),
+        pytest.param(1, False, 1, {"score": 1.0}, id="resumes-a-parked-session"),
+        pytest.param(
+            1,
+            True,
+            1,
+            {"error": "failure", "message": "hud rpc error -32000: grader failed"},
+            id="grader-error",
+        ),
+        pytest.param(
+            2,
+            False,
+            2,
+            {
+                "error": "failure",
+                "message": IsStr(
+                    regex=r"hud rpc error -32600: 2 parked sessions \(sess-\w+, sess-\w+\); "
+                    r"resume one by sending hello with its session_id"
+                ),
+            },
+            id="ambiguous-parked-sessions",
+        ),
+    ],
+)
+async def test_grade_resumes_a_started_task_on_a_served_env(
+    hud: Hud, parked: int, failing: bool, starts: int, document: dict[str, Any]
+) -> None:
+    started: list[str] = []
+    async with LocalRuntime(counting_env(started, failing=failing))(
+        Task(env="example", id="solve")
+    ) as runtime:
+        for _ in range(parked):
             async with connect(runtime) as client:
                 await client.start_task("solve", {})
         result = await asyncio.to_thread(
-            CliRunner().invoke,
-            app,
-            ["task", "grade", "solve", "--url", runtime.url, "--json"],
-        )
-    assert starts == (2 if mode == "ambiguous" else 1)
-    if mode in {"empty", "parked"}:
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.stdout)["score"] == 1.0
-    else:
-        assert result.exit_code != 0
-        assert (
-            "grader failed" in result.output
-            if mode == "failed_grade"
-            else "2 parked sessions" in result.output
+            hud, "task", "grade", "solve", "--url", runtime.url, "--answer", "answer", "--json"
         )
 
-
-async def test_json_source_spawns_the_env_beside_it(tmp_path, monkeypatch):
-    from hud.clients import connect
-
-    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
-    (tmp_path / "env.py").write_text(
-        'from hud import Environment\nenv = Environment("example")\n'
-        '@env.template(id="solve")\nasync def solve():\n'
-        '    answer = yield "question"\n    yield 1.0 if answer == "answer" else 0.0\n'
-    )
-    source = Taskset(
-        "authored",
-        [Task(env="example", id="solve", slug="solve")],
-    ).to_file(tmp_path / "tasks.json")
-
-    task_id, args, placement = task_module._resolve("solve", str(source), None, None)
-    async with placement as runtime, connect(runtime) as client:
-        await client.start_task(task_id, args)
-        result = await client.grade({"answer": "answer"})
-    assert result["score"] == 1.0
+    assert result.exit_code == ("error" in document), result
+    assert len(started) == starts
+    assert {key: result.json[key] for key in document} == document
 
 
-def test_task_id_matching_multiple_rows_requires_unique_slug(tmp_path):
-    source = Taskset(
-        "authored",
-        [
-            Task(env="example", id="solve", slug="first"),
-            Task(env="example", id="solve", slug="second"),
-        ],
-    ).to_file(tmp_path / "tasks.json")
-    result = CliRunner().invoke(app, ["task", "start", "solve", "--source", str(source), "--json"])
-    assert result.exit_code == 2
-    assert "Ambiguous task" in json.loads(result.stdout)["message"]
+@pytest.mark.parametrize(
+    ("argv", "target"),
+    [
+        (["--source", "tasks.json"], "hello"),
+        (["--source", "tasks.json", "--args", "{}"], "answer"),
+        (["--args", '{"target": "hello"}'], "hello"),
+    ],
+)
+async def test_a_url_runs_the_task_a_source_names_or_the_raw_id(
+    hud: Hud, project: Any, argv: list[str], target: str
+) -> None:
+    started: list[str] = []
+    task = "say-hello" if "--source" in argv else "solve"
+    async with LocalRuntime(counting_env(started))(Task(env="example", id="solve")) as runtime:
+        result = await asyncio.to_thread(hud, "task", "start", task, "--url", runtime.url, *argv)
+
+    assert (result.exit_code, result.stdout) == (0, f"Say {target}.\n"), result
+    assert started == [target]
