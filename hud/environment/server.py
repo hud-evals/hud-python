@@ -581,8 +581,9 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
         print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
-        async with server:
-            await server.serve_forever()
+        # The bound server is already accepting. Not serve_forever(): cancelling it
+        # waits for open connections to close, and only _shutdown() closes them.
+        await asyncio.Event().wait()
     finally:
         if server is not None:
             await _shutdown(server)
