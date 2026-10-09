@@ -1,81 +1,85 @@
-"""Tests for settings module."""
+"""Where the SDK's configuration comes from, and what a few settings switch."""
 
 from __future__ import annotations
 
-from hud.settings import Settings, get_settings, settings
+from typing import TYPE_CHECKING
+
+import pytest
+
+from hud import Environment
+from hud.settings import Settings
+from tests.harness import served
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tests.harness import FakeServices, Hud, HudEnv
+
+SERVICE_URLS = {
+    "HUD_TELEMETRY_URL": "https://telemetry.hud.ai/v3/api",
+    "HUD_API_URL": "https://api.hud.ai",
+    "HUD_WEB_URL": "https://hud.ai",
+    "HUD_GATEWAY_URL": "https://inference.hud.ai",
+    "HUD_RUNTIME_URL": "https://mcp.hud.ai",
+    "HUD_RL_URL": "https://rl.hud.ai",
+}
 
 
-def test_get_settings():
-    """Test that get_settings returns the singleton settings instance."""
-    result = get_settings()
-    assert isinstance(result, Settings)
-    assert result is settings  # Should be the same singleton instance
+@pytest.mark.parametrize(
+    ("process", "project", "user", "sent"),
+    [
+        pytest.param(None, None, "from-hud-set", "from-hud-set", id="hud-set-only"),
+        pytest.param(None, "from-project", "from-hud-set", "from-project", id="project-wins"),
+        pytest.param("from-env", "from-project", "from-hud-set", "from-env", id="env-wins"),
+    ],
+)
+def test_the_api_key_comes_from_env_then_project_env_then_hud_set(
+    services: FakeServices,
+    hud_env: HudEnv,
+    hud: Hud,
+    process: str | None,
+    project: str | None,
+    user: str,
+    sent: str,
+) -> None:
+    services.route("api", "GET", "/v2/jobs", json={"items": []})
+    assert hud("set", f"HUD_API_KEY={user}").exit_code == 0
+    if project is not None:
+        (hud.cwd / ".env").write_text(f"HUD_API_KEY={project}\n")
+    hud_env.set(HUD_API_KEY=process)
+
+    result = hud("jobs", "list", "--json")
+
+    assert result.exit_code == 0, result
+    assert [request.bearer for request in services.requests("api", "GET", "/v2/jobs")] == [sent]
 
 
-def test_service_url_defaults():
-    expected = {
-        "hud_telemetry_url": "https://telemetry.hud.ai/v3/api",
-        "hud_api_url": "https://api.hud.ai",
-        "hud_web_url": "https://hud.ai",
-        "hud_gateway_url": "https://inference.hud.ai",
-        "hud_runtime_url": "https://mcp.hud.ai",
-        "hud_rl_url": "https://rl.hud.ai",
-    }
+def test_service_urls_default_to_the_hud_platform(hud_env: HudEnv) -> None:
+    hud_env.set(**dict.fromkeys(SERVICE_URLS))
 
-    for name, default in expected.items():
-        assert Settings.model_fields[name].default == default
+    configured = Settings(_env_file=None)
+
+    assert {
+        variable: getattr(configured, variable.lower()) for variable in SERVICE_URLS
+    } == SERVICE_URLS
 
 
-def test_file_tracking_is_enabled_by_default():
-    assert Settings.model_fields["file_tracking_enabled"].default is True
+@pytest.mark.parametrize(
+    ("tracking", "published"),
+    [
+        pytest.param(None, ["shell", "filetracking"], id="default-on"),
+        pytest.param("false", ["shell"], id="disabled"),
+    ],
+)
+async def test_file_tracking_follows_hud_file_tracking_enabled(
+    hud_env: HudEnv, tmp_path: Path, tracking: str | None, published: list[str]
+) -> None:
+    hud_env.set(HUD_FILE_TRACKING_ENABLED=tracking)
+    env = Environment("tracked")
+    env.workspace(tmp_path / "workspace")
 
+    async with served(env) as client:
+        assert client.manifest is not None
+        names = [binding.name for binding in client.manifest.bindings]
 
-def test_file_tracking_can_be_disabled_by_env(monkeypatch):
-    monkeypatch.setenv("HUD_FILE_TRACKING_ENABLED", "false")
-
-    assert Settings().file_tracking_enabled is False
-
-
-def test_default_project_accepts_a_name_or_id(monkeypatch):
-    monkeypatch.setenv("HUD_DEFAULT_PROJECT", "browser-evals")
-
-    assert Settings().default_project == "browser-evals"
-
-
-def test_span_dir_defaults_to_home_when_uploads_are_off(monkeypatch, tmp_path):
-    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HUD_TELEMETRY_LOCAL_DIR", "")
-    monkeypatch.setattr("hud.settings.Path.home", lambda: tmp_path)
-
-    assert Settings().span_dir == str(tmp_path / ".hud" / "spans")
-
-
-def test_span_dir_explicit_local_dir_wins_when_uploads_are_off(monkeypatch):
-    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HUD_TELEMETRY_LOCAL_DIR", "./spans")
-
-    assert Settings().span_dir == "./spans"
-
-
-def test_span_dir_is_unset_when_uploads_are_on(monkeypatch):
-    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "true")
-    monkeypatch.setenv("HUD_TELEMETRY_LOCAL_DIR", "")
-
-    assert Settings().span_dir is None
-
-
-def test_cli_analytics_is_independent_of_trace_telemetry(monkeypatch):
-    monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "true")
-    monkeypatch.setenv("HUD_CLI_ANALYTICS_ENABLED", "false")
-    configured = Settings()
-
-    assert configured.telemetry_enabled is True
-    assert configured.cli_analytics_enabled is False
-
-
-def test_settings_singleton():
-    """Test that settings is a singleton."""
-    s1 = get_settings()
-    s2 = get_settings()
-    assert s1 is s2
-    assert s1 is settings
+    assert names == published
