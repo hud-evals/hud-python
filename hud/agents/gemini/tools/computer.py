@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 GEMINI_DRAG_INSET = 25
+#: Gemini places every coordinate on a 1000x1000 grid regardless of the screen size.
+GEMINI_COORDINATE_SCALE = 1000
 IS_MAC = platform.system().lower() == "darwin"
 
 PREDEFINED_COMPUTER_USE_FUNCTIONS = (
@@ -80,20 +82,20 @@ class GeminiComputerTool(RFBTool):
             return await self.screenshot()
 
         if action == "click_at":
-            await self.click(args.get("x"), args.get("y"))
+            await self.click(*self._point(args))
             return await self.screenshot()
 
         if action == "hover_at":
-            x, y = args.get("x"), args.get("y")
+            x, y = self._point(args)
             if x is not None and y is not None:
-                await self.move(int(x), int(y))
+                await self.move(x, y)
             return await self.screenshot()
 
         if action == "type_text_at":
-            x, y = args.get("x"), args.get("y")
+            x, y = self._point(args)
             if x is not None and y is not None:
-                await self.move(int(x), int(y))
-                await self.click(int(x), int(y))
+                await self.move(x, y)
+                await self.click(x, y)
             if args.get("clear_before_typing", True):
                 select_all = ["Super_L", "a"] if IS_MAC else ["Control_L", "a"]
                 delete_key = "BackSpace" if IS_MAC else "Delete"
@@ -118,14 +120,8 @@ class GeminiComputerTool(RFBTool):
                 sx = magnitude
             elif direction == "left":
                 sx = -magnitude
-            x = args.get("x") if action == "scroll_at" else None
-            y = args.get("y") if action == "scroll_at" else None
-            await self.scroll(
-                int(x) if x is not None else None,
-                int(y) if y is not None else None,
-                scroll_x=sx,
-                scroll_y=sy,
-            )
+            x, y = self._point(args) if action == "scroll_at" else (None, None)
+            await self.scroll(x, y, scroll_x=sx, scroll_y=sy)
             return await self.screenshot()
 
         if action == "wait_5_seconds":
@@ -180,21 +176,31 @@ class GeminiComputerTool(RFBTool):
             return await self.screenshot()
 
         if action == "drag_and_drop":
-            max_coord = max(self.display_width, self.display_height)
 
-            def clamp(v: Any) -> int:
-                if not isinstance(v, int | float):
-                    return 0
-                return min(max(int(v), GEMINI_DRAG_INSET), max_coord - GEMINI_DRAG_INSET)
+            def inset(value: Any, size: int) -> int:
+                pixel = self._pixel(value if isinstance(value, int | float) else 0, size)
+                return min(max(pixel, GEMINI_DRAG_INSET), size - GEMINI_DRAG_INSET)
 
+            width, height = self.display_width, self.display_height
             path = [
-                (clamp(args.get("x")), clamp(args.get("y"))),
-                (clamp(args.get("destination_x")), clamp(args.get("destination_y"))),
+                (inset(args.get("x"), width), inset(args.get("y"), height)),
+                (inset(args.get("destination_x"), width), inset(args.get("destination_y"), height)),
             ]
             await self.drag(path)
             return await self.screenshot()
 
         return tool_err(f"Unknown Gemini computer action: {action}")
+
+    @staticmethod
+    def _pixel(value: float, size: int) -> int:
+        """Map a coordinate on Gemini's normalized 0-999 grid onto a ``size``-pixel axis."""
+        return int(value / GEMINI_COORDINATE_SCALE * size)
+
+    def _point(self, args: dict[str, Any]) -> tuple[int | None, int | None]:
+        x, y = args.get("x"), args.get("y")
+        if x is None or y is None:
+            return None, None
+        return self._pixel(x, self.display_width), self._pixel(y, self.display_height)
 
 
 __all__ = ["GEMINI_COMPUTER_SPEC", "PREDEFINED_COMPUTER_USE_FUNCTIONS", "GeminiComputerTool"]
