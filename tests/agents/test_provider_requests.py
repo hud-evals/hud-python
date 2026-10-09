@@ -26,14 +26,14 @@ from hud.agents.gemini.tools import (
 from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from tests.agents.support import image, mcp_server, run_task, wire, workspace_env
-from tests.harness import call, say, shell_call, steps
+from tests.harness import Turn, call, say, shell_call, steps
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from hud.agents.base import Agent
-    from tests.harness import HudEnv, Models, Turn
+    from tests.harness import HudEnv, ModelRequest, Models
 
 
 @dataclass(frozen=True)
@@ -1053,3 +1053,143 @@ async def test_an_invalid_hosted_tool_fails_the_run_before_any_request(
 
     assert (run.trace.status, run.trace.error) == ("error", error)
     assert models.requests() == []
+
+
+def request_options(request: ModelRequest) -> dict[str, Any]:
+    """A Chat Completions request without its conversation and tool list."""
+    return {key: value for key, value in request.body.items() if key not in {"messages", "tools"}}
+
+
+TRAINING = {
+    "token-ids-continue-the-kv-cache": (
+        OpenAIChatConfig(
+            model="qwen3.6-plus",
+            completion_kwargs={"extra_body": {"return_token_ids": True}, "temperature": 0.2},
+        ),
+        [
+            Turn(
+                tool_calls=call("bash", command="true").tool_calls,
+                extra={"prompt_token_ids": [1, 2], "token_ids": [3]},
+            ),
+            Turn(text="done", extra={"prompt_token_ids": [1, 2, 3, 4], "token_ids": [5]}),
+        ],
+        snapshot(
+            [
+                {
+                    "model": "qwen3.6-plus",
+                    "logprobs": True,
+                    "stream": False,
+                    "temperature": 0.2,
+                    "return_token_ids": True,
+                },
+                {
+                    "model": "qwen3.6-plus",
+                    "logprobs": True,
+                    "stream": False,
+                    "temperature": 0.2,
+                    "return_token_ids": True,
+                    "prompt_token_ids": [1, 2, 3],
+                    "continuation_from": 2,
+                },
+            ]
+        ),
+    ),
+    "multimodal-prompt-chunks-reset-the-continuation": (
+        OpenAIChatConfig(
+            model="qwen3.6-plus", completion_kwargs={"extra_body": {"return_token_ids": True}}
+        ),
+        [
+            Turn(
+                tool_calls=call("bash", command="true").tool_calls,
+                extra={"prompt_chunks": [{"type": "text", "text": "hi"}], "token_ids": [3]},
+            ),
+            say("done"),
+        ],
+        snapshot(
+            [
+                {
+                    "model": "qwen3.6-plus",
+                    "logprobs": True,
+                    "stream": False,
+                    "return_token_ids": True,
+                },
+                {
+                    "model": "qwen3.6-plus",
+                    "logprobs": True,
+                    "stream": False,
+                    "return_token_ids": True,
+                },
+            ]
+        ),
+    ),
+    "checkpoint-routes-in-the-body": (
+        OpenAIChatConfig(model="qwen3.6-plus", checkpoint="ckpt-7"),
+        [say("done")],
+        snapshot([{"model": "qwen3.6-plus", "stream": False, "checkpoint": "ckpt-7"}]),
+    ),
+    "reserved-completion-kwargs-are-dropped": (
+        OpenAIChatConfig(
+            model="qwen3.6-plus",
+            completion_kwargs={
+                "model": "other",
+                "stream": True,
+                "tools": [],
+                "messages": [],
+                "max_tokens": 50,
+            },
+        ),
+        [say("done")],
+        snapshot([{"model": "qwen3.6-plus", "max_tokens": 50, "stream": False}]),
+    ),
+}
+
+
+@pytest.mark.parametrize(("config", "turns", "expected"), TRAINING.values(), ids=TRAINING.keys())
+async def test_chat_completion_options_reach_every_request(
+    config: OpenAIChatConfig,
+    turns: list[Turn],
+    expected: Any,
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script(turns)
+
+    await run_task(workspace_env(tmp_path / "ws"), OpenAIChatAgent(config))
+
+    assert [request_options(request) for request in models.requests()] == expected
+
+
+CITATIONS = {
+    "openai": (
+        lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6", citations_enabled=True)),
+        lambda request: request.body.get("include"),
+        snapshot(["web_search_call.action.sources"]),
+    ),
+    "gemini": (
+        lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", citations_enabled=True)),
+        lambda request: [
+            tool for tool in request.body["tools"] if "functionDeclarations" not in tool
+        ],
+        snapshot([{"googleSearch": {}}]),
+    ),
+}
+
+
+@pytest.mark.parametrize(("agent", "part", "expected"), CITATIONS.values(), ids=CITATIONS.keys())
+async def test_citations_ask_the_provider_for_sources(
+    agent: Callable[[], Agent],
+    part: Callable[[ModelRequest], Any],
+    expected: Any,
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("done")])
+
+    await run_task(workspace_env(tmp_path / "ws"), agent())
+
+    (request,) = models.requests()
+    assert part(request) == expected
