@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from weakref import WeakValueDictionary
 
 from hud.utils.process import (
+    OUTPUT_DRAIN_TIMEOUT,
     create_process_group_exec,
     finish_output,
     output_writer,
@@ -219,37 +220,50 @@ class SubprocessRuntime:
         try:
             from hud.environment.server import PORT_ANNOUNCEMENT
 
-            port = None
-            line_continues = False
             write_stdout, finish_stdout = output_writer(
                 sys.stdout,
                 capture=lambda text: output_tail.append(text.strip()[-1024:]),
             )
+
+            async def read_port() -> int | None:
+                """The port the child announces, or ``None`` once stdout ends without one."""
+                line_continues = False
+                while True:
+                    eof = False
+                    try:
+                        line = await output.readuntil()
+                    except asyncio.LimitOverrunError as exc:
+                        line = await output.read(exc.consumed)
+                        line_continues = True
+                    except asyncio.IncompleteReadError as exc:
+                        line = exc.partial
+                        eof = True
+                    if not line:
+                        return None
+                    if not line_continues:
+                        text = line.decode("utf-8", "replace").strip()
+                        if text.startswith(PORT_ANNOUNCEMENT):
+                            return int(text.removeprefix(PORT_ANNOUNCEMENT))
+                    write_stdout(line)
+                    line_continues = not line.endswith(b"\n")
+                    if eof:
+                        return None
+
+            reading = asyncio.create_task(read_port())
+            exited = asyncio.create_task(proc.wait())
             try:
                 async with asyncio.timeout(self.ready_timeout):
-                    while True:
-                        eof = False
-                        try:
-                            line = await output.readuntil()
-                        except asyncio.LimitOverrunError as exc:
-                            line = await output.read(exc.consumed)
-                            line_continues = True
-                        except asyncio.IncompleteReadError as exc:
-                            line = exc.partial
-                            eof = True
-                        if not line:
-                            break
-                        if not line_continues:
-                            text = line.decode("utf-8", "replace").strip()
-                            if text.startswith(PORT_ANNOUNCEMENT):
-                                port = int(text.removeprefix(PORT_ANNOUNCEMENT))
-                                break
-                        write_stdout(line)
-                        line_continues = not line.endswith(b"\n")
-                        if eof:
-                            break
+                    await asyncio.wait((reading, exited), return_when=asyncio.FIRST_COMPLETED)
+                    if not reading.done():
+                        # The child exited without announcing a port, and a process
+                        # it started may still hold stdout open: take what is there.
+                        await asyncio.wait((reading,), timeout=OUTPUT_DRAIN_TIMEOUT)
             finally:
+                exited.cancel()
+                reading.cancel()
+                await asyncio.gather(reading, exited, return_exceptions=True)
                 finish_stdout()
+            port = None if reading.cancelled() else reading.result()
             if port is None:
                 # Stdout ends as the child exits; give it a moment to be reaped
                 # so the error reports its exit code rather than a closed pipe.
