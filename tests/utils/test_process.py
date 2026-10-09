@@ -100,8 +100,8 @@ async def test_stream_output_keeps_draining_after_sink_failure() -> None:
 async def test_a_child_outside_the_group_cannot_hold_completion_open() -> None:
     child = shlex.quote(sys.executable)
     result = await asyncio.wait_for(
-        _run(f"{child} -c 'import os, time; os.setsid(); time.sleep(2)' & echo retained"),
-        1,
+        _run(f"{child} -c 'import os, time; os.setsid(); time.sleep(30)' & echo retained"),
+        10,
     )
 
     assert result.returncode == 0
