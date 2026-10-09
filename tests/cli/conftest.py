@@ -16,12 +16,16 @@ if TYPE_CHECKING:
 API_KEY = "sk-hud-test"
 USER_ID = "11111111-1111-4111-8111-111111111111"
 TEAM_ID = "22222222-2222-4222-8222-222222222222"
+WEB_URL = "https://hud.example"
 
 
 @pytest.fixture
 def platform(services: FakeServices, hud_env: HudEnv) -> FakeServices:
-    """The fake platform with a signed-in user: a HUD key and ``GET /auth/me``."""
-    hud_env.set(HUD_API_KEY=API_KEY)
+    """The fake platform with a signed-in user: a HUD key and ``GET /auth/me``.
+
+    The web app is only printed as links, so it keeps a fixed address.
+    """
+    hud_env.set(HUD_API_KEY=API_KEY, HUD_WEB_URL=WEB_URL)
     services.route("api", "GET", "/v2/auth/me", json={"user_id": USER_ID, "team_id": TEAM_ID})
     return services
 
