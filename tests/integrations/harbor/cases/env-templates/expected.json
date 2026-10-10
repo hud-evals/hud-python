@@ -1,0 +1,44 @@
+{
+  "failures": [],
+  "projects": {
+    "env-templates-<h1>": {
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "templated",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "env-templates-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "templated"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/templated/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

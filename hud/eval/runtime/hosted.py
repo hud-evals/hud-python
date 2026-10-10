@@ -211,7 +211,12 @@ class HostedRuntime:
         return run
 
     async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> dict[str, Any]:
+        task = asyncio.current_task()
         while True:
+            # httpx can swallow a cancellation that lands mid-request, which
+            # would leave a timed-out or cancelled rollout polling forever.
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError
             state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
             if state.get("status") in _TERMINAL_TRACE_STATUSES:
                 return state

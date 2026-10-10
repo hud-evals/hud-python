@@ -1,0 +1,370 @@
+{
+  "failures": [],
+  "projects": {
+    "resources-and-budgets-<h1>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h2>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:resources-and-budgets-<h1>-<h3>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "cpu-only",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "resources-and-budgets-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "cpu-only"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/cpu-only/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "resources-and-budgets-<h4>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h2>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:resources-and-budgets-<h4>-<h5>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "windows-tpu",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "resources-and-budgets-<h4>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": {
+              "os": "windows",
+              "tpu": {
+                "topology": "2x2",
+                "type": "v5"
+              }
+            }
+          },
+          "slug": "windows-tpu"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/windows-tpu/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "resources-and-budgets-<h6>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h2>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:resources-and-budgets-<h6>-<h7>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "agent_config": {
+            "timeout_seconds": 28800.0
+          },
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "budget",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "resources-and-budgets-<h6>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": {
+              "startup_timeout_s": 901
+            },
+            "resources": null
+          },
+          "slug": "budget"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/budget/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "resources-and-budgets-<h8>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h2>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h2>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:resources-and-budgets-<h8>-<h9>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "gpu",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "resources-and-budgets-<h8>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": {
+              "cpu": 4.0,
+              "gpu": {
+                "count": 2,
+                "type": [
+                  "H100"
+                ]
+              },
+              "memory_mb": 8192,
+              "storage_mb": 32768
+            }
+          },
+          "slug": "gpu"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/gpu/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

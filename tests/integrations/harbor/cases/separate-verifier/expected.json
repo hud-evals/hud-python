@@ -1,0 +1,221 @@
+{
+  "failures": [],
+  "projects": {
+    "separate-verifier-<h1>": {
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [
+                {
+                  "service": "main",
+                  "source": "/tmp/agent.patch"
+                }
+              ],
+              "collect": [
+                {
+                  "command": "redis-cli save",
+                  "service": "redis",
+                  "timeout_sec": 10.0
+                }
+              ],
+              "description": "",
+              "id": "placement",
+              "separate_verifier": true,
+              "verifier_timeout": 30.0
+            }
+          },
+          "env": "separate-verifier-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": true
+            },
+            "limits": {
+              "startup_timeout_s": 600
+            },
+            "resources": {
+              "cpu": 2.0,
+              "memory_mb": 2048
+            }
+          },
+          "slug": "placement",
+          "verifier": {
+            "args": {
+              "task": {
+                "artifacts": [
+                  {
+                    "service": "main",
+                    "source": "/tmp/agent.patch"
+                  }
+                ],
+                "collect": [
+                  {
+                    "command": "redis-cli save",
+                    "service": "redis",
+                    "timeout_sec": 10.0
+                  }
+                ],
+                "description": "",
+                "id": "placement",
+                "separate_verifier": true,
+                "verifier_timeout": 30.0
+              }
+            },
+            "env": "separate-verifier-<h1>",
+            "id": "verify",
+            "runtime_config": {
+              "compose": {
+                "document": "compose.yaml",
+                "root": "."
+              },
+              "limits": {
+                "startup_timeout_s": 1200
+              },
+              "resources": {
+                "cpu": 4.0,
+                "gpu": {
+                  "count": 1,
+                  "type": [
+                    "T4"
+                  ]
+                },
+                "memory_mb": 1024
+              }
+            },
+            "slug": "placement:verify"
+          }
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/environment/docker-compose.yaml",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/verifier/Dockerfile",
+        "compose-project/verifier/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "separate-verifier-<h2>": {
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "plain",
+              "separate_verifier": true,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "separate-verifier-<h2>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "plain",
+          "verifier": {
+            "args": {
+              "task": {
+                "artifacts": [],
+                "collect": [],
+                "description": "",
+                "id": "plain",
+                "separate_verifier": true,
+                "verifier_timeout": 600.0
+              }
+            },
+            "env": "separate-verifier-<h2>",
+            "id": "verify",
+            "slug": "plain:verify"
+          }
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/environment/docker-compose.yaml",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/verifier/Dockerfile",
+        "compose-project/verifier/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "separate-verifier-<h3>": {
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "same-placement",
+              "separate_verifier": true,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "separate-verifier-<h3>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": {
+              "cpu": 4.0,
+              "memory_mb": 14336
+            }
+          },
+          "slug": "same-placement",
+          "verifier": {
+            "args": {
+              "task": {
+                "artifacts": [],
+                "collect": [],
+                "description": "",
+                "id": "same-placement",
+                "separate_verifier": true,
+                "verifier_timeout": 600.0
+              }
+            },
+            "env": "separate-verifier-<h3>",
+            "id": "verify",
+            "slug": "same-placement:verify"
+          }
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/verifier/Dockerfile",
+        "compose-project/verifier/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

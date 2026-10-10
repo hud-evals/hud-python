@@ -1,0 +1,3 @@
+services:
+  main:
+    image: ${HARBOR_JUDGE_KEY}

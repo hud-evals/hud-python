@@ -1,0 +1,3 @@
+services:
+  main:
+    env_file: ../../secret.env

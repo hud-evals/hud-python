@@ -1,0 +1,25 @@
+{
+  "builds": {
+    "implicit-main/environment/cache": {
+      "config": {
+        "ExposedPorts": {
+          "11211/tcp": {},
+          "11211/udp": {}
+        }
+      }
+    }
+  },
+  "pulls": {
+    "redis:7-alpine": {
+      "config": {
+        "ExposedPorts": {
+          "6379/tcp": {}
+        }
+      }
+    },
+    "busybox:1.37": {}
+  },
+  "observe": [
+    "compose"
+  ]
+}

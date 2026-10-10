@@ -1,0 +1,125 @@
+{
+  "failures": [],
+  "projects": {
+    "source-builds-and-volumes-<h1>": {
+      "compose.yaml": {
+        "networks": {},
+        "services": {
+          "database": {
+            "build": {
+              "context": "./compose-project/environment/database"
+            },
+            "env_file": "./compose-project/environment/database/db.env",
+            "environment": {},
+            "expose": [
+              "5432"
+            ],
+            "image": "hud-harbor-sidecar:<h2>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/environment/database/data:/var/lib/postgresql/data"
+            ]
+          },
+          "hud-base": {
+            "build": {
+              "context": "./compose-project/environment"
+            },
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor-base:<h3>",
+            "ports": [],
+            "scale": 0,
+            "volumes": []
+          },
+          "main": {
+            "build": {
+              "additional_contexts": {
+                "hud-base": "service:hud-base"
+              },
+              "args": {
+                "BASE_IMAGE": "hud-base",
+                "HUD_REQUIREMENT": "hud",
+                "VERIFIER_IMAGE": "hud-harbor-base:<h3>"
+              },
+              "context": "./compose-project/main",
+              "target": "plain"
+            },
+            "command": [
+              "/controller/venv/bin/hud",
+              "serve",
+              "hud.integrations.harbor.env:env",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8765"
+            ],
+            "entrypoint": [],
+            "env_file": "./compose-project/environment/main.env",
+            "environment": {},
+            "expose": [],
+            "image": "hud-harbor:source-builds-and-volumes-<h1>-<h4>",
+            "ports": [],
+            "volumes": [
+              "./compose-project/environment/main-data:/mounts/0",
+              {
+                "read_only": true,
+                "source": "./compose-project/environment/readonly",
+                "target": "/mounts/1",
+                "type": "bind"
+              },
+              "outputs:/mounts/2",
+              "./compose-project/tests:/controller/tests:ro"
+            ]
+          }
+        },
+        "volumes": {
+          "outputs": {}
+        }
+      },
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "task-a",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "env": "source-builds-and-volumes-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "task-a"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/environment/database/Dockerfile",
+        "compose-project/environment/database/data/.keep",
+        "compose-project/environment/database/db.env",
+        "compose-project/environment/docker-compose.yaml",
+        "compose-project/environment/main-data/.keep",
+        "compose-project/environment/main.env",
+        "compose-project/environment/readonly/.keep",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/task-a/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    }
+  }
+}

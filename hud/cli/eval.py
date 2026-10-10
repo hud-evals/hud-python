@@ -21,7 +21,7 @@ from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlCons
 from rich import box
 from rich.table import Table
 
-from hud.cli import CLI, CliError, parse_key_value
+from hud.cli import CLI, CliError, Result, parse_key_value
 from hud.eval import (
     DaytonaRuntime,
     DockerRuntime,
@@ -196,7 +196,7 @@ def eval_command(
         "--remote",
         help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
-) -> dict[str, Any]:
+) -> dict[str, Any] | Result:
     """Run evaluation on datasets or individual tasks with agents.
 
     A tasks file (tasks.py, a directory, or JSON/JSONL beside its env source) runs
@@ -525,8 +525,8 @@ def eval_command(
     if job.runs and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"{settings.hud_web_url}/jobs/{UUID(job.id)}")
 
+    errors = set(map(id, job.errors))
     if job.runs:
-        errors = set(map(id, job.errors))
         hud_console.print(f"\n[bold]'{cfg.source}' Results[/bold]")
         hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
         hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
@@ -552,21 +552,23 @@ def eval_command(
             hud_console.print(details)
         hud_console.print()
 
-    return {
+    result = {
         "job_id": job.id,
         "source": cfg.source,
         "run_count": len(job.runs),
         "mean_reward": job.reward,
-        "error_count": len(job.errors),
+        "error_count": len(errors),
         "elapsed_seconds": elapsed,
         "runs": [
             {
                 "task_id": run.task_id,
                 "slug": run.slug,
                 "reward": run.reward,
-                "is_error": run.trace.is_error,
+                "is_error": id(run) in errors,
                 "trace_id": run.trace_id,
             }
             for run in job.runs
         ],
     }
+    # A low reward is a result; a run without a valid grade is a failure.
+    return Result(result) if errors else result

@@ -64,7 +64,6 @@ exclude = [
     "cookbooks/",
     "environments/",
     "hud-python/",
-    "hud/integrations/harbor/tests/",
     "**/checkpoints/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -96,7 +95,6 @@ include = [
     "/pyproject.toml"
 ]
 exclude = [
-    "*/tests/",
     "*/__pycache__/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -128,7 +126,7 @@ bedrock = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud[agents]",  # Include agents for dev
-    "hud[robot]",  # the robot end-to-end gates (hud/tests/test_robot.py) run the real wire
+    "hud[robot]",  # the robot end-to-end gates (tests/test_robot.py) run the real wire
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff==0.16.1",
@@ -136,6 +134,10 @@ dev = [
     "pytest-asyncio",
     "pytest-mock",
     "pytest-cov",
+    "pytest-xdist",
+    "pytest-timeout",
+    "inline-snapshot",
+    "dirty-equals",
     "ty==0.0.67",
 ]
 
@@ -172,7 +174,7 @@ train = [
 
 
 [tool.uv]
-required-version = "==0.12.2"
+required-version = ">=0.12.2"
 
 [tool.ruff]
 target-version = "py311"
@@ -230,7 +232,7 @@ docstring-code-format = true
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ty.src]
-include = ["hud"]
+include = ["hud", "tests"]
 
 [tool.ty.rules]
 blanket-ignore-comment = "error"
@@ -244,9 +246,6 @@ strict-equality-semantics = true
 
 [tool.coverage.run]
 source = ["hud"]
-omit = [
-    "*/tests/*",
-]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -263,15 +262,17 @@ exclude_lines = [
 ]
 show_missing = true
 fail_under = 58
-omit = [
-    "*/tests/*",
-]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud"]
-addopts = "-m 'not integration'"
+testpaths = ["tests"]
+addopts = "-m 'not e2e'"
+timeout = 120
 markers = [
-    "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
+    "e2e: needs something outside the test process; runs only when selected with -m",
+    "docker: needs a running Docker daemon",
+    "sandbox: needs Linux, root, and bubblewrap",
+    "live: needs a real HUD account (HUD_API_KEY) and spends credits",
+    "hosted: deploys to and runs on the HUD platform",
 ]

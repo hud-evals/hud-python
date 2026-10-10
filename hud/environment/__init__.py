@@ -91,7 +91,7 @@ def load_environment(
             raise ValueError(f"multiple Environments in {path}; select one by name")
         return next(iter(matched.values()))
 
-    if path.is_file() or "/" in str(target):
+    if path.suffix == ".py" or "/" in str(target):
         raise FileNotFoundError(f"no environment source at {target}")
     obj = getattr(importlib.import_module(str(target)), name or "env")
     env = obj if isinstance(obj, Environment) or not callable(obj) else obj(**args or {})

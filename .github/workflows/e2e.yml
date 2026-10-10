@@ -1,0 +1,103 @@
+name: E2E
+
+# Tests marked `e2e` need something outside the test process. Each job selects
+# the ones its runner can provide; they skip themselves when it cannot.
+
+on:
+  pull_request:
+    paths:
+      - "hud/**"
+      - "tests/**"
+      - "environments/**"
+      - "pyproject.toml"
+      - ".github/workflows/e2e.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Run Docker scenarios
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest -m "e2e and docker" -n 4 --timeout 1800 --durations 20
+
+  sandbox:
+    name: Sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Environments run in containers with HUD's seccomp profile, so the
+      # sandbox scenarios run there too, as root, with bubblewrap installed.
+      - name: Run sandbox scenarios in a container
+        run: >-
+          docker run --rm
+          --security-opt seccomp=hud/eval/docker-seccomp.json
+          --security-opt systempaths=unconfined
+          --security-opt apparmor=unconfined
+          --volume "$PWD:/src" --workdir /src
+          --env UV_PROJECT_ENVIRONMENT=/opt/venv
+          python:3.12-bookworm
+          sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client >/dev/null
+          && pip install -q "uv>=0.12.2"
+          && uv run --all-extras pytest -m "e2e and sandbox" -n 4 --timeout 600'
+
+  live:
+    name: Live
+    # Secrets are not available to pull requests from forks or Dependabot.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
+      HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Run live scenarios
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest -m "e2e and live and not hosted" -n 4 --timeout 1200 --durations 20
+
+  cookbooks:
+    name: Cookbooks
+    # Cookbooks live outside the package, so SDK changes can break them silently.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Check cookbooks
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest tests/e2e/test_cookbooks.py -m e2e -n 4 --timeout 1200 --durations 20

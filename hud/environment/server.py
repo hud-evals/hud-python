@@ -409,15 +409,16 @@ class _ControlChannel:
                         if not isinstance(task_id, str):
                             await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
                             continue
-                        args = params.get("args") or {}
+                        args = params.get("args")
+                        if args is None:
+                            args = {}
                         if not isinstance(args, dict):
                             await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
                             continue
-                        try:
-                            prompt = await self.start(session_id, task_id, args)
-                        except KeyError:
+                        if task_id not in env.tasks:
                             await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
                             continue
+                        prompt = await self.start(session_id, task_id, args)
                         try:
                             await reply_to(msg_id, prompt)
                         except FrameTooLargeError:
@@ -580,23 +581,45 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
         print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
-        async with server:
-            await server.serve_forever()
+        # The bound server is already accepting. Not serve_forever(): cancelling it
+        # waits for open connections to close, and only _shutdown() closes them.
+        await asyncio.Event().wait()
     finally:
         if server is not None:
             await _shutdown(server)
         await env.stop()
 
 
-async def _serve_until_terminated(env: Environment, host: str, port: int) -> None:
+async def serve_until_terminated(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
+    """``serve`` as a process's main task: SIGTERM stops it cleanly and it returns.
+
+    SIGTERM (a container stop, the spawn provider's teardown) ends serving the
+    way cancellation does, so shutdown hooks run and backing daemons don't
+    orphan. The handler is process-wide, so only entry points that own the
+    process call this.
+    """
     main_task = asyncio.current_task()
     assert main_task is not None
-    # SIGTERM (the spawn provider's teardown) cancels serving so env.stop()
-    # runs and backing daemons don't orphan. Not available on Windows loops.
+    loop = asyncio.get_running_loop()
+    terminated = False
+
+    def terminate() -> None:
+        nonlocal terminated
+        terminated = True
+        main_task.cancel()
+
+    # Signal handlers are not available on Windows loops.
     with contextlib.suppress(NotImplementedError):
-        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
-    with contextlib.suppress(asyncio.CancelledError):
+        loop.add_signal_handler(signal.SIGTERM, terminate)
+    try:
         await serve(env, host, port)
+    except asyncio.CancelledError:
+        if not terminated:
+            raise
+        main_task.uncancel()
+    finally:
+        with contextlib.suppress(NotImplementedError):
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 def main() -> None:
@@ -611,7 +634,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
     asyncio.run(
-        _serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
+        serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
     )
 
 

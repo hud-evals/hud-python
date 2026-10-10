@@ -107,28 +107,36 @@ def validate_rollout_timeouts(
     return agent_timeout
 
 
-def _prompt_message(item: Any) -> mcp_types.PromptMessage:
+def _prompt_messages(item: Any) -> list[mcp_types.PromptMessage]:
     """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
 
     Turns are env-authored: chat-style dicts (plain-string content wrapped as
     text, roles outside MCP's user/assistant vocabulary such as ``system``
     coerced to ``user``), already-built ``PromptMessage``s, or anything else
-    stringified. Coercion may be lossy — prompt context is what the agent is
-    given, and the verbatim payload stays on the setup ``task`` step's result.
+    stringified. A ``PromptMessage`` holds one content block, so a turn whose
+    content is a list of blocks becomes one message per block. Coercion may be
+    lossy — prompt context is what the agent is given, and the verbatim
+    payload stays on the setup ``task`` step's result.
     """
     if isinstance(item, mcp_types.PromptMessage):
-        return item
+        return [item]
     if not isinstance(item, dict):
         item = {"content": str(item)}
     raw_role = item.get("role")
     role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
     content = item.get("content")
     if isinstance(content, str):
-        return mcp_types.PromptMessage(
-            role=role,
-            content=mcp_types.TextContent(type="text", text=content),
-        )
-    return mcp_types.PromptMessage.model_validate({**item, "role": role})
+        return [
+            mcp_types.PromptMessage(
+                role=role,
+                content=mcp_types.TextContent(type="text", text=content),
+            )
+        ]
+    blocks = content if isinstance(content, list) else [content]
+    return [
+        mcp_types.PromptMessage.model_validate({**item, "role": role, "content": block})
+        for block in blocks
+    ]
 
 
 def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -280,11 +288,11 @@ class Run:
 
         The structured form agents consume and the opening ``user`` step
         records: a text prompt (or none) is one user turn; chat-style lists
-        map turn by turn.
+        map turn by turn, a turn of several blocks to one message per block.
         """
         if self.prompt is None or isinstance(self.prompt, str):
-            return [_prompt_message({"content": self.prompt or ""})]
-        return [_prompt_message(item) for item in self.prompt]
+            return _prompt_messages({"content": self.prompt or ""})
+        return [message for item in self.prompt for message in _prompt_messages(item)]
 
     @property
     def prompt_text(self) -> str:
@@ -395,7 +403,8 @@ class Run:
         runtime, partial trace) with the error recorded on the trace.
         """
         run = cls(None, "", {})
-        run.trace = Trace(status="error", steps=[Step(source="system", error=error)])
+        run.trace.status = "error"
+        run.record(Step(source="system", error=error))
         return run
 
 

@@ -249,53 +249,6 @@ class HUDConsole:
         else:
             console.print(f"  [{SECONDARY}]{command}[/{SECONDARY}]")
 
-    # Exception rendering utilities
-    def render_support_hint(self, stderr: bool = True) -> None:
-        """Render a standard support message for users encountering issues."""
-        support = (
-            "If this looks like an issue with the sdk, please make a github issue at "
-            "https://github.com/hud-evals/hud-python/issues"
-        )
-        self.info(support, stderr=stderr)
-
-    def render_exception(self, error: BaseException, *, stderr: bool = True) -> None:
-        """Render exceptions consistently using the HUD design system.
-
-        - Shows exception type and message
-        - Displays structured hints if present on the exception (e.g., HudException.hints)
-        - Prints a link to open an issue for SDK problems
-        """
-        from hud.utils.exceptions import HudRequestError  # lazy import: avoid import cycle
-
-        # Header with exception type
-        ex_type = type(error).__name__
-        message = getattr(error, "message", "") or str(error) or ex_type
-        self.error(f"{ex_type}: {message}", stderr=stderr)
-
-        # Specialized details for request errors
-        if isinstance(error, HudRequestError):
-            details: dict[str, str | int | float] = {}
-            if error.status_code is not None:
-                details["Status"] = str(error.status_code)
-            if error.response_text:
-                # Limit very long responses
-                text = error.response_text
-                details["Response"] = text[:500] + ("..." if len(text) > 500 else "")
-            if error.response_json and "Response" not in details:
-                details["Response JSON"] = str(error.response_json)
-            if details:
-                self.key_value_table(details, show_header=False, stderr=stderr)
-
-        # Structured hints, if available
-        hints = getattr(error, "hints", None)
-        if hints:
-            from hud.utils.hints import render_hints  # lazy import: avoid import cycle
-
-            render_hints(hints, design=self)
-
-        # Standard support hint
-        self.render_support_hint(stderr=stderr)
-
     @property
     def stdout(self) -> Console:
         return self._stdout_console

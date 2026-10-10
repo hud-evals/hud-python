@@ -1,0 +1,4 @@
+services:
+  main:
+    healthcheck:
+      test: [CMD-SHELL, a, b]

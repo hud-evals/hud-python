@@ -121,7 +121,7 @@ The adapter handles:
   that agent service;
 - the Compose variables Harbor defines (`CONTEXT_DIR`, `MAIN_IMAGE_NAME`,
   `CPUS`, `MEMORY`, `PREBUILT_IMAGE_NAME`) and literal
-  `[environment.env]` values, alongside the project `.env`;
+  `[environment.env]` values, which take precedence over the project `.env`;
 - Compose sidecars, including ones that expose no TCP ports;
 - HTTP MCP servers (`sse` and `streamable-http`), healthchecks, network modes,
   allowlists, phase users, environment variables, and placement requirements;
@@ -137,10 +137,13 @@ it can provision those requirements.
 stdio MCP servers and skills directories configure Harbor's own agents; the
 adapter accepts them and does not expose them to HUD agents.
 
-Unsupported declarations fail during adaptation. These include multi-step
-tasks, Compose variables only the host environment could supply, `include`,
-and `extends`. A project also fails if its main service has neither an image
-nor a valid build recipe.
+Unsupported declarations fail during adaptation with a finding of kind
+`contract`: multi-step tasks (`harbor.unsupported.multi_step`), Compose
+variables only the host environment could supply
+(`harbor.unsupported.host_compose_variable`), and Compose `include` and
+`extends` (`harbor.unsupported.compose_include_extends`). Malformed tasks fail
+with findings of kind `invalid`, such as a project whose main service has
+neither an image nor a valid build recipe.
 
 ## Export HUD tasks to Harbor
 

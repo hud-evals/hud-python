@@ -1,0 +1,9 @@
+{
+  "builds": {
+    "task-a/environment": {
+      "config": {
+        "WorkingDir": "/workspace"
+      }
+    }
+  }
+}

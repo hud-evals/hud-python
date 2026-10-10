@@ -159,4 +159,4 @@ def combine_all(weight: float, subscores: list[SubScore], *, name: str = "all") 
     return _boolean_subscore(name, weight, subscores, min(s.value for s in subscores))
 
 
-__all__ = ["_combine_subscores", "combine", "combine_all", "combine_any"]
+__all__ = ["combine", "combine_all", "combine_any"]
