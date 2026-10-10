@@ -90,20 +90,20 @@ DEFAULT_TIMEOUT_S = 60.0
 _FULL_TURN = 2.0 * math.pi
 
 #: An addressed scalar is reached within this fraction of its range, and at least this
-#: absolute gap. Orientation is reached within ``_REACH_RAD``. Motion counts as stopped
-#: once proprioception changes by less than ``_STILL_ABS`` for ``_STILL_TICKS`` ticks
-#: after it has moved.
+#: absolute gap. Orientation is reached within ``_REACH_RAD``. Once the final setpoint is
+#: playing, the arm has stopped when proprioception changes by less than ``_STILL_FRAC``
+#: of the widest action range for ``_STILL_TICKS`` ticks in a row.
 _REACH_FRAC = 0.01
 _REACH_ABS = 1e-3
 _REACH_RAD = 0.05
-_STILL_ABS = 1e-4
+_STILL_FRAC = 1e-4
 _STILL_TICKS = 2
 
 Content = list[TextContent | ImageContent]
 
 
 #: Longest ``wait``, in sim seconds.
-MAX_WAIT_S = 300.0
+MAX_WAIT_S = 100.0
 
 #: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
 #: reached), whether the safety cap clipped the rows, and the dimensions named.
@@ -169,8 +169,8 @@ class DirectControl:
     - ``time_limit`` - the episode's budget in sim seconds (default: none). Every
       reply reports the time remaining. Spending it ends the episode as sim
       termination does: the call in flight stops at the limit, later calls play
-      nothing, and replies say the episode has ended. :attr:`prompt` tells the
-      model about the limit.
+      nothing, and replies say the episode has ended. The motion and ``wait`` tool
+      descriptions tell the model about the limit; the episode prompt does not.
     - ``use_annotation`` - ask the model for a ``note`` on every call (default).
       Off, the tools take no ``note``.
     """
@@ -203,9 +203,11 @@ class DirectControl:
         self.notes = notes
         self.time_limit = time_limit
         self.use_annotation = use_annotation
-        #: Appended to the episode prompt so the model knows its budget.
-        self.prompt = (
-            f"\n\nYou have {time_limit:g} seconds of simulated time."
+        # Appended to the motion and wait tool descriptions when a limit is enforced.
+        self._budget = (
+            f" You have {time_limit:g} seconds of simulated time. Time passes only while the "
+            "robot moves or waits; thinking is free. When it runs out the episode ends and is "
+            "graded as it stands."
             if time_limit is not None
             else ""
         )
@@ -254,6 +256,7 @@ class DirectControl:
         self._low = np.asarray(bounds["min"], dtype=np.float64)
         self._high = np.asarray(bounds["max"], dtype=np.float64)
         self._rate = float(contract["control_rate"])
+        self._still = _STILL_FRAC * float(np.max(self._high - self._low))
         self._max_ticks = max(1, math.ceil(self.timeout * self._rate))
         self._limit_ticks = (
             None if self.time_limit is None else max(1, math.ceil(self.time_limit * self._rate))
@@ -289,7 +292,9 @@ class DirectControl:
         # 4. Serve the tools over loopback HTTP on a free port; publish them as an mcp capability.
         server = FastMCP(name=self.name)
         self._bind_tools(server)
-        server.add_tool(self._make_tool(self.wait, "wait", _WAIT, {"duration": _DURATION}))
+        server.add_tool(
+            self._make_tool(self.wait, "wait", _WAIT + self._budget, {"duration": _DURATION})
+        )
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -404,18 +409,21 @@ class DirectControl:
         if self._absolute:
             motion = (
                 "Move to absolute targets. Null dimensions hold their commanded value. "
-                "The motion is interpolated at a safe speed."
+                f"The motion is interpolated at a safe speed: {self.speed * 100:g}% of each "
+                f"range per second, so a full-range move takes about {1 / self.speed:g} s."
             )
         else:
             motion = (
-                "Move by a displacement. Null dimensions do not move. "
-                "The motion is split into steps within the per-step bounds."
+                "Move by a displacement, in the action's own components (a rotation is not "
+                "euler angles). Null dimensions do not move. The motion is split into steps "
+                f"within the per-step bounds, played at {self._rate:g} steps per second."
             )
         rotation = ""
         if self._orientations:
             rotation = (
                 " Orientation is intrinsic XYZ euler in radians (roll, pitch, yaw), "
-                "converted to the arm's rotation and interpolated on the shortest arc."
+                "converted to the arm's rotation and interpolated on the shortest arc, "
+                f"at {self.speed * 360:g} degrees per second."
             )
         annotation = (
             " Include a note saying what you see and why you chose the motion."
@@ -425,7 +433,7 @@ class DirectControl:
         return (
             f"{motion} {hold}{rotation} The call steps until the target is reached or the arm "
             f"stops, then returns the camera frames and the pose. It stops at {self.timeout:g} s "
-            f"if the motion has not finished.{annotation} {self.notes}"
+            f"if the motion has not finished.{self._budget}{annotation} {self.notes}"
         ).strip()
 
     def _addressable(self) -> tuple[dict[str, _Axis], list[str]]:
@@ -509,13 +517,12 @@ class DirectControl:
                 # Playback state, updated by step() each tick.
                 played = 0
                 finished = False
-                seen = False  # proprioception has moved at least once
-                still = 0  # consecutive ticks below the movement threshold
+                still = 0  # consecutive ticks at the final setpoint without movement
                 proprio = prev = self._proprio(obs)
 
                 async def step(row: NDArray[np.float64], *, check: bool) -> bool:
                     """Play one tick; return True when the call should stop."""
-                    nonlocal played, obs, finished, seen, still, prev, proprio
+                    nonlocal played, obs, finished, still, prev, proprio
                     await client.send_action(row)
                     obs = await client.get_observation()
                     await self._record(obs)
@@ -526,18 +533,14 @@ class DirectControl:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = np.asarray(row, dtype=np.float64).copy()
                     proprio = self._proprio(obs)
-                    # Track whether the arm has moved, and how many ticks it has been still since.
-                    if prev.size and proprio.shape == prev.shape:
-                        if float(np.max(np.abs(proprio - prev))) > _STILL_ABS:
-                            seen = True
-                            still = 0
-                        else:
-                            still += 1
+                    # Count quiet ticks at the final setpoint; an arm that never moved is quiet too.
+                    moved = proprio.size > 0 and float(np.max(np.abs(proprio - prev))) > self._still
+                    still = still + 1 if check and not moved else 0
                     prev = proprio
-                    # Done = arrived at the goal, or came to rest after moving.
+                    # Done = arrived at the goal, or at rest at the final setpoint.
                     if check and goal is not None and not obs["terminated"]:
-                        finished = self._reached(proprio, goal, named, blocks) or (
-                            seen and still >= _STILL_TICKS
+                        finished = (
+                            self._reached(proprio, goal, named, blocks) or still >= _STILL_TICKS
                         )
                     return bool(obs["terminated"] or finished)
 

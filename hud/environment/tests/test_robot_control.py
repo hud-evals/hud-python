@@ -197,6 +197,10 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert schema["properties"]["targets"]["required"] == ["x", "grip"]
     assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
+    assert (
+        "10% of each range per second, so a full-range move takes about 10 s"
+        in (agent.descriptions["move_to"])
+    )
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command, so the call returns when the target is reached.
@@ -224,6 +228,11 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert agent.tools == {"move_by", "wait"}
+    assert (
+        "action's own components (a rotation is not euler angles)"
+        in (agent.descriptions["move_by"])
+    )
+    assert "10 steps per second" in agent.descriptions["move_by"]
     # Four in-box steps, then two still ticks once the arm has stopped.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4 + [[0.0, 0.0]] * 2)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
@@ -454,18 +463,18 @@ async def test_wait_holds_the_commanded_pose_for_the_requested_sim_time() -> Non
 
 async def test_a_wait_longer_than_the_maximum_is_a_correctable_error() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("wait", {"duration": 301, "note": "sleep"}))
+    agent = _ScriptedLLM(("wait", {"duration": 101, "note": "sleep"}))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     (result,) = agent.results
     assert result.isError
-    assert "duration must be within [0, 300]" in _text(result)
+    assert "duration must be within [0, 100]" in _text(result)
     assert sim.actions == []
 
 
-async def test_the_time_limit_is_in_the_prompt_and_every_reply_reports_the_time_left() -> None:
+async def test_every_reply_reports_the_time_left_and_the_tools_state_the_limit() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(
         _move("move_to", x=0.2),
@@ -474,9 +483,11 @@ async def test_the_time_limit_is_in_the_prompt_and_every_reply_reports_the_time_
     )
 
     async with _served(sim, DirectControl(time_limit=10.0)) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert run.prompt_text.endswith("close the gripper\n\nYou have 10 seconds of simulated time.")
+    for tool in ("move_to", "wait"):
+        assert "You have 10 seconds of simulated time." in agent.descriptions[tool]
+        assert "thinking is free" in agent.descriptions[tool]
     moved, waited, looked = (_text(result) for result in agent.results)
     assert moved.startswith("Played 20 steps (2.0 s). Time remaining: 8.0 s.")
     assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 7.0 s.")
@@ -484,13 +495,18 @@ async def test_the_time_limit_is_in_the_prompt_and_every_reply_reports_the_time_
     assert "The episode has ended" not in looked
 
 
-async def test_the_prompt_is_the_sims_own_without_a_time_limit() -> None:
+@pytest.mark.parametrize("time_limit", [None, 10.0])
+async def test_the_prompt_is_the_sims_own_whatever_the_time_limit(time_limit: float | None) -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM()
 
-    async with _served(sim, DirectControl()) as env:
-        run = await rollout(Task(env="arm", id="reach"), _ScriptedLLM(), runtime=LocalRuntime(env))
+    async with _served(sim, DirectControl(time_limit=time_limit)) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert run.prompt == "move x to 0.5, then close the gripper"
+    # Only an enforced limit is disclosed, and only on the tools.
+    assert ("simulated time" in agent.descriptions["wait"]) == (time_limit is not None)
+    assert ("simulated time" in agent.descriptions["move_to"]) == (time_limit is not None)
 
 
 async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode() -> None:
@@ -521,6 +537,31 @@ async def test_a_new_episode_starts_with_the_whole_time_limit() -> None:
 
     assert "Time remaining: 1.0 s." in _text(first.results[0])
     assert "Time remaining: 1.0 s." in _text(second.results[0])
+
+
+class _Jitter(_Pose):
+    """An arm that never moves, whose sensor reads a little high then low on alternate ticks."""
+
+    def step(self, action: NDArray[Any]) -> None:
+        super().step(action)
+        self.state = self.home + 2e-5 * (-1) ** len(self.actions)
+
+
+@pytest.mark.parametrize("arm", [_Pose, _Jitter])
+async def test_an_arm_that_never_moves_stops_after_the_final_setpoint_not_at_the_timeout(
+    arm: type[_Pose],
+) -> None:
+    sim = arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], lag=0.0)
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    # The 50-tick move plays out; its last tick and one held tick are the two quiet ones.
+    assert len(sim.actions) == 51
+    text = _text(agent.results[0])
+    assert "safety timeout" not in text
+    assert "off: x=-0.5000" in text
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
