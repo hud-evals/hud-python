@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from hud.settings import settings
 from hud.utils.process import finish_output, stream_output
 
 from .compose import ComposeConfig
@@ -206,6 +207,16 @@ class ModalRuntime:
                 "ModalRuntime sandbox secrets require an image runtime; attaching them to "
                 "the outer Docker-in-Docker sandbox would not expose them to main"
             )
+        # The env process uploads its own telemetry (e.g. robot video), so it needs the
+        # client's credentials; caller-supplied env_vars take precedence.
+        env_vars = dict(self.env_vars)
+        if settings.telemetry_enabled and settings.api_key:
+            for name, value in (
+                ("HUD_API_KEY", settings.api_key),
+                ("HUD_API_URL", settings.hud_api_url),
+                ("HUD_TELEMETRY_URL", settings.hud_telemetry_url),
+            ):
+                env_vars.setdefault(name, value)
         compose_config = ComposeConfig.from_file(compose) if compose is not None else None
         port_service = compose_config.network_owner("main") if compose_config else "main"
         if compose is not None:
@@ -259,8 +270,8 @@ class ModalRuntime:
                 sandbox_kwargs["cpu"] = resources.cpu
             if resources is not None and resources.memory_mb is not None:
                 sandbox_kwargs["memory"] = resources.memory_mb
-            if self.env_vars:
-                sandbox_kwargs["env"] = self.env_vars
+            if env_vars:
+                sandbox_kwargs["env"] = env_vars
             if self.sandbox_secrets:
                 sandbox_kwargs["secrets"] = self.sandbox_secrets
         if resources is not None and resources.gpu is not None:
@@ -327,7 +338,7 @@ class ModalRuntime:
                     port_service=port_service,
                     seccomp="/hud/docker-seccomp.json",
                     service_socket=("/var/run/docker.sock" if project.service_access else None),
-                    env_vars=self.env_vars,
+                    env_vars=env_vars,
                     cpu=resources.cpu if resources is not None else None,
                     memory_mb=resources.memory_mb if resources is not None else None,
                     gpu_count=(

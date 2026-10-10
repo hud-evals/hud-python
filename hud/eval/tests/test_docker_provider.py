@@ -42,6 +42,7 @@ from hud.eval.runtime.compose import (
     ComposeService,
 )
 from hud.eval.task import Task
+from hud.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -1507,6 +1508,84 @@ async def test_modal_runtime_passes_env_vars_to_sandbox(
     assert isinstance(sandbox_kwargs, dict)
     assert sandbox_kwargs["image"] == _ModalImageRef("registry", "img:tag")
     assert sandbox_kwargs["env"] == {"TOKEN": "secret"}
+
+
+async def test_modal_runtime_forwards_hud_credentials_to_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    monkeypatch.setattr(settings, "telemetry_enabled", True)
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    monkeypatch.setattr(settings, "hud_api_url", "https://api.test")
+    monkeypatch.setattr(settings, "hud_telemetry_url", "https://telemetry.test/v3/api")
+    provider = ModalRuntime(runtime_config=RuntimeConfig(image="img:tag"), env_vars={"TOKEN": "t"})
+
+    async with provider(_row()):
+        pass
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["env"] == {
+        "TOKEN": "t",
+        "HUD_API_KEY": "hud-key",
+        "HUD_API_URL": "https://api.test",
+        "HUD_TELEMETRY_URL": "https://telemetry.test/v3/api",
+    }
+    assert provider.env_vars == {"TOKEN": "t"}
+
+
+async def test_modal_runtime_keeps_caller_hud_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    monkeypatch.setattr(settings, "telemetry_enabled", True)
+    monkeypatch.setattr(settings, "api_key", "client-key")
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(image="img:tag"), env_vars={"HUD_API_KEY": "caller-key"}
+    )
+
+    async with provider(_row()):
+        pass
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert sandbox_kwargs["env"]["HUD_API_KEY"] == "caller-key"
+
+
+@pytest.mark.parametrize(("telemetry_enabled", "api_key"), [(True, None), (False, "hud-key")])
+async def test_modal_runtime_forwards_no_credentials_without_telemetry_key(
+    monkeypatch: pytest.MonkeyPatch, telemetry_enabled: bool, api_key: str | None
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    monkeypatch.setattr(settings, "telemetry_enabled", telemetry_enabled)
+    monkeypatch.setattr(settings, "api_key", api_key)
+
+    async with ModalRuntime(runtime_config=RuntimeConfig(image="img:tag"))(_row()):
+        pass
+
+    sandbox_kwargs = calls["sandbox_kwargs"]
+    assert isinstance(sandbox_kwargs, dict)
+    assert "env" not in sandbox_kwargs
+
+
+async def test_modal_runtime_stages_hud_credentials_into_the_compose_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _install_fake_modal(monkeypatch)
+    monkeypatch.setattr(settings, "telemetry_enabled", True)
+    monkeypatch.setattr(settings, "api_key", "hud-key")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services:\n  main:\n    image: hud-env:one\n", encoding="utf-8")
+    provider = ModalRuntime(
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
+    )
+
+    async with provider(_row()):
+        pass
+
+    override = calls["compose_override"]
+    assert isinstance(override, dict)
+    assert override["services"]["main"]["environment"]["HUD_API_KEY"] == "hud-key"
 
 
 async def test_modal_runtime_streams_sandbox_output_to_terminal(
