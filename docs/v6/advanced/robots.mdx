@@ -603,14 +603,14 @@ The [contract](#contract) derives the tool surface:
 
 There is no `observe` tool. Every motion call returns the camera frames and the pose it
 ended on, so the model does not choose whether to look. The `wait` tool is the other call: it
-lets `duration` sim seconds pass (at most 300) while the robot holds its pose, and `duration`
-defaults to 0, which lets no time pass. So `wait` doubles as a no-op that shows the current state
-without moving. Each call is its own short connection on the `robot` wire, so the sim holds still
+lets `duration` sim seconds pass (at most 300) while the robot holds its pose, and a `duration` of
+`null` or 0 lets no time pass. So `wait` doubles as a no-op that shows the current state without
+moving. Each call is its own short connection on the `robot` wire, so the sim holds still
 while the model thinks. A call also takes a required `note`: what the model sees and why it chose
 the motion; `use_annotation=False` removes it. Every reply opens with
 `Played N steps (X s).`, plus ` Time remaining: Y s.` when the environment sets a `time_limit`.
 The episode ends when the model stops calling tools, or when the sim terminates or the time limit
-is spent; the reply then says so. The template grades it as usual.
+is spent, which is handled as sim termination; the reply then says so. The template grades it as usual.
 
 A call steps until the commanded target is reached or the arm
 stops moving, then returns the pose and how far it is from the command. `timeout` (default 60 s)
@@ -629,7 +629,7 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
-| `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining, and a call that would cross the limit is cut at it. Once it is spent calls play nothing and the reply says the episode has ended. `sim.reset` appends "You have N seconds of simulated time." to the prompt. |
+| `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining. Spending it ends the episode as sim termination does: the call in flight stops at the limit, later calls play nothing, and the reply says the episode has ended. `sim.reset` appends "You have N seconds of simulated time." to the prompt. |
 | `use_annotation` | `True` | Ask for a `note` on every call. `False` removes `note` from the tool schemas and never refuses an empty one. |
 
 <Note>
