@@ -67,7 +67,7 @@ from hud.telemetry.robot import TraceRecorder
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from fastmcp.tools.tool import ToolResult
+    from fastmcp.tools import ToolResult
     from numpy.typing import NDArray
 
     from hud.environment.robot.endpoint import RobotEndpoint
