@@ -1,6 +1,6 @@
 ---
 title: "Harbor interoperability"
-description: "Adapt Harbor tasks into runnable HUD tasksets and Compose artifacts, or export HUD tasks to Harbor folders."
+description: "Adapt Harbor tasks into runnable HUD tasksets and Compose artifacts, import Harbor tasks and job runs into HUD, or export HUD tasks to Harbor folders."
 icon: "ship"
 tag: "Experimental"
 ---
@@ -12,6 +12,8 @@ The **Harbor adapter** (`hud/integrations/harbor/`) translates between Harbor
 task directories and HUD's native `Environment`, `Task`, and `Taskset`
 contracts. `adapt()` packages Harbor tasks without publishing
 images. `export()` materializes HUD tasks as self-contained Harbor folders.
+`hud harbor import` brings Harbor tasks and the runs Harbor recorded into a HUD
+taskset, to browse and compare them on the platform without running them again.
 
 ## Adapt Harbor tasks
 
@@ -141,6 +143,76 @@ Unsupported declarations fail during adaptation. These include multi-step
 tasks, Compose variables only the host environment could supply, `include`,
 and `extends`. A project also fails if its main service has neither an image
 nor a valid build recipe.
+
+## Import into HUD
+
+`hud harbor import` copies Harbor task folders and job runs into a taskset, the way
+`harbor publish` and `harbor upload` send them to Harbor Hub:
+
+| Harbor | HUD |
+| --- | --- |
+| `harbor publish ./tasks` | `hud harbor import ./tasks --taskset <name>` |
+| `harbor upload ./jobs/<job>` | `hud harbor import ./jobs/<job> --taskset <name>` |
+
+One import can take both. The command zips the folders it is given, uploads the zip
+to your team's data store, and runs the platform's Harbor import on it into the
+taskset. It follows the import until it ends and prints a report of every task, job,
+and trial; `--no-wait` returns once the import starts, and `hud harbor report
+<run-id>` shows the report later. The taskset's **Imports** tab in the web app lists
+the same imports, and its **Import from Harbor** menu item takes the same zip.
+
+```bash
+hud harbor import ./terminal-bench ./jobs/2026-10-01__12-00 --taskset tb2
+```
+
+### What an import creates
+
+- **Tasks.** Each task folder (a folder holding `task.toml`, at any depth) becomes an
+  environment named after the folder (suffixed when your team already has an environment
+  of that name), created in the taskset's Project on first import, and a task of the
+  taskset. The environment's version is the folder's Harbor content
+  digest: importing the same content again changes nothing, and changed content becomes
+  the environment's next version, which its task moves to in every taskset you can
+  edit. `dataset.toml`
+  manifests are ignored; the task folders in a dataset folder import like any other.
+- **Jobs.** Each job folder (`config.json` and `result.json`, with a folder per trial)
+  becomes a HUD job marked as imported from Harbor. Each finished trial becomes a trace
+  of the task it ran: its `agent/trajectory.json` (ATIF) becomes the trace's steps, and
+  its `result.json` and verifier reward become the trace's outcome. Unfinished trials
+  are skipped.
+- **Links between runs and tasks.** A trial links to its task by the task digest in its
+  `lock.json`, or, for trials from Harbor versions without trial locks, by matching the
+  `task_checksum` in its `result.json` to a task folder in the same zip. A task the zip
+  does not hold is looked up among Harbor environments already in the taskset's Project,
+  so a job can be imported on its own after its tasks.
+
+Imported tasks are for browsing and comparing runs; HUD cannot run them. To run Harbor
+tasks on HUD, [adapt](#adapt-harbor-tasks) and deploy them.
+
+### Limits
+
+- The zip is at most 1 GiB (the CLI checks before uploading), with at most 200,000
+  entries and 8 GiB unpacked. Import a larger set in several runs into the same taskset.
+- You must be able to edit the taskset.
+- A team holds one Harbor environment per task folder name. A task folder whose
+  environment already exists in another Project fails, and two folders with the same
+  name but different content stop the import.
+- A taskset holds one task per name. A task found in HUD joins the taskset only if the
+  taskset has no task of that name, and a trial of another version of a task links only
+  if the taskset's task has held that version.
+- A trial without `lock.json` links only to a task folder in the same zip.
+
+### Report and reruns
+
+Every task, job, and trial ends `imported`, `unchanged` (already in HUD from an earlier
+import), `skipped`, or `failed`, and skipped or failed items carry the reason. A platform
+or storage failure stops the import; the report then names the step that failed and what
+was imported before it. Importing the same folders again resumes: environments, tasks,
+jobs, and traces are matched by digest and Harbor id instead of being created twice.
+
+`hud harbor import` exits `1` when the import did not complete (stopped, failed, or
+cancelled). Skipped and failed items are listed in the report and do not fail the
+command; `--json` returns the run and the full report for scripts.
 
 ## Export HUD tasks to Harbor
 
