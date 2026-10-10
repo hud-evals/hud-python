@@ -26,6 +26,7 @@ from hud.cli.jobs import cancel_job_command, jobs_app
 from hud.cli.models import models_app
 from hud.cli.project import project_app
 from hud.cli.qa import qa_app
+from hud.cli.regrade import regrade_app
 from hud.cli.serve import serve_command
 from hud.cli.sync import sync_app
 from hud.cli.task import task_app
@@ -284,6 +285,7 @@ app.add_typer(sync_app, name="sync")
 app.add_typer(qa_app, name="qa")
 app.add_typer(jobs_app, name="jobs")
 app.command(name="cancel", hidden=True, deprecated=True)(cancel_job_command)
+app.add_typer(regrade_app, name="regrade")
 app.add_typer(trace_app, name="trace")
 app.add_typer(models_app, name="models")
 app.command(name="set")(set_command)

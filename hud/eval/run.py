@@ -448,6 +448,7 @@ async def rollout(
     job_id: str | None = None,
     group_id: str | None = None,
     trace_id: str | None = None,
+    parent_trace_id: str | None = None,
     rollout_timeout: float | None = None,
     connections: Sequence[Connection] = (),
     workspace_routes: Sequence[WorkspaceRoute] = (),
@@ -498,7 +499,8 @@ async def rollout(
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
-    parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
+    if parent_trace_id is None:
+        parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
     if parent_trace_id is not None and normalize_trace_id(parent_trace_id) == normalize_trace_id(
         trace_id
     ):

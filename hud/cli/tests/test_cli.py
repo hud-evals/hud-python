@@ -654,6 +654,7 @@ def test_root_help_lists_nouns() -> None:
         "serve",
         "deploy",
         "eval",
+        "regrade",
         "task",
         "project",
         "sync",
