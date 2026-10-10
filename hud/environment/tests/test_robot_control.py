@@ -93,6 +93,22 @@ class _Arm(RobotBridge):
         return data, np.array([self.success])
 
 
+class _Sparse(dict[str, Any]):
+    """The dimensions a scripted call sets, by dotted name; the model nulls the rest."""
+
+
+def _nulled(schema: dict[str, Any], values: _Sparse) -> dict[str, Any]:
+    """``values`` laid out as the schema's ``targets``: every dimension listed, unset ones null."""
+    targets: dict[str, Any] = {}
+    for key, prop in schema["properties"].items():
+        if "anyOf" in prop:
+            leaves = {leaf: values.get(f"{key}.{leaf}") for leaf in prop["anyOf"][0]["properties"]}
+            targets[key] = leaves if any(v is not None for v in leaves.values()) else None
+        else:
+            targets[key] = values.get(key)
+    return targets
+
+
 class _ScriptedLLM(Agent):
     """Stands in for a tool-calling LLM: plays fixed MCP calls, keeps their results."""
 
@@ -101,6 +117,7 @@ class _ScriptedLLM(Agent):
         self.calls = calls
         self.tools: set[str] = set()
         self.schemas: dict[str, dict[str, Any]] = {}
+        self.descriptions: dict[str, str] = {}
         self.results: list[MCPToolResult] = []
 
     async def __call__(self, run: Run) -> None:
@@ -108,7 +125,16 @@ class _ScriptedLLM(Agent):
         listed = await client.list_tools()
         self.tools = {tool.name for tool in listed}
         self.schemas = {tool.name: tool.inputSchema for tool in listed}
+        self.descriptions = {tool.name: tool.description or "" for tool in listed}
         for name, arguments in self.calls:
+            properties = self.schemas[name]["properties"]
+            if isinstance(arguments.get("targets"), _Sparse):
+                arguments = {
+                    **arguments,
+                    "targets": _nulled(properties["targets"], arguments["targets"]),
+                }
+            if "note" not in properties:
+                arguments = {k: v for k, v in arguments.items() if k != "note"}
             self.results.append(await client.call_tool(name, arguments))
         run.trace.content = "done"
 
@@ -151,10 +177,7 @@ def _text(result: MCPToolResult) -> str:
 
 
 def _move(tool: str, **values: float) -> tuple[str, dict[str, Any]]:
-    """One required ``target`` plus any further dimensions in ``others``."""
-    items = [{"name": name, "value": value} for name, value in values.items()]
-    target, *others = items
-    return tool, {"target": target, "others": others, "note": "move toward the goal"}
+    return tool, {"targets": _Sparse(values), "note": "move toward the goal"}
 
 
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
@@ -167,11 +190,13 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
         run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert agent.tools == {"move_to"}  # the ee_abs contract picked the tool; no observe
+    assert agent.tools == {"move_to", "wait"}  # the ee_abs contract picked the motion tool
     schema = agent.schemas["move_to"]
-    assert set(schema["required"]) == {"target", "others", "note"}
-    strict = ensure_strict_json_schema(copy.deepcopy(schema))
-    assert "target" in strict["required"]  # survives strict mode, unlike minItems on a list
+    assert set(schema["required"]) == {"targets", "note"}
+    # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
+    assert schema["properties"]["targets"]["required"] == ["x", "grip"]
+    assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
+    assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command, so the call returns when the target is reached.
@@ -188,6 +213,7 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "The episode has ended" in _text(closed)
+    assert "Time remaining" not in _text(reached)
 
 
 async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box() -> None:
@@ -197,7 +223,7 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert agent.tools == {"move_by"}
+    assert agent.tools == {"move_by", "wait"}
     # Four in-box steps, then two still ticks once the arm has stopped.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4 + [[0.0, 0.0]] * 2)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
@@ -206,13 +232,17 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
 @pytest.mark.parametrize(
     ("call", "error"),
     [
-        (_move("move_to", z=0.1), "unknown dimension(s) ['z']"),
-        (_move("move_to", grip=1.0), "unknown dimension(s) ['grip']; valid: x"),
-        (_move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
         (
-            ("move_to", {"target": {"name": "x", "value": 0.1}, "others": [], "note": "  "}),
-            "note must say",
+            ("move_to", {"targets": {"x": 0.1, "z": 0.1}, "note": "go"}),
+            "unknown dimension(s) ['z']",
         ),
+        (
+            ("move_to", {"targets": {"x": None, "grip": 1.0}, "note": "go"}),
+            "unknown dimension(s) ['grip']; valid: x",
+        ),
+        (_move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
+        (("move_to", {"targets": {"x": None}, "note": "go"}), "set at least one"),
+        (("move_to", {"targets": {"x": 0.1}, "note": "  "}), "note must say"),
     ],
 )
 async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
@@ -234,7 +264,11 @@ class _GraspTool(DirectControl):
     """Stands in for an env that serves its own motion tool on this wire."""
 
     def _bind_tools(self, server) -> None:
-        server.tool(self.move, name="move_eef", description="grasp targets", output_schema=None)
+        server.add_tool(
+            self._make_tool(
+                self.move, "move_eef", "grasp targets", {"targets": self._targets_schema()}
+            )
+        )
 
 
 async def test_an_env_can_replace_the_contract_motion_tool() -> None:
@@ -244,7 +278,7 @@ async def test_an_env_can_replace_the_contract_motion_tool() -> None:
     async with _served(sim, _GraspTool(max_step={"grip": 2.0})) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert agent.tools == {"move_eef"}
+    assert agent.tools == {"move_eef", "wait"}
     assert sim.actions  # the replacement tool still plays through the shared wire
 
 
@@ -278,15 +312,16 @@ class _Pose(RobotBridge):
         return data, np.array([self.success])
 
 
-async def test_an_empty_target_list_is_rejected_and_does_not_move() -> None:
+async def test_a_call_that_nulls_every_dimension_is_rejected_and_does_not_move() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("move_to", {"targets": [], "note": "move toward the goal"}))
+    agent = _ScriptedLLM(_move("move_to"))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     (result,) = agent.results
     assert result.isError
+    assert "wait" in _text(result)
     assert sim.actions == []
 
 
@@ -320,6 +355,165 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert "safety timeout" in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
+
+
+async def test_dimensions_with_a_shared_prefix_nest_as_a_group_the_model_can_null_whole() -> None:
+    names = ["left_arm.x", "left_arm.y", "right_arm.x", "grip"]
+    sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [0.0] * 4)
+    agent = _ScriptedLLM(_move("move_to", **{"left_arm.x": 0.1, "right_arm.x": 0.1}))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    targets = agent.schemas["move_to"]["properties"]["targets"]
+    assert list(targets["properties"]) == ["grip", "left_arm", "right_arm"]
+    assert targets["required"] == ["grip", "left_arm", "right_arm"]
+    group = targets["properties"]["left_arm"]["anyOf"]
+    assert group[1] == {"type": "null"}
+    assert list(group[0]["properties"]) == ["x", "y"]
+    assert (
+        ensure_strict_json_schema(copy.deepcopy(agent.schemas["move_to"]))
+        == (agent.schemas["move_to"])
+    )
+    np.testing.assert_allclose(sim.actions[-1], [0.1, 0.0, 0.1, 0.0], atol=1e-6)
+
+
+async def test_a_group_set_to_null_holds_all_of_its_dimensions() -> None:
+    names = ["left_arm.x", "left_arm.y", "right_arm.x", "grip"]
+    sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [0.0] * 4)
+    call = (
+        "move_to",
+        {
+            "targets": {"grip": 0.1, "left_arm": None, "right_arm": {"x": None}},
+            "note": "close the gripper",
+        },
+    )
+    agent = _ScriptedLLM(call)
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    np.testing.assert_allclose(sim.actions[-1], [0.0, 0.0, 0.0, 0.1], atol=1e-6)
+
+
+async def test_without_annotation_the_tools_take_no_note_and_never_refuse_an_empty_one() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(("move_to", {"targets": {"x": 0.1, "grip": None}}), ("wait", {}))
+
+    async with _served(sim, DirectControl(use_annotation=False)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    for schema in agent.schemas.values():
+        assert "note" not in schema["properties"]
+        assert "note" not in schema["required"]
+    assert not any(result.isError for result in agent.results)
+    assert sim.actions
+
+
+async def test_with_annotation_wait_asks_for_a_note_too() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(("wait", {"duration": None, "note": " "}))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert set(agent.schemas["wait"]["required"]) == {"duration", "note"}
+    (result,) = agent.results
+    assert result.isError
+    assert "note must say" in _text(result)
+
+
+async def test_wait_without_a_duration_only_observes_the_current_state() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": None, "note": "look"}))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert "no-op" in agent.descriptions["wait"]
+    _, looked = agent.results
+    assert len(sim.actions) == 20  # only the move stepped the sim
+    assert _text(looked).startswith("Played 0 steps (0.0 s).")
+    assert "observation/state: x=0.2000" in _text(looked)
+    assert "commanded: x=0.2000" in _text(looked)
+    assert [block.type for block in looked.content] == ["text", "text", "image"]
+
+
+async def test_wait_holds_the_commanded_pose_for_the_requested_sim_time() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(
+        _move("move_to", x=0.2), ("wait", {"duration": 1.5, "note": "let it settle"})
+    )
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    held = np.array(sim.actions[20:])
+    assert len(held) == 15  # 1.5 s at 10 Hz
+    np.testing.assert_allclose(held, [[0.2, 0.0]] * 15)
+    assert _text(agent.results[1]).startswith("Played 15 steps (1.5 s).")
+
+
+async def test_a_wait_longer_than_the_maximum_is_a_correctable_error() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(("wait", {"duration": 301, "note": "sleep"}))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    (result,) = agent.results
+    assert result.isError
+    assert "duration must be within [0, 300]" in _text(result)
+    assert sim.actions == []
+
+
+async def test_the_time_limit_is_in_the_prompt_and_every_reply_reports_the_time_left() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(
+        _move("move_to", x=0.2),
+        ("wait", {"duration": 1.0, "note": "look"}),
+        ("wait", {"note": "x"}),
+    )
+
+    async with _served(sim, DirectControl(time_limit=10.0)) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert run.prompt_text.endswith("close the gripper\n\nYou have 10 seconds of simulated time.")
+    moved, waited, looked = (_text(result) for result in agent.results)
+    assert moved.startswith("Played 20 steps (2.0 s). Time remaining: 8.0 s.")
+    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 7.0 s.")
+    assert looked.startswith("Played 0 steps (0.0 s). Time remaining: 7.0 s.")
+    assert "The episode has ended" not in looked
+
+
+async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.5), _move("move_to", x=0.1))
+
+    async with _served(sim, DirectControl(time_limit=2.0)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    cut, after = (_text(result) for result in agent.results)
+    assert len(sim.actions) == 20  # the move needed 50 ticks; 2 s at 10 Hz were left
+    assert sim.state[0] == pytest.approx(0.2)
+    assert cut.startswith("Played 20 steps (2.0 s). Time remaining: 0.0 s.")
+    assert "The time limit is reached." in cut
+    assert "The episode has ended; stop calling tools." in cut
+    assert after.startswith("Played 0 steps (0.0 s). Time remaining: 0.0 s.")
+    assert "The episode has ended; stop calling tools." in after
+
+
+async def test_a_new_episode_starts_with_the_whole_time_limit() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    first = _ScriptedLLM(_move("move_to", x=0.2))
+    second = _ScriptedLLM(_move("move_to", x=0.2))
+
+    async with _served(sim, DirectControl(time_limit=3.0)) as env:
+        await rollout(Task(env="arm", id="reach"), first, runtime=LocalRuntime(env))
+        await rollout(Task(env="arm", id="reach"), second, runtime=LocalRuntime(env))
+
+    assert "Time remaining: 1.0 s." in _text(first.results[0])
+    assert "Time remaining: 1.0 s." in _text(second.results[0])
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
