@@ -178,7 +178,7 @@ ModalRuntime(image_name=None, *, image=None, command=None, app=None, app_name=No
 - **`workdir`** - working directory inside the sandbox. Left unset, Modal keeps the image's `WORKDIR`.
 - **`app`** - an already-running, caller-owned Modal app. `ModalRuntime` does not manage its lifecycle.
 - **`app_name`** - a Modal app to look up. Defaults to `hud-envs` when `app` is not supplied; `app` and `app_name` are mutually exclusive.
-- **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables.
+- **`port`** / **`env_vars`** - in-sandbox serving port and extra environment variables. When telemetry is enabled and `HUD_API_KEY` is set, the sandbox also receives `HUD_API_KEY`, `HUD_API_URL`, and `HUD_TELEMETRY_URL` so the environment can upload its own traces (for example robot video); the key is readable by code running in the sandbox, and an `env_vars` entry of the same name takes precedence.
 - **`sandbox_secrets`** - Modal `Secret` objects to attach to the sandbox. Resolve named secrets with `modal.Secret.from_name(...)`; their values never pass through the local process. Sandbox secrets require an image runtime and are rejected for Docker-in-Docker Compose because attaching them to the outer sandbox would not expose them to `main`.
 - **`registry_secret`** - optional Modal `Secret` for pulling a private registry image (`REGISTRY_USERNAME` / `REGISTRY_PASSWORD`). Unused for `modal://` images and Compose.
 
