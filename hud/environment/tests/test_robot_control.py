@@ -232,14 +232,10 @@ async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box(
 @pytest.mark.parametrize(
     ("call", "error"),
     [
-        (
-            ("move_to", {"targets": {"x": 0.1, "z": 0.1}, "note": "go"}),
-            "unknown dimension(s) ['z']",
-        ),
-        (
-            ("move_to", {"targets": {"x": None, "grip": 1.0}, "note": "go"}),
-            "unknown dimension(s) ['grip']; valid: x",
-        ),
+        (("move_to", {"targets": {"x": 0.1, "z": 0.1}, "note": "go"}), "'z' was unexpected"),
+        (("move_to", {"targets": {"x": None, "grip": 1.0}, "note": "go"}), "'grip' was unexpected"),
+        (("move_to", {"targets": {"grip": None}, "note": "go"}), "'x' is a required property"),
+        (("move_to", {"targets": {"x": "far"}, "note": "go"}), "'far' is not of type"),
         (_move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
         (("move_to", {"targets": {"x": None}, "note": "go"}), "set at least one"),
         (("move_to", {"targets": {"x": 0.1}, "note": "  "}), "note must say"),
@@ -398,7 +394,9 @@ async def test_a_group_set_to_null_holds_all_of_its_dimensions() -> None:
 
 async def test_without_annotation_the_tools_take_no_note_and_never_refuse_an_empty_one() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("move_to", {"targets": {"x": 0.1, "grip": None}}), ("wait", {}))
+    agent = _ScriptedLLM(
+        ("move_to", {"targets": {"x": 0.1, "grip": None}}), ("wait", {"duration": None})
+    )
 
     async with _served(sim, DirectControl(use_annotation=False)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
@@ -472,7 +470,7 @@ async def test_the_time_limit_is_in_the_prompt_and_every_reply_reports_the_time_
     agent = _ScriptedLLM(
         _move("move_to", x=0.2),
         ("wait", {"duration": 1.0, "note": "look"}),
-        ("wait", {"note": "x"}),
+        ("wait", {"duration": None, "note": "x"}),
     )
 
     async with _served(sim, DirectControl(time_limit=10.0)) as env:
@@ -484,6 +482,15 @@ async def test_the_time_limit_is_in_the_prompt_and_every_reply_reports_the_time_
     assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 7.0 s.")
     assert looked.startswith("Played 0 steps (0.0 s). Time remaining: 7.0 s.")
     assert "The episode has ended" not in looked
+
+
+async def test_the_prompt_is_the_sims_own_without_a_time_limit() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+
+    async with _served(sim, DirectControl()) as env:
+        run = await rollout(Task(env="arm", id="reach"), _ScriptedLLM(), runtime=LocalRuntime(env))
+
+    assert run.prompt == "move x to 0.5, then close the gripper"
 
 
 async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode() -> None:

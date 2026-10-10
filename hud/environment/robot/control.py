@@ -38,13 +38,15 @@ import contextlib
 import io
 import math
 import socket
+from collections.abc import Callable  # noqa: TC003 - pydantic resolves the field at runtime
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from fastmcp.tools import FunctionTool
+from fastmcp.tools import Tool
+from jsonschema import ValidationError, validate
 from mcp.types import ImageContent, TextContent
 from PIL import Image
 
@@ -63,8 +65,9 @@ from hud.telemetry.exporter import flush
 from hud.telemetry.robot import TraceRecorder
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
+    from fastmcp.tools.tool import ToolResult
     from numpy.typing import NDArray
 
     from hud.environment.robot.endpoint import RobotEndpoint
@@ -116,10 +119,24 @@ _NOTE = (
 
 _WAIT = (
     f"Let `duration` sim seconds pass (at most {MAX_WAIT_S:g}) while the robot holds its pose, "
-    "then return the camera frames and state. Omit `duration`, or pass 0, to let no time pass: "
+    "then return the camera frames and state. Pass null or 0 to let no time pass: "
     "a no-op that just shows the current state."
 )
 _DURATION = {"type": ["number", "null"], "description": "Sim seconds; null is 0."}
+
+
+class _SchemaTool(Tool):
+    """A tool that serves exactly the schema it advertises: arguments are validated
+    against ``parameters`` and then passed to ``fn`` by keyword."""
+
+    fn: Callable[..., Any]
+
+    async def run(self, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            validate(arguments, self.parameters)
+        except ValidationError as exc:
+            raise ToolError(exc.message) from exc
+        return self.convert_result(await self.fn(**arguments))
 
 
 @dataclass(frozen=True)
@@ -150,9 +167,10 @@ class DirectControl:
     - ``notes`` - embodiment facts the model needs (frames, units, gripper
       polarity), appended to the motion tool's description.
     - ``time_limit`` - the episode's budget in sim seconds (default: none). Every
-      reply reports the time remaining. A call that would cross the limit is
-      cut at it, and once it is spent calls play nothing and the reply says the
-      episode has ended. :attr:`prompt` tells the model about the limit.
+      reply reports the time remaining. Spending it ends the episode as sim
+      termination does: the call in flight stops at the limit, later calls play
+      nothing, and replies say the episode has ended. :attr:`prompt` tells the
+      model about the limit.
     - ``use_annotation`` - ask the model for a ``note`` on every call (default).
       Off, the tools take no ``note``.
     """
@@ -326,15 +344,13 @@ class DirectControl:
         name: str,
         description: str,
         properties: dict[str, Any],
-    ) -> FunctionTool:
+    ) -> Tool:
         """A tool whose strict-mode schema requires every property; ``note`` joins if annotating."""
         if self.use_annotation:
             properties = {**properties, "note": {"type": "string", "description": _NOTE}}
-        tool = FunctionTool.from_function(
-            fn, name=name, description=description, output_schema=None
+        return _SchemaTool(
+            name=name, description=description, parameters=_object(properties), fn=fn
         )
-        tool.parameters = _object(properties)
-        return tool
 
     # The one tool body; registered as move_to / move_joints / move_by by the contract.
     async def move(
@@ -350,7 +366,7 @@ class DirectControl:
         values = {name: value for name, value in flat.items() if value is not None}
         return await self._play(lambda obs: self._plan(values, obs), note)
 
-    async def wait(self, duration: float | None = None, note: str = "") -> Content:
+    async def wait(self, duration: float | None, note: str = "") -> Content:
         seconds = duration or 0.0
         if not 0 <= seconds <= MAX_WAIT_S:
             raise ToolError(f"duration must be within [0, {MAX_WAIT_S:g}] s, got {seconds:g}")
@@ -473,10 +489,12 @@ class DirectControl:
                         lossless_video=True,
                     )
                     await self._record(obs)  # the episode's opening scene
-                # Plan: turn the call into per-tick action rows (none if the episode is over),
-                # cut to the sim time the episode has left.
+                # Plan: turn the call into per-tick action rows (none if the episode is over).
+                # A spent time limit ends the episode the way sim termination does.
                 left = None if self._limit_ticks is None else self._limit_ticks - self._elapsed
-                if obs["terminated"] or left == 0:
+                if left == 0:
+                    obs["terminated"] = True
+                if obs["terminated"]:
                     rows = np.zeros((0, len(self._names)))
                     goal = None
                     clipped = False
@@ -484,8 +502,6 @@ class DirectControl:
                     blocks: list[Orientation] = []
                 else:
                     rows, goal, clipped, named = plan(obs)
-                    if left is not None and len(rows) > left:
-                        rows, clipped = rows[:left], True
                     # Rotation blocks the model touched (only those count toward "reached").
                     blocks = [
                         b for b in self._orientations if any(n in named for n in b.tool_names)
@@ -504,6 +520,8 @@ class DirectControl:
                     obs = await client.get_observation()
                     await self._record(obs)
                     played += 1
+                    if left is not None and played >= left:
+                        obs["terminated"] = True
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = np.asarray(row, dtype=np.float64).copy()
@@ -528,11 +546,10 @@ class DirectControl:
                     if await step(row, check=index == len(rows) - 1 and not clipped):
                         break
                 # Then hold the final setpoint until the arm arrives or stops. A clipped
-                # plan already fills the safety cap or the time left, so it gets no hold.
+                # plan already fills the safety cap, so it gets no hold.
                 if goal is not None and not clipped and not finished and not obs["terminated"]:
                     hold = goal if self._absolute else np.zeros(len(self._names))
-                    cap = self._max_ticks if left is None else min(self._max_ticks, left)
-                    while played < cap:
+                    while played < self._max_ticks:
                         if await step(hold, check=True):
                             break
                 # Ran out of ticks before arriving: report it rather than error.
@@ -578,12 +595,9 @@ class DirectControl:
 
     def _plan(self, values: dict[str, float], obs: dict[str, Any]) -> Plan:
         """Action rows, the intended goal, whether the safety cap clipped them, and named dims."""
-        # Validate names, then find the start pose and the end pose (goal) of the move.
+        # Find the start pose and the end pose (goal) of the move.
         if not values:
             raise ToolError("set at least one action dimension (`wait` to just look)")
-        unknown = [name for name in values if name not in self._dims]
-        if unknown:
-            raise ToolError(f"unknown dimension(s) {unknown}; valid: {', '.join(self._dims)}")
         start = self._start(obs)
         end = start.copy()  # unnamed dimensions keep their start value (they hold)
         named = set(values)
@@ -721,7 +735,7 @@ class DirectControl:
             lines.append("commanded: " + _labeled(zip(self._names, self._command, strict=True)))
         if left == 0:
             lines.append("The time limit is reached.")
-        if obs["terminated"] or left == 0:
+        if obs["terminated"]:
             lines.append("The episode has ended; stop calling tools.")
         content: Content = [TextContent(type="text", text="\n".join(lines))]
         for camera in self._cameras:
