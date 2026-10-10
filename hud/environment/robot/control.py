@@ -2,10 +2,11 @@
 
 The ``robot`` wire takes one action per control tick, which a policy keeps up
 with and a tool-calling LLM does not. :class:`DirectControl` serves the same sim
-as an ``mcp`` capability instead: a tool call names targets (or displacements)
+as an ``mcp`` capability instead: a tool call sets targets (or displacements)
 for some action dimensions, the tool plays them out on the wire, and answers
-with the camera frames and the pose it ended on. Each call is its own wire
-connection, so the sim holds still while the model thinks. The env keeps
+with the camera frames and the pose it ended on. A ``wait`` tool plays nothing
+(or holds the pose for a while) and answers the same way. Each call is its own
+wire connection, so the sim holds still while the model thinks. The env keeps
 serving ``robot`` too, so one env serves VLAs and LLMs alike.
 
 The contract derives the tool surface: the action ``type`` picks the motion
@@ -38,14 +39,14 @@ import io
 import math
 import socket
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.tools import FunctionTool
 from mcp.types import ImageContent, TextContent
 from PIL import Image
-from pydantic import BaseModel, Field
 
 from hud.capabilities import Capability
 from hud.capabilities.mcp import get_mcp_trace_id
@@ -98,31 +99,27 @@ _STILL_TICKS = 2
 Content = list[TextContent | ImageContent]
 
 
-class DimValue(BaseModel):
-    """A value for one named action dimension."""
+#: Longest ``wait``, in sim seconds.
+MAX_WAIT_S = 300.0
 
-    name: str
-    value: float
+#: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
+#: reached), whether the safety cap clipped the rows, and the dimensions named.
+Plan = tuple["NDArray[np.float64]", "NDArray[np.float64] | None", bool, set[str]]
+
+#: Asked of the model on every call (unless ``use_annotation`` is off) so the
+#: transcript records what the model saw and why.
+_NOTE = (
+    "What you observe right now in the frames and state, and why you chose this. "
+    "One or two plain sentences."
+)
 
 
-#: One required dimension. Strict structured outputs drop ``minItems``, so a list
-#: cannot say "non-empty" to the model; a required object can.
-Target = Annotated[DimValue, Field(description="One named dimension to set. Required.")]
-Others = Annotated[
-    list[DimValue],
-    Field(description="Further named dimensions. An empty list if `target` is the only one."),
-]
-
-#: Required on every motion call so the transcript records what the model saw and why.
-MotionNote = Annotated[
-    str,
-    Field(
-        description=(
-            "What you observe right now in the frames and state, and why you chose this motion. "
-            "One or two plain sentences."
-        )
-    ),
-]
+_WAIT = (
+    f"Let `duration` sim seconds pass (at most {MAX_WAIT_S:g}) while the robot holds its pose, "
+    "then return the camera frames and state. Omit `duration`, or pass 0, to let no time pass: "
+    "a no-op that just shows the current state."
+)
+_DURATION = {"type": ["number", "null"], "description": "Sim seconds; null is 0."}
 
 
 @dataclass(frozen=True)
@@ -152,6 +149,12 @@ class DirectControl:
       vector as wide as the action.
     - ``notes`` - embodiment facts the model needs (frames, units, gripper
       polarity), appended to the motion tool's description.
+    - ``time_limit`` - the episode's budget in sim seconds (default: none). Every
+      reply reports the time remaining. A call that would cross the limit is
+      cut at it, and once it is spent calls play nothing and the reply says the
+      episode has ended. :attr:`prompt` tells the model about the limit.
+    - ``use_annotation`` - ask the model for a ``note`` on every call (default).
+      Off, the tools take no ``note``.
     """
 
     def __init__(
@@ -165,9 +168,13 @@ class DirectControl:
         timeout: float = DEFAULT_TIMEOUT_S,
         reference: Callable[[dict[str, NDArray[Any]]], NDArray[Any]] | None = None,
         notes: str = "",
+        time_limit: float | None = None,
+        use_annotation: bool = True,
     ) -> None:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError(f"timeout must be positive seconds, got {timeout}")
+        if time_limit is not None and (not math.isfinite(time_limit) or time_limit <= 0):
+            raise ValueError(f"time_limit must be positive seconds, got {time_limit}")
         self.robot = robot
         self.name = name
         self.dims = dims
@@ -176,8 +183,17 @@ class DirectControl:
         self.timeout = timeout
         self.reference = reference
         self.notes = notes
+        self.time_limit = time_limit
+        self.use_annotation = use_annotation
+        #: Appended to the episode prompt so the model knows its budget.
+        self.prompt = (
+            f"\n\nYou have {time_limit:g} seconds of simulated time."
+            if time_limit is not None
+            else ""
+        )
         self._lock = asyncio.Lock()  # a slot takes one wire connection at a time
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
+        self._elapsed = 0  # ticks this episode has played
         self._serving: asyncio.Task[None] | None = None
         self._capability: Capability | None = None
         self._recorder: TraceRecorder | None = None  # this episode's trace telemetry
@@ -221,6 +237,9 @@ class DirectControl:
         self._high = np.asarray(bounds["max"], dtype=np.float64)
         self._rate = float(contract["control_rate"])
         self._max_ticks = max(1, math.ceil(self.timeout * self._rate))
+        self._limit_ticks = (
+            None if self.time_limit is None else max(1, math.ceil(self.time_limit * self._rate))
+        )
         # Per-tick limit: a speed-paced share of the range, or the per-step box for deltas.
         self._step = (
             self.speed * (self._high - self._low) / self._rate
@@ -249,9 +268,10 @@ class DirectControl:
                 )
             self._reference = lambda data: data[wide[0]]
 
-        # 4. Serve the tool over loopback HTTP on a free port and publish it as an mcp capability.
+        # 4. Serve the tools over loopback HTTP on a free port; publish them as an mcp capability.
         server = FastMCP(name=self.name)
         self._bind_tools(server)
+        server.add_tool(self._make_tool(self.wait, "wait", _WAIT, {"duration": _DURATION}))
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -278,11 +298,12 @@ class DirectControl:
         self._capability = None
 
     async def end_episode(self) -> None:
-        """Clear the last absolute target and close the episode's trace telemetry.
+        """Clear the last absolute target and time spent, and close the episode's trace telemetry.
 
         A move still playing stops recording; the tick being recorded finishes first.
         """
         self._command = None
+        self._elapsed = 0
         recorder, self._recorder = self._recorder, None
         if recorder is not None:
             async with self._recording:
@@ -293,35 +314,86 @@ class DirectControl:
 
     def _bind_tools(self, server: FastMCP) -> None:
         """Register the contract motion tool. Override to serve an env-specific tool."""
-        server.tool(self.move, name=self._tool, description=self._describe(), output_schema=None)
+        server.add_tool(
+            self._make_tool(
+                self.move, self._tool, self._describe(), {"targets": self._targets_schema()}
+            )
+        )
+
+    def _make_tool(
+        self,
+        fn: Callable[..., Any],
+        name: str,
+        description: str,
+        properties: dict[str, Any],
+    ) -> FunctionTool:
+        """A tool whose strict-mode schema requires every property; ``note`` joins if annotating."""
+        if self.use_annotation:
+            properties = {**properties, "note": {"type": "string", "description": _NOTE}}
+        tool = FunctionTool.from_function(
+            fn, name=name, description=description, output_schema=None
+        )
+        tool.parameters = _object(properties)
+        return tool
 
     # The one tool body; registered as move_to / move_joints / move_by by the contract.
-    async def move(self, target: Target, others: Others, note: MotionNote) -> Content:
-        return await self._play([target, *others], note)
+    async def move(
+        self, targets: dict[str, float | dict[str, float | None] | None], note: str = ""
+    ) -> Content:
+        # A group's dimensions are named ``group.leaf``, as in the contract; null ones hold.
+        flat: dict[str, float | None] = {}
+        for key, value in targets.items():
+            if isinstance(value, dict):
+                flat.update({f"{key}.{leaf}": number for leaf, number in value.items()})
+            else:
+                flat[key] = value
+        values = {name: value for name, value in flat.items() if value is not None}
+        return await self._play(lambda obs: self._plan(values, obs), note)
+
+    async def wait(self, duration: float | None = None, note: str = "") -> Content:
+        seconds = duration or 0.0
+        if not 0 <= seconds <= MAX_WAIT_S:
+            raise ToolError(f"duration must be within [0, {MAX_WAIT_S:g}] s, got {seconds:g}")
+        ticks = round(seconds * self._rate)
+        return await self._play(
+            lambda obs: (np.repeat(self._start(obs)[None], ticks, axis=0), None, False, set()),
+            note,
+        )
+
+    def _targets_schema(self) -> dict[str, Any]:
+        """Every dimension, nullable (null holds it). ``group.leaf`` names nest under ``group``."""
+        targets: dict[str, Any] = {}
+        groups: dict[str, dict[str, Any]] = {}
+        for name in self._dims:
+            low, high = self._range(name)
+            number = {"type": ["number", "null"], "description": f"[{low:.4g}, {high:.4g}]"}
+            group, dot, leaf = name.partition(".")
+            if dot:
+                groups.setdefault(group, {})[leaf] = number
+            else:
+                targets[name] = number
+        for group, leaves in groups.items():
+            targets[group] = {"anyOf": [_object(leaves), {"type": "null"}]}
+        return _object(targets)
+
+    def _range(self, name: str) -> tuple[float, float]:
+        # Euler dimensions are unbounded in the contract; report them as ±pi.
+        axis = self._axes[name]
+        if axis.kind == "euler":
+            return -math.pi, math.pi
+        return float(self._low[axis.index]), float(self._high[axis.index])
 
     def _describe(self) -> str:
-        # Euler dimensions are unbounded in the contract; report them as ±pi.
-        ranges = [
-            (-math.pi, math.pi)
-            if (axis := self._axes[name]).kind == "euler"
-            else (self._low[axis.index], self._high[axis.index])
-            for name in self._dims
-        ]
-        bounds = ", ".join(
-            f"{name} [{low:.4g}, {high:.4g}]"
-            for name, (low, high) in zip(self._dims, ranges, strict=True)
-        )
+        hold = "Set a dimension (or a whole group) to null to leave it as it is."
         if self._absolute:
             motion = (
-                "Move to absolute targets. `target` is required; put any further dimensions "
-                "in `others` (an empty list if there are no more). Unnamed dimensions hold "
-                "their commanded value. The motion is interpolated at a safe speed."
+                "Move to absolute targets. Null dimensions hold their commanded value. "
+                "The motion is interpolated at a safe speed."
             )
         else:
             motion = (
-                "Move by a displacement. `target` is required; put any further dimensions "
-                "in `others` (an empty list if there are no more). Unnamed dimensions do not "
-                "move. The motion is split into steps within the per-step bounds."
+                "Move by a displacement. Null dimensions do not move. "
+                "The motion is split into steps within the per-step bounds."
             )
         rotation = ""
         if self._orientations:
@@ -329,11 +401,15 @@ class DirectControl:
                 " Orientation is intrinsic XYZ euler in radians (roll, pitch, yaw), "
                 "converted to the arm's rotation and interpolated on the shortest arc."
             )
+        annotation = (
+            " Include a note saying what you see and why you chose the motion."
+            if self.use_annotation
+            else ""
+        )
         return (
-            f"{motion}{rotation} The call steps until the target is reached or the arm stops, "
-            f"then returns the camera frames and the pose. It stops at {self.timeout:g} s if "
-            f"the motion has not finished. Include a note saying what you see and why you "
-            f"chose the motion. Dimensions and bounds: {bounds}. {self.notes}"
+            f"{motion} {hold}{rotation} The call steps until the target is reached or the arm "
+            f"stops, then returns the camera frames and the pose. It stops at {self.timeout:g} s "
+            f"if the motion has not finished.{annotation} {self.notes}"
         ).strip()
 
     def _addressable(self) -> tuple[dict[str, _Axis], list[str]]:
@@ -377,11 +453,11 @@ class DirectControl:
 
     # ── the wire ───────────────────────────────────────────────────────────
 
-    async def _play(self, values: list[DimValue], note: str) -> Content:
-        """Plan *values* against the live observation, play until done, and render the result."""
+    async def _play(self, plan: Callable[[dict[str, Any]], Plan], note: str) -> Content:
+        """Plan against the live observation, play until done, and render the result."""
         # The note stays on the tool call; an empty one is a correctable miss, not a move.
-        if not note.strip():
-            raise ToolError("note must say what you see and why you chose this motion")
+        if self.use_annotation and not note.strip():
+            raise ToolError("note must say what you see and why you chose this")
         # One short wire connection per call: the sim is frozen while the model thinks.
         async with self._lock:
             client = await RobotClient.connect(self._robot)
@@ -397,15 +473,19 @@ class DirectControl:
                         lossless_video=True,
                     )
                     await self._record(obs)  # the episode's opening scene
-                # Plan: turn the named targets into per-tick action rows (none if already over).
-                if obs["terminated"]:
+                # Plan: turn the call into per-tick action rows (none if the episode is over),
+                # cut to the sim time the episode has left.
+                left = None if self._limit_ticks is None else self._limit_ticks - self._elapsed
+                if obs["terminated"] or left == 0:
                     rows = np.zeros((0, len(self._names)))
                     goal = None
                     clipped = False
                     named: set[str] = set()
                     blocks: list[Orientation] = []
                 else:
-                    rows, goal, clipped, named = self._plan(values, obs)
+                    rows, goal, clipped, named = plan(obs)
+                    if left is not None and len(rows) > left:
+                        rows, clipped = rows[:left], True
                     # Rotation blocks the model touched (only those count toward "reached").
                     blocks = [
                         b for b in self._orientations if any(n in named for n in b.tool_names)
@@ -415,8 +495,7 @@ class DirectControl:
                 finished = False
                 seen = False  # proprioception has moved at least once
                 still = 0  # consecutive ticks below the movement threshold
-                prev = self._proprio(obs)
-                proprio: NDArray[np.float64] | None = None
+                proprio = prev = self._proprio(obs)
 
                 async def step(row: NDArray[np.float64], *, check: bool) -> bool:
                     """Play one tick; return True when the call should stop."""
@@ -449,16 +528,23 @@ class DirectControl:
                     if await step(row, check=index == len(rows) - 1 and not clipped):
                         break
                 # Then hold the final setpoint until the arm arrives or stops. A clipped
-                # plan already fills the safety cap, so it gets no hold.
+                # plan already fills the safety cap or the time left, so it gets no hold.
                 if goal is not None and not clipped and not finished and not obs["terminated"]:
                     hold = goal if self._absolute else np.zeros(len(self._names))
-                    while played < self._max_ticks:
+                    cap = self._max_ticks if left is None else min(self._max_ticks, left)
+                    while played < cap:
                         if await step(hold, check=True):
                             break
                 # Ran out of ticks before arriving: report it rather than error.
-                timed_out = played >= self._max_ticks and not finished and not obs["terminated"]
+                timed_out = (
+                    goal is not None
+                    and played >= self._max_ticks
+                    and not finished
+                    and not obs["terminated"]
+                )
             finally:
                 await client.close()
+        self._elapsed += played
         # Answer with the pose, command, residual, and camera frames the move ended on.
         return self._render(
             obs,
@@ -466,6 +552,7 @@ class DirectControl:
             proprio,
             timed_out=timed_out,
             goal=goal if self._absolute else None,
+            left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
         )
 
     async def _record(self, obs: dict[str, Any]) -> None:
@@ -479,52 +566,52 @@ class DirectControl:
                     )
                     self._tick += 1
 
-    def _plan(
-        self, values: list[DimValue], obs: dict[str, Any]
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], bool, set[str]]:
+    def _start(self, obs: dict[str, Any]) -> NDArray[np.float64]:
+        """Where a move begins: the commanded target (the reference on an episode's first
+        move) for absolute control, zero displacement otherwise."""
+        if not self._absolute:
+            return np.zeros(len(self._names), dtype=np.float64)
+        if self._command is not None:
+            return self._command.copy()
+        assert self._reference is not None
+        return np.asarray(self._reference(obs["data"]), dtype=np.float64).reshape(-1)
+
+    def _plan(self, values: dict[str, float], obs: dict[str, Any]) -> Plan:
         """Action rows, the intended goal, whether the safety cap clipped them, and named dims."""
         # Validate names, then find the start pose and the end pose (goal) of the move.
         if not values:
-            raise ToolError("name at least one action dimension")
-        unknown = [v.name for v in values if v.name not in self._dims]
+            raise ToolError("set at least one action dimension (`wait` to just look)")
+        unknown = [name for name in values if name not in self._dims]
         if unknown:
             raise ToolError(f"unknown dimension(s) {unknown}; valid: {', '.join(self._dims)}")
-        # Absolute moves start at the commanded target (the reference on an episode's
-        # first move); a displacement starts at zero.
-        start = np.zeros(len(self._names), dtype=np.float64)
-        if self._absolute:
-            assert self._reference is not None
-            if self._command is None:
-                start = np.asarray(self._reference(obs["data"]), dtype=np.float64).reshape(-1)
-            else:
-                start = self._command.copy()
+        start = self._start(obs)
         end = start.copy()  # unnamed dimensions keep their start value (they hold)
-        named = {v.name for v in values}
+        named = set(values)
         # Scalar dimensions: range-check and write straight into the goal.
-        for value in values:
-            axis = self._axes[value.name]
+        for name, value in values.items():
+            axis = self._axes[name]
             if axis.kind == "scalar":
                 index = axis.index
-                if self._absolute and not self._low[index] <= value.value <= self._high[index]:
+                if self._absolute and not self._low[index] <= value <= self._high[index]:
                     raise ToolError(
-                        f"{value.name}={value.value} is outside "
+                        f"{name}={value} is outside "
                         f"[{self._low[index]:.4g}, {self._high[index]:.4g}]"
                     )
-                end[index] = value.value
+                end[index] = value
         # Rotations: start from the current euler, overwrite the named angles, convert back
         # to the contract's representation.
         addressed = [b for b in self._orientations if any(n in named for n in b.tool_names)]
         for block in addressed:
             roll, pitch, yaw = xyzw_to_euler(block.read(start))
             euler = [roll, pitch, yaw]
-            for value in values:
-                axis = self._axes[value.name]
+            for name, value in values.items():
+                axis = self._axes[name]
                 if axis.kind == "euler" and axis.block is block:
-                    if abs(value.value) > math.pi + 1e-4:
+                    if abs(value) > math.pi + 1e-4:
                         raise ToolError(
-                            f"{value.name}={value.value} is outside [{-math.pi:.4g}, {math.pi:.4g}]"
+                            f"{name}={value} is outside [{-math.pi:.4g}, {math.pi:.4g}]"
                         )
-                    euler[axis.index] = value.value
+                    euler[axis.index] = value
             target_q = euler_to_xyzw(euler[0], euler[1], euler[2])
             # Same rotation as now: keep the contract components bit for bit.
             if angular_distance(block.read(start), target_q) <= 1e-8:
@@ -604,14 +691,18 @@ class DirectControl:
         self,
         obs: dict[str, Any],
         played: int,
-        proprio: NDArray[np.float64] | None,
+        proprio: NDArray[np.float64],
         *,
         timed_out: bool,
         goal: NDArray[np.float64] | None,
+        left: int | None,
     ) -> Content:
         data = obs["data"]
         # Keep this opening line: the trace viewer reads it to place each call on the video.
-        lines = [f"Played {played} steps ({played / self._rate:.1f} s)."] if played else []
+        opening = f"Played {played} steps ({played / self._rate:.1f} s)."
+        if left is not None:
+            opening += f" Time remaining: {left / self._rate:.1f} s."
+        lines = [opening]
         if timed_out:
             lines.append(
                 f"Stopped at the {self.timeout:g} s safety timeout before the motion finished."
@@ -620,15 +711,17 @@ class DirectControl:
             vector = np.asarray(data[key], dtype=np.float64).reshape(-1)
             labels = names or [str(i) for i in range(vector.size)]
             lines.append(f"{key}: " + _labeled(zip(labels, vector, strict=True)))
-        if proprio is not None and proprio.size == len(self._names):
+        if proprio.size == len(self._names):
             lines.append("pose: " + _labeled(self._reading(proprio)))
         if goal is not None:
             lines.append("commanded: " + _labeled(self._reading(goal)))
-        if proprio is not None and goal is not None and proprio.shape == goal.shape:
+        if goal is not None and proprio.shape == goal.shape:
             lines.append("off: " + self._off(proprio, goal))
         if self._command is not None and goal is None:
             lines.append("commanded: " + _labeled(zip(self._names, self._command, strict=True)))
-        if obs["terminated"]:
+        if left == 0:
+            lines.append("The time limit is reached.")
+        if obs["terminated"] or left == 0:
             lines.append("The episode has ended; stop calling tools.")
         content: Content = [TextContent(type="text", text="\n".join(lines))]
         for camera in self._cameras:
@@ -685,6 +778,16 @@ def _tool_order(names: list[str], blocks: list[Orientation]) -> list[str]:
     return order
 
 
+def _object(properties: dict[str, Any]) -> dict[str, Any]:
+    """A strict-mode object schema: every property required, none extra."""
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
 def _labeled(pairs: Iterable[tuple[str, Any]]) -> str:
     return ", ".join(f"{name}={value:.4f}" for name, value in pairs)
 
@@ -711,4 +814,4 @@ async def _wait_until_listening(task: asyncio.Task[None], port: int) -> None:
         return
 
 
-__all__ = ["DEFAULT_TIMEOUT_S", "MOTION_TOOLS", "DimValue", "DirectControl"]
+__all__ = ["DEFAULT_TIMEOUT_S", "MAX_WAIT_S", "MOTION_TOOLS", "DirectControl"]

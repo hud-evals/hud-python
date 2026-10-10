@@ -556,7 +556,7 @@ spec - the closed symbol sets and known traps - lives outside the SDK alongside 
 ## Direct control
 
 A tool-calling LLM cannot stream an action every control tick, but it can drive the same sim
-through **direct control**: motion tools that name targets for the action's dimensions, such as
+through **direct control**: motion tools that set targets for the action's dimensions, such as
 "move the end effector to z = 0.95". `DirectControl` serves those tools as an `mcp` capability next
 to the `robot` wire, so one environment serves a VLA over `robot` and an LLM over MCP. Each agent
 opens only the protocol it speaks, so any tool-calling agent (`claude`, `openai`, ...) drives the
@@ -596,16 +596,21 @@ The [contract](#contract) derives the tool surface:
 | Contract field | Tool surface |
 |----------------|--------------|
 | action `type` | The motion tool: `ee_abs` → `move_to` and `joint_pos` → `move_joints` take absolute targets, interpolated at a safe speed; `ee_del` → `move_by` takes a displacement, split into steps within the per-step bounds. |
-| action `names` | The dimensions a call addresses. `target` is one `{name, value}` and is required; `others` is any further ones. Unnamed dimensions hold. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
+| action `names` | The dimensions a call addresses. `targets` lists every one, and the model sets a dimension to `null` to leave it as it is. A name with a prefix (`left_arm.x`) nests under its prefix as a group (`left_arm: {x, ...}`), and a group set to `null` holds all of its dimensions at once, which keeps humanoid-sized action spaces manageable. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
 | action `limits` (else `stats`) | Per-dimension `min` / `max`: the target range, or the per-step box for a displacement. |
 | `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops, and gives up at `timeout` (default 60 s). |
 | `rgb` observations and the rest | The camera frames and labeled state every call returns. |
 
 There is no `observe` tool. Every motion call returns the camera frames and the pose it
-ended on, so the model does not choose whether to look. Each call is its own short connection on
-the `robot` wire, so the sim holds still while the model thinks. A call also takes a required
-`note`: what the model sees and why it chose the motion. The episode ends when the model stops
-calling tools. The template grades it as usual.
+ended on, so the model does not choose whether to look. The `wait` tool is the other call: it
+lets `duration` sim seconds pass (at most 300) while the robot holds its pose, and `duration`
+defaults to 0, which lets no time pass. So `wait` doubles as a no-op that shows the current state
+without moving. Each call is its own short connection on the `robot` wire, so the sim holds still
+while the model thinks. A call also takes a required `note`: what the model sees and why it chose
+the motion; `use_annotation=False` removes it. Every reply opens with
+`Played N steps (X s).`, plus ` Time remaining: Y s.` when the environment sets a `time_limit`.
+The episode ends when the model stops calling tools, or when the sim terminates or the time limit
+is spent; the reply then says so. The template grades it as usual.
 
 A call steps until the commanded target is reached or the arm
 stops moving, then returns the pose and how far it is from the command. `timeout` (default 60 s)
@@ -624,6 +629,8 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
+| `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining, and a call that would cross the limit is cut at it. Once it is spent calls play nothing and the reply says the episode has ended. `sim.reset` appends "You have N seconds of simulated time." to the prompt. |
+| `use_annotation` | `True` | Ask for a `note` on every call. `False` removes `note` from the tool schemas and never refuses an empty one. |
 
 <Note>
 Direct control claims the sim's sole slot, so it serves single-env sims. Scale out with more
@@ -666,7 +673,9 @@ flowchart LR
   reads each observation, runs the policy, and sends one action per tick until the episode ends.
 - **An LLM** calls an MCP tool on the env server, where `DirectControl` acts as its harness. It
   opens its own short connection to the bridge, plays the call out one action per tick, closes the
-  connection, and returns the camera frames and pose.
+  connection, and returns the camera frames and pose. The bridge drops a connection that sends no
+  action for `step_timeout` (30 s), so a connection held open while the model thinks would not
+  survive.
 
 Direct control does no inverse kinematics (IK, solving joint angles for a target pose). It
 interpolates setpoints at `speed` so the sim never jumps to a distant goal, and the sim's own
