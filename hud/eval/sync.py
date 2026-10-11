@@ -76,7 +76,10 @@ def diff(local: Taskset, remote: Taskset) -> SyncPlan:
 
 
 def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, str]:
-    """Resolve a taskset name to ``(uuid, display_name)``; uuid is "" if not found."""
+    """Resolve a taskset name to ``(uuid, display_name)``; uuid is "" if not found.
+
+    A UUID is returned as given, without checking that the taskset exists.
+    """
     try:
         uuid.UUID(name_or_id)
         return name_or_id, name_or_id

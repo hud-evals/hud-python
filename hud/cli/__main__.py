@@ -21,6 +21,7 @@ from packaging.version import parse as parse_version
 from hud.cli import CLI, CliError, parse_key_value, set_env_values
 from hud.cli.deploy import deploy_command
 from hud.cli.eval import eval_command
+from hud.cli.harbor import harbor_app
 from hud.cli.init import init_command
 from hud.cli.jobs import cancel_job_command, jobs_app
 from hud.cli.models import models_app
@@ -281,6 +282,7 @@ app.command(name="eval")(eval_command)
 app.add_typer(task_app, name="task")
 app.add_typer(project_app, name="project")
 app.add_typer(sync_app, name="sync")
+app.add_typer(harbor_app, name="harbor")
 app.add_typer(qa_app, name="qa")
 app.add_typer(jobs_app, name="jobs")
 app.command(name="cancel", hidden=True, deprecated=True)(cancel_job_command)
