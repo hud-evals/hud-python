@@ -14,6 +14,7 @@ import itertools
 import logging
 import math
 import socket
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
@@ -54,6 +55,22 @@ _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
     cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
 }
+
+
+async def _open_connection(
+    host: str, port: int
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Open a TCP connection to the sandbox with keepalive probes.
+
+    Modal's tunnel drops connections idle for ~350 s, and ``tasks.start`` is silent for minutes.
+    """
+    reader, writer = await asyncio.open_connection(host, port)
+    sock = writer.get_extra_info("socket")
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    # macOS names the idle-time option TCP_KEEPALIVE.
+    idle = socket.TCP_KEEPALIVE if sys.platform == "darwin" else socket.TCP_KEEPIDLE
+    sock.setsockopt(socket.IPPROTO_TCP, idle, _CONTROL_KEEPALIVE_IDLE_SECONDS)
+    return reader, writer
 
 
 async def _connect_capability(
@@ -211,7 +228,7 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await asyncio.open_connection(host, port)
+                        up_reader, up_writer = await _open_connection(host, port)
                     except OSError as exc:
                         LOGGER.warning(
                             "tunnel peer %s:%d connection failed: %s",
@@ -415,17 +432,12 @@ async def _connect_ready(
     deadline = loop.time() + ready_timeout
     while True:
         try:
-            reader, writer = await asyncio.open_connection(host, port)
+            reader, writer = await _open_connection(host, port)
         except OSError:
             if loop.time() >= deadline:
                 raise
             await asyncio.sleep(interval)
             continue
-
-        # `tasks.start` is silent for minutes; probes stop tunnels dropping the idle socket.
-        sock = writer.get_extra_info("socket")
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, _CONTROL_KEEPALIVE_IDLE_SECONDS)
 
         client = HudClient(reader, writer, endpoint=(host, port))
         try:

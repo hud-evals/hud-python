@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import sys
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -40,14 +41,30 @@ def test_workspace_route_from_url_extracts_transport_address() -> None:
     )
 
 
-async def test_connect_enables_tcp_keepalive_on_control_socket(
+async def test_connect_enables_tcp_keepalive_on_control_and_tunnel_sockets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             hello = await read_frame(reader)
             assert hello is not None
-            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": hello["id"],
+                    "result": {
+                        **HELLO_RESULT,
+                        "bindings": [
+                            {
+                                "name": "shell",
+                                "protocol": "ssh/2",
+                                "url": "ssh://agent@environment:22",
+                            }
+                        ],
+                    },
+                },
+            )
             await read_frame(reader)
         finally:
             writer.close()
@@ -56,18 +73,29 @@ async def test_connect_enables_tcp_keepalive_on_control_socket(
     port = server.sockets[0].getsockname()[1]
     open_connection = asyncio.open_connection
     sockets: list[socket.socket] = []
+    both_open = asyncio.Event()
 
     async def recording_open_connection(host: str, peer_port: int):
         reader, writer = await open_connection(host, peer_port)
         sockets.append(writer.get_extra_info("socket"))
+        if len(sockets) == 2:
+            both_open.set()
         return reader, writer
 
+    idle_option = socket.TCP_KEEPALIVE if sys.platform == "darwin" else socket.TCP_KEEPIDLE
     monkeypatch.setattr(client_module.asyncio, "open_connection", recording_open_connection)
     try:
-        async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
-            (control,) = sockets
-            assert control.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
-            assert control.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 30
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            route = urlsplit(client.binding("shell").url)
+            _, writer = await open_connection(route.hostname, route.port)
+            try:
+                await asyncio.wait_for(both_open.wait(), timeout=5)
+            finally:
+                writer.close()
+                await writer.wait_closed()
+            for sock in sockets:
+                assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+                assert sock.getsockopt(socket.IPPROTO_TCP, idle_option) == 30
     finally:
         server.close()
         await server.wait_closed()
