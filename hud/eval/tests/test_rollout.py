@@ -41,6 +41,7 @@ from hud.eval import (
     Runtime,
     RuntimeConfig,
     RuntimeLimits,
+    Shared,
     SubprocessRuntime,
     Task,
     Taskset,
@@ -1116,9 +1117,9 @@ async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPa
     real_abort = HudClient.abort
     real_wait = asyncio.wait
 
-    def track_abort(self: HudClient) -> None:
+    def track_abort(self: HudClient, **kwargs: Any) -> None:
         aborted.append(True)
-        real_abort(self)
+        real_abort(self, **kwargs)
 
     async def wait_after_agent_starts(
         tasks: set[asyncio.Task[None]], **kwargs: Any
@@ -1145,6 +1146,81 @@ async def test_timeout_aborts_when_cancel_rpc_hangs(monkeypatch: pytest.MonkeyPa
     assert run.trace.stop_reason == "timeout"
     assert cancel_started.is_set()
     assert aborted
+
+
+async def test_timeout_in_the_agent_loop_lets_the_task_teardown_finish() -> None:
+    env = Environment("sums")
+    torn_down = asyncio.Event()
+
+    @env.template()
+    async def add(a: int, b: int):
+        try:
+            yield f"add:{a}:{b}"
+            yield 1.0
+        finally:
+            await asyncio.sleep(0.1)  # an async teardown step (close a browser, free a slot)
+            torn_down.set()
+
+    class WaitingAgent(Agent):
+        async def __call__(self, run: Run) -> None:
+            await asyncio.Event().wait()
+
+    run = await rollout(
+        _add_task(2, 3), WaitingAgent(), runtime=LocalRuntime(env), rollout_timeout=0.2
+    )
+
+    assert run.trace.stop_reason == "timeout"
+    assert "during agent loop" in (run.trace.error or "")
+    await asyncio.wait_for(torn_down.wait(), 3.0)
+
+
+def _slow_start_env() -> tuple[Environment, TaskRow, asyncio.Event, asyncio.Event, asyncio.Event]:
+    """An env whose ``tasks.start`` waits for ``release`` (like a sim slot coming free)."""
+    env = Environment("slow_start")
+    entered, release, torn_down = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    @env.template()
+    async def slow():
+        try:
+            entered.set()
+            await release.wait()
+            yield "prompt"
+            yield 1.0
+        finally:
+            torn_down.set()
+
+    return env, slow(), entered, release, torn_down
+
+
+async def test_timeout_while_starting_tears_the_task_down_on_a_shared_runtime() -> None:
+    env, task, _, release, torn_down = _slow_start_env()
+
+    async with Shared(LocalRuntime(env), width=2) as runtime:
+        run = await rollout(task, _FnAgent(str), runtime=runtime, rollout_timeout=1.0)
+        assert run.trace.stop_reason == "timeout"
+        assert "during starting task" in (run.trace.error or "")
+
+        release.set()  # the start completes after the rollout gave up on it
+        await asyncio.wait_for(torn_down.wait(), 5.0)
+
+
+@pytest.mark.parametrize("rollout_timeout", [None, 60.0])
+async def test_cancelled_rollout_while_starting_tears_the_task_down_on_a_shared_runtime(
+    rollout_timeout: float | None,
+) -> None:
+    env, task, entered, release, torn_down = _slow_start_env()
+
+    async with Shared(LocalRuntime(env), width=2) as runtime:
+        rolling = asyncio.create_task(
+            rollout(task, _FnAgent(str), runtime=runtime, rollout_timeout=rollout_timeout)
+        )
+        await asyncio.wait_for(entered.wait(), 5.0)
+        rolling.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await rolling
+
+        release.set()
+        await asyncio.wait_for(torn_down.wait(), 5.0)
 
 
 async def test_timeout_does_not_wait_for_provider_cleanup() -> None:
