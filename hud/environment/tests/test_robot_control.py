@@ -196,11 +196,11 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
     assert schema["properties"]["targets"]["required"] == ["x", "grip"]
     assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
-    # Position is reached within 5 mm, a gripper within 2% of its range.
+    # Position is reached within 1 mm; a gripper has no tolerance.
     descriptions = [
         prop["description"] for prop in schema["properties"]["targets"]["properties"].values()
     ]
-    assert descriptions == ["[0, 1]; reached within 0.005", "[-1, 1]; reached within 0.04"]
+    assert descriptions == ["[0, 1]; reached within 0.001", "[-1, 1]"]
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
     assert (
         "10% of each range per second, so a full-range move takes about 10 s"
@@ -208,21 +208,22 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     )
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
-    # The sim matches the command, so the call returns when the target is reached.
-    reach_x, close = np.array(sim.actions[:50]), sim.actions[50:]
+    # The sim matches the command; the call holds until two 3-tick windows show it settled.
+    reach_x, held, close = np.array(sim.actions[:50]), sim.actions[50:55], sim.actions[55:]
     np.testing.assert_allclose(reach_x[:, 0], np.linspace(0.01, 0.5, 50), rtol=1e-6)
     np.testing.assert_allclose(reach_x[:, 1], 0.0)
+    np.testing.assert_allclose(held, [[0.5, 0.0]] * 5)
     # max_step lets the gripper switch in one tick while x holds its commanded target;
     # the sim succeeds on that tick, which ends the episode.
     np.testing.assert_allclose(close, [[0.5, 1.0]])
     reached, closed = agent.results
     assert [block.type for block in reached.content] == ["text", "text", "image"]
     # The trace viewer parses this opening line to map tool calls to ticks.
-    assert _text(reached).startswith("Played 50 steps (5.0 s).")
+    assert _text(reached).startswith("Played 55 steps (5.5 s).")
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "off: x=0.0000, grip=0.0000" in _text(reached)
-    assert "Target reached." in _text(reached)
+    assert "Target reached within 1 mm." in _text(reached)
     assert "Did not reach" not in _text(reached)
     assert "The episode has ended" in _text(closed)
     assert "Time remaining" not in _text(reached)
@@ -246,7 +247,7 @@ async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
     # Four in-box steps; a displacement returns once played.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
-    assert "Target reached." not in _text(agent.results[0])
+    assert "Target reached" not in _text(agent.results[0])
 
 
 @pytest.mark.parametrize(
@@ -342,7 +343,7 @@ async def test_a_call_that_nulls_every_dimension_is_rejected_and_does_not_move()
 
 
 async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> None:
-    """VLABench was rejected at 10.1 s. The cap is a 60 s safety timeout, not that reject."""
+    """VLABench was rejected at 10.1 s. The cap is a 30 s safety timeout, not that reject."""
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=0.6))
 
@@ -357,6 +358,23 @@ async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> N
     assert "safety timeout" not in _text(result)
 
 
+@pytest.mark.parametrize(("speed", "ticks", "full_range"), [(0.1, 50, "10 s"), (0.25, 20, "4 s")])
+async def test_speed_sets_the_share_of_the_range_an_absolute_move_travels_per_second(
+    speed: float, ticks: int, full_range: str
+) -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl(speed=speed)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert f"{speed * 100:g}% of each range per second" in agent.descriptions["move_to"]
+    assert f"a full-range move takes about {full_range}" in agent.descriptions["move_to"]
+    moved = np.array(sim.actions[:ticks])[:, 0]
+    np.testing.assert_allclose(moved, np.linspace(0.5 / ticks, 0.5, ticks), rtol=1e-6)
+    np.testing.assert_allclose(np.array(sim.actions[ticks:])[:, 0], 0.5)
+
+
 async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=1.0))
@@ -369,7 +387,7 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert len(sim.actions) == 3  # 0.3 s at 10 Hz
     assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
     assert "safety timeout" in _text(result)
-    assert "Did not reach the target; largest offset 0.9" in _text(result)
+    assert "Did not reach the target; it stopped with x off by 985 mm." in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
 
@@ -451,12 +469,12 @@ async def test_wait_without_a_duration_observes_with_one_hold_tick() -> None:
 
     assert "one control tick passes" in agent.descriptions["wait"]
     _, looked = agent.results
-    assert len(sim.actions) == 21  # the move, then one tick holding its setpoint
+    assert len(sim.actions) == 26  # the move and its settle, then one tick holding its setpoint
     np.testing.assert_allclose(sim.actions[-1], [0.2, 0.0])
     assert _text(looked).startswith("Played 1 steps (0.1 s).")
     assert "observation/state: x=0.2000" in _text(looked)
     assert "commanded: x=0.2000, grip=0.0000" in _text(looked)
-    assert "Target reached." not in _text(looked)
+    assert "Target reached" not in _text(looked)
     assert "Did not reach" not in _text(looked)
     assert [block.type for block in looked.content] == ["text", "text", "image"]
 
@@ -485,7 +503,7 @@ async def test_wait_holds_the_commanded_pose_for_the_requested_sim_time() -> Non
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    held = np.array(sim.actions[20:])
+    held = np.array(sim.actions[25:])
     assert len(held) == 15  # 1.5 s at 10 Hz
     np.testing.assert_allclose(held, [[0.2, 0.0]] * 15)
     assert _text(agent.results[1]).startswith("Played 15 steps (1.5 s).")
@@ -519,9 +537,9 @@ async def test_every_reply_reports_the_time_left_and_the_tools_state_the_limit()
         assert "You have 10 seconds of simulated time." in agent.descriptions[tool]
         assert "thinking is free" in agent.descriptions[tool]
     moved, waited, looked = (_text(result) for result in agent.results)
-    assert moved.startswith("Played 20 steps (2.0 s). Time remaining: 8.0 s.")
-    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 7.0 s.")
-    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 6.9 s.")
+    assert moved.startswith("Played 25 steps (2.5 s). Time remaining: 7.5 s.")
+    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 6.5 s.")
+    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 6.4 s.")
     assert "The episode has ended" not in looked
 
 
@@ -560,7 +578,7 @@ async def test_a_wait_on_the_last_tick_of_the_time_limit_spends_it_and_ends_the_
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": 0, "note": "look"}))
 
-    async with _served(sim, DirectControl(time_limit=2.1)) as env:
+    async with _served(sim, DirectControl(time_limit=2.6)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     moved, looked = (_text(result) for result in agent.results)
@@ -578,8 +596,8 @@ async def test_a_new_episode_starts_with_the_whole_time_limit() -> None:
         await rollout(Task(env="arm", id="reach"), first, runtime=LocalRuntime(env))
         await rollout(Task(env="arm", id="reach"), second, runtime=LocalRuntime(env))
 
-    assert "Time remaining: 1.0 s." in _text(first.results[0])
-    assert "Time remaining: 1.0 s." in _text(second.results[0])
+    assert "Time remaining: 0.5 s." in _text(first.results[0])
+    assert "Time remaining: 0.5 s." in _text(second.results[0])
 
 
 class _Jitter(_Pose):
@@ -591,7 +609,7 @@ class _Jitter(_Pose):
 
 
 @pytest.mark.parametrize("arm", [_Pose, _Jitter])
-async def test_an_arm_that_never_moves_stops_after_the_final_setpoint_not_at_the_timeout(
+async def test_an_arm_that_never_moves_gives_up_at_the_settle_cap_not_the_safety_timeout(
     arm: type[_Pose],
 ) -> None:
     sim = arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], lag=0.0)
@@ -600,12 +618,12 @@ async def test_an_arm_that_never_moves_stops_after_the_final_setpoint_not_at_the
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    # The 50-tick move plays out, then three held ticks (0.3 s) without progress stall it.
-    assert len(sim.actions) == 53
+    # The 50-tick move plays out; an arm that never responded is held the whole 3 s cap.
+    assert len(sim.actions) == 80
     text = _text(agent.results[0])
     assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
-    assert "Did not reach the target; largest offset 0.5000 on x." in text
+    assert "Did not reach the target; it stopped with x off by 500 mm." in text
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
@@ -619,7 +637,7 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state[0] == pytest.approx(0.5, abs=0.01)
     assert "pose:" in _text(agent.results[0])
     assert "off:" in _text(agent.results[0])
-    assert "Target reached." in _text(agent.results[0])
+    assert "Target reached within 1 mm." in _text(agent.results[0])
 
 
 class _Sag(_Pose):
@@ -631,19 +649,14 @@ class _Sag(_Pose):
 
 
 @pytest.mark.parametrize(
-    ("tolerance", "verdict", "ticks"),
+    ("tolerance", "verdict"),
     [
-        (None, "Stopped 12 mm short.", 53),
-        ({"position": 0.02}, "Target reached.", 50),
-        (
-            {"position": 0.02, "x": 0.003},
-            "Did not reach the target; largest offset 0.0120 on x.",
-            53,
-        ),
+        (None, "Did not reach the target; it settled with x off by 12 mm."),
+        ({"position": 0.02}, "Target reached within 20 mm."),
     ],
 )
-async def test_an_arm_settling_short_reports_its_residual_against_the_tolerance_in_force(
-    tolerance: dict[str, float] | None, verdict: str, ticks: int
+async def test_an_arm_settling_short_is_held_alike_and_labeled_by_the_tolerance_in_force(
+    tolerance: dict[str, float] | None, verdict: str
 ) -> None:
     sim = _Sag(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0])
     agent = _ScriptedLLM(_move("move_to", x=0.5))
@@ -653,7 +666,7 @@ async def test_an_arm_settling_short_reports_its_residual_against_the_tolerance_
 
     assert verdict in _text(agent.results[0])
     assert "safety timeout" not in _text(agent.results[0])
-    assert len(sim.actions) == ticks
+    assert len(sim.actions) == 55  # the tolerance does not change when the call returns
 
 
 class _OpenHand(_Pose):
@@ -675,18 +688,13 @@ async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verd
     assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
     assert "off: x=-0.00" in _text(agent.results[0])
     assert "grip=-2.0000" in _text(agent.results[0])
-    assert "Target reached." in _text(agent.results[0])
+    assert "Target reached within 1 mm." in _text(agent.results[0])
 
 
-@pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"rotation": 0.1}, {"y": 0.1}])
-async def test_a_tolerance_key_that_is_no_quantity_or_action_name_is_refused(
-    tolerance: dict[str, float],
-) -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-
+@pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"grip": 0.1}, {"x": 0.1}])
+def test_a_tolerance_key_that_is_not_a_quantity_is_refused(tolerance: dict[str, float]) -> None:
     with pytest.raises(ValueError, match="tolerance keys"):
-        async with _served(sim, DirectControl(tolerance=tolerance)) as env:
-            await env.start()
+        DirectControl(tolerance=tolerance)
 
 
 def _quat_names(order: str) -> list[str]:
@@ -699,74 +707,66 @@ def _reached_within(schema: dict[str, Any]) -> dict[str, float]:
     return {
         name: float(prop["description"].split("reached within ")[1])
         for name, prop in schema["properties"]["targets"]["properties"].items()
+        if "reached within" in prop["description"]
     }
 
 
 @pytest.mark.parametrize(
-    ("action_type", "names", "low", "high", "reach"),
+    ("action_type", "names", "reach"),
     [
-        # Position: 1% of the range, at least 1 mm, at most 5 mm.
-        ("ee_abs", ["x", "y", "z"], [0.0] * 3, [0.05, 0.3, 1.0], {"x": 1e-3, "y": 3e-3, "z": 5e-3}),
-        # Rotation: 1% of a full turn capped at 0.03 rad, whatever the quaternion columns span.
+        # Each default moves the fingertips 1 mm: directly, over a 0.15 m gripper, over a
+        # 2.5 m lever of joints. A gripper has none, whatever its unit.
+        ("ee_abs", ["x", "y", "z"], {"x": 1e-3, "y": 1e-3, "z": 1e-3}),
         (
             "ee_abs",
             _quat_names("xyzw"),
-            [-1.0] * 4,
-            [1.0] * 4,
-            {"roll": 0.03, "pitch": 0.03, "yaw": 0.03},
+            {"roll": 1e-3 / 0.15, "pitch": 1e-3 / 0.15, "yaw": 1e-3 / 0.15},
         ),
-        # Joint: 1% of the range, at least 0.001 rad, at most 0.002 rad.
-        (
-            "joint_pos",
-            ["joint1", "joint2", "joint3"],
-            [0.0] * 3,
-            [0.05, 0.15, 3.0],
-            {"joint1": 1e-3, "joint2": 1.5e-3, "joint3": 2e-3},
-        ),
-        # Gripper: 2% of whatever range and unit it has, unclamped.
-        ("ee_abs", ["x", "grip"], [0.0, 0.0], [1.0, 0.04], {"x": 5e-3, "grip": 8e-4}),
-        ("joint_pos", ["joint1", "grip"], [-3.0, 0.0], [3.0, 255.0], {"joint1": 2e-3, "grip": 5.1}),
+        ("joint_pos", ["joint1", "joint2"], {"joint1": 4e-4, "joint2": 4e-4}),
+        ("ee_abs", ["x", "grip"], {"x": 1e-3}),
+        ("joint_pos", ["joint1", "grip"], {"joint1": 4e-4}),
     ],
 )
-async def test_each_quantity_defaults_to_a_clamped_share_of_the_dimension_range(
-    action_type: str, names: list[str], low: list[float], high: list[float], reach: dict[str, float]
+async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one_millimetre(
+    action_type: str, names: list[str], reach: dict[str, float]
 ) -> None:
-    sim = _Pose(_contract(action_type, low, high, names), [0.0] * len(names))
+    sim = _Pose(
+        _contract(action_type, [-1.0] * len(names), [1.0] * len(names), names), [0.0] * len(names)
+    )
     agent = _ScriptedLLM()
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     (schema,) = (s for tool, s in agent.schemas.items() if tool != "wait")
-    assert _reached_within(schema) == pytest.approx(reach)
+    assert _reached_within(schema) == pytest.approx(reach, rel=1e-3)
 
 
 @pytest.mark.parametrize(
     ("tolerance", "reach"),
     [
-        (None, {"x": 1e-3, "roll": 0.03, "pitch": 0.03, "yaw": 0.03}),
+        (
+            {"position": 4e-3},
+            {"x": 4e-3, "roll": 4e-3 / 0.15, "pitch": 4e-3 / 0.15, "yaw": 4e-3 / 0.15},
+        ),
         (
             {"position": 4e-3, "rotation": 0.05},
             {"x": 4e-3, "roll": 0.05, "pitch": 0.05, "yaw": 0.05},
         ),
-        (
-            {"position": 4e-3, "x": 2e-3, "rotation": 0.05, "tcp_quat.qz": 0.08},
-            {"x": 2e-3, "roll": 0.08, "pitch": 0.08, "yaw": 0.08},
-        ),
+        ({"rotation": 0.05}, {"x": 1e-3, "roll": 0.05, "pitch": 0.05, "yaw": 0.05}),
     ],
 )
-async def test_a_tolerance_override_beats_the_range_default_and_an_action_name_beats_its_quantity(
-    tolerance: dict[str, float] | None, reach: dict[str, float]
+async def test_a_position_override_rescales_the_angle_defaults_unless_they_are_set(
+    tolerance: dict[str, float], reach: dict[str, float]
 ) -> None:
     names = ["x", *_quat_names("xyzw")]
-    contract = _contract("ee_abs", [0.0] + [-1.0] * 4, [0.05] + [1.0] * 4, names)
-    sim = _Pose(contract, [0.0, 0.0, 0.0, 0.0, 1.0])
+    sim = _Pose(_contract("ee_abs", [-1.0] * 5, [1.0] * 5, names), [0.0, 0.0, 0.0, 0.0, 1.0])
     agent = _ScriptedLLM()
 
     async with _served(sim, DirectControl(tolerance=tolerance)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert _reached_within(agent.schemas["move_to"]) == pytest.approx(reach)
+    assert _reached_within(agent.schemas["move_to"]) == pytest.approx(reach, rel=1e-3)
 
 
 @pytest.mark.parametrize(
@@ -885,7 +885,9 @@ async def test_euler_commands_slerp_onto_axis_angle() -> None:
     # Intrinsic XYZ of roll=yaw=pi/2 is the quaternion (0.5, 0.5, 0.5, 0.5), angle 2pi/3.
     component = (2.0 * np.pi / 3.0) / np.sqrt(3.0)
     np.testing.assert_allclose(sim.actions[-1], [component, component, component], atol=1e-4)
-    angles = np.linalg.norm(sim.actions, axis=1)
+    # 2pi/3 at a tenth of a turn per second, 10 Hz; the hold after it repeats the goal.
+    ticks = math.ceil((2 * np.pi / 3) / (0.1 * 2 * np.pi / 10))
+    angles = np.linalg.norm(sim.actions[:ticks], axis=1)
     gaps = np.diff(angles)
     assert gaps.min() > 0
     np.testing.assert_allclose(gaps, gaps[0], rtol=0.05)
@@ -1012,6 +1014,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
         assert not result.isError
         assert f"ee_euler.x={wrapped:.4f}" in _text(result)
         assert f"pose: x=0.0000, roll={wrapped:.4f}" in _text(result)
-    assert "Target reached." in _text(past)
+    assert "Target reached within 0.006667 rad." in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]

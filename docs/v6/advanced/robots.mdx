@@ -598,31 +598,29 @@ The [contract](#contract) derives the tool surface:
 | action `state_type` (else `type`) | The control kind, which picks the tool (`CONTROL_KINDS`, one row per kind). |
 | action `names` | The dimensions a call addresses. `targets` lists every one, and the model sets a dimension to `null` to leave it as it is. A name with a prefix (`left_arm.x`) nests under its prefix as a group (`left_arm: {x, ...}`), and a group set to `null` holds all of its dimensions at once, which keeps humanoid-sized action spaces manageable. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
 | action `limits` (else `stats`) | Per-dimension `min` / `max`: the target range, or the per-step box for a displacement. |
-| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops getting closer, and gives up at `timeout` (default 60 s). |
+| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call holds the goal until the arm stops getting closer (at most 3 s after the motion), and gives up at `timeout` (default 30 s). |
 | `rgb` observations and the rest | The camera frames and labeled state every call returns. |
 
 | Control kind (`state_type`) | Coarse `type` | Tool | Quantities |
 |-----------------------------|---------------|------|------------|
-| `EE_ABS_POSE`, `EE_ABS_POS` | `ee_abs` | `move_to` | `position`, `rotation`, `grip` |
-| `JOINT_ABS_POS` | `joint_pos` | `move_joints` | `joint`, `grip` |
+| `EE_ABS_POSE`, `EE_ABS_POS` | `ee_abs` | `move_to` | `position`, `rotation` |
+| `JOINT_ABS_POS` | `joint_pos` | `move_joints` | `joint` |
 | `EE_DEL_POSE`, `EE_DEL_POS` | `ee_del` | `move_by` | displacement, played once |
 | `BASE_DEL_POSE` | | `walk_by` | displacement, played once |
 
 A gripper is a name containing `grip`, and a rotation is the `roll` / `pitch` / `yaw` of a wrist
-rotation block. Each dimension of an absolute kind is reached within a share of its range,
-clamped (`TOLERANCES`):
+rotation block. The tolerance says how close counts as reaching the target. It labels the result
+and never ends a move early. Each default is the amount that moves the fingertips 1 mm
+(`DEFAULT_TOLERANCE_M`):
 
-| Quantity | Share of range | Floor | Cap |
-|----------|----------------|-------|-----|
-| `position` | 1% | 1 mm | 5 mm |
-| `rotation` | 1% of a full turn | 0.01 rad | 0.03 rad |
-| `joint` | 1% | 0.001 rad | 0.002 rad |
-| `grip` | 2% | none | none |
+| Quantity | Default | Fingertip lever |
+|----------|---------|-----------------|
+| `position` | 1 mm | |
+| `rotation` | 0.0067 rad | a 0.15 m gripper turning at the wrist |
+| `joint` | 0.0004 rad | 2.5 m summed over an arm's joints (a Franka's spans about 2 to 2.9 m) |
 
-A rotation's range is always a full turn, so it is reached within 0.03 rad, and a revolute joint
-spanning more than 0.2 rad within 0.002 rad. A gripper's tolerance stays a share of its range
-because its unit varies by sim. Each dimension's schema description states its range and tolerance
-(`[0, 1]; reached within 0.005`).
+A gripper has no tolerance, since its unit varies by sim and it often stops on what it holds. Each
+arm dimension's schema description states its range and tolerance (`[0, 1]; reached within 0.001`).
 `BASE_ABS_TWIST` (a `walk` velocity for a duration) is not served yet. The wire carries one action
 feature, so a contract that mixes kinds is not served.
 
@@ -632,7 +630,7 @@ Tool dimensions follow a standard naming convention when every native name maps 
 `right_` name goes under the `left_arm` / `right_arm` group, so a bimanual call is
 `move_to({"left_arm": {"x": ..., "grip": ...}, "right_arm": null})`. If any name has no standard
 form, or two collide, the tool keeps the native names. Only the tool renames: the wire, the
-observation lines, and every env parameter (`max_step`, `tolerance`) keep the contract's names, and
+observation lines, and `max_step` keep the contract's names, and
 `dims` accepts either. Units and gripper polarity are the contract's, so `notes` still states them.
 
 There is no `observe` tool. Every motion call returns the camera frames and the pose it
@@ -651,21 +649,26 @@ episode has ended and tells the model to stop. The agent loop itself ends only w
 (or at its step cap), so a model that ignores the reply keeps getting that reply. The template
 grades it as usual.
 
-An absolute move steps until every set dimension is within its tolerance or the arm stops getting
-closer, then returns the pose, how far it is from the command (`off`), and a verdict on the arm:
-`Target reached.`; `Stopped 6 mm and 0.04 rad short.` when it settled within three tolerances
-(the largest offset of each quantity outside its tolerance); or
-`Did not reach the target; largest offset X on <dim>.` when it stalled farther away. The gripper
-waits like any dimension but never decides the verdict, since a gripper short of its command is
-usually holding something (and some references cannot read it). Stopping is measured in
-tolerances: once the final setpoint plays, each tick records every set dimension's offset divided
-by its tolerance, and the move has stalled when no dimension outside its tolerance got 0.1 closer
-over the last 0.25 s (at least three ticks) than its best before. So a blocked or jittering arm
-returns about 0.25 s after the setpoints play out instead of running to `timeout`, a slowly
-converging one keeps going, and a gripper that never reads closed does not cut a settling arm
-short. A displacement returns once played. `timeout` (default 60 s)
-is only the safety cap: a full-range move at the default speed is about 10 s, and a longer real
-move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
+An absolute move plays its setpoints, then holds the goal until the arm settles, so every move
+gets as close as the arm will go. It then returns the pose, how far it is from the command (`off`),
+and a verdict on the arm: `Target reached within 1 mm and 0.0067 rad.`, or
+`Did not reach the target; it settled with z off by 4.2 mm.` (the dimension farthest outside its
+tolerance). The verdict says `it stopped with` instead when the hold ended unsettled. The gripper
+is waited for like any dimension but never decides the verdict, since a gripper short of its
+command is usually holding something (and some references cannot read it).
+
+Settling is measured on window averages, so sensor jitter does not count as progress. From the
+call's start, each tick records every set dimension's distance from the goal. The arm has settled
+when, between the last two windows of 0.25 s (at least three ticks), no dimension's mean distance
+shrank by more than 10% and by more than a tenth of its tolerance (a gripper: 0.01% of its range).
+Before that check counts, every arm dimension must be within its tolerance or have closed half of
+its commanded travel, so an arm slow to start is not cut short. The hold lasts at most 3 s. So a
+tracking arm returns about two windows (0.5 s) after its setpoints play out, a converging one keeps
+going, and an arm that never responds returns at the 3 s cap rather than at `timeout`. A short move
+toward a steady offset (an arm resting a few mm low, moved down) may also wait the full 3 s. A
+displacement returns once played. `timeout` (default 30 s) is only the safety cap: a full-range
+move at the default speed is about 10 s, and a longer real move plays through instead of being
+rejected. End-effector orientation is intrinsic XYZ euler
 (roll, pitch, yaw, radians). Angles are periodic: replies report euler angles, both the `pose` and
 any euler columns of the observation state, wrapped into [-pi, pi), and a command past pi is
 accepted rather than rejected. Any wrapped convention flips sign at its own boundary, so the tool
@@ -683,10 +686,10 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
 | `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
-| `tolerance` | `{}` | Reach tolerance overrides of the range default, by quantity (`{"position": 0.008, "rotation": 0.05}`; `joint`, `grip`) or by action name, which beats its quantity. Values are in the dimension's unit, a gripper's too. A key that is neither a quantity nor an action name of the tool is refused. A rotation named by several of its action columns takes the largest. |
-| `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops getting closer. |
+| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only the verdict, not when a call returns. |
+| `timeout` | `30` | Safety cap, in seconds, on one call. The call returns earlier, once the arm settles. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
-| `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
+| `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second (a rotation: of a full turn), so a full-range move takes `1 / speed` seconds. It paces only the setpoints; the settle hold after them is unchanged. Displacements ignore it. |
 | `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining. Spending it ends the episode as sim termination does: the call in flight stops at the limit, later calls play nothing, and the reply says the episode has ended. The motion and `wait` tool descriptions say "You have N seconds of simulated time. Time passes only while the robot moves or waits; thinking is free. When it runs out the episode ends and is graded as it stands."; the episode prompt is unchanged, so VLAs see the sim's own instruction. |
 | `use_annotation` | `True` | Ask for a `note` on every call. `False` removes `note` from the tool schemas and never refuses an empty one. |
 | `use_wait` | `True` | Serve the `wait` tool. `False` serves only the motion tool, whose time-limit text then says time passes only while the robot moves. |
@@ -738,8 +741,8 @@ flowchart LR
 
 Direct control does no inverse kinematics (IK, solving joint angles for a target pose). It
 interpolates setpoints at `speed` so the sim never jumps to a distant goal, and the sim's own
-low-level controller tracks each one. It stops when the arm arrives, stops getting closer, or
-reaches `timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
+low-level controller tracks each one. It then holds the goal until the arm stops getting closer
+(at most 3 s), or until `timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
 
 The bridge sees `DirectControl` as an ordinary `robot` client, so direct control needs no bridge
 changes. The control link from `RobotEndpoint` carries only `reset` and `result`.
