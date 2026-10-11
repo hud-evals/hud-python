@@ -196,11 +196,11 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
     assert schema["properties"]["targets"]["required"] == ["x", "grip"]
     assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
-    # Position is reached within 1 mm, a gripper within 2% of its range.
+    # Position is reached within 5 mm, a gripper within 2% of its range.
     descriptions = [
         prop["description"] for prop in schema["properties"]["targets"]["properties"].values()
     ]
-    assert descriptions == ["[0, 1]; reached within 0.001", "[-1, 1]; reached within 0.04"]
+    assert descriptions == ["[0, 1]; reached within 0.005", "[-1, 1]; reached within 0.04"]
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
     assert (
         "10% of each range per second, so a full-range move takes about 10 s"
@@ -623,30 +623,70 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
 
 
 class _Sag(_Pose):
-    """An arm that settles 5 mm short of every command."""
+    """An arm that settles 12 mm short of every command."""
 
     def step(self, action: NDArray[Any]) -> None:
         super().step(action)
-        self.state = self.state - [0.005, 0.0]
+        self.state = self.state - [0.012, 0.0]
 
 
 @pytest.mark.parametrize(
-    ("tolerance", "verdict"),
-    [(None, "Did not reach the target; largest offset 0.0050 on x."), (0.01, "Target reached.")],
+    ("tolerance", "verdict", "ticks"),
+    [
+        (None, "Stopped 12 mm short.", 53),
+        ({"position": 0.02}, "Target reached.", 50),
+        (
+            {"position": 0.02, "x": 0.003},
+            "Did not reach the target; largest offset 0.0120 on x.",
+            53,
+        ),
+    ],
 )
-async def test_an_arm_settling_short_stalls_unless_the_env_declares_a_looser_tolerance(
-    tolerance: float | None, verdict: str
+async def test_an_arm_settling_short_reports_its_residual_against_the_tolerance_in_force(
+    tolerance: dict[str, float] | None, verdict: str, ticks: int
 ) -> None:
     sim = _Sag(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0])
     agent = _ScriptedLLM(_move("move_to", x=0.5))
-    overrides = None if tolerance is None else {"x": tolerance}
 
-    async with _served(sim, DirectControl(tolerance=overrides)) as env:
+    async with _served(sim, DirectControl(tolerance=tolerance)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert verdict in _text(agent.results[0])
     assert "safety timeout" not in _text(agent.results[0])
-    assert len(sim.actions) == (53 if tolerance is None else 50)
+    assert len(sim.actions) == ticks
+
+
+class _OpenHand(_Pose):
+    """A lagging arm whose state always reads the gripper open, as a hand-only reference does."""
+
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
+        data, success = super().get_observation()
+        data["observation/state"] = data["observation/state"] * [1.0, 0.0] - [0.0, 1.0]
+        return data, success
+
+
+async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verdict() -> None:
+    sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
+    agent = _ScriptedLLM(_move("move_to", x=0.5, grip=1.0))
+
+    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
+    assert "off: x=-0.00" in _text(agent.results[0])
+    assert "grip=-2.0000" in _text(agent.results[0])
+    assert "Target reached." in _text(agent.results[0])
+
+
+@pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"rotation": 0.1}, {"y": 0.1}])
+async def test_a_tolerance_key_that_is_no_quantity_or_action_name_is_refused(
+    tolerance: dict[str, float],
+) -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+
+    with pytest.raises(ValueError, match="tolerance keys"):
+        async with _served(sim, DirectControl(tolerance=tolerance)) as env:
+            await env.start()
 
 
 @pytest.mark.parametrize(

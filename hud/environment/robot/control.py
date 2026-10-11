@@ -23,8 +23,8 @@ onto whatever the contract stores (quaternion, axis-angle, or euler)::
     sim = env.gym(make_env)
     DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
-An absolute move steps until every set dimension is within its kind's
-tolerance or the arm stops getting closer, then returns that pose; a
+An absolute move steps until every set dimension is within its tolerance
+(``TOLERANCES``) or the arm stops getting closer, then returns that pose; a
 displacement returns once played. ``timeout`` is only a safety cap. Single-env
 sims only: a tool call claims the sole slot (no slot token).
 
@@ -85,15 +85,15 @@ class ControlKind(NamedTuple):
 
     tool: str
     absolute: bool  # targets held until reached; else displacements played once
-    tolerance: float | None  # reach tolerance of a non-gripper scalar, in the kind's unit
+    quantity: str | None  # tolerance quantity of its plain scalars; None: nothing to reach
 
 
 #: Control kind -> tool. A new kind is a row. ``BASE_ABS_TWIST`` (``walk``) needs a
 #: duration and a stop-after law, so it is not served yet.
 CONTROL_KINDS: dict[str, ControlKind] = {
-    "EE_ABS_POSE": ControlKind("move_to", True, 1e-3),  # m
-    "EE_ABS_POS": ControlKind("move_to", True, 1e-3),
-    "JOINT_ABS_POS": ControlKind("move_joints", True, 2e-3),  # rad
+    "EE_ABS_POSE": ControlKind("move_to", True, "position"),
+    "EE_ABS_POS": ControlKind("move_to", True, "position"),
+    "JOINT_ABS_POS": ControlKind("move_joints", True, "joint"),
     "EE_DEL_POSE": ControlKind("move_by", False, None),
     "EE_DEL_POS": ControlKind("move_by", False, None),
     "BASE_DEL_POSE": ControlKind("walk_by", False, None),
@@ -102,13 +102,17 @@ CONTROL_KINDS: dict[str, ControlKind] = {
 #: The control kind of a contract that only gives the coarse action ``type``.
 _TYPE_KINDS = {"ee_abs": "EE_ABS_POSE", "joint_pos": "JOINT_ABS_POS", "ee_del": "EE_DEL_POSE"}
 
-#: Reach tolerance of a rotation (rad) and of a gripper (fraction of its range).
-_ROTATION_TOLERANCE = 0.01
-_GRIP_TOLERANCE = 0.02
+#: Default reach tolerance per quantity: m, rad, rad, and a gripper's share of its range.
+#: Rotation 0.03 rad clears the worst LIBERO OSC settle (0.022 rad) seen on Modal.
+TOLERANCES = {"position": 5e-3, "rotation": 0.03, "joint": 2e-3, "grip": 0.02}
+#: How the verdict states a residual: (scale, unit).
+_UNITS = {"position": (1e3, "mm"), "rotation": (1.0, "rad"), "joint": (1.0, "rad")}
+#: A stalled arm within this many tolerances stopped short; farther, it did not reach.
+_SHORT = 3.0
 
-#: Once the final setpoint plays, a move has stalled when its best error (worst offset in
-#: tolerances) over the last ``max(_STALL_TICKS, _STALL_S)`` is not ``_PROGRESS`` better
-#: than its best before.
+#: Once the final setpoint plays, a move has stalled when no dimension outside its
+#: tolerance got ``_PROGRESS`` tolerances closer over the last ``max(_STALL_TICKS,
+#: _STALL_S)`` than its best before.
 _STALL_TICKS = 3
 _STALL_S = 0.25
 _PROGRESS = 0.1
@@ -200,9 +204,10 @@ class DirectControl:
       range per second. Orientation travels this fraction of a full turn per second.
     - ``max_step`` - per-dimension step override by action name (e.g. a binary
       gripper that should switch in one step).
-    - ``tolerance`` - per-dimension reach tolerance override by action name, for a
-      controller that cannot reach the kind's default. A rotation takes the
-      largest tolerance among its action columns.
+    - ``tolerance`` - reach tolerance overrides of ``TOLERANCES``, by quantity
+      (``position``, ``rotation``, ``joint``, ``grip``) or by action name, which
+      beats its quantity. Values are in the dimension's unit (a gripper's too).
+      A rotation takes the largest tolerance among its action columns.
     - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
       when the target is reached or the arm stops getting closer. Default 60 s.
     - ``reference`` - maps observation data to the current action-space vector,
@@ -320,17 +325,45 @@ class DirectControl:
             self._step[self._names.index(dim)] = step
         if np.any(self._step <= 0):
             raise ValueError(f"every action dimension needs a positive step, got {self._step}")
-        # Reach tolerance per tool dimension: the kind's, a rotation's, or a gripper's share.
+        # Reach tolerance per tool dimension, from its quantity's default, then the env's
+        # overrides: by quantity, then by action name (specific beats quantity).
+        quantities = (
+            []
+            if kind.quantity is None
+            else [
+                "grip"
+                if "grip" in name
+                else "rotation"
+                if i in self._orient_columns
+                else kind.quantity
+                for i, name in enumerate(self._names)
+            ]
+        )
+        known = set(quantities) | (set(self._names) if quantities else set())
+        unknown = sorted(set(self.tolerance) - known)
+        if unknown:
+            raise ValueError(
+                f"tolerance keys {unknown} are not quantities {sorted(set(quantities))} or "
+                f"action names of this {self._tool} tool"
+            )
         self._reach: dict[str, float] = {}
-        if kind.tolerance is not None:
-            grip = np.array(["grip" in name for name in self._names])
-            columns = np.where(grip, _GRIP_TOLERANCE * (self._high - self._low), kind.tolerance)
-            columns[list(self._orient_columns)] = _ROTATION_TOLERANCE
-            for name, value in self.tolerance.items():
-                columns[self._names.index(name)] = value
+        self._quantity: dict[str, str] = {}
+        if quantities:
+            span = self._high - self._low
+            columns = np.array(
+                [
+                    TOLERANCES[q] * (span[i] if q == "grip" else 1.0)
+                    for i, q in enumerate(quantities)
+                ]
+            )
+            for key in sorted(self.tolerance, key=lambda key: key in self._names):
+                columns[[i for i, q in enumerate(quantities) if key in (q, self._names[i])]] = (
+                    self.tolerance[key]
+                )
             for name, axis in self._axes.items():
                 own = [axis.index] if axis.block is None else list(axis.block.contract_columns)
                 self._reach[name] = float(np.max(columns[own]))
+                self._quantity[name] = quantities[own[0]]
         # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._obs_space = observations
@@ -597,13 +630,18 @@ class DirectControl:
                 # Then hold the goal until it is reached or the arm stops getting closer. A
                 # clipped plan already fills the safety cap, so it gets no hold.
                 finished = False
-                errors: list[float] = []  # per tick at the goal: worst offset, in tolerances
+                errors: list[list[float]] = []  # per tick at the goal: offsets in tolerances
                 if goal is not None and not clipped:
                     while not obs["terminated"]:
-                        errors.append(max(o / t for _, o, t in self._gaps(proprio, goal, named)))
-                        before, recent = errors[: -self._window], errors[-self._window :]
-                        stalled = bool(before) and min(before) - min(recent) < _PROGRESS
-                        finished = errors[-1] <= 1 or stalled
+                        errors.append([o / t for _, o, t, _ in self._gaps(proprio, goal, named)])
+                        now = np.array(errors[-1])
+                        before = np.array(errors[: -self._window])
+                        recent = np.array(errors[-self._window :])
+                        # Per dimension, so an unreadable gripper cannot mask a settling arm.
+                        stalled = len(before) > 0 and not np.any(
+                            (before.min(0) - recent.min(0) >= _PROGRESS) & (now > 1)
+                        )
+                        finished = bool(np.all(now <= 1)) or stalled
                         if finished or played >= self._max_ticks:
                             break
                         await step(goal)
@@ -723,9 +761,10 @@ class DirectControl:
 
     def _gaps(
         self, proprio: NDArray[np.float64], goal: NDArray[np.float64], named: set[str]
-    ) -> list[tuple[str, float, float]]:
-        """Each named dimension's (name, offset, tolerance); a rotation is one ``orientation``."""
-        gaps: list[tuple[str, float, float]] = []
+    ) -> list[tuple[str, float, float, str]]:
+        """Each named dimension's (name, offset, tolerance, quantity); a rotation is one
+        ``orientation``."""
+        gaps: list[tuple[str, float, float, str]] = []
         blocks: set[int] = set()
         for name in self._dims:
             axis = self._axes[name]
@@ -733,11 +772,11 @@ class DirectControl:
                 continue
             if axis.block is None:
                 offset = abs(float(proprio[axis.index] - goal[axis.index]))
-                gaps.append((name, offset, self._reach[name]))
+                gaps.append((name, offset, self._reach[name], self._quantity[name]))
             elif id(axis.block) not in blocks:
                 blocks.add(id(axis.block))
                 offset = angular_distance(axis.block.read(proprio), axis.block.read(goal))
-                gaps.append(("orientation", offset, self._reach[name]))
+                gaps.append(("orientation", offset, self._reach[name], "rotation"))
         return gaps
 
     def _proprio(self, obs: dict[str, Any]) -> NDArray[np.float64]:
@@ -755,7 +794,7 @@ class DirectControl:
         proprio: NDArray[np.float64],
         *,
         timed_out: bool,
-        gaps: list[tuple[str, float, float]] | None,
+        gaps: list[tuple[str, float, float, str]] | None,
         goal: NDArray[np.float64] | None,
         left: int | None,
     ) -> Content:
@@ -782,13 +821,23 @@ class DirectControl:
             lines.append("commanded: " + _labeled(self._reading(command)))
         if goal is not None:
             lines.append("off: " + self._off(proprio, goal))
-        if gaps:
-            name, offset, tolerance = max(gaps, key=lambda gap: gap[1] / gap[2])
-            lines.append(
-                "Target reached."
-                if offset <= tolerance
-                else f"Did not reach the target; largest offset {offset:.4f} on {name}."
-            )
+        # The verdict is about the arm: a gripper short of its command is usually holding.
+        arm = [gap for gap in gaps or [] if gap[3] != "grip"]
+        if arm:
+            name, offset, tolerance, _ = max(arm, key=lambda gap: gap[1] / gap[2])
+            if offset <= tolerance:
+                lines.append("Target reached.")
+            elif offset <= _SHORT * tolerance:
+                short: dict[str, float] = {}  # quantity -> largest offset outside tolerance
+                for _, off, tol, quantity in arm:
+                    if off > tol:
+                        short[quantity] = max(off, short.get(quantity, 0.0))
+                residual = " and ".join(
+                    f"{off * _UNITS[q][0]:.2g} {_UNITS[q][1]}" for q, off in short.items()
+                )
+                lines.append(f"Stopped {residual} short.")
+            else:
+                lines.append(f"Did not reach the target; largest offset {offset:.4f} on {name}.")
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:
@@ -907,6 +956,7 @@ __all__ = [
     "DEFAULT_TIMEOUT_S",
     "MAX_WAIT_S",
     "MIN_WAIT_TICKS",
+    "TOLERANCES",
     "ControlKind",
     "DirectControl",
 ]
