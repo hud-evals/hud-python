@@ -652,13 +652,26 @@ grades it as usual.
 
 An absolute move plays its setpoints, then holds the goal until the arm settles, so every move
 gets as close as the arm will go. It then returns the pose, how far it is from the command (`off`),
-and one of two verdicts on the arm, each stating the largest remaining offset in mm or rad:
-`Target reached; the largest remaining offset is 0.4 mm on z.` or
-`Did not reach the target; the largest remaining offset is 4.2 mm on z.` When several dimensions
-miss, the second verdict lists them largest first (`the remaining offsets are 0.02 rad on
-orientation and 2 mm on x`). The gripper is waited for like any dimension but never decides the
+and one of three verdicts on the arm, each stating the real remaining offsets in mm or rad and no
+tolerance:
+
+- `At the target. Largest remaining offset: 3.2 mm on z.`
+- `Stopped near the target. Remaining offsets: 8.1 mm on x, 12.4 mm on z.` A miss beyond the
+  tolerance but within 2.5 times it.
+- `Did not reach the target. Remaining offsets: 82.2 mm on z, 43.5 mm on y.` A miss beyond 2.5
+  times the tolerance.
+
+The two miss verdicts list every offset beyond its tolerance, largest relative to its tolerance
+first. A verdict reports where the arm ended, not why it stopped. The gripper never decides the
 verdict, since a gripper short of its command is usually holding something (and some references
 cannot read it).
+
+A call that changes a gripper command also waits for the observed fingers: any observation state
+whose name contains `grip` (a Franka hand's `finger_joint1` and `finger_joint2` columns in LIBERO's
+`robot0_gripper_qpos`, in metres). The call holds until a finger has moved faster than 0.5 mm per
+tick, then returns once every finger has stayed slower than that for 3 ticks, so a close that
+stalls on an object returns 3 ticks after the fingers stop, within the 3 s hold cap. A call that
+re-sends the gripper's current command, and an observation that names no finger, wait for nothing.
 
 Settling is measured on window averages, so sensor jitter does not count as progress. From the
 call's start, each tick records every set dimension's distance from the goal. The arm has settled
@@ -690,7 +703,7 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
 | `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
-| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only which verdict is returned, not when a call returns, and the model never sees it. |
+| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only which verdict is returned (at the target, or a miss beyond 2.5 times it), not when a call returns, and the model never sees it. |
 | `timeout` | `30` | Safety cap, in seconds, on one call. The call returns earlier, once the arm settles. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second (a rotation: of a full turn), so a full-range move takes `1 / speed` seconds. It paces only the setpoints; the settle hold after them is unchanged. Displacements ignore it. |

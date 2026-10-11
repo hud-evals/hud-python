@@ -23,9 +23,10 @@ onto whatever the contract stores (quaternion, axis-angle, or euler)::
     sim = env.gym(make_env)
     DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
-An absolute move holds its goal until the arm stops getting closer (at most 3 s
-after the motion plays), then returns that pose and whether it reached the
-target; a displacement returns once played. ``timeout`` is only a safety cap.
+An absolute move holds its goal until the arm stops getting closer (and, when it changes a
+gripper command, the observed fingers have stopped moving), at most 3 s after the motion
+plays, then returns that pose and how close it got to the target; a displacement returns
+once played. ``timeout`` is only a safety cap.
 Single-env sims only: a tool call claims the sole slot (no slot token).
 
 Every tick of every call also streams to the rollout's trace: numeric state per
@@ -127,6 +128,13 @@ _GRIP_FLOOR = 1e-4
 #: Before settling counts, every arm dimension must have closed ``_RESPONDED`` of its
 #: commanded travel (or have none to close), so an arm slow to start is not cut short.
 _RESPONDED = 0.5
+#: A gripper command also waits for the observed fingers: first until one moves faster than
+#: ``_FINGER_REST_M`` per tick, then until every finger stays slower than that for
+#: ``_FINGER_REST_TICKS`` ticks. A finger column is any observation state named like a gripper.
+_FINGER_REST_M = 5e-4
+_FINGER_REST_TICKS = 3
+#: A miss beyond this many tolerances is not reported as a near miss.
+_NEAR = 2.5
 #: Longest hold after the motion plays, in seconds.
 _SETTLE_S = 3.0
 
@@ -228,8 +236,8 @@ class DirectControl:
     - ``tolerance`` - how close counts as reaching the target, by quantity:
       ``position`` (m, default ``DEFAULT_TOLERANCE_M``), ``rotation`` and ``joint``
       (rad, default the position tolerance over a 0.15 m and a 2.5 m lever). It only
-      decides whether the reply says the target was reached, and is never shown to the
-      model; every move gets as close as the arm settles.
+      picks the reply's verdict (at the target, or a miss beyond ``_NEAR`` tolerances),
+      and is never shown to the model; every move gets as close as the arm settles.
     - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
       once the arm settles. Default 30 s.
     - ``reference`` - maps observation data to the current action-space vector,
@@ -372,6 +380,12 @@ class DirectControl:
         self._states = {
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
         }
+        self._fingers = [
+            (key, column)
+            for key, names in self._states.items()
+            for column, name in enumerate(names or [])
+            if "grip" in name
+        ]
         self._euler_columns = {
             key: euler_columns(names or []) for key, names in self._states.items()
         }
@@ -512,7 +526,8 @@ class DirectControl:
             )
             done = (
                 "The call returns once the arm stops getting closer (at most "
-                f"{_SETTLE_S:g} s after the motion plays) and says whether it reached the target"
+                f"{_SETTLE_S:g} s after the motion plays) and reports how close the arm is "
+                "to the target"
             )
         else:
             motion = (
@@ -611,6 +626,7 @@ class DirectControl:
                     assert goal is not None
                     return np.array([gap.distance for gap in self._gaps(vector, goal, named)])
 
+                fingers = [self._finger_positions(obs)]
                 origin = self._start(obs)  # the command the move starts from
                 if goal is not None:
                     distances.append(measure(proprio))
@@ -627,6 +643,7 @@ class DirectControl:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = row.copy()
                     proprio = self._proprio(obs)
+                    fingers.append(self._finger_positions(obs))
                     if goal is not None:
                         distances.append(measure(proprio))
 
@@ -649,16 +666,22 @@ class DirectControl:
                         ]
                     )
                     travel = measure(origin)
+                    watch = bool(self._fingers) and bool(np.any(grip & (travel > 0)))
                     held = 0
                     while not obs["terminated"]:
                         # A gripper often stops on what it holds, so it always counts as
-                        # responded; its own settling is still awaited.
+                        # responded; a changed gripper command waits for its fingers instead.
                         responded = (
                             grip
                             | (travel <= floor)
                             | (distances[0] - distances[-1] >= _RESPONDED * travel)
                         )
-                        if np.all(responded) and len(distances) >= 2 * self._window:
+                        speed = np.abs(np.diff(fingers, axis=0))
+                        at_rest = not watch or (
+                            np.any(speed > _FINGER_REST_M)
+                            and np.all(speed[-_FINGER_REST_TICKS:] < _FINGER_REST_M)
+                        )
+                        if np.all(responded) and at_rest and len(distances) >= 2 * self._window:
                             earlier = np.mean(distances[-2 * self._window : -self._window], axis=0)
                             shrink = earlier - np.mean(distances[-self._window :], axis=0)
                             if not np.any((shrink > _PROGRESS * earlier) & (shrink > floor)):
@@ -793,6 +816,12 @@ class DirectControl:
                 gaps.append(_Gap("orientation", offset, "rotation"))
         return gaps
 
+    def _finger_positions(self, obs: dict[str, Any]) -> NDArray[np.float64]:
+        return np.array(
+            [np.asarray(obs["data"][key]).reshape(-1)[column] for key, column in self._fingers],
+            dtype=np.float64,
+        )
+
     def _proprio(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         if self._reference is not None:
             return np.asarray(self._reference(obs["data"]), dtype=np.float64).reshape(-1)
@@ -844,17 +873,16 @@ class DirectControl:
             )
             missed = [gap for gap in ranked if gap.distance > self._tolerances[gap.quantity]]
             if not missed:
-                lines.append(
-                    f"Target reached; the largest remaining offset is {_offset(ranked[0])}."
-                )
+                lines.append(f"At the target. Largest remaining offset: {_offset(ranked[0])}.")
             else:
-                *rest, last = (_offset(gap) for gap in missed)
-                offsets = (
-                    f"the remaining offsets are {', '.join(rest)} and {last}"
-                    if rest
-                    else f"the largest remaining offset is {last}"
+                worst = missed[0]
+                verdict = (
+                    "Did not reach the target"
+                    if worst.distance > _NEAR * self._tolerances[worst.quantity]
+                    else "Stopped near the target"
                 )
-                lines.append(f"Did not reach the target; {offsets}.")
+                offsets = ", ".join(_offset(gap) for gap in missed)
+                lines.append(f"{verdict}. Remaining offsets: {offsets}.")
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:

@@ -223,7 +223,7 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "off: x=0.0000, grip=0.0000" in _text(reached)
-    assert "Target reached; the largest remaining offset is 0 mm on x." in _text(reached)
+    assert "At the target. Largest remaining offset: 0 mm on x." in _text(reached)
     assert "Did not reach" not in _text(reached)
     assert "The episode has ended" in _text(closed)
     assert "Time remaining" not in _text(reached)
@@ -251,7 +251,7 @@ async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
     # Four in-box steps; a displacement returns once played.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
-    assert "Target reached" not in _text(agent.results[0])
+    assert "At the target" not in _text(agent.results[0])
 
 
 @pytest.mark.parametrize(
@@ -391,7 +391,7 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert len(sim.actions) == 3  # 0.3 s at 10 Hz
     assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
     assert "safety timeout" in _text(result)
-    assert "Did not reach the target; the largest remaining offset is 985 mm on x." in _text(result)
+    assert "Did not reach the target. Remaining offsets: 985 mm on x." in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
 
@@ -478,7 +478,7 @@ async def test_wait_without_a_duration_observes_with_one_hold_tick() -> None:
     assert _text(looked).startswith("Played 1 steps (0.1 s).")
     assert "observation/state: x=0.2000" in _text(looked)
     assert "commanded: x=0.2000, grip=0.0000" in _text(looked)
-    assert "Target reached" not in _text(looked)
+    assert "At the target" not in _text(looked)
     assert "Did not reach" not in _text(looked)
     assert [block.type for block in looked.content] == ["text", "text", "image"]
 
@@ -627,7 +627,7 @@ async def test_an_arm_that_never_moves_gives_up_at_the_settle_cap_not_the_safety
     text = _text(agent.results[0])
     assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
-    assert "Did not reach the target; the largest remaining offset is 500 mm on x." in text
+    assert "Did not reach the target. Remaining offsets: 500 mm on x." in text
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
@@ -641,7 +641,7 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state[0] == pytest.approx(0.5, abs=0.01)
     assert "pose:" in _text(agent.results[0])
     assert "off:" in _text(agent.results[0])
-    assert "Target reached; the largest remaining offset is " in _text(agent.results[0])
+    assert "At the target. Largest remaining offset: " in _text(agent.results[0])
 
 
 class _Offset(_Pose):
@@ -659,8 +659,9 @@ class _Offset(_Pose):
 @pytest.mark.parametrize(
     ("tolerance", "verdict"),
     [
-        (None, "Did not reach the target; the largest remaining offset is 12 mm on x."),
-        ({"position": 0.02}, "Target reached; the largest remaining offset is 12 mm on x."),
+        (None, "Did not reach the target. Remaining offsets: 12 mm on x."),
+        ({"position": 0.005}, "Stopped near the target. Remaining offsets: 12 mm on x."),
+        ({"position": 0.02}, "At the target. Largest remaining offset: 12 mm on x."),
     ],
 )
 async def test_an_arm_settling_short_is_held_alike_whichever_verdict_the_tolerance_picks(
@@ -704,6 +705,62 @@ async def test_a_move_waits_for_a_slow_arm_whatever_the_tolerance(
     assert len(sim.actions) == 16  # the tolerance does not change when the call returns
 
 
+async def test_a_gripper_call_returns_once_the_fingers_have_moved_and_come_to_rest() -> None:
+    sim = _Delayed(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], delay=10)
+    agent = _ScriptedLLM(_move("move_to", grip=1.0))
+
+    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    # The fingers sit still for 10 ticks, then jump; the call holds through both.
+    assert sim.state[1] == pytest.approx(1.0)
+    assert len(sim.actions) == 16  # not the 5 an unmoving gripper reading would settle at
+
+
+class _Fingers(_Pose):
+    """A hand whose two fingers close 5 cm per tick, the left one jamming on an object at 0.3."""
+
+    def step(self, action: NDArray[Any]) -> None:
+        target = np.asarray(action[0], dtype=np.float64)
+        self.actions.append(target.copy())
+        close = np.minimum(self.state[1:] + 0.05, target[1:])
+        self.state = np.concatenate([self.state[:1], close])
+        self.state[1] = min(self.state[1], 0.3)
+        self.success = False
+
+
+async def test_a_gripper_call_waits_for_every_finger_and_not_only_the_first_to_stop() -> None:
+    names = ["x", "grip_left", "grip_right"]
+    contract = _contract("ee_abs", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], names)
+    sim = _Fingers(contract, [0.0, 0.0, 0.0])
+    agent = _ScriptedLLM(_move("move_to", grip_left=1.0, grip_right=1.0))
+
+    async with _served(sim, DirectControl(max_step={"grip_left": 2.0, "grip_right": 2.0})) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    # The left finger jams after 6 ticks; the right one closes for 20, and the call outlasts it.
+    np.testing.assert_allclose(sim.state, [0.0, 0.3, 1.0])
+    assert 20 + 3 <= len(sim.actions) < 20 + 30
+
+
+@pytest.mark.parametrize(
+    ("state_names", "ticks"),
+    [(["x", "grip"], 31), (["x", "finger"], 5)],
+)
+async def test_a_gripper_call_waits_only_for_fingers_the_observation_names(
+    state_names: list[str], ticks: int
+) -> None:
+    contract = _contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
+    contract["features"]["observation/state"]["names"] = state_names
+    sim = _Pose(contract, [0.0, 0.0], lag=0.0)  # the fingers never move
+    agent = _ScriptedLLM(_move("move_to", grip=1.0))
+
+    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert len(sim.actions) == ticks
+
+
 class _OpenHand(_Pose):
     """A lagging arm whose state always reads the gripper open, as a hand-only reference does."""
 
@@ -723,7 +780,7 @@ async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verd
     assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
     assert "off: x=-0.00" in _text(agent.results[0])
     assert "grip=-2.0000" in _text(agent.results[0])
-    assert "Target reached; the largest remaining offset is " in _text(agent.results[0])
+    assert "At the target. Largest remaining offset: " in _text(agent.results[0])
     assert "on grip" not in _text(agent.results[0])
 
 
@@ -771,9 +828,9 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     text = _text(agent.results[0])
-    assert ("Target reached; " in text) == (share < 1)
-    assert ("Did not reach the target; the largest remaining offset is" in text) == (share > 1)
-    assert f" on {label}." in text  # both verdicts name the dimension and how far off it is
+    assert ("At the target. " in text) == (share < 1)
+    assert ("Stopped near the target. " in text) == (share > 1)
+    assert f" on {label}." in text  # every verdict names the dimension and how far off it is
 
 
 @pytest.mark.parametrize(
@@ -781,16 +838,15 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
     [
         (
             None,
-            "Did not reach the target; the remaining offsets are "
-            "0.02 rad on orientation and 2 mm on x.",
+            "Did not reach the target. Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
         ),
         (
             {"position": 4e-3},
-            "Target reached; the largest remaining offset is 0.02 rad on orientation.",
+            "At the target. Largest remaining offset: 0.02 rad on orientation.",
         ),  # rotation: 4 mm over 0.15 m, 0.027 rad
         (
             {"position": 4e-3, "rotation": 0.01},
-            "Did not reach the target; the largest remaining offset is 0.02 rad on orientation.",
+            "Stopped near the target. Remaining offsets: 0.02 rad on orientation.",
         ),
     ],
 )
@@ -1053,6 +1109,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
         assert not result.isError
         assert f"ee_euler.x={wrapped:.4f}" in _text(result)
         assert f"pose: x=0.0000, roll={wrapped:.4f}" in _text(result)
-    assert "Target reached; the largest remaining offset is " in _text(past)
+    assert "At the target. Largest remaining offset: " in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]
