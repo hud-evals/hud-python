@@ -6,8 +6,10 @@ Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 import time
 import tomllib
 from enum import StrEnum
@@ -39,9 +41,10 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
     from contextlib import AbstractAsyncContextManager
 
-    from hud.eval import Provider, Task
+    from hud.eval import Job, Provider, Task
     from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()
@@ -79,6 +82,44 @@ def _substitute_env(value: Any, mapping: dict[str, Any]) -> Any:
         return Template(value).substitute(mapping)
     except KeyError as exc:
         raise ValueError(f"{_CONFIG_PATH}: ${{{exc.args[0]}}} is not set") from None
+
+
+def _run_until_terminated(main: Coroutine[Any, Any, Job]) -> Job:
+    """``asyncio.run`` that cancels the main task on SIGTERM, then exits with 143.
+
+    Spawned environments run in their own sessions, so a SIGTERM that kills this
+    process outright (``timeout``, ``kill``) leaves them running. Cancelling the main
+    task instead lets placements tear their substrates down, as they do on Ctrl-C.
+    """
+    terminated = False
+
+    async def run() -> Job:
+        task = asyncio.current_task()
+        assert task is not None
+        loop = asyncio.get_running_loop()
+
+        def terminate() -> None:
+            nonlocal terminated
+            if terminated:  # a repeat must not cut teardown short
+                return
+            terminated = True
+            task.cancel()
+
+        # No signal handlers on Windows loops or off the main thread.
+        with contextlib.suppress(NotImplementedError, RuntimeError):
+            loop.add_signal_handler(signal.SIGTERM, terminate)
+        try:
+            return await main
+        finally:
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.remove_signal_handler(signal.SIGTERM)
+
+    try:
+        return asyncio.run(run())
+    except asyncio.CancelledError:
+        if not terminated:
+            raise
+        raise SystemExit(128 + signal.SIGTERM) from None
 
 
 class EvalConfig(BaseModel):
@@ -513,7 +554,7 @@ def eval_command(
     agent_instance = agent_type.cls.load(agent_kwargs)
 
     started = time.monotonic()
-    job = asyncio.run(
+    job = _run_until_terminated(
         taskset.run(
             agent_instance,
             runtime=placement,
