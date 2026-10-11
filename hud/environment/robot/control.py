@@ -109,8 +109,8 @@ DEFAULT_TOLERANCE_M = 1e-3
 #: it gives the default rotation and joint tolerances: a 0.15 m gripper turning at the wrist,
 #: and a 2.5 m summed lever over an arm's joints (a Franka's spans about 2 to 2.9 m).
 _LEVER_M = {"position": 1.0, "rotation": 0.15, "joint": 2.5}
-#: How the verdict states a distance: (scale, unit).
-_UNITS = {"position": (1e3, "mm"), "rotation": (1.0, "rad"), "joint": (1.0, "rad")}
+#: How the verdict states a distance: (scale, unit, decimals it is rounded to).
+_UNITS = {"position": (1e3, "mm", 2), "rotation": (1.0, "rad", 5), "joint": (1.0, "rad", 5)}
 
 #: A move has settled when, between the last two windows of ``max(_WINDOW_TICKS,
 #: _WINDOW_S)``, no named dimension's mean distance from the goal shrank by more than
@@ -851,14 +851,26 @@ class DirectControl:
         # The verdict is about the arm: a gripper short of its command is usually holding.
         arm = [gap for gap in gaps or [] if gap.quantity != "grip"]
         if arm:
-            missed = [gap for gap in arm if gap.distance > self._tolerances[gap.quantity]]
-            if missed:
-                offsets = ", ".join(
-                    f"{gap.label} is off by {_amount(gap.quantity, gap.distance)}" for gap in missed
+            # Largest first, measured against each dimension's threshold so mm and rad compare.
+            ranked = sorted(
+                arm, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
+            )
+            missed = [gap for gap in ranked if gap.distance > self._tolerances[gap.quantity]]
+            if not missed:
+                lines.append(
+                    f"Target reached; the largest remaining offset is {_offset(ranked[0])}."
                 )
-                lines.append(f"Did not reach the target; {offsets}.")
+            elif len(missed) == 1:
+                lines.append(
+                    f"Did not reach the target; the largest remaining offset is "
+                    f"{_offset(missed[0])}."
+                )
             else:
-                lines.append("Target reached.")
+                *rest, last = (_offset(gap) for gap in missed)
+                lines.append(
+                    f"Did not reach the target; the remaining offsets are {', '.join(rest)} "
+                    f"and {last}."
+                )
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:
@@ -946,9 +958,9 @@ def _object(properties: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _amount(quantity: str, value: float) -> str:
-    scale, unit = _UNITS[quantity]
-    return f"{value * scale:.4g} {unit}"
+def _offset(gap: _Gap) -> str:
+    scale, unit, decimals = _UNITS[gap.quantity]
+    return f"{round(gap.distance * scale, decimals):.4g} {unit} on {gap.label}"
 
 
 def _labeled(pairs: Iterable[tuple[str, Any]]) -> str:

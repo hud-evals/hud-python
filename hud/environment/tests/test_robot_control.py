@@ -223,7 +223,7 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "off: x=0.0000, grip=0.0000" in _text(reached)
-    assert "Target reached." in _text(reached)
+    assert "Target reached; the largest remaining offset is 0 mm on x." in _text(reached)
     assert "Did not reach" not in _text(reached)
     assert "The episode has ended" in _text(closed)
     assert "Time remaining" not in _text(reached)
@@ -391,7 +391,7 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert len(sim.actions) == 3  # 0.3 s at 10 Hz
     assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
     assert "safety timeout" in _text(result)
-    assert "Did not reach the target; x is off by 985 mm." in _text(result)
+    assert "Did not reach the target; the largest remaining offset is 985 mm on x." in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
 
@@ -627,7 +627,7 @@ async def test_an_arm_that_never_moves_gives_up_at_the_settle_cap_not_the_safety
     text = _text(agent.results[0])
     assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
-    assert "Did not reach the target; x is off by 500 mm." in text
+    assert "Did not reach the target; the largest remaining offset is 500 mm on x." in text
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
@@ -641,7 +641,7 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state[0] == pytest.approx(0.5, abs=0.01)
     assert "pose:" in _text(agent.results[0])
     assert "off:" in _text(agent.results[0])
-    assert "Target reached." in _text(agent.results[0])
+    assert "Target reached; the largest remaining offset is " in _text(agent.results[0])
 
 
 class _Offset(_Pose):
@@ -659,8 +659,8 @@ class _Offset(_Pose):
 @pytest.mark.parametrize(
     ("tolerance", "verdict"),
     [
-        (None, "Did not reach the target; x is off by 12 mm."),
-        ({"position": 0.02}, "Target reached."),
+        (None, "Did not reach the target; the largest remaining offset is 12 mm on x."),
+        ({"position": 0.02}, "Target reached; the largest remaining offset is 12 mm on x."),
     ],
 )
 async def test_an_arm_settling_short_is_held_alike_whichever_verdict_the_tolerance_picks(
@@ -696,7 +696,8 @@ async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verd
     assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
     assert "off: x=-0.00" in _text(agent.results[0])
     assert "grip=-2.0000" in _text(agent.results[0])
-    assert "Target reached." in _text(agent.results[0])
+    assert "Target reached; the largest remaining offset is " in _text(agent.results[0])
+    assert "on grip" not in _text(agent.results[0])
 
 
 @pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"grip": 0.1}, {"x": 0.1}])
@@ -743,18 +744,26 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     text = _text(agent.results[0])
-    assert ("Target reached." in text) == (share < 1)
-    assert (f"Did not reach the target; {label} is off by" in text) == (share > 1)
+    assert ("Target reached; " in text) == (share < 1)
+    assert ("Did not reach the target; the largest remaining offset is" in text) == (share > 1)
+    assert f" on {label}." in text  # both verdicts name the dimension and how far off it is
 
 
 @pytest.mark.parametrize(
     ("tolerance", "verdict"),
     [
-        (None, "Did not reach the target; x is off by 2 mm, orientation is off by 0.02 rad."),
-        ({"position": 4e-3}, "Target reached."),  # rotation: 4 mm over 0.15 m, 0.027 rad
+        (
+            None,
+            "Did not reach the target; the remaining offsets are "
+            "0.02 rad on orientation and 2 mm on x.",
+        ),
+        (
+            {"position": 4e-3},
+            "Target reached; the largest remaining offset is 0.02 rad on orientation.",
+        ),  # rotation: 4 mm over 0.15 m, 0.027 rad
         (
             {"position": 4e-3, "rotation": 0.01},
-            "Did not reach the target; orientation is off by 0.02 rad.",
+            "Did not reach the target; the largest remaining offset is 0.02 rad on orientation.",
         ),
     ],
 )
@@ -1017,6 +1026,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
         assert not result.isError
         assert f"ee_euler.x={wrapped:.4f}" in _text(result)
         assert f"pose: x=0.0000, roll={wrapped:.4f}" in _text(result)
-    assert "Target reached." in _text(past)
+    assert "Target reached; the largest remaining offset is " in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]
