@@ -434,20 +434,38 @@ async def test_with_annotation_wait_asks_for_a_note_too() -> None:
     assert "note must say" in _text(result)
 
 
-async def test_wait_without_a_duration_only_observes_the_current_state() -> None:
+async def test_wait_without_a_duration_observes_with_one_hold_tick() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": None, "note": "look"}))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert "no-op" in agent.descriptions["wait"]
+    assert "one control tick passes" in agent.descriptions["wait"]
     _, looked = agent.results
-    assert len(sim.actions) == 20  # only the move stepped the sim
-    assert _text(looked).startswith("Played 0 steps (0.0 s).")
+    assert len(sim.actions) == 21  # the move, then one tick holding its setpoint
+    np.testing.assert_allclose(sim.actions[-1], [0.2, 0.0])
+    assert _text(looked).startswith("Played 1 steps (0.1 s).")
     assert "observation/state: x=0.2000" in _text(looked)
     assert "commanded: x=0.2000" in _text(looked)
+    assert "Target reached." not in _text(looked)
+    assert "Did not reach" not in _text(looked)
     assert [block.type for block in looked.content] == ["text", "text", "image"]
+
+
+@pytest.mark.parametrize("action_type", ["ee_abs", "ee_del"])
+async def test_a_first_call_wait_plays_one_tick_that_does_not_move_the_arm(
+    action_type: str,
+) -> None:
+    sim = _Arm(_contract(action_type, [-1.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(("wait", {"duration": 0, "note": "look"}))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    np.testing.assert_allclose(sim.actions, [[0.0, 0.0]])
+    np.testing.assert_allclose(sim.state, [0.0, 0.0])
+    assert _text(agent.results[0]).startswith("Played 1 steps (0.1 s).")
 
 
 async def test_wait_holds_the_commanded_pose_for_the_requested_sim_time() -> None:
@@ -495,7 +513,7 @@ async def test_every_reply_reports_the_time_left_and_the_tools_state_the_limit()
     moved, waited, looked = (_text(result) for result in agent.results)
     assert moved.startswith("Played 20 steps (2.0 s). Time remaining: 8.0 s.")
     assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 7.0 s.")
-    assert looked.startswith("Played 0 steps (0.0 s). Time remaining: 7.0 s.")
+    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 6.9 s.")
     assert "The episode has ended" not in looked
 
 
@@ -528,6 +546,19 @@ async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode(
     assert "The episode has ended; stop calling tools." in cut
     assert after.startswith("Played 0 steps (0.0 s). Time remaining: 0.0 s.")
     assert "The episode has ended; stop calling tools." in after
+
+
+async def test_a_wait_on_the_last_tick_of_the_time_limit_spends_it_and_ends_the_episode() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": 0, "note": "look"}))
+
+    async with _served(sim, DirectControl(time_limit=2.1)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    moved, looked = (_text(result) for result in agent.results)
+    assert "Time remaining: 0.1 s." in moved
+    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 0.0 s.")
+    assert "The episode has ended; stop calling tools." in looked
 
 
 async def test_a_new_episode_starts_with_the_whole_time_limit() -> None:

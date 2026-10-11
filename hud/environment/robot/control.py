@@ -4,8 +4,8 @@ The ``robot`` wire takes one action per control tick, which a policy keeps up
 with and a tool-calling LLM does not. :class:`DirectControl` serves the same sim
 as an ``mcp`` capability instead: a tool call sets targets (or displacements)
 for some action dimensions, the tool plays them out on the wire, and answers
-with the camera frames and the pose it ended on. A ``wait`` tool plays nothing
-(or holds the pose for a while) and answers the same way. Each call is its own
+with the camera frames and the pose it ended on. A ``wait`` tool holds the
+pose (for one tick, or a while) and answers the same way. Each call is its own
 wire connection, so the sim holds still while the model thinks. The env keeps
 serving ``robot`` too, so one env serves VLAs and LLMs alike.
 
@@ -107,6 +107,10 @@ Content = list[TextContent | ImageContent]
 #: Longest ``wait``, in sim seconds.
 MAX_WAIT_S = 100.0
 
+#: Ticks every ``wait`` plays, so its step always spans a tick. Interim: the trace viewer
+#: crashes on zero-tick steps. Set to 0 to let ``wait(0)`` play nothing again.
+MIN_WAIT_TICKS = 1
+
 #: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
 #: reached), whether the safety cap clipped the rows, and the dimensions named.
 Plan = tuple["NDArray[np.float64]", "NDArray[np.float64] | None", bool, set[str]]
@@ -121,8 +125,8 @@ _NOTE = (
 
 _WAIT = (
     f"Let `duration` sim seconds pass (at most {MAX_WAIT_S:g}) while the robot holds its pose, "
-    "then return the camera frames and state. Pass null or 0 to let no time pass: "
-    "a no-op that just shows the current state."
+    "then return the camera frames and state. Pass null or 0 to just observe: "
+    "one control tick passes while the robot holds its pose."
 )
 _DURATION = {"type": ["number", "null"], "description": "Sim seconds; null is 0."}
 
@@ -380,7 +384,7 @@ class DirectControl:
         seconds = duration or 0.0
         if not 0 <= seconds <= MAX_WAIT_S:
             raise ToolError(f"duration must be within [0, {MAX_WAIT_S:g}] s, got {seconds:g}")
-        ticks = round(seconds * self._rate)
+        ticks = max(MIN_WAIT_TICKS, round(seconds * self._rate))
         return await self._play(
             lambda obs: (np.repeat(self._start(obs)[None], ticks, axis=0), None, False, set()),
             note,
@@ -850,4 +854,4 @@ async def _wait_until_listening(task: asyncio.Task[None], port: int) -> None:
         return
 
 
-__all__ = ["DEFAULT_TIMEOUT_S", "MAX_WAIT_S", "MOTION_TOOLS", "DirectControl"]
+__all__ = ["DEFAULT_TIMEOUT_S", "MAX_WAIT_S", "MIN_WAIT_TICKS", "MOTION_TOOLS", "DirectControl"]

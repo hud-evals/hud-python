@@ -603,9 +603,10 @@ The [contract](#contract) derives the tool surface:
 
 There is no `observe` tool. Every motion call returns the camera frames and the pose it
 ended on, so the model does not choose whether to look. The `wait` tool is the other call: it
-lets `duration` sim seconds pass (at most 100) while the robot holds its pose, and a `duration` of
-`null` or 0 lets no time pass. So `wait` doubles as a no-op that shows the current state without
-moving. Each call is its own short connection on the `robot` wire, so the sim holds still
+lets `duration` sim seconds pass (at most 100) while the robot holds its pose. A `duration` of
+`null` or 0 just observes: one control tick passes (`MIN_WAIT_TICKS`, an interim minimum so every
+`wait` step spans a tick) while the robot holds its commanded setpoint, and that tick counts
+against any `time_limit`. Each call is its own short connection on the `robot` wire, so the sim holds still
 while the model thinks. A call also takes a required `note`: what the model sees and why it chose
 the motion; `use_annotation=False` removes it. Every reply opens with
 `Played N steps (X s).`, plus ` Time remaining: Y s.` when the environment sets a `time_limit`.
