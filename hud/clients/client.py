@@ -13,6 +13,7 @@ import contextlib
 import itertools
 import logging
 import math
+import socket
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
 _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
+_CONTROL_KEEPALIVE_IDLE_SECONDS = 30
 _CAPABILITY_CONNECT_ATTEMPTS = 3
 _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 
@@ -419,6 +421,11 @@ async def _connect_ready(
                 raise
             await asyncio.sleep(interval)
             continue
+
+        # `tasks.start` is silent for minutes; probes stop tunnels dropping the idle socket.
+        sock = writer.get_extra_info("socket")
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, _CONTROL_KEEPALIVE_IDLE_SECONDS)
 
         client = HudClient(reader, writer, endpoint=(host, port))
         try:

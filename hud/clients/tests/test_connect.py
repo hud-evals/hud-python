@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -37,6 +38,39 @@ def test_workspace_route_from_url_extracts_transport_address() -> None:
         "gateway.test",
         8080,
     )
+
+
+async def test_connect_enables_tcp_keepalive_on_control_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    open_connection = asyncio.open_connection
+    sockets: list[socket.socket] = []
+
+    async def recording_open_connection(host: str, peer_port: int):
+        reader, writer = await open_connection(host, peer_port)
+        sockets.append(writer.get_extra_info("socket"))
+        return reader, writer
+
+    monkeypatch.setattr(client_module.asyncio, "open_connection", recording_open_connection)
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
+            (control,) = sockets
+            assert control.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+            assert control.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 30
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 async def test_connect_sends_workspace_routes_in_hello() -> None:
