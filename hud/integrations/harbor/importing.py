@@ -1,4 +1,4 @@
-"""Packing Harbor folders for the ``harbor_import`` pipeline and reading its report."""
+"""Packing Harbor folders into an import bundle and reading the import's report."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-PIPELINE_KEY = "harbor_import"
-REPORT_OUTPUT = "report"
+IMPORT_FORMAT = "harbor"
 # v5 added the ``updated`` task status; v4 reports read as v5 reports without it.
 ReportSchema = Literal["harbor_import_report.v4", "harbor_import_report.v5"]
 REPORT_SCHEMAS: tuple[ReportSchema, ...] = get_args(ReportSchema)
@@ -126,7 +125,7 @@ class ReportError(_Item):
 
 
 class ImportReport(_Item):
-    """The ``report`` output of a ``harbor_import`` run."""
+    """The report a Harbor import publishes when it completes or stops."""
 
     schema_version: ReportSchema
     taskset_id: str

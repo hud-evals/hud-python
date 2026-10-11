@@ -155,10 +155,9 @@ nor a valid build recipe.
 | `harbor upload ./jobs/<job>` | `hud harbor import ./jobs/<job> --taskset <name>` |
 
 One import can take both. The command zips the folders it is given, uploads the zip
-to your team's data store, and runs the platform's Harbor import on it into the
-taskset. It follows the import until it ends and prints a report of every task, job,
-and trial; `--no-wait` returns once the import starts, and `hud harbor report
-<run-id>` shows the report later. The taskset's **Imports** tab in the web app lists
+to your team's data store, and imports it into the taskset. It follows the import
+until it ends and prints a report of every task, job, and trial; `--no-wait` returns
+once the import starts, and `hud harbor report <import-id>` shows the report later. The taskset's **Imports** tab in the web app lists
 the same imports, and its **Import from Harbor** menu item takes the same zip.
 
 ```bash
@@ -195,7 +194,7 @@ tasks on HUD, [adapt](#adapt-harbor-tasks) and deploy them.
 ### Limits
 
 - The zip is at most 1 GiB (the CLI checks before uploading), with at most 200,000
-  entries and 8 GiB unpacked. Import a larger set in several runs into the same taskset.
+  entries and 8 GiB unpacked. Import a larger set in several imports into the same taskset.
 - You must be able to edit the taskset.
 - A team holds one Harbor environment per task folder name. A task folder whose
   environment already exists in another Project fails, and two folders with the same
@@ -216,7 +215,7 @@ jobs, and traces are matched by digest and Harbor id instead of being created tw
 
 `hud harbor import` exits `1` when the import did not complete (stopped, failed, or
 cancelled). Skipped and failed items are listed in the report and do not fail the
-command; `--json` returns the run and the full report for scripts.
+command; `--json` returns the import and the full report for scripts.
 
 ## Export HUD tasks to Harbor
 

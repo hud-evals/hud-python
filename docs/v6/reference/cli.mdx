@@ -298,12 +298,11 @@ hud harbor import ./tasks ./jobs/2026-10-01__12-00 --taskset tb2  # tasks and th
 hud harbor import ./jobs/2026-10-02__09-00                        # into the directory's taskset
 hud harbor import bundle.zip --taskset tb2 --no-wait --json       # a prepared zip; return at once
 hud harbor imports --taskset tb2                                  # past imports
-hud harbor report <run-id> --wait                                 # follow one, then show its report
-hud harbor cancel <run-id>
+hud harbor report <import-id> --wait                              # follow one, then show its report
+hud harbor cancel <import-id>
 ```
 
-`hud harbor import` zips the folders, uploads the zip, runs the platform's Harbor import on
-it, and prints what became of each task, job, and trial. `--taskset` takes a name or ID; a name
+`hud harbor import` zips the folders, uploads the zip, imports it into the taskset, and prints what became of each task, job, and trial. `--taskset` takes a name or ID; a name
 is normalized as HUD normalizes taskset names (`TB2 Sample` is `tb2-sample`), and a name no
 taskset has creates one, while an ID has to name an existing taskset. Without it, the directory's
 taskset is used, then a taskset named after the first folder. A created taskset goes to the Project

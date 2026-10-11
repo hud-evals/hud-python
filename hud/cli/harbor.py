@@ -2,8 +2,8 @@
 
 hud harbor import <folders...>   # import into a taskset and show the report
 hud harbor imports               # recent imports
-hud harbor report <run-id>       # one import's report
-hud harbor cancel <run-id>       # cancel an import
+hud harbor report <import-id>    # one import's report
+hud harbor cancel <import-id>    # cancel an import
 """
 
 from __future__ import annotations
@@ -29,12 +29,11 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from hud import data
+from hud import imports
 from hud.cli import CLI, AuthScope, CliError, DirectoryLink, DirectoryState, Result
 from hud.cli.project import Placement, Project
 from hud.integrations.harbor.importing import (
-    PIPELINE_KEY,
-    REPORT_OUTPUT,
+    IMPORT_FORMAT,
     REPORT_SCHEMAS,
     ImportReport,
     TaskStatus,
@@ -130,7 +129,7 @@ def import_command(
     platform = PlatformClient.from_settings()
     state = DirectoryState(AuthScope.resolve(platform))
     link = state.load()
-    pipeline = _pipeline(platform)
+    import_format = _import_format(platform)
     default_name = archive.stem if archive else paths[0].resolve().name
     target = _resolve_target(platform, link, taskset=taskset, project=project, name=default_name)
 
@@ -142,14 +141,14 @@ def import_command(
         else:
             bundle, file_count = archive, None
         size = bundle.stat().st_size
-        if size > pipeline.max_input_bytes:
+        if size > import_format.max_input_bytes:
             raise CliError(
                 "usage",
                 f"The bundle is {decimal(size)}; a Harbor import takes at most "
-                f"{decimal(pipeline.max_input_bytes)}.",
+                f"{decimal(import_format.max_input_bytes)}.",
                 suggestion=(
-                    "Import the folders in several runs into the same taskset; runs link "
-                    "to tasks imported earlier."
+                    "Split the folders across several imports into the same taskset; job "
+                    "runs link to tasks imported earlier."
                 ),
             )
         plan = {
@@ -169,14 +168,16 @@ def import_command(
         assert target.id is not None
         if link_target:
             state.update(DirectoryLink(taskset_id=uuid.UUID(target.id)))
-        stored = _upload(platform, bundle)
+        file_id = _upload(platform, bundle)
 
-    run = data.start_run(platform, PIPELINE_KEY, stored.id, {"taskset_id": target.id})
-    hud_console.success(f"Started import {run.id}")
+    imported = imports.start_import(
+        platform, format=IMPORT_FORMAT, file_id=file_id, taskset_id=target.id
+    )
+    hud_console.success(f"Started import {imported.id}")
     if not wait:
-        hud_console.hint(f"Follow it with: hud harbor report {run.id} --wait")
-        return {**plan, "run": run.model_dump(mode="json"), "report": None}
-    return _conclude(platform, run, plan)
+        hud_console.hint(f"Follow it with: hud harbor report {imported.id} --wait")
+        return {**plan, "import": imported.model_dump(mode="json"), "report": None}
+    return _conclude(platform, imported, plan)
 
 
 @harbor_app.command("imports")
@@ -184,7 +185,7 @@ def imports_command(
     taskset: str | None = typer.Option(
         None, "--taskset", "-t", help="Only imports into this taskset (name or ID)"
     ),
-    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to show"),
+    limit: int = typer.Option(20, "--limit", "-n", min=1, max=100, help="Max rows to show"),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one identifier per line, with no headers (for piping)."
     ),
@@ -197,61 +198,65 @@ def imports_command(
         hud harbor imports --json[/not dim]
     """
     platform = PlatformClient.from_settings()
-    args = None
+    taskset_id = None
     if taskset is not None:
         record = _find_taskset(platform, _taskset_ref(taskset))
         if record is None:
             raise CliError("not_found", f"Taskset not found: {taskset}", input={"taskset": taskset})
-        args = {"taskset_id": str(record["id"])}
-    runs, total = data.list_runs(platform, pipeline_key=PIPELINE_KEY, args=args, limit=limit)
-    payload = {"runs": [run.model_dump(mode="json") for run in runs], "total": total}
+        taskset_id = str(record["id"])
+    found, total = imports.list_imports(
+        platform, format=IMPORT_FORMAT, taskset_id=taskset_id, limit=limit
+    )
+    payload = {"imports": [item.model_dump(mode="json") for item in found], "total": total}
     if quiet:
-        for run in runs:
-            typer.echo(run.id)
+        for item in found:
+            typer.echo(item.id)
         return payload
-    if not runs:
+    if not found:
         hud_console.stdout.print("[yellow]No Harbor imports found.[/yellow]")
         return payload
 
     table = Table()
-    table.add_column("Run ID", style="blue", no_wrap=True)
+    table.add_column("Import ID", style="blue", no_wrap=True)
     table.add_column("Status")
     table.add_column("Started", style="dim", no_wrap=True)
-    for run in runs:
-        table.add_row(run.id, run.phase, run.created_at.strftime("%Y-%m-%d %H:%M"))
+    for item in found:
+        table.add_row(item.id, item.status, item.created_at.strftime("%Y-%m-%d %H:%M"))
     hud_console.stdout.print(table)
-    if total > len(runs):
+    if total > len(found):
         hud_console.stdout.print(
-            f"[dim]Showing {len(runs)} of {total}; raise --limit for more[/dim]"
+            f"[dim]Showing {len(found)} of {total}; raise --limit for more[/dim]"
         )
-    hud_console.stdout.print("[dim]Tip: hud harbor report <run-id> to see what an import did[/dim]")
+    hud_console.stdout.print(
+        "[dim]Tip: hud harbor report <import-id> to see what an import did[/dim]"
+    )
     return payload
 
 
 @harbor_app.command("report")
 def report_command(
-    run_id: str = typer.Argument(..., help="Import run ID (see hud harbor imports)"),
+    import_id: str = typer.Argument(..., help="Import ID (see hud harbor imports)"),
     wait: bool = typer.Option(False, "--wait", help="Follow a running import until it ends"),
 ) -> Any:
     """Show what a Harbor import did with each task, job, and trial.
 
     [not dim]Examples:
-        hud harbor report <run-id>
-        hud harbor report <run-id> --wait
-        hud harbor report <run-id> --json[/not dim]
+        hud harbor report <import-id>
+        hud harbor report <import-id> --wait
+        hud harbor report <import-id> --json[/not dim]
     """
     platform = PlatformClient.from_settings()
-    run = _get_import(platform, run_id)
-    if not run.finished and not wait:
-        hud_console.info(f"The import is {run.phase}; its report is published when it ends.")
-        hud_console.hint(f"Follow it with: hud harbor report {run.id} --wait")
-        return {"run": run.model_dump(mode="json"), "report": None}
-    return _conclude(platform, run, {})
+    imported = _get_import(platform, import_id)
+    if not imported.ended and not wait:
+        hud_console.info(f"The import is {imported.status}; its report is published when it ends.")
+        hud_console.hint(f"Follow it with: hud harbor report {imported.id} --wait")
+        return {"import": imported.model_dump(mode="json"), "report": None}
+    return _conclude(platform, imported, {})
 
 
 @harbor_app.command("cancel")
 def cancel_command(
-    run_id: str = typer.Argument(..., help="Import run ID (see hud harbor imports)"),
+    import_id: str = typer.Argument(..., help="Import ID (see hud harbor imports)"),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -265,28 +270,35 @@ def cancel_command(
     folders again resumes it.
 
     Examples:
-        hud harbor cancel <run-id>
-        hud harbor cancel <run-id> --yes --json[/not dim]
+        hud harbor cancel <import-id>
+        hud harbor cancel <import-id> --yes --json[/not dim]
     """
     platform = PlatformClient.from_settings()
-    run = _get_import(platform, run_id)
-    if run.finished:
-        hud_console.info(f"The import already ended: {run.status}")
-        return run.model_dump(mode="json")
-    CLI.confirm_or_abort(f"Cancel import {run.id}?", yes=yes, default=False)
-    run = data.cancel_run(platform, run.id)
+    imported = _get_import(platform, import_id)
+    if imported.ended:
+        hud_console.info(f"The import already ended: {imported.status}")
+        return imported.model_dump(mode="json")
+    CLI.confirm_or_abort(f"Cancel import {imported.id}?", yes=yes, default=False)
+    imported = imports.cancel_import(platform, imported.id)
     hud_console.success("Cancellation requested")
-    return run.model_dump(mode="json")
+    return imported.model_dump(mode="json")
 
 
-def _pipeline(platform: PlatformClient) -> data.DataPipeline:
-    for pipeline in data.list_pipelines(platform):
-        if pipeline.key == PIPELINE_KEY:
-            return pipeline
+def _import_format(platform: PlatformClient) -> imports.ImportFormat:
+    try:
+        formats = imports.list_formats(platform)
+    except HudRequestError as exc:
+        # A platform that predates imports has no formats route.
+        if exc.status_code != 404:
+            raise
+        formats = []
+    for import_format in formats:
+        if import_format.format == IMPORT_FORMAT:
+            return import_format
     raise CliError(
         "not_found",
         f"Harbor import is not available on {platform.api_url}.",
-        suggestion="Check HUD_API_URL; the platform has to offer the harbor_import pipeline.",
+        suggestion="Check HUD_API_URL.",
     )
 
 
@@ -396,7 +408,7 @@ def _create_taskset(platform: PlatformClient, target: _Target) -> _Target:
     return _Target(name=str(record["name"]), id=str(record["id"]))
 
 
-def _upload(platform: PlatformClient, bundle: Path) -> data.DataFile:
+def _upload(platform: PlatformClient, bundle: Path) -> str:
     with Progress(
         TextColumn("Uploading"),
         BarColumn(),
@@ -407,70 +419,71 @@ def _upload(platform: PlatformClient, bundle: Path) -> data.DataFile:
         transient=True,
     ) as progress:
         task = progress.add_task("upload", total=bundle.stat().st_size)
-        stored = data.upload_file(
+        file_id = imports.upload_bundle(
             platform,
             bundle,
+            format=IMPORT_FORMAT,
             content_type="application/zip",
-            pipeline_key=PIPELINE_KEY,
             on_progress=lambda sent: progress.advance(task, sent),
         )
     hud_console.success(f"Uploaded {bundle.name}")
-    return stored
+    return file_id
 
 
-def _get_import(platform: PlatformClient, run_id: str) -> data.PipelineRun:
-    run_id = str(uuid.UUID(run_id))
+def _get_import(platform: PlatformClient, import_id: str) -> imports.Import:
+    import_id = str(uuid.UUID(import_id))
     try:
-        run = data.get_run(platform, run_id)
+        imported = imports.get_import(platform, import_id)
     except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Import", input={"run_id": run_id}) from exc
-    if run.pipeline_key != PIPELINE_KEY:
+        raise CliError.from_http(exc, resource="Import", input={"import_id": import_id}) from exc
+    if imported.format != IMPORT_FORMAT:
         raise CliError(
             "usage",
-            f"Run {run_id} is a {run.pipeline_key} run, not a Harbor import.",
-            input={"run_id": run_id},
+            f"Import {import_id} is a {imported.format} import, not a Harbor import.",
+            input={"import_id": import_id},
         )
-    return run
+    return imported
 
 
-def _conclude(platform: PlatformClient, run: data.PipelineRun, plan: dict[str, Any]) -> Any:
-    """Follow the run until it ends, then show its report; a run that did not complete fails."""
-    if not run.finished:
-        run = _follow(platform, run.id)
-    report = _read_report(platform, run)
+def _conclude(platform: PlatformClient, imported: imports.Import, plan: dict[str, Any]) -> Any:
+    """Follow the import until it ends, then show its report; one that did not complete fails."""
+    if not imported.ended:
+        imported = _follow(platform, imported.id)
+    report = _read_report(platform, imported)
     if report is not None:
         _print_report(report)
-    _print_outcome(run)
+    _print_outcome(imported)
     payload = {
         **plan,
-        "run": run.model_dump(mode="json"),
+        "import": imported.model_dump(mode="json"),
         "report": report.model_dump(mode="json") if report else None,
     }
-    return payload if run.status == "completed" else Result(payload)
+    return payload if imported.status == "completed" else Result(payload)
 
 
-def _follow(platform: PlatformClient, run_id: str) -> data.PipelineRun:
+def _follow(platform: PlatformClient, import_id: str) -> imports.Import:
     try:
         with hud_console.console.status("Import queued") as status:
 
-            def show(run: data.PipelineRun) -> None:
-                elapsed = int((datetime.now(UTC) - run.created_at).total_seconds())
-                status.update(f"Import {run.phase} ({elapsed // 60}m {elapsed % 60:02d}s)")
+            def show(imported: imports.Import) -> None:
+                elapsed = int((datetime.now(UTC) - imported.created_at).total_seconds())
+                status.update(f"Import {imported.status} ({elapsed // 60}m {elapsed % 60:02d}s)")
 
-            return data.wait_for_run(platform, run_id, on_update=show)
+            return imports.wait_for_import(platform, import_id, on_update=show)
     except KeyboardInterrupt:
         hud_console.info(
             f"Stopped following; the import keeps running. "
-            f"Follow it again with: hud harbor report {run_id} --wait"
+            f"Follow it again with: hud harbor report {import_id} --wait"
         )
         raise
 
 
-def _read_report(platform: PlatformClient, run: data.PipelineRun) -> ImportReport | None:
-    output = run.output(REPORT_OUTPUT)
-    if output is None:
+def _read_report(platform: PlatformClient, imported: imports.Import) -> ImportReport | None:
+    if not imported.publishes_report:
         return None
-    raw = data.download_json(platform, output.file_id)
+    raw = imports.get_report(platform, imported.id)
+    if raw is None:
+        return None
     schema = raw.get("schema_version") if isinstance(raw, dict) else None
     if schema not in REPORT_SCHEMAS:
         hud_console.warning(
@@ -544,18 +557,15 @@ def _print_report(report: ImportReport) -> None:
         )
 
 
-def _print_outcome(run: data.PipelineRun) -> None:
-    summary = run.result.get("summary") if run.result else None
-    if run.status == "completed":
-        hud_console.success(summary or "Import completed")
-    elif run.status == "blocked":
-        hud_console.warning(summary or "The import stopped; rerun it to resume")
-    elif run.status == "cancelled":
+def _print_outcome(imported: imports.Import) -> None:
+    if imported.status == "completed":
+        hud_console.success(imported.summary or "Import completed")
+    elif imported.status == "stopped":
+        hud_console.warning(imported.summary or "The import stopped; rerun it to resume")
+    elif imported.status == "cancelled":
         hud_console.warning("The import was cancelled; rerun it to resume")
     else:
-        hud_console.warning(f"The import failed: {run.error or 'no error was reported'}")
-    taskset_id = run.args.get("taskset_id")
-    if taskset_id:
-        hud_console.info(
-            f"Imports: {settings.hud_web_url.rstrip('/')}/tasksets/{taskset_id}/imports"
-        )
+        hud_console.warning(f"The import failed: {imported.error or 'no error was reported'}")
+    hud_console.info(
+        f"Imports: {settings.hud_web_url.rstrip('/')}/tasksets/{imported.taskset_id}/imports"
+    )
