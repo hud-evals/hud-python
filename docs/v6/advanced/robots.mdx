@@ -661,9 +661,10 @@ command is usually holding something (and some references cannot read it).
 Settling is measured on window averages, so sensor jitter does not count as progress. From the
 call's start, each tick records every set dimension's distance from the goal. The arm has settled
 when, between the last two windows of 0.25 s (at least three ticks), no dimension's mean distance
-shrank by more than 10% and by more than a tenth of its tolerance (a gripper: 0.01% of its range).
-Before that check counts, every arm dimension must be within its tolerance or have closed half of
-its commanded travel, so an arm slow to start is not cut short. The hold lasts at most 3 s. So a
+shrank by more than 10% and by more than a tenth of its default tolerance (a gripper: 0.01% of its
+range). Before that check counts, every arm dimension must have closed half of its commanded
+travel, so an arm slow to start is not cut short; the check never reads the env's `tolerance`.
+The hold lasts at most 3 s. So a
 tracking arm returns about two windows (0.5 s) after its setpoints play out, a converging one keeps
 going, and an arm that never responds returns at the 3 s cap rather than at `timeout`. A short move
 toward a steady offset (an arm resting a few mm low, moved down) may also wait the full 3 s. A

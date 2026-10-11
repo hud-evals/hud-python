@@ -114,16 +114,18 @@ _UNITS = {"position": (1e3, "mm", 2), "rotation": (1.0, "rad", 5), "joint": (1.0
 
 #: A move has settled when, between the last two windows of ``max(_WINDOW_TICKS,
 #: _WINDOW_S)``, no named dimension's mean distance from the goal shrank by more than
-#: ``_PROGRESS`` of its earlier mean and by more than ``_FLOOR`` of its tolerance (a
-#: gripper's: ``_GRIP_FLOOR`` of its range). The windows count from the call's start, so
-#: the motion's own ticks are measured too.
+#: ``_PROGRESS`` of its earlier mean and by more than its floor. The windows count from the
+#: call's start, so the motion's own ticks are measured too. Nothing here depends on the
+#: env's ``tolerance``.
 _WINDOW_TICKS = 3
 _WINDOW_S = 0.25
 _PROGRESS = 0.1
-_FLOOR = 0.1
+#: Smaller shrinks are noise: a tenth of each quantity's default tolerance (a gripper's:
+#: ``_GRIP_FLOOR`` of its range).
+_FLOORS = {quantity: 0.1 * DEFAULT_TOLERANCE_M / lever for quantity, lever in _LEVER_M.items()}
 _GRIP_FLOOR = 1e-4
-#: Before settling counts, every arm dimension must be within its tolerance or have closed
-#: ``_RESPONDED`` of its commanded travel, so an arm slow to start is not cut short.
+#: Before settling counts, every arm dimension must have closed ``_RESPONDED`` of its
+#: commanded travel (or have none to close), so an arm slow to start is not cut short.
 _RESPONDED = 0.5
 #: Longest hold after the motion plays, in seconds.
 _SETTLE_S = 3.0
@@ -639,38 +641,34 @@ class DirectControl:
                         break
                 # Then hold the goal until the arm settles, for at most the settle cap. A
                 # clipped plan already fills the safety cap, so it gets no hold.
-                settled = False
                 timed_out = clipped and not obs["terminated"]
                 if goal is not None and not clipped:
-                    labels = self._gaps(proprio, goal, named)
-                    # A gripper has no tolerance (it often stops on what it holds), so it always
-                    # counts as responded; its own settling is still awaited.
-                    tolerance = np.array(
-                        [self._tolerances.get(gap.quantity, math.inf) for gap in labels]
-                    )
+                    gaps = self._gaps(proprio, goal, named)
+                    grip = np.array([gap.quantity == "grip" for gap in gaps])
                     floor = np.array(
                         [
                             _GRIP_FLOOR * float(np.ptp(self._range(gap.label)))
-                            if gap.quantity == "grip"
-                            else _FLOOR * self._tolerances[gap.quantity]
-                            for gap in labels
+                            if is_grip
+                            else _FLOORS[gap.quantity]
+                            for gap, is_grip in zip(gaps, grip, strict=True)
                         ]
                     )
                     travel = measure(origin)
                     held = 0
                     while not obs["terminated"]:
-                        now = distances[-1]
+                        # A gripper often stops on what it holds, so it always counts as
+                        # responded; its own settling is still awaited.
                         responded = (
-                            (now <= tolerance)
+                            grip
                             | (travel <= floor)
-                            | (distances[0] - now >= _RESPONDED * travel)
+                            | (distances[0] - distances[-1] >= _RESPONDED * travel)
                         )
                         if np.all(responded) and len(distances) >= 2 * self._window:
                             earlier = np.mean(distances[-2 * self._window : -self._window], axis=0)
                             shrink = earlier - np.mean(distances[-self._window :], axis=0)
-                            closing = (shrink > _PROGRESS * earlier) & (shrink > floor)
-                            settled = not bool(np.any(closing))
-                        if settled or held >= self._settle_ticks:
+                            if not np.any((shrink > _PROGRESS * earlier) & (shrink > floor)):
+                                break
+                        if held >= self._settle_ticks:
                             break
                         if played >= self._max_ticks:
                             timed_out = True

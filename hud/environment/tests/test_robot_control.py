@@ -677,6 +677,33 @@ async def test_an_arm_settling_short_is_held_alike_whichever_verdict_the_toleran
     assert len(sim.actions) == 55  # the tolerance does not change when the call returns
 
 
+class _Delayed(_Pose):
+    """An arm whose state follows each command ``delay`` ticks late."""
+
+    def __init__(self, contract: dict[str, Any], home: list[float], delay: int) -> None:
+        super().__init__(contract, home)
+        self.delay = delay
+
+    def step(self, action: NDArray[Any]) -> None:
+        super().step(action)
+        late = len(self.actions) - 1 - self.delay
+        self.state = self.actions[late] if late >= 0 else self.home
+
+
+@pytest.mark.parametrize("tolerance", [None, {"position": 1e-4}, {"position": 0.05}])
+async def test_a_move_waits_for_a_slow_arm_whatever_the_tolerance(
+    tolerance: dict[str, float] | None,
+) -> None:
+    sim = _Delayed(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], delay=10)
+    agent = _ScriptedLLM(_move("move_to", x=8e-4))
+
+    async with _served(sim, DirectControl(tolerance=tolerance)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert sim.state[0] == pytest.approx(8e-4)  # the arm arrived, though 0.8 mm is within tolerance
+    assert len(sim.actions) == 16  # the tolerance does not change when the call returns
+
+
 class _OpenHand(_Pose):
     """A lagging arm whose state always reads the gripper open, as a hand-only reference does."""
 
