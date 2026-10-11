@@ -276,10 +276,9 @@ class DirectControl:
         self.dims = dims
         self.speed = speed
         self.max_step = max_step or {}
-        self.tolerance = tolerance or {}
-        position = self.tolerance.get("position", DEFAULT_TOLERANCE_M)
+        position = (tolerance or {}).get("position", DEFAULT_TOLERANCE_M)
         self._tolerances = {
-            quantity: self.tolerance.get(quantity, position / lever)
+            quantity: (tolerance or {}).get(quantity, position / lever)
             for quantity, lever in _LEVER_M.items()
         }
         self.timeout = timeout
@@ -357,16 +356,15 @@ class DirectControl:
         if np.any(self._step <= 0):
             raise ValueError(f"every action dimension needs a positive step, got {self._step}")
         # What each tool dimension of an absolute kind measures, which picks its tolerance.
-        self._quantity: dict[str, str] = {}
-        if kind.quantity is not None:
-            for name, axis in self._axes.items():
-                self._quantity[name] = (
-                    "rotation"
-                    if axis.block is not None
-                    else "grip"
-                    if "grip" in self._names[axis.index]
-                    else kind.quantity
-                )
+        self._quantity = {
+            name: "rotation"
+            if axis.block is not None
+            else "grip"
+            if "grip" in self._names[axis.index]
+            else kind.quantity
+            for name, axis in self._axes.items()
+            if kind.quantity is not None
+        }
         # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._obs_space = observations
@@ -595,21 +593,18 @@ class DirectControl:
                         lossless_video=True,
                     )
                     await self._record(obs)  # the episode's opening scene
-                # Plan: turn the call into per-tick action rows (none if the episode is over).
                 # A spent time limit ends the episode the way sim termination does.
                 left = None if self._limit_ticks is None else self._limit_ticks - self._elapsed
                 if left == 0:
                     obs["terminated"] = True
-                if obs["terminated"]:
-                    rows = np.zeros((0, len(self._names)))
-                    goal = None
-                    clipped = False
-                    named: set[str] = set()
-                else:
-                    rows, goal, clipped, named = plan(obs)
+                rows, goal, clipped, named = (
+                    (np.zeros((0, len(self._names))), None, False, set())
+                    if obs["terminated"]
+                    else plan(obs)
+                )
                 played = 0
                 proprio = self._proprio(obs)
-                # Per tick from the call's start: each named dimension's distance from the goal.
+                # Each tick since the call's start: every named dimension's distance from the goal.
                 distances: list[NDArray[np.float64]] = []
 
                 def measure(vector: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -630,7 +625,7 @@ class DirectControl:
                         obs["terminated"] = True
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
-                        self._command = np.asarray(row, dtype=np.float64).copy()
+                        self._command = row.copy()
                     proprio = self._proprio(obs)
                     if goal is not None:
                         distances.append(measure(proprio))
@@ -679,7 +674,6 @@ class DirectControl:
             finally:
                 await client.close()
         self._elapsed += played
-        # Answer with the pose, command, residual, and camera frames the move ended on.
         return self._render(
             obs,
             played,
@@ -713,14 +707,12 @@ class DirectControl:
 
     def _plan(self, values: dict[str, float], obs: dict[str, Any]) -> Plan:
         """Action rows, the intended goal, whether the safety cap clipped them, and named dims."""
-        # Find the start pose and the end pose (goal) of the move.
         if not values:
             look = " (`wait` to just look)" if self.use_wait else ""
             raise ToolError(f"set at least one action dimension{look}")
         start = self._start(obs)
         end = start.copy()  # unnamed dimensions keep their start value (they hold)
         named = set(values)
-        # Scalar dimensions: range-check and write straight into the goal.
         for name, value in values.items():
             axis = self._axes[name]
             if axis.kind == "scalar":
@@ -731,8 +723,6 @@ class DirectControl:
                         f"[{self._low[index]:.4g}, {self._high[index]:.4g}]"
                     )
                 end[index] = value
-        # Rotations: start from the current euler, overwrite the named angles, convert back
-        # to the contract's representation.
         addressed = [b for b in self._orientations if any(self._axes[n].block is b for n in named)]
         for block in addressed:
             roll, pitch, yaw = xyzw_to_euler(block.read(start))
@@ -746,7 +736,7 @@ class DirectControl:
             if angular_distance(block.read(start), target_q) <= 1e-8:
                 continue
             block.write(end, target_q)
-        # Duration: the slowest dimension sets the tick count (scalars by step, rotations by angle).
+        # The slowest dimension sets the tick count (scalars by step, rotations by angle).
         span = end - start
         scalar = [i for i in range(len(self._names)) if i not in self._orient_columns]
         ticks = 1
@@ -768,7 +758,6 @@ class DirectControl:
         play = min(ticks, self._max_ticks)
         clipped = play < ticks
         fractions = np.linspace(1 / ticks, play / ticks, play)  # progress 0→1 per tick
-        # Build one action row per tick.
         if not self._absolute:
             rows = np.repeat((span / ticks)[None], play, axis=0)
         elif not self._orientations:
@@ -792,9 +781,9 @@ class DirectControl:
         gaps: list[_Gap] = []
         blocks: set[int] = set()
         for name in self._dims:
-            axis = self._axes[name]
             if name not in named:
                 continue
+            axis = self._axes[name]
             if axis.block is None:
                 offset = abs(float(proprio[axis.index] - goal[axis.index]))
                 gaps.append(_Gap(name, offset, self._quantity[name]))
@@ -858,17 +847,14 @@ class DirectControl:
                 lines.append(
                     f"Target reached; the largest remaining offset is {_offset(ranked[0])}."
                 )
-            elif len(missed) == 1:
-                lines.append(
-                    f"Did not reach the target; the largest remaining offset is "
-                    f"{_offset(missed[0])}."
-                )
             else:
                 *rest, last = (_offset(gap) for gap in missed)
-                lines.append(
-                    f"Did not reach the target; the remaining offsets are {', '.join(rest)} "
-                    f"and {last}."
+                offsets = (
+                    f"the remaining offsets are {', '.join(rest)} and {last}"
+                    if rest
+                    else f"the largest remaining offset is {last}"
                 )
+                lines.append(f"Did not reach the target; {offsets}.")
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:

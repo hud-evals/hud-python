@@ -652,11 +652,13 @@ grades it as usual.
 
 An absolute move plays its setpoints, then holds the goal until the arm settles, so every move
 gets as close as the arm will go. It then returns the pose, how far it is from the command (`off`),
-and one of two verdicts on the arm: `Target reached.`, or
-`Did not reach the target; z is off by 4.2 mm.`, which names every arm dimension outside its
-tolerance with its distance in mm or rad (`x is off by 2 mm, orientation is off by 0.02 rad`). The gripper
-is waited for like any dimension but never decides the verdict, since a gripper short of its
-command is usually holding something (and some references cannot read it).
+and one of two verdicts on the arm, each stating the largest remaining offset in mm or rad:
+`Target reached; the largest remaining offset is 0.4 mm on z.` or
+`Did not reach the target; the largest remaining offset is 4.2 mm on z.` When several dimensions
+miss, the second verdict lists them largest first (`the remaining offsets are 0.02 rad on
+orientation and 2 mm on x`). The gripper is waited for like any dimension but never decides the
+verdict, since a gripper short of its command is usually holding something (and some references
+cannot read it).
 
 Settling is measured on window averages, so sensor jitter does not count as progress. From the
 call's start, each tick records every set dimension's distance from the goal. The arm has settled
@@ -664,10 +666,10 @@ when, between the last two windows of 0.25 s (at least three ticks), no dimensio
 shrank by more than 10% and by more than a tenth of its default tolerance (a gripper: 0.01% of its
 range). Before that check counts, every arm dimension must have closed half of its commanded
 travel, so an arm slow to start is not cut short; the check never reads the env's `tolerance`.
-The hold lasts at most 3 s. So a
-tracking arm returns about two windows (0.5 s) after its setpoints play out, a converging one keeps
-going, and an arm that never responds returns at the 3 s cap rather than at `timeout`. A short move
-toward a steady offset (an arm resting a few mm low, moved down) may also wait the full 3 s. A
+The hold lasts at most 3 s. So a tracking
+arm returns about two windows (0.5 s) after its setpoints play out, a converging one keeps going,
+and an arm that never responds returns at the 3 s cap rather than at `timeout`. A short move toward
+a steady offset (an arm resting a few mm low, moved down) may also wait the full 3 s. A
 displacement returns once played. `timeout` (default 30 s) is only the safety cap: a full-range
 move at the default speed is about 10 s, and a longer real move plays through instead of being
 rejected. End-effector orientation is intrinsic XYZ euler
