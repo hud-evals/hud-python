@@ -23,10 +23,11 @@ onto whatever the contract stores (quaternion, axis-angle, or euler)::
     sim = env.gym(make_env)
     DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
-An absolute move holds its goal until the arm stops getting closer (and, when it changes a
-gripper command, the observed fingers have stopped moving), at most 3 s after the motion
-plays, then returns that pose and how close it got to the target; a displacement returns
-once played. ``timeout`` is only a safety cap.
+An absolute move holds its goal until the arm comes to rest (and, when it changes a gripper
+command, the observed fingers have stopped moving), at most 3 s after the motion plays, then
+returns that pose and why the call ended: at the target, stopped short of it at rest, or out
+of time while still moving, with every named dimension's remaining offset. A displacement
+returns once played. ``timeout`` caps one call.
 Single-env sims only: a tool call claims the sole slot (no slot token).
 
 Every tick of every call also streams to the rollout's trace: numeric state per
@@ -110,21 +111,23 @@ DEFAULT_TOLERANCE_M = 1e-3
 #: it gives the default rotation and joint tolerances: a 0.15 m gripper turning at the wrist,
 #: and a 2.5 m summed lever over an arm's joints (a Franka's spans about 2 to 2.9 m).
 _LEVER_M = {"position": 1.0, "rotation": 0.15, "joint": 2.5}
-#: How the verdict states a distance: (scale, unit, decimals it is rounded to).
-_UNITS = {"position": (1e3, "mm", 2), "rotation": (1.0, "rad", 5), "joint": (1.0, "rad", 5)}
+#: How the verdict states a distance: (scale, unit, decimals it is rounded to). A gripper
+#: is stated in the contract's own units.
+_UNITS = {
+    "position": (1e3, "mm", 2),
+    "rotation": (1.0, "rad", 5),
+    "joint": (1.0, "rad", 5),
+    "grip": (1.0, "", 4),
+}
 
-#: A move has settled when, between the last two windows of ``max(_WINDOW_TICKS,
-#: _WINDOW_S)``, no named dimension's mean distance from the goal shrank by more than
-#: ``_PROGRESS`` of its earlier mean and by more than its floor. The windows count from the
-#: call's start, so the motion's own ticks are measured too. Nothing here depends on the
-#: env's ``tolerance``.
+#: The arm is at rest when, over each of the last two windows of ``max(_WINDOW_TICKS,
+#: _WINDOW_S)``, every named arm dimension's mean speed (its pose change per tick, an angle
+#: for a rotation) was under its floor. A gripper has no floor: its fingers are waited for
+#: below. Nothing here depends on the env's ``tolerance``.
 _WINDOW_TICKS = 3
 _WINDOW_S = 0.25
-_PROGRESS = 0.1
-#: Smaller shrinks are noise: a tenth of each quantity's default tolerance (a gripper's:
-#: ``_GRIP_FLOOR`` of its range).
+#: At rest is under a tenth of each quantity's default tolerance per tick.
 _FLOORS = {quantity: 0.1 * DEFAULT_TOLERANCE_M / lever for quantity, lever in _LEVER_M.items()}
-_GRIP_FLOOR = 1e-4
 #: Before settling counts, every arm dimension must have closed ``_RESPONDED`` of its
 #: commanded travel (or have none to close), so an arm slow to start is not cut short.
 _RESPONDED = 0.5
@@ -133,10 +136,11 @@ _RESPONDED = 0.5
 #: ``_FINGER_REST_TICKS`` ticks. A finger column is any observation state named like a gripper.
 _FINGER_REST_M = 5e-4
 _FINGER_REST_TICKS = 3
-#: A miss beyond this many tolerances is not reported as a near miss.
-_NEAR = 2.5
 #: Longest hold after the motion plays, in seconds.
 _SETTLE_S = 3.0
+#: An arm at rest but outside its tolerance is held this long, in seconds of continuous rest,
+#: in case it creeps in. It lives inside ``_SETTLE_S``.
+_GRACE_S = 1.5
 
 #: Standard name of a native leaf (the last dotted part, after any ``left_`` / ``right_``).
 _LEAF_STANDARD = {
@@ -173,8 +177,8 @@ MAX_WAIT_S = 100.0
 MIN_WAIT_TICKS = 1
 
 #: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
-#: reached), whether the safety cap clipped the rows, and the dimensions named.
-Plan = tuple["NDArray[np.float64]", "NDArray[np.float64] | None", bool, set[str]]
+#: reached), and the dimensions named.
+Plan = tuple["NDArray[np.float64]", "NDArray[np.float64] | None", set[str]]
 
 #: Asked of the model on every call (unless ``use_annotation`` is off) so the
 #: transcript records what the model saw and why.
@@ -235,9 +239,10 @@ class DirectControl:
       gripper that should switch in one step).
     - ``tolerance`` - how close counts as reaching the target, by quantity:
       ``position`` (m, default ``DEFAULT_TOLERANCE_M``), ``rotation`` and ``joint``
-      (rad, default the position tolerance over a 0.15 m and a 2.5 m lever). It only
-      picks the reply's verdict (at the target, or a miss beyond ``_NEAR`` tolerances),
-      and is never shown to the model; every move gets as close as the arm settles.
+      (rad, default the position tolerance over a 0.15 m and a 2.5 m lever). It picks
+      whether an arm at rest reads as at the target or stopped short of it, and holds one
+      at rest outside it for up to 1.5 s in case it creeps in; it never ends a move early
+      and is never shown to the model.
     - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
       once the arm settles. Default 30 s.
     - ``reference`` - maps observation data to the current action-space vector,
@@ -289,6 +294,8 @@ class DirectControl:
             quantity: (tolerance or {}).get(quantity, position / lever)
             for quantity, lever in _LEVER_M.items()
         }
+        # A gripper has no tolerance: it never decides the verdict.
+        self._tolerances["grip"] = math.inf
         self.timeout = timeout
         self.reference = reference
         self.notes = notes
@@ -349,6 +356,7 @@ class DirectControl:
         self._rate = float(contract["control_rate"])
         self._window = max(_WINDOW_TICKS, math.ceil(_WINDOW_S * self._rate))
         self._settle_ticks = max(1, math.ceil(_SETTLE_S * self._rate))
+        self._grace_ticks = max(1, math.ceil(_GRACE_S * self._rate))
         self._max_ticks = max(1, math.ceil(self.timeout * self._rate))
         self._limit_ticks = (
             None if self.time_limit is None else max(1, math.ceil(self.time_limit * self._rate))
@@ -489,7 +497,7 @@ class DirectControl:
             raise ToolError(f"duration must be within [0, {MAX_WAIT_S:g}] s, got {seconds:g}")
         ticks = max(MIN_WAIT_TICKS, round(seconds * self._rate))
         return await self._play(
-            lambda obs: (np.repeat(self._start(obs)[None], ticks, axis=0), None, False, set()),
+            lambda obs: (np.repeat(self._start(obs)[None], ticks, axis=0), None, set()),
             note,
         )
 
@@ -525,9 +533,9 @@ class DirectControl:
                 f"range per second, so a full-range move takes about {1 / self.speed:g} s."
             )
             done = (
-                "The call returns once the arm stops getting closer (at most "
-                f"{_SETTLE_S:g} s after the motion plays) and reports how close the arm is "
-                "to the target"
+                "The call returns once the arm comes to rest (at most "
+                f"{_SETTLE_S:g} s after the motion plays) and reports whether it is at the "
+                "target, stopped short of it, or ran out of time while still moving"
             )
         else:
             motion = (
@@ -612,24 +620,25 @@ class DirectControl:
                 left = None if self._limit_ticks is None else self._limit_ticks - self._elapsed
                 if left == 0:
                     obs["terminated"] = True
-                rows, goal, clipped, named = (
-                    (np.zeros((0, len(self._names))), None, False, set())
+                rows, goal, named = (
+                    (np.zeros((0, len(self._names))), None, set())
                     if obs["terminated"]
                     else plan(obs)
                 )
                 played = 0
                 proprio = self._proprio(obs)
-                # Each tick since the call's start: every named dimension's distance from the goal.
-                distances: list[NDArray[np.float64]] = []
+                # Each tick since the call's start: every named dimension's speed.
+                speeds: list[NDArray[np.float64]] = []
 
-                def measure(vector: NDArray[np.float64]) -> NDArray[np.float64]:
-                    assert goal is not None
-                    return np.array([gap.distance for gap in self._gaps(vector, goal, named)])
+                def measure(
+                    vector: NDArray[np.float64], target: NDArray[np.float64]
+                ) -> NDArray[np.float64]:
+                    """Every named dimension's distance between two poses."""
+                    return np.array([gap.distance for gap in self._gaps(vector, target, named)])
 
                 fingers = [self._finger_positions(obs)]
+                begun = proprio
                 origin = self._start(obs)  # the command the move starts from
-                if goal is not None:
-                    distances.append(measure(proprio))
 
                 async def step(row: NDArray[np.float64]) -> None:
                     nonlocal played, obs, proprio
@@ -642,54 +651,57 @@ class DirectControl:
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = row.copy()
-                    proprio = self._proprio(obs)
+                    previous, proprio = proprio, self._proprio(obs)
                     fingers.append(self._finger_positions(obs))
                     if goal is not None:
-                        distances.append(measure(proprio))
+                        speeds.append(measure(proprio, previous))
 
                 for row in rows:
                     await step(row)
                     if obs["terminated"]:
                         break
-                # Then hold the goal until the arm settles, for at most the settle cap. A
-                # clipped plan already fills the safety cap, so it gets no hold.
-                timed_out = clipped and not obs["terminated"]
-                if goal is not None and not clipped:
+                # Then hold the goal, for at most the settle cap, until the arm is at rest within
+                # tolerance, or has stayed at rest outside it for the grace period.
+                rested = False
+                if goal is not None:
                     gaps = self._gaps(proprio, goal, named)
                     grip = np.array([gap.quantity == "grip" for gap in gaps])
-                    floor = np.array(
-                        [
-                            _GRIP_FLOOR * float(np.ptp(self._range(gap.label)))
-                            if is_grip
-                            else _FLOORS[gap.quantity]
-                            for gap, is_grip in zip(gaps, grip, strict=True)
-                        ]
-                    )
-                    travel = measure(origin)
+                    # A gripper is never held for here: its fingers are waited for instead.
+                    floor = np.array([_FLOORS.get(gap.quantity, np.inf) for gap in gaps])
+                    tolerance = np.array([self._tolerances[gap.quantity] for gap in gaps])
+                    travel = measure(origin, goal)
+                    gap_at_start = measure(begun, goal)
                     watch = bool(self._fingers) and bool(np.any(grip & (travel > 0)))
                     held = 0
-                    while not obs["terminated"]:
-                        # A gripper often stops on what it holds, so it always counts as
-                        # responded; a changed gripper command waits for its fingers instead.
-                        responded = (
-                            grip
-                            | (travel <= floor)
-                            | (distances[0] - distances[-1] >= _RESPONDED * travel)
-                        )
-                        speed = np.abs(np.diff(fingers, axis=0))
-                        at_rest = not watch or (
-                            np.any(speed > _FINGER_REST_M)
-                            and np.all(speed[-_FINGER_REST_TICKS:] < _FINGER_REST_M)
-                        )
-                        if np.all(responded) and at_rest and len(distances) >= 2 * self._window:
-                            earlier = np.mean(distances[-2 * self._window : -self._window], axis=0)
-                            shrink = earlier - np.mean(distances[-self._window :], axis=0)
-                            if not np.any((shrink > _PROGRESS * earlier) & (shrink > floor)):
-                                break
-                        if held >= self._settle_ticks:
-                            break
-                        if played >= self._max_ticks:
-                            timed_out = True
+                    rest_ticks = 0
+                    while True:
+                        remaining = measure(proprio, goal)
+                        finger_speed = np.abs(np.diff(fingers, axis=0))
+                        rested = False
+                        if len(speeds) >= 2 * self._window:
+                            windows = np.mean(
+                                np.reshape(speeds[-2 * self._window :], (2, self._window, -1)),
+                                axis=1,
+                            )
+                            rested = bool(np.all(windows < floor)) and (
+                                not watch
+                                or bool(np.all(finger_speed[-_FINGER_REST_TICKS:] < _FINGER_REST_M))
+                            )
+                        # Slow to start looks like rest, so returning early waits for a response.
+                        responded = bool(
+                            np.all(
+                                (travel <= floor)
+                                | (gap_at_start - remaining >= _RESPONDED * travel)
+                            )
+                        ) and (not watch or bool(np.any(finger_speed > _FINGER_REST_M)))
+                        rest_ticks = rest_ticks + 1 if rested else 0
+                        arrived = bool(np.all(remaining <= tolerance))
+                        if (
+                            (rested and responded and (arrived or rest_ticks > self._grace_ticks))
+                            or obs["terminated"]
+                            or held >= self._settle_ticks
+                            or played >= self._max_ticks
+                        ):
                             break
                         await step(goal)
                         held += 1
@@ -701,7 +713,7 @@ class DirectControl:
             obs,
             played,
             proprio,
-            timed_out=timed_out,
+            rested=rested,
             gaps=gaps,
             goal=goal,
             left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
@@ -729,7 +741,7 @@ class DirectControl:
         return np.asarray(self._reference(obs["data"]), dtype=np.float64).reshape(-1)
 
     def _plan(self, values: dict[str, float], obs: dict[str, Any]) -> Plan:
-        """Action rows, the intended goal, whether the safety cap clipped them, and named dims."""
+        """Action rows (cut at the safety cap), the intended goal, and named dims."""
         if not values:
             look = " (`wait` to just look)" if self.use_wait else ""
             raise ToolError(f"set at least one action dimension{look}")
@@ -777,7 +789,7 @@ class DirectControl:
                 step = self.speed * _FULL_TURN / self._rate
                 ticks = max(ticks, math.ceil(angle / step))
                 quats.append((block, start_q, end_q))
-        # Safety cap: play only the prefix that fits; `clipped` tells the caller it was cut short.
+        # Safety cap: play only the prefix that fits.
         play = min(ticks, self._max_ticks)
         clipped = play < ticks
         fractions = np.linspace(1 / ticks, play / ticks, play)  # progress 0→1 per tick
@@ -795,7 +807,7 @@ class DirectControl:
                     block.write(row, slerp(start_q, end_q, float(fraction)))
             if not clipped:
                 rows[-1] = end  # land exactly on the goal, free of round-trip rotation error
-        return rows, end if self._absolute else None, clipped, named
+        return rows, end if self._absolute else None, named
 
     def _gaps(
         self, proprio: NDArray[np.float64], goal: NDArray[np.float64], named: set[str]
@@ -836,7 +848,7 @@ class DirectControl:
         played: int,
         proprio: NDArray[np.float64],
         *,
-        timed_out: bool,
+        rested: bool,
         gaps: list[_Gap] | None,
         goal: NDArray[np.float64] | None,
         left: int | None,
@@ -847,10 +859,6 @@ class DirectControl:
         if left is not None:
             opening += f" Time remaining: {left / self._rate:.1f} s."
         lines = [opening]
-        if timed_out:
-            lines.append(
-                f"Stopped at the {self.timeout:g} s safety timeout before the motion finished."
-            )
         for key, names in self._states.items():
             vector = np.array(data[key], dtype=np.float64).reshape(-1)
             angles = self._euler_columns[key]
@@ -864,25 +872,20 @@ class DirectControl:
             lines.append("commanded: " + _labeled(self._reading(command)))
         if goal is not None:
             lines.append("off: " + self._off(proprio, goal))
-        # The verdict is about the arm: a gripper short of its command is usually holding.
-        arm = [gap for gap in gaps or [] if gap.quantity != "grip"]
-        if arm:
-            # Largest first, measured against each dimension's threshold so mm and rad compare.
+        if gaps:
+            # Largest first, measured against each dimension's tolerance so mm and rad compare.
             ranked = sorted(
-                arm, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
+                gaps, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
             )
-            missed = [gap for gap in ranked if gap.distance > self._tolerances[gap.quantity]]
-            if not missed:
-                lines.append(f"At the target. Largest remaining offset: {_offset(ranked[0])}.")
+            if not rested:
+                verdict = "Ran out of time before settling; the arm was still moving."
+            elif any(gap.distance > self._tolerances[gap.quantity] for gap in gaps):
+                verdict = "Stopped short of the target; the arm is at rest."
             else:
-                worst = missed[0]
-                verdict = (
-                    "Did not reach the target"
-                    if worst.distance > _NEAR * self._tolerances[worst.quantity]
-                    else "Stopped near the target"
-                )
-                offsets = ", ".join(_offset(gap) for gap in missed)
-                lines.append(f"{verdict}. Remaining offsets: {offsets}.")
+                verdict = "At the target."
+            lines.append(
+                f"{verdict} Remaining offsets: {', '.join(_offset(gap) for gap in ranked)}."
+            )
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:
@@ -972,7 +975,7 @@ def _object(properties: dict[str, Any]) -> dict[str, Any]:
 
 def _offset(gap: _Gap) -> str:
     scale, unit, decimals = _UNITS[gap.quantity]
-    return f"{round(gap.distance * scale, decimals):.4g} {unit} on {gap.label}"
+    return f"{round(gap.distance * scale, decimals):.4g}{' ' + unit if unit else ''} on {gap.label}"
 
 
 def _labeled(pairs: Iterable[tuple[str, Any]]) -> str:

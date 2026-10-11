@@ -33,7 +33,7 @@ from hud.telemetry.robot import TraceRecorder
 from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from numpy.typing import NDArray
 
@@ -209,22 +209,22 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command; the call holds until two 3-tick windows show it settled.
-    reach_x, held, close = np.array(sim.actions[:50]), sim.actions[50:55], sim.actions[55:]
+    reach_x, held, close = np.array(sim.actions[:50]), sim.actions[50:56], sim.actions[56:]
     np.testing.assert_allclose(reach_x[:, 0], np.linspace(0.01, 0.5, 50), rtol=1e-6)
     np.testing.assert_allclose(reach_x[:, 1], 0.0)
-    np.testing.assert_allclose(held, [[0.5, 0.0]] * 5)
+    np.testing.assert_allclose(held, [[0.5, 0.0]] * 6)
     # max_step lets the gripper switch in one tick while x holds its commanded target;
     # the sim succeeds on that tick, which ends the episode.
     np.testing.assert_allclose(close, [[0.5, 1.0]])
     reached, closed = agent.results
     assert [block.type for block in reached.content] == ["text", "text", "image"]
     # The trace viewer parses this opening line to map tool calls to ticks.
-    assert _text(reached).startswith("Played 55 steps (5.5 s).")
+    assert _text(reached).startswith("Played 56 steps (5.6 s).")
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "off: x=0.0000, grip=0.0000" in _text(reached)
-    assert "At the target. Largest remaining offset: 0 mm on x." in _text(reached)
-    assert "Did not reach" not in _text(reached)
+    assert "At the target. Remaining offsets: 0 mm on x." in _text(reached)
+    assert "Stopped short" not in _text(reached)
     assert "The episode has ended" in _text(closed)
     assert "Time remaining" not in _text(reached)
     # Tolerance only picks the verdict; nothing the model sees mentions it.
@@ -359,7 +359,7 @@ async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> N
     # 0.6 / 0.05 s = 12 s at 10 Hz, which used to exceed the 10 s cap.
     assert len(sim.actions) >= 120
     assert sim.state[0] == pytest.approx(0.6)
-    assert "safety timeout" not in _text(result)
+    assert "At the target." in _text(result)
 
 
 @pytest.mark.parametrize(("speed", "ticks", "full_range"), [(0.1, 50, "10 s"), (0.25, 20, "4 s")])
@@ -390,8 +390,9 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert not result.isError
     assert len(sim.actions) == 3  # 0.3 s at 10 Hz
     assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
-    assert "safety timeout" in _text(result)
-    assert "Did not reach the target. Remaining offsets: 985 mm on x." in _text(result)
+    assert (
+        "Ran out of time before settling; the arm was still moving. Remaining offsets: 985 mm on x."
+    ) in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
 
@@ -473,13 +474,13 @@ async def test_wait_without_a_duration_observes_with_one_hold_tick() -> None:
 
     assert "one control tick passes" in agent.descriptions["wait"]
     _, looked = agent.results
-    assert len(sim.actions) == 26  # the move and its settle, then one tick holding its setpoint
+    assert len(sim.actions) == 27  # the move and its settle, then one tick holding its setpoint
     np.testing.assert_allclose(sim.actions[-1], [0.2, 0.0])
     assert _text(looked).startswith("Played 1 steps (0.1 s).")
     assert "observation/state: x=0.2000" in _text(looked)
     assert "commanded: x=0.2000, grip=0.0000" in _text(looked)
     assert "At the target" not in _text(looked)
-    assert "Did not reach" not in _text(looked)
+    assert "Stopped short" not in _text(looked)
     assert [block.type for block in looked.content] == ["text", "text", "image"]
 
 
@@ -507,7 +508,7 @@ async def test_wait_holds_the_commanded_pose_for_the_requested_sim_time() -> Non
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    held = np.array(sim.actions[25:])
+    held = np.array(sim.actions[26:])
     assert len(held) == 15  # 1.5 s at 10 Hz
     np.testing.assert_allclose(held, [[0.2, 0.0]] * 15)
     assert _text(agent.results[1]).startswith("Played 15 steps (1.5 s).")
@@ -541,9 +542,9 @@ async def test_every_reply_reports_the_time_left_and_the_tools_state_the_limit()
         assert "You have 10 seconds of simulated time." in agent.descriptions[tool]
         assert "thinking is free" in agent.descriptions[tool]
     moved, waited, looked = (_text(result) for result in agent.results)
-    assert moved.startswith("Played 25 steps (2.5 s). Time remaining: 7.5 s.")
-    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 6.5 s.")
-    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 6.4 s.")
+    assert moved.startswith("Played 26 steps (2.6 s). Time remaining: 7.4 s.")
+    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 6.4 s.")
+    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 6.3 s.")
     assert "The episode has ended" not in looked
 
 
@@ -574,6 +575,9 @@ async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode(
     assert cut.startswith("Played 20 steps (2.0 s). Time remaining: 0.0 s.")
     assert "The time limit is reached." in cut
     assert "The episode has ended; stop calling tools." in cut
+    assert (
+        "Ran out of time before settling; the arm was still moving. Remaining offsets: 300 mm on x."
+    ) in cut
     assert after.startswith("Played 0 steps (0.0 s). Time remaining: 0.0 s.")
     assert "The episode has ended; stop calling tools." in after
 
@@ -582,7 +586,7 @@ async def test_a_wait_on_the_last_tick_of_the_time_limit_spends_it_and_ends_the_
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": 0, "note": "look"}))
 
-    async with _served(sim, DirectControl(time_limit=2.6)) as env:
+    async with _served(sim, DirectControl(time_limit=2.7)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     moved, looked = (_text(result) for result in agent.results)
@@ -600,8 +604,8 @@ async def test_a_new_episode_starts_with_the_whole_time_limit() -> None:
         await rollout(Task(env="arm", id="reach"), first, runtime=LocalRuntime(env))
         await rollout(Task(env="arm", id="reach"), second, runtime=LocalRuntime(env))
 
-    assert "Time remaining: 0.5 s." in _text(first.results[0])
-    assert "Time remaining: 0.5 s." in _text(second.results[0])
+    assert "Time remaining: 0.4 s." in _text(first.results[0])
+    assert "Time remaining: 0.4 s." in _text(second.results[0])
 
 
 class _Jitter(_Pose):
@@ -625,9 +629,10 @@ async def test_an_arm_that_never_moves_gives_up_at_the_settle_cap_not_the_safety
     # The 50-tick move plays out; an arm that never responded is held the whole 3 s cap.
     assert len(sim.actions) == 80
     text = _text(agent.results[0])
-    assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
-    assert "Did not reach the target. Remaining offsets: 500 mm on x." in text
+    assert (
+        "Stopped short of the target; the arm is at rest. Remaining offsets: 500 mm on x." in text
+    )
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
@@ -641,7 +646,7 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state[0] == pytest.approx(0.5, abs=0.01)
     assert "pose:" in _text(agent.results[0])
     assert "off:" in _text(agent.results[0])
-    assert "At the target. Largest remaining offset: " in _text(agent.results[0])
+    assert "At the target. Remaining offsets: " in _text(agent.results[0])
 
 
 class _Offset(_Pose):
@@ -657,15 +662,18 @@ class _Offset(_Pose):
 
 
 @pytest.mark.parametrize(
-    ("tolerance", "verdict"),
+    ("tolerance", "verdict", "ticks"),
     [
-        (None, "Did not reach the target. Remaining offsets: 12 mm on x."),
-        ({"position": 0.005}, "Stopped near the target. Remaining offsets: 12 mm on x."),
-        ({"position": 0.02}, "At the target. Largest remaining offset: 12 mm on x."),
+        (
+            None,
+            "Stopped short of the target; the arm is at rest. Remaining offsets: 12 mm on x.",
+            50 + 21,
+        ),
+        ({"position": 0.02}, "At the target. Remaining offsets: 12 mm on x.", 56),
     ],
 )
-async def test_an_arm_settling_short_is_held_alike_whichever_verdict_the_tolerance_picks(
-    tolerance: dict[str, float] | None, verdict: str
+async def test_an_arm_at_rest_outside_its_tolerance_is_held_for_the_grace_period_before_stopping(
+    tolerance: dict[str, float] | None, verdict: str, ticks: int
 ) -> None:
     sim = _Offset(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], [-0.012, 0.0])
     agent = _ScriptedLLM(_move("move_to", x=0.5))
@@ -674,8 +682,7 @@ async def test_an_arm_settling_short_is_held_alike_whichever_verdict_the_toleran
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert verdict in _text(agent.results[0])
-    assert "safety timeout" not in _text(agent.results[0])
-    assert len(sim.actions) == 55  # the tolerance does not change when the call returns
+    assert len(sim.actions) == ticks  # tolerance only lengthens the wait, never shortens it
 
 
 class _Delayed(_Pose):
@@ -702,7 +709,7 @@ async def test_a_move_waits_for_a_slow_arm_whatever_the_tolerance(
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert sim.state[0] == pytest.approx(8e-4)  # the arm arrived, though 0.8 mm is within tolerance
-    assert len(sim.actions) == 16  # the tolerance does not change when the call returns
+    assert len(sim.actions) == 17  # the tolerance does not change when the call returns
 
 
 async def test_a_gripper_call_returns_once_the_fingers_have_moved_and_come_to_rest() -> None:
@@ -714,7 +721,8 @@ async def test_a_gripper_call_returns_once_the_fingers_have_moved_and_come_to_re
 
     # The fingers sit still for 10 ticks, then jump; the call holds through both.
     assert sim.state[1] == pytest.approx(1.0)
-    assert len(sim.actions) == 16  # not the 5 an unmoving gripper reading would settle at
+    assert len(sim.actions) == 14  # three ticks after the fingers stop
+    assert "At the target. Remaining offsets: 0 on grip." in _text(agent.results[0])
 
 
 class _Fingers(_Pose):
@@ -741,11 +749,12 @@ async def test_a_gripper_call_waits_for_every_finger_and_not_only_the_first_to_s
     # The left finger jams after 6 ticks; the right one closes for 20, and the call outlasts it.
     np.testing.assert_allclose(sim.state, [0.0, 0.3, 1.0])
     assert 20 + 3 <= len(sim.actions) < 20 + 30
+    assert "Remaining offsets: 0.7 on grip_left, 0 on grip_right." in _text(agent.results[0])
 
 
 @pytest.mark.parametrize(
     ("state_names", "ticks"),
-    [(["x", "grip"], 31), (["x", "finger"], 5)],
+    [(["x", "grip"], 31), (["x", "finger"], 6)],
 )
 async def test_a_gripper_call_waits_only_for_fingers_the_observation_names(
     state_names: list[str], ticks: int
@@ -759,6 +768,68 @@ async def test_a_gripper_call_waits_only_for_fingers_the_observation_names(
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert len(sim.actions) == ticks
+
+
+class _Drifting(_Pose):
+    """An arm tracking the command exactly for the move's 50 ticks, then ``offset(ticks since)``."""
+
+    def __init__(self, contract: dict[str, Any], offset: Callable[[int], float]) -> None:
+        super().__init__(contract, [0.0, 0.0])
+        self.offset = offset
+
+    def step(self, action: NDArray[Any]) -> None:
+        super().step(action)
+        self.state = np.array([action[0][0] + self.offset(len(self.actions) - 50), action[0][1]])
+
+
+def _overshoot_then_creep_back(ticks: int) -> float:
+    """Overshoots 3 mm in three ticks, then eases back at 0.3 mm per tick."""
+    return 0.0 if ticks <= 0 else max(0.0, min(ticks * 1e-3, 3e-3 - (ticks - 3) * 3e-4))
+
+
+async def test_an_arm_still_creeping_back_from_an_overshoot_is_held_until_it_rests() -> None:
+    sim = _Drifting(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), _overshoot_then_creep_back)
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    # The error is flat or growing for the first ticks while the arm is still moving.
+    assert sim.state[0] == pytest.approx(0.5, abs=1e-4)
+    assert "At the target. Remaining offsets: 0" in _text(agent.results[0])
+    assert len(sim.actions) < 50 + 30
+
+
+def _creep_in(ticks: int) -> float:
+    """Jumps 1.5 mm short, then creeps in at 0.06 mm per tick, below the rest speed."""
+    return 0.0 if ticks <= 0 else -max(0.0, 1.5e-3 - ticks * 6e-5)
+
+
+async def test_an_arm_at_rest_that_creeps_into_tolerance_during_the_grace_period_reaches_it() -> (
+    None
+):
+    sim = _Drifting(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), _creep_in)
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert "At the target. Remaining offsets: 0" in _text(agent.results[0])
+    assert sim.state[0] == pytest.approx(0.5, abs=1e-3)
+    assert len(sim.actions) < 50 + 21  # returned inside the grace period, not after it
+
+
+async def test_an_arm_drifting_away_from_the_goal_is_held_to_the_cap_and_reported() -> None:
+    sim = _Drifting(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), lambda ticks: 5e-4 * ticks)
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert len(sim.actions) == 50 + 30
+    assert (
+        "Ran out of time before settling; the arm was still moving. Remaining offsets: 15 mm on x."
+    ) in _text(agent.results[0])
 
 
 class _OpenHand(_Pose):
@@ -780,8 +851,8 @@ async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verd
     assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
     assert "off: x=-0.00" in _text(agent.results[0])
     assert "grip=-2.0000" in _text(agent.results[0])
-    assert "At the target. Largest remaining offset: " in _text(agent.results[0])
-    assert "on grip" not in _text(agent.results[0])
+    assert "At the target. Remaining offsets: " in _text(agent.results[0])
+    assert "2 on grip" in _text(agent.results[0])  # the reference reads the hand open
 
 
 @pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"grip": 0.1}, {"x": 0.1}])
@@ -829,7 +900,7 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
 
     text = _text(agent.results[0])
     assert ("At the target. " in text) == (share < 1)
-    assert ("Stopped near the target. " in text) == (share > 1)
+    assert ("Stopped short of the target; the arm is at rest. " in text) == (share > 1)
     assert f" on {label}." in text  # every verdict names the dimension and how far off it is
 
 
@@ -838,15 +909,17 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
     [
         (
             None,
-            "Did not reach the target. Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
+            "Stopped short of the target; the arm is at rest. "
+            "Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
         ),
         (
             {"position": 4e-3},
-            "At the target. Largest remaining offset: 0.02 rad on orientation.",
+            "At the target. Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
         ),  # rotation: 4 mm over 0.15 m, 0.027 rad
         (
             {"position": 4e-3, "rotation": 0.01},
-            "Stopped near the target. Remaining offsets: 0.02 rad on orientation.",
+            "Stopped short of the target; the arm is at rest. "
+            "Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
         ),
     ],
 )
@@ -1109,6 +1182,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
         assert not result.isError
         assert f"ee_euler.x={wrapped:.4f}" in _text(result)
         assert f"pose: x=0.0000, roll={wrapped:.4f}" in _text(result)
-    assert "At the target. Largest remaining offset: " in _text(past)
+    assert "At the target. Remaining offsets: " in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]

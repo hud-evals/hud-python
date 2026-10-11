@@ -610,7 +610,7 @@ The [contract](#contract) derives the tool surface:
 
 A gripper is a name containing `grip`, and a rotation is the `roll` / `pitch` / `yaw` of a wrist
 rotation block. The tolerance is an env-side threshold for how close counts as reaching the
-target. It only picks the verdict, never ends a move early, and is never shown to the model: no
+target. It only separates `At the target` from `Stopped short` and lengthens the wait of an arm at rest outside it, never ends a move early, and is never shown to the model: no
 schema, description, or reply mentions it. Each default is the amount that moves the fingertips
 1 mm (`DEFAULT_TOLERANCE_M`):
 
@@ -650,21 +650,25 @@ episode has ended and tells the model to stop. The agent loop itself ends only w
 (or at its step cap), so a model that ignores the reply keeps getting that reply. The template
 grades it as usual.
 
-An absolute move plays its setpoints, then holds the goal until the arm settles, so every move
-gets as close as the arm will go. It then returns the pose, how far it is from the command (`off`),
-and one of three verdicts on the arm, each stating the real remaining offsets in mm or rad and no
-tolerance:
+An absolute move plays its setpoints, then holds the goal until the arm is at rest, so every
+move gets as close as the arm will go. It then returns the pose, how far it is from the command
+(`off`), and one of three verdicts on why the call ended. Each verdict lists the remaining offset
+of every named dimension, in mm or rad, largest relative to its own tolerance first, and never
+a tolerance:
 
-- `At the target. Largest remaining offset: 3.2 mm on z.`
-- `Stopped near the target. Remaining offsets: 8.1 mm on x, 12.4 mm on z.` A miss beyond the
-  tolerance but within 2.5 times it.
-- `Did not reach the target. Remaining offsets: 82.2 mm on z, 43.5 mm on y.` A miss beyond 2.5
-  times the tolerance.
+- `At the target. Remaining offsets: 3.2 mm on z, 0.4 mm on x.` The arm is at rest and every
+  dimension is within its tolerance.
+- `Stopped short of the target; the arm is at rest. Remaining offsets: 12.4 mm on z, 8.1 mm on x.`
+  The arm stayed at rest for 1.5 s and at least one dimension is still beyond its tolerance.
+- `Ran out of time before settling; the arm was still moving. Remaining offsets: 82.2 mm on z.`
+  The 3 s hold, or the call's `timeout`, ended while the arm was still moving.
 
-The two miss verdicts list every offset beyond its tolerance, largest relative to its tolerance
-first. A verdict reports where the arm ended, not why it stopped. The gripper never decides the
-verdict, since a gripper short of its command is usually holding something (and some references
-cannot read it).
+The verdicts say only that the arm arrived, stopped short, or was still moving, never why. The
+gripper has no tolerance, so it never decides the verdict (a gripper short of its command is
+usually holding something, and some references cannot read it), but its offset is listed after the
+arm's, in the contract's own units and unlabelled (`0.37 on grip`). A call that sets only the
+gripper is judged on rest alone and reads `At the target.`. A call on an episode that has already
+ended plays nothing and returns no verdict.
 
 A call that changes a gripper command also waits for the observed fingers: any observation state
 whose name contains `grip` (a Franka hand's `finger_joint1` and `finger_joint2` columns in LIBERO's
@@ -673,20 +677,28 @@ tick, then returns once every finger has stayed slower than that for 3 ticks, so
 stalls on an object returns 3 ticks after the fingers stop, within the 3 s hold cap. A call that
 re-sends the gripper's current command, and an observation that names no finger, wait for nothing.
 
-Settling is measured on window averages, so sensor jitter does not count as progress. From the
-call's start, each tick records every set dimension's distance from the goal. The arm has settled
-when, between the last two windows of 0.25 s (at least three ticks), no dimension's mean distance
-shrank by more than 10% and by more than a tenth of its default tolerance (a gripper: 0.01% of its
-range). Before that check counts, every arm dimension must have closed half of its commanded
-travel, so an arm slow to start is not cut short; the check never reads the env's `tolerance`.
-The hold lasts at most 3 s. So a tracking
-arm returns about two windows (0.5 s) after its setpoints play out, a converging one keeps going,
-and an arm that never responds returns at the 3 s cap rather than at `timeout`. A short move toward
-a steady offset (an arm resting a few mm low, moved down) may also wait the full 3 s. A
-displacement returns once played. `timeout` (default 30 s) is only the safety cap: a full-range
-move at the default speed is about 10 s, and a longer real move plays through instead of being
-rejected. End-effector orientation is intrinsic XYZ euler
-(roll, pitch, yaw, radians). Angles are periodic: replies report euler angles, both the `pose` and
+Rest is measured on window averages, so sensor jitter does not count as motion. From the call's
+start, each tick records every set dimension's pose change (an angle for a rotation). The arm is at
+rest when, over each of the last two windows of 0.25 s (at least three ticks), every dimension's mean
+change per tick is below a tenth of the per-tick amount its default tolerance allows (position
+0.1 mm, rotation 0.00067 rad, joint 0.00004 rad). The check is sign-agnostic, so an arm
+overshooting and creeping back keeps being held, as does one drifting away. Before the check
+counts, every arm dimension must have closed half of its commanded travel, so an arm slow to start
+is not cut short.
+
+The hold returns as soon as the arm is at rest and within tolerance. An arm at rest but outside it
+is held for up to 1.5 s of continuous rest (the count restarts if it moves again), in case it
+creeps in: if it enters tolerance the call returns at the target, and if it is still short
+after 1.5 s the call returns stopped short. Tolerance only lengthens that wait or labels the
+result; it never ends a move early. The grace sits inside the
+3 s hold cap, so a call is held at most 3 s after its setpoints play out; an arm still moving at
+the cap reads as out of time. An arm that tracks its setpoints and ends within tolerance returns
+about two windows (0.5 s) after they play out. An arm that never responds is at rest, so it returns
+at the 3 s cap as stopped short, not as out of time. A displacement returns once played. `timeout`
+(default 30 s) is the cap on a call: a full-range move at the default speed is about 10 s, and a
+longer real move plays through instead of being rejected.
+
+End-effector orientation is intrinsic XYZ euler (roll, pitch, yaw, radians). Angles are periodic: replies report euler angles, both the `pose` and
 any euler columns of the observation state, wrapped into [-pi, pi), and a command past pi is
 accepted rather than rejected. Any wrapped convention flips sign at its own boundary, so the tool
 description tells the model that pi and -pi are the same orientation. The tool slerps that rotation onto the contract, which may store a
@@ -703,8 +715,8 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
 | `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
-| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only which verdict is returned (at the target, or a miss beyond 2.5 times it), not when a call returns, and the model never sees it. |
-| `timeout` | `30` | Safety cap, in seconds, on one call. The call returns earlier, once the arm settles. |
+| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only whether an arm at rest reads as at the target or stopped short, and how long an arm at rest outside it is held (up to 1.5 s), never ends a move early, and the model never sees it. |
+| `timeout` | `30` | Cap, in seconds, on one call. The call returns earlier, once the arm is at rest. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second (a rotation: of a full turn), so a full-range move takes `1 / speed` seconds. It paces only the setpoints; the settle hold after them is unchanged. Displacements ignore it. |
 | `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining. Spending it ends the episode as sim termination does: the call in flight stops at the limit, later calls play nothing, and the reply says the episode has ended. The motion and `wait` tool descriptions say "You have N seconds of simulated time. Time passes only while the robot moves or waits; thinking is free. When it runs out the episode ends and is graded as it stands."; the episode prompt is unchanged, so VLAs see the sim's own instruction. |
