@@ -47,8 +47,9 @@ class Task(BaseModel):
             str(data.get("id", ""))
             + (
                 "-"
-                + hashlib.sha1(  # noqa: S324 - stable non-cryptographic suffix
-                    json.dumps(args, sort_keys=True, default=str).encode("utf-8")
+                + hashlib.sha1(
+                    json.dumps(args, sort_keys=True, default=str).encode("utf-8"),
+                    usedforsecurity=False,
                 ).hexdigest()[:8]
                 if (args := data.get("args"))
                 else ""
