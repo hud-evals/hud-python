@@ -455,7 +455,7 @@ async def test_wait_without_a_duration_observes_with_one_hold_tick() -> None:
     np.testing.assert_allclose(sim.actions[-1], [0.2, 0.0])
     assert _text(looked).startswith("Played 1 steps (0.1 s).")
     assert "observation/state: x=0.2000" in _text(looked)
-    assert "commanded: x=0.2000" in _text(looked)
+    assert "commanded: x=0.2000, grip=0.0000" in _text(looked)
     assert "Target reached." not in _text(looked)
     assert "Did not reach" not in _text(looked)
     assert [block.type for block in looked.content] == ["text", "text", "image"]

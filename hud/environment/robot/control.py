@@ -777,8 +777,9 @@ class DirectControl:
             lines.append(f"{key}: " + _labeled(zip(labels, vector, strict=True)))
         if proprio.size == len(self._names):
             lines.append("pose: " + _labeled(self._reading(proprio)))
-        if goal is not None:
-            lines.append("commanded: " + _labeled(self._reading(goal)))
+        command = goal if goal is not None else self._command
+        if command is not None:
+            lines.append("commanded: " + _labeled(self._reading(command)))
         if goal is not None:
             lines.append("off: " + self._off(proprio, goal))
         if gaps:
@@ -788,8 +789,6 @@ class DirectControl:
                 if offset <= tolerance
                 else f"Did not reach the target; largest offset {offset:.4f} on {name}."
             )
-        if self._command is not None and goal is None:
-            lines.append("commanded: " + _labeled(zip(self._names, self._command, strict=True)))
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:
