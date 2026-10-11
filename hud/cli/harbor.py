@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import typer
 from rich.filesize import decimal
@@ -31,13 +32,12 @@ from rich.table import Table
 from hud import data
 from hud.cli import CLI, AuthScope, CliError, DirectoryLink, DirectoryState, Result
 from hud.cli.project import Placement, Project
-from hud.eval.sync import resolve_taskset_id
 from hud.integrations.harbor.importing import (
     PIPELINE_KEY,
     REPORT_OUTPUT,
-    REPORT_SCHEMA,
+    REPORT_SCHEMAS,
     ImportReport,
-    ItemStatus,
+    TaskStatus,
     pack_bundle,
 )
 from hud.settings import settings
@@ -55,8 +55,9 @@ harbor_app = CLI(
     rich_markup_mode="rich",
 )
 
-_STATUS_STYLE: dict[ItemStatus, str] = {
+_STATUS_STYLE: dict[TaskStatus, str] = {
     "imported": "green",
+    "updated": "cyan",
     "unchanged": "dim",
     "skipped": "yellow",
     "failed": "red",
@@ -198,10 +199,10 @@ def imports_command(
     platform = PlatformClient.from_settings()
     args = None
     if taskset is not None:
-        taskset_id, _ = resolve_taskset_id(platform, taskset)
-        if not taskset_id:
+        record = _find_taskset(platform, _taskset_ref(taskset))
+        if record is None:
             raise CliError("not_found", f"Taskset not found: {taskset}", input={"taskset": taskset})
-        args = {"taskset_id": taskset_id}
+        args = {"taskset_id": str(record["id"])}
     runs, total = data.list_runs(platform, pipeline_key=PIPELINE_KEY, args=args, limit=limit)
     payload = {"runs": [run.model_dump(mode="json") for run in runs], "total": total}
     if quiet:
@@ -291,7 +292,7 @@ def _pipeline(platform: PlatformClient) -> data.DataPipeline:
 
 def _given_archive(paths: list[Path]) -> Path | None:
     """The zip to import as it is, when the command was given one."""
-    archives = [path for path in paths if path.suffix.lower() == ".zip"]
+    archives = [path for path in paths if path.suffix.lower() == ".zip" and not path.is_dir()]
     if not archives:
         return None
     if len(paths) > 1:
@@ -305,6 +306,36 @@ def _given_archive(paths: list[Path]) -> Path | None:
     return archives[0]
 
 
+def _taskset_ref(ref: str) -> uuid.UUID | str:
+    """``ref`` as a taskset ID, else as the taskset name HUD normalizes it to."""
+    try:
+        return uuid.UUID(ref)
+    except ValueError:
+        pass
+    name = normalize_environment_name(ref, default="")
+    if not name:
+        raise CliError(
+            "usage",
+            f"{ref!r} cannot name a taskset.",
+            suggestion="Pass --taskset <name>.",
+            input={"taskset": ref},
+        )
+    return name
+
+
+def _find_taskset(platform: PlatformClient, ref: uuid.UUID | str) -> dict[str, Any] | None:
+    """The taskset with this ID or normalized name, or None when there is none."""
+    try:
+        if isinstance(ref, str):
+            found = platform.get(f"/tasksets/by-name/{quote(ref, safe='')}")
+            ref = uuid.UUID(str(found["taskset_id"]))
+        return platform.get(f"/tasksets/{ref}")
+    except HudRequestError as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+
+
 def _resolve_target(
     platform: PlatformClient,
     link: DirectoryLink,
@@ -313,39 +344,39 @@ def _resolve_target(
     project: str | None,
     name: str,
 ) -> _Target:
-    """The taskset named by ``--taskset``, the directory, or ``name``; a new name is created."""
-    ref = taskset or (str(link.taskset_id) if link.taskset_id else name)
-    taskset_id, display = resolve_taskset_id(platform, ref)
-    if not taskset_id:
-        new_name = normalize_environment_name(display, default="")
-        if not new_name:
+    """The taskset named by ``--taskset``, the directory, or ``name``.
+
+    An ID has to name an existing taskset; a name with no taskset is created.
+    """
+    given = taskset or (str(link.taskset_id) if link.taskset_id else name)
+    ref = _taskset_ref(given)
+    record = _find_taskset(platform, ref)
+    if record is None:
+        if isinstance(ref, uuid.UUID):
             raise CliError(
-                "usage",
-                f"{display!r} cannot name a taskset.",
-                suggestion="Pass --taskset <name>.",
+                "not_found",
+                f"Taskset {ref} is inaccessible or deleted.",
+                suggestion="Pass --taskset <name> to import into a taskset by name.",
+                input={"taskset": given},
             )
         placement = Placement.resolve(platform, link, flag=project)
         placement.require_writable()
-        return _Target(name=new_name, id=None, placement=placement)
+        return _Target(name=ref, id=None, placement=placement)
 
-    try:
-        record = platform.get(f"/tasksets/{taskset_id}")
-    except HudRequestError as exc:
-        raise CliError.from_http(exc, resource="Taskset", input={"taskset": ref}) from exc
     if not record["can_edit"]:
         raise CliError(
             "permission_denied",
             f"You cannot edit taskset {record['name']!r}, so nothing can be imported into it.",
-            input={"taskset": ref},
+            input={"taskset": given},
         )
     if project is not None and Project.resolve(platform, project).id != str(record["project_id"]):
         raise CliError(
             "usage",
             f"Taskset {record['name']!r} is in another Project; --project only places a "
             "taskset this command creates.",
-            input={"taskset": ref, "project": project},
+            input={"taskset": given, "project": project},
         )
-    return _Target(name=str(record["name"]), id=taskset_id)
+    return _Target(name=str(record["name"]), id=str(record["id"]))
 
 
 def _print_plan(target: _Target, bundle: Path, file_count: int | None, size: int) -> None:
@@ -441,21 +472,21 @@ def _read_report(platform: PlatformClient, run: data.PipelineRun) -> ImportRepor
         return None
     raw = data.download_json(platform, output.file_id)
     schema = raw.get("schema_version") if isinstance(raw, dict) else None
-    if schema != REPORT_SCHEMA:
+    if schema not in REPORT_SCHEMAS:
         hud_console.warning(
-            f"This hud version reads {REPORT_SCHEMA} reports, and the import wrote "
-            f"{schema!r}; upgrade hud to see the report in detail."
+            f"This hud version reads {' and '.join(REPORT_SCHEMAS)} reports, and the import "
+            f"wrote {schema!r}; upgrade hud to see the report in detail."
         )
         return None
     return ImportReport.model_validate(raw)
 
 
-def _status(status: ItemStatus) -> str:
+def _status(status: TaskStatus) -> str:
     style = _STATUS_STYLE[status]
     return f"[{style}]{status}[/{style}]"
 
 
-def _status_count(count: int, status: ItemStatus) -> str:
+def _status_count(count: int, status: TaskStatus) -> str:
     style = _STATUS_STYLE[status]
     return f"[{style}]{count} {status}[/{style}]"
 
@@ -482,7 +513,7 @@ def _print_report(report: ImportReport) -> None:
         table.add_column("Trials")
         table.add_column("HUD job", style="blue", no_wrap=True)
         for job in report.jobs:
-            counts = Counter(trial.status for trial in job.trials)
+            counts: Counter[TaskStatus] = Counter(trial.status for trial in job.trials)
             trials = ", ".join(
                 _status_count(counts[status], status) for status in _STATUS_STYLE if counts[status]
             )

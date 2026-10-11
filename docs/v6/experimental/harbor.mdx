@@ -175,6 +175,9 @@ hud harbor import ./terminal-bench ./jobs/2026-10-01__12-00 --taskset tb2
   the environment's next version, which its task moves to in every taskset you can
   edit. `dataset.toml`
   manifests are ignored; the task folders in a dataset folder import like any other.
+  A task folder Harbor would not run (its `task.toml` does not match Harbor's schema,
+  it has no environment, or it lacks `instruction.md` or a test script) is skipped
+  with Harbor's reason.
 - **Jobs.** Each job folder (`config.json` and `result.json`, with a folder per trial)
   becomes a HUD job marked as imported from Harbor. Each finished trial becomes a trace
   of the task it ran: its `agent/trajectory.json` (ATIF) becomes the trace's steps, and
@@ -205,7 +208,8 @@ tasks on HUD, [adapt](#adapt-harbor-tasks) and deploy them.
 ### Report and reruns
 
 Every task, job, and trial ends `imported`, `unchanged` (already in HUD from an earlier
-import), `skipped`, or `failed`, and skipped or failed items carry the reason. A platform
+import), `skipped`, or `failed`, and skipped or failed items carry the reason. A task
+can also end `updated`, when changed content moved it to a new version. A platform
 or storage failure stops the import; the report then names the step that failed and what
 was imported before it. Importing the same folders again resumes: environments, tasks,
 jobs, and traces are matched by digest and Harbor id instead of being created twice.

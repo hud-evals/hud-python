@@ -33,7 +33,7 @@ _REPORT_URL = "https://storage.test/report?signature=secret"
 
 def _report(**changes: Any) -> dict[str, Any]:
     return {
-        "schema_version": "harbor_import_report.v4",
+        "schema_version": "harbor_import_report.v5",
         "taskset_id": _TASKSET,
         "tasks": [
             {
@@ -133,7 +133,10 @@ class _Platform:
                     return {"taskset_id": taskset["id"], "name": name}
             raise HudRequestError("Taskset not found", status_code=404)
         if method == "GET" and path.startswith("/tasksets/"):
-            return self.tasksets[path.removeprefix("/tasksets/")]
+            taskset_id = path.removeprefix("/tasksets/")
+            if taskset_id not in self.tasksets:
+                raise HudRequestError("Taskset not found", status_code=404)
+            return self.tasksets[taskset_id]
         if method == "POST" and path == "/tasksets":
             created = {"id": _TASKSET, "name": kwargs["json"]["name"], "can_edit": True}
             self.tasksets[_TASKSET] = created
@@ -258,6 +261,30 @@ def test_import_defaults_to_the_taskset_named_after_the_first_folder(
     assert payload["taskset"] == {"id": _TASKSET, "name": "tasks", "created": False}
 
 
+def test_rerunning_an_import_finds_the_taskset_its_name_created(
+    platform: _Platform, folders: list[str]
+) -> None:
+    first, _ = _invoke("import", *folders, "--taskset", "TB2/Sample", "--yes")
+    second, payload = _invoke("import", *folders, "--taskset", "TB2/Sample", "--yes")
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    assert platform.paths("POST").count("/tasksets") == 1
+    assert platform.paths("GET").count("/tasksets/by-name/tb2sample") == 2
+    assert payload["taskset"] == {"id": _TASKSET, "name": "tb2sample", "created": False}
+
+
+def test_import_refuses_an_unknown_taskset_id_instead_of_creating_one(
+    platform: _Platform, folders: list[str]
+) -> None:
+    result, payload = _invoke("import", *folders, "--taskset", _TASKSET, "--yes")
+
+    assert result.exit_code == ExitCode.FAILURE
+    assert payload["error"] == "not_found"
+    assert payload["message"] == f"Taskset {_TASKSET} is inaccessible or deleted."
+    assert platform.paths("POST") == []
+
+
 def test_import_link_saves_the_taskset_as_the_directory_default(
     platform: _Platform, folders: list[str], tmp_path: Path
 ) -> None:
@@ -353,6 +380,20 @@ def test_import_uploads_a_given_zip_as_it_is(platform: _Platform, tmp_path: Path
     assert payload["taskset"]["name"] == "prepared"
 
 
+def test_import_packs_a_folder_named_like_a_zip(platform: _Platform, tmp_path: Path) -> None:
+    folder = tmp_path / "release.zip"
+    folder.mkdir()
+    (folder / "task.toml").write_text("version = '1.0'\n")
+
+    result, payload = _invoke("import", str(folder), "--taskset", "tb2", "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert payload["bundle"]["files"] == 1
+    assert platform.uploaded is not None
+    with zipfile.ZipFile(io.BytesIO(platform.uploaded)) as bundle:
+        assert bundle.namelist() == ["release.zip/task.toml"]
+
+
 def test_import_refuses_a_zip_mixed_with_folders_before_any_request(
     platform: _Platform, folders: list[str], tmp_path: Path
 ) -> None:
@@ -407,6 +448,26 @@ def test_report_of_a_running_import_without_wait_has_no_report(platform: _Platfo
     assert f"/data/{_REPORT_FILE}/download" not in platform.paths("GET")
 
 
+def test_report_shows_tasks_an_import_updated(platform: _Platform) -> None:
+    [task] = platform.report["tasks"]
+    platform.report["tasks"] = [{**task, "build_version": 2, "status": "updated"}]
+
+    result = CliRunner().invoke(app, ["harbor", "report", _RUN])
+
+    assert result.exit_code == 0, result.output
+    assert "updated" in result.output
+
+
+def test_report_reads_a_v4_report(platform: _Platform) -> None:
+    platform.report = _report(schema_version="harbor_import_report.v4")
+
+    result, payload = _invoke("report", _RUN)
+
+    assert result.exit_code == 0, result.output
+    assert payload["report"]["schema_version"] == "harbor_import_report.v4"
+    assert payload["report"]["tasks"][0]["status"] == "imported"
+
+
 def test_report_of_an_unknown_schema_falls_back_to_the_summary(platform: _Platform) -> None:
     platform.report = {"schema_version": "harbor_import_report.v9"}
 
@@ -454,3 +515,11 @@ def test_imports_filters_by_taskset(platform: _Platform) -> None:
     assert platform.run_queries == [
         {"pipeline_key": ["harbor_import"], "limit": ["20"], "arg": [f"taskset_id:{_TASKSET}"]}
     ]
+
+
+def test_imports_refuses_an_unknown_taskset_id(platform: _Platform) -> None:
+    result, payload = _invoke("imports", "--taskset", _TASKSET)
+
+    assert result.exit_code == ExitCode.FAILURE
+    assert payload["error"] == "not_found"
+    assert platform.run_queries == []

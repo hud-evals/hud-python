@@ -64,6 +64,18 @@ def test_symlinked_files_are_stored_by_content_and_symlinked_folders_are_not_fol
     assert not any("linked" in name or "dangling" in name for name in members)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any folder")
+def test_a_folder_that_cannot_be_read_fails_packing(tmp_path: Path) -> None:
+    task = _task(tmp_path / "src")
+    locked = task / "environment"
+    locked.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            pack_bundle([task], tmp_path / "bundle.zip")
+    finally:
+        locked.chmod(0o755)
+
+
 def test_two_folders_with_one_name_are_refused(tmp_path: Path) -> None:
     first = _task(tmp_path / "a")
     second = _task(tmp_path / "b")

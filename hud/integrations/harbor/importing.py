@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,12 +14,15 @@ if TYPE_CHECKING:
 
 PIPELINE_KEY = "harbor_import"
 REPORT_OUTPUT = "report"
-REPORT_SCHEMA = "harbor_import_report.v4"
+# v5 added the ``updated`` task status; v4 reports read as v5 reports without it.
+ReportSchema = Literal["harbor_import_report.v4", "harbor_import_report.v5"]
+REPORT_SCHEMAS: tuple[ReportSchema, ...] = get_args(ReportSchema)
 
 # Files only a Harbor task folder (task.toml) or job and trial folder (result.json) holds.
 _HARBOR_FILES = frozenset({"task.toml", "result.json"})
 
 ItemStatus = Literal["imported", "unchanged", "skipped", "failed"]
+TaskStatus = Literal["imported", "updated", "unchanged", "skipped", "failed"]
 
 
 class BundleError(ValueError):
@@ -31,7 +34,7 @@ def pack_bundle(paths: Sequence[Path], destination: Path) -> int:
 
     Files go in unchanged so the import computes Harbor's task digests. Like
     Harbor's packager, symlinked files are stored by content and symlinked
-    folders are skipped.
+    folders are skipped. A folder that cannot be read raises its ``OSError``.
     """
     folders: dict[str, Path] = {}
     for path in paths:
@@ -52,7 +55,7 @@ def pack_bundle(paths: Sequence[Path], destination: Path) -> int:
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, path in folders.items():
             root = path.resolve()
-            for current, dirnames, filenames in os.walk(root):
+            for current, dirnames, filenames in os.walk(root, onerror=_raise):
                 dirnames.sort()
                 directory = Path(current)
                 for filename in sorted(filenames):
@@ -71,6 +74,10 @@ def pack_bundle(paths: Sequence[Path], destination: Path) -> int:
     return count
 
 
+def _raise(error: OSError) -> None:
+    raise error
+
+
 class _Item(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -85,7 +92,7 @@ class ReportTask(_Item):
     build_id: str | None = None
     build_version: int | None = None
     task_id: str | None = None
-    status: ItemStatus
+    status: TaskStatus
     reason: str | None = None
 
 
@@ -121,7 +128,7 @@ class ReportError(_Item):
 class ImportReport(_Item):
     """The ``report`` output of a ``harbor_import`` run."""
 
-    schema_version: Literal["harbor_import_report.v4"]
+    schema_version: ReportSchema
     taskset_id: str
     tasks: list[ReportTask]
     jobs: list[ReportJob]
