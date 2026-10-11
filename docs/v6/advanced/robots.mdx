@@ -616,13 +616,18 @@ episode has ended and tells the model to stop. The agent loop itself ends only w
 grades it as usual.
 
 A call steps until the commanded target is reached or the arm
-stops moving, then returns the pose and how far it is from the command. The arm counts as stopped
+stops moving, then returns the pose, how far it is from the command (`off`), and a verdict for an
+absolute move: `Target reached.`, or `Did not reach the target; largest offset X on <dim>.` (the
+dimension furthest outside its tolerance). The arm counts as stopped
 once the final setpoint is playing and proprioception has changed by less than 0.01% of the widest
 action range for two ticks in a row, so a blocked arm returns right after the move's setpoints
 play out instead of running to `timeout`. `timeout` (default 60 s)
 is only the safety cap: a full-range move at the default speed is about 10 s, and a longer real
 move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
-(roll, pitch, yaw, radians). The tool slerps that rotation onto the contract, which may store a
+(roll, pitch, yaw, radians). Angles are periodic: replies report euler angles, both the `pose` and
+any euler columns of the observation state, wrapped into [-pi, pi), and a command past pi is
+accepted rather than rejected. Any wrapped convention flips sign at its own boundary, so the tool
+description tells the model that pi and -pi are the same orientation. The tool slerps that rotation onto the contract, which may store a
 quaternion, an axis-angle, or euler. A `move_by` displacement is different: its dimensions,
 rotations included, are the action's own raw components, not euler angles, so say what they mean
 in `notes`. The tool description states the pace: for absolute moves, `speed` as a percentage of

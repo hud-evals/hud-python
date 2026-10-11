@@ -56,9 +56,11 @@ from hud.capabilities.robot import RobotClient
 from hud.environment.robot.orientation import (
     Orientation,
     angular_distance,
+    euler_columns,
     euler_to_xyzw,
     find_orientations,
     slerp,
+    wrap_angle,
     xyzw_to_euler,
 )
 from hud.telemetry.exporter import flush
@@ -278,6 +280,9 @@ class DirectControl:
         self._states = {
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
         }
+        self._euler_columns = {
+            key: euler_columns(names or []) for key, names in self._states.items()
+        }
         # Absolute moves need a start pose: default to the state vector as wide as the action.
         self._reference = self.reference
         if self._absolute and self._reference is None:
@@ -423,7 +428,8 @@ class DirectControl:
             rotation = (
                 " Orientation is intrinsic XYZ euler in radians (roll, pitch, yaw), "
                 "converted to the arm's rotation and interpolated on the shortest arc, "
-                f"at {self.speed * 360:g} degrees per second."
+                f"at {self.speed * 360:g} degrees per second. Angles are periodic: "
+                "pi and -pi are the same orientation, and the pose reports them in [-pi, pi)."
             )
         annotation = (
             " Include a note saying what you see and why you chose the motion."
@@ -540,7 +546,8 @@ class DirectControl:
                     # Done = arrived at the goal, or at rest at the final setpoint.
                     if check and goal is not None and not obs["terminated"]:
                         finished = (
-                            self._reached(proprio, goal, named, blocks) or still >= _STILL_TICKS
+                            self._misses(proprio, goal, named, blocks) == []
+                            or still >= _STILL_TICKS
                         )
                     return bool(obs["terminated"] or finished)
 
@@ -562,6 +569,7 @@ class DirectControl:
                     and not finished
                     and not obs["terminated"]
                 )
+                misses = None if goal is None else self._misses(proprio, goal, named, blocks)
             finally:
                 await client.close()
         self._elapsed += played
@@ -571,6 +579,7 @@ class DirectControl:
             played,
             proprio,
             timed_out=timed_out,
+            misses=misses,
             goal=goal if self._absolute else None,
             left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
         )
@@ -624,10 +633,6 @@ class DirectControl:
             for name, value in values.items():
                 axis = self._axes[name]
                 if axis.kind == "euler" and axis.block is block:
-                    if abs(value) > math.pi + 1e-4:
-                        raise ToolError(
-                            f"{name}={value} is outside [{-math.pi:.4g}, {math.pi:.4g}]"
-                        )
                     euler[axis.index] = value
             target_q = euler_to_xyzw(euler[0], euler[1], euler[2])
             # Same rotation as now: keep the contract components bit for bit.
@@ -673,28 +678,32 @@ class DirectControl:
                 rows[-1] = end  # land exactly on the goal, free of round-trip rotation error
         return rows, end, clipped, named
 
-    def _reached(
+    def _misses(
         self,
         proprio: NDArray[np.float64],
         goal: NDArray[np.float64],
         named: set[str],
         blocks: list[Orientation],
-    ) -> bool:
-        """Every addressed scalar within tolerance and every addressed rotation within reach."""
+    ) -> list[tuple[str, float, float]] | None:
+        """Addressed dimensions outside tolerance, as (name, offset, tolerance); ``None`` when
+        there is no absolute goal to judge against."""
         if not self._absolute or proprio.shape != goal.shape or not named:
-            return False
-        for name in named:
+            return None
+        misses: list[tuple[str, float, float]] = []
+        for name in self._dims:
             axis = self._axes[name]
-            if axis.kind != "scalar":
+            if name not in named or axis.kind != "scalar":
                 continue
             index = axis.index
             tolerance = max(_REACH_ABS, _REACH_FRAC * float(self._high[index] - self._low[index]))
-            if abs(float(proprio[index] - goal[index])) > tolerance:
-                return False
-        return all(
-            angular_distance(block.read(proprio), block.read(goal)) <= _REACH_RAD
-            for block in blocks
-        )
+            offset = abs(float(proprio[index] - goal[index]))
+            if offset > tolerance:
+                misses.append((name, offset, tolerance))
+        for block in blocks:
+            offset = angular_distance(block.read(proprio), block.read(goal))
+            if offset > _REACH_RAD:
+                misses.append(("orientation", offset, _REACH_RAD))
+        return misses
 
     def _proprio(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         if self._reference is not None:
@@ -711,6 +720,7 @@ class DirectControl:
         proprio: NDArray[np.float64],
         *,
         timed_out: bool,
+        misses: list[tuple[str, float, float]] | None,
         goal: NDArray[np.float64] | None,
         left: int | None,
     ) -> Content:
@@ -725,7 +735,9 @@ class DirectControl:
                 f"Stopped at the {self.timeout:g} s safety timeout before the motion finished."
             )
         for key, names in self._states.items():
-            vector = np.asarray(data[key], dtype=np.float64).reshape(-1)
+            vector = np.array(data[key], dtype=np.float64).reshape(-1)
+            angles = self._euler_columns[key]
+            vector[angles] = wrap_angle(vector[angles])
             labels = names or [str(i) for i in range(vector.size)]
             lines.append(f"{key}: " + _labeled(zip(labels, vector, strict=True)))
         if proprio.size == len(self._names):
@@ -734,6 +746,12 @@ class DirectControl:
             lines.append("commanded: " + _labeled(self._reading(goal)))
         if goal is not None and proprio.shape == goal.shape:
             lines.append("off: " + self._off(proprio, goal))
+        if misses is not None:
+            if not misses:
+                lines.append("Target reached.")
+            else:
+                name, offset, _ = max(misses, key=lambda miss: miss[1] / miss[2])
+                lines.append(f"Did not reach the target; largest offset {offset:.4f} on {name}.")
         if self._command is not None and goal is None:
             lines.append("commanded: " + _labeled(zip(self._names, self._command, strict=True)))
         if left == 0:
@@ -749,7 +767,7 @@ class DirectControl:
         return content
 
     def _reading(self, vector: NDArray[np.float64]) -> list[tuple[str, float]]:
-        euler: dict[int, tuple[float, float, float]] = {}
+        euler: dict[int, NDArray[np.float64]] = {}
         reading: list[tuple[str, float]] = []
         for name in self._dims:
             axis = self._axes[name]
@@ -759,8 +777,9 @@ class DirectControl:
             assert axis.block is not None
             key = id(axis.block)
             if key not in euler:
-                euler[key] = xyzw_to_euler(axis.block.read(vector))
-            reading.append((name, euler[key][axis.index]))
+                angles = np.asarray(xyzw_to_euler(axis.block.read(vector)))
+                euler[key] = wrap_angle(angles)
+            reading.append((name, float(euler[key][axis.index])))
         return reading
 
     def _off(self, proprio: NDArray[np.float64], goal: NDArray[np.float64]) -> str:

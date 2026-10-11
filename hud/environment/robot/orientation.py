@@ -54,6 +54,17 @@ class Orientation:
             vector[column] = value
 
 
+def euler_columns(names: list[str]) -> list[int]:
+    """Columns of *names* that hold euler angles (radians), in any euler block."""
+    blocks = (_block_at(names, index) for index in range(len(names)))
+    return sorted({c for block in blocks if block and block.kind == "euler" for c in block.columns})
+
+
+def wrap_angle(angle: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Angles in radians as the equivalent ones in [-pi, pi)."""
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
 def find_orientations(names: list[str]) -> list[Orientation]:
     """Contiguous quaternion or euler/axis-angle blocks in an action's names."""
     found: list[Orientation] = []
@@ -296,10 +307,12 @@ def _block_at(names: list[str], index: int) -> Orientation | None:
 __all__ = [
     "Orientation",
     "angular_distance",
+    "euler_columns",
     "euler_to_xyzw",
     "find_orientations",
     "rotvec_to_xyzw",
     "slerp",
+    "wrap_angle",
     "xyzw_to_euler",
     "xyzw_to_rotvec",
 ]

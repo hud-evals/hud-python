@@ -216,6 +216,9 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert _text(reached).startswith("Played 50 steps (5.0 s).")
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
+    assert "off: x=0.0000, grip=0.0000" in _text(reached)
+    assert "Target reached." in _text(reached)
+    assert "Did not reach" not in _text(reached)
     assert "The episode has ended" in _text(closed)
     assert "Time remaining" not in _text(reached)
 
@@ -358,6 +361,7 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert len(sim.actions) == 3  # 0.3 s at 10 Hz
     assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
     assert "safety timeout" in _text(result)
+    assert "Did not reach the target; largest offset 0.9" in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
 
@@ -562,6 +566,7 @@ async def test_an_arm_that_never_moves_stops_after_the_final_setpoint_not_at_the
     text = _text(agent.results[0])
     assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
+    assert "Did not reach the target; largest offset 0.5000 on x." in text
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
@@ -575,6 +580,7 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state[0] == pytest.approx(0.5, abs=0.01)
     assert "pose:" in _text(agent.results[0])
     assert "off:" in _text(agent.results[0])
+    assert "Target reached." in _text(agent.results[0])
 
 
 def _quat_names(order: str) -> list[str]:
@@ -755,3 +761,27 @@ async def test_ending_the_episode_mid_move_closes_the_recording_after_the_tick_i
     await asyncio.gather(*ends)
 
     assert events == ["record"] * 3 + ["close"]  # ticks 0-2, then nothing after the close
+
+
+async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() -> None:
+    names = ["ee.x", "ee_euler.x", "ee_euler.y", "ee_euler.z"]
+    home = [0.0, 3.2, 0.0, 0.0]  # a sim that reports roll unwrapped, just past pi
+    sim = _Pose(_contract("ee_abs", [-1.0, -4.0, -4.0, -4.0], [1.0, 4.0, 4.0, 4.0], names), home)
+    agent = _ScriptedLLM(
+        ("wait", {"duration": None, "note": "look"}),
+        _move("move_to", **{"ee.roll": 3.2}),
+        _move("move_to", **{"ee.roll": -math.pi}),
+    )
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    looked, past, edge = agent.results
+    wrapped = 3.2 - 2 * math.pi
+    for result in (looked, past):
+        assert not result.isError
+        assert f"ee_euler.x={wrapped:.4f}" in _text(result)
+        assert f"pose: ee.x=0.0000, ee.roll={wrapped:.4f}" in _text(result)
+    assert "Target reached." in _text(past)
+    assert not edge.isError
+    assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]
