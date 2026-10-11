@@ -24,8 +24,8 @@ onto whatever the contract stores (quaternion, axis-angle, or euler)::
     DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
 An absolute move holds its goal until the arm stops getting closer (at most 3 s
-after the motion plays), then returns that pose and whether it is within the
-tolerance; a displacement returns once played. ``timeout`` is only a safety cap.
+after the motion plays), then returns that pose and whether it reached the
+target; a displacement returns once played. ``timeout`` is only a safety cap.
 Single-env sims only: a tool call claims the sole slot (no slot token).
 
 Every tick of every call also streams to the rollout's trace: numeric state per
@@ -226,7 +226,8 @@ class DirectControl:
     - ``tolerance`` - how close counts as reaching the target, by quantity:
       ``position`` (m, default ``DEFAULT_TOLERANCE_M``), ``rotation`` and ``joint``
       (rad, default the position tolerance over a 0.15 m and a 2.5 m lever). It only
-      labels the result; every move gets as close as the arm settles.
+      decides whether the reply says the target was reached, and is never shown to the
+      model; every move gets as close as the arm settles.
     - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
       once the arm settles. Default 30 s.
     - ``reference`` - maps observation data to the current action-space vector,
@@ -484,10 +485,7 @@ class DirectControl:
         groups: dict[str, dict[str, Any]] = {}
         for name in self._dims:
             low, high = self._range(name)
-            description = f"[{low:.4g}, {high:.4g}]"
-            if (quantity := self._quantity.get(name, "grip")) != "grip":
-                description += f"; reached within {self._tolerances[quantity]:.4g}"
-            number = {"type": ["number", "null"], "description": description}
+            number = {"type": ["number", "null"], "description": f"[{low:.4g}, {high:.4g}]"}
             group, dot, leaf = name.partition(".")
             if dot:
                 groups.setdefault(group, {})[leaf] = number
@@ -514,8 +512,7 @@ class DirectControl:
             )
             done = (
                 "The call returns once the arm stops getting closer (at most "
-                f"{_SETTLE_S:g} s after the motion plays) and says whether it is within the "
-                "tolerance its schema states"
+                f"{_SETTLE_S:g} s after the motion plays) and says whether it reached the target"
             )
         else:
             motion = (
@@ -690,7 +687,6 @@ class DirectControl:
             played,
             proprio,
             timed_out=timed_out,
-            settled=settled,
             gaps=gaps,
             goal=goal,
             left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
@@ -825,7 +821,6 @@ class DirectControl:
         proprio: NDArray[np.float64],
         *,
         timed_out: bool,
-        settled: bool,
         gaps: list[_Gap] | None,
         goal: NDArray[np.float64] | None,
         left: int | None,
@@ -856,18 +851,14 @@ class DirectControl:
         # The verdict is about the arm: a gripper short of its command is usually holding.
         arm = [gap for gap in gaps or [] if gap.quantity != "grip"]
         if arm:
-            worst = max(arm, key=lambda gap: gap.distance / self._tolerances[gap.quantity])
-            if worst.distance <= self._tolerances[worst.quantity]:
-                within = " and ".join(
-                    _amount(quantity, self._tolerances[quantity])
-                    for quantity in dict.fromkeys(gap.quantity for gap in arm)
+            missed = [gap for gap in arm if gap.distance > self._tolerances[gap.quantity]]
+            if missed:
+                offsets = ", ".join(
+                    f"{gap.label} is off by {_amount(gap.quantity, gap.distance)}" for gap in missed
                 )
-                lines.append(f"Target reached within {within}.")
+                lines.append(f"Did not reach the target; {offsets}.")
             else:
-                lines.append(
-                    f"Did not reach the target; it {'settled' if settled else 'stopped'} with "
-                    f"{worst.label} off by {_amount(worst.quantity, worst.distance)}."
-                )
+                lines.append("Target reached.")
         if left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:

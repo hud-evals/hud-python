@@ -609,9 +609,10 @@ The [contract](#contract) derives the tool surface:
 | `BASE_DEL_POSE` | | `walk_by` | displacement, played once |
 
 A gripper is a name containing `grip`, and a rotation is the `roll` / `pitch` / `yaw` of a wrist
-rotation block. The tolerance says how close counts as reaching the target. It labels the result
-and never ends a move early. Each default is the amount that moves the fingertips 1 mm
-(`DEFAULT_TOLERANCE_M`):
+rotation block. The tolerance is an env-side threshold for how close counts as reaching the
+target. It only picks the verdict, never ends a move early, and is never shown to the model: no
+schema, description, or reply mentions it. Each default is the amount that moves the fingertips
+1 mm (`DEFAULT_TOLERANCE_M`):
 
 | Quantity | Default | Fingertip lever |
 |----------|---------|-----------------|
@@ -620,7 +621,7 @@ and never ends a move early. Each default is the amount that moves the fingertip
 | `joint` | 0.0004 rad | 2.5 m summed over an arm's joints (a Franka's spans about 2 to 2.9 m) |
 
 A gripper has no tolerance, since its unit varies by sim and it often stops on what it holds. Each
-arm dimension's schema description states its range and tolerance (`[0, 1]; reached within 0.001`).
+dimension's schema description states only its range (`[0, 1]`).
 `BASE_ABS_TWIST` (a `walk` velocity for a duration) is not served yet. The wire carries one action
 feature, so a contract that mixes kinds is not served.
 
@@ -651,9 +652,9 @@ grades it as usual.
 
 An absolute move plays its setpoints, then holds the goal until the arm settles, so every move
 gets as close as the arm will go. It then returns the pose, how far it is from the command (`off`),
-and a verdict on the arm: `Target reached within 1 mm and 0.0067 rad.`, or
-`Did not reach the target; it settled with z off by 4.2 mm.` (the dimension farthest outside its
-tolerance). The verdict says `it stopped with` instead when the hold ended unsettled. The gripper
+and one of two verdicts on the arm: `Target reached.`, or
+`Did not reach the target; z is off by 4.2 mm.`, which names every arm dimension outside its
+tolerance with its distance in mm or rad (`x is off by 2 mm, orientation is off by 0.02 rad`). The gripper
 is waited for like any dimension but never decides the verdict, since a gripper short of its
 command is usually holding something (and some references cannot read it).
 
@@ -686,7 +687,7 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
 | `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
-| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only the verdict, not when a call returns. |
+| `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only which verdict is returned, not when a call returns, and the model never sees it. |
 | `timeout` | `30` | Safety cap, in seconds, on one call. The call returns earlier, once the arm settles. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second (a rotation: of a full turn), so a full-range move takes `1 / speed` seconds. It paces only the setpoints; the settle hold after them is unchanged. Displacements ignore it. |

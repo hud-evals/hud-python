@@ -196,11 +196,11 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
     assert schema["properties"]["targets"]["required"] == ["x", "grip"]
     assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
-    # Position is reached within 1 mm; a gripper has no tolerance.
+    # Each dimension states only its range.
     descriptions = [
         prop["description"] for prop in schema["properties"]["targets"]["properties"].values()
     ]
-    assert descriptions == ["[0, 1]; reached within 0.001", "[-1, 1]"]
+    assert descriptions == ["[0, 1]", "[-1, 1]"]
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
     assert (
         "10% of each range per second, so a full-range move takes about 10 s"
@@ -223,10 +223,14 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert "observation/state: x=0.5000, grip=0.0000" in _text(reached)
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "off: x=0.0000, grip=0.0000" in _text(reached)
-    assert "Target reached within 1 mm." in _text(reached)
+    assert "Target reached." in _text(reached)
     assert "Did not reach" not in _text(reached)
     assert "The episode has ended" in _text(closed)
     assert "Time remaining" not in _text(reached)
+    # Tolerance only picks the verdict; nothing the model sees mentions it.
+    seen = " ".join([str(agent.schemas), *agent.descriptions.values(), _text(reached)])
+    for word in ("toleran", "within", "settle"):
+        assert word not in seen.lower()
 
 
 @pytest.mark.parametrize(("state_type", "tool"), [(None, "move_by"), ("BASE_DEL_POSE", "walk_by")])
@@ -387,7 +391,7 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
     assert len(sim.actions) == 3  # 0.3 s at 10 Hz
     assert sim.state[0] < 0.05  # the prefix of the move, not a jump to the goal
     assert "safety timeout" in _text(result)
-    assert "Did not reach the target; it stopped with x off by 985 mm." in _text(result)
+    assert "Did not reach the target; x is off by 985 mm." in _text(result)
     assert "pose:" in _text(result)
     assert "commanded:" in _text(result)
 
@@ -623,7 +627,7 @@ async def test_an_arm_that_never_moves_gives_up_at_the_settle_cap_not_the_safety
     text = _text(agent.results[0])
     assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
-    assert "Did not reach the target; it stopped with x off by 500 mm." in text
+    assert "Did not reach the target; x is off by 500 mm." in text
 
 
 async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> None:
@@ -637,28 +641,32 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state[0] == pytest.approx(0.5, abs=0.01)
     assert "pose:" in _text(agent.results[0])
     assert "off:" in _text(agent.results[0])
-    assert "Target reached within 1 mm." in _text(agent.results[0])
+    assert "Target reached." in _text(agent.results[0])
 
 
-class _Sag(_Pose):
-    """An arm that settles 12 mm short of every command."""
+class _Offset(_Pose):
+    """An arm that settles a fixed ``offset`` (in action columns) away from every command."""
+
+    def __init__(self, contract: dict[str, Any], home: list[float], offset: list[float]) -> None:
+        super().__init__(contract, home)
+        self.offset = np.asarray(offset, dtype=np.float64)
 
     def step(self, action: NDArray[Any]) -> None:
         super().step(action)
-        self.state = self.state - [0.012, 0.0]
+        self.state = self.state + self.offset
 
 
 @pytest.mark.parametrize(
     ("tolerance", "verdict"),
     [
-        (None, "Did not reach the target; it settled with x off by 12 mm."),
-        ({"position": 0.02}, "Target reached within 20 mm."),
+        (None, "Did not reach the target; x is off by 12 mm."),
+        ({"position": 0.02}, "Target reached."),
     ],
 )
-async def test_an_arm_settling_short_is_held_alike_and_labeled_by_the_tolerance_in_force(
+async def test_an_arm_settling_short_is_held_alike_whichever_verdict_the_tolerance_picks(
     tolerance: dict[str, float] | None, verdict: str
 ) -> None:
-    sim = _Sag(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0])
+    sim = _Offset(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], [-0.012, 0.0])
     agent = _ScriptedLLM(_move("move_to", x=0.5))
 
     async with _served(sim, DirectControl(tolerance=tolerance)) as env:
@@ -688,7 +696,7 @@ async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verd
     assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
     assert "off: x=-0.00" in _text(agent.results[0])
     assert "grip=-2.0000" in _text(agent.results[0])
-    assert "Target reached within 1 mm." in _text(agent.results[0])
+    assert "Target reached." in _text(agent.results[0])
 
 
 @pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"grip": 0.1}, {"x": 0.1}])
@@ -702,71 +710,66 @@ def _quat_names(order: str) -> list[str]:
     return [f"tcp_quat.{part}" for part in parts]
 
 
-def _reached_within(schema: dict[str, Any]) -> dict[str, float]:
-    """Each target dimension's tolerance, as its schema description states it."""
-    return {
-        name: float(prop["description"].split("reached within ")[1])
-        for name, prop in schema["properties"]["targets"]["properties"].items()
-        if "reached within" in prop["description"]
-    }
+_EULER = ["ee.x", "ee_euler.x", "ee_euler.y", "ee_euler.z"]
 
 
+@pytest.mark.parametrize("share", [0.9, 1.1])
 @pytest.mark.parametrize(
-    ("action_type", "names", "reach"),
+    ("action_type", "names", "move", "column", "tolerance", "label"),
     [
         # Each default moves the fingertips 1 mm: directly, over a 0.15 m gripper, over a
-        # 2.5 m lever of joints. A gripper has none, whatever its unit.
-        ("ee_abs", ["x", "y", "z"], {"x": 1e-3, "y": 1e-3, "z": 1e-3}),
-        (
-            "ee_abs",
-            _quat_names("xyzw"),
-            {"roll": 1e-3 / 0.15, "pitch": 1e-3 / 0.15, "yaw": 1e-3 / 0.15},
-        ),
-        ("joint_pos", ["joint1", "joint2"], {"joint1": 4e-4, "joint2": 4e-4}),
-        ("ee_abs", ["x", "grip"], {"x": 1e-3}),
-        ("joint_pos", ["joint1", "grip"], {"joint1": 4e-4}),
+        # 2.5 m lever of joints.
+        ("ee_abs", ["x", "grip"], {"x": 0.5}, 0, 1e-3, "x"),
+        ("ee_abs", _EULER, {"roll": 0.3}, 1, 1e-3 / 0.15, "orientation"),
+        ("joint_pos", ["joint1", "grip"], {"joint1": 0.3}, 0, 4e-4, "joint1"),
     ],
 )
 async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one_millimetre(
-    action_type: str, names: list[str], reach: dict[str, float]
+    share: float,
+    action_type: str,
+    names: list[str],
+    move: dict[str, float],
+    column: int,
+    tolerance: float,
+    label: str,
 ) -> None:
-    sim = _Pose(
-        _contract(action_type, [-1.0] * len(names), [1.0] * len(names), names), [0.0] * len(names)
-    )
-    agent = _ScriptedLLM()
+    offset = [0.0] * len(names)
+    offset[column] = share * tolerance
+    contract = _contract(action_type, [-1.0] * len(names), [1.0] * len(names), names)
+    sim = _Offset(contract, [0.0] * len(names), offset)
+    agent = _ScriptedLLM(_move("move_to" if action_type == "ee_abs" else "move_joints", **move))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    (schema,) = (s for tool, s in agent.schemas.items() if tool != "wait")
-    assert _reached_within(schema) == pytest.approx(reach, rel=1e-3)
+    text = _text(agent.results[0])
+    assert ("Target reached." in text) == (share < 1)
+    assert (f"Did not reach the target; {label} is off by" in text) == (share > 1)
 
 
 @pytest.mark.parametrize(
-    ("tolerance", "reach"),
+    ("tolerance", "verdict"),
     [
+        (None, "Did not reach the target; x is off by 2 mm, orientation is off by 0.02 rad."),
+        ({"position": 4e-3}, "Target reached."),  # rotation: 4 mm over 0.15 m, 0.027 rad
         (
-            {"position": 4e-3},
-            {"x": 4e-3, "roll": 4e-3 / 0.15, "pitch": 4e-3 / 0.15, "yaw": 4e-3 / 0.15},
+            {"position": 4e-3, "rotation": 0.01},
+            "Did not reach the target; orientation is off by 0.02 rad.",
         ),
-        (
-            {"position": 4e-3, "rotation": 0.05},
-            {"x": 4e-3, "roll": 0.05, "pitch": 0.05, "yaw": 0.05},
-        ),
-        ({"rotation": 0.05}, {"x": 1e-3, "roll": 0.05, "pitch": 0.05, "yaw": 0.05}),
     ],
 )
-async def test_a_position_override_rescales_the_angle_defaults_unless_they_are_set(
-    tolerance: dict[str, float], reach: dict[str, float]
+async def test_a_position_override_rescales_the_angle_default_and_the_verdict_names_each_miss(
+    tolerance: dict[str, float] | None, verdict: str
 ) -> None:
-    names = ["x", *_quat_names("xyzw")]
-    sim = _Pose(_contract("ee_abs", [-1.0] * 5, [1.0] * 5, names), [0.0, 0.0, 0.0, 0.0, 1.0])
-    agent = _ScriptedLLM()
+    sim = _Offset(
+        _contract("ee_abs", [-1.0] * 4, [1.0] * 4, _EULER), [0.0] * 4, [0.002, 0.02, 0, 0]
+    )
+    agent = _ScriptedLLM(_move("move_to", x=0.5, roll=0.3))
 
     async with _served(sim, DirectControl(tolerance=tolerance)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert _reached_within(agent.schemas["move_to"]) == pytest.approx(reach, rel=1e-3)
+    assert verdict in _text(agent.results[0])
 
 
 @pytest.mark.parametrize(
@@ -1014,6 +1017,6 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
         assert not result.isError
         assert f"ee_euler.x={wrapped:.4f}" in _text(result)
         assert f"pose: x=0.0000, roll={wrapped:.4f}" in _text(result)
-    assert "Target reached within 0.006667 rad." in _text(past)
+    assert "Target reached." in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]
