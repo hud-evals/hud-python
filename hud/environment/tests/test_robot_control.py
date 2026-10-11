@@ -689,6 +689,86 @@ async def test_a_tolerance_key_that_is_no_quantity_or_action_name_is_refused(
             await env.start()
 
 
+def _quat_names(order: str) -> list[str]:
+    parts = ("qx", "qy", "qz", "qw") if order == "xyzw" else ("qw", "qx", "qy", "qz")
+    return [f"tcp_quat.{part}" for part in parts]
+
+
+def _reached_within(schema: dict[str, Any]) -> dict[str, float]:
+    """Each target dimension's tolerance, as its schema description states it."""
+    return {
+        name: float(prop["description"].split("reached within ")[1])
+        for name, prop in schema["properties"]["targets"]["properties"].items()
+    }
+
+
+@pytest.mark.parametrize(
+    ("action_type", "names", "low", "high", "reach"),
+    [
+        # Position: 1% of the range, at least 1 mm, at most 5 mm.
+        ("ee_abs", ["x", "y", "z"], [0.0] * 3, [0.05, 0.3, 1.0], {"x": 1e-3, "y": 3e-3, "z": 5e-3}),
+        # Rotation: 1% of a full turn capped at 0.03 rad, whatever the quaternion columns span.
+        (
+            "ee_abs",
+            _quat_names("xyzw"),
+            [-1.0] * 4,
+            [1.0] * 4,
+            {"roll": 0.03, "pitch": 0.03, "yaw": 0.03},
+        ),
+        # Joint: 1% of the range, at least 0.001 rad, at most 0.002 rad.
+        (
+            "joint_pos",
+            ["joint1", "joint2", "joint3"],
+            [0.0] * 3,
+            [0.05, 0.15, 3.0],
+            {"joint1": 1e-3, "joint2": 1.5e-3, "joint3": 2e-3},
+        ),
+        # Gripper: 2% of whatever range and unit it has, unclamped.
+        ("ee_abs", ["x", "grip"], [0.0, 0.0], [1.0, 0.04], {"x": 5e-3, "grip": 8e-4}),
+        ("joint_pos", ["joint1", "grip"], [-3.0, 0.0], [3.0, 255.0], {"joint1": 2e-3, "grip": 5.1}),
+    ],
+)
+async def test_each_quantity_defaults_to_a_clamped_share_of_the_dimension_range(
+    action_type: str, names: list[str], low: list[float], high: list[float], reach: dict[str, float]
+) -> None:
+    sim = _Pose(_contract(action_type, low, high, names), [0.0] * len(names))
+    agent = _ScriptedLLM()
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    (schema,) = (s for tool, s in agent.schemas.items() if tool != "wait")
+    assert _reached_within(schema) == pytest.approx(reach)
+
+
+@pytest.mark.parametrize(
+    ("tolerance", "reach"),
+    [
+        (None, {"x": 1e-3, "roll": 0.03, "pitch": 0.03, "yaw": 0.03}),
+        (
+            {"position": 4e-3, "rotation": 0.05},
+            {"x": 4e-3, "roll": 0.05, "pitch": 0.05, "yaw": 0.05},
+        ),
+        (
+            {"position": 4e-3, "x": 2e-3, "rotation": 0.05, "tcp_quat.qz": 0.08},
+            {"x": 2e-3, "roll": 0.08, "pitch": 0.08, "yaw": 0.08},
+        ),
+    ],
+)
+async def test_a_tolerance_override_beats_the_range_default_and_an_action_name_beats_its_quantity(
+    tolerance: dict[str, float] | None, reach: dict[str, float]
+) -> None:
+    names = ["x", *_quat_names("xyzw")]
+    contract = _contract("ee_abs", [0.0] + [-1.0] * 4, [0.05] + [1.0] * 4, names)
+    sim = _Pose(contract, [0.0, 0.0, 0.0, 0.0, 1.0])
+    agent = _ScriptedLLM()
+
+    async with _served(sim, DirectControl(tolerance=tolerance)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert _reached_within(agent.schemas["move_to"]) == pytest.approx(reach)
+
+
 @pytest.mark.parametrize(
     ("action_type", "names", "targets"),
     [
@@ -739,11 +819,6 @@ async def test_without_wait_only_the_motion_tool_is_served_and_its_texts_drop_wa
     assert agent.tools == {"move_to"}
     assert "Time passes only while the robot moves;" in agent.descriptions["move_to"]
     assert "wait" not in _text(agent.results[0])
-
-
-def _quat_names(order: str) -> list[str]:
-    parts = ("qx", "qy", "qz", "qw") if order == "xyzw" else ("qw", "qx", "qy", "qz")
-    return [f"tcp_quat.{part}" for part in parts]
 
 
 async def test_a_yaw_slerps_an_xyzw_quaternion_instead_of_lerping_components() -> None:

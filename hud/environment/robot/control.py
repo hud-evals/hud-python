@@ -102,9 +102,24 @@ CONTROL_KINDS: dict[str, ControlKind] = {
 #: The control kind of a contract that only gives the coarse action ``type``.
 _TYPE_KINDS = {"ee_abs": "EE_ABS_POSE", "joint_pos": "JOINT_ABS_POS", "ee_del": "EE_DEL_POSE"}
 
-#: Default reach tolerance per quantity: m, rad, rad, and a gripper's share of its range.
-#: Rotation 0.03 rad clears the worst LIBERO OSC settle (0.022 rad) seen on Modal.
-TOLERANCES = {"position": 5e-3, "rotation": 0.03, "joint": 2e-3, "grip": 0.02}
+
+class Tolerance(NamedTuple):
+    """A quantity's default reach tolerance: ``frac`` of a dimension's range, clamped."""
+
+    frac: float
+    floor: float
+    cap: float
+
+
+#: Default reach tolerance per quantity, in the dimension's unit (m, rad, rad, the
+#: gripper's own). A rotation's range is its euler span, a full turn. The caps clear the
+#: worst settles probed on rua-envs (3.9 mm, 0.02 rad, 0.0001 rad).
+TOLERANCES = {
+    "position": Tolerance(0.01, 1e-3, 5e-3),
+    "rotation": Tolerance(0.01, 0.01, 0.03),
+    "joint": Tolerance(0.01, 1e-3, 2e-3),
+    "grip": Tolerance(0.02, 0.0, math.inf),
+}
 #: How the verdict states a residual: (scale, unit).
 _UNITS = {"position": (1e3, "mm"), "rotation": (1.0, "rad"), "joint": (1.0, "rad")}
 #: A stalled arm within this many tolerances stopped short; farther, it did not reach.
@@ -204,10 +219,10 @@ class DirectControl:
       range per second. Orientation travels this fraction of a full turn per second.
     - ``max_step`` - per-dimension step override by action name (e.g. a binary
       gripper that should switch in one step).
-    - ``tolerance`` - reach tolerance overrides of ``TOLERANCES``, by quantity
-      (``position``, ``rotation``, ``joint``, ``grip``) or by action name, which
-      beats its quantity. Values are in the dimension's unit (a gripper's too).
-      A rotation takes the largest tolerance among its action columns.
+    - ``tolerance`` - reach tolerance overrides of the ``TOLERANCES`` defaults, by
+      quantity (``position``, ``rotation``, ``joint``, ``grip``) or by action name,
+      which beats its quantity. Values are in the dimension's unit (a gripper's too).
+      A rotation named by several of its action columns takes the largest.
     - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
       when the target is reached or the arm stops getting closer. Default 60 s.
     - ``reference`` - maps observation data to the current action-space vector,
@@ -325,8 +340,8 @@ class DirectControl:
             self._step[self._names.index(dim)] = step
         if np.any(self._step <= 0):
             raise ValueError(f"every action dimension needs a positive step, got {self._step}")
-        # Reach tolerance per tool dimension, from its quantity's default, then the env's
-        # overrides: by quantity, then by action name (specific beats quantity).
+        # Reach tolerance per tool dimension: its quantity's share of the dimension's range,
+        # clamped, unless the env overrides it by quantity or by action name (specific wins).
         quantities = (
             []
             if kind.quantity is None
@@ -349,21 +364,17 @@ class DirectControl:
         self._reach: dict[str, float] = {}
         self._quantity: dict[str, str] = {}
         if quantities:
-            span = self._high - self._low
-            columns = np.array(
-                [
-                    TOLERANCES[q] * (span[i] if q == "grip" else 1.0)
-                    for i, q in enumerate(quantities)
-                ]
-            )
-            for key in sorted(self.tolerance, key=lambda key: key in self._names):
-                columns[[i for i, q in enumerate(quantities) if key in (q, self._names[i])]] = (
-                    self.tolerance[key]
-                )
             for name, axis in self._axes.items():
                 own = [axis.index] if axis.block is None else list(axis.block.contract_columns)
-                self._reach[name] = float(np.max(columns[own]))
-                self._quantity[name] = quantities[own[0]]
+                quantity = quantities[own[0]]
+                low, high = self._range(name)
+                frac, floor, cap = TOLERANCES[quantity]
+                default = min(max(frac * (high - low), floor), cap)
+                named = [
+                    self.tolerance[self._names[i]] for i in own if self._names[i] in self.tolerance
+                ]
+                self._reach[name] = max(named) if named else self.tolerance.get(quantity, default)
+                self._quantity[name] = quantity
         # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._obs_space = observations
@@ -959,4 +970,5 @@ __all__ = [
     "TOLERANCES",
     "ControlKind",
     "DirectControl",
+    "Tolerance",
 ]
