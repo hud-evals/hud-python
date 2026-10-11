@@ -1,10 +1,11 @@
-"""List, run, and inspect HUD's QA checks on evaluation traces."""
+"""List, run, and inspect HUD's QA checks on evaluation traces and tasks."""
 
 from __future__ import annotations
 
 import json
 import time
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import Any, cast
 from uuid import UUID  # noqa: TC003 - typer resolves argument annotations at runtime
 
@@ -43,6 +44,16 @@ _CAUSE = {
 }
 _VERDICT_STYLES = {"passed": "green", "failed": "red", "unknown": "yellow"}
 _SEVERITY_STYLES = {"error": "red", "warning": "yellow"}
+
+
+class Level(StrEnum):
+    """What a QA check judges: one evaluation trace, or one task's current version."""
+
+    trace = "trace"
+    task = "task"
+
+
+_IDS_FIELD = {Level.trace: "trace_ids", Level.task: "task_ids"}
 
 
 @dataclass(frozen=True)
@@ -243,29 +254,43 @@ def _headline(text: str | None) -> Markdown | str:
     return Markdown(line) if line else "-"
 
 
-def _print_results(results: list[dict[str, Any]]) -> None:
-    """One table row per result: trace, check, verdict, and the summary's first line."""
+def _level(result: dict[str, Any]) -> Level:
+    return Level(result["subject_type"])
+
+
+def _subject_id(result: dict[str, Any]) -> str:
+    """The trace or task a result judges."""
+    if _level(result) is Level.task:
+        return str(result["subject_task_id"])
+    return str(result["subject_trace_id"])
+
+
+def _print_results(results: list[dict[str, Any]], level: Level) -> None:
+    """One table row per result: trace or task, check, verdict, and the summary's first line."""
     if not results:
         hud_console.stdout.print("[yellow]No QA results found.[/yellow]")
         return
     hud_console.stdout.print(Panel.fit("[bold cyan]QA Results[/bold cyan]", border_style="cyan"))
     table = Table()
-    table.add_column("Trace", style="blue", no_wrap=True)
+    table.add_column(level.value.capitalize(), style="blue", no_wrap=True)
     table.add_column("Check", style="cyan", no_wrap=True)
     table.add_column("Verdict", no_wrap=True)
     table.add_column("Summary")
     for result in results:
         view = presentation_for_result(result)
         table.add_row(
-            str(result["subject_trace_id"]),
+            _subject_id(result),
             str(result["check_key"]),
             _verdict(result, view),
             _headline(view.summary or result.get("note")),
         )
     hud_console.stdout.print(table)
-    hud_console.stdout.print(
-        "\n[dim]Tip: hud qa results <trace-id> for summaries and findings[/dim]"
+    results_command = (
+        "hud qa results --level task <task-id>"
+        if level is Level.task
+        else "hud qa results <trace-id>"
     )
+    hud_console.stdout.print(f"\n[dim]Tip: {results_command} for summaries and findings[/dim]")
 
 
 def _finding_panel(index: int, finding: QaFinding) -> Panel:
@@ -294,7 +319,8 @@ def _finding_panel(index: int, finding: QaFinding) -> Panel:
 
 def _print_result(result: dict[str, Any], web_url: str) -> None:
     """One result in full: verdict, details, markdown summary, findings, and links."""
-    subject_id = str(result["subject_trace_id"])
+    level = _level(result)
+    subject_id = _subject_id(result)
     view = presentation_for_result(result)
     hud_console.stdout.print(
         Panel.fit(
@@ -306,6 +332,8 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
     hud_console.stdout.print(Text.assemble((f"{label}: ", "bold"), _verdict(result, view)))
 
     details: list[tuple[str, str]] = []
+    if level is Level.task:
+        details.append(("Task version", str(result["subject_task_version_id"])))
     if view.answer:
         details.append((view.label if view.kind == "boolean" else "Cause", view.answer))
     if result["source"] != "analysis":
@@ -330,21 +358,55 @@ def _print_result(result: dict[str, Any], web_url: str) -> None:
     for index, finding in enumerate(view.findings, start=1):
         hud_console.stdout.print(_finding_panel(index, finding))
 
-    hud_console.stdout.print(f"\n[dim]View: {web_url}/trace/{subject_id}[/dim]")
+    links: list[str] = []
+    if level is Level.trace:
+        links.append(f"View: {web_url}/trace/{subject_id}")
     if result.get("analysis_trace_id"):
-        hud_console.stdout.print(
-            f"[dim]Analysis: {web_url}/trace/{result['analysis_trace_id']}[/dim]"
-        )
+        links.append(f"Analysis: {web_url}/trace/{result['analysis_trace_id']}")
+    if links:
+        hud_console.stdout.print()
+    for link in links:
+        hud_console.stdout.print(f"[dim]{link}[/dim]")
 
 
-def _results(platform: PlatformClient, trace_ids: list[str]) -> list[dict[str, Any]]:
-    response = cast("dict[str, Any]", platform.get("/qa/results", params={"trace_ids": trace_ids}))
+def _results(
+    platform: PlatformClient,
+    level: Level,
+    ids: list[str],
+    *,
+    history: bool = False,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {_IDS_FIELD[level]: ids}
+    if history:
+        params["include_history"] = True
+    response = cast("dict[str, Any]", platform.get("/qa/results", params=params))
     return cast("list[dict[str, Any]]", response["results"])
+
+
+def _checks_level(platform: PlatformClient, check_keys: list[str]) -> Level:
+    """The one level every named check runs at."""
+    catalog = cast("dict[str, Any]", platform.get("/qa/checks"))["checks"]
+    levels = {check["key"]: Level(check["subject_type"]) for check in catalog}
+    unknown = [key for key in check_keys if key not in levels]
+    if unknown:
+        raise CliError(
+            error="usage",
+            message=f"Unknown QA check: {', '.join(unknown)}. `hud qa list` shows them.",
+            input={"check_keys": check_keys},
+        )
+    found = {levels[key] for key in check_keys}
+    if len(found) > 1:
+        raise CliError(
+            error="usage",
+            message="Run trace-level and task-level checks separately.",
+            input={"check_keys": check_keys},
+        )
+    return found.pop()
 
 
 qa_app = CLI(
     name="qa",
-    help="List, run, and inspect HUD's QA checks on evaluation traces.",
+    help="List, run, and inspect HUD's QA checks on evaluation traces and tasks.",
     add_completion=False,
     rich_markup_mode="rich",
     no_args_is_help=False,
@@ -356,16 +418,25 @@ def list_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
+    level: Level | None = typer.Option(  # noqa: B008
+        None, "--level", case_sensitive=False, help="Only the checks that run at this level."
+    ),
 ) -> Any:
-    """List the QA checks HUD runs on evaluation traces.
+    """List the QA checks HUD runs on evaluation traces and tasks.
 
     [not dim]Examples:
         hud qa list
+        hud qa list --level task
         hud qa list --json
         hud qa list --quiet[/not dim]
     """
     response = cast("dict[str, Any]", PlatformClient.from_settings().get("/qa/checks"))
-    checks = response["checks"]
+    checks = [
+        check
+        for check in response["checks"]
+        if level is None or Level(check["subject_type"]) is level
+    ]
+    response = {**response, "checks": checks}
     if quiet:
         for check in checks:
             typer.echo(check["key"])
@@ -377,13 +448,14 @@ def list_command(
     hud_console.stdout.print(Panel.fit("[bold cyan]QA Checks[/bold cyan]", border_style="cyan"))
     table = Table()
     table.add_column("Key", style="blue", no_wrap=True)
+    table.add_column("Level", no_wrap=True)
     table.add_column("Title", style="cyan")
     table.add_column("Question")
     for check in checks:
-        table.add_row(check["key"], check["title"], check["question"])
+        table.add_row(check["key"], check["subject_type"], check["title"], check["question"])
     hud_console.stdout.print(table)
     hud_console.stdout.print(
-        "\n[dim]Tip: hud qa run <check>[,<check>...] <trace-id>... to run checks[/dim]"
+        "\n[dim]Tip: hud qa run <check>[,<check>...] <trace-or-task-id>... to run checks[/dim]"
     )
     return response
 
@@ -394,6 +466,9 @@ def qa_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Print one check key per line, with no headers (for piping)."
     ),
+    level: Level | None = typer.Option(  # noqa: B008
+        None, "--level", case_sensitive=False, help="Only the checks that run at this level."
+    ),
 ) -> Any:
     """List QA checks, or run and inspect them.
 
@@ -402,11 +477,12 @@ def qa_command(
     [not dim]Examples:
         hud qa
         hud qa list --json
-        hud qa run failure_analysis <trace-id>[/not dim]
+        hud qa run failure_analysis <trace-id>
+        hud qa run task_reward_exploit <task-id>[/not dim]
     """
     if ctx.invoked_subcommand is not None:
         return None
-    return list_command(quiet=quiet)
+    return list_command(quiet=quiet, level=level)
 
 
 @qa_app.command("run")
@@ -415,9 +491,12 @@ def run_checks(
         ...,
         help="QA check key from `hud qa list`, or several separated by commas.",
     ),
-    trace_ids: list[UUID] = typer.Argument(  # noqa: B008
+    ids: list[UUID] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more completed evaluation trace UUIDs (at most 100).",
+        help=(
+            "Completed evaluation trace UUIDs for trace-level checks, or task UUIDs for "
+            "task-level checks (at most 100)."
+        ),
     ),
     overwrite: bool = typer.Option(
         False,
@@ -427,7 +506,7 @@ def run_checks(
     wait: bool = typer.Option(
         True,
         "--wait/--no-wait",
-        help="Wait for every check to finish on every trace.",
+        help="Wait for every check to finish on every trace or task.",
     ),
     timeout: float = typer.Option(
         900,
@@ -439,11 +518,15 @@ def run_checks(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
 ) -> Any:
-    """Run QA checks on completed evaluation traces as one run.
+    """Run QA checks on completed evaluation traces or on tasks as one run.
+
+    The checks decide what the IDs are: trace-level checks take traces, task-level
+    checks take tasks and judge each task's current version.
 
     [not dim]Examples:
         hud qa run failure_analysis <trace-id>
         hud qa run reward_hacking,false_positive <trace-id> <trace-id> --no-wait --json
+        hud qa run task_reward_exploit,task_failure_analysis <task-id>
         hud qa run failure_analysis <trace-id> --dry-run --json[/not dim]
     """
     check_keys = list(dict.fromkeys(key.strip() for key in checks.split(",") if key.strip()))
@@ -453,35 +536,40 @@ def run_checks(
             message="Name at least one QA check; `hud qa list` shows them.",
             input={"checks": checks},
         )
-    traces = [str(trace_id) for trace_id in trace_ids]
+    subject_ids = [str(subject_id) for subject_id in ids]
+    platform = PlatformClient.from_settings()
+    level = _checks_level(platform, check_keys)
+    ids_field = _IDS_FIELD[level]
     if dry_run:
-        typer.echo(f"--dry-run: would run {len(check_keys)} check(s) on {len(traces)} trace(s)")
+        typer.echo(
+            f"--dry-run: would run {len(check_keys)} check(s) on {len(subject_ids)} {level}(s)"
+        )
         return {
             "dry_run": True,
             "action": "qa_run",
             "check_keys": check_keys,
-            "trace_ids": traces,
+            "level": level.value,
+            ids_field: subject_ids,
             "overwrite": overwrite,
             "wait": wait,
         }
 
-    platform = PlatformClient.from_settings()
     try:
         response = cast(
             "dict[str, Any]",
             platform.post(
                 "/qa/runs",
-                json={"check_keys": check_keys, "trace_ids": traces, "overwrite": overwrite},
+                json={"check_keys": check_keys, ids_field: subject_ids, "overwrite": overwrite},
             ),
         )
     except HudException as exc:
-        raise map_exception(exc, input={"check_keys": check_keys, "trace_ids": traces}) from exc
+        raise map_exception(exc, input={"check_keys": check_keys, ids_field: subject_ids}) from exc
     results = cast("list[dict[str, Any]]", response["results"])
     if not wait:
-        _print_results(results)
+        _print_results(results, level)
         return results
 
-    requested = {(trace_id, check_key) for trace_id in traces for check_key in check_keys}
+    requested = {(subject_id, check_key) for subject_id in subject_ids for check_key in check_keys}
     deadline = time.monotonic() + timeout
     while len(results) < len(requested) or any(
         result["status"] not in _TERMINAL_STATUSES for result in results
@@ -491,24 +579,48 @@ def run_checks(
         time.sleep(_POLL_INTERVAL_SECONDS)
         results = [
             result
-            for result in _results(platform, traces)
-            if (result["subject_trace_id"], result["check_key"]) in requested
+            for result in _results(platform, level, subject_ids)
+            if (_subject_id(result), result["check_key"]) in requested
         ]
 
-    _print_results(results)
+    _print_results(results, level)
     failed = any(presentation_for_result(result).tag != "passed" for result in results)
     return Result(results) if failed else results
 
 
 @qa_app.command("results")
 def list_results(
-    trace_ids: list[UUID] = typer.Argument(  # noqa: B008
+    ids: list[UUID] = typer.Argument(  # noqa: B008
         ...,
-        help="One or more evaluation trace UUIDs (at most 100).",
+        help="Evaluation trace UUIDs, or task UUIDs with --level task (at most 100).",
+    ),
+    level: Level = typer.Option(  # noqa: B008
+        Level.trace, "--level", case_sensitive=False, help="Whether the IDs are traces or tasks."
+    ),
+    history: bool = typer.Option(
+        False,
+        "--history",
+        help=(
+            "Every result, newest first, instead of the one in effect per check. "
+            "For tasks this includes results on earlier versions."
+        ),
     ),
 ) -> Any:
-    """Inspect the QA result in effect for every check on the given traces."""
-    results = _results(PlatformClient.from_settings(), [str(trace_id) for trace_id in trace_ids])
+    """Inspect the QA result in effect for every check on the given traces or tasks.
+
+    A task's result in effect is the latest one on its current version.
+
+    [not dim]Examples:
+        hud qa results <trace-id>
+        hud qa results --level task <task-id>
+        hud qa results --level task <task-id> --history --json[/not dim]
+    """
+    results = _results(
+        PlatformClient.from_settings(),
+        level,
+        [str(subject_id) for subject_id in ids],
+        history=history,
+    )
     if not results:
         hud_console.stdout.print("[yellow]No QA results found.[/yellow]")
         return results

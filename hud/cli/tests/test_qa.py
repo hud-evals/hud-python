@@ -1,10 +1,10 @@
-"""CLI behavior for HUD's QA checks on evaluation traces."""
+"""CLI behavior for HUD's QA checks on evaluation traces and tasks."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -17,17 +17,44 @@ runner = CliRunner()
 _TRACE_ID = "00000000-0000-4000-a000-000000000002"
 _RESULT_ID = "00000000-0000-4000-a000-000000000003"
 _ANALYSIS_TRACE_ID = "00000000-0000-4000-a000-000000000004"
+_TASK_ID = "00000000-0000-4000-a000-000000000005"
+_TASK_VERSION_ID = "00000000-0000-4000-a000-000000000006"
 _CHECK = "failure_analysis"
 _OTHER_CHECK = "reward_hacking"
+_TASK_CHECK = "task_reward_exploit"
 
 
-def _check(key: str = _CHECK, title: str = "Failure Analysis") -> dict[str, object]:
+def _check(
+    key: str = _CHECK, title: str = "Failure Analysis", level: str = "trace"
+) -> dict[str, object]:
     return {
         "key": key,
+        "subject_type": level,
         "title": title,
         "question": "Why did the agent fail?",
         "description": "Attributes each failure to the agent, the evaluation, or the platform.",
     }
+
+
+_CATALOG = [
+    _check(),
+    _check(_OTHER_CHECK, "Reward Hacking"),
+    _check(_TASK_CHECK, "Task Reward Exploit", "task"),
+]
+
+
+def _platform(*polls: list[dict[str, Any]]) -> MagicMock:
+    """A platform serving the check catalog and one results reply per poll (the last repeats)."""
+    platform = MagicMock()
+    replies = list(polls)
+
+    def get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if path == "/qa/checks":
+            return {"checks": _CATALOG}
+        return {"results": replies.pop(0) if len(replies) > 1 else replies[0]}
+
+    platform.get.side_effect = get
+    return platform
 
 
 def _row(
@@ -42,6 +69,7 @@ def _row(
     return {
         "id": _RESULT_ID,
         "check_key": check_key,
+        "subject_type": "trace",
         "subject_trace_id": _TRACE_ID,
         "source": "analysis",
         "status": status,
@@ -71,6 +99,16 @@ def _result(verdict: str = "passed", *, check_key: str = _CHECK) -> dict[str, An
     )
 
 
+def _task_result(verdict: str = "passed") -> dict[str, Any]:
+    return {
+        **_result(verdict, check_key=_TASK_CHECK),
+        "subject_type": "task",
+        "subject_trace_id": None,
+        "subject_task_id": _TASK_ID,
+        "subject_task_version_id": _TASK_VERSION_ID,
+    }
+
+
 def _invoke(platform: MagicMock, args: list[str]):
     with patch("hud.cli.qa.PlatformClient.from_settings", return_value=platform):
         return runner.invoke(app, args, env={"TERM": "xterm", "COLUMNS": "200"})
@@ -90,7 +128,7 @@ def test_qa_lists_checks_as_a_table(args: list[str]) -> None:
 
     assert result.exit_code == 0
     assert "QA Checks" in result.output
-    assert _table_row(result.output, _CHECK, "Failure Analysis", "Why did the agent fail?")
+    assert _table_row(result.output, _CHECK, "trace", "Failure Analysis", "Why did the agent fail?")
     platform.get.assert_called_once_with("/qa/checks")
 
 
@@ -102,6 +140,16 @@ def test_qa_list_quiet_prints_keys() -> None:
 
     assert result.exit_code == 0
     assert result.output.split() == [_CHECK, _OTHER_CHECK]
+
+
+@pytest.mark.parametrize(
+    ("level", "keys"), [("task", [_TASK_CHECK]), ("TRACE", [_CHECK, _OTHER_CHECK])]
+)
+def test_qa_list_filters_by_level(level: str, keys: list[str]) -> None:
+    result = _invoke(_platform(), ["qa", "list", "--level", level, "--quiet"])
+
+    assert result.exit_code == 0
+    assert result.output.split() == keys
 
 
 @pytest.mark.parametrize("args", [[_CHECK], [" , ", _TRACE_ID]])
@@ -124,7 +172,7 @@ def test_qa_run_rejects_non_uuid_traces() -> None:
 
 
 def test_qa_run_no_wait_posts_comma_separated_checks_as_one_run() -> None:
-    platform = MagicMock()
+    platform = _platform()
     platform.post.return_value = {
         "results": [_row("queued"), _row("queued", check_key=_OTHER_CHECK)]
     }
@@ -147,11 +195,58 @@ def test_qa_run_no_wait_posts_comma_separated_checks_as_one_run() -> None:
         "/qa/runs",
         json={"check_keys": [_CHECK, _OTHER_CHECK], "trace_ids": [_TRACE_ID], "overwrite": False},
     )
-    platform.get.assert_not_called()
+    assert platform.get.call_args_list == [call("/qa/checks")]
+
+
+def test_qa_run_task_checks_take_task_ids_and_wait_on_tasks() -> None:
+    platform = _platform([_task_result("failed")])
+    platform.post.return_value = {"results": [{**_task_result(), "status": "queued"}]}
+
+    with patch("hud.cli.qa.time.sleep"):
+        result = _invoke(platform, ["qa", "run", _TASK_CHECK, _TASK_ID])
+
+    assert result.exit_code == 1
+    platform.post.assert_called_once_with(
+        "/qa/runs",
+        json={"check_keys": [_TASK_CHECK], "task_ids": [_TASK_ID], "overwrite": False},
+    )
+    platform.get.assert_called_with("/qa/results", params={"task_ids": [_TASK_ID]})
+    assert "Task " in result.output
+    assert _table_row(result.output, _TASK_ID, _TASK_CHECK, "failed")
+    assert "hud qa results --level task <task-id>" in result.output
+
+
+@pytest.mark.parametrize(
+    ("checks", "message"),
+    [
+        ("missing_check", "Unknown QA check: missing_check"),
+        (f"{_CHECK},{_TASK_CHECK}", "Run trace-level and task-level checks separately."),
+    ],
+)
+def test_qa_run_rejects_unknown_or_mixed_level_checks(checks: str, message: str) -> None:
+    platform = _platform()
+
+    result = _invoke(platform, ["qa", "run", checks, _TRACE_ID])
+
+    assert result.exit_code == 2
+    assert message in result.output
+    platform.post.assert_not_called()
+
+
+def test_qa_run_dry_run_reports_the_level_without_launching() -> None:
+    platform = _platform()
+
+    result = _invoke(platform, ["qa", "run", _TASK_CHECK, _TASK_ID, "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    planned = json.loads(result.stdout)
+    assert planned["level"] == "task"
+    assert planned["task_ids"] == [_TASK_ID]
+    platform.post.assert_not_called()
 
 
 def test_qa_run_forwards_overwrite() -> None:
-    platform = MagicMock()
+    platform = _platform()
     platform.post.return_value = {"results": [_result()]}
 
     result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID, "--overwrite"])
@@ -162,12 +257,8 @@ def test_qa_run_forwards_overwrite() -> None:
 
 @pytest.mark.parametrize(("verdict", "exit_code"), [("failed", 1), ("passed", 0)])
 def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
-    platform = MagicMock()
+    platform = _platform([_row("running")], [_result(verdict)])
     platform.post.return_value = {"results": [_row("queued")]}
-    platform.get.side_effect = [
-        {"results": [_row("running")]},
-        {"results": [_result(verdict)]},
-    ]
 
     with patch("hud.cli.qa.time.sleep"):
         result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
@@ -178,13 +269,13 @@ def test_qa_run_waits_and_scores(verdict: str, exit_code: int) -> None:
 
 
 def test_qa_run_does_not_poll_settled_results() -> None:
-    platform = MagicMock()
+    platform = _platform()
     platform.post.return_value = {"results": [_result("passed")]}
 
     result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == 0
-    platform.get.assert_not_called()
+    assert platform.get.call_args_list == [call("/qa/checks")]
 
 
 def test_qa_run_table_shows_the_summary_headline_as_markdown() -> None:
@@ -193,7 +284,7 @@ def test_qa_run_table_shows_the_summary_headline_as_markdown() -> None:
         **row["result"],
         "summary": "**Verdict:** The grader missed it.\n\n- The answer was right.",
     }
-    platform = MagicMock()
+    platform = _platform()
     platform.post.return_value = {"results": [row]}
 
     result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
@@ -205,11 +296,8 @@ def test_qa_run_table_shows_the_summary_headline_as_markdown() -> None:
 
 
 def test_qa_run_wait_ignores_unrequested_checks() -> None:
-    platform = MagicMock()
+    platform = _platform([_result("failed", check_key=_OTHER_CHECK), _result("passed")])
     platform.post.return_value = {"results": [_row("queued")]}
-    platform.get.return_value = {
-        "results": [_result("failed", check_key=_OTHER_CHECK), _result("passed")]
-    }
 
     with patch("hud.cli.qa.time.sleep"):
         result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
@@ -219,7 +307,7 @@ def test_qa_run_wait_ignores_unrequested_checks() -> None:
 
 
 def test_qa_run_errored_check_fails() -> None:
-    platform = MagicMock()
+    platform = _platform()
     platform.post.return_value = {
         "results": [_row("error", error="The QA check produced an invalid result.")]
     }
@@ -231,9 +319,8 @@ def test_qa_run_errored_check_fails() -> None:
 
 
 def test_qa_run_times_out() -> None:
-    platform = MagicMock()
+    platform = _platform([_row("running")])
     platform.post.return_value = {"results": [_row("queued")]}
-    platform.get.return_value = {"results": [_row("running")]}
     clock = [0.0]
 
     def sleep(seconds: float) -> None:
@@ -258,6 +345,25 @@ def test_qa_results_queries_traces() -> None:
     assert result.exit_code == 0
     assert json.loads(result.output)[0]["verdict"] == "passed"
     platform.get.assert_called_once_with("/qa/results", params={"trace_ids": [_TRACE_ID]})
+
+
+def test_qa_results_reads_task_history_without_a_trace_link() -> None:
+    platform = MagicMock()
+    platform.get.return_value = {
+        "results": [{**_task_result("failed"), "analysis_trace_id": _ANALYSIS_TRACE_ID}]
+    }
+
+    result = _invoke(platform, ["qa", "results", "--level", "task", _TASK_ID, "--history"])
+
+    assert result.exit_code == 0
+    platform.get.assert_called_once_with(
+        "/qa/results", params={"task_ids": [_TASK_ID], "include_history": True}
+    )
+    assert _TASK_ID in result.output
+    assert f"Task version: {_TASK_VERSION_ID}" in result.output
+    assert "Verdict: failed" in result.output
+    assert "View:" not in result.output
+    assert f"Analysis: https://hud.ai/trace/{_ANALYSIS_TRACE_ID}" in result.output
 
 
 def test_qa_results_tui_renders_findings_and_trace_link() -> None:
