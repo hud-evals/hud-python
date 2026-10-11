@@ -196,6 +196,11 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
     assert schema["properties"]["targets"]["required"] == ["x", "grip"]
     assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
+    # Position is reached within 1 mm, a gripper within 2% of its range.
+    descriptions = [
+        prop["description"] for prop in schema["properties"]["targets"]["properties"].values()
+    ]
+    assert descriptions == ["[0, 1]; reached within 0.001", "[-1, 1]; reached within 0.04"]
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
     assert (
         "10% of each range per second, so a full-range move takes about 10 s"
@@ -223,22 +228,25 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert "Time remaining" not in _text(reached)
 
 
-async def test_move_by_splits_a_displacement_into_steps_within_the_per_step_box() -> None:
+@pytest.mark.parametrize(("state_type", "tool"), [(None, "move_by"), ("BASE_DEL_POSE", "walk_by")])
+async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
+    state_type: str | None, tool: str
+) -> None:
     sim = _Arm(_contract("ee_del", [-0.1, -1.0], [0.1, 1.0]))
-    agent = _ScriptedLLM(_move("move_by", x=0.35))
+    sim.contract["features"]["action"]["state_type"] = state_type  # wins over the coarse type
+    agent = _ScriptedLLM(_move(tool, x=0.35))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert agent.tools == {"move_by", "wait"}
-    assert (
-        "action's own components (a rotation is not euler angles)"
-        in (agent.descriptions["move_by"])
-    )
-    assert "10 steps per second" in agent.descriptions["move_by"]
-    # Four in-box steps, then two still ticks once the arm has stopped.
-    np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4 + [[0.0, 0.0]] * 2)
+    assert agent.tools == {tool, "wait"}
+    assert "action's own components (a rotation is not euler angles)" in agent.descriptions[tool]
+    assert "10 steps per second" in agent.descriptions[tool]
+    assert "reached within" not in str(agent.schemas[tool])
+    # Four in-box steps; a displacement returns once played.
+    np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
+    assert "Target reached." not in _text(agent.results[0])
 
 
 @pytest.mark.parametrize(
@@ -592,8 +600,8 @@ async def test_an_arm_that_never_moves_stops_after_the_final_setpoint_not_at_the
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    # The 50-tick move plays out; its last tick and one held tick are the two quiet ones.
-    assert len(sim.actions) == 51
+    # The 50-tick move plays out, then three held ticks (0.3 s) without progress stall it.
+    assert len(sim.actions) == 53
     text = _text(agent.results[0])
     assert "safety timeout" not in text
     assert "off: x=-0.5000" in text
@@ -614,6 +622,85 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert "Target reached." in _text(agent.results[0])
 
 
+class _Sag(_Pose):
+    """An arm that settles 5 mm short of every command."""
+
+    def step(self, action: NDArray[Any]) -> None:
+        super().step(action)
+        self.state = self.state - [0.005, 0.0]
+
+
+@pytest.mark.parametrize(
+    ("tolerance", "verdict"),
+    [(None, "Did not reach the target; largest offset 0.0050 on x."), (0.01, "Target reached.")],
+)
+async def test_an_arm_settling_short_stalls_unless_the_env_declares_a_looser_tolerance(
+    tolerance: float | None, verdict: str
+) -> None:
+    sim = _Sag(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0])
+    agent = _ScriptedLLM(_move("move_to", x=0.5))
+    overrides = None if tolerance is None else {"x": tolerance}
+
+    async with _served(sim, DirectControl(tolerance=overrides)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert verdict in _text(agent.results[0])
+    assert "safety timeout" not in _text(agent.results[0])
+    assert len(sim.actions) == (53 if tolerance is None else 50)
+
+
+@pytest.mark.parametrize(
+    ("action_type", "names", "targets"),
+    [
+        (
+            "ee_abs",  # LIBERO
+            [
+                "target_eef_pos.x",
+                "target_eef_pos.y",
+                "target_eef_pos.z",
+                "target_eef_axis_angle.rx",
+                "target_eef_axis_angle.ry",
+                "target_eef_axis_angle.rz",
+                "gripper.open_close",
+            ],
+            ["x", "y", "z", "roll", "pitch", "yaw", "grip"],
+        ),
+        ("ee_del", ["delta_eef_pos.dx", "delta_eef_rot.droll", "gripper"], ["x", "roll", "grip"]),
+        (
+            "joint_pos",
+            ["panda_joint1", "panda_joint2", "gripper.open_close"],
+            ["joint1", "joint2", "grip"],
+        ),
+        ("ee_abs", ["left_x", "right_x", "left_gripper"], ["left_arm", "right_arm"]),
+        ("ee_abs", ["left_x", "left_pitch_deg"], ["left_x", "left_pitch_deg"]),  # no standard
+    ],
+)
+async def test_tools_use_standard_dimension_names_when_every_native_name_has_one(
+    action_type: str, names: list[str], targets: list[str]
+) -> None:
+    contract = _contract(action_type, [-1.0] * len(names), [1.0] * len(names), names)
+    sim = _Pose(contract, [0.0] * len(names))
+    agent = _ScriptedLLM()
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    (schema,) = (s for tool, s in agent.schemas.items() if tool != "wait")
+    assert list(schema["properties"]["targets"]["properties"]) == targets
+
+
+async def test_without_wait_only_the_motion_tool_is_served_and_its_texts_drop_waiting() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to"))
+
+    async with _served(sim, DirectControl(use_wait=False, time_limit=10.0)) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert agent.tools == {"move_to"}
+    assert "Time passes only while the robot moves;" in agent.descriptions["move_to"]
+    assert "wait" not in _text(agent.results[0])
+
+
 def _quat_names(order: str) -> list[str]:
     parts = ("qx", "qy", "qz", "qw") if order == "xyzw" else ("qw", "qx", "qy", "qz")
     return [f"tcp_quat.{part}" for part in parts]
@@ -622,7 +709,7 @@ def _quat_names(order: str) -> list[str]:
 async def test_a_yaw_slerps_an_xyzw_quaternion_instead_of_lerping_components() -> None:
     names = _quat_names("xyzw")
     sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [0.0, 0.0, 0.0, 1.0])
-    agent = _ScriptedLLM(_move("move_to", **{"tcp.yaw": math.pi / 2}))
+    agent = _ScriptedLLM(_move("move_to", yaw=math.pi / 2))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
@@ -640,7 +727,7 @@ async def test_a_yaw_slerps_an_xyzw_quaternion_instead_of_lerping_components() -
 async def test_a_roll_writes_a_wxyz_quaternion() -> None:
     names = _quat_names("wxyz")
     sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [1.0, 0.0, 0.0, 0.0])
-    agent = _ScriptedLLM(_move("move_to", **{"tcp.roll": math.pi / 2}))
+    agent = _ScriptedLLM(_move("move_to", roll=math.pi / 2))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
@@ -675,9 +762,7 @@ async def test_euler_commands_slerp_onto_axis_angle() -> None:
         "target_eef_axis_angle.rz",
     ]
     sim = _Pose(_contract("ee_abs", [-np.pi] * 3, [np.pi] * 3, names), [0.0, 0.0, 0.0])
-    agent = _ScriptedLLM(
-        _move("move_to", **{"target_eef.roll": math.pi / 2, "target_eef.yaw": math.pi / 2})
-    )
+    agent = _ScriptedLLM(_move("move_to", roll=math.pi / 2, yaw=math.pi / 2))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
@@ -704,7 +789,7 @@ async def test_an_euler_contract_is_addressed_as_roll_pitch_yaw() -> None:
     low = [-1.0, -1.0, 0.0, -np.pi, -np.pi, -np.pi, 0.0]
     high = [1.0, 1.0, 2.0, np.pi, np.pi, np.pi, 0.04]
     sim = _Pose(_contract("ee_abs", low, high, names), [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.04])
-    agent = _ScriptedLLM(_move("move_to", **{"ee_pos.z": 1.2, "ee.yaw": 0.4}))
+    agent = _ScriptedLLM(_move("move_to", z=1.2, yaw=0.4))
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
@@ -714,14 +799,13 @@ async def test_an_euler_contract_is_addressed_as_roll_pitch_yaw() -> None:
     assert final[5] == pytest.approx(0.4, abs=1e-4)
     np.testing.assert_allclose(final[3:5], 0.0, atol=1e-4)
     assert final[6] == pytest.approx(0.04)
-    assert "ee.yaw" not in sim.contract["features"]["action"]["names"]
 
 
 async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     sim.contract["features"]["action"]["type"] = "joint_vel"
 
-    with pytest.raises(ValueError, match="direct control needs an action type"):
+    with pytest.raises(ValueError, match="direct control needs an action state_type"):
         async with _served(sim, DirectControl()) as env:
             await env.start()
 
@@ -800,8 +884,8 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     sim = _Pose(_contract("ee_abs", [-1.0, -4.0, -4.0, -4.0], [1.0, 4.0, 4.0, 4.0], names), home)
     agent = _ScriptedLLM(
         ("wait", {"duration": None, "note": "look"}),
-        _move("move_to", **{"ee.roll": 3.2}),
-        _move("move_to", **{"ee.roll": -math.pi}),
+        _move("move_to", roll=3.2),
+        _move("move_to", roll=-math.pi),
     )
 
     async with _served(sim, DirectControl()) as env:
@@ -812,7 +896,7 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     for result in (looked, past):
         assert not result.isError
         assert f"ee_euler.x={wrapped:.4f}" in _text(result)
-        assert f"pose: ee.x=0.0000, ee.roll={wrapped:.4f}" in _text(result)
+        assert f"pose: x=0.0000, roll={wrapped:.4f}" in _text(result)
     assert "Target reached." in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]

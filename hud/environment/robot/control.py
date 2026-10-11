@@ -9,20 +9,24 @@ pose (for one tick, or a while) and answers the same way. Each call is its own
 wire connection, so the sim holds still while the model thinks. The env keeps
 serving ``robot`` too, so one env serves VLAs and LLMs alike.
 
-The contract derives the tool surface: the action ``type`` picks the motion
-tool (:data:`MOTION_TOOLS`), its ``names`` are the addressable dimensions, its
-``limits`` (else ``stats``) ``min``/``max`` bound them, ``control_rate`` paces
-the playout, and ``rgb`` observations are the frames returned. An absolute
-end-effector rotation is presented as intrinsic XYZ euler and slerped onto
-whatever the contract stores (quaternion, axis-angle, or euler)::
+The contract derives the tool surface: the action's control kind (its Spec v0
+``state_type``, else its ``type``) picks the tool (:data:`CONTROL_KINDS`), its
+``names`` are the addressable dimensions, its ``limits`` (else ``stats``)
+``min``/``max`` bound them, ``control_rate`` paces the playout, and ``rgb``
+observations are the frames returned. The tool names dimensions in the standard
+``x y z roll pitch yaw grip`` / ``jointN`` convention (``left_arm.x`` for a
+bimanual) when every native name maps onto it, else by their native names. An
+absolute end-effector rotation is presented as intrinsic XYZ euler and slerped
+onto whatever the contract stores (quaternion, axis-angle, or euler)::
 
     env = Environment(name="my-sim")
     sim = env.gym(make_env)
     DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
-A call steps until the arm reaches the target or stops moving, then returns
-that pose. ``timeout`` is only a safety cap. Single-env sims only: a tool call
-claims the sole slot (no slot token).
+An absolute move steps until every set dimension is within its kind's
+tolerance or the arm stops getting closer, then returns that pose; a
+displacement returns once played. ``timeout`` is only a safety cap. Single-env
+sims only: a tool call claims the sole slot (no slot token).
 
 Every tick of every call also streams to the rollout's trace: numeric state per
 tick plus one H.264 video per camera, so the trace viewer replays the whole
@@ -37,10 +41,11 @@ import base64
 import contextlib
 import io
 import math
+import re
 import socket
 from collections.abc import Callable  # noqa: TC003 - pydantic resolves the field at runtime
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import numpy as np
 from fastmcp import FastMCP
@@ -74,11 +79,52 @@ if TYPE_CHECKING:
 
     from hud.environment.robot.endpoint import RobotEndpoint
 
-#: Contract action ``type`` -> (motion tool, whether its values are absolute targets).
-MOTION_TOOLS: dict[str, tuple[str, bool]] = {
-    "ee_abs": ("move_to", True),
-    "joint_pos": ("move_joints", True),
-    "ee_del": ("move_by", False),
+
+class ControlKind(NamedTuple):
+    """How one Spec v0 ``state_type`` is served."""
+
+    tool: str
+    absolute: bool  # targets held until reached; else displacements played once
+    tolerance: float | None  # reach tolerance of a non-gripper scalar, in the kind's unit
+
+
+#: Control kind -> tool. A new kind is a row. ``BASE_ABS_TWIST`` (``walk``) needs a
+#: duration and a stop-after law, so it is not served yet.
+CONTROL_KINDS: dict[str, ControlKind] = {
+    "EE_ABS_POSE": ControlKind("move_to", True, 1e-3),  # m
+    "EE_ABS_POS": ControlKind("move_to", True, 1e-3),
+    "JOINT_ABS_POS": ControlKind("move_joints", True, 2e-3),  # rad
+    "EE_DEL_POSE": ControlKind("move_by", False, None),
+    "EE_DEL_POS": ControlKind("move_by", False, None),
+    "BASE_DEL_POSE": ControlKind("walk_by", False, None),
+}
+
+#: The control kind of a contract that only gives the coarse action ``type``.
+_TYPE_KINDS = {"ee_abs": "EE_ABS_POSE", "joint_pos": "JOINT_ABS_POS", "ee_del": "EE_DEL_POSE"}
+
+#: Reach tolerance of a rotation (rad) and of a gripper (fraction of its range).
+_ROTATION_TOLERANCE = 0.01
+_GRIP_TOLERANCE = 0.02
+
+#: Once the final setpoint plays, a move has stalled when its best error (worst offset in
+#: tolerances) over the last ``max(_STALL_TICKS, _STALL_S)`` is not ``_PROGRESS`` better
+#: than its best before.
+_STALL_TICKS = 3
+_STALL_S = 0.25
+_PROGRESS = 0.1
+
+#: Standard name of a native leaf (the last dotted part, after any ``left_`` / ``right_``).
+_LEAF_STANDARD = {
+    leaf: standard
+    for standard, leaves in {
+        "x": "x dx",
+        "y": "y dy",
+        "z": "z dz",
+        "roll": "roll droll drx",
+        "pitch": "pitch dpitch dry",
+        "yaw": "yaw dyaw drz",
+    }.items()
+    for leaf in leaves.split()
 }
 
 #: Observation ``type`` tags that mark an image rather than a state vector.
@@ -90,16 +136,6 @@ DEFAULT_TIMEOUT_S = 60.0
 
 #: Fraction of a full turn an absolute orientation travels per second, times ``speed``.
 _FULL_TURN = 2.0 * math.pi
-
-#: An addressed scalar is reached within this fraction of its range, and at least this
-#: absolute gap. Orientation is reached within ``_REACH_RAD``. Once the final setpoint is
-#: playing, the arm has stopped when proprioception changes by less than ``_STILL_FRAC``
-#: of the widest action range for ``_STILL_TICKS`` ticks in a row.
-_REACH_FRAC = 0.01
-_REACH_ABS = 1e-3
-_REACH_RAD = 0.05
-_STILL_FRAC = 1e-4
-_STILL_TICKS = 2
 
 Content = list[TextContent | ImageContent]
 
@@ -157,15 +193,18 @@ class _Axis:
 class DirectControl:
     """Serve a ``robot`` capability's action space as MCP motion tools.
 
-    - ``dims`` - the dimensions a call may address (default: all). The rest hold
-      their commanded value. Orientation is addressed as ``roll`` / ``pitch`` /
-      ``yaw``, not as quaternion components.
+    - ``dims`` - the dimensions a call may address, by tool or action name
+      (default: all). The rest hold their commanded value. Orientation is
+      addressed as ``roll`` / ``pitch`` / ``yaw``, not as quaternion components.
     - ``speed`` - absolute scalar moves travel this fraction of each dimension's
       range per second. Orientation travels this fraction of a full turn per second.
     - ``max_step`` - per-dimension step override by action name (e.g. a binary
       gripper that should switch in one step).
+    - ``tolerance`` - per-dimension reach tolerance override by action name, for a
+      controller that cannot reach the kind's default. A rotation takes the
+      largest tolerance among its action columns.
     - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
-      when the target is reached or the arm stops. Default 60 s.
+      when the target is reached or the arm stops getting closer. Default 60 s.
     - ``reference`` - maps observation data to the current action-space vector,
       where an absolute move starts on an episode's first call (later moves
       start from the last commanded target). Default: the one observation
@@ -179,6 +218,7 @@ class DirectControl:
       descriptions tell the model about the limit; the episode prompt does not.
     - ``use_annotation`` - ask the model for a ``note`` on every call (default).
       Off, the tools take no ``note``.
+    - ``use_wait`` - serve the ``wait`` tool (default). Off, only the motion tool.
     """
 
     def __init__(
@@ -189,11 +229,13 @@ class DirectControl:
         dims: list[str] | None = None,
         speed: float = 0.1,
         max_step: dict[str, float] | None = None,
+        tolerance: dict[str, float] | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         reference: Callable[[dict[str, NDArray[Any]]], NDArray[Any]] | None = None,
         notes: str = "",
         time_limit: float | None = None,
         use_annotation: bool = True,
+        use_wait: bool = True,
     ) -> None:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError(f"timeout must be positive seconds, got {timeout}")
@@ -204,16 +246,18 @@ class DirectControl:
         self.dims = dims
         self.speed = speed
         self.max_step = max_step or {}
+        self.tolerance = tolerance or {}
         self.timeout = timeout
         self.reference = reference
         self.notes = notes
         self.time_limit = time_limit
         self.use_annotation = use_annotation
+        self.use_wait = use_wait
         # Appended to the motion and wait tool descriptions when a limit is enforced.
         self._budget = (
             f" You have {time_limit:g} seconds of simulated time. Time passes only while the "
-            "robot moves or waits; thinking is free. When it runs out the episode ends and is "
-            "graded as it stands."
+            f"robot {'moves or waits' if use_wait else 'moves'}; thinking is free. When it runs "
+            "out the episode ends and is graded as it stands."
             if time_limit is not None
             else ""
         )
@@ -235,24 +279,23 @@ class DirectControl:
         """Serve the tools derived from *robot*'s contract; returns their ``mcp`` capability."""
         if self._capability is not None:
             return self._capability
-        # 1. Read the contract: the action's type picks the tool, its names are the dimensions.
+        # 1. Read the contract: the action's control kind picks the tool, its names are the
+        # dimensions.
         self._robot = robot
         contract = robot.params["contract"]
         features: dict[str, dict[str, Any]] = contract["features"]
         action = next(f for f in features.values() if f["role"] == "action")
-        if action.get("type") not in MOTION_TOOLS:
+        kind_name = action.get("state_type") or _TYPE_KINDS.get(action.get("type"), "")
+        kind = CONTROL_KINDS.get(kind_name)
+        if kind is None:
             raise ValueError(
-                f"direct control needs an action type in {sorted(MOTION_TOOLS)}, "
-                f"got {action.get('type')!r}"
+                f"direct control needs an action state_type in {sorted(CONTROL_KINDS)} (or a "
+                f"type in {sorted(_TYPE_KINDS)}), got {kind_name or action.get('type')!r}"
             )
-        self._tool, self._absolute = MOTION_TOOLS[action["type"]]
+        self._tool, self._absolute = kind.tool, kind.absolute
         self._names: list[str] = list(action["names"])
         # Wrist rotation columns (quat / axis-angle / euler) are exposed as roll/pitch/yaw.
-        self._orientations = (
-            find_orientations(self._names)
-            if self._absolute and action.get("type") == "ee_abs"
-            else []
-        )
+        self._orientations = find_orientations(self._names) if self._tool == "move_to" else []
         self._orient_columns = {
             column for block in self._orientations for column in block.contract_columns
         }
@@ -262,7 +305,7 @@ class DirectControl:
         self._low = np.asarray(bounds["min"], dtype=np.float64)
         self._high = np.asarray(bounds["max"], dtype=np.float64)
         self._rate = float(contract["control_rate"])
-        self._still = _STILL_FRAC * float(np.max(self._high - self._low))
+        self._window = max(_STALL_TICKS, math.ceil(_STALL_S * self._rate))
         self._max_ticks = max(1, math.ceil(self.timeout * self._rate))
         self._limit_ticks = (
             None if self.time_limit is None else max(1, math.ceil(self.time_limit * self._rate))
@@ -277,6 +320,17 @@ class DirectControl:
             self._step[self._names.index(dim)] = step
         if np.any(self._step <= 0):
             raise ValueError(f"every action dimension needs a positive step, got {self._step}")
+        # Reach tolerance per tool dimension: the kind's, a rotation's, or a gripper's share.
+        self._reach: dict[str, float] = {}
+        if kind.tolerance is not None:
+            grip = np.array(["grip" in name for name in self._names])
+            columns = np.where(grip, _GRIP_TOLERANCE * (self._high - self._low), kind.tolerance)
+            columns[list(self._orient_columns)] = _ROTATION_TOLERANCE
+            for name, value in self.tolerance.items():
+                columns[self._names.index(name)] = value
+            for name, axis in self._axes.items():
+                own = [axis.index] if axis.block is None else list(axis.block.contract_columns)
+                self._reach[name] = float(np.max(columns[own]))
         # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._obs_space = observations
@@ -301,9 +355,10 @@ class DirectControl:
         # 4. Serve the tools over loopback HTTP on a free port; publish them as an mcp capability.
         server = FastMCP(name=self.name)
         self._bind_tools(server)
-        server.add_tool(
-            self._make_tool(self.wait, "wait", _WAIT + self._budget, {"duration": _DURATION})
-        )
+        if self.use_wait:
+            server.add_tool(
+                self._make_tool(self.wait, "wait", _WAIT + self._budget, {"duration": _DURATION})
+            )
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -366,7 +421,7 @@ class DirectControl:
             name=name, description=description, parameters=_object(properties), fn=fn
         )
 
-    # The one tool body; registered as move_to / move_joints / move_by by the contract.
+    # The one tool body; registered under the control kind's tool name (move_to, move_by, ...).
     async def move(
         self, targets: dict[str, float | dict[str, float | None] | None], note: str = ""
     ) -> Content:
@@ -396,7 +451,10 @@ class DirectControl:
         groups: dict[str, dict[str, Any]] = {}
         for name in self._dims:
             low, high = self._range(name)
-            number = {"type": ["number", "null"], "description": f"[{low:.4g}, {high:.4g}]"}
+            description = f"[{low:.4g}, {high:.4g}]"
+            if name in self._reach:
+                description += f"; reached within {self._reach[name]:.4g}"
+            number = {"type": ["number", "null"], "description": description}
             group, dot, leaf = name.partition(".")
             if dot:
                 groups.setdefault(group, {})[leaf] = number
@@ -421,12 +479,17 @@ class DirectControl:
                 f"The motion is interpolated at a safe speed: {self.speed * 100:g}% of each "
                 f"range per second, so a full-range move takes about {1 / self.speed:g} s."
             )
+            done = (
+                "The call returns once every set dimension is within the tolerance its "
+                "schema states, or once the arm stops getting closer"
+            )
         else:
             motion = (
                 "Move by a displacement, in the action's own components (a rotation is not "
                 "euler angles). Null dimensions do not move. The motion is split into steps "
                 f"within the per-step bounds, played at {self._rate:g} steps per second."
             )
+            done = "The call returns once the displacement has played"
         rotation = ""
         if self._orientations:
             rotation = (
@@ -441,13 +504,14 @@ class DirectControl:
             else ""
         )
         return (
-            f"{motion} {hold}{rotation} The call steps until the target is reached or the arm "
-            f"stops, then returns the camera frames and the pose. It stops at {self.timeout:g} s "
-            f"if the motion has not finished.{self._budget}{annotation} {self.notes}"
+            f"{motion} {hold}{rotation} {done}, with the camera frames and the pose. It stops "
+            f"at {self.timeout:g} s if the motion has not finished.{self._budget}{annotation} "
+            f"{self.notes}"
         ).strip()
 
     def _addressable(self) -> tuple[dict[str, _Axis], list[str]]:
-        """Tool dimensions. Contract orientation blocks become roll, pitch, yaw."""
+        """Tool dimensions. Contract orientation blocks become roll, pitch, yaw; every name
+        becomes its standard name when all have distinct ones."""
         axes: dict[str, _Axis] = {}
         covered: set[int] = set()
         for block in self._orientations:
@@ -457,33 +521,24 @@ class DirectControl:
         for index, name in enumerate(self._names):
             if index not in covered:
                 axes[name] = _Axis("scalar", index)
+        order = _tool_order(self._names, self._orientations)
+        rename = {name: standard for name in order if (standard := _standard_name(name))}
+        if len(set(rename.values())) < len(order):
+            rename = {name: name for name in order}
+        axes = {rename[name]: axis for name, axis in axes.items()}
         if self.dims is None:
-            order = _tool_order(self._names, self._orientations)
-            return axes, [name for name in order if name in axes]
-        # A dims entry may name a tool dimension or any contract column of a rotation block.
-        block_of = {
-            name: block
-            for block in self._orientations
-            for name in (*block.tool_names, *(self._names[i] for i in block.contract_columns))
-        }
-        chosen: list[str] = []
-        unknown: list[str] = []
-        for name in self.dims:
-            if name in axes and name not in chosen:
-                chosen.append(name)
-                continue
-            block = block_of.get(name)
-            if block is None:
-                unknown.append(name)
-                continue
-            for tool_name in block.tool_names:
-                if tool_name not in chosen:
-                    chosen.append(tool_name)
+            return axes, [rename[name] for name in order]
+        # A dims entry may name a tool dimension, its native name, or any contract column of
+        # a rotation block.
+        aliases = {name: [tool] for native, tool in rename.items() for name in (native, tool)}
+        for block in self._orientations:
+            tools = [rename[name] for name in block.tool_names]
+            aliases.update({self._names[column]: tools for column in block.contract_columns})
+        unknown = sorted(name for name in self.dims if name not in aliases)
         if unknown:
-            raise ValueError(
-                f"dims {sorted(unknown)} are not dimensions of this tool ({', '.join(axes)})"
-            )
-        return axes, chosen
+            raise ValueError(f"dims {unknown} are not dimensions of this tool ({', '.join(axes)})")
+        chosen = [tool for name in self.dims for tool in aliases[name]]
+        return axes, list(dict.fromkeys(chosen))
 
     # ── the wire ───────────────────────────────────────────────────────────
 
@@ -517,22 +572,13 @@ class DirectControl:
                     goal = None
                     clipped = False
                     named: set[str] = set()
-                    blocks: list[Orientation] = []
                 else:
                     rows, goal, clipped, named = plan(obs)
-                    # Rotation blocks the model touched (only those count toward "reached").
-                    blocks = [
-                        b for b in self._orientations if any(n in named for n in b.tool_names)
-                    ]
-                # Playback state, updated by step() each tick.
                 played = 0
-                finished = False
-                still = 0  # consecutive ticks at the final setpoint without movement
-                proprio = prev = self._proprio(obs)
+                proprio = self._proprio(obs)
 
-                async def step(row: NDArray[np.float64], *, check: bool) -> bool:
-                    """Play one tick; return True when the call should stop."""
-                    nonlocal played, obs, finished, still, prev, proprio
+                async def step(row: NDArray[np.float64]) -> None:
+                    nonlocal played, obs, proprio
                     await client.send_action(row)
                     obs = await client.get_observation()
                     await self._record(obs)
@@ -543,37 +589,29 @@ class DirectControl:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = np.asarray(row, dtype=np.float64).copy()
                     proprio = self._proprio(obs)
-                    # Count quiet ticks at the final setpoint; an arm that never moved is quiet too.
-                    moved = proprio.size > 0 and float(np.max(np.abs(proprio - prev))) > self._still
-                    still = still + 1 if check and not moved else 0
-                    prev = proprio
-                    # Done = arrived at the goal, or at rest at the final setpoint.
-                    if check and goal is not None and not obs["terminated"]:
-                        finished = (
-                            self._misses(proprio, goal, named, blocks) == []
-                            or still >= _STILL_TICKS
-                        )
-                    return bool(obs["terminated"] or finished)
 
-                # Play the plan; only the final setpoint can finish the move.
-                for index, row in enumerate(rows):
-                    if await step(row, check=index == len(rows) - 1 and not clipped):
+                for row in rows:
+                    await step(row)
+                    if obs["terminated"]:
                         break
-                # Then hold the final setpoint until the arm arrives or stops. A clipped
-                # plan already fills the safety cap, so it gets no hold.
-                if goal is not None and not clipped and not finished and not obs["terminated"]:
-                    hold = goal if self._absolute else np.zeros(len(self._names))
-                    while played < self._max_ticks:
-                        if await step(hold, check=True):
+                # Then hold the goal until it is reached or the arm stops getting closer. A
+                # clipped plan already fills the safety cap, so it gets no hold.
+                finished = False
+                errors: list[float] = []  # per tick at the goal: worst offset, in tolerances
+                if goal is not None and not clipped:
+                    while not obs["terminated"]:
+                        errors.append(max(o / t for _, o, t in self._gaps(proprio, goal, named)))
+                        before, recent = errors[: -self._window], errors[-self._window :]
+                        stalled = bool(before) and min(before) - min(recent) < _PROGRESS
+                        finished = errors[-1] <= 1 or stalled
+                        if finished or played >= self._max_ticks:
                             break
+                        await step(goal)
                 # Ran out of ticks before arriving: report it rather than error.
-                timed_out = (
-                    goal is not None
-                    and played >= self._max_ticks
-                    and not finished
-                    and not obs["terminated"]
+                timed_out = not obs["terminated"] and (
+                    clipped or (goal is not None and not finished)
                 )
-                misses = None if goal is None else self._misses(proprio, goal, named, blocks)
+                gaps = None if goal is None else self._gaps(proprio, goal, named)
             finally:
                 await client.close()
         self._elapsed += played
@@ -583,8 +621,8 @@ class DirectControl:
             played,
             proprio,
             timed_out=timed_out,
-            misses=misses,
-            goal=goal if self._absolute else None,
+            gaps=gaps,
+            goal=goal,
             left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
         )
 
@@ -613,7 +651,8 @@ class DirectControl:
         """Action rows, the intended goal, whether the safety cap clipped them, and named dims."""
         # Find the start pose and the end pose (goal) of the move.
         if not values:
-            raise ToolError("set at least one action dimension (`wait` to just look)")
+            look = " (`wait` to just look)" if self.use_wait else ""
+            raise ToolError(f"set at least one action dimension{look}")
         start = self._start(obs)
         end = start.copy()  # unnamed dimensions keep their start value (they hold)
         named = set(values)
@@ -630,7 +669,7 @@ class DirectControl:
                 end[index] = value
         # Rotations: start from the current euler, overwrite the named angles, convert back
         # to the contract's representation.
-        addressed = [b for b in self._orientations if any(n in named for n in b.tool_names)]
+        addressed = [b for b in self._orientations if any(self._axes[n].block is b for n in named)]
         for block in addressed:
             roll, pitch, yaw = xyzw_to_euler(block.read(start))
             euler = [roll, pitch, yaw]
@@ -680,34 +719,26 @@ class DirectControl:
                     block.write(row, slerp(start_q, end_q, float(fraction)))
             if not clipped:
                 rows[-1] = end  # land exactly on the goal, free of round-trip rotation error
-        return rows, end, clipped, named
+        return rows, end if self._absolute else None, clipped, named
 
-    def _misses(
-        self,
-        proprio: NDArray[np.float64],
-        goal: NDArray[np.float64],
-        named: set[str],
-        blocks: list[Orientation],
-    ) -> list[tuple[str, float, float]] | None:
-        """Addressed dimensions outside tolerance, as (name, offset, tolerance); ``None`` when
-        there is no absolute goal to judge against."""
-        if not self._absolute or proprio.shape != goal.shape or not named:
-            return None
-        misses: list[tuple[str, float, float]] = []
+    def _gaps(
+        self, proprio: NDArray[np.float64], goal: NDArray[np.float64], named: set[str]
+    ) -> list[tuple[str, float, float]]:
+        """Each named dimension's (name, offset, tolerance); a rotation is one ``orientation``."""
+        gaps: list[tuple[str, float, float]] = []
+        blocks: set[int] = set()
         for name in self._dims:
             axis = self._axes[name]
-            if name not in named or axis.kind != "scalar":
+            if name not in named:
                 continue
-            index = axis.index
-            tolerance = max(_REACH_ABS, _REACH_FRAC * float(self._high[index] - self._low[index]))
-            offset = abs(float(proprio[index] - goal[index]))
-            if offset > tolerance:
-                misses.append((name, offset, tolerance))
-        for block in blocks:
-            offset = angular_distance(block.read(proprio), block.read(goal))
-            if offset > _REACH_RAD:
-                misses.append(("orientation", offset, _REACH_RAD))
-        return misses
+            if axis.block is None:
+                offset = abs(float(proprio[axis.index] - goal[axis.index]))
+                gaps.append((name, offset, self._reach[name]))
+            elif id(axis.block) not in blocks:
+                blocks.add(id(axis.block))
+                offset = angular_distance(axis.block.read(proprio), axis.block.read(goal))
+                gaps.append(("orientation", offset, self._reach[name]))
+        return gaps
 
     def _proprio(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         if self._reference is not None:
@@ -724,7 +755,7 @@ class DirectControl:
         proprio: NDArray[np.float64],
         *,
         timed_out: bool,
-        misses: list[tuple[str, float, float]] | None,
+        gaps: list[tuple[str, float, float]] | None,
         goal: NDArray[np.float64] | None,
         left: int | None,
     ) -> Content:
@@ -748,14 +779,15 @@ class DirectControl:
             lines.append("pose: " + _labeled(self._reading(proprio)))
         if goal is not None:
             lines.append("commanded: " + _labeled(self._reading(goal)))
-        if goal is not None and proprio.shape == goal.shape:
+        if goal is not None:
             lines.append("off: " + self._off(proprio, goal))
-        if misses is not None:
-            if not misses:
-                lines.append("Target reached.")
-            else:
-                name, offset, _ = max(misses, key=lambda miss: miss[1] / miss[2])
-                lines.append(f"Did not reach the target; largest offset {offset:.4f} on {name}.")
+        if gaps:
+            name, offset, tolerance = max(gaps, key=lambda gap: gap[1] / gap[2])
+            lines.append(
+                "Target reached."
+                if offset <= tolerance
+                else f"Did not reach the target; largest offset {offset:.4f} on {name}."
+            )
         if self._command is not None and goal is None:
             lines.append("commanded: " + _labeled(zip(self._names, self._command, strict=True)))
         if left == 0:
@@ -818,6 +850,23 @@ def _tool_order(names: list[str], blocks: list[Orientation]) -> list[str]:
     return order
 
 
+def _standard_name(name: str) -> str | None:
+    """*name* in the standard convention (``x``, ``roll``, ``grip``, ``joint3``; under
+    ``left_arm.`` / ``right_arm.`` for a ``left_`` / ``right_`` name), or ``None``."""
+    side = re.match(r"(left|right)[_.]", name)
+    rest = name[side.end() :] if side else name
+    leaf = rest.rsplit(".", 1)[-1]
+    if "grip" in rest:
+        standard = "grip"
+    elif joint := re.search(r"joint_?(\d+)$", leaf):
+        standard = f"joint{joint[1]}"
+    else:
+        standard = _LEAF_STANDARD.get(leaf)
+    if standard is None or side is None:
+        return standard
+    return f"{side[1]}_arm.{standard}"
+
+
 def _object(properties: dict[str, Any]) -> dict[str, Any]:
     """A strict-mode object schema: every property required, none extra."""
     return {
@@ -854,4 +903,11 @@ async def _wait_until_listening(task: asyncio.Task[None], port: int) -> None:
         return
 
 
-__all__ = ["DEFAULT_TIMEOUT_S", "MAX_WAIT_S", "MIN_WAIT_TICKS", "MOTION_TOOLS", "DirectControl"]
+__all__ = [
+    "CONTROL_KINDS",
+    "DEFAULT_TIMEOUT_S",
+    "MAX_WAIT_S",
+    "MIN_WAIT_TICKS",
+    "ControlKind",
+    "DirectControl",
+]

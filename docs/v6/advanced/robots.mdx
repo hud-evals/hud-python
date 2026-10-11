@@ -595,14 +595,36 @@ The [contract](#contract) derives the tool surface:
 
 | Contract field | Tool surface |
 |----------------|--------------|
-| action `type` | The motion tool: `ee_abs` → `move_to` and `joint_pos` → `move_joints` take absolute targets, interpolated at a safe speed; `ee_del` → `move_by` takes a displacement, split into steps within the per-step bounds. |
+| action `state_type` (else `type`) | The control kind, which picks the tool (`CONTROL_KINDS`, one row per kind). |
 | action `names` | The dimensions a call addresses. `targets` lists every one, and the model sets a dimension to `null` to leave it as it is. A name with a prefix (`left_arm.x`) nests under its prefix as a group (`left_arm: {x, ...}`), and a group set to `null` holds all of its dimensions at once, which keeps humanoid-sized action spaces manageable. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
 | action `limits` (else `stats`) | Per-dimension `min` / `max`: the target range, or the per-step box for a displacement. |
-| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops, and gives up at `timeout` (default 60 s). |
+| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops getting closer, and gives up at `timeout` (default 60 s). |
 | `rgb` observations and the rest | The camera frames and labeled state every call returns. |
 
+| Control kind (`state_type`) | Coarse `type` | Tool | Reached within |
+|-----------------------------|---------------|------|----------------|
+| `EE_ABS_POSE`, `EE_ABS_POS` | `ee_abs` | `move_to` | 1 mm (position), 0.01 rad (rotation) |
+| `JOINT_ABS_POS` | `joint_pos` | `move_joints` | 0.002 rad |
+| `EE_DEL_POSE`, `EE_DEL_POS` | `ee_del` | `move_by` | displacement, played once |
+| `BASE_DEL_POSE` | | `walk_by` | displacement, played once |
+
+A gripper (a name containing `grip`) is reached within 2% of its range in any absolute kind. Each
+dimension's schema description states its range and tolerance (`[0, 1]; reached within 0.001`).
+`BASE_ABS_TWIST` (a `walk` velocity for a duration) is not served yet. The wire carries one action
+feature, so a contract that mixes kinds is not served.
+
+Tool dimensions follow a standard naming convention when every native name maps onto it: `x y z`
+(from leaves `x`, `dx`, ...), `roll pitch yaw` (a rotation block, or delta leaves `droll`, `drx`,
+...), `grip` (any name containing `grip`), and `jointN` (a trailing joint number). A `left_` or
+`right_` name goes under the `left_arm` / `right_arm` group, so a bimanual call is
+`move_to({"left_arm": {"x": ..., "grip": ...}, "right_arm": null})`. If any name has no standard
+form, or two collide, the tool keeps the native names. Only the tool renames: the wire, the
+observation lines, and every env parameter (`max_step`, `tolerance`) keep the contract's names, and
+`dims` accepts either. Units and gripper polarity are the contract's, so `notes` still states them.
+
 There is no `observe` tool. Every motion call returns the camera frames and the pose it
-ended on, so the model does not choose whether to look. The `wait` tool is the other call: it
+ended on, so the model does not choose whether to look. The `wait` tool (off with
+`use_wait=False`) is the other call: it
 lets `duration` sim seconds pass (at most 100) while the robot holds its pose. A `duration` of
 `null` or 0 just observes: one control tick passes (`MIN_WAIT_TICKS`, an interim minimum so every
 `wait` step spans a tick) while the robot holds its commanded setpoint, and that tick counts
@@ -616,13 +638,15 @@ episode has ended and tells the model to stop. The agent loop itself ends only w
 (or at its step cap), so a model that ignores the reply keeps getting that reply. The template
 grades it as usual.
 
-A call steps until the commanded target is reached or the arm
-stops moving, then returns the pose, how far it is from the command (`off`), and a verdict for an
-absolute move: `Target reached.`, or `Did not reach the target; largest offset X on <dim>.` (the
-dimension furthest outside its tolerance). The arm counts as stopped
-once the final setpoint is playing and proprioception has changed by less than 0.01% of the widest
-action range for two ticks in a row, so a blocked arm returns right after the move's setpoints
-play out instead of running to `timeout`. `timeout` (default 60 s)
+An absolute move steps until every set dimension is within its tolerance or the arm stops getting
+closer, then returns the pose, how far it is from the command (`off`), and a verdict:
+`Target reached.`, or `Did not reach the target; largest offset X on <dim>.` (the dimension
+furthest outside its tolerance). Stopping is measured in tolerances: once the final setpoint
+plays, each tick's error is the largest offset divided by its tolerance, and the move has stalled
+when its best error over the last 0.25 s (at least three ticks) is not 0.1 better than its best
+before. So a blocked or jittering arm returns about 0.25 s after the setpoints play out instead of
+running to `timeout`, while a slowly converging one keeps going. A displacement returns once
+played. `timeout` (default 60 s)
 is only the safety cap: a full-range move at the default speed is about 10 s, and a longer real
 move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
 (roll, pitch, yaw, radians). Angles are periodic: replies report euler angles, both the `pose` and
@@ -640,13 +664,15 @@ A few embodiment facts can't be read off the contract, so the environment states
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
-| `dims` | every action dimension | The dimensions a call may address; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
+| `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
-| `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops. |
+| `tolerance` | `{}` | Per-dimension reach tolerance override by action name, for a controller that settles outside the kind's default (an OSC arm 5 mm short declares `0.008`). A rotation takes the largest tolerance among its action columns. |
+| `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops getting closer. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
 | `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining. Spending it ends the episode as sim termination does: the call in flight stops at the limit, later calls play nothing, and the reply says the episode has ended. The motion and `wait` tool descriptions say "You have N seconds of simulated time. Time passes only while the robot moves or waits; thinking is free. When it runs out the episode ends and is graded as it stands."; the episode prompt is unchanged, so VLAs see the sim's own instruction. |
 | `use_annotation` | `True` | Ask for a `note` on every call. `False` removes `note` from the tool schemas and never refuses an empty one. |
+| `use_wait` | `True` | Serve the `wait` tool. `False` serves only the motion tool, whose time-limit text then says time passes only while the robot moves. |
 
 <Note>
 Direct control claims the sim's sole slot, so it serves single-env sims. Scale out with more
@@ -695,8 +721,8 @@ flowchart LR
 
 Direct control does no inverse kinematics (IK, solving joint angles for a target pose). It
 interpolates setpoints at `speed` so the sim never jumps to a distant goal, and the sim's own
-low-level controller tracks each one. It stops when the arm arrives, comes to rest, or reaches
-`timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
+low-level controller tracks each one. It stops when the arm arrives, stops getting closer, or
+reaches `timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
 
 The bridge sees `DirectControl` as an ordinary `robot` client, so direct control needs no bridge
 changes. The control link from `RobotEndpoint` carries only `reset` and `result`.
