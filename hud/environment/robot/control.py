@@ -322,8 +322,11 @@ class DirectControl:
         self._high = np.asarray(bounds["max"], dtype=np.float64)
         self._rate = float(contract["control_rate"])
         self._window = max(_WINDOW_TICKS, math.ceil(_WINDOW_S * self._rate))
-        self._settle_ticks = max(1, math.ceil(_SETTLE_S * self._rate))
         self._grace_ticks = max(1, math.ceil(_GRACE_S * self._rate))
+        # The hold must outlast rest detection, which at low rates takes longer than _SETTLE_S.
+        self._settle_ticks = max(
+            math.ceil(_SETTLE_S * self._rate), 2 * self._window + self._grace_ticks
+        )
         self._max_ticks = max(1, math.ceil(self.timeout * self._rate))
         self._limit_ticks = (
             None if self.time_limit is None else max(1, math.ceil(self.time_limit * self._rate))
@@ -858,7 +861,11 @@ class DirectControl:
                 shown, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
             )
             if not rested:
-                verdict = "Ran out of time before settling; the arm was still moving."
+                verdict = (
+                    "The episode ended before the arm settled."
+                    if obs["terminated"]
+                    else "Ran out of time before settling; the arm was still moving."
+                )
             elif any(gap.distance > self._tolerances[gap.quantity] for gap in arm):
                 verdict = "Stopped short of the target; the arm is at rest."
             else:

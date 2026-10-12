@@ -451,11 +451,37 @@ async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode(
     assert cut.startswith("Played 20 steps (2.0 s). Time remaining: 0.0 s.")
     assert "The time limit is reached." in cut
     assert "The episode has ended; stop calling tools." in cut
-    assert (
-        "Ran out of time before settling; the arm was still moving. Remaining offsets: 300 mm on x."
-    ) in cut
+    assert "The episode ended before the arm settled. Remaining offsets: 300 mm on x." in cut
+    assert "Ran out of time" not in cut
     assert after.startswith("Played 0 steps (0.0 s). Time remaining: 0.0 s.")
     assert "The episode has ended; stop calling tools." in after
+
+
+async def test_a_sim_that_terminates_mid_move_is_not_reported_as_running_out_of_time() -> None:
+    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    agent = _ScriptedLLM(_move("move_to", x=1.0, grip=1.0))
+
+    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    (result,) = agent.results
+    assert run.reward == 1.0
+    assert len(sim.actions) < 100  # the sim succeeded before the 100-tick move finished
+    assert "The episode ended before the arm settled." in _text(result)
+    assert "Ran out of time" not in _text(result)
+    assert "The episode has ended; stop calling tools." in _text(result)
+
+
+async def test_an_arm_already_at_the_target_is_at_rest_at_a_low_control_rate() -> None:
+    sim = _Pose(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0])
+    sim.contract["control_rate"] = 1
+    agent = _ScriptedLLM(_move("move_to", x=0.05))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    assert "At the target." in _text(agent.results[0])
+    assert "Ran out of time" not in _text(agent.results[0])
 
 
 class _Jitter(_Pose):

@@ -630,7 +630,9 @@ verdict listing each dimension's remaining offset:
 
 - `At the target.` At rest within tolerance.
 - `Stopped short of the target; the arm is at rest.` At rest outside tolerance for 1.5 s.
-- `Ran out of time before settling; the arm was still moving.` The 3 s hold or `timeout` ran out.
+- `Ran out of time before settling; the arm was still moving.` The 3 s hold (longer at control
+  rates too low for rest to be detected within 3 s) or `timeout` ran out.
+- `The episode ended before the arm settled.` The sim terminated or the time limit ran out first.
 
 Tolerance (default: whatever moves the fingertips 1 mm) only picks the verdict; the model never
 sees it. The gripper never decides the verdict, since it often stops on what it holds. A displacement
