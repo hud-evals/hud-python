@@ -117,6 +117,7 @@ def patch_streamable_http_error_handling() -> None:
                 retryable_exceptions = (
                     httpx.ConnectError,
                     httpx.ReadError,
+                    httpx.RemoteProtocolError,
                     httpx.TimeoutException,
                     ssl.SSLError,
                 )
