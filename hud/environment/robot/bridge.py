@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import websockets
 import websockets.exceptions
+from websockets.protocol import State
 
 # The openpi/0 wire codec is defined alongside the agent-side client; reuse it so both
 # ends of the protocol stay in lockstep (env -> capabilities is the correct direction).
@@ -329,14 +330,19 @@ class RobotBridge(ABC):
             # A None claim binds the sole claimed slot — single-env agents skip
             # the token plumbing; ambiguous (vectorized) claims error instead.
             slot = self._registry.resolve(claim["claim"])
-            if slot.ws is not None:
+            # A peer that already hung up still occupies the slot until its handler
+            # returns, and that handler can be parked on a busy sim; only an open
+            # connection blocks a reconnect.
+            if slot.ws is not None and slot.ws.state is State.OPEN:
                 raise RuntimeError(f"slot {slot.index} already has a live connection")
             slot.ws = ws
             slot.action = None
             slot.idle = False
             self._action_event.set()  # wake tick loop waiting for dialing to finish
             # First frame after claim: one sim read, then this slot's scalar row.
-            await self._send_slot_observation(slot, await self._run_on_sim(self.get_observation))
+            first = await self._run_on_sim(self.get_observation)
+            if slot.ws is ws:  # a reconnect may have taken the slot while the sim was busy
+                await self._send_slot_observation(slot, first)
             async for frame in ws:
                 action = _unpackb(frame)["actions"]  # codec already returns an ndarray
                 slot.action = np.asarray(action, dtype=np.float32)

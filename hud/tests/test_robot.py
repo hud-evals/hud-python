@@ -24,8 +24,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
+import websockets
 
 from hud.agents.robot import Adapter, Model, RobotAgent
+from hud.capabilities.robot import _packb
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
@@ -272,6 +274,49 @@ async def test_a_vectorized_sim_refuses_a_tokenless_grade() -> None:
         # Two claimed slots: which one to grade is ambiguous, so say so instead of guessing.
         with pytest.raises(RuntimeError, match="tokenless claim"):
             await endpoint.result()
+
+
+class _BusySim(_StubSim):
+    """A sim whose observation read stays pending until ``unblock`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.read_started = asyncio.Event()
+        self.unblock = asyncio.Event()
+
+    async def get_observation(self) -> Any:  # type: ignore[override]  # in-loop async hook
+        self.read_started.set()
+        await self.unblock.wait()
+        return super().get_observation()
+
+
+async def test_a_claim_dropped_while_the_sim_is_busy_can_be_reclaimed() -> None:
+    sim = _BusySim()
+
+    async def dial_and_claim(token: str) -> Any:
+        ws = await websockets.connect(sim.url, ping_interval=None)
+        await ws.recv()  # connect-time metadata frame
+        await ws.send(_packb({"claim": token}))
+        return ws
+
+    async with _sim_env(sim) as (_env, endpoint):
+        token = (await endpoint.reset())["token"]
+        try:
+            abandoned = await dial_and_claim(token)
+            await asyncio.wait_for(sim.read_started.wait(), timeout=5)
+            await abandoned.close()  # the agent's claim timeout: gone before any observation
+
+            reclaimed = await dial_and_claim(token)
+            with pytest.raises(TimeoutError):  # a rejected claim answers at once with a traceback
+                await asyncio.wait_for(reclaimed.recv(), timeout=0.3)
+            sim.unblock.set()
+            first = await asyncio.wait_for(reclaimed.recv(), timeout=5)
+            assert isinstance(first, bytes), first  # an observation, not a traceback frame
+            with pytest.raises(TimeoutError):  # the abandoned handler must not echo a second one
+                await asyncio.wait_for(reclaimed.recv(), timeout=0.2)
+            await reclaimed.close()
+        finally:
+            sim.unblock.set()  # parked handlers would otherwise block teardown
 
 
 # ─── the robot-template shape: env.gym behind a pre-written contract ───
