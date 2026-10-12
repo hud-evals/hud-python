@@ -313,8 +313,8 @@ async def test_gemini_async_request_includes_trace_id(
     assert seen_trace_id == trace_id
     assert attempts == (1 if initial_status == 200 else 2)
     if initial_status != 200:
-        # The gateway's Retry-After is one second; the client's first backoff is
-        # that plus up to a second of jitter, not the 10 s used for Google's API.
+        # The client's first backoff is its initial delay plus up to a second of
+        # jitter, not the 10 s used for Google's API.
         sleep.assert_awaited_once()
         assert 1 <= sleep.await_args_list[0].args[0] <= 2
     else:

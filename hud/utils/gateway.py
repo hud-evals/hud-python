@@ -124,7 +124,9 @@ def build_model_client(
     return AsyncOpenAI(api_key=key)
 
 
-# Retries of an OpenAI-compatible gateway client; see build_gateway_client.
+# Retries of an OpenAI-compatible gateway client, each waiting out the
+# gateway's Retry-After; the SDK's default of two is not enough patience for a
+# pod at capacity.
 GATEWAY_MAX_RETRIES = 6
 
 
@@ -154,11 +156,10 @@ def build_gateway_client(provider: str) -> GatewayClient:
         from google import genai
         from google.genai.types import HttpOptions, HttpRetryOptions
 
-        # The gateway refuses with 503 + Retry-After (one second) when a pod is at
-        # capacity. google-genai retries 5xx on its own backoff and never reads the
-        # header, so keep that backoff on the gateway's scale: ten agents behind a
-        # cap of two drained in 15 s with these values and in 135 s with the
-        # 10 s floor used for Google's own API.
+        # The gateway refuses with 503 + Retry-After (a few seconds) when a pod
+        # is at capacity. google-genai retries 5xx on its own backoff and never
+        # reads the header, so the backoff is kept on the gateway's scale rather
+        # than the 10 s floor used for Google's own API.
         return genai.Client(
             api_key=settings.api_key,
             http_options=HttpOptions(
@@ -179,10 +180,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
 
     # OpenAI-compatible (openai, azure, together, groq, fireworks, etc.)
     # The gateway refuses with 503 + Retry-After when a pod is at capacity and
-    # the SDK waits the header out before each retry; its default of two
-    # retries gave a refused agent under three seconds of patience against a
-    # slot that frees every few seconds. Six retries is about 18 s at the
-    # gateway's 3 s header, on the Gemini client's scale.
+    # the SDK waits the header out before each retry.
     return AsyncOpenAI(
         api_key=settings.api_key,
         base_url=settings.hud_gateway_url,
