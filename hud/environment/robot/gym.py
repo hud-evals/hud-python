@@ -144,7 +144,7 @@ def final_observations(
     for slot in np.flatnonzero(done):
         row = {k: v[slot] for k, v in leaves.items()} if batched else leaves
         state, frames = split_observation(row)
-        rows[int(slot)] = {**state, **frames}
+        rows[int(slot)] = {k: np.array(v) for k, v in {**state, **frames}.items()}
     return rows
 
 
