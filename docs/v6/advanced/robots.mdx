@@ -665,10 +665,14 @@ a tolerance:
 
 The verdicts say only that the arm arrived, stopped short, or was still moving, never why. The
 gripper has no tolerance, so it never decides the verdict (a gripper short of its command is
-usually holding something, and some references cannot read it), but its offset is listed after the
-arm's, in the contract's own units and unlabelled (`0.37 on grip`). A call that sets only the
-gripper is judged on rest alone and reads `At the target.`. A call on an episode that has already
-ended plays nothing and returns no verdict.
+usually holding something). Its offset is listed only when the env's `reference` reads the hand:
+with the default reference it follows the arm's, in the contract's own units and unlabelled
+(`0.37 on grip`), and with a custom `reference` (LIBERO, SIMPLER) it is left out of both `off:` and
+the verdict, so the model never sees an offset against a hand the reference cannot read. A call that
+sets only the gripper has no verdict: it reads `fingers: grip_left=0.0370, grip_right=0.0370`, the
+observed fingers in the env's units, so a close that jams on an object does not read as success.
+An observation that names no finger adds no such line. A call on an episode that has already ended
+plays nothing and returns no verdict.
 
 A call that changes a gripper command also waits for the observed fingers: any observation state
 whose name contains `grip` (a Franka hand's `finger_joint1` and `finger_joint2` columns in LIBERO's
@@ -717,7 +721,7 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
 | `tolerance` | `{}` | Tolerance overrides by quantity: `position` in m, `rotation` and `joint` in rad (`{"position": 0.005}`). An unset `rotation` or `joint` is the `position` tolerance over its fingertip lever, so `{"position": 0.005}` also sets 0.033 rad and 0.002 rad. Other keys are refused. It changes only whether an arm at rest reads as at the target or stopped short, and how long an arm at rest outside it is held (up to 1.5 s), never ends a move early, and the model never sees it. |
 | `timeout` | `30` | Cap, in seconds, on one call. The call returns earlier, once the arm is at rest. |
-| `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
+| `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. The default reads the gripper; a custom reference is taken not to, so gripper offsets are not reported. |
 | `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second (a rotation: of a full turn), so a full-range move takes `1 / speed` seconds. It paces only the setpoints; the settle hold after them is unchanged. Displacements ignore it. |
 | `time_limit` | none | The episode's budget in sim seconds, counted in control ticks played (`wait` included). Replies report the time remaining. Spending it ends the episode as sim termination does: the call in flight stops at the limit, later calls play nothing, and the reply says the episode has ended. The motion and `wait` tool descriptions say "You have N seconds of simulated time. Time passes only while the robot moves or waits; thinking is free. When it runs out the episode ends and is graded as it stands."; the episode prompt is unchanged, so VLAs see the sim's own instruction. |
 | `use_annotation` | `True` | Ask for a `note` on every call. `False` removes `note` from the tool schemas and never refuses an empty one. |

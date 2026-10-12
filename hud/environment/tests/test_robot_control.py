@@ -722,7 +722,10 @@ async def test_a_gripper_call_returns_once_the_fingers_have_moved_and_come_to_re
     # The fingers sit still for 10 ticks, then jump; the call holds through both.
     assert sim.state[1] == pytest.approx(1.0)
     assert len(sim.actions) == 14  # three ticks after the fingers stop
-    assert "At the target. Remaining offsets: 0 on grip." in _text(agent.results[0])
+    text = _text(agent.results[0])
+    assert "fingers: grip=1.0000" in text
+    assert "At the target" not in text
+    assert "Remaining offsets" not in text
 
 
 class _Fingers(_Pose):
@@ -749,7 +752,10 @@ async def test_a_gripper_call_waits_for_every_finger_and_not_only_the_first_to_s
     # The left finger jams after 6 ticks; the right one closes for 20, and the call outlasts it.
     np.testing.assert_allclose(sim.state, [0.0, 0.3, 1.0])
     assert 20 + 3 <= len(sim.actions) < 20 + 30
-    assert "Remaining offsets: 0.7 on grip_left, 0 on grip_right." in _text(agent.results[0])
+    text = _text(agent.results[0])
+    assert "fingers: grip_left=0.3000, grip_right=1.0000" in text  # the jam reads as no success
+    assert "At the target" not in text
+    assert "Remaining offsets" not in text
 
 
 @pytest.mark.parametrize(
@@ -841,18 +847,50 @@ class _OpenHand(_Pose):
         return data, success
 
 
-async def test_an_unread_gripper_neither_cuts_the_arm_short_nor_decides_the_verdict() -> None:
+async def test_a_reference_that_cannot_read_the_hand_leaves_the_gripper_out_of_the_offsets() -> (
+    None
+):
+    sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
+    agent = _ScriptedLLM(_move("move_to", x=0.5, grip=1.0))
+
+    async with _served(
+        sim, DirectControl(max_step={"grip": 2.0}, reference=lambda data: data["observation/state"])
+    ) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    text = _text(agent.results[0])
+    assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
+    assert "off: x=-0.00" in text
+    assert "At the target. Remaining offsets: " in text
+    assert "grip" not in text.split("off:")[1].split("\n")[0]
+    assert "on grip" not in text
+
+
+async def test_an_unreadable_hand_leaves_a_gripper_call_with_only_the_fingers() -> None:
+    sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
+    agent = _ScriptedLLM(_move("move_to", grip=1.0))
+
+    async with _served(
+        sim, DirectControl(max_step={"grip": 2.0}, reference=lambda data: data["observation/state"])
+    ) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    text = _text(agent.results[0])
+    assert "fingers: grip=-1.0000" in text
+    assert "off: x=0.0000\n" in text  # the unread gripper is not in it
+    assert "Remaining offsets" not in text
+
+
+async def test_a_reference_that_reads_the_hand_lists_the_gripper_among_the_offsets() -> None:
     sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
     agent = _ScriptedLLM(_move("move_to", x=0.5, grip=1.0))
 
     async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
-    assert "off: x=-0.00" in _text(agent.results[0])
-    assert "grip=-2.0000" in _text(agent.results[0])
-    assert "At the target. Remaining offsets: " in _text(agent.results[0])
-    assert "2 on grip" in _text(agent.results[0])  # the reference reads the hand open
+    text = _text(agent.results[0])
+    assert "grip=-2.0000" in text
+    assert "2 on grip" in text
 
 
 @pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"grip": 0.1}, {"x": 0.1}])

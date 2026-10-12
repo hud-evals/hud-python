@@ -248,7 +248,9 @@ class DirectControl:
     - ``reference`` - maps observation data to the current action-space vector,
       where an absolute move starts on an episode's first call (later moves
       start from the last commanded target). Default: the one observation
-      vector as wide as the action.
+      vector as wide as the action, which reads the gripper. A custom reference
+      is taken not to read it, so gripper offsets are left out of ``off:`` and
+      the verdict.
     - ``notes`` - embodiment facts the model needs (frames, units, gripper
       polarity), appended to the motion tool's description.
     - ``time_limit`` - the episode's budget in sim seconds (default: none). Every
@@ -298,6 +300,7 @@ class DirectControl:
         self._tolerances["grip"] = math.inf
         self.timeout = timeout
         self.reference = reference
+        self._reads_grip = reference is None
         self.notes = notes
         self.time_limit = time_limit
         self.use_annotation = use_annotation
@@ -389,7 +392,7 @@ class DirectControl:
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
         }
         self._fingers = [
-            (key, column)
+            (name, key, column)
             for key, names in self._states.items()
             for column, name in enumerate(names or [])
             if "grip" in name
@@ -830,7 +833,7 @@ class DirectControl:
 
     def _finger_positions(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         return np.array(
-            [np.asarray(obs["data"][key]).reshape(-1)[column] for key, column in self._fingers],
+            [np.asarray(obs["data"][key]).reshape(-1)[column] for _, key, column in self._fingers],
             dtype=np.float64,
         )
 
@@ -872,14 +875,28 @@ class DirectControl:
             lines.append("commanded: " + _labeled(self._reading(command)))
         if goal is not None:
             lines.append("off: " + self._off(proprio, goal))
-        if gaps:
+        arm = [gap for gap in gaps or [] if gap.quantity != "grip"]
+        if goal is not None and not arm and self._fingers:
+            # A gripper call has no verdict: a jam on an object must not read as success.
+            lines.append(
+                "fingers: "
+                + _labeled(
+                    zip(
+                        (name for name, _, _ in self._fingers),
+                        self._finger_positions(obs),
+                        strict=True,
+                    )
+                )
+            )
+        if arm:
+            shown = [gap for gap in gaps or [] if self._reads_grip or gap.quantity != "grip"]
             # Largest first, measured against each dimension's tolerance so mm and rad compare.
             ranked = sorted(
-                gaps, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
+                shown, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
             )
             if not rested:
                 verdict = "Ran out of time before settling; the arm was still moving."
-            elif any(gap.distance > self._tolerances[gap.quantity] for gap in gaps):
+            elif any(gap.distance > self._tolerances[gap.quantity] for gap in arm):
                 verdict = "Stopped short of the target; the arm is at rest."
             else:
                 verdict = "At the target."
@@ -920,7 +937,8 @@ class DirectControl:
         for name in self._dims:
             axis = self._axes[name]
             if axis.kind == "scalar":
-                parts.append(f"{name}={float(proprio[axis.index] - goal[axis.index]):.4f}")
+                if self._reads_grip or self._quantity[name] != "grip":
+                    parts.append(f"{name}={float(proprio[axis.index] - goal[axis.index]):.4f}")
                 continue
             assert axis.block is not None
             key = id(axis.block)
