@@ -2,32 +2,28 @@
 
 The ``robot`` wire takes one action per control tick, which a policy keeps up
 with and a tool-calling LLM does not. :class:`DirectControl` serves the same sim
-as an ``mcp`` capability instead: a tool call sets targets (or displacements)
+as an ``mcp`` capability instead: a tool call names targets (or displacements)
 for some action dimensions, the tool plays them out on the wire, and answers
-with the camera frames and the pose it ended on. A ``wait`` tool holds the
-pose (for one tick, or a while) and answers the same way. Each call is its own
-wire connection, so the sim holds still while the model thinks. The env keeps
+with the camera frames and the pose it ended on. ``wait`` holds the pose and
+answers the same way. Each call is its own wire
+connection, so the sim holds still while the model thinks. The env keeps
 serving ``robot`` too, so one env serves VLAs and LLMs alike.
 
-The contract derives the tool surface: the action's control kind (its Spec v0
-``state_type``, else its ``type``) picks the tool (:data:`CONTROL_KINDS`), its
-``names`` are the addressable dimensions, its ``limits`` (else ``stats``)
-``min``/``max`` bound them, ``control_rate`` paces the playout, and ``rgb``
-observations are the frames returned. The tool names dimensions in the standard
-``x y z roll pitch yaw grip`` / ``jointN`` convention (``left_arm.x`` for a
-bimanual) when every native name maps onto it, else by their native names. An
-absolute end-effector rotation is presented as intrinsic XYZ euler and slerped
-onto whatever the contract stores (quaternion, axis-angle, or euler)::
+The contract derives the tool surface: the action's control kind (``state_type``,
+else ``type``) picks the tool (:data:`CONTROL_KINDS`), its ``names`` are the
+addressable dimensions, its ``limits`` (else ``stats``) ``min``/``max`` bound
+them, ``control_rate`` paces the playout, and ``rgb`` observations are the
+frames returned. An absolute
+end-effector rotation is presented as intrinsic XYZ euler and slerped onto
+whatever the contract stores (quaternion, axis-angle, or euler)::
 
     env = Environment(name="my-sim")
     sim = env.gym(make_env)
     DirectControl(notes="Gripper: -1 open, +1 closed.").attach(sim)
 
-An absolute move holds its goal until the arm comes to rest (and, when it changes a gripper
-command, the observed fingers have stopped moving), at most 3 s after the motion plays, then
-returns that pose and why the call ended: at the target, stopped short of it at rest, or out
-of time while still moving, with every named dimension's remaining offset. A displacement
-returns once played. ``timeout`` caps one call.
+An absolute move then holds its goal until the arm (and, after a gripper change, the fingers)
+comes to rest, and reports whether it is at the target, stopped short, or out of time. A
+displacement returns once played. ``timeout`` caps one call.
 Single-env sims only: a tool call claims the sole slot (no slot token).
 
 Every tick of every call also streams to the rollout's trace: numeric state per
@@ -105,14 +101,12 @@ CONTROL_KINDS: dict[str, ControlKind] = {
 _TYPE_KINDS = {"ee_abs": "EE_ABS_POSE", "joint_pos": "JOINT_ABS_POS", "ee_del": "EE_DEL_POSE"}
 
 
-#: Default ``position`` reach tolerance, in metres.
+#: Default ``position`` tolerance, in metres. It only picks the verdict; the model never sees it.
 DEFAULT_TOLERANCE_M = 1e-3
-#: Metres the fingertips move per unit of each quantity. Dividing the position tolerance by
-#: it gives the default rotation and joint tolerances: a 0.15 m gripper turning at the wrist,
-#: and a 2.5 m summed lever over an arm's joints (a Franka's spans about 2 to 2.9 m).
+#: Fingertip metres per unit of each quantity (a 0.15 m gripper at the wrist, a 2.5 m summed
+#: arm lever): the position tolerance over it is the rotation / joint default.
 _LEVER_M = {"position": 1.0, "rotation": 0.15, "joint": 2.5}
-#: How the verdict states a distance: (scale, unit, decimals it is rounded to). A gripper
-#: is stated in the contract's own units.
+#: How a verdict states each quantity's distance: (scale, unit, decimals).
 _UNITS = {
     "position": (1e3, "mm", 2),
     "rotation": (1.0, "rad", 5),
@@ -120,40 +114,24 @@ _UNITS = {
     "grip": (1.0, "", 4),
 }
 
-#: The arm is at rest when, over each of the last two windows of ``max(_WINDOW_TICKS,
-#: _WINDOW_S)``, every named arm dimension's mean speed (its pose change per tick, an angle
-#: for a rotation) was under its floor. A gripper has no floor: its fingers are waited for
-#: below. Nothing here depends on the env's ``tolerance``.
+#: At rest: over each of the last two windows of max(3 ticks, 0.25 s), every named arm
+#: dimension's mean change per tick is under a tenth of its default tolerance.
 _WINDOW_TICKS = 3
 _WINDOW_S = 0.25
-#: At rest is under a tenth of each quantity's default tolerance per tick.
 _FLOORS = {quantity: 0.1 * DEFAULT_TOLERANCE_M / lever for quantity, lever in _LEVER_M.items()}
-#: Before settling counts, every arm dimension must have closed ``_RESPONDED`` of its
-#: commanded travel (or have none to close), so an arm slow to start is not cut short.
+#: Rest only counts once every arm dimension has closed half its commanded travel.
 _RESPONDED = 0.5
-#: A gripper command also waits for the observed fingers: first until one moves faster than
-#: ``_FINGER_REST_M`` per tick, then until every finger stays slower than that for
-#: ``_FINGER_REST_TICKS`` ticks. A finger column is any observation state named like a gripper.
+#: A gripper change also waits for a finger to move faster than this (m/tick), then for all
+#: fingers to stay slower for this many ticks.
 _FINGER_REST_M = 5e-4
 _FINGER_REST_TICKS = 3
-#: Longest hold after the motion plays, in seconds.
+#: Longest hold after the motion plays, and the rest an arm outside tolerance gets within it (s).
 _SETTLE_S = 3.0
-#: An arm at rest but outside its tolerance is held this long, in seconds of continuous rest,
-#: in case it creeps in. It lives inside ``_SETTLE_S``.
 _GRACE_S = 1.5
 
 #: Standard name of a native leaf (the last dotted part, after any ``left_`` / ``right_``).
-_LEAF_STANDARD = {
-    leaf: standard
-    for standard, leaves in {
-        "x": "x dx",
-        "y": "y dy",
-        "z": "z dz",
-        "roll": "roll droll drx",
-        "pitch": "pitch dpitch dry",
-        "yaw": "yaw dyaw drz",
-    }.items()
-    for leaf in leaves.split()
+_LEAF_STANDARD = {"drx": "roll", "dry": "pitch", "drz": "yaw"} | {
+    leaf: axis for axis in ("x", "y", "z", "roll", "pitch", "yaw") for leaf in (axis, f"d{axis}")
 }
 
 #: Observation ``type`` tags that mark an image rather than a state vector.
@@ -171,10 +149,6 @@ Content = list[TextContent | ImageContent]
 
 #: Longest ``wait``, in sim seconds.
 MAX_WAIT_S = 100.0
-
-#: Ticks every ``wait`` plays, so its step always spans a tick. Interim: the trace viewer
-#: crashes on zero-tick steps. Set to 0 to let ``wait(0)`` play nothing again.
-MIN_WAIT_TICKS = 1
 
 #: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
 #: reached), and the dimensions named.
@@ -237,14 +211,9 @@ class DirectControl:
       range per second. Orientation travels this fraction of a full turn per second.
     - ``max_step`` - per-dimension step override by action name (e.g. a binary
       gripper that should switch in one step).
-    - ``tolerance`` - how close counts as reaching the target, by quantity:
-      ``position`` (m, default ``DEFAULT_TOLERANCE_M``), ``rotation`` and ``joint``
-      (rad, default the position tolerance over a 0.15 m and a 2.5 m lever). It picks
-      whether an arm at rest reads as at the target or stopped short of it, and holds one
-      at rest outside it for up to 1.5 s in case it creeps in; it never ends a move early
-      and is never shown to the model.
-    - ``timeout`` - safety cap, in seconds, on one call. The call returns earlier,
-      once the arm settles. Default 30 s.
+    - ``tolerance`` - how close counts as at the target, by quantity: ``position`` (m),
+      ``rotation`` and ``joint`` (rad, default scaled from ``position``). Picks the verdict only.
+    - ``timeout`` - safety cap, in seconds, on one call.
     - ``reference`` - maps observation data to the current action-space vector,
       where an absolute move starts on an episode's first call (later moves
       start from the last commanded target). Default: the one observation
@@ -253,14 +222,10 @@ class DirectControl:
       the verdict.
     - ``notes`` - embodiment facts the model needs (frames, units, gripper
       polarity), appended to the motion tool's description.
-    - ``time_limit`` - the episode's budget in sim seconds (default: none). Every
-      reply reports the time remaining. Spending it ends the episode as sim
-      termination does: the call in flight stops at the limit, later calls play
-      nothing, and replies say the episode has ended. The motion and ``wait`` tool
-      descriptions tell the model about the limit; the episode prompt does not.
+    - ``time_limit`` - the episode's budget in sim seconds (default: none). Spending it
+      ends the episode as sim termination does.
     - ``use_annotation`` - ask the model for a ``note`` on every call (default).
-      Off, the tools take no ``note``.
-    - ``use_wait`` - serve the ``wait`` tool (default). Off, only the motion tool.
+    - ``use_wait`` - serve the ``wait`` tool (default).
     """
 
     def __init__(
@@ -331,13 +296,12 @@ class DirectControl:
         """Serve the tools derived from *robot*'s contract; returns their ``mcp`` capability."""
         if self._capability is not None:
             return self._capability
-        # 1. Read the contract: the action's control kind picks the tool, its names are the
-        # dimensions.
+        # 1. Read the contract: the action's kind picks the tool, its names are the dimensions.
         self._robot = robot
         contract = robot.params["contract"]
         features: dict[str, dict[str, Any]] = contract["features"]
         action = next(f for f in features.values() if f["role"] == "action")
-        kind_name = action.get("state_type") or _TYPE_KINDS.get(action.get("type"), "")
+        kind_name = action.get("state_type") or _TYPE_KINDS.get(action.get("type") or "", "")
         kind = CONTROL_KINDS.get(kind_name)
         if kind is None:
             raise ValueError(
@@ -498,7 +462,8 @@ class DirectControl:
         seconds = duration or 0.0
         if not 0 <= seconds <= MAX_WAIT_S:
             raise ToolError(f"duration must be within [0, {MAX_WAIT_S:g}] s, got {seconds:g}")
-        ticks = max(MIN_WAIT_TICKS, round(seconds * self._rate))
+        # At least one tick: the trace viewer needs every step to span one.
+        ticks = max(1, round(seconds * self._rate))
         return await self._play(
             lambda obs: (np.repeat(self._start(obs)[None], ticks, axis=0), None, set()),
             note,
@@ -509,7 +474,13 @@ class DirectControl:
         targets: dict[str, Any] = {}
         groups: dict[str, dict[str, Any]] = {}
         for name in self._dims:
-            low, high = self._range(name)
+            axis = self._axes[name]
+            # Euler dimensions are unbounded in the contract; report them as ±pi.
+            low, high = (
+                (-math.pi, math.pi)
+                if axis.kind == "euler"
+                else (self._low[axis.index], self._high[axis.index])
+            )
             number = {"type": ["number", "null"], "description": f"[{low:.4g}, {high:.4g}]"}
             group, dot, leaf = name.partition(".")
             if dot:
@@ -519,13 +490,6 @@ class DirectControl:
         for group, leaves in groups.items():
             targets[group] = {"anyOf": [_object(leaves), {"type": "null"}]}
         return _object(targets)
-
-    def _range(self, name: str) -> tuple[float, float]:
-        # Euler dimensions are unbounded in the contract; report them as ±pi.
-        axis = self._axes[name]
-        if axis.kind == "euler":
-            return -math.pi, math.pi
-        return float(self._low[axis.index]), float(self._high[axis.index])
 
     def _describe(self) -> str:
         hold = "Set a dimension (or a whole group) to null to leave it as it is."
@@ -620,8 +584,10 @@ class DirectControl:
                     )
                     await self._record(obs)  # the episode's opening scene
                 # A spent time limit ends the episode the way sim termination does.
-                left = None if self._limit_ticks is None else self._limit_ticks - self._elapsed
-                if left == 0:
+                ticks_left = (
+                    None if self._limit_ticks is None else self._limit_ticks - self._elapsed
+                )
+                if ticks_left == 0:
                     obs["terminated"] = True
                 rows, goal, named = (
                     (np.zeros((0, len(self._names))), None, set())
@@ -640,8 +606,7 @@ class DirectControl:
                     return np.array([gap.distance for gap in self._gaps(vector, target, named)])
 
                 fingers = [self._finger_positions(obs)]
-                begun = proprio
-                origin = self._start(obs)  # the command the move starts from
+                start_pose, start_command = proprio, self._start(obs)
 
                 async def step(row: NDArray[np.float64]) -> None:
                     nonlocal played, obs, proprio
@@ -649,7 +614,7 @@ class DirectControl:
                     obs = await client.get_observation()
                     await self._record(obs)
                     played += 1
-                    if left is not None and played >= left:
+                    if ticks_left is not None and played >= ticks_left:
                         obs["terminated"] = True
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
@@ -668,35 +633,38 @@ class DirectControl:
                 rested = False
                 if goal is not None:
                     gaps = self._gaps(proprio, goal, named)
-                    grip = np.array([gap.quantity == "grip" for gap in gaps])
                     # A gripper is never held for here: its fingers are waited for instead.
                     floor = np.array([_FLOORS.get(gap.quantity, np.inf) for gap in gaps])
                     tolerance = np.array([self._tolerances[gap.quantity] for gap in gaps])
-                    travel = measure(origin, goal)
-                    gap_at_start = measure(begun, goal)
-                    watch = bool(self._fingers) and bool(np.any(grip & (travel > 0)))
+                    travel = measure(start_command, goal)
+                    gap_at_start = measure(start_pose, goal)
+                    wait_fingers = bool(self._fingers) and any(
+                        gap.quantity == "grip" and distance > 0
+                        for gap, distance in zip(gaps, travel, strict=True)
+                    )
                     held = 0
                     rest_ticks = 0
                     while True:
                         remaining = measure(proprio, goal)
                         finger_speed = np.abs(np.diff(fingers, axis=0))
-                        rested = False
-                        if len(speeds) >= 2 * self._window:
-                            windows = np.mean(
-                                np.reshape(speeds[-2 * self._window :], (2, self._window, -1)),
-                                axis=1,
+                        recent = speeds[-2 * self._window :]
+                        rested = (
+                            len(recent) == 2 * self._window
+                            and bool(
+                                np.all(np.reshape(recent, (2, self._window, -1)).mean(1) < floor)
                             )
-                            rested = bool(np.all(windows < floor)) and (
-                                not watch
+                            and (
+                                not wait_fingers
                                 or bool(np.all(finger_speed[-_FINGER_REST_TICKS:] < _FINGER_REST_M))
                             )
+                        )
                         # Slow to start looks like rest, so returning early waits for a response.
                         responded = bool(
                             np.all(
                                 (travel <= floor)
                                 | (gap_at_start - remaining >= _RESPONDED * travel)
                             )
-                        ) and (not watch or bool(np.any(finger_speed > _FINGER_REST_M)))
+                        ) and (not wait_fingers or bool(np.any(finger_speed > _FINGER_REST_M)))
                         rest_ticks = rest_ticks + 1 if rested else 0
                         arrived = bool(np.all(remaining <= tolerance))
                         if (
@@ -719,7 +687,7 @@ class DirectControl:
             rested=rested,
             gaps=gaps,
             goal=goal,
-            left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
+            ticks_left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
         )
 
     async def _record(self, obs: dict[str, Any]) -> None:
@@ -738,10 +706,7 @@ class DirectControl:
         move) for absolute control, zero displacement otherwise."""
         if not self._absolute:
             return np.zeros(len(self._names), dtype=np.float64)
-        if self._command is not None:
-            return self._command.copy()
-        assert self._reference is not None
-        return np.asarray(self._reference(obs["data"]), dtype=np.float64).reshape(-1)
+        return self._command.copy() if self._command is not None else self._proprio(obs)
 
     def _plan(self, values: dict[str, float], obs: dict[str, Any]) -> Plan:
         """Action rows (cut at the safety cap), the intended goal, and named dims."""
@@ -751,6 +716,7 @@ class DirectControl:
         start = self._start(obs)
         end = start.copy()  # unnamed dimensions keep their start value (they hold)
         named = set(values)
+        # Scalar dimensions: range-check and write straight into the goal.
         for name, value in values.items():
             axis = self._axes[name]
             if axis.kind == "scalar":
@@ -761,6 +727,8 @@ class DirectControl:
                         f"[{self._low[index]:.4g}, {self._high[index]:.4g}]"
                     )
                 end[index] = value
+        # Rotations: start from the current euler, overwrite the named angles, convert back
+        # to the contract's representation.
         addressed = [b for b in self._orientations if any(self._axes[n].block is b for n in named)]
         for block in addressed:
             roll, pitch, yaw = xyzw_to_euler(block.read(start))
@@ -774,7 +742,7 @@ class DirectControl:
             if angular_distance(block.read(start), target_q) <= 1e-8:
                 continue
             block.write(end, target_q)
-        # The slowest dimension sets the tick count (scalars by step, rotations by angle).
+        # Duration: the slowest dimension sets the tick count (scalars by step, rotations by angle).
         span = end - start
         scalar = [i for i in range(len(self._names)) if i not in self._orient_columns]
         ticks = 1
@@ -796,6 +764,7 @@ class DirectControl:
         play = min(ticks, self._max_ticks)
         clipped = play < ticks
         fractions = np.linspace(1 / ticks, play / ticks, play)  # progress 0→1 per tick
+        # Build one action row per tick.
         if not self._absolute:
             rows = np.repeat((span / ticks)[None], play, axis=0)
         elif not self._orientations:
@@ -854,13 +823,13 @@ class DirectControl:
         rested: bool,
         gaps: list[_Gap] | None,
         goal: NDArray[np.float64] | None,
-        left: int | None,
+        ticks_left: int | None,
     ) -> Content:
         data = obs["data"]
         # Keep this opening line: the trace viewer reads it to place each call on the video.
         opening = f"Played {played} steps ({played / self._rate:.1f} s)."
-        if left is not None:
-            opening += f" Time remaining: {left / self._rate:.1f} s."
+        if ticks_left is not None:
+            opening += f" Time remaining: {ticks_left / self._rate:.1f} s."
         lines = [opening]
         for key, names in self._states.items():
             vector = np.array(data[key], dtype=np.float64).reshape(-1)
@@ -878,15 +847,9 @@ class DirectControl:
         arm = [gap for gap in gaps or [] if gap.quantity != "grip"]
         if goal is not None and not arm and self._fingers:
             # A gripper call has no verdict: a jam on an object must not read as success.
+            names = [name for name, _, _ in self._fingers]
             lines.append(
-                "fingers: "
-                + _labeled(
-                    zip(
-                        (name for name, _, _ in self._fingers),
-                        self._finger_positions(obs),
-                        strict=True,
-                    )
-                )
+                "fingers: " + _labeled(zip(names, self._finger_positions(obs), strict=True))
             )
         if arm:
             shown = [gap for gap in gaps or [] if self._reads_grip or gap.quantity != "grip"]
@@ -903,7 +866,7 @@ class DirectControl:
             lines.append(
                 f"{verdict} Remaining offsets: {', '.join(_offset(gap) for gap in ranked)}."
             )
-        if left == 0:
+        if ticks_left == 0:
             lines.append("The time limit is reached.")
         if obs["terminated"]:
             lines.append("The episode has ended; stop calling tools.")
@@ -1022,12 +985,4 @@ async def _wait_until_listening(task: asyncio.Task[None], port: int) -> None:
         return
 
 
-__all__ = [
-    "CONTROL_KINDS",
-    "DEFAULT_TIMEOUT_S",
-    "DEFAULT_TOLERANCE_M",
-    "MAX_WAIT_S",
-    "MIN_WAIT_TICKS",
-    "ControlKind",
-    "DirectControl",
-]
+__all__ = ["CONTROL_KINDS", "DEFAULT_TIMEOUT_S", "DirectControl"]

@@ -124,12 +124,8 @@ def probe_success(info: Any, *, num_envs: int = 1) -> NDArray[Any] | None:
 
 
 def _with_final_obs(obs: Any, info: Any, done: NDArray[Any]) -> Any:
-    """*obs* with each finished env's row replaced by its ``info["final_obs"]`` row.
-
-    A sim that resets a finished env inside ``step`` returns the new episode's first frame for
-    it, so the frame the episode ended on is reported separately: an obs-shaped batch (Isaac
-    Lab) or one obs per env (gymnasium vector envs). Without ``final_obs``, *obs* is as is.
-    """
+    """*obs* with each finished env's row replaced by its last frame from ``info["final_obs"]``:
+    an obs-shaped batch (Isaac Lab) or one obs per env (gymnasium same-step autoreset)."""
     final = info.get("final_obs") if isinstance(info, dict) else None
     if final is None or not done.any():
         return obs

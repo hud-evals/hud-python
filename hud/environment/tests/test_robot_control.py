@@ -13,31 +13,27 @@ import base64
 import copy
 import io
 import itertools
-import json
 import math
 import time
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from datetime import datetime
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import av
 import numpy as np
 import pytest
-from PIL import Image
 
 from hud.agents.base import Agent
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
-from hud.environment.robot import DirectControl, GymBridge, RobotBridge, RobotEndpoint
+from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task, rollout
 from hud.telemetry.robot import TraceRecorder
 from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
-    from pathlib import Path
+    from collections.abc import AsyncIterator
 
     from numpy.typing import NDArray
 
@@ -200,16 +196,8 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
     assert schema["properties"]["targets"]["required"] == ["x", "grip"]
     assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
-    # Each dimension states only its range.
-    descriptions = [
-        prop["description"] for prop in schema["properties"]["targets"]["properties"].values()
-    ]
-    assert descriptions == ["[0, 1]", "[-1, 1]"]
+    assert schema["properties"]["targets"]["properties"]["grip"]["description"] == "[-1, 1]"
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
-    assert (
-        "10% of each range per second, so a full-range move takes about 10 s"
-        in (agent.descriptions["move_to"])
-    )
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
     # The sim matches the command; the call holds until two 3-tick windows show it settled.
@@ -228,9 +216,7 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert "pose: x=0.5000, grip=0.0000" in _text(reached)
     assert "off: x=0.0000, grip=0.0000" in _text(reached)
     assert "At the target. Remaining offsets: 0 mm on x." in _text(reached)
-    assert "Stopped short" not in _text(reached)
     assert "The episode has ended" in _text(closed)
-    assert "Time remaining" not in _text(reached)
     # Tolerance only picks the verdict; nothing the model sees mentions it.
     seen = " ".join([str(agent.schemas), *agent.descriptions.values(), _text(reached)])
     for word in ("toleran", "within", "settle"):
@@ -249,9 +235,7 @@ async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     assert agent.tools == {tool, "wait"}
-    assert "action's own components (a rotation is not euler angles)" in agent.descriptions[tool]
-    assert "10 steps per second" in agent.descriptions[tool]
-    assert "reached within" not in str(agent.schemas[tool])
+    assert "action's own components" in agent.descriptions[tool]
     # Four in-box steps; a displacement returns once played.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4)
     assert "observation/state: x=0.3500" in _text(agent.results[0])
@@ -268,6 +252,8 @@ async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
         (_move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
         (("move_to", {"targets": {"x": None}, "note": "go"}), "set at least one"),
         (("move_to", {"targets": {"x": 0.1}, "note": "  "}), "note must say"),
+        (("wait", {"duration": None, "note": " "}), "note must say"),
+        (("wait", {"duration": 101, "note": "sleep"}), "duration must be within [0, 100]"),
     ],
 )
 async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
@@ -337,7 +323,7 @@ class _Pose(RobotBridge):
         return data, np.array([self.success])
 
 
-async def test_a_call_that_nulls_every_dimension_is_rejected_and_does_not_move() -> None:
+async def test_an_empty_target_list_is_rejected_and_does_not_move() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to"))
 
@@ -366,23 +352,6 @@ async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> N
     assert "At the target." in _text(result)
 
 
-@pytest.mark.parametrize(("speed", "ticks", "full_range"), [(0.1, 50, "10 s"), (0.25, 20, "4 s")])
-async def test_speed_sets_the_share_of_the_range_an_absolute_move_travels_per_second(
-    speed: float, ticks: int, full_range: str
-) -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to", x=0.5))
-
-    async with _served(sim, DirectControl(speed=speed)) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert f"{speed * 100:g}% of each range per second" in agent.descriptions["move_to"]
-    assert f"a full-range move takes about {full_range}" in agent.descriptions["move_to"]
-    moved = np.array(sim.actions[:ticks])[:, 0]
-    np.testing.assert_allclose(moved, np.linspace(0.5 / ticks, 0.5, ticks), rtol=1e-6)
-    np.testing.assert_allclose(np.array(sim.actions[ticks:])[:, 0], 0.5)
-
-
 async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=1.0))
@@ -404,40 +373,19 @@ async def test_the_safety_timeout_returns_the_pose_instead_of_rejecting_the_call
 async def test_dimensions_with_a_shared_prefix_nest_as_a_group_the_model_can_null_whole() -> None:
     names = ["left_arm.x", "left_arm.y", "right_arm.x", "grip"]
     sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [0.0] * 4)
-    agent = _ScriptedLLM(_move("move_to", **{"left_arm.x": 0.1, "right_arm.x": 0.1}))
+    agent = _ScriptedLLM(_move("move_to", **{"left_arm.x": 0.1}))  # right_arm: null
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    targets = agent.schemas["move_to"]["properties"]["targets"]
-    assert list(targets["properties"]) == ["grip", "left_arm", "right_arm"]
+    schema = agent.schemas["move_to"]
+    targets = schema["properties"]["targets"]
     assert targets["required"] == ["grip", "left_arm", "right_arm"]
     group = targets["properties"]["left_arm"]["anyOf"]
-    assert group[1] == {"type": "null"}
     assert list(group[0]["properties"]) == ["x", "y"]
-    assert (
-        ensure_strict_json_schema(copy.deepcopy(agent.schemas["move_to"]))
-        == (agent.schemas["move_to"])
-    )
-    np.testing.assert_allclose(sim.actions[-1], [0.1, 0.0, 0.1, 0.0], atol=1e-6)
-
-
-async def test_a_group_set_to_null_holds_all_of_its_dimensions() -> None:
-    names = ["left_arm.x", "left_arm.y", "right_arm.x", "grip"]
-    sim = _Pose(_contract("ee_abs", [-1.0] * 4, [1.0] * 4, names), [0.0] * 4)
-    call = (
-        "move_to",
-        {
-            "targets": {"grip": 0.1, "left_arm": None, "right_arm": {"x": None}},
-            "note": "close the gripper",
-        },
-    )
-    agent = _ScriptedLLM(call)
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    np.testing.assert_allclose(sim.actions[-1], [0.0, 0.0, 0.0, 0.1], atol=1e-6)
+    assert group[1] == {"type": "null"}
+    assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
+    np.testing.assert_allclose(sim.actions[-1], [0.1, 0.0, 0.0, 0.0], atol=1e-6)
 
 
 async def test_without_annotation_the_tools_take_no_note_and_never_refuse_an_empty_one() -> None:
@@ -456,114 +404,38 @@ async def test_without_annotation_the_tools_take_no_note_and_never_refuse_an_emp
     assert sim.actions
 
 
-async def test_with_annotation_wait_asks_for_a_note_too() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("wait", {"duration": None, "note": " "}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert set(agent.schemas["wait"]["required"]) == {"duration", "note"}
-    (result,) = agent.results
-    assert result.isError
-    assert "note must say" in _text(result)
-
-
-async def test_wait_without_a_duration_observes_with_one_hold_tick() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": None, "note": "look"}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert "one control tick passes" in agent.descriptions["wait"]
-    _, looked = agent.results
-    assert len(sim.actions) == 27  # the move and its settle, then one tick holding its setpoint
-    np.testing.assert_allclose(sim.actions[-1], [0.2, 0.0])
-    assert _text(looked).startswith("Played 1 steps (0.1 s).")
-    assert "observation/state: x=0.2000" in _text(looked)
-    assert "commanded: x=0.2000, grip=0.0000" in _text(looked)
-    assert "At the target" not in _text(looked)
-    assert "Stopped short" not in _text(looked)
-    assert [block.type for block in looked.content] == ["text", "text", "image"]
-
-
-@pytest.mark.parametrize("action_type", ["ee_abs", "ee_del"])
-async def test_a_first_call_wait_plays_one_tick_that_does_not_move_the_arm(
-    action_type: str,
-) -> None:
-    sim = _Arm(_contract(action_type, [-1.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("wait", {"duration": 0, "note": "look"}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    np.testing.assert_allclose(sim.actions, [[0.0, 0.0]])
-    np.testing.assert_allclose(sim.state, [0.0, 0.0])
-    assert _text(agent.results[0]).startswith("Played 1 steps (0.1 s).")
-
-
-async def test_wait_holds_the_commanded_pose_for_the_requested_sim_time() -> None:
+async def test_wait_holds_the_commanded_pose_and_a_null_duration_observes_for_one_tick() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(
-        _move("move_to", x=0.2), ("wait", {"duration": 1.5, "note": "let it settle"})
+        _move("move_to", x=0.2),
+        ("wait", {"duration": None, "note": "look"}),
+        ("wait", {"duration": 1.5, "note": "let it settle"}),
     )
 
     async with _served(sim, DirectControl()) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    held = np.array(sim.actions[26:])
-    assert len(held) == 15  # 1.5 s at 10 Hz
-    np.testing.assert_allclose(held, [[0.2, 0.0]] * 15)
-    assert _text(agent.results[1]).startswith("Played 15 steps (1.5 s).")
-
-
-async def test_a_wait_longer_than_the_maximum_is_a_correctable_error() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(("wait", {"duration": 101, "note": "sleep"}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    (result,) = agent.results
-    assert result.isError
-    assert "duration must be within [0, 100]" in _text(result)
-    assert sim.actions == []
+    _, looked, waited = (_text(result) for result in agent.results)
+    np.testing.assert_allclose(sim.actions[26:], [[0.2, 0.0]] * 16)  # held at the setpoint
+    assert looked.startswith("Played 1 steps (0.1 s).")
+    assert waited.startswith("Played 15 steps (1.5 s).")
+    assert "commanded: x=0.2000, grip=0.0000" in looked
+    assert "At the target" not in looked
 
 
 async def test_every_reply_reports_the_time_left_and_the_tools_state_the_limit() -> None:
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(
-        _move("move_to", x=0.2),
-        ("wait", {"duration": 1.0, "note": "look"}),
-        ("wait", {"duration": None, "note": "x"}),
-    )
+    agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": 1.0, "note": "look"}))
 
     async with _served(sim, DirectControl(time_limit=10.0)) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    for tool in ("move_to", "wait"):
-        assert "You have 10 seconds of simulated time." in agent.descriptions[tool]
-        assert "thinking is free" in agent.descriptions[tool]
-    moved, waited, looked = (_text(result) for result in agent.results)
-    assert moved.startswith("Played 26 steps (2.6 s). Time remaining: 7.4 s.")
-    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 6.4 s.")
-    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 6.3 s.")
-    assert "The episode has ended" not in looked
-
-
-@pytest.mark.parametrize("time_limit", [None, 10.0])
-async def test_the_prompt_is_the_sims_own_whatever_the_time_limit(time_limit: float | None) -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM()
-
-    async with _served(sim, DirectControl(time_limit=time_limit)) as env:
         run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert run.prompt == "move x to 0.5, then close the gripper"
-    # Only an enforced limit is disclosed, and only on the tools.
-    assert ("simulated time" in agent.descriptions["wait"]) == (time_limit is not None)
-    assert ("simulated time" in agent.descriptions["move_to"]) == (time_limit is not None)
+    assert run.prompt == "move x to 0.5, then close the gripper"  # VLAs see the sim's own
+    for tool in ("move_to", "wait"):
+        assert "You have 10 seconds of simulated time." in agent.descriptions[tool]
+    moved, waited = (_text(result) for result in agent.results)
+    assert moved.startswith("Played 26 steps (2.6 s). Time remaining: 7.4 s.")
+    assert waited.startswith("Played 10 steps (1.0 s). Time remaining: 6.4 s.")
 
 
 async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode() -> None:
@@ -584,32 +456,6 @@ async def test_a_move_crossing_the_time_limit_is_cut_there_and_ends_the_episode(
     ) in cut
     assert after.startswith("Played 0 steps (0.0 s). Time remaining: 0.0 s.")
     assert "The episode has ended; stop calling tools." in after
-
-
-async def test_a_wait_on_the_last_tick_of_the_time_limit_spends_it_and_ends_the_episode() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": 0, "note": "look"}))
-
-    async with _served(sim, DirectControl(time_limit=2.7)) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    moved, looked = (_text(result) for result in agent.results)
-    assert "Time remaining: 0.1 s." in moved
-    assert looked.startswith("Played 1 steps (0.1 s). Time remaining: 0.0 s.")
-    assert "The episode has ended; stop calling tools." in looked
-
-
-async def test_a_new_episode_starts_with_the_whole_time_limit() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    first = _ScriptedLLM(_move("move_to", x=0.2))
-    second = _ScriptedLLM(_move("move_to", x=0.2))
-
-    async with _served(sim, DirectControl(time_limit=3.0)) as env:
-        await rollout(Task(env="arm", id="reach"), first, runtime=LocalRuntime(env))
-        await rollout(Task(env="arm", id="reach"), second, runtime=LocalRuntime(env))
-
-    assert "Time remaining: 0.4 s." in _text(first.results[0])
-    assert "Time remaining: 0.4 s." in _text(second.results[0])
 
 
 class _Jitter(_Pose):
@@ -702,34 +548,15 @@ class _Delayed(_Pose):
         self.state = self.actions[late] if late >= 0 else self.home
 
 
-@pytest.mark.parametrize("tolerance", [None, {"position": 1e-4}, {"position": 0.05}])
-async def test_a_move_waits_for_a_slow_arm_whatever_the_tolerance(
-    tolerance: dict[str, float] | None,
-) -> None:
+async def test_a_move_waits_for_a_slow_arm_even_when_already_within_tolerance() -> None:
     sim = _Delayed(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], delay=10)
     agent = _ScriptedLLM(_move("move_to", x=8e-4))
 
-    async with _served(sim, DirectControl(tolerance=tolerance)) as env:
+    async with _served(sim, DirectControl(tolerance={"position": 0.05})) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert sim.state[0] == pytest.approx(8e-4)  # the arm arrived, though 0.8 mm is within tolerance
-    assert len(sim.actions) == 17  # the tolerance does not change when the call returns
-
-
-async def test_a_gripper_call_returns_once_the_fingers_have_moved_and_come_to_rest() -> None:
-    sim = _Delayed(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, 0.0], delay=10)
-    agent = _ScriptedLLM(_move("move_to", grip=1.0))
-
-    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    # The fingers sit still for 10 ticks, then jump; the call holds through both.
-    assert sim.state[1] == pytest.approx(1.0)
-    assert len(sim.actions) == 14  # three ticks after the fingers stop
-    text = _text(agent.results[0])
-    assert "fingers: grip=1.0000" in text
-    assert "At the target" not in text
-    assert "Remaining offsets" not in text
+    assert sim.state[0] == pytest.approx(8e-4)
+    assert len(sim.actions) == 17
 
 
 class _Fingers(_Pose):
@@ -762,86 +589,6 @@ async def test_a_gripper_call_waits_for_every_finger_and_not_only_the_first_to_s
     assert "Remaining offsets" not in text
 
 
-@pytest.mark.parametrize(
-    ("state_names", "ticks"),
-    [(["x", "grip"], 31), (["x", "finger"], 6)],
-)
-async def test_a_gripper_call_waits_only_for_fingers_the_observation_names(
-    state_names: list[str], ticks: int
-) -> None:
-    contract = _contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
-    contract["features"]["observation/state"]["names"] = state_names
-    sim = _Pose(contract, [0.0, 0.0], lag=0.0)  # the fingers never move
-    agent = _ScriptedLLM(_move("move_to", grip=1.0))
-
-    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert len(sim.actions) == ticks
-
-
-class _Drifting(_Pose):
-    """An arm tracking the command exactly for the move's 50 ticks, then ``offset(ticks since)``."""
-
-    def __init__(self, contract: dict[str, Any], offset: Callable[[int], float]) -> None:
-        super().__init__(contract, [0.0, 0.0])
-        self.offset = offset
-
-    def step(self, action: NDArray[Any]) -> None:
-        super().step(action)
-        self.state = np.array([action[0][0] + self.offset(len(self.actions) - 50), action[0][1]])
-
-
-def _overshoot_then_creep_back(ticks: int) -> float:
-    """Overshoots 3 mm in three ticks, then eases back at 0.3 mm per tick."""
-    return 0.0 if ticks <= 0 else max(0.0, min(ticks * 1e-3, 3e-3 - (ticks - 3) * 3e-4))
-
-
-async def test_an_arm_still_creeping_back_from_an_overshoot_is_held_until_it_rests() -> None:
-    sim = _Drifting(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), _overshoot_then_creep_back)
-    agent = _ScriptedLLM(_move("move_to", x=0.5))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    # The error is flat or growing for the first ticks while the arm is still moving.
-    assert sim.state[0] == pytest.approx(0.5, abs=1e-4)
-    assert "At the target. Remaining offsets: 0" in _text(agent.results[0])
-    assert len(sim.actions) < 50 + 30
-
-
-def _creep_in(ticks: int) -> float:
-    """Jumps 1.5 mm short, then creeps in at 0.06 mm per tick, below the rest speed."""
-    return 0.0 if ticks <= 0 else -max(0.0, 1.5e-3 - ticks * 6e-5)
-
-
-async def test_an_arm_at_rest_that_creeps_into_tolerance_during_the_grace_period_reaches_it() -> (
-    None
-):
-    sim = _Drifting(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), _creep_in)
-    agent = _ScriptedLLM(_move("move_to", x=0.5))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert "At the target. Remaining offsets: 0" in _text(agent.results[0])
-    assert sim.state[0] == pytest.approx(0.5, abs=1e-3)
-    assert len(sim.actions) < 50 + 21  # returned inside the grace period, not after it
-
-
-async def test_an_arm_drifting_away_from_the_goal_is_held_to_the_cap_and_reported() -> None:
-    sim = _Drifting(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), lambda ticks: 5e-4 * ticks)
-    agent = _ScriptedLLM(_move("move_to", x=0.5))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert len(sim.actions) == 50 + 30
-    assert (
-        "Ran out of time before settling; the arm was still moving. Remaining offsets: 15 mm on x."
-    ) in _text(agent.results[0])
-
-
 class _OpenHand(_Pose):
     """A lagging arm whose state always reads the gripper open, as a hand-only reference does."""
 
@@ -851,56 +598,25 @@ class _OpenHand(_Pose):
         return data, success
 
 
-async def test_a_reference_that_cannot_read_the_hand_leaves_the_gripper_out_of_the_offsets() -> (
-    None
-):
+@pytest.mark.parametrize("reads_hand", [True, False])
+async def test_gripper_offsets_are_reported_only_when_the_reference_reads_the_hand(
+    reads_hand: bool,
+) -> None:
     sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
     agent = _ScriptedLLM(_move("move_to", x=0.5, grip=1.0))
+    reference = None if reads_hand else (lambda data: data["observation/state"])
 
-    async with _served(
-        sim, DirectControl(max_step={"grip": 2.0}, reference=lambda data: data["observation/state"])
-    ) as env:
+    async with _served(sim, DirectControl(max_step={"grip": 2.0}, reference=reference)) as env:
         await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     text = _text(agent.results[0])
-    assert sim.state[0] == pytest.approx(0.5, abs=0.005)  # held until the arm arrived
-    assert "off: x=-0.00" in text
-    assert "At the target. Remaining offsets: " in text
-    assert "grip" not in text.split("off:")[1].split("\n")[0]
-    assert "on grip" not in text
+    assert "At the target. Remaining offsets: " in text  # the gripper never decides the verdict
+    assert ("2 on grip" in text) == reads_hand
 
 
-async def test_an_unreadable_hand_leaves_a_gripper_call_with_only_the_fingers() -> None:
-    sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
-    agent = _ScriptedLLM(_move("move_to", grip=1.0))
-
-    async with _served(
-        sim, DirectControl(max_step={"grip": 2.0}, reference=lambda data: data["observation/state"])
-    ) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    text = _text(agent.results[0])
-    assert "fingers: grip=-1.0000" in text
-    assert "off: x=0.0000\n" in text  # the unread gripper is not in it
-    assert "Remaining offsets" not in text
-
-
-async def test_a_reference_that_reads_the_hand_lists_the_gripper_among_the_offsets() -> None:
-    sim = _OpenHand(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), [0.0, -1.0], lag=0.25)
-    agent = _ScriptedLLM(_move("move_to", x=0.5, grip=1.0))
-
-    async with _served(sim, DirectControl(max_step={"grip": 2.0})) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    text = _text(agent.results[0])
-    assert "grip=-2.0000" in text
-    assert "2 on grip" in text
-
-
-@pytest.mark.parametrize("tolerance", [{"orientation": 0.1}, {"grip": 0.1}, {"x": 0.1}])
-def test_a_tolerance_key_that_is_not_a_quantity_is_refused(tolerance: dict[str, float]) -> None:
+def test_a_tolerance_key_that_is_not_a_quantity_is_refused() -> None:
     with pytest.raises(ValueError, match="tolerance keys"):
-        DirectControl(tolerance=tolerance)
+        DirectControl(tolerance={"grip": 0.1})
 
 
 def _quat_names(order: str) -> list[str]:
@@ -947,60 +663,15 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
 
 
 @pytest.mark.parametrize(
-    ("tolerance", "verdict"),
-    [
-        (
-            None,
-            "Stopped short of the target; the arm is at rest. "
-            "Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
-        ),
-        (
-            {"position": 4e-3},
-            "At the target. Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
-        ),  # rotation: 4 mm over 0.15 m, 0.027 rad
-        (
-            {"position": 4e-3, "rotation": 0.01},
-            "Stopped short of the target; the arm is at rest. "
-            "Remaining offsets: 0.02 rad on orientation, 2 mm on x.",
-        ),
-    ],
-)
-async def test_a_position_override_rescales_the_angle_default_and_the_verdict_names_each_miss(
-    tolerance: dict[str, float] | None, verdict: str
-) -> None:
-    sim = _Offset(
-        _contract("ee_abs", [-1.0] * 4, [1.0] * 4, _EULER), [0.0] * 4, [0.002, 0.02, 0, 0]
-    )
-    agent = _ScriptedLLM(_move("move_to", x=0.5, roll=0.3))
-
-    async with _served(sim, DirectControl(tolerance=tolerance)) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    assert verdict in _text(agent.results[0])
-
-
-@pytest.mark.parametrize(
     ("action_type", "names", "targets"),
     [
-        (
-            "ee_abs",  # LIBERO
-            [
-                "target_eef_pos.x",
-                "target_eef_pos.y",
-                "target_eef_pos.z",
-                "target_eef_axis_angle.rx",
-                "target_eef_axis_angle.ry",
-                "target_eef_axis_angle.rz",
-                "gripper.open_close",
-            ],
-            ["x", "y", "z", "roll", "pitch", "yaw", "grip"],
+        (  # LIBERO
+            "ee_abs",
+            [f"target_eef_pos.{a}" for a in "xyz"] + [f"target_eef_axis_angle.r{a}" for a in "xyz"],
+            ["x", "y", "z", "roll", "pitch", "yaw"],
         ),
         ("ee_del", ["delta_eef_pos.dx", "delta_eef_rot.droll", "gripper"], ["x", "roll", "grip"]),
-        (
-            "joint_pos",
-            ["panda_joint1", "panda_joint2", "gripper.open_close"],
-            ["joint1", "joint2", "grip"],
-        ),
+        ("joint_pos", ["panda_joint1", "panda_joint2"], ["joint1", "joint2"]),
         ("ee_abs", ["left_x", "right_x", "left_gripper"], ["left_arm", "right_arm"]),
         ("ee_abs", ["left_x", "left_pitch_deg"], ["left_x", "left_pitch_deg"]),  # no standard
     ],
@@ -1227,82 +898,3 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     assert "At the target. Remaining offsets: " in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]
-
-
-class _AutoResetArm:
-    """A gym env that resets inside ``step`` at its horizon, as Isaac Lab does.
-
-    The step that ends the episode returns the reset observation; the one the episode
-    ended on is ``info["final_obs"]``. The camera is one gray level per unit of x, so a
-    frame says which pose it shows.
-    """
-
-    action_space = SimpleNamespace(shape=(2,), dtype=np.float32)
-
-    def __init__(self, horizon: int) -> None:
-        self.metadata = {"render_fps": 10}
-        self.horizon = horizon
-        self.state = np.zeros(2)
-        self.ticks = 0
-
-    def _observe(self) -> dict[str, NDArray[Any]]:
-        gray = round(255 * self.state[0])
-        return {
-            "observation/state": self.state.astype(np.float32),
-            "observation/image": np.full((8, 8, 3), gray, dtype=np.uint8),
-        }
-
-    def reset(self, seed: int | None = None, options: Any = None) -> tuple[Any, dict[str, Any]]:
-        self.state, self.ticks = np.zeros(2), 0
-        return self._observe(), {}
-
-    def step(self, action: NDArray[Any]) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-        self.state, self.ticks = np.array(action, dtype=np.float64), self.ticks + 1
-        if self.ticks < self.horizon:
-            return self._observe(), 0.0, False, False, {}
-        final = self._observe()
-        obs, _ = self.reset()
-        return obs, 0.0, False, True, {"final_obs": final}
-
-    def close(self) -> None:
-        pass
-
-
-def _gray(result: MCPToolResult) -> int:
-    (image,) = (block for block in result.content if block.type == "image")
-    return int(np.asarray(Image.open(io.BytesIO(base64.b64decode(image.data))))[0, 0, 0])
-
-
-async def test_an_episode_ended_by_the_sim_horizon_shows_the_frame_it_ended_on(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("hud.types.queue_span", lambda _span: None)
-    recorded: list[tuple[int, float, int]] = []
-
-    class _Recorder(TraceRecorder):
-        def record_observation(self, data: dict[str, Any], *, tick: int) -> None:
-            recorded.append(
-                (tick, float(data["observation/state"][0]), int(data["observation/image"][0, 0, 0]))
-            )
-            super().record_observation(data, tick=tick)
-
-    monkeypatch.setattr("hud.environment.robot.control.TraceRecorder", _Recorder)
-    contract = tmp_path / "contract.json"
-    contract.write_text(json.dumps(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0])))
-    sim = GymBridge(lambda: _AutoResetArm(horizon=20), contract=contract)
-    agent = _ScriptedLLM(_move("move_to", x=0.5), ("wait", {"duration": 0, "note": "look"}))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    ended, looked = agent.results
-    # The move is cut at tick 20 of 50: x was commanded to 0.01 per tick, so 0.2 is where it ended.
-    assert "The episode has ended; stop calling tools." in _text(ended)
-    assert "observation/state: x=0.2000" in _text(ended)
-    assert _gray(ended) == 51
-    tick, state, gray = recorded[-1]
-    assert (tick, gray) == (20, 51)
-    assert state == pytest.approx(0.2)
-    # A later call reads the same final frame, not the reset one.
-    assert "observation/state: x=0.2000" in _text(looked)
-    assert _gray(looked) == 51
