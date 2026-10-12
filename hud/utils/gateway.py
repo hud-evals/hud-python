@@ -150,10 +150,15 @@ def build_gateway_client(provider: str) -> GatewayClient:
         from google import genai
         from google.genai.types import HttpOptions, HttpRetryOptions
 
+        # The gateway refuses with 503 + Retry-After (one second) when a pod is at
+        # capacity. google-genai retries 5xx on its own backoff and never reads the
+        # header, so keep that backoff on the gateway's scale: ten agents behind a
+        # cap of two drained in 15 s with these values and in 135 s with the
+        # 10 s floor used for Google's own API.
         return genai.Client(
             api_key=settings.api_key,
             http_options=HttpOptions(
-                retry_options=HttpRetryOptions(initial_delay=10),
+                retry_options=HttpRetryOptions(initial_delay=1, max_delay=5),
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
                 client_args={
