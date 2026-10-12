@@ -49,9 +49,6 @@ logger = logging.getLogger(__name__)
 #: Conventional info keys carrying env-reported success, probed in order.
 SUCCESS_KEYS = ("success", "is_success", "task_success")
 
-#: Info key under which an auto-resetting env reports the observation an episode ended on.
-FINAL_OBS_KEY = "final_obs"
-
 
 class _TorchModule(Protocol):
     def as_tensor(self, data: object, *, device: object = None) -> object: ...
@@ -126,37 +123,24 @@ def probe_success(info: Any, *, num_envs: int = 1) -> NDArray[Any] | None:
     return None
 
 
-def final_observations(
-    info: Any, done: NDArray[Any], *, batched: bool
-) -> dict[int, dict[str, NDArray[Any]]]:
-    """Terminal rows of the envs that finished this step, keyed by slot: name -> array.
+def _with_final_obs(obs: Any, info: Any, done: NDArray[Any]) -> Any:
+    """*obs* with each finished env's row replaced by its ``info["final_obs"]`` row.
 
-    An env that resets inside ``step`` returns the *reset* observation for a finished
-    env, so the frame the episode ended on is gone unless the env reports it as
-    ``info["final_obs"]``: shaped like the observation, with the finished envs' rows
-    holding their last observation. Empty when the env reports none.
+    A sim that resets a finished env inside ``step`` returns the new episode's first frame for
+    it, so the frame the episode ended on is reported separately: an obs-shaped batch (Isaac
+    Lab) or one obs per env (gymnasium vector envs). Without ``final_obs``, *obs* is as is.
     """
-    final = info.get(FINAL_OBS_KEY) if isinstance(info, dict) else None
-    if final is None:
-        return {}
-    leaves = flatten_observation(final)
-    rows: dict[int, dict[str, NDArray[Any]]] = {}
-    for slot in np.flatnonzero(done):
-        row = {k: v[slot] for k, v in leaves.items()} if batched else leaves
-        state, frames = split_observation(row)
-        rows[int(slot)] = {k: np.array(v) for k, v in {**state, **frames}.items()}
+    final = info.get("final_obs") if isinstance(info, dict) else None
+    if final is None or not done.any():
+        return obs
+    rows = {k: np.array(to_numpy(v)) for k, v in flatten_observation(obs).items()}
+    per_env = isinstance(final, np.ndarray) and final.dtype == object
+    leaves = {} if per_env else flatten_observation(final)
+    for i in np.flatnonzero(done):
+        last = flatten_observation(final[i]) if per_env else {k: v[i] for k, v in leaves.items()}
+        for name, value in last.items():
+            rows[name][i] = to_numpy(value)
     return rows
-
-
-def overlay_final(
-    arrays: dict[str, NDArray[Any]], finals: dict[int, dict[str, NDArray[Any]]]
-) -> dict[str, NDArray[Any]]:
-    """*arrays* (name -> ``[N, ...]``) with each slot's terminal row written over its reset one."""
-    out = {name: np.array(value) for name, value in arrays.items()} if finals else arrays
-    for slot, row in finals.items():
-        for name in row.keys() & out.keys():
-            out[name][slot] = row[name]
-    return out
 
 
 def detect_fps(env: Any) -> int:
@@ -286,8 +270,6 @@ class GymBridge(RobotBridge):
         self.env: Any = None
         self.batched = False  # env carries a leading [N] dim (any env exposing num_envs)
         self._obs: Any = None  # latest observation (reset or step)
-        # Terminal rows of finished slots, served instead of the reset frame the env returned.
-        self._final: dict[int, dict[str, NDArray[Any]]] = {}
         self._instance: Any = None  # current env-defining args; a mismatch rebuilds
         self._is_torch = False
         # Per-slot episode scoring, sticky until the next reset.
@@ -384,7 +366,6 @@ class GymBridge(RobotBridge):
         seed = episodic.pop("seed", None)
         obs, _ = self.env.reset(seed=seed, options=episodic or None)
         self._obs = obs  # the first frame an agent sees on connect/reset
-        self._final = {}
         self._is_torch = "torch" in type(_first_leaf(obs)).__module__
         self._done = np.zeros(self.num_envs, dtype=bool)
         self._success = np.zeros(self.num_envs, dtype=bool)
@@ -451,16 +432,15 @@ class GymBridge(RobotBridge):
             torch = cast("_TorchModule", importlib.import_module("torch"))
             env_action = torch.as_tensor(act, device=getattr(self._unwrapped, "device", None))
         obs, reward, terminated, truncated, info = self.env.step(env_action)
-        self._obs = obs
         done = np.atleast_1d(to_numpy(terminated)).astype(bool) | np.atleast_1d(
             to_numpy(truncated)
         ).astype(bool)
+        self._obs = _with_final_obs(obs, info, done)
         # Per-step reward for the RL wire (get_observation attaches it as a sibling).
         self._step_reward = np.atleast_1d(to_numpy(reward)).astype(np.float32)
         self._acc_reward += self._step_reward * ~self._done
         newly = done & ~self._done
         if newly.any():
-            self._final |= final_observations(info, newly, batched=self.batched)
             success = self._resolve_success(info)
             if success is not None:
                 self._seen_success = True
@@ -494,7 +474,6 @@ class GymBridge(RobotBridge):
             reward = data.pop("reward")
             data = {k: np.asarray(v)[None] for k, v in data.items()}
             data["reward"] = np.atleast_1d(reward)
-        data = overlay_final(data, self._final)
         return data, np.asarray(self._done, dtype=bool).reshape(self.num_envs)
 
     def result_slots(self) -> list[dict[str, Any]]:
@@ -582,16 +561,15 @@ class TracedEnv:
         obs, reward, terminated, truncated = result[:4]
         info = result[4] if len(result) > 4 else {}
         if self._rec is not None:
-            state, frames = split_observation(obs, batched=self._batched)
             # Episode ends on either gym flag; coerce to a 1-D bool mask.
             done = np.atleast_1d(to_numpy(terminated) | to_numpy(truncated)).astype(bool)
+            state, frames = split_observation(
+                _with_final_obs(obs, info, done), batched=self._batched
+            )
             if not self._batched:  # plain env → batch of one for the recorder
                 state = {k: v[None] for k, v in state.items()}
                 frames = {k: v[None] for k, v in frames.items()}
                 action = to_numpy(action)[None]
-            # A finished env that reset inside step reports the frame it ended on.
-            finals = final_observations(info, done, batched=self._batched)
-            state, frames = overlay_final(state, finals), overlay_final(frames, finals)
             self._rec.record(
                 obs=state or None,
                 frames=frames or None,
@@ -753,20 +731,17 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "FINAL_OBS_KEY",
     "SUCCESS_KEYS",
     "GymBridge",
     "TracedEnv",
     "action_dim_of",
     "capture_task_params",
     "detect_fps",
-    "final_observations",
     "flatten_observation",
     "gym_command",
     "is_batched",
     "load_or_write_contract",
     "num_envs_of",
-    "overlay_final",
     "probe_success",
     "split_observation",
     "wrap",
