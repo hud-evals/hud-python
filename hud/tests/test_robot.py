@@ -284,7 +284,7 @@ class _BusySim(_StubSim):
         self.read_started = asyncio.Event()
         self.unblock = asyncio.Event()
 
-    async def get_observation(self) -> Any:  # type: ignore[override]  # in-loop async hook
+    async def get_observation(self) -> Any:  # ty: ignore[invalid-method-override]  # in-loop async hook
         self.read_started.set()
         await self.unblock.wait()
         return super().get_observation()
