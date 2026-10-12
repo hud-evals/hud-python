@@ -1016,6 +1016,96 @@ async def test_agent_loop_timeout_is_an_explicit_failure() -> None:
     assert run.trace_id is not None
 
 
+class _LimitedLocalRuntime:
+    """A local provider that declares ``startup_timeout_s`` and can stall provisioning."""
+
+    def __init__(self, env: Environment, *, startup_timeout_s: int, provision_delay: float = 0.0):
+        self.runtime_config = RuntimeConfig(
+            limits=RuntimeLimits(startup_timeout_s=startup_timeout_s)
+        )
+        self._local = LocalRuntime(env)
+        self._provision_delay = provision_delay
+
+    @asynccontextmanager
+    async def __call__(self, task: TaskRow) -> AsyncIterator[Runtime]:
+        await asyncio.sleep(self._provision_delay)
+        async with self._local(task) as runtime:
+            yield runtime
+
+
+async def test_slow_task_start_fails_loudly_at_the_startup_budget() -> None:
+    env = Environment("sums")
+    setup_cancelled = asyncio.Event()
+
+    @env.template()
+    async def add(a: int, b: int):
+        try:
+            await asyncio.sleep(30)  # env setup that never finishes
+        finally:
+            setup_cancelled.set()
+        yield f"add:{a}:{b}"
+
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(_solve_add),
+        runtime=_LimitedLocalRuntime(env, startup_timeout_s=1),
+        rollout_timeout=60,
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.steps[-1].error == (
+        "[starting task] startup did not reply in 1s (runtime_config.limits.startup_timeout_s)"
+    )
+    await asyncio.wait_for(setup_cancelled.wait(), 1.0)
+
+
+async def test_slow_provisioning_counts_against_the_startup_budget() -> None:
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    run = await rollout(
+        _add_task(2, 3),
+        _FnAgent(_solve_add),
+        runtime=_LimitedLocalRuntime(env, startup_timeout_s=1, provision_delay=30),
+    )
+
+    assert run.trace.status == "error"
+    assert run.trace.steps[-1].error == (
+        "[provisioning] startup did not reply in 1s (runtime_config.limits.startup_timeout_s)"
+    )
+
+
+class _LingeringAgent(_FnAgent):
+    """Answers correctly after a pause that outlasts the 1s startup budget."""
+
+    async def __call__(self, run: Any) -> None:
+        await asyncio.sleep(1.2)
+        await super().__call__(run)
+
+
+async def test_startup_budget_does_not_bound_the_agent_loop() -> None:
+    env = Environment("sums")
+
+    @env.template()
+    async def add(a: int, b: int):
+        await asyncio.sleep(0.3)
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    run = await rollout(
+        _add_task(2, 3),
+        _LingeringAgent(_solve_add),
+        runtime=_LimitedLocalRuntime(env, startup_timeout_s=1),
+    )
+
+    assert run.trace.status != "error"
+    assert run.reward == 1.0
+
+
 async def test_task_agent_timeout_still_grades_completed_work() -> None:
     env = Environment("sums")
 

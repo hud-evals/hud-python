@@ -71,8 +71,16 @@ class RuntimeResources(BaseModel):
             raise ValueError(f"{provider} does not support {fields}")
 
 
+DEFAULT_STARTUP_TIMEOUT_S = 900
+
+
 class RuntimeLimits(BaseModel):
-    """Runtime lifecycle limits in seconds."""
+    """Runtime lifecycle limits in seconds.
+
+    ``startup_timeout_s`` budgets provisioning plus ``tasks.start`` (default
+    ``DEFAULT_STARTUP_TIMEOUT_S``); a rollout whose env is not up and started in
+    time fails with a startup error instead of waiting out ``rollout_timeout``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 

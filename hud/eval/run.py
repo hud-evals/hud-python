@@ -482,9 +482,13 @@ async def rollout(
     control transport, lets provider teardown finish in the background, and
     returns an errored run immediately.
     """
-    from .runtime.core import resolve_runtime_config
+    from .runtime.core import DEFAULT_STARTUP_TIMEOUT_S, resolve_runtime_config
 
     actor_runtime_config = resolve_runtime_config(runtime, task)
+    actor_limits = actor_runtime_config.limits if actor_runtime_config is not None else None
+    startup_timeout_s = (
+        actor_limits.startup_timeout_s if actor_limits is not None else None
+    ) or DEFAULT_STARTUP_TIMEOUT_S
     agent_timeout = validate_rollout_timeouts(
         task,
         agent,
@@ -525,14 +529,17 @@ async def rollout(
         rollout_expired = False
 
         client: HudClient | None = None
+        startup: asyncio.Timeout | None = None
 
         async def _drive() -> None:
-            nonlocal client, run, _phase
+            nonlocal client, run, startup, _phase
             actor_result: dict[str, Any] = {}
             actor_session_id: str | None = None
             verifier = task.verifier
             shared_verifier = task.shares_verifier_runtime
             async with contextlib.AsyncExitStack() as scope:
+                # Spans provisioning through ``tasks.start``; cleared once live.
+                startup = await scope.enter_async_context(asyncio.timeout(startup_timeout_s))
                 actor = contextlib.AsyncExitStack()
                 await actor.__aenter__()
 
@@ -572,6 +579,7 @@ async def rollout(
                     )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit
+                        startup.reschedule(None)
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
                         try:
@@ -692,6 +700,11 @@ async def rollout(
             # only it can see there, like the sandbox's env output on a failed
             # handshake — where str(exc) would drop them.
             detail = "".join(traceback.format_exception_only(exc)).strip()
+            if isinstance(exc, TimeoutError) and startup is not None and startup.expired():
+                detail = (
+                    f"startup did not reply in {startup_timeout_s}s "
+                    "(runtime_config.limits.startup_timeout_s)"
+                )
             if run is None:
                 logger.warning("rollout failed before launch (%s): %s", _phase, detail)
                 run = Run.failed(f"[{_phase}] {detail}")
