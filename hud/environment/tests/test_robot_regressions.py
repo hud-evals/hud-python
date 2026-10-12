@@ -591,3 +591,52 @@ def test_both_pitch_singularities_keep_roll_through_a_partial_yaw_merge() -> Non
         assert angular_distance(merged, euler_to_xyzw(roll, pitch, yaw)) == pytest.approx(
             0.0, abs=1e-8
         )
+
+
+class _VectorAutoReset:
+    """Two lockstep envs that reset inside ``step``; env 1 finishes on the first step.
+
+    ``per_env`` reports the final observation as gymnasium vector envs do (one obs per env),
+    otherwise as Isaac Lab does (an obs-shaped batch).
+    """
+
+    num_envs = 2
+    action_space = SimpleNamespace(shape=(2, 1), dtype=np.float32)
+
+    def __init__(self, per_env: bool) -> None:
+        self.per_env = per_env
+        self.ticks = np.zeros(2)
+
+    def _observe(self) -> dict[str, NDArray[Any]]:
+        return {"state": self.ticks[:, None].astype(np.float32)}
+
+    def reset(self, seed: int | None = None, options: Any = None) -> tuple[Any, dict[str, Any]]:
+        self.ticks[:] = 0
+        return self._observe(), {}
+
+    def step(self, action: NDArray[Any]) -> tuple[Any, ...]:
+        self.ticks += 1
+        final = self._observe()
+        done = np.array([False, True])
+        self.ticks[done] = 0
+        if self.per_env:
+            final = np.array([None, {"state": final["state"][1]}], dtype=object)
+        return self._observe(), np.zeros(2), np.zeros(2, dtype=bool), done, {"final_obs": final}
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize("per_env", [False, True])
+def test_a_finished_env_is_observed_on_the_frame_it_ended_on(per_env: bool) -> None:
+    bridge = GymBridge(lambda: _VectorAutoReset(per_env), contract=None)
+    bridge.reset()
+    bridge.step(np.zeros((2, 1), dtype=np.float32))
+
+    observation = bridge.get_observation()
+
+    assert observation is not None
+    data, terminated = observation
+    assert terminated.tolist() == [False, True]
+    # Env 1 was reset after its first tick; its observation is still that tick.
+    assert data["state"].ravel().tolist() == [1.0, 1.0]

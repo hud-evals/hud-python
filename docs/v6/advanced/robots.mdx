@@ -138,6 +138,10 @@ this capability's per-episode binding, `{"prompt": ep["prompt"], "bindings": {"r
 ep["token"]}}}`, and call `sim.result(token=ep["token"])`; see
 [vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
 
+A sim that resets finished envs inside `step` can report each episode's last frame as
+`info["final_obs"]` (Isaac Lab's `compute_final_obs`, gymnasium's same-step autoreset); GymBridge
+then serves and records that frame for the finished env.
+
 You can find gym-shaped environments in various places - [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub),
 including Isaac Lab Arena environments, or environments built into LeRobot directly.
 
@@ -595,35 +599,64 @@ The [contract](#contract) derives the tool surface:
 
 | Contract field | Tool surface |
 |----------------|--------------|
-| action `type` | The motion tool: `ee_abs` → `move_to` and `joint_pos` → `move_joints` take absolute targets, interpolated at a safe speed; `ee_del` → `move_by` takes a displacement, split into steps within the per-step bounds. |
-| action `names` | The dimensions a call addresses. `target` is one `{name, value}` and is required; `others` is any further ones. Unnamed dimensions hold. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
+| action `state_type` (else `type`) | The control kind, which picks the tool (`CONTROL_KINDS`, one row per kind). |
+| action `names` | The dimensions a call addresses. `targets` lists each one, and `null` leaves it as it is. A prefixed name (`left_arm.x`) nests under its group, and a `null` group holds all of it. An end-effector rotation is `roll` / `pitch` / `yaw` in radians. |
 | action `limits` (else `stats`) | Per-dimension `min` / `max`: the target range, or the per-step box for a displacement. |
-| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second. A call steps until the arm arrives or stops, and gives up at `timeout` (default 60 s). |
+| `control_rate` | Playout pacing. Absolute moves travel `speed` (default `0.1`) of each range per second, then hold the goal until the arm is at rest (at most 3 s). `timeout` (default 30 s) caps a call. |
 | `rgb` observations and the rest | The camera frames and labeled state every call returns. |
 
-There is no `observe` tool. Every motion call returns the camera frames and the pose it
-ended on, so the model does not choose whether to look. Each call is its own short connection on
-the `robot` wire, so the sim holds still while the model thinks. A call also takes a required
-`note`: what the model sees and why it chose the motion. The episode ends when the model stops
-calling tools. The template grades it as usual.
+| Control kind (`state_type`) | Coarse `type` | Tool | Quantities |
+|-----------------------------|---------------|------|------------|
+| `EE_ABS_POSE`, `EE_ABS_POS` | `ee_abs` | `move_to` | `position`, `rotation` |
+| `JOINT_ABS_POS` | `joint_pos` | `move_joints` | `joint` |
+| `EE_DEL_POSE`, `EE_DEL_POS` | `ee_del` | `move_by` | displacement, played once |
+| `BASE_DEL_POSE` | | `walk_by` | displacement, played once |
 
-A call steps until the commanded target is reached or the arm
-stops moving, then returns the pose and how far it is from the command. `timeout` (default 60 s)
-is only the safety cap: a full-range move at the default speed is about 10 s, and a longer real
-move plays through instead of being rejected. End-effector orientation is intrinsic XYZ euler
-(roll, pitch, yaw, radians). The tool slerps that rotation onto the contract, which may store a
-quaternion, an axis-angle, or euler.
+Tool dimensions take standard names when every action name maps onto one: `x y z`, `roll pitch
+yaw`, `grip` (any name containing `grip`), `jointN`, grouped under `left_arm` / `right_arm` for
+`left_` / `right_` names. Otherwise they keep the contract's names. `BASE_ABS_TWIST` and contracts
+that mix kinds are not served yet.
+
+There is no `observe` tool. Every call returns the camera frames and the pose it ended on, and
+`wait` lets `duration` sim seconds pass (`null` observes for one tick) while the robot holds. Each
+call is its own short connection on the `robot` wire, so the sim holds still while the model
+thinks. A call also takes a required `note`: what the model sees and why it chose the motion. The
+episode ends when the model stops calling tools, the sim terminates, or `time_limit` runs out;
+later calls play nothing and say so. The template grades it as usual.
+
+An absolute move plays its setpoints, then holds the goal until the arm (and, after a gripper
+change, the fingers) is at rest. It returns how far the pose is from the command (`off`) and a
+verdict listing each dimension's remaining offset:
+
+- `At the target.` At rest within tolerance.
+- `Stopped short of the target; the arm is at rest.` At rest outside tolerance for 1.5 s.
+- `Ran out of time before settling; the arm was still moving.` The 3 s hold (longer at control
+  rates too low for rest to be detected within 3 s) or `timeout` ran out.
+- `The episode ended before the arm settled.` The sim terminated or the time limit ran out first.
+
+Tolerance (default: whatever moves the fingertips 1 mm) only picks the verdict; the model never
+sees it. The gripper never decides the verdict, since it often stops on what it holds. A displacement
+returns once played.
+
+End-effector orientation is intrinsic XYZ euler (roll, pitch, yaw, radians), wrapped into
+[-pi, pi) in replies. The tool slerps it onto the contract, which may store a quaternion, an
+axis-angle, or euler. A `move_by` rotation is the action's raw components, so say what they mean
+in `notes`.
 
 A few embodiment facts can't be read off the contract, so the environment states them:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `notes` | `""` | Frames, units, gripper polarity: appended to the motion tool's description. |
-| `dims` | every action dimension | The dimensions a call may address; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
+| `dims` | every action dimension | The dimensions a call may address, by tool or action name; the rest hold their commanded value. A rotation block is addressed as `roll`, `pitch`, and `yaw`. |
 | `max_step` | `{}` | Per-dimension step override by action name, such as a binary gripper that switches in one step. |
-| `timeout` | `60` | Safety cap, in seconds, on one call. The call returns earlier, when the target is reached or the arm stops. |
-| `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. |
-| `speed` | `0.1` | Fraction of each dimension's range an absolute move travels per second. |
+| `tolerance` | `{}` | Overrides by quantity: `position` in m, `rotation` and `joint` in rad. An unset `rotation` or `joint` scales from `position`. |
+| `timeout` | `30` | Cap, in seconds, on one call. |
+| `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. A custom reference is taken not to read the gripper, so gripper offsets are not reported. |
+| `speed` | `0.1` | Fraction of each dimension's range (a rotation: of a full turn) an absolute move travels per second. |
+| `time_limit` | none | The episode's budget in sim seconds of control ticks played. Replies report the time remaining. |
+| `use_annotation` | `True` | Ask for a `note` on every call. |
+| `use_wait` | `True` | Serve the `wait` tool. |
 
 <Note>
 Direct control claims the sim's sole slot, so it serves single-env sims. Scale out with more
@@ -670,7 +703,7 @@ flowchart LR
 
 Direct control does no inverse kinematics (IK, solving joint angles for a target pose). It
 interpolates setpoints at `speed` so the sim never jumps to a distant goal, and the sim's own
-low-level controller tracks each one. It stops when the arm arrives, comes to rest, or reaches
+low-level controller tracks each one. It then holds the goal until the arm comes to rest, or until
 `timeout`. Because each call is a separate connection, the sim holds still while the model thinks.
 
 The bridge sees `DirectControl` as an ordinary `robot` client, so direct control needs no bridge
