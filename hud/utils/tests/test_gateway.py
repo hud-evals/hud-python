@@ -372,3 +372,9 @@ async def test_gemini_gateway_client_backoff_is_capped_at_five_seconds(
     assert 2 <= waits[1] <= 3
     assert 4 <= waits[2] <= 5
     assert 5 <= waits[3] <= 6
+
+
+def test_openai_gateway_client_carries_more_retries_than_the_sdk_default() -> None:
+    """Six retries, each waiting the gateway's Retry-After, instead of the SDK's two."""
+    client = gateway.build_gateway_client("openai")
+    assert client.max_retries == gateway.GATEWAY_MAX_RETRIES == 6

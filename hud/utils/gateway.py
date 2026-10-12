@@ -124,6 +124,10 @@ def build_model_client(
     return AsyncOpenAI(api_key=key)
 
 
+# Retries of an OpenAI-compatible gateway client; see build_gateway_client.
+GATEWAY_MAX_RETRIES = 6
+
+
 def build_gateway_client(provider: str) -> GatewayClient:
     """A *provider* SDK client pointed at the HUD gateway, with trace headers attached."""
     # Provider SDK clients bypass hud.utils.requests, so guard here.
@@ -174,9 +178,15 @@ def build_gateway_client(provider: str) -> GatewayClient:
         )
 
     # OpenAI-compatible (openai, azure, together, groq, fireworks, etc.)
+    # The gateway refuses with 503 + Retry-After when a pod is at capacity and
+    # the SDK waits the header out before each retry; its default of two
+    # retries gave a refused agent under three seconds of patience against a
+    # slot that frees every few seconds. Six retries is about 18 s at the
+    # gateway's 3 s header, on the Gemini client's scale.
     return AsyncOpenAI(
         api_key=settings.api_key,
         base_url=settings.hud_gateway_url,
+        max_retries=GATEWAY_MAX_RETRIES,
         http_client=DefaultAsyncHttpxClient(
             event_hooks={"request": [_inject_trace_id]},
         ),
