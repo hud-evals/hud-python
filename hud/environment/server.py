@@ -34,6 +34,7 @@ from .env import Answer, current_session_id
 from .utils import (
     CONTROL_FRAME_LIMIT_BYTES,
     FrameTooLargeError,
+    enable_tcp_keepalive,
     encode_frame,
     error,
     read_frame,
@@ -436,6 +437,9 @@ class _ControlChannel:
                         await self.cancel(session_id)
                         await reply_to(msg_id, {"cancelled": True})
 
+                    elif method == "keepalive":
+                        pass  # one-way liveness frame; nothing to answer
+
                     elif method == "bye":
                         await self.cancel(session_id)
                         await reply_to(msg_id, {"goodbye": True})
@@ -539,6 +543,7 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
         if task is not None:
             active.add(task)
             task.add_done_callback(active.discard)
+        enable_tcp_keepalive(writer)
         try:
             first = await read_frame(reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
             if first is None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -20,7 +21,7 @@ import hud.clients.client as client_module
 from hud.capabilities import Capability, CapabilityClient, Connection
 from hud.clients import HudProtocolError, connect
 from hud.environment import WorkspaceRoute
-from hud.environment.utils import read_frame, send_frame
+from hud.environment.utils import enable_tcp_keepalive, read_frame, send_frame
 from hud.eval.runtime import Runtime
 
 HELLO_RESULT = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
@@ -311,6 +312,65 @@ async def test_heartbeat_serializes_calls_without_aborting_on_protocol_errors(
 
     assert [request["method"] for request in requests] == ["hello", "hello", "tasks.grade"]
     assert requests[1]["params"] == {"session_id": "s-1"}
+
+
+async def test_tcp_keepalive_probes_an_idle_connection_within_a_minute() -> None:
+    server = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    _, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        enable_tcp_keepalive(writer)
+        sock = writer.get_extra_info("socket")
+        assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        idle = getattr(socket, "TCP_KEEPIDLE", None) or socket.TCP_KEEPALIVE
+        assert sock.getsockopt(socket.IPPROTO_TCP, idle) == 30
+    finally:
+        writer.close()
+        server.close()
+        await server.wait_closed()
+
+
+async def test_a_call_awaiting_its_reply_keeps_sending_keepalives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long ``tasks.start`` must not leave the link silent while the env works."""
+    methods: list[str] = []
+    keepalives_seen = asyncio.Event()
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            start = await read_frame(reader)
+            assert start is not None
+            methods.append(start["method"])
+            while methods.count("keepalive") < 2:
+                frame = await read_frame(reader)
+                assert frame is not None
+                methods.append(frame["method"])
+                assert "id" not in frame  # one-way: nothing to reply to
+            keepalives_seen.set()
+            await send_frame(
+                writer, {"jsonrpc": "2.0", "id": start["id"], "result": {"prompt": "go"}}
+            )
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_KEEPALIVE_INTERVAL_SECONDS", 0.01)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            started = await asyncio.wait_for(client.start_task("slow"), 5.0)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert started == {"prompt": "go"}
+    assert keepalives_seen.is_set()
+    assert methods[0] == "tasks.start"
 
 
 async def test_heartbeat_transport_failure_interrupts_the_connection_body(

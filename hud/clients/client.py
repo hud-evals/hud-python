@@ -30,6 +30,7 @@ from hud.capabilities import (
 )
 from hud.environment.utils import (
     CONTROL_FRAME_LIMIT_BYTES,
+    enable_tcp_keepalive,
     encode_frame,
     read_frame,
     send_frame,
@@ -45,6 +46,9 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
 _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
+#: While a call awaits its reply, how often a one-way ``keepalive`` frame goes
+#: out; well under the ~5 minute idle drop seen on Modal's raw TCP tunnels.
+_CONTROL_KEEPALIVE_INTERVAL_SECONDS = 30.0
 _CAPABILITY_CONNECT_ATTEMPTS = 3
 _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 
@@ -66,6 +70,16 @@ async def _connect_capability(
                 raise
             await asyncio.sleep(_CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
     raise RuntimeError("capability connect attempts must be positive")
+
+
+async def _send_keepalives(writer: asyncio.StreamWriter) -> None:
+    """Send ``keepalive`` notifications until cancelled; the awaited read reports a dead link."""
+    frame = encode_frame({"jsonrpc": "2.0", "method": "keepalive"})
+    with contextlib.suppress(ConnectionError):
+        while True:
+            await asyncio.sleep(_CONTROL_KEEPALIVE_INTERVAL_SECONDS)
+            writer.write(frame)
+            await writer.drain()
 
 
 class HudProtocolError(RuntimeError):
@@ -219,6 +233,7 @@ class HudClient:
                         )
                         writer.close()
                         return
+                    enable_tcp_keepalive(up_writer)
                     await send_frame(
                         up_writer,
                         {
@@ -362,7 +377,13 @@ class HudClient:
                 async with asyncio.timeout(reply_timeout):
                     self._writer.write(frame)
                     await self._writer.drain()
-                    reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                    # A long call (``tasks.start`` building a sim) leaves the link
+                    # silent otherwise; the env ignores these frames.
+                    keepalive = asyncio.create_task(_send_keepalives(self._writer))
+                    try:
+                        reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                    finally:
+                        keepalive.cancel()
                     if reply is None:
                         raise EOFError(f"env closed connection during {method!r}")
                     if reply.get("id") != msg_id:
@@ -420,6 +441,7 @@ async def _connect_ready(
             await asyncio.sleep(interval)
             continue
 
+        enable_tcp_keepalive(writer)
         client = HudClient(reader, writer, endpoint=(host, port))
         try:
             await client.hello(workspace_routes=workspace_routes, connections=connections)

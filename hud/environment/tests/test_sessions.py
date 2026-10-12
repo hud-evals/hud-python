@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import hud.clients.client as client_module
 from hud.capabilities import Connection
 from hud.clients import HudProtocolError, connect
 from hud.environment import Environment, Workspace, WorkspaceRoute
@@ -46,6 +47,26 @@ async def test_concurrent_sessions_grade_their_own_tasks() -> None:
         await b.start_task("echo", {"tag": "b"})  # must not disturb a's task
         assert (await a.grade({"answer": "x"}))["tag"] == "a"
         assert (await b.grade({"answer": "x"}))["tag"] == "b"
+
+
+async def test_keepalives_during_a_slow_start_do_not_disturb_later_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = Environment("slow")
+
+    @env.template()
+    async def build_scene():
+        await asyncio.sleep(0.2)  # a long setup, silent without keepalives
+        yield "ready"
+        yield {"score": 1.0}
+
+    monkeypatch.setattr(client_module, "_CONTROL_KEEPALIVE_INTERVAL_SECONDS", 0.01)
+    async with (
+        LocalRuntime(env)(Task(env="slow", id="build_scene")) as runtime,
+        connect(runtime) as client,
+    ):
+        assert (await client.start_task("build_scene"))["prompt"] == "ready"
+        assert (await client.grade({"answer": "x"}))["score"] == 1.0
 
 
 async def test_restart_replaces_only_the_sessions_own_task() -> None:

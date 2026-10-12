@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import socket
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -76,6 +77,27 @@ async def read_frame(
     if not line:
         return None
     return json.loads(line)
+
+
+def enable_tcp_keepalive(writer: asyncio.StreamWriter) -> None:
+    """Probe an idle connection so a dead path errors the pending read instead of hanging it.
+
+    A control call such as ``tasks.start`` can leave the connection silent for
+    minutes; probes keep middleboxes' idle timers fresh and surface a dead
+    peer within about a minute (30s idle + 3 probes at 10s).
+    """
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    idle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+    for option, value in (
+        (idle, 30),
+        (getattr(socket, "TCP_KEEPINTVL", None), 10),
+        (getattr(socket, "TCP_KEEPCNT", None), 3),
+    ):
+        if option is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, option, value)
 
 
 def reply(msg_id: int | str, result: dict[str, Any]) -> dict[str, Any]:
