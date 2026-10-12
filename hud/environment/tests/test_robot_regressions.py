@@ -16,7 +16,7 @@ from hud.environment.env import current_session_id
 from hud.environment.robot import DirectControl
 from hud.environment.robot.bridge import _HUD_STATE, RobotBridge, _apply_declaration_state
 from hud.environment.robot.endpoint import RobotEndpoint, _bridge_init_kwargs
-from hud.environment.robot.gym import GymBridge, action_dim_of
+from hud.environment.robot.gym import GymBridge, action_dim_of, wrap
 from hud.environment.robot.orientation import angular_distance, euler_to_xyzw, xyzw_to_euler
 from hud.telemetry.robot.recorder import JobRecorder
 
@@ -591,3 +591,80 @@ def test_both_pitch_singularities_keep_roll_through_a_partial_yaw_merge() -> Non
         assert angular_distance(merged, euler_to_xyzw(roll, pitch, yaw)) == pytest.approx(
             0.0, abs=1e-8
         )
+
+
+class _VectorAutoReset:
+    """Two lockstep envs that reset inside ``step``; slot 1 ends its episode on the first step."""
+
+    num_envs = 2
+    action_space = SimpleNamespace(shape=(2, 1), dtype=np.float32)
+
+    def __init__(self) -> None:
+        self.ticks = np.zeros(2, dtype=int)
+
+    def _observe(self) -> dict[str, NDArray[Any]]:
+        return {"state": self.ticks[:, None].astype(np.float32)}
+
+    def reset(self, seed: int | None = None, options: Any = None) -> tuple[Any, dict[str, Any]]:
+        self.ticks[:] = 0
+        return self._observe(), {}
+
+    def step(self, action: NDArray[Any]) -> tuple[Any, ...]:
+        self.ticks += 1
+        done = np.array([False, self.ticks[1] == 1])
+        final = self._observe()
+        self.ticks[done] = 0
+        info = {"final_obs": final} if done.any() else {}
+        return self._observe(), np.zeros(2), np.zeros(2, dtype=bool), done, info
+
+    def close(self) -> None:
+        pass
+
+
+def test_a_slot_that_finished_keeps_its_final_row_while_the_others_play_on() -> None:
+    bridge = GymBridge(_VectorAutoReset, contract=None)
+    bridge.reset()
+    action = np.zeros((2, 1), dtype=np.float32)
+
+    bridge.step(action)
+    bridge.step(action)
+    observation = bridge.get_observation()
+
+    assert observation is not None
+    data, terminated = observation
+    assert terminated.tolist() == [False, True]
+    # Slot 0 is on tick 2; slot 1 ended on tick 1 and has been reset since.
+    assert data["state"].ravel().tolist() == [2.0, 1.0]
+
+    bridge.reset()
+    observation = bridge.get_observation()
+    assert observation is not None
+    assert observation[0]["state"].ravel().tolist() == [0.0, 0.0]
+
+
+def test_a_recorded_episode_ends_on_the_final_frame_not_the_reset_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[dict[str, Any]] = []
+
+    class _Recorder:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.extra_metadata: dict[str, Any] = {}
+
+        def record(self, **kwargs: Any) -> None:
+            recorded.append(kwargs)
+
+        def close_slots(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("hud.environment.robot.gym.JobRecorder", _Recorder)
+    env = wrap(_VectorAutoReset(), contract=None)
+    env.reset()
+    env.step(np.zeros((2, 1), dtype=np.float32))
+
+    (step,) = recorded
+    assert step["done"].tolist() == [False, True]
+    assert step["obs"]["state"].ravel().tolist() == [1.0, 1.0]

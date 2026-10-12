@@ -13,27 +13,31 @@ import base64
 import copy
 import io
 import itertools
+import json
 import math
 import time
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import av
 import numpy as np
 import pytest
+from PIL import Image
 
 from hud.agents.base import Agent
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment import Environment
-from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
+from hud.environment.robot import DirectControl, GymBridge, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task, rollout
 from hud.telemetry.robot import TraceRecorder
 from hud.telemetry.span import PAYLOAD_ATTRIBUTE, TASK_RUN_ID_ATTRIBUTE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
+    from pathlib import Path
 
     from numpy.typing import NDArray
 
@@ -1223,3 +1227,82 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     assert "At the target. Remaining offsets: " in _text(past)
     assert not edge.isError
     assert "pi and -pi are the same orientation" in agent.descriptions["move_to"]
+
+
+class _AutoResetArm:
+    """A gym env that resets inside ``step`` at its horizon, as Isaac Lab does.
+
+    The step that ends the episode returns the reset observation; the one the episode
+    ended on is ``info["final_obs"]``. The camera is one gray level per unit of x, so a
+    frame says which pose it shows.
+    """
+
+    action_space = SimpleNamespace(shape=(2,), dtype=np.float32)
+
+    def __init__(self, horizon: int) -> None:
+        self.metadata = {"render_fps": 10}
+        self.horizon = horizon
+        self.state = np.zeros(2)
+        self.ticks = 0
+
+    def _observe(self) -> dict[str, NDArray[Any]]:
+        gray = round(255 * self.state[0])
+        return {
+            "observation/state": self.state.astype(np.float32),
+            "observation/image": np.full((8, 8, 3), gray, dtype=np.uint8),
+        }
+
+    def reset(self, seed: int | None = None, options: Any = None) -> tuple[Any, dict[str, Any]]:
+        self.state, self.ticks = np.zeros(2), 0
+        return self._observe(), {}
+
+    def step(self, action: NDArray[Any]) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        self.state, self.ticks = np.array(action, dtype=np.float64), self.ticks + 1
+        if self.ticks < self.horizon:
+            return self._observe(), 0.0, False, False, {}
+        final = self._observe()
+        obs, _ = self.reset()
+        return obs, 0.0, False, True, {"final_obs": final}
+
+    def close(self) -> None:
+        pass
+
+
+def _gray(result: MCPToolResult) -> int:
+    (image,) = (block for block in result.content if block.type == "image")
+    return int(np.asarray(Image.open(io.BytesIO(base64.b64decode(image.data))))[0, 0, 0])
+
+
+async def test_an_episode_ended_by_the_sim_horizon_shows_the_frame_it_ended_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("hud.types.queue_span", lambda _span: None)
+    recorded: list[tuple[int, float, int]] = []
+
+    class _Recorder(TraceRecorder):
+        def record_observation(self, data: dict[str, Any], *, tick: int) -> None:
+            recorded.append(
+                (tick, float(data["observation/state"][0]), int(data["observation/image"][0, 0, 0]))
+            )
+            super().record_observation(data, tick=tick)
+
+    monkeypatch.setattr("hud.environment.robot.control.TraceRecorder", _Recorder)
+    contract = tmp_path / "contract.json"
+    contract.write_text(json.dumps(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0])))
+    sim = GymBridge(lambda: _AutoResetArm(horizon=20), contract=contract)
+    agent = _ScriptedLLM(_move("move_to", x=0.5), ("wait", {"duration": 0, "note": "look"}))
+
+    async with _served(sim, DirectControl()) as env:
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    ended, looked = agent.results
+    # The move is cut at tick 20 of 50: x was commanded to 0.01 per tick, so 0.2 is where it ended.
+    assert "The episode has ended; stop calling tools." in _text(ended)
+    assert "observation/state: x=0.2000" in _text(ended)
+    assert _gray(ended) == 51
+    tick, state, gray = recorded[-1]
+    assert (tick, gray) == (20, 51)
+    assert state == pytest.approx(0.2)
+    # A later call reads the same final frame, not the reset one.
+    assert "observation/state: x=0.2000" in _text(looked)
+    assert _gray(looked) == 51

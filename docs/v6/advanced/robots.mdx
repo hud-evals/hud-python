@@ -138,6 +138,14 @@ this capability's per-episode binding, `{"prompt": ep["prompt"], "bindings": {"r
 ep["token"]}}}`, and call `sim.result(token=ep["token"])`; see
 [vectorized envs and evals](#vectorized-envs-and-evals) for the full pattern.
 
+Some sims (Isaac Lab, for one) reset a finished env inside `step`, so the observation `step`
+returns for it is already the first frame of the next episode. To have the agent, the recorded
+video, and the trace end on the frame the episode actually ended on, report it as
+`info["final_obs"]`: shaped like the observation, with the finished envs' rows holding their last
+observation. GymBridge serves that row to the finished slot until the next `reset`, and `wrap`
+records it. Without `final_obs`, the returned observation is used as is. Grading is unaffected:
+success and reward come from `step`'s own outputs.
+
 You can find gym-shaped environments in various places - [LeRobot EnvHub](https://huggingface.co/docs/lerobot/en/envhub),
 including Isaac Lab Arena environments, or environments built into LeRobot directly.
 
