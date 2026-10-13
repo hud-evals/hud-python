@@ -14,25 +14,26 @@ from dotenv import dotenv_values
 from inline_snapshot import snapshot
 
 from hud.version import __version__
-from tests.harness import Reply, words
+from tests.harness import Hud, Reply, words
 
 from .conftest import API_KEY
 
 if TYPE_CHECKING:
-    from tests.harness import FakeServices, Hud, HudEnv
+    from tests.harness import FakeServices, HudEnv
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 
 
 def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
-    result = hud()
+    # Wide enough that no command's description wraps onto a line of its own.
+    result = Hud(hud.cwd, columns=200)()
 
     assert result.exit_code == 2
     assert result.stderr == ""
     commands = result.lines[result.lines.index("Commands") + 1 :]
     assert [line.split()[0] for line in commands] == [
-        *("init", "serve", "deploy", "eval", "task", "project", "sync"),
+        *("init", "serve", "deploy", "eval", "task", "project", "sync", "harbor"),
         *("qa", "jobs", "trace", "models", "set", "version"),
     ]
 
@@ -423,6 +424,8 @@ def test_an_interrupted_command_reports_exit_130(
 ) -> None:
     hud_env.set(HUD_API_KEY=API_KEY)
     pending = {"subject_trace_id": TRACE_ID, "check_key": "failure_analysis", "status": "queued"}
+    check = {"key": "failure_analysis", "subject_type": "trace", "title": "Failure Analysis"}
+    analytics.route("api", "GET", "/v2/qa/checks", json={"checks": [check]})
     analytics.route("api", "POST", "/v2/qa/runs", json={"results": [pending]})
     process = hud.start("qa", "run", "failure_analysis", TRACE_ID)
 
