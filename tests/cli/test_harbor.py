@@ -226,7 +226,7 @@ def test_import_creates_a_new_taskset_and_imports_into_it(
 ) -> None:
     result, payload = run(hud, "import", *folders, "--taskset", "TB2 Sample", "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert importer.body("POST", "/tasksets") == {"name": "tb2-sample", "project_id": None}
     assert importer.body("POST", "/imports") == {
         "format": "harbor",
@@ -249,7 +249,7 @@ def test_import_uploads_each_folder_under_its_name(
 ) -> None:
     result, _ = run(hud, "import", *folders, "--taskset", "tb2", "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     reservation = importer.body("POST", "/imports/uploads")
     assert reservation["format"] == "harbor"
     assert reservation["filename"] == "tb2.zip"
@@ -275,7 +275,7 @@ def test_import_defaults_to_the_taskset_named_after_the_first_folder(
 
     result, payload = run(hud, "import", *folders, "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert "/tasksets" not in importer.paths("POST")
     assert payload["taskset"] == {"id": _TASKSET, "name": "tasks", "created": False}
 
@@ -309,7 +309,7 @@ def test_import_link_saves_the_taskset_as_the_directory_default(
 ) -> None:
     result, _ = run(hud, "import", *folders, "--taskset", "tb2", "--yes", "--link")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     link = json.loads((hud.cwd / ".hud" / "config.json").read_text())
     assert link["taskset_id"] == _TASKSET
 
@@ -341,7 +341,7 @@ def test_import_refuses_a_bundle_over_the_format_limit(
 def test_dry_run_plans_without_writing(hud: Hud, importer: _Platform, folders: list[str]) -> None:
     result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--dry-run")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["dry_run"] is True
     assert payload["taskset"] == {"id": None, "name": "tb2", "created": True}
     assert payload["bundle"]["filename"] == "tb2.zip"
@@ -360,7 +360,7 @@ def test_a_failed_upload_deletes_its_reservation_without_leaking_the_signed_url(
     assert payload["message"] == "Storage refused the upload: HTTP 403"
     assert importer.paths("DELETE") == [f"/data/{_FILE}"]
     assert "/imports" not in importer.paths("POST")
-    assert "signature" not in (result.stdout + result.stderr)
+    assert "signature" not in str(result)
 
 
 def test_a_stopped_import_exits_with_failure_and_its_report(
@@ -385,7 +385,7 @@ def test_a_failed_import_without_a_report_exits_with_its_error(
     result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "The import failed: the importer crashed" in (result.stdout + result.stderr)
+    assert "The import failed: the importer crashed" in result.stderr
     assert f"/imports/{_IMPORT}/report" not in importer.paths("GET")
 
 
@@ -409,7 +409,7 @@ def test_no_wait_returns_the_started_import(
 
     result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--yes", "--no-wait")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["import"]["status"] == "queued"
     assert payload["report"] is None
     assert f"/imports/{_IMPORT}" not in importer.paths("GET")
@@ -422,7 +422,7 @@ def test_import_uploads_a_given_zip_as_it_is(hud: Hud, importer: _Platform, tmp_
 
     result, payload = run(hud, "import", str(bundle), "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert importer.uploaded == bundle.read_bytes()
     assert payload["taskset"]["name"] == "prepared"
 
@@ -436,7 +436,7 @@ def test_import_packs_a_folder_named_like_a_zip(
 
     result, payload = run(hud, "import", str(folder), "--taskset", "tb2", "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["bundle"]["files"] == 1
     assert importer.uploaded is not None
     with zipfile.ZipFile(io.BytesIO(importer.uploaded)) as bundle:
@@ -483,12 +483,10 @@ def test_import_fails_where_the_platform_has_no_imports(
 def test_import_prints_the_report_tables(hud: Hud, importer: _Platform, folders: list[str]) -> None:
     result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
-    assert "1 imported, 1 skipped" in (result.stdout + result.stderr)
-    assert "it ran a task that is neither in the bundle nor in HUD" in (
-        result.stdout + result.stderr
-    )
-    assert f"{WEB_URL}/tasksets/{_TASKSET}/imports" in (result.stdout + result.stderr)
+    assert result.exit_code == 0, result
+    assert "1 imported, 1 skipped" in result.stdout
+    assert "it ran a task that is neither in the bundle nor in HUD" in result.stdout
+    assert f"Imports: {WEB_URL}/tasksets/{_TASKSET}/imports" in result.stderr
 
 
 def test_report_wait_follows_the_import_until_it_ends(hud: Hud, importer: _Platform) -> None:
@@ -496,7 +494,7 @@ def test_report_wait_follows_the_import_until_it_ends(hud: Hud, importer: _Platf
 
     result, payload = run(hud, "report", _IMPORT, "--wait")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["import"]["status"] == "completed"
     assert payload["report"]["taskset_id"] == _TASKSET
 
@@ -508,7 +506,7 @@ def test_report_of_a_running_import_without_wait_has_no_report(
 
     result, payload = run(hud, "report", _IMPORT)
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["report"] is None
     assert f"/imports/{_IMPORT}/report" not in importer.paths("GET")
 
@@ -519,8 +517,8 @@ def test_report_shows_tasks_an_import_updated(hud: Hud, importer: _Platform) -> 
 
     result = hud("harbor", "report", _IMPORT)
 
-    assert result.exit_code == 0, result.stdout + result.stderr
-    assert "updated" in (result.stdout + result.stderr)
+    assert result.exit_code == 0, result
+    assert "updated" in result.stdout
 
 
 def test_report_reads_a_v4_report(hud: Hud, importer: _Platform) -> None:
@@ -528,7 +526,7 @@ def test_report_reads_a_v4_report(hud: Hud, importer: _Platform) -> None:
 
     result, payload = run(hud, "report", _IMPORT)
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["report"]["schema_version"] == "harbor_import_report.v4"
     assert payload["report"]["tasks"][0]["status"] == "imported"
 
@@ -540,7 +538,7 @@ def test_report_of_an_unknown_schema_falls_back_to_the_summary(
 
     result, payload = run(hud, "report", _IMPORT)
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert payload["report"] is None
     assert payload["import"]["summary"] == "Imported 1 task(s) and 1 run(s)"
 
@@ -566,7 +564,7 @@ def test_cancel_requests_cancellation_of_a_running_import(hud: Hud, importer: _P
 
     result, payload = run(hud, "cancel", _IMPORT, "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert f"/imports/{_IMPORT}/cancel" in importer.paths("POST")
     assert payload["status"] == "cancelling"
 
@@ -574,7 +572,7 @@ def test_cancel_requests_cancellation_of_a_running_import(hud: Hud, importer: _P
 def test_cancel_leaves_an_ended_import_alone(hud: Hud, importer: _Platform) -> None:
     result, payload = run(hud, "cancel", _IMPORT, "--yes")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert importer.paths("POST") == []
     assert payload["status"] == "completed"
 
@@ -584,7 +582,7 @@ def test_imports_filters_by_taskset(hud: Hud, importer: _Platform) -> None:
 
     result, payload = run(hud, "imports", "--taskset", "tb2")
 
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result
     assert [item["id"] for item in payload["imports"]] == [_IMPORT]
     assert importer.list_queries == [
         {"limit": ["20"], "format": ["harbor"], "taskset_id": [_TASKSET]}

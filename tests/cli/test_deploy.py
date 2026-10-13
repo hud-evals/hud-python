@@ -187,8 +187,9 @@ def test_deploy_uploads_the_context_triggers_the_build_and_links_the_directory(
             "token.txt",
         ]
     )
-    output = result.stdout + result.stderr
-    assert not any(secret in output for secret in ("dotenv-secret", "env-secret", "file-secret"))
+    assert not any(
+        secret in str(result) for secret in ("dotenv-secret", "env-secret", "file-secret")
+    )
     assert list((tmp_path / "tmp").iterdir()) == []
     assert json.loads((env / ".hud" / "config.json").read_text())["registry_id"] == REGISTRY_ID
 
