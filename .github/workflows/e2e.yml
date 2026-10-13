@@ -35,6 +35,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
+      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
+      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Run Docker scenarios
         run: >-
           uv run --python 3.12 --all-extras
@@ -46,6 +51,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
+      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # Environments run in containers with HUD's seccomp profile, so the
       # sandbox scenarios run there too, as root, with bubblewrap installed.
