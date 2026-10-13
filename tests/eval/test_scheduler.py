@@ -21,8 +21,8 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.eval.envs import containers, eventually, lab, minted, solve
-from tests.harness import RecordingProvider, ScriptedAgent
+from tests.eval.envs import containers, lab, minted, solve
+from tests.harness import RecordingProvider, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable

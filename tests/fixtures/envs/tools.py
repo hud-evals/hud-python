@@ -59,3 +59,6 @@ async def collect_code(length: int = 4):
         "in order, as one string."
     )
     yield 1.0 if answer == "".join(code) and revealed == code else 0.0
+
+
+tasks = [collect_code()]

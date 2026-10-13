@@ -18,7 +18,7 @@ from hud.environment.env import current_session_id
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from tests.harness import FakeDocker
@@ -34,15 +34,6 @@ async def add(a: int, b: int):
     answer = yield f"add {a} {b}"
     yield 1.0 if answer == str(a + b) else 0.0
 """
-
-
-async def eventually(condition: Callable[[], bool], *, within: float = 10.0) -> None:
-    """Wait for work a rollout left running in the background to finish."""
-    deadline = asyncio.get_running_loop().time() + within
-    while not condition():
-        if asyncio.get_running_loop().time() > deadline:
-            raise AssertionError(f"condition still false after {within}s")
-        await asyncio.sleep(0.01)
 
 
 def solve(prompt: str) -> str:

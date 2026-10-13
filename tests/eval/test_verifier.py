@@ -27,8 +27,8 @@ from hud.eval import (
     Shared,
     Task,
 )
-from tests.eval.envs import actor, containers, eventually, judge
-from tests.harness import RecordingProvider, ScriptedAgent, steps
+from tests.eval.envs import actor, containers, judge
+from tests.harness import RecordingProvider, ScriptedAgent, eventually, steps
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

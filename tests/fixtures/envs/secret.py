@@ -10,9 +10,9 @@ from pathlib import Path
 
 from hud import Environment
 
-ROOT = Path(tempfile.gettempdir()) / f"hud-oracle-secret-{os.getpid()}"
+ROOT = Path(tempfile.gettempdir()) / f"hud-fixture-secret-{os.getpid()}"
 
-env = Environment("oracle-secret")
+env = Environment("secret")
 env.workspace(ROOT, guest_path=str(ROOT))
 
 

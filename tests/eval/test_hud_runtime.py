@@ -25,8 +25,8 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.eval.envs import eventually, lab, solve
-from tests.harness import Reply, ScriptedAgent
+from tests.eval.envs import lab, solve
+from tests.harness import Reply, ScriptedAgent, eventually
 from tests.harness.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:

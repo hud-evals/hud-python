@@ -25,8 +25,7 @@ from hud.eval import (
     Taskset,
 )
 from hud.telemetry.context import set_trace_context
-from tests.eval.envs import eventually
-from tests.harness import Reply, ScriptedAgent
+from tests.harness import Reply, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from pathlib import Path

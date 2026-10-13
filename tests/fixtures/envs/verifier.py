@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from hud import Environment
 
-actor = Environment("oracle-actor")
-judge = Environment("oracle-judge")
+actor = Environment("actor")
+judge = Environment("judge")
 
 
 @actor.template(id="relay")
 async def relay(word: str):
-    answer = yield f"Reply with this word and nothing else: {word}"
+    answer = yield f"Reply with: {word}"
     yield {"score": 0.0, "answer": answer}
 
 

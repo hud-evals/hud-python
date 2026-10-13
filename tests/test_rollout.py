@@ -34,9 +34,9 @@ from hud.eval import (
     rollout,
 )
 from hud.telemetry.context import get_current_trace_id
-from tests.eval.envs import SUMS_SOURCE, eventually, lab, solve
+from tests.eval.envs import SUMS_SOURCE, lab, solve
 from tests.fixtures.envs import source
-from tests.harness import ScriptedAgent, steps
+from tests.harness import ScriptedAgent, eventually, steps
 from tests.harness.cloud import FakeDaytona, FakeModal
 from tests.harness.runtime import host_on_runtime
 

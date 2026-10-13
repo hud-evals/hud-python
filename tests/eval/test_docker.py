@@ -36,8 +36,8 @@ from hud.eval import (
     rollout,
 )
 from hud.eval.runtime import DockerBindMount
-from tests.eval.envs import DF_FREE, actor, containers, eventually, judge, lab, solve
-from tests.harness import ScriptedAgent
+from tests.eval.envs import DF_FREE, actor, containers, judge, lab, solve
+from tests.harness import ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from hud.eval import Runtime

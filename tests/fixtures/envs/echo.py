@@ -17,3 +17,6 @@ async def echo(word: str):
 async def count(word: str):
     answer = yield f"How many letters are in {word}?"
     yield 1.0 if answer.content == len(word) else 0.0
+
+
+tasks = [echo(word="tangerine")]

@@ -10,7 +10,6 @@ still finishes cleanly.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,7 +17,7 @@ import pytest
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.eval import LocalRuntime, Task
-from tests.fixtures.envs import source
+from tests.fixtures.envs import collect_digits, repeat_word, source
 from tests.harness import call, computer_call, say
 
 if TYPE_CHECKING:
@@ -34,33 +33,6 @@ AGENTS: dict[str, Callable[[], Agent]] = {
     "gemini": lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview")),
     "chat": lambda: OpenAIChatAgent(OpenAIChatConfig(model="m")),
 }
-
-
-def repeat_word(request: ModelRequest) -> Turn:
-    """Answer with the word the prompt asks for."""
-    match = re.search(r"Reply with: (\S+)", request.prompt)
-    return say(match.group(1) if match else "no word in the prompt")
-
-
-def collect_digits() -> Callable[[ModelRequest], Turn]:
-    """Call next_digit until it says done, then answer with every digit it returned.
-
-    Responses chains requests and sends only the newest tool result, so the policy
-    keeps the digits it has seen, as the model's own context would.
-    """
-    digits: list[str] = []
-
-    def policy(request: ModelRequest) -> Turn:
-        if request.tool_results:
-            latest = re.search(r"\b(\d|done)\b", request.tool_results[-1])
-            assert latest is not None, request.tool_results[-1]
-            if latest.group(1) == "done":
-                return say("".join(digits))
-            digits.append(latest.group(1))
-        (tool,) = [name for name in request.tools if name.endswith("next_digit")]
-        return call(tool)
-
-    return policy
 
 
 def click_once(click: Turn) -> Callable[[ModelRequest], Turn]:

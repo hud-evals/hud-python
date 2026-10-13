@@ -18,8 +18,8 @@ from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.telemetry import flush
 from hud.telemetry.context import get_trace_headers, set_trace_context
-from tests.eval.envs import eventually, lab, solve
-from tests.harness import Reply, ScriptedAgent
+from tests.eval.envs import lab, solve
+from tests.harness import Reply, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
