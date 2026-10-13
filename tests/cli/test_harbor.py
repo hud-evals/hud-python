@@ -286,8 +286,8 @@ def test_rerunning_an_import_finds_the_taskset_its_name_created(
     first, _ = run(hud, "import", *folders, "--taskset", "TB2/Sample", "--yes")
     second, payload = run(hud, "import", *folders, "--taskset", "TB2/Sample", "--yes")
 
-    assert first.exit_code == 0, first.output
-    assert second.exit_code == 0, second.output
+    assert first.exit_code == 0, first
+    assert second.exit_code == 0, second
     assert importer.paths("POST").count("/tasksets") == 1
     assert importer.paths("GET").count("/tasksets/by-name/tb2sample") == 2
     assert payload["taskset"] == {"id": _TASKSET, "name": "tb2sample", "created": False}
