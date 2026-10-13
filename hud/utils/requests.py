@@ -35,6 +35,12 @@ _DEFAULT_LIMITS = httpx.Limits(
 )
 
 
+# Statuses the API answers with a Retry-After header; each is retried after that wait.
+_RETRY_STATUS_CODES = (429, 502, 503, 504)
+# The API never advises more than this; anything larger is a clock or a proxy artefact.
+_MAX_RETRY_AFTER_SECONDS = 30.0
+
+
 def _retry_delay(
     attempt: int, max_retries: int, retry_delay: float, url: str, error_msg: str
 ) -> float:
@@ -49,6 +55,40 @@ def _retry_delay(
         max_retries,
     )
     return retry_time
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """The wait the API advised in ``Retry-After`` (delay-seconds form), capped; None if absent."""
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None  # HTTP-date form: the API does not send it
+    if seconds < 0:
+        return None
+    return min(seconds, _MAX_RETRY_AFTER_SECONDS)
+
+
+def _response_retry_wait(
+    response: httpx.Response, attempt: int, max_retries: int, retry_delay: float, url: str
+) -> float:
+    """Seconds to wait before retrying a response: the advised wait, else the shared backoff."""
+    advised = _retry_after_seconds(response)
+    if advised is None:
+        return _retry_delay(
+            attempt, max_retries, retry_delay, url, f"Received status {response.status_code}"
+        )
+    logger.debug(
+        "Received status %d from %s, retrying in %.2f seconds as advised (attempt %d/%d)",
+        response.status_code,
+        url,
+        advised,
+        attempt,
+        max_retries,
+    )
+    return advised
 
 
 def _create_default_async_client() -> httpx.AsyncClient:
@@ -138,7 +178,6 @@ async def make_request(
         raise HudAuthenticationError("API key is required but not provided")
 
     headers = {"Authorization": f"Bearer {api_key}"}
-    retry_status_codes = [502, 503, 504]
     attempt = 0
     should_close_client = False
 
@@ -153,16 +192,9 @@ async def make_request(
             try:
                 response = await client.request(method=method, url=url, json=json, headers=headers)
 
-                # Check if we got a retriable status code
-                if response.status_code in retry_status_codes and attempt <= max_retries:
+                if response.status_code in _RETRY_STATUS_CODES and attempt <= max_retries:
                     await asyncio.sleep(
-                        _retry_delay(
-                            attempt,
-                            max_retries,
-                            retry_delay,
-                            url,
-                            f"Received status {response.status_code}",
-                        )
+                        _response_retry_wait(response, attempt, max_retries, retry_delay, url)
                     )
                     continue
 
@@ -224,7 +256,6 @@ def make_request_sync(
         raise HudAuthenticationError("API key is required but not provided")
 
     headers = {"Authorization": f"Bearer {api_key}"}
-    retry_status_codes = [502, 503, 504]
     attempt = 0
     should_close_client = False
 
@@ -239,16 +270,9 @@ def make_request_sync(
             try:
                 response = client.request(method=method, url=url, json=json, headers=headers)
 
-                # Check if we got a retriable status code
-                if response.status_code in retry_status_codes and attempt <= max_retries:
+                if response.status_code in _RETRY_STATUS_CODES and attempt <= max_retries:
                     time.sleep(
-                        _retry_delay(
-                            attempt,
-                            max_retries,
-                            retry_delay,
-                            url,
-                            f"Received status {response.status_code}",
-                        )
+                        _response_retry_wait(response, attempt, max_retries, retry_delay, url)
                     )
                     continue
 

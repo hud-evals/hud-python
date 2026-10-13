@@ -56,18 +56,71 @@ async def test_requests_retry_transient_responses_with_shared_backoff(asynchrono
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize("status", [402, 429])
-async def test_requests_preserve_status_hints_without_retry(asynchronous, status):
+async def test_requests_preserve_status_hints_once_retries_are_spent(asynchronous, status):
     from hud.utils.hints import CREDITS_EXHAUSTED, RATE_LIMIT_HIT
 
     transport = httpx.MockTransport(lambda request: httpx.Response(status, json={"detail": "stop"}))
     with pytest.raises(HudRequestError) as error:
         if asynchronous:
             async with httpx.AsyncClient(transport=transport) as client:
-                await make_request("GET", "https://test/data", api_key="key", client=client)
+                await make_request(
+                    "GET", "https://test/data", api_key="key", client=client, max_retries=0
+                )
         else:
             with httpx.Client(transport=transport) as client:
-                make_request_sync("GET", "https://test/data", api_key="key", client=client)
+                make_request_sync(
+                    "GET", "https://test/data", api_key="key", client=client, max_retries=0
+                )
     assert error.value.hints == [CREDITS_EXHAUSTED if status == 402 else RATE_LIMIT_HIT]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("status", [429, 503])
+async def test_requests_wait_out_the_advised_retry_after(asynchronous, status):
+    """A refusal with Retry-After is retried after exactly that wait, capped at 30 s."""
+    calls = 0
+    advised = ["3", "120", "oops"]  # a plain wait, one past the cap, one the API never sends
+
+    def handle(request):
+        nonlocal calls
+        calls += 1
+        if calls <= len(advised):
+            return httpx.Response(status, headers={"Retry-After": advised[calls - 1]})
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handle)
+    with (
+        patch("hud.utils.requests.time.sleep") as sync_sleep,
+        patch("hud.utils.requests.asyncio.sleep", new_callable=AsyncMock) as async_sleep,
+    ):
+        if asynchronous:
+            async with httpx.AsyncClient(transport=transport) as client:
+                result = await make_request(
+                    "GET", "https://test/data", api_key="key", client=client
+                )
+        else:
+            with httpx.Client(transport=transport) as client:
+                result = make_request_sync("GET", "https://test/data", api_key="key", client=client)
+        sleep = async_sleep if asynchronous else sync_sleep
+        assert [call.args[0] for call in sleep.call_args_list] == [3.0, 30.0, 8.0]
+    assert result == {"ok": True}
+    assert calls == 4
+
+
+async def test_a_rate_limit_that_outlasts_the_retries_raises_with_the_hint():
+    from hud.utils.hints import RATE_LIMIT_HIT
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(429, headers={"Retry-After": "1"}, json={"detail": "no"})
+    )
+    with patch("hud.utils.requests.asyncio.sleep", new_callable=AsyncMock) as sleep:
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(HudRequestError) as error:
+                await make_request(
+                    "GET", "https://test/data", api_key="key", client=client, max_retries=2
+                )
+    assert sleep.await_count == 2
+    assert error.value.hints == [RATE_LIMIT_HIT]
 
 
 def test_requests_warn_once_per_deprecation_notice():
