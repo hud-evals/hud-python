@@ -1275,6 +1275,86 @@ async def test_timeout_does_not_cancel_verifier_provider_cleanup() -> None:
     await asyncio.wait_for(cleanup_finished.wait(), 1.0)
 
 
+async def test_cancelled_rollout_reports_trace_exit_as_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = Environment("cancel-exit")
+
+    @env.template()
+    async def add(a: int, b: int):
+        answer = yield f"add:{a}:{b}"
+        yield 1.0 if answer == str(a + b) else 0.0
+
+    entered: list[str] = []
+    exited: list[Run] = []
+
+    async def capture_enter(trace_id: str, **kwargs: Any) -> None:
+        entered.append(trace_id)
+
+    async def capture_exit(run: Run) -> None:
+        exited.append(run)
+
+    monkeypatch.setattr(run_module, "trace_enter", capture_enter)
+    monkeypatch.setattr(run_module, "trace_exit", capture_exit)
+
+    agent_started = asyncio.Event()
+
+    class HangingAgent(Agent):
+        async def __call__(self, run: Run) -> None:
+            agent_started.set()
+            await asyncio.Event().wait()
+
+    driver = asyncio.create_task(
+        rollout(_add_task(2, 3), HangingAgent(), runtime=LocalRuntime(env))
+    )
+    await asyncio.wait_for(agent_started.wait(), timeout=5.0)
+    driver.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await driver
+
+    assert len(entered) == 1
+    assert len(exited) == 1
+    assert exited[0].trace.trace_id == entered[0]
+    assert exited[0].trace.status == "cancelled"
+
+
+async def test_cancelled_rollout_before_launch_still_reports_trace_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered: list[str] = []
+    exited: list[Run] = []
+
+    async def capture_enter(trace_id: str, **kwargs: Any) -> None:
+        entered.append(trace_id)
+
+    async def capture_exit(run: Run) -> None:
+        exited.append(run)
+
+    monkeypatch.setattr(run_module, "trace_enter", capture_enter)
+    monkeypatch.setattr(run_module, "trace_exit", capture_exit)
+
+    provision_started = asyncio.Event()
+
+    @asynccontextmanager
+    async def blocking_provider(_task: TaskRow) -> AsyncIterator[Any]:
+        provision_started.set()
+        await asyncio.Event().wait()
+        yield  # pragma: no cover
+
+    driver = asyncio.create_task(
+        rollout(_add_task(1, 1), _FnAgent(_solve_add), runtime=blocking_provider)
+    )
+    await asyncio.wait_for(provision_started.wait(), timeout=5.0)
+    driver.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await driver
+
+    assert len(entered) == 1
+    assert len(exited) == 1
+    assert exited[0].trace.trace_id == entered[0]
+    assert exited[0].trace.status == "cancelled"
+
+
 async def test_pre_launch_failure_yields_a_synthesized_failed_run() -> None:
     @asynccontextmanager
     async def broken_provider(task: TaskRow) -> AsyncIterator[Runtime]:
