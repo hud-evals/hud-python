@@ -19,6 +19,7 @@ from hud.utils.exceptions import (
     HudRequestError,
     HudTimeoutError,
 )
+from hud.utils.hints import CREDITS_EXHAUSTED, RATE_LIMIT_HIT
 from tests.harness import Reply
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ async def test_transient_responses_are_retried_with_doubling_backoff(
         ),
         pytest.param(
             [Reply(status=404, json={"detail": "nope"})],
-            ("Request failed: nope", 404, {"detail": "nope"}),
+            ("Request failed: nope", 404, {"detail": "nope"}, []),
             1,
             id="404-detail",
         ),
@@ -80,25 +81,26 @@ async def test_transient_responses_are_retried_with_doubling_backoff(
                 "Request failed with status 400 - JSON response: {'code': 'bad'}",
                 400,
                 {"code": "bad"},
+                [],
             ),
             1,
             id="400-without-detail",
         ),
         pytest.param(
             [Reply(status=402, json={"detail": "no credits"})],
-            ("Request failed: no credits", 402, {"detail": "no credits"}),
+            ("Request failed: no credits", 402, {"detail": "no credits"}, [CREDITS_EXHAUSTED]),
             1,
             id="402-once",
         ),
         pytest.param(
             [Reply(status=429, json={"detail": "slow down"})],
-            ("Request failed: slow down", 429, {"detail": "slow down"}),
+            ("Request failed: slow down", 429, {"detail": "slow down"}, [RATE_LIMIT_HIT]),
             1,
             id="429-once",
         ),
         pytest.param(
             [Reply(status=500, body="oops", content_type="text/plain")],
-            ("Request failed with status 500", 500, None),
+            ("Request failed with status 500", 500, None, []),
             1,
             id="500-once",
         ),
@@ -117,9 +119,9 @@ async def test_each_response_status_has_one_outcome(
     if isinstance(outcome, tuple):
         with pytest.raises(HudRequestError) as raised:
             await _request(asynchronous, url, api_key="k", retry_delay=0.01)
-        message, status, body = outcome
+        message, status, body, hints = outcome
         assert (raised.value.message, raised.value.status_code) == (message, status)
-        assert raised.value.response_json == body
+        assert (raised.value.response_json, raised.value.hints) == (body, hints)
         assert f"Status: {status}" in str(raised.value)
     else:
         assert await _request(asynchronous, url, api_key="k", retry_delay=0.01) == outcome
