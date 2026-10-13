@@ -6,7 +6,7 @@ acquisition below also runs a rollout whose reward proves the placement worked.
 """
 
 # The snapshots hold whole sandbox command lines.
-# ruff: noqa: E501
+# ruff: noqa: E501 -- snapshots quote SDK and CLI arguments verbatim
 
 from __future__ import annotations
 

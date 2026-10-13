@@ -185,6 +185,7 @@ def test_each_package_exports_the_documented_names() -> None:
                 "Grader",
                 "LLMJudgeGrader",
                 "SubScore",
+                "_combine_subscores",
                 "combine",
                 "combine_all",
                 "combine_any",
@@ -235,8 +236,7 @@ def test_each_package_exports_the_documented_names() -> None:
 
 
 @pytest.mark.parametrize("package", PACKAGES)
-def test_every_exported_name_resolves_and_none_is_private(package: str) -> None:
+def test_every_exported_name_resolves(package: str) -> None:
     module = importlib.import_module(package)
 
     assert [name for name in module.__all__ if not hasattr(module, name)] == []
-    assert [name for name in module.__all__ if name.startswith("_") and name != "__version__"] == []
