@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import ssl
 import time
 import warnings
@@ -66,7 +67,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
         seconds = float(value)
     except ValueError:
         return None  # HTTP-date form: the API does not send it
-    if seconds < 0:
+    if not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, _MAX_RETRY_AFTER_SECONDS)
 

@@ -79,7 +79,8 @@ async def test_requests_preserve_status_hints_once_retries_are_spent(asynchronou
 async def test_requests_wait_out_the_advised_retry_after(asynchronous, status):
     """A refusal with Retry-After is retried after exactly that wait, capped at 30 s."""
     calls = 0
-    advised = ["3", "120", "oops"]  # a plain wait, one past the cap, one the API never sends
+    # A plain wait, one past the cap, and two the API never sends (a date, a non-finite number).
+    advised = ["3", "120", "oops", "NaN"]
 
     def handle(request):
         nonlocal calls
@@ -102,9 +103,9 @@ async def test_requests_wait_out_the_advised_retry_after(asynchronous, status):
             with httpx.Client(transport=transport) as client:
                 result = make_request_sync("GET", "https://test/data", api_key="key", client=client)
         sleep = async_sleep if asynchronous else sync_sleep
-        assert [call.args[0] for call in sleep.call_args_list] == [3.0, 30.0, 8.0]
+        assert [call.args[0] for call in sleep.call_args_list] == [3.0, 30.0, 8.0, 16.0]
     assert result == {"ok": True}
-    assert calls == 4
+    assert calls == 5
 
 
 async def test_a_rate_limit_that_outlasts_the_retries_raises_with_the_hint():
