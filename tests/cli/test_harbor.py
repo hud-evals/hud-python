@@ -1,4 +1,8 @@
-"""Tests for ``hud harbor``."""
+"""``hud harbor``: import Harbor folders or bundles into a taskset, and follow imports.
+
+The CLI runs as a subprocess against the fake platform, which hosts a stateful
+importer: it answers the imports API, keeps tasksets, and stores the uploaded
+bundle the way signed storage would."""
 
 from __future__ import annotations
 
@@ -6,27 +10,25 @@ import io
 import json
 import zipfile
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlsplit
-from uuid import UUID
+from urllib.parse import urlencode, urlsplit
 
-import httpx
 import pytest
-from typer.testing import CliRunner, Result
 
-from hud.cli import AuthScope, DirectoryState, ExitCode
-from hud.cli.__main__ import app
-from hud.utils.exceptions import HudRequestError
-from hud.utils.platform import PlatformClient
+from hud.cli import ExitCode
+from tests.harness import Reply
+
+from .conftest import WEB_URL
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.harness import FakeServices, Hud, Request, Result
 
 _USER = "11111111-1111-4111-8111-111111111111"
 _TEAM = "22222222-2222-4222-8222-222222222222"
 _TASKSET = "44444444-4444-4444-8444-444444444444"
 _FILE = "55555555-5555-4555-8555-555555555555"
 _IMPORT = "66666666-6666-4666-8666-666666666666"
-_UPLOAD_URL = "https://storage.test/upload?signature=secret"
 _LIVE = {"queued", "starting", "running", "cancelling"}
 
 
@@ -65,10 +67,15 @@ def _report(**changes: Any) -> dict[str, Any]:
     }
 
 
+class NotFound(Exception):
+    """The importer has no such resource; the platform answers 404."""
+
+
 class _Platform:
     """The platform and storage endpoints a Harbor import touches."""
 
-    def __init__(self) -> None:
+    def __init__(self, storage_url: str) -> None:
+        self.storage_url = storage_url
         self.tasksets: dict[str, dict[str, Any]] = {}
         self.has_imports_api = True
         self.offers_harbor_import = True
@@ -82,7 +89,7 @@ class _Platform:
         self.calls: list[tuple[str, str, Any]] = []
         self.list_queries: list[dict[str, list[str]]] = []
         self.uploaded: bytes | None = None
-        self.upload_headers: httpx.Headers | None = None
+        self.upload_headers: dict[str, str] | None = None
 
     def body(self, method: str, path: str) -> Any:
         [body] = [body for called, at, body in self.calls if (called, at) == (method, path)]
@@ -113,14 +120,16 @@ class _Platform:
         status = statuses.pop(0) if len(statuses) > 1 else statuses[0]
         return self.imported(status)
 
-    def request(self, method: str, url: str, **kwargs: Any) -> Any:
+    def request(
+        self, method: str, url: str, request_query: dict[str, list[str]], **kwargs: Any
+    ) -> Any:
         parts = urlsplit(url)
         path = parts.path.removeprefix("/v2")
         self.calls.append((method, path, kwargs.get("json")))
         if path == "/auth/me":
             return {"user_id": _USER, "team_id": _TEAM}
         if path.startswith("/imports") and not self.has_imports_api:
-            raise HudRequestError("Not Found", status_code=404)
+            raise NotFound("Not Found")
         if path == "/imports/formats":
             harbor = {
                 "format": "harbor",
@@ -133,11 +142,11 @@ class _Platform:
             for taskset in self.tasksets.values():
                 if taskset["name"] == name:
                     return {"taskset_id": taskset["id"], "name": name}
-            raise HudRequestError("Taskset not found", status_code=404)
+            raise NotFound("Taskset not found")
         if method == "GET" and path.startswith("/tasksets/"):
             taskset_id = path.removeprefix("/tasksets/")
             if taskset_id not in self.tasksets:
-                raise HudRequestError("Taskset not found", status_code=404)
+                raise NotFound("Taskset not found")
             return self.tasksets[taskset_id]
         if method == "POST" and path == "/tasksets":
             created = {"id": _TASKSET, "name": kwargs["json"]["name"], "can_edit": True}
@@ -145,7 +154,7 @@ class _Platform:
             return created
         if method == "POST" and path == "/imports/uploads":
             filename = kwargs["json"]["filename"]
-            return {"file": {"id": _FILE, "filename": filename}, "upload_url": _UPLOAD_URL}
+            return {"file": {"id": _FILE, "filename": filename}, "upload_url": self.storage_url}
         if method == "POST" and path == f"/data/{_FILE}/complete":
             return {"id": _FILE, "filename": "tb2.zip", "size_bytes": 10}
         if method == "DELETE" and path == f"/data/{_FILE}":
@@ -153,42 +162,43 @@ class _Platform:
         if method == "POST" and path == "/imports":
             return self.current_import()
         if path == "/imports":
-            self.list_queries.append(parse_qs(parts.query))
+            self.list_queries.append(dict(request_query))
             return {"imports": [self.current_import()], "total": 1}
         if path == f"/imports/{_IMPORT}":
             return self.current_import()
         if path == f"/imports/{_IMPORT}/report":
             if self.report is None:
-                raise HudRequestError("Import report not found", status_code=404)
+                raise NotFound("Import report not found")
             return self.report
         if path == f"/imports/{_IMPORT}/cancel":
             return self.imported("cancelling")
         if path.startswith("/imports/"):
-            raise HudRequestError("Import not found", status_code=404)
+            raise NotFound("Import not found")
         raise AssertionError((method, url))
 
-    def storage(self, request: httpx.Request) -> httpx.Response:
-        assert request.method == "PUT"
-        self.uploaded = request.read()
+    def handle(self, request: Request) -> Reply:
+        """Answer one platform API request."""
+        url = request.path + (f"?{urlencode(request.query, doseq=True)}" if request.query else "")
+        try:
+            body = self.request(request.method, url, request.query, json=request.json)
+        except NotFound as error:
+            return Reply(status=404, json={"detail": str(error)})
+        return Reply(status=204) if body is None else Reply(json=body)
+
+    def store(self, request: Request) -> Reply:
+        """Signed storage: keep the uploaded bundle and its headers."""
+        self.uploaded = request.body
         self.upload_headers = request.headers
-        return httpx.Response(self.storage_status)
+        return Reply(status=self.storage_status)
 
 
 @pytest.fixture
-def platform(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Platform:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("hud.settings.settings.api_key", "test-key")
-    monkeypatch.setattr("hud.settings.settings.default_project", None)
-    monkeypatch.setattr("hud.settings.settings.hud_web_url", "https://hud.test")
-    monkeypatch.setattr("hud.imports.time.sleep", lambda _seconds: None)
-    fake = _Platform()
-    monkeypatch.setattr("hud.utils.platform.make_request_sync", fake.request)
-    client = httpx.Client
-    monkeypatch.setattr(
-        httpx,
-        "Client",
-        lambda **kwargs: client(transport=httpx.MockTransport(fake.storage), **kwargs),
-    )
+def importer(platform: FakeServices) -> _Platform:
+    """The platform's imports API and signed storage, answered by one stateful fake."""
+    fake = _Platform(f"{platform.url('api')}/storage/upload?signature=secret")
+    for method in ("GET", "POST", "DELETE"):
+        platform.route("api", method, "/v2/{rest:path}", handler=fake.handle)
+    platform.route("api", "PUT", "/storage/upload", handler=fake.store)
     return fake
 
 
@@ -206,24 +216,24 @@ def folders(tmp_path: Path) -> list[str]:
     return [str(tmp_path / "tasks"), str(job)]
 
 
-def _invoke(*args: str) -> tuple[Result, dict[str, Any]]:
-    result = CliRunner().invoke(app, ["harbor", *args, "--json"])
+def run(hud: Hud, *args: str) -> tuple[Result, dict[str, Any]]:
+    result = hud("harbor", *args, "--json")
     return result, json.loads(result.stdout)
 
 
 def test_import_creates_a_new_taskset_and_imports_into_it(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    result, payload = _invoke("import", *folders, "--taskset", "TB2 Sample", "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", "TB2 Sample", "--yes")
 
-    assert result.exit_code == 0, result.output
-    assert platform.body("POST", "/tasksets") == {"name": "tb2-sample", "project_id": None}
-    assert platform.body("POST", "/imports") == {
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert importer.body("POST", "/tasksets") == {"name": "tb2-sample", "project_id": None}
+    assert importer.body("POST", "/imports") == {
         "format": "harbor",
         "file_id": _FILE,
         "taskset_id": _TASKSET,
     }
-    assert platform.paths("POST")[-2:] == [f"/data/{_FILE}/complete", "/imports"]
+    assert importer.paths("POST")[-2:] == [f"/data/{_FILE}/complete", "/imports"]
     assert payload["taskset"] == {"id": _TASKSET, "name": "tb2-sample", "created": True}
     assert payload["import"]["status"] == "completed"
     assert payload["import"]["summary"] == "Imported 1 task(s) and 1 run(s)"
@@ -234,18 +244,20 @@ def test_import_creates_a_new_taskset_and_imports_into_it(
     ]
 
 
-def test_import_uploads_each_folder_under_its_name(platform: _Platform, folders: list[str]) -> None:
-    result, _ = _invoke("import", *folders, "--taskset", "tb2", "--yes")
+def test_import_uploads_each_folder_under_its_name(
+    hud: Hud, importer: _Platform, folders: list[str]
+) -> None:
+    result, _ = run(hud, "import", *folders, "--taskset", "tb2", "--yes")
 
-    assert result.exit_code == 0, result.output
-    reservation = platform.body("POST", "/imports/uploads")
+    assert result.exit_code == 0, result.stdout + result.stderr
+    reservation = importer.body("POST", "/imports/uploads")
     assert reservation["format"] == "harbor"
     assert reservation["filename"] == "tb2.zip"
     assert reservation["content_type"] == "application/zip"
-    assert platform.upload_headers is not None
-    assert platform.upload_headers["content-length"] == str(reservation["size_bytes"])
-    assert platform.uploaded is not None
-    with zipfile.ZipFile(io.BytesIO(platform.uploaded)) as bundle:
+    assert importer.upload_headers is not None
+    assert importer.upload_headers["content-length"] == str(reservation["size_bytes"])
+    assert importer.uploaded is not None
+    with zipfile.ZipFile(io.BytesIO(importer.uploaded)) as bundle:
         assert sorted(bundle.namelist()) == [
             "run-1/config.json",
             "run-1/hello__a/config.json",
@@ -257,107 +269,107 @@ def test_import_uploads_each_folder_under_its_name(platform: _Platform, folders:
 
 
 def test_import_defaults_to_the_taskset_named_after_the_first_folder(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.tasksets[_TASKSET] = {"id": _TASKSET, "name": "tasks", "can_edit": True}
+    importer.tasksets[_TASKSET] = {"id": _TASKSET, "name": "tasks", "can_edit": True}
 
-    result, payload = _invoke("import", *folders, "--yes")
+    result, payload = run(hud, "import", *folders, "--yes")
 
-    assert result.exit_code == 0, result.output
-    assert "/tasksets" not in platform.paths("POST")
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "/tasksets" not in importer.paths("POST")
     assert payload["taskset"] == {"id": _TASKSET, "name": "tasks", "created": False}
 
 
 def test_rerunning_an_import_finds_the_taskset_its_name_created(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    first, _ = _invoke("import", *folders, "--taskset", "TB2/Sample", "--yes")
-    second, payload = _invoke("import", *folders, "--taskset", "TB2/Sample", "--yes")
+    first, _ = run(hud, "import", *folders, "--taskset", "TB2/Sample", "--yes")
+    second, payload = run(hud, "import", *folders, "--taskset", "TB2/Sample", "--yes")
 
     assert first.exit_code == 0, first.output
     assert second.exit_code == 0, second.output
-    assert platform.paths("POST").count("/tasksets") == 1
-    assert platform.paths("GET").count("/tasksets/by-name/tb2sample") == 2
+    assert importer.paths("POST").count("/tasksets") == 1
+    assert importer.paths("GET").count("/tasksets/by-name/tb2sample") == 2
     assert payload["taskset"] == {"id": _TASKSET, "name": "tb2sample", "created": False}
 
 
 def test_import_refuses_an_unknown_taskset_id_instead_of_creating_one(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    result, payload = _invoke("import", *folders, "--taskset", _TASKSET, "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", _TASKSET, "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["error"] == "not_found"
     assert payload["message"] == f"Taskset {_TASKSET} is inaccessible or deleted."
-    assert platform.paths("POST") == []
+    assert importer.paths("POST") == []
 
 
 def test_import_link_saves_the_taskset_as_the_directory_default(
-    platform: _Platform, folders: list[str], tmp_path: Path
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    result, _ = _invoke("import", *folders, "--taskset", "tb2", "--yes", "--link")
+    result, _ = run(hud, "import", *folders, "--taskset", "tb2", "--yes", "--link")
 
-    assert result.exit_code == 0, result.output
-    state = DirectoryState(AuthScope.resolve(PlatformClient.from_settings()), tmp_path)
-    assert state.load().taskset_id == UUID(_TASKSET)
+    assert result.exit_code == 0, result.stdout + result.stderr
+    link = json.loads((hud.cwd / ".hud" / "config.json").read_text())
+    assert link["taskset_id"] == _TASKSET
 
 
 def test_import_refuses_a_taskset_the_caller_cannot_edit_before_uploading(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.tasksets[_TASKSET] = {"id": _TASKSET, "name": "theirs", "can_edit": False}
+    importer.tasksets[_TASKSET] = {"id": _TASKSET, "name": "theirs", "can_edit": False}
 
-    result, payload = _invoke("import", *folders, "--taskset", _TASKSET, "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", _TASKSET, "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["error"] == "permission_denied"
-    assert "/imports/uploads" not in platform.paths("POST")
+    assert "/imports/uploads" not in importer.paths("POST")
 
 
 def test_import_refuses_a_bundle_over_the_format_limit(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.max_input_bytes = 10
+    importer.max_input_bytes = 10
 
-    result, payload = _invoke("import", *folders, "--taskset", "tb2", "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--yes")
 
     assert result.exit_code == ExitCode.USAGE
     assert payload["message"].endswith("a Harbor import takes at most 10 bytes.")
-    assert platform.paths("POST") == []
+    assert importer.paths("POST") == []
 
 
-def test_dry_run_plans_without_writing(platform: _Platform, folders: list[str]) -> None:
-    result, payload = _invoke("import", *folders, "--taskset", "tb2", "--dry-run")
+def test_dry_run_plans_without_writing(hud: Hud, importer: _Platform, folders: list[str]) -> None:
+    result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--dry-run")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["dry_run"] is True
     assert payload["taskset"] == {"id": None, "name": "tb2", "created": True}
     assert payload["bundle"]["filename"] == "tb2.zip"
     assert payload["bundle"]["files"] == 6
-    assert platform.paths("POST") == []
+    assert importer.paths("POST") == []
 
 
 def test_a_failed_upload_deletes_its_reservation_without_leaking_the_signed_url(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.storage_status = 403
+    importer.storage_status = 403
 
-    result, payload = _invoke("import", *folders, "--taskset", "tb2", "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["message"] == "Storage refused the upload: HTTP 403"
-    assert platform.paths("DELETE") == [f"/data/{_FILE}"]
-    assert "/imports" not in platform.paths("POST")
-    assert "signature" not in result.output
+    assert importer.paths("DELETE") == [f"/data/{_FILE}"]
+    assert "/imports" not in importer.paths("POST")
+    assert "signature" not in (result.stdout + result.stderr)
 
 
 def test_a_stopped_import_exits_with_failure_and_its_report(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.import_statuses = ["stopped"]
-    platform.report = _report(error={"step": "add the tasks to the taskset", "message": "boom"})
+    importer.import_statuses = ["stopped"]
+    importer.report = _report(error={"step": "add the tasks to the taskset", "message": "boom"})
 
-    result, payload = _invoke("import", *folders, "--taskset", "tb2", "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["import"]["status"] == "stopped"
@@ -365,87 +377,91 @@ def test_a_stopped_import_exits_with_failure_and_its_report(
 
 
 def test_a_failed_import_without_a_report_exits_with_its_error(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.import_statuses = ["failed"]
-    platform.import_error = "the importer crashed"
+    importer.import_statuses = ["failed"]
+    importer.import_error = "the importer crashed"
 
-    result = CliRunner().invoke(app, ["harbor", "import", *folders, "--taskset", "tb2", "--yes"])
+    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "The import failed: the importer crashed" in result.output
-    assert f"/imports/{_IMPORT}/report" not in platform.paths("GET")
+    assert "The import failed: the importer crashed" in (result.stdout + result.stderr)
+    assert f"/imports/{_IMPORT}/report" not in importer.paths("GET")
 
 
 def test_a_stopped_import_without_a_report_shows_its_summary(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.import_statuses = ["stopped"]
-    platform.report = None
+    importer.import_statuses = ["stopped"]
+    importer.report = None
 
-    result, payload = _invoke("import", *folders, "--taskset", "tb2", "--yes")
+    result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["report"] is None
     assert payload["import"]["summary"] == "Imported 1 task(s) and 1 run(s)"
 
 
-def test_no_wait_returns_the_started_import(platform: _Platform, folders: list[str]) -> None:
-    platform.import_statuses = ["queued"]
+def test_no_wait_returns_the_started_import(
+    hud: Hud, importer: _Platform, folders: list[str]
+) -> None:
+    importer.import_statuses = ["queued"]
 
-    result, payload = _invoke("import", *folders, "--taskset", "tb2", "--yes", "--no-wait")
+    result, payload = run(hud, "import", *folders, "--taskset", "tb2", "--yes", "--no-wait")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["import"]["status"] == "queued"
     assert payload["report"] is None
-    assert f"/imports/{_IMPORT}" not in platform.paths("GET")
+    assert f"/imports/{_IMPORT}" not in importer.paths("GET")
 
 
-def test_import_uploads_a_given_zip_as_it_is(platform: _Platform, tmp_path: Path) -> None:
+def test_import_uploads_a_given_zip_as_it_is(hud: Hud, importer: _Platform, tmp_path: Path) -> None:
     bundle = tmp_path / "prepared.zip"
     with zipfile.ZipFile(bundle, "w") as archive:
         archive.writestr("hello/task.toml", "version = '1.0'\n")
 
-    result, payload = _invoke("import", str(bundle), "--yes")
+    result, payload = run(hud, "import", str(bundle), "--yes")
 
-    assert result.exit_code == 0, result.output
-    assert platform.uploaded == bundle.read_bytes()
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert importer.uploaded == bundle.read_bytes()
     assert payload["taskset"]["name"] == "prepared"
 
 
-def test_import_packs_a_folder_named_like_a_zip(platform: _Platform, tmp_path: Path) -> None:
+def test_import_packs_a_folder_named_like_a_zip(
+    hud: Hud, importer: _Platform, tmp_path: Path
+) -> None:
     folder = tmp_path / "release.zip"
     folder.mkdir()
     (folder / "task.toml").write_text("version = '1.0'\n")
 
-    result, payload = _invoke("import", str(folder), "--taskset", "tb2", "--yes")
+    result, payload = run(hud, "import", str(folder), "--taskset", "tb2", "--yes")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["bundle"]["files"] == 1
-    assert platform.uploaded is not None
-    with zipfile.ZipFile(io.BytesIO(platform.uploaded)) as bundle:
+    assert importer.uploaded is not None
+    with zipfile.ZipFile(io.BytesIO(importer.uploaded)) as bundle:
         assert bundle.namelist() == ["release.zip/task.toml"]
 
 
 def test_import_refuses_a_zip_mixed_with_folders_before_any_request(
-    platform: _Platform, folders: list[str], tmp_path: Path
+    hud: Hud, importer: _Platform, folders: list[str], tmp_path: Path
 ) -> None:
     bundle = tmp_path / "prepared.zip"
     bundle.write_bytes(b"zip")
 
-    result, payload = _invoke("import", str(bundle), folders[0], "--yes")
+    result, payload = run(hud, "import", str(bundle), folders[0], "--yes")
 
     assert result.exit_code == ExitCode.USAGE
     assert payload["message"] == "Pass either one .zip bundle or folders, not both or several zips."
-    assert platform.calls == []
+    assert importer.calls == []
 
 
 def test_import_fails_where_the_platform_offers_no_harbor_import(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.offers_harbor_import = False
+    importer.offers_harbor_import = False
 
-    result, payload = _invoke("import", *folders, "--yes")
+    result, payload = run(hud, "import", *folders, "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["error"] == "not_found"
@@ -453,132 +469,138 @@ def test_import_fails_where_the_platform_offers_no_harbor_import(
 
 
 def test_import_fails_where_the_platform_has_no_imports(
-    platform: _Platform, folders: list[str]
+    hud: Hud, importer: _Platform, folders: list[str]
 ) -> None:
-    platform.has_imports_api = False
+    importer.has_imports_api = False
 
-    result, payload = _invoke("import", *folders, "--yes")
+    result, payload = run(hud, "import", *folders, "--yes")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["error"] == "not_found"
     assert payload["message"].startswith("Harbor import is not available on ")
 
 
-def test_import_prints_the_report_tables(platform: _Platform, folders: list[str]) -> None:
-    result = CliRunner().invoke(app, ["harbor", "import", *folders, "--taskset", "tb2", "--yes"])
+def test_import_prints_the_report_tables(hud: Hud, importer: _Platform, folders: list[str]) -> None:
+    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes")
 
-    assert result.exit_code == 0, result.output
-    assert "1 imported, 1 skipped" in result.output
-    assert "it ran a task that is neither in the bundle nor in HUD" in result.output
-    assert f"https://hud.test/tasksets/{_TASKSET}/imports" in result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "1 imported, 1 skipped" in (result.stdout + result.stderr)
+    assert "it ran a task that is neither in the bundle nor in HUD" in (
+        result.stdout + result.stderr
+    )
+    assert f"{WEB_URL}/tasksets/{_TASKSET}/imports" in (result.stdout + result.stderr)
 
 
-def test_report_wait_follows_the_import_until_it_ends(platform: _Platform) -> None:
-    platform.import_statuses = ["queued", "running", "completed"]
+def test_report_wait_follows_the_import_until_it_ends(hud: Hud, importer: _Platform) -> None:
+    importer.import_statuses = ["queued", "running", "completed"]
 
-    result, payload = _invoke("report", _IMPORT, "--wait")
+    result, payload = run(hud, "report", _IMPORT, "--wait")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["import"]["status"] == "completed"
     assert payload["report"]["taskset_id"] == _TASKSET
 
 
-def test_report_of_a_running_import_without_wait_has_no_report(platform: _Platform) -> None:
-    platform.import_statuses = ["running"]
+def test_report_of_a_running_import_without_wait_has_no_report(
+    hud: Hud, importer: _Platform
+) -> None:
+    importer.import_statuses = ["running"]
 
-    result, payload = _invoke("report", _IMPORT)
+    result, payload = run(hud, "report", _IMPORT)
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["report"] is None
-    assert f"/imports/{_IMPORT}/report" not in platform.paths("GET")
+    assert f"/imports/{_IMPORT}/report" not in importer.paths("GET")
 
 
-def test_report_shows_tasks_an_import_updated(platform: _Platform) -> None:
-    [task] = platform.report["tasks"]
-    platform.report["tasks"] = [{**task, "build_version": 2, "status": "updated"}]
+def test_report_shows_tasks_an_import_updated(hud: Hud, importer: _Platform) -> None:
+    [task] = importer.report["tasks"]
+    importer.report["tasks"] = [{**task, "build_version": 2, "status": "updated"}]
 
-    result = CliRunner().invoke(app, ["harbor", "report", _IMPORT])
+    result = hud("harbor", "report", _IMPORT)
 
-    assert result.exit_code == 0, result.output
-    assert "updated" in result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "updated" in (result.stdout + result.stderr)
 
 
-def test_report_reads_a_v4_report(platform: _Platform) -> None:
-    platform.report = _report(schema_version="harbor_import_report.v4")
+def test_report_reads_a_v4_report(hud: Hud, importer: _Platform) -> None:
+    importer.report = _report(schema_version="harbor_import_report.v4")
 
-    result, payload = _invoke("report", _IMPORT)
+    result, payload = run(hud, "report", _IMPORT)
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["report"]["schema_version"] == "harbor_import_report.v4"
     assert payload["report"]["tasks"][0]["status"] == "imported"
 
 
-def test_report_of_an_unknown_schema_falls_back_to_the_summary(platform: _Platform) -> None:
-    platform.report = {"schema_version": "harbor_import_report.v9"}
+def test_report_of_an_unknown_schema_falls_back_to_the_summary(
+    hud: Hud, importer: _Platform
+) -> None:
+    importer.report = {"schema_version": "harbor_import_report.v9"}
 
-    result, payload = _invoke("report", _IMPORT)
+    result, payload = run(hud, "report", _IMPORT)
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert payload["report"] is None
     assert payload["import"]["summary"] == "Imported 1 task(s) and 1 run(s)"
 
 
-def test_report_refuses_an_import_of_another_format(platform: _Platform) -> None:
-    platform.import_format = "parquet"
+def test_report_refuses_an_import_of_another_format(hud: Hud, importer: _Platform) -> None:
+    importer.import_format = "parquet"
 
-    result, payload = _invoke("report", _IMPORT)
+    result, payload = run(hud, "report", _IMPORT)
 
     assert result.exit_code == ExitCode.USAGE
     assert payload["message"] == f"Import {_IMPORT} is a parquet import, not a Harbor import."
 
 
-def test_report_of_an_unknown_import_is_not_found(platform: _Platform) -> None:
-    result, payload = _invoke("report", "88888888-8888-4888-8888-888888888888")
+def test_report_of_an_unknown_import_is_not_found(hud: Hud, importer: _Platform) -> None:
+    result, payload = run(hud, "report", "88888888-8888-4888-8888-888888888888")
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["error"] == "not_found"
 
 
-def test_cancel_requests_cancellation_of_a_running_import(platform: _Platform) -> None:
-    platform.import_statuses = ["running"]
+def test_cancel_requests_cancellation_of_a_running_import(hud: Hud, importer: _Platform) -> None:
+    importer.import_statuses = ["running"]
 
-    result, payload = _invoke("cancel", _IMPORT, "--yes")
+    result, payload = run(hud, "cancel", _IMPORT, "--yes")
 
-    assert result.exit_code == 0, result.output
-    assert f"/imports/{_IMPORT}/cancel" in platform.paths("POST")
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert f"/imports/{_IMPORT}/cancel" in importer.paths("POST")
     assert payload["status"] == "cancelling"
 
 
-def test_cancel_leaves_an_ended_import_alone(platform: _Platform) -> None:
-    result, payload = _invoke("cancel", _IMPORT, "--yes")
+def test_cancel_leaves_an_ended_import_alone(hud: Hud, importer: _Platform) -> None:
+    result, payload = run(hud, "cancel", _IMPORT, "--yes")
 
-    assert result.exit_code == 0, result.output
-    assert platform.paths("POST") == []
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert importer.paths("POST") == []
     assert payload["status"] == "completed"
 
 
-def test_imports_filters_by_taskset(platform: _Platform) -> None:
-    platform.tasksets[_TASKSET] = {"id": _TASKSET, "name": "tb2", "can_edit": True}
+def test_imports_filters_by_taskset(hud: Hud, importer: _Platform) -> None:
+    importer.tasksets[_TASKSET] = {"id": _TASKSET, "name": "tb2", "can_edit": True}
 
-    result, payload = _invoke("imports", "--taskset", "tb2")
+    result, payload = run(hud, "imports", "--taskset", "tb2")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout + result.stderr
     assert [item["id"] for item in payload["imports"]] == [_IMPORT]
-    assert platform.list_queries == [
+    assert importer.list_queries == [
         {"limit": ["20"], "format": ["harbor"], "taskset_id": [_TASKSET]}
     ]
 
 
-def test_imports_refuses_an_unknown_taskset_id(platform: _Platform) -> None:
-    result, payload = _invoke("imports", "--taskset", _TASKSET)
+def test_imports_refuses_an_unknown_taskset_id(hud: Hud, importer: _Platform) -> None:
+    result, payload = run(hud, "imports", "--taskset", _TASKSET)
 
     assert result.exit_code == ExitCode.FAILURE
     assert payload["error"] == "not_found"
-    assert platform.list_queries == []
+    assert importer.list_queries == []
 
 
-def test_imports_refuses_a_limit_the_platform_does_not_page(platform: _Platform) -> None:
-    result = CliRunner().invoke(app, ["harbor", "imports", "--limit", "101"])
+def test_imports_refuses_a_limit_the_platform_does_not_page(hud: Hud, importer: _Platform) -> None:
+    result = hud("harbor", "imports", "--limit", "101")
 
     assert result.exit_code == ExitCode.USAGE
-    assert platform.calls == []
+    assert importer.calls == []
