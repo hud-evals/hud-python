@@ -100,41 +100,6 @@ async def run_task(env: Environment, agent: Agent, *, prompt: str = PROMPT, **op
     )
 
 
-class Relay:
-    """A TCP relay to one address that a test can cut, dropping every connection."""
-
-    def __init__(self) -> None:
-        self._server: asyncio.Server | None = None
-        self._writers: list[asyncio.StreamWriter] = []
-
-    async def start(self, host: str, port: int) -> int:
-        """Relay to ``host:port``; return the loopback port the relay listens on."""
-
-        async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            while chunk := await reader.read(65536):
-                writer.write(chunk)
-                await writer.drain()
-            writer.close()
-
-        async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            upstream_reader, upstream_writer = await asyncio.open_connection(host, port)
-            self._writers += [writer, upstream_writer]
-            await asyncio.gather(
-                pipe(reader, upstream_writer),
-                pipe(upstream_reader, writer),
-                return_exceptions=True,
-            )
-
-        self._server = await asyncio.start_server(accept, "127.0.0.1", 0)
-        return self._server.sockets[0].getsockname()[1]
-
-    def cut(self) -> None:
-        assert self._server is not None
-        self._server.close()
-        for writer in self._writers:
-            writer.transport.abort()
-
-
 def write_files(root: Path, files: Mapping[str, bytes | str]) -> None:
     root.mkdir(parents=True, exist_ok=True)
     for relative, content in files.items():

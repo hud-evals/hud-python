@@ -18,7 +18,7 @@ SESSION = "/runtime/sessions/{id}"
 TUNNEL = "/runtime/tunnels/{id}"
 
 
-def relay(port: int) -> Callable[[WebSocket, dict[str, str]], Awaitable[None]]:
+def tunnel(port: int) -> Callable[[WebSocket, dict[str, str]], Awaitable[None]]:
     """A tunnel endpoint splicing each WebSocket to the control channel on ``port``."""
 
     async def handler(websocket: WebSocket, params: dict[str, str]) -> None:
@@ -51,4 +51,4 @@ def host_on_runtime(services: FakeServices, port: int, session: str = "sess-1") 
     """Let the fake runtime service lease ``session`` and tunnel it to the env on ``port``."""
     services.route("runtime", "POST", SESSIONS, json={"id": session})
     services.route("runtime", "DELETE", SESSION, json={})
-    services.websocket("runtime", TUNNEL, relay(port))
+    services.websocket("runtime", TUNNEL, tunnel(port))

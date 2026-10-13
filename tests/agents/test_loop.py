@@ -10,6 +10,8 @@ unknown calls, failing tools, provider faults, lost workspaces and timeouts.
 from __future__ import annotations
 
 import asyncio
+import sys
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -19,7 +21,6 @@ from fastmcp import FastMCP
 from inline_snapshot import snapshot
 
 from tests.agents.support import (
-    Relay,
     chat,
     claude,
     gemini,
@@ -28,7 +29,7 @@ from tests.agents.support import (
     run_task,
     workspace_env,
 )
-from tests.harness import Reply, Turn, call, fail, say, shell_call, steps
+from tests.harness import Reply, Turn, call, fail, relay, say, shell_call, steps
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.eval import Run
-    from tests.harness import HudEnv, ModelRequest, Models
+    from tests.harness import FlakyRelay, HudEnv, ModelRequest, Models
 
 
 def result_texts(requests: list[ModelRequest]) -> list[str]:
@@ -459,13 +460,15 @@ async def test_auto_respond_answers_a_question_or_lets_the_rollout_end(
     assert observed == expected
 
 
-def cutter(relay: Relay) -> FastMCP:
+def cutter(relays: list[FlakyRelay]) -> FastMCP:
     server = FastMCP("cutter")
 
     @server.tool()
     def cut_workspace() -> str:
-        """Drop the connection to the workspace."""
-        relay.cut()
+        """Drop the connection to the workspace for good."""
+        (workspace,) = relays
+        workspace.refuse(sys.maxsize)
+        workspace.sever()
         return "cut"
 
     return server
@@ -547,18 +550,21 @@ async def test_a_lost_workspace_ends_the_rollout_after_three_consecutive_failure
     root = tmp_path / "ws"
     script = [call("cut_workspace"), *(call(name, command="true") for name in tools)]
     models.script([*script, say("done")])
-    relay = Relay()
+    relays: list[FlakyRelay] = []
     env = workspace_env(root)
 
-    @env.initialize
-    async def reach_the_workspace_through_the_relay() -> None:
-        shell = env.capability("shell")
-        address = urlsplit(shell.url)
-        assert address.hostname is not None and address.port is not None
-        port = await relay.start(address.hostname, address.port)
-        env.add_capability(replace(shell, url=f"ssh://127.0.0.1:{port}"))
+    async with AsyncExitStack() as stack:
 
-    async with mcp_server(cutter(relay)) as cut:
+        @env.initialize
+        async def reach_the_workspace_through_a_relay() -> None:
+            shell = env.capability("shell")
+            address = urlsplit(shell.url)
+            assert address.hostname is not None and address.port is not None
+            workspace = await stack.enter_async_context(relay(address.hostname, address.port))
+            relays.append(workspace)
+            env.add_capability(replace(shell, url=f"ssh://127.0.0.1:{workspace.port}"))
+
+        cut = await stack.enter_async_context(mcp_server(cutter(relays)))
         env.add_capability(cut)
         run = await run_task(env, chat(max_steps=10)())
 
