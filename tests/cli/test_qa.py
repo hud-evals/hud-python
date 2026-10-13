@@ -1,4 +1,4 @@
-"""``hud qa``: list QA checks, run them on traces, and read their results."""
+"""``hud qa``: list QA checks, run them on traces or tasks, and read their results."""
 
 from __future__ import annotations
 
@@ -15,22 +15,40 @@ if TYPE_CHECKING:
 
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 ANALYSIS_TRACE_ID = "00000000-0000-4000-a000-000000000004"
+TASK_ID = "00000000-0000-4000-a000-000000000005"
+TASK_VERSION_ID = "00000000-0000-4000-a000-000000000006"
 CHECK = "failure_analysis"
 OTHER_CHECK = "reward_hacking"
+TASK_CHECK = "task_reward_exploit"
 CHECKS = [
     {
         "key": CHECK,
+        "subject_type": "trace",
         "title": "Failure Analysis",
         "question": "Why did the agent fail?",
         "description": "Attributes each failure to the agent, the evaluation, or the platform.",
     },
     {
         "key": OTHER_CHECK,
+        "subject_type": "trace",
         "title": "Reward Hacking",
         "question": "Did the agent game the grader?",
         "description": "Looks for answers that satisfy the grader without solving the task.",
     },
+    {
+        "key": TASK_CHECK,
+        "subject_type": "task",
+        "title": "Task Reward Exploit",
+        "question": "Can the task's reward be earned without solving it?",
+        "description": "Probes a task's grader for shortcuts.",
+    },
 ]
+
+
+@pytest.fixture(autouse=True)
+def catalog(platform: FakeServices) -> None:
+    """The platform's QA check catalog, which hud qa reads to place checks by level."""
+    platform.route("api", "GET", "/v2/qa/checks", json={"checks": CHECKS})
 
 
 def row(status: str = "completed", **fields: Any) -> dict[str, Any]:
@@ -38,6 +56,7 @@ def row(status: str = "completed", **fields: Any) -> dict[str, Any]:
     return {
         "id": "00000000-0000-4000-a000-000000000003",
         "check_key": CHECK,
+        "subject_type": "trace",
         "subject_trace_id": TRACE_ID,
         "source": "analysis",
         "status": status,
@@ -75,10 +94,12 @@ def test_qa_lists_the_checks(hud: Hud, platform: FakeServices, argv: list[str]) 
     assert result.lines == snapshot(
         [
             "QA Checks",
-            "Key Title Question",
-            "failure_analysis Failure Analysis Why did the agent fail?",
-            "reward_hacking Reward Hacking Did the agent game the grader?",
-            "Tip: hud qa run <check>[,<check>...] <trace-id>... to run checks",
+            "Key Level Title Question",
+            "failure_analysis trace Failure Analysis Why did the agent fail?",
+            "reward_hacking trace Reward Hacking Did the agent game the grader?",
+            "task_reward_exploit task Task Reward Exploit Can the task's reward be earned without",
+            "solving it?",
+            "Tip: hud qa run <check>[,<check>...] <trace-or-task-id>... to run checks",
         ]
     )
 
@@ -86,8 +107,10 @@ def test_qa_lists_the_checks(hud: Hud, platform: FakeServices, argv: list[str]) 
 @pytest.mark.parametrize(
     ("argv", "checks", "stdout"),
     [
-        (["qa", "list", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n"),
-        (["qa", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n"),
+        (["qa", "list", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n{TASK_CHECK}\n"),
+        (["qa", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n{TASK_CHECK}\n"),
+        (["qa", "list", "--level", "task", "--quiet"], CHECKS, f"{TASK_CHECK}\n"),
+        (["qa", "list", "--level", "TRACE", "--quiet"], CHECKS, f"{CHECK}\n{OTHER_CHECK}\n"),
         (["qa", "list", "--json"], CHECKS, json.dumps({"checks": CHECKS}, indent=2) + "\n"),
         (["qa", "list"], [], "No QA checks are available.\n"),
     ],
@@ -107,7 +130,7 @@ def test_qa_list_modes(
     [
         (
             ["qa", "run", CHECK],
-            snapshot({"error": "usage", "message": "Missing parameter: trace_ids"}),
+            snapshot({"error": "usage", "message": "Missing parameter: ids"}),
         ),
         (
             ["qa", "run", " , ", TRACE_ID],
@@ -159,7 +182,7 @@ def test_qa_run_without_waiting_posts_one_run(
     assert result.exit_code == 0, result
     assert result.json == queued
     assert platform.bodies("api", "POST", "/v2/qa/runs") == [body]
-    assert platform.requests("api", "GET") == []
+    assert platform.requests("api", "GET", "/v2/qa/results") == []
 
 
 def test_qa_run_dry_run_posts_nothing(hud: Hud, platform: FakeServices) -> None:
@@ -171,12 +194,13 @@ def test_qa_run_dry_run_posts_nothing(hud: Hud, platform: FakeServices) -> None:
             "dry_run": True,
             "action": "qa_run",
             "check_keys": ["failure_analysis", "reward_hacking"],
+            "level": "trace",
             "trace_ids": ["00000000-0000-4000-a000-000000000002"],
             "overwrite": False,
             "wait": True,
         }
     )
-    assert platform.requests("api") == []
+    assert platform.requests("api", "POST") == []
 
 
 @pytest.mark.parametrize(
@@ -294,7 +318,7 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
 
     assert result.exit_code == exit_code, result
     assert result.stdout == stdout
-    assert [request.query for request in platform.requests("api", "GET")] == [
+    assert [request.query for request in platform.requests("api", "GET", "/v2/qa/results")] == [
         {"trace_ids": [TRACE_ID]}
     ] * len(polled)
 
@@ -538,3 +562,89 @@ def test_qa_results_without_results_says_so(hud: Hud, platform: FakeServices) ->
     result = hud("qa", "results", TRACE_ID)
 
     assert (result.exit_code, result.stdout) == (0, "No QA results found.\n")
+
+
+def task_verdict(tag: str, **fields: Any) -> dict[str, Any]:
+    """A completed task-level result: it names a task and task version, not a trace."""
+    return {
+        **verdict(tag, check_key=TASK_CHECK),
+        "subject_type": "task",
+        "subject_trace_id": None,
+        "subject_task_id": TASK_ID,
+        "subject_task_version_id": TASK_VERSION_ID,
+        **fields,
+    }
+
+
+def test_task_level_checks_run_on_task_ids_and_wait_on_their_results(
+    hud: Hud, platform: FakeServices
+) -> None:
+    platform.route(
+        "api",
+        "POST",
+        "/v2/qa/runs",
+        json={"results": [{**task_verdict("passed"), "status": "queued"}]},
+    )
+    platform.route("api", "GET", "/v2/qa/results", json={"results": [task_verdict("failed")]})
+
+    result = hud("qa", "run", TASK_CHECK, TASK_ID)
+
+    assert result.exit_code == 1, result
+    assert platform.bodies("api", "POST", "/v2/qa/runs") == [
+        {"check_keys": [TASK_CHECK], "task_ids": [TASK_ID], "overwrite": False}
+    ]
+    assert [request.query for request in platform.requests("api", "GET", "/v2/qa/results")] == [
+        {"task_ids": [TASK_ID]}
+    ]
+    assert "hud qa results --level task <task-id>" in " ".join(result.lines)
+
+
+@pytest.mark.parametrize(
+    ("checks", "message"),
+    [
+        ("missing_check", "Unknown QA check: missing_check"),
+        (f"{CHECK},{TASK_CHECK}", "Run trace-level and task-level checks separately."),
+    ],
+    ids=["an-unknown-check", "trace-and-task-checks-together"],
+)
+def test_qa_run_refuses_checks_it_cannot_place_before_starting_anything(
+    hud: Hud, platform: FakeServices, checks: str, message: str
+) -> None:
+    result = hud("qa", "run", checks, TRACE_ID, "--json")
+
+    assert result.exit_code == 2, result
+    assert message in result.json["message"]
+    assert platform.requests("api", "POST") == []
+
+
+def test_a_task_level_dry_run_names_its_level_and_task_ids(
+    hud: Hud, platform: FakeServices
+) -> None:
+    result = hud("qa", "run", TASK_CHECK, TASK_ID, "--dry-run", "--json")
+
+    assert result.exit_code == 0, result
+    assert (result.json["level"], result.json["task_ids"]) == ("task", [TASK_ID])
+    assert platform.requests("api", "POST") == []
+
+
+def test_task_results_with_history_show_the_task_version_and_analysis(
+    hud: Hud, platform: FakeServices
+) -> None:
+    platform.route(
+        "api",
+        "GET",
+        "/v2/qa/results",
+        json={"results": [task_verdict("failed", analysis_trace_id=ANALYSIS_TRACE_ID)]},
+    )
+
+    result = hud("qa", "results", "--level", "task", TASK_ID, "--history")
+
+    assert result.exit_code == 0, result
+    (request,) = platform.requests("api", "GET", "/v2/qa/results")
+    assert request.query == {"task_ids": [TASK_ID], "include_history": ["True"]}
+    shown = " ".join(result.lines)
+    assert TASK_ID in shown
+    assert f"Task version: {TASK_VERSION_ID}" in shown
+    assert "Verdict: failed" in shown
+    assert "View:" not in shown
+    assert f"/trace/{ANALYSIS_TRACE_ID}" in shown
