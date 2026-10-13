@@ -123,6 +123,22 @@ def probe_success(info: Any, *, num_envs: int = 1) -> NDArray[Any] | None:
     return None
 
 
+def _with_final_obs(obs: Any, info: Any, done: NDArray[Any]) -> Any:
+    """*obs* with each finished env's row replaced by its last frame from ``info["final_obs"]``:
+    an obs-shaped batch (Isaac Lab) or one obs per env (gymnasium same-step autoreset)."""
+    final = info.get("final_obs") if isinstance(info, dict) else None
+    if final is None or not done.any():
+        return obs
+    rows = {k: np.array(to_numpy(v)) for k, v in flatten_observation(obs).items()}
+    per_env = isinstance(final, np.ndarray) and final.dtype == object
+    leaves = {} if per_env else flatten_observation(final)
+    for i in np.flatnonzero(done):
+        last = flatten_observation(final[i]) if per_env else {k: v[i] for k, v in leaves.items()}
+        for name, value in last.items():
+            rows[name][i] = to_numpy(value)
+    return rows
+
+
 def detect_fps(env: Any) -> int:
     """Control rate from env metadata (``render_fps``) or Isaac's ``step_dt``; default 10."""
     fps = (getattr(env, "metadata", None) or {}).get("render_fps")
@@ -412,10 +428,10 @@ class GymBridge(RobotBridge):
             torch = cast("_TorchModule", importlib.import_module("torch"))
             env_action = torch.as_tensor(act, device=getattr(self._unwrapped, "device", None))
         obs, reward, terminated, truncated, info = self.env.step(env_action)
-        self._obs = obs
         done = np.atleast_1d(to_numpy(terminated)).astype(bool) | np.atleast_1d(
             to_numpy(truncated)
         ).astype(bool)
+        self._obs = _with_final_obs(obs, info, done)
         # Per-step reward for the RL wire (get_observation attaches it as a sibling).
         self._step_reward = np.atleast_1d(to_numpy(reward)).astype(np.float32)
         self._acc_reward += self._step_reward * ~self._done
@@ -541,9 +557,11 @@ class TracedEnv:
         obs, reward, terminated, truncated = result[:4]
         info = result[4] if len(result) > 4 else {}
         if self._rec is not None:
-            state, frames = split_observation(obs, batched=self._batched)
             # Episode ends on either gym flag; coerce to a 1-D bool mask.
             done = np.atleast_1d(to_numpy(terminated) | to_numpy(truncated)).astype(bool)
+            state, frames = split_observation(
+                _with_final_obs(obs, info, done), batched=self._batched
+            )
             if not self._batched:  # plain env → batch of one for the recorder
                 state = {k: v[None] for k, v in state.items()}
                 frames = {k: v[None] for k, v in frames.items()}

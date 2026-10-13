@@ -248,7 +248,8 @@ hud project use browser-evals -C ./my-env
 
 #### Project selection
 
-`hud deploy` and `hud sync tasks` resolve their destination in this order:
+`hud deploy`, `hud sync tasks`, and `hud harbor import` (for a taskset it creates) resolve their
+destination in this order:
 
 | Priority | Source | Scope |
 |----------|--------|-------|
@@ -296,32 +297,66 @@ remain in their original Project. The first upload from a directory records the 
 External benchmark formats can be adapted into runnable `Taskset`s through the
 experimental [Harbor integration](/v6/experimental/harbor).
 
+### `hud harbor`
+
+Import Harbor task folders and the job runs Harbor recorded into a taskset:
+
+```bash
+hud harbor import ./tasks ./jobs/2026-10-01__12-00 --taskset tb2  # tasks and their runs
+hud harbor import ./jobs/2026-10-02__09-00                        # into the directory's taskset
+hud harbor import bundle.zip --taskset tb2 --no-wait --json       # a prepared zip; return at once
+hud harbor imports --taskset tb2                                  # past imports
+hud harbor report <import-id> --wait                              # follow one, then show its report
+hud harbor cancel <import-id>
+```
+
+`hud harbor import` zips the folders, uploads the zip, imports it into the taskset, and prints what became of each task, job, and trial. `--taskset` takes a name or ID; a name
+is normalized as HUD normalizes taskset names (`TB2 Sample` is `tb2-sample`), and a name no
+taskset has creates one, while an ID has to name an existing taskset. Without it, the directory's
+taskset is used, then a taskset named after the first folder. A created taskset goes to the Project
+chosen as in
+[Project selection](#project-selection). `--link` saves the taskset as the directory's default.
+Exit code `1` means the import did not complete; tasks or trials it skipped are listed in the report
+without failing the command. See [Harbor import](/platform/harbor-import) for the zip layout, what
+an import creates, the report, and limits.
+
 ### QA checks
 
 ```bash
 hud qa list
 hud qa
+hud qa list --level task
 hud qa run failure_analysis <trace-id>
 hud qa run reward_hacking,false_positive <trace-id> <trace-id>
+hud qa run task_reward_exploit,task_failure_analysis <task-id>
 hud qa results <trace-id>
+hud qa results --level task <task-id>
 ```
 
-`hud qa list` lists HUD's QA checks: title, key, and the question each one
-answers. `hud qa` is an alias for
-`list`.
+Each QA check runs at one level: `trace` checks judge one completed evaluation
+trace, and `task` checks judge one task's current version.
+
+`hud qa list` lists HUD's QA checks: key, level, title, and the question each
+one answers. `--level trace` or `--level task` lists only the checks at that
+level. `hud qa` is an alias for `list`.
 
 `hud qa run` runs one check, or several separated by commas, on up to 100
-completed traces as a single run, then waits until every check has finished on
-every trace. Where a check's current result on a trace is completed or still
-running, it is kept rather than run again; pass `--overwrite` to run it anyway.
-Pass `--no-wait` to return after launch, or `--json` for machine-readable
-output. Exit code `1` means a check did not pass or the SDK could not complete
-the command.
+traces or tasks as a single run, then waits until every check has finished on
+every one. The checks decide what the IDs are: trace-level checks take
+completed trace IDs, task-level checks take task IDs. Trace-level and
+task-level checks can't be mixed in one run. Where a check's current result is
+completed or still running, it is kept rather than run again; pass
+`--overwrite` to run it anyway. Pass `--no-wait` to return after launch, or
+`--json` for machine-readable output. Exit code `1` means a check did not pass
+or the SDK could not complete the command.
 
 `hud qa results` prints the result in effect for every check on the given
-traces: its verdict (`passed`, `failed`, or `unknown`), summary, and numbered
-findings. A check passed on reward alone shows source `skipped`; a reviewer's
-verdict shows source `manual` with its note. `--json` prints the raw results.
+traces, or on tasks with `--level task`: its verdict (`passed`, `failed`, or
+`unknown`), summary, and numbered findings. A task's result in effect is the
+latest one on its current version. `--history` lists every result, newest
+first, including results on a task's earlier versions. A check passed on reward
+alone shows source `skipped`; a reviewer's verdict shows source `manual` with
+its note. `--json` prints the raw results.
 
 ## Inspect
 
