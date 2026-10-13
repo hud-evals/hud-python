@@ -13,16 +13,17 @@ import base64
 import io
 import json
 import re
-import socket
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
-import uvicorn
 from PIL import Image
 
 from hud import Environment
+from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task, rollout
+from tests.harness import serve_asgi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -36,6 +37,26 @@ if TYPE_CHECKING:
 
 PROMPT = "Do the task."
 DATA_URL = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.*)$", re.DOTALL)
+
+
+def claude(*, model: str = "claude-sonnet-4-6", **config: Any) -> Callable[[], Agent]:
+    """A ``ClaudeAgent`` factory; ``config`` sets ``ClaudeConfig`` fields besides the model."""
+    return lambda: ClaudeAgent(ClaudeConfig(model=model, **config))
+
+
+def openai(*, model: str = "gpt-5.6", **config: Any) -> Callable[[], Agent]:
+    """An ``OpenAIAgent`` (Responses API) factory, configured like ``claude``."""
+    return lambda: OpenAIAgent(OpenAIConfig(model=model, **config))
+
+
+def gemini(*, model: str = "gemini-3.1-pro-preview", **config: Any) -> Callable[[], Agent]:
+    """A ``GeminiAgent`` factory, configured like ``claude``."""
+    return lambda: GeminiAgent(GeminiConfig(model=model, **config))
+
+
+def chat(*, model: str = "qwen3.6-plus", **config: Any) -> Callable[[], Agent]:
+    """An ``OpenAIChatAgent`` (Chat Completions) factory, configured like ``claude``."""
+    return lambda: OpenAIChatAgent(OpenAIChatConfig(model=model, **config))
 
 
 def workspace_env(
@@ -133,23 +154,9 @@ async def mcp_server(
     transport: Literal["streamable-http", "sse"] = "streamable-http",
 ) -> AsyncIterator[Capability]:
     """Serve ``server`` over HTTP on loopback; yield the capability that reaches it."""
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
     path = "/mcp" if transport == "streamable-http" else "/sse"
-    app = server.http_app(path=path, transport=transport)
-    http = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
-    serving = asyncio.create_task(http.serve(sockets=[sock]))
-    while not http.started:
-        if serving.done():
-            await serving
-            raise RuntimeError("MCP server stopped before it started")
-        await asyncio.sleep(0.01)
-    try:
+    async with serve_asgi(server.http_app(path=path, transport=transport)) as port:
         yield Capability.mcp(name=name, url=f"http://127.0.0.1:{port}{path}", transport=transport)
-    finally:
-        http.should_exit = True
-        await serving
 
 
 def image(

@@ -18,10 +18,8 @@ from fastmcp import FastMCP
 from inline_snapshot import snapshot
 from pydantic import BaseModel, Field
 
-from hud.agents import ClaudeAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, OpenAIChatConfig, OpenAIConfig
 from hud.capabilities.mcp import get_mcp_trace_id
-from tests.agents.support import mcp_server, run_task, wire, workspace_env
+from tests.agents.support import chat, claude, mcp_server, openai, run_task, wire, workspace_env
 from tests.harness import call, say
 
 if TYPE_CHECKING:
@@ -99,9 +97,9 @@ def tool_name(tool: dict[str, Any]) -> str:
 
 
 AGENTS: dict[str, Callable[[], Agent]] = {
-    "openai": lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6")),
-    "claude": lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
-    "chat": lambda: OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+    "openai": openai(),
+    "claude": claude(),
+    "chat": chat(),
 }
 
 OFFERED = {

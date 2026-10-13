@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import secrets
-import socket
+from contextlib import AsyncExitStack
 
-import uvicorn
 from fastmcp import FastMCP
 
 from hud import Environment
 from hud.capabilities import Capability
+from tests.harness import serve_asgi
 
 server = FastMCP(name="digits")
 code: list[str] = []
@@ -27,27 +26,18 @@ def next_digit() -> str:
 
 
 env = Environment("tools")
-running: list[tuple[uvicorn.Server, asyncio.Task[None]]] = []
+stack = AsyncExitStack()
 
 
 @env.initialize
 async def serve_tools() -> None:
-    http = uvicorn.Server(uvicorn.Config(server.http_app(path="/mcp"), log_level="error"))
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    running.append((http, asyncio.create_task(http.serve(sockets=[listener]))))
-    while not http.started:  # noqa: ASYNC110 - uvicorn signals readiness only by this flag
-        await asyncio.sleep(0.01)
-    port = listener.getsockname()[1]
+    port = await stack.enter_async_context(serve_asgi(server.http_app(path="/mcp")))
     env.add_capability(Capability.mcp(name="digits", url=f"http://127.0.0.1:{port}/mcp"))
 
 
 @env.shutdown
 async def stop_tools() -> None:
-    for http, _ in running:
-        http.should_exit = True
-    await asyncio.gather(*(task for _, task in running))
-    running.clear()
+    await stack.aclose()
 
 
 @env.template()

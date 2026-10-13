@@ -18,9 +18,16 @@ import pytest
 from fastmcp import FastMCP
 from inline_snapshot import snapshot
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
-from tests.agents.support import Relay, mcp_server, run_task, workspace_env
+from tests.agents.support import (
+    Relay,
+    chat,
+    claude,
+    gemini,
+    mcp_server,
+    openai,
+    run_task,
+    workspace_env,
+)
 from tests.harness import Reply, Turn, call, fail, say, shell_call, steps
 
 if TYPE_CHECKING:
@@ -30,22 +37,6 @@ if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.eval import Run
     from tests.harness import HudEnv, ModelRequest, Models
-
-
-def chat(**config: Any) -> Callable[[], Agent]:
-    return lambda: OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", **config))
-
-
-def responses(**config: Any) -> Callable[[], Agent]:
-    return lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6", **config))
-
-
-def claude(**config: Any) -> Callable[[], Agent]:
-    return lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", **config))
-
-
-def gemini(**config: Any) -> Callable[[], Agent]:
-    return lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", **config))
 
 
 def result_texts(requests: list[ModelRequest]) -> list[str]:
@@ -140,7 +131,7 @@ $ true
         ),
     ),
     "responses-token-cap": Row(
-        responses(),
+        openai(),
         [Turn(text="part", truncated=True)],
         snapshot(
             {
@@ -330,7 +321,7 @@ $ exit 3
         ),
     ),
     "responses-empty-shell-call-resampled": Row(
-        responses(),
+        openai(),
         [shell_call(), say("done")],
         snapshot(
             {
@@ -344,7 +335,7 @@ $ exit 3
         ),
     ),
     "responses-empty-shell-call-on-last-step": Row(
-        responses(max_steps=1),
+        openai(max_steps=1),
         [shell_call()],
         snapshot(
             {
@@ -393,7 +384,7 @@ async def test_a_discarded_responses_turn_does_not_advance_the_response_chain(
     hud_env.set(HUD_API_KEY="k")
     models.respond(sequence(shell_call("true"), shell_call(), say("done")))
 
-    run = await run_task(workspace_env(tmp_path / "ws"), responses()())
+    run = await run_task(workspace_env(tmp_path / "ws"), openai()())
 
     chain = [request.body.get("previous_response_id") for request in models.requests()]
     assert (run.trace.content, chain) == ("done", [None, "resp_1", "resp_1"])

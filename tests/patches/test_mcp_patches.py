@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import socket
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import uvicorn
 from fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.harness import Reply
+from tests.harness import Reply, serve_asgi
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterator
+    from collections.abc import Callable, Iterator
 
     from tests.harness import FakeServices, HudEnv, Request
 
@@ -161,25 +158,6 @@ async def test_a_failing_tool_call_resolves_with_a_transport_error(
     assert server.attempts() == attempts
 
 
-@asynccontextmanager
-async def _serving(mcp: FastMCP) -> AsyncIterator[str]:
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    server = uvicorn.Server(uvicorn.Config(mcp.http_app(), log_level="error"))
-    serving = asyncio.create_task(server.serve(sockets=[listener]))
-    for _ in range(1000):
-        if server.started:
-            break
-        await asyncio.sleep(0.01)
-    else:
-        raise TimeoutError("the MCP server did not start")
-    try:
-        yield f"http://127.0.0.1:{listener.getsockname()[1]}/mcp"
-    finally:
-        server.should_exit = True
-        await serving
-
-
 async def test_a_fastmcp_tool_wraps_plain_results_and_skips_output_validation() -> None:
     mcp = FastMCP("wrapped")
 
@@ -192,7 +170,8 @@ async def test_a_fastmcp_tool_wraps_plain_results_and_skips_output_validation() 
         wrong: Any = "not an int"
         return wrong
 
-    async with _serving(mcp) as url:
+    async with serve_asgi(mcp.http_app(path="/mcp")) as port:
+        url = f"http://127.0.0.1:{port}/mcp"
         client = await MCPClient.connect(Capability.mcp(url=url, transport="streamable-http"))
         try:
             wrapped = await client.call_tool("numbers", {})

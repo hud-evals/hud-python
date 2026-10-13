@@ -17,10 +17,19 @@ import pytest
 from asyncvnc import key_codes
 from inline_snapshot import snapshot
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIConfig
+from hud.agents import ClaudeAgent
+from hud.agents.types import ClaudeConfig
 from hud.capabilities import Capability
-from tests.agents.support import result_line, run_task, tool_results, wire, workspace_env
+from tests.agents.support import (
+    claude,
+    gemini,
+    openai,
+    result_line,
+    run_task,
+    tool_results,
+    wire,
+    workspace_env,
+)
 from tests.harness import (
     KeyEvent,
     Turn,
@@ -68,13 +77,9 @@ class Row:
     observed: Any
 
 
-def claude() -> Agent:
-    return ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6"))
-
-
 def claude_does(*actions: dict[str, Any], observed: Any) -> Row:
     turns = [call("computer", **action) for action in actions]
-    return Row(agent=claude, script=[*turns, say("done")], observed=observed)
+    return Row(agent=claude(), script=[*turns, say("done")], observed=observed)
 
 
 CLAUDE = {
@@ -232,10 +237,6 @@ CLAUDE = {
 }
 
 
-def openai(**config: Any) -> Callable[[], Agent]:
-    return lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6", **config))
-
-
 def openai_does(*actions: dict[str, Any], observed: Any, **call: Any) -> Row:
     return Row(
         agent=openai(), script=[computer_call(*actions, **call), say("done")], observed=observed
@@ -351,10 +352,6 @@ actions list is empty\
         observed=snapshot({"events": "", "results": ["<image/webp 200x100>"]}),
     ),
 }
-
-
-def gemini(**config: Any) -> Callable[[], Agent]:
-    return lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", **config))
 
 
 def gemini_does(*turns: Turn, observed: Any) -> Row:
@@ -693,7 +690,7 @@ async def test_only_the_first_screen_is_driven(
             Capability.rfb(name="screen-0", url=first.url),
             Capability.rfb(name="screen-1", url=second.url),
         )
-        await run_task(workspace_env(tmp_path / "ws", capabilities=screens), claude())
+        await run_task(workspace_env(tmp_path / "ws", capabilities=screens), claude()())
 
     assert (events(first), events(second), second.connections) == ("1,1 b0 1,1 b1 1,1 b0", "", 0)
 

@@ -14,17 +14,12 @@ import pytest
 from dirty_equals import IsStr
 from inline_snapshot import snapshot
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.base import Agent
 from hud.agents.types import (
-    ClaudeConfig,
-    GeminiConfig,
-    OpenAIChatConfig,
-    OpenAIConfig,
     SubagentStep,
 )
 from hud.types import Trace
-from tests.agents.support import run_task, workspace_env
+from tests.agents.support import chat, claude, gemini, openai, run_task, workspace_env
 from tests.harness import Turn, call, say, steps
 
 if TYPE_CHECKING:
@@ -77,7 +72,7 @@ CLAUDE_CITATIONS = (
 
 ROWS = {
     "claude": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        agent=claude(),
         script=[
             Turn(
                 reasoning="look it up",
@@ -119,7 +114,7 @@ ROWS = {
         ),
     ),
     "claude-refusal": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        agent=claude(),
         script=[
             Turn(
                 finish="refusal",
@@ -152,7 +147,7 @@ ROWS = {
         ),
     ),
     "claude-refusal-category": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        agent=claude(),
         script=[
             Turn(
                 finish="refusal",
@@ -181,7 +176,7 @@ ROWS = {
         ),
     ),
     "openai": Row(
-        agent=lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6")),
+        agent=openai(),
         script=[
             Turn(
                 reasoning="look it up",
@@ -250,7 +245,7 @@ ROWS = {
         ),
     ),
     "gemini": Row(
-        agent=lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview")),
+        agent=gemini(),
         script=[
             Turn(
                 text="Blue.",
@@ -306,7 +301,7 @@ ROWS = {
         ),
     ),
     "claude-tool": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        agent=claude(),
         script=[call("bash", command="echo hi"), say("done")],
         steps=snapshot(
             [
@@ -373,12 +368,7 @@ hi
         ),
     ),
     "chat-training": Row(
-        agent=lambda: OpenAIChatAgent(
-            OpenAIChatConfig(
-                model="qwen3.6-plus",
-                completion_kwargs={"extra_body": {"return_token_ids": True}},
-            )
-        ),
+        agent=chat(completion_kwargs={"extra_body": {"return_token_ids": True}}),
         script=[
             Turn(
                 text="Blue.",
@@ -468,7 +458,7 @@ hi
         ),
     ),
     "chat": Row(
-        agent=lambda: OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+        agent=chat(),
         script=[Turn(text="Blue.", reasoning="look it up")],
         steps=snapshot(
             [

@@ -14,9 +14,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.eval import LocalRuntime, Task
+from tests.agents.support import chat, claude, gemini, openai
 from tests.fixtures.envs import collect_digits, repeat_word, source
 from tests.harness import call, computer_call, say
 
@@ -28,10 +27,10 @@ if TYPE_CHECKING:
 
 
 AGENTS: dict[str, Callable[[], Agent]] = {
-    "claude": lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
-    "openai": lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6")),
-    "gemini": lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview")),
-    "chat": lambda: OpenAIChatAgent(OpenAIChatConfig(model="m")),
+    "claude": claude(),
+    "openai": openai(),
+    "gemini": gemini(),
+    "chat": chat(),
 }
 
 

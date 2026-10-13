@@ -27,9 +27,18 @@ from inline_snapshot import snapshot
 from PIL import Image
 
 from hud import Environment
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig, ToolStep
-from tests.agents.support import image, mcp_server, run_task, wire, workspace_env
+from hud.agents.types import ToolStep
+from tests.agents.support import (
+    chat,
+    claude,
+    gemini,
+    image,
+    mcp_server,
+    openai,
+    run_task,
+    wire,
+    workspace_env,
+)
 from tests.harness import call, say
 
 if TYPE_CHECKING:
@@ -124,7 +133,7 @@ class Row:
 
 ROWS = {
     "claude": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        agent=claude(),
         tools=ALL_TOOLS,
         results=snapshot(
             [
@@ -217,7 +226,7 @@ ROWS = {
         ),
     ),
     "claude-citations": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", citations_enabled=True)),
+        agent=claude(citations_enabled=True),
         tools=("note", "report", "broken"),
         results=snapshot(
             [
@@ -297,13 +306,13 @@ ROWS = {
         ),
     ),
     "claude-resource-link": Row(
-        agent=lambda: ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        agent=claude(),
         tools=("link",),
         results=snapshot([]),
         error="Unknown content block type: <class 'mcp.types.ResourceLink'>",
     ),
     "openai": Row(
-        agent=lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6")),
+        agent=openai(),
         tools=(*ALL_TOOLS, "link"),
         results=snapshot(
             [
@@ -355,7 +364,7 @@ ROWS = {
         ),
     ),
     "gemini": Row(
-        agent=lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview")),
+        agent=gemini(),
         tools=ALL_TOOLS,
         results=snapshot(
             [
@@ -427,7 +436,7 @@ ROWS = {
         ),
     ),
     "chat": Row(
-        agent=lambda: OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+        agent=chat(),
         tools=ALL_TOOLS,
         results=snapshot(
             [
@@ -472,7 +481,7 @@ async def test_gemini_bounds_a_long_tool_output_to_its_head_and_tail(
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
     models.script([call("long_output"), say("done")])
-    agent = GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", max_tool_result_chars=100))
+    agent = gemini(max_tool_result_chars=100)()
 
     async with mcp_server(result_tools()) as tools:
         await run_task(workspace_env(tmp_path / "ws", capabilities=(tools,)), agent)
@@ -571,7 +580,7 @@ async def test_claude_sees_a_viewed_file_within_its_image_limits(
 
     run = await run_task(
         workspace_env(root, files={"file": data}),
-        ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+        claude()(),
     )
 
     assert run.trace.status == "completed"
@@ -598,7 +607,7 @@ async def test_chat_models_see_a_read_image_as_it_is_on_disk(
 
     await run_task(
         workspace_env(root, files={"file": data}),
-        OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+        chat()(),
     )
 
     *_, tool, follow_up = models.requests()[-1].body["messages"]
@@ -643,13 +652,9 @@ async def test_claude_keeps_only_its_newest_tool_result_images_when_asked(
             say("done"),
         ]
     )
-    agent = ClaudeAgent(
-        ClaudeConfig(
-            model="claude-sonnet-4-6",
-            max_tool_result_images=limit,
-            thinking={"type": "adaptive"} if limit is not None else None,
-        )
-    )
+    agent = claude(
+        max_tool_result_images=limit, thinking={"type": "adaptive"} if limit is not None else None
+    )()
 
     async with mcp_server(screenshots(), name="screenshots") as tools:
         env = Environment("shots", capabilities=[tools])

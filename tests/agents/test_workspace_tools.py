@@ -13,9 +13,16 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from inline_snapshot import snapshot
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
-from tests.agents.support import result_line, run_task, tool_results, workspace_env
+from tests.agents.support import (
+    chat,
+    claude,
+    gemini,
+    openai,
+    result_line,
+    run_task,
+    tool_results,
+    workspace_env,
+)
 from tests.harness import call, say, shell_call
 
 if TYPE_CHECKING:
@@ -43,22 +50,6 @@ class Row:
     seed: dict[str, str] | None = None
 
 
-def claude() -> Agent:
-    return ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6"))
-
-
-def openai() -> Agent:
-    return OpenAIAgent(OpenAIConfig(model="gpt-5.6"))
-
-
-def gemini() -> Agent:
-    return GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview"))
-
-
-def chat() -> Agent:
-    return OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus"))
-
-
 def editor(**arguments: Any) -> Turn:
     return call("str_replace_based_edit_tool", **arguments)
 
@@ -68,7 +59,7 @@ NOTES = {"notes.txt": "one\ntwo\nthree\n", "dup.txt": "a a a"}
 ROWS = {
     # OpenAI Responses shell
     "openai-shell-commands-run-in-order": Row(
-        openai,
+        openai(),
         lambda _: [shell_call("printf A > a.txt", "cat a.txt"), say("done")],
         snapshot(
             {
@@ -80,7 +71,7 @@ ROWS = {
         ),
     ),
     "openai-shell-timeout-covers-the-whole-command": Row(
-        openai,
+        openai(),
         lambda _: [shell_call("echo ready; sleep 5; echo late", timeout_ms=500), say("done")],
         snapshot(
             {
@@ -92,7 +83,7 @@ ROWS = {
         ),
     ),
     "openai-shell-bounds-each-command-on-its-own": Row(
-        openai,
+        openai(),
         lambda _: [
             shell_call(
                 "printf 'head-%050d' 0; printf '%050d-tail' 0 >&2",
@@ -111,7 +102,7 @@ ROWS = {
         ),
     ),
     "openai-shell-limit-smaller-than-the-marker": Row(
-        openai,
+        openai(),
         lambda _: [shell_call("seq 100", max_output_length=1), say("done")],
         snapshot(
             {
@@ -123,7 +114,7 @@ ROWS = {
         ),
     ),
     "openai-shell-caps-the-limit": Row(
-        openai,
+        openai(),
         lambda _: [shell_call("true", max_output_length=20 * 1024 * 1024), say("done")],
         snapshot(
             {
@@ -135,7 +126,7 @@ ROWS = {
         ),
     ),
     "openai-shell-rejects-a-zero-limit": Row(
-        openai,
+        openai(),
         lambda _: [shell_call("touch ran", max_output_length=0), say("done")],
         snapshot(
             {
@@ -147,7 +138,7 @@ ROWS = {
         ),
     ),
     "openai-shell-rejects-commands-that-are-not-a-list": Row(
-        openai,
+        openai(),
         lambda _: [
             replace(
                 shell_call(),
@@ -174,7 +165,7 @@ ROWS = {
     ),
     # OpenAI-compatible chat tools
     "chat-bash-workdir-and-timeout": Row(
-        chat,
+        chat(),
         lambda root: [
             call("bash", command="mkdir -p 'my dir'"),
             call(
@@ -205,14 +196,14 @@ $ cd '<path0>/my dir' && timeout 1s bash -lc 'pwd; sleep 5; echo late'
         ),
     ),
     "chat-write-creates-parent-directories": Row(
-        chat,
+        chat(),
         lambda root: [call("write", filePath=f"{root}/deep/er/x.txt", content="x"), say("done")],
         snapshot(
             {"results": ["wrote 1 bytes to <path0>/deep/er/x.txt"], "files": {"deep/er/x.txt": "x"}}
         ),
     ),
     "chat-read-pages-text": Row(
-        chat,
+        chat(),
         lambda root: [
             call("read", filePath=f"{root}/notes.txt", offset=0, limit=1),
             call("read", filePath=f"{root}/notes.txt", offset=2),
@@ -256,7 +247,7 @@ three
         seed=NOTES,
     ),
     "chat-read-lists-a-directory": Row(
-        chat,
+        chat(),
         lambda root: [
             call("bash", command="mkdir -p pkg/sub && touch pkg/mod.py"),
             call("read", filePath=f"{root}/pkg"),
@@ -286,7 +277,7 @@ sub
         ),
     ),
     "chat-edit": Row(
-        chat,
+        chat(),
         lambda root: [
             call("edit", filePath=f"{root}/notes.txt", oldString="two", newString="2"),
             call("edit", filePath=f"{root}/dup.txt", oldString="a", newString="b"),
@@ -322,7 +313,7 @@ three
         seed=NOTES,
     ),
     "chat-grep-and-glob": Row(
-        chat,
+        chat(),
         lambda root: [
             call("grep", pattern="tw.", path=str(root), include="*.txt"),
             call("glob", pattern="*.txt", path=str(root)),
@@ -351,7 +342,7 @@ $ find <path0> -name '*.txt'
     ),
     # Gemini tools
     "gemini-shell-in-a-quoted-directory": Row(
-        gemini,
+        gemini(),
         lambda root: [
             call("run_shell_command", command="mkdir -p 'my dir'"),
             call("run_shell_command", command="pwd", dir_path=f"{root}/my dir"),
@@ -368,7 +359,7 @@ $ find <path0> -name '*.txt'
         ),
     ),
     "gemini-shell-without-a-command": Row(
-        gemini,
+        gemini(),
         lambda _: [call("run_shell_command", command=""), say("done")],
         snapshot(
             {
@@ -378,7 +369,7 @@ $ find <path0> -name '*.txt'
         ),
     ),
     "gemini-replace-and-read-lines": Row(
-        gemini,
+        gemini(),
         lambda root: [
             call("replace", file_path=f"{root}/notes.txt", old_string="two", new_string="2"),
             call("replace", file_path=f"{root}/notes.txt", old_string="zzz", new_string="y"),
@@ -408,7 +399,7 @@ three
         seed=NOTES,
     ),
     "gemini-search-and-glob": Row(
-        gemini,
+        gemini(),
         lambda root: [
             call("grep_search", pattern="tw.", dir_path=str(root), include_pattern="*.txt"),
             call("glob", pattern="*.txt", dir_path=str(root)),
@@ -427,7 +418,7 @@ three
     ),
     # Claude tools
     "claude-bash-restart-and-missing-command": Row(
-        claude,
+        claude(),
         lambda _: [call("bash", restart=True), call("bash"), say("done")],
         snapshot(
             {
@@ -440,7 +431,7 @@ three
         ),
     ),
     "claude-editor": Row(
-        claude,
+        claude(),
         lambda root: [
             editor(command="create", path=f"{root}/made.txt", file_text="made\n"),
             editor(command="str_replace", path=f"{root}/notes.txt", old_str="two", new_str="2"),
@@ -506,6 +497,6 @@ async def test_a_path_outside_the_workspace_root_is_used_as_given(
     outside = tmp_path / "elsewhere" / "probe.txt"
     models.script([call("write", filePath=str(outside), content="done"), say("done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), chat())
+    await run_task(workspace_env(tmp_path / "ws"), chat()())
 
     assert outside.read_text() == "done"

@@ -17,7 +17,7 @@ from fastmcp import FastMCP
 from inline_snapshot import snapshot
 from pydantic import ValidationError
 
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
+from hud.agents import ClaudeAgent, GeminiAgent, OpenAIChatAgent
 from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 from hud.agents.gemini.tools import (
     GeminiCodeExecutionTool,
@@ -25,8 +25,18 @@ from hud.agents.gemini.tools import (
     GeminiUrlContextTool,
 )
 from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
-from tests.agents.support import image, mcp_server, run_task, wire, workspace_env
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig
+from tests.agents.support import (
+    chat,
+    claude,
+    gemini,
+    image,
+    mcp_server,
+    openai,
+    run_task,
+    wire,
+    workspace_env,
+)
 from tests.harness import Turn, call, say, shell_call, steps
 
 if TYPE_CHECKING:
@@ -47,9 +57,7 @@ class Row:
 
 ROWS = {
     "claude": Row(
-        agent=lambda: ClaudeAgent(
-            ClaudeConfig(model="claude-sonnet-4-6", system_prompt="Be brief.", max_tokens=1024)
-        ),
+        agent=claude(system_prompt="Be brief.", max_tokens=1024),
         script=lambda root: [
             replace(
                 call(
@@ -177,9 +185,7 @@ PASS
         ),
     ),
     "openai": Row(
-        agent=lambda: OpenAIAgent(
-            OpenAIConfig(model="gpt-5.6", system_prompt="Be brief.", prompt_cache_key="cache-1")
-        ),
+        agent=openai(system_prompt="Be brief.", prompt_cache_key="cache-1"),
         script=lambda _root: [
             replace(shell_call("printf PASS > a.txt", "cat a.txt"), reasoning="plan"),
             say("done", reasoning="checked"),
@@ -219,9 +225,7 @@ PASS
         steps=snapshot(["task", "user", "agent", "tool", "agent", "task"]),
     ),
     "gemini": Row(
-        agent=lambda: GeminiAgent(
-            GeminiConfig(model="gemini-3.1-pro-preview", system_prompt="Be brief.")
-        ),
+        agent=gemini(system_prompt="Be brief."),
         script=lambda root: [
             replace(
                 call("write_file", file_path=f"{root}/a.txt", content="PASS"), reasoning="plan"
@@ -418,9 +422,7 @@ shot.png\
         ),
     ),
     "chat": Row(
-        agent=lambda: OpenAIChatAgent(
-            OpenAIChatConfig(model="qwen3.6-plus", system_prompt="Be brief.")
-        ),
+        agent=chat(system_prompt="Be brief."),
         script=lambda root: [
             replace(call("write", filePath=f"{root}/a.txt", content="PASS"), reasoning="plan"),
             call("read", filePath=f"{root}/shot.png"),
@@ -645,15 +647,12 @@ class HostedRow:
 
 HOSTED = {
     "claude": HostedRow(
-        agent=lambda: ClaudeAgent(
-            ClaudeConfig(
-                model="claude-sonnet-4-6",
-                hosted_tools=[
-                    ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"]),
-                    ClaudeWebFetchTool(max_content_tokens=100, citations_enabled=True),
-                    ClaudeWebSearchTool(supported_models=("claude-opus-*",)),
-                ],
-            )
+        agent=claude(
+            hosted_tools=[
+                ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"]),
+                ClaudeWebFetchTool(max_content_tokens=100, citations_enabled=True),
+                ClaudeWebSearchTool(supported_models=("claude-opus-*",)),
+            ]
         ),
         tools=snapshot(
             [
@@ -695,11 +694,7 @@ HOSTED = {
         ),
     ),
     "claude-tool-search-over-threshold": HostedRow(
-        agent=lambda: ClaudeAgent(
-            ClaudeConfig(
-                model="claude-sonnet-4-6", hosted_tools=[ClaudeToolSearchTool(threshold=1)]
-            )
-        ),
+        agent=claude(hosted_tools=[ClaudeToolSearchTool(threshold=1)]),
         tools=snapshot(
             [
                 {"type": "bash_20250124", "name": "bash"},
@@ -731,11 +726,7 @@ HOSTED = {
         ),
     ),
     "claude-tool-search-under-threshold": HostedRow(
-        agent=lambda: ClaudeAgent(
-            ClaudeConfig(
-                model="claude-sonnet-4-6", hosted_tools=[ClaudeToolSearchTool(threshold=5)]
-            )
-        ),
+        agent=claude(hosted_tools=[ClaudeToolSearchTool(threshold=5)]),
         tools=snapshot(
             [
                 {"type": "bash_20250124", "name": "bash"},
@@ -765,12 +756,7 @@ HOSTED = {
         ),
     ),
     "openai": HostedRow(
-        agent=lambda: OpenAIAgent(
-            OpenAIConfig(
-                model="gpt-5.6",
-                hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})],
-            )
-        ),
+        agent=openai(hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})]),
         tools=snapshot(
             [
                 {"type": "shell", "environment": {"type": "local"}},
@@ -801,9 +787,7 @@ HOSTED = {
         ),
     ),
     "openai-tool-search-over-threshold": HostedRow(
-        agent=lambda: OpenAIAgent(
-            OpenAIConfig(model="gpt-5.6", hosted_tools=[OpenAIToolSearchTool(threshold=1)])
-        ),
+        agent=openai(hosted_tools=[OpenAIToolSearchTool(threshold=1)]),
         tools=snapshot(
             [
                 {"type": "shell", "environment": {"type": "local"}},
@@ -836,9 +820,7 @@ HOSTED = {
         ),
     ),
     "openai-tool-search-under-threshold": HostedRow(
-        agent=lambda: OpenAIAgent(
-            OpenAIConfig(model="gpt-5.6", hosted_tools=[OpenAIToolSearchTool(threshold=5)])
-        ),
+        agent=openai(hosted_tools=[OpenAIToolSearchTool(threshold=5)]),
         tools=snapshot(
             [
                 {"type": "shell", "environment": {"type": "local"}},
@@ -869,15 +851,12 @@ HOSTED = {
         ),
     ),
     "gemini": HostedRow(
-        agent=lambda: GeminiAgent(
-            GeminiConfig(
-                model="gemini-3.1-pro-preview",
-                hosted_tools=[
-                    GeminiGoogleSearchTool(),
-                    GeminiUrlContextTool(),
-                    GeminiCodeExecutionTool(),
-                ],
-            )
+        agent=gemini(
+            hosted_tools=[
+                GeminiGoogleSearchTool(),
+                GeminiUrlContextTool(),
+                GeminiCodeExecutionTool(),
+            ]
         ),
         tools=snapshot(
             [
@@ -1164,12 +1143,12 @@ async def test_chat_completion_options_reach_every_request(
 
 CITATIONS = {
     "openai": (
-        lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6", citations_enabled=True)),
+        openai(citations_enabled=True),
         lambda request: request.body.get("include"),
         snapshot(["web_search_call.action.sources"]),
     ),
     "gemini": (
-        lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", citations_enabled=True)),
+        gemini(citations_enabled=True),
         lambda request: [
             tool for tool in request.body["tools"] if "functionDeclarations" not in tool
         ],
