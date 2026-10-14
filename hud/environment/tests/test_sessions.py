@@ -15,11 +15,13 @@ from urllib.parse import urlsplit
 
 import pytest
 
+import hud.clients.client as client_module
 from hud.capabilities import Connection
 from hud.clients import HudProtocolError, connect
 from hud.environment import Environment, Workspace, WorkspaceRoute
 from hud.environment.utils import read_frame, send_frame
 from hud.eval import LocalRuntime, Task
+from hud.settings import settings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,6 +70,8 @@ async def test_disconnect_parks_the_task_for_a_later_connection(
     monkeypatch: pytest.MonkeyPatch, write_error: type[BaseException] | None
 ) -> None:
     real_write = asyncio.StreamWriter.write
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_outage_budget", 0.1)
 
     def write(writer: asyncio.StreamWriter, data: bytes) -> None:
         if write_error is not None and b'"prompt":' in data:
@@ -131,7 +135,10 @@ async def test_hello_cannot_resume_a_live_session() -> None:
             await b.hello(session_id=a.manifest.session_id)
 
 
-async def test_hello_takes_over_a_live_session_when_asked() -> None:
+async def test_hello_takes_over_a_live_session_when_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
     async with LocalRuntime(_env())(_SESSION) as runtime, connect(runtime) as a:
         assert a.manifest is not None
         await a.start_task("echo", {"tag": "a"})
@@ -159,8 +166,7 @@ async def test_hello_takes_over_a_live_session_when_asked() -> None:
             assert graded["result"]["tag"] == "a"
         finally:
             writer.close()
-        with pytest.raises(EOFError):
-            await a.grade({"answer": "x"})
+        assert (await a.grade({"answer": "x"}))["tag"] == "a"
 
 
 async def test_a_finished_session_releases_its_connection_for_the_next_rollout(
@@ -228,3 +234,97 @@ async def test_a_finished_session_takes_its_workspace_route_with_it(
             await later.start_task("echo", {"tag": "later"})
             assert workspace.peers == ()
             await later.grade({"answer": "x"})
+
+
+def _counting_env() -> tuple[Environment, dict[str, int]]:
+    env = Environment("sessions")
+    counts = {"starts": 0, "grades": 0}
+
+    @env.template()
+    async def echo(tag: str):
+        counts["starts"] += 1
+        yield f"go {tag}"
+        counts["grades"] += 1
+        yield {"score": 1.0, "tag": tag}
+
+    return env, counts
+
+
+@pytest.mark.parametrize("lost_reply", [b'"prompt":', b'"score":'])
+async def test_a_task_call_whose_reply_was_lost_is_answered_once_after_the_redial(
+    monkeypatch: pytest.MonkeyPatch, lost_reply: bytes
+) -> None:
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    real_write = asyncio.StreamWriter.write
+    dropped: list[bytes] = []
+
+    def write(writer: asyncio.StreamWriter, data: bytes) -> None:
+        if lost_reply in data and not dropped:
+            dropped.append(data)
+            writer.close()
+            raise ConnectionResetError
+        real_write(writer, data)
+
+    monkeypatch.setattr(asyncio.StreamWriter, "write", write)
+    env, counts = _counting_env()
+    async with LocalRuntime(env)(_SESSION) as runtime, connect(runtime) as client:
+        assert (await client.start_task("echo", {"tag": "a"}))["prompt"] == "go a"
+        assert (await client.grade({"answer": "x"}))["tag"] == "a"
+
+    assert dropped
+    assert counts == {"starts": 1, "grades": 1}
+
+
+async def test_a_new_start_discards_the_kept_grade() -> None:
+    env, counts = _counting_env()
+    async with LocalRuntime(env)(_SESSION) as runtime, connect(runtime) as client:
+        await client.start_task("echo", {"tag": "first"})
+        assert (await client.grade({"answer": "x"}))["tag"] == "first"
+        await client.start_task("echo", {"tag": "second"})
+        assert (await client.grade({"answer": "x"}))["tag"] == "second"
+
+    assert counts == {"starts": 2, "grades": 2}
+
+
+async def test_a_start_retried_on_a_new_connection_joins_the_start_in_flight() -> None:
+    env = Environment("sessions")
+    starts = 0
+    release = asyncio.Event()
+
+    @env.template()
+    async def slow():
+        nonlocal starts
+        starts += 1
+        await release.wait()
+        yield "ready"
+        yield 1.0
+
+    async def call(
+        writer: asyncio.StreamWriter, msg_id: int, method: str, **params: object
+    ) -> None:
+        await send_frame(
+            writer, {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params}
+        )
+
+    async with LocalRuntime(env)(Task(env="sessions", id="slow")) as runtime:
+        port = urlsplit(runtime.url).port
+        first_reader, first_writer = await asyncio.open_connection("127.0.0.1", port)
+        second_reader, second_writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            await call(first_writer, 1, "hello")
+            hello = await read_frame(first_reader)
+            assert hello is not None
+            session_id = hello["result"]["session_id"]
+            await call(first_writer, 2, "tasks.start", id="slow", call_id="c1")
+            await call(second_writer, 1, "hello", session_id=session_id, takeover=True)
+            assert (await read_frame(second_reader)) is not None
+            await call(second_writer, 2, "tasks.start", id="slow", call_id="c1")
+            release.set()
+            started = await asyncio.wait_for(read_frame(second_reader), timeout=5.0)
+        finally:
+            first_writer.close()
+            second_writer.close()
+
+    assert started is not None
+    assert started["result"]["prompt"] == "ready"
+    assert starts == 1

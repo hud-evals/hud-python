@@ -198,6 +198,38 @@ class Settings(BaseSettings):
         validation_alias="HUD_CONTROL_OUTAGE_BUDGET",
     )
 
+    control_keepalive_idle: int = Field(
+        default=10,
+        ge=1,
+        description="Seconds a control or tunnel connection may sit idle before TCP keepalive "
+        "probes start. Together with the interval and count it bounds how long a dead peer "
+        "goes unnoticed while the client waits for a reply.",
+        validation_alias="HUD_CONTROL_KEEPALIVE_IDLE",
+    )
+
+    control_keepalive_interval: int = Field(
+        default=5,
+        ge=1,
+        description="Seconds between TCP keepalive probes on control and tunnel connections.",
+        validation_alias="HUD_CONTROL_KEEPALIVE_INTERVAL",
+    )
+
+    control_keepalive_count: int = Field(
+        default=3,
+        ge=1,
+        description="Unanswered TCP keepalive probes before a control or tunnel connection "
+        "is declared dead.",
+        validation_alias="HUD_CONTROL_KEEPALIVE_COUNT",
+    )
+
+    control_user_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="Seconds transmitted data may stay unacknowledged on a control or tunnel "
+        "connection before it errors (TCP_USER_TIMEOUT, Linux only).",
+        validation_alias="HUD_CONTROL_USER_TIMEOUT",
+    )
+
     @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:

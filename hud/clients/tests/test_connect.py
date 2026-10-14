@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -612,3 +613,53 @@ async def test_connect_reports_handshake_failure(protocol_error: bool) -> None:
     finally:
         server.close()
         await server.wait_closed()
+
+
+async def test_control_connection_enables_keepalive_with_configured_timings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "control_keepalive_idle", 7)
+    monkeypatch.setattr(settings, "control_keepalive_interval", 3)
+    monkeypatch.setattr(settings, "control_keepalive_count", 2)
+    monkeypatch.setattr(settings, "control_user_timeout", 11.0)
+    applied: list[tuple[int, int, int]] = []
+    real_setsockopt = socket.socket.setsockopt
+
+    def record_setsockopt(sock: socket.socket, level: int, option: int, value: int) -> None:
+        applied.append((level, option, value))
+        real_setsockopt(sock, level, option, value)
+
+    monkeypatch.setattr(socket.socket, "setsockopt", record_setsockopt)
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+            await read_frame(reader)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
+            pass
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in applied
+    expected = {
+        "TCP_KEEPINTVL": 3,
+        "TCP_KEEPCNT": 2,
+        "TCP_USER_TIMEOUT": 11_000,
+    }
+    for name, value in expected.items():
+        if hasattr(socket, name):
+            assert (socket.IPPROTO_TCP, getattr(socket, name), value) in applied
+    assert any(
+        value == 7
+        for _level, option, value in applied
+        if option in (getattr(socket, "TCP_KEEPIDLE", None), getattr(socket, "TCP_KEEPALIVE", None))
+    )

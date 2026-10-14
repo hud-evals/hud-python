@@ -13,6 +13,8 @@ import contextlib
 import itertools
 import logging
 import math
+import socket
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
@@ -68,6 +70,29 @@ async def _connect_capability(
                 raise
             await asyncio.sleep(_CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
     raise RuntimeError("capability connect attempts must be positive")
+
+
+async def _open_control_connection(
+    host: str, port: int
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Dial the env with TCP keepalive so a dead peer errors instead of hanging a read.
+
+    Options the platform lacks (``TCP_USER_TIMEOUT`` is Linux-only) are skipped.
+    """
+    reader, writer = await asyncio.open_connection(host, port)
+    sock = writer.get_extra_info("socket")
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    keepidle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+    options = (
+        (keepidle, settings.control_keepalive_idle),
+        (getattr(socket, "TCP_KEEPINTVL", None), settings.control_keepalive_interval),
+        (getattr(socket, "TCP_KEEPCNT", None), settings.control_keepalive_count),
+        (getattr(socket, "TCP_USER_TIMEOUT", None), int(settings.control_user_timeout * 1000)),
+    )
+    for option, value in options:
+        if option is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, option, value)
+    return reader, writer
 
 
 class ControlTimeoutError(TimeoutError):
@@ -226,7 +251,7 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await asyncio.open_connection(host, port)
+                        up_reader, up_writer = await _open_control_connection(host, port)
                     except OSError as exc:
                         LOGGER.warning(
                             "tunnel peer %s:%d connection failed: %s",
@@ -351,11 +376,13 @@ class HudClient:
         args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start a task; returns the first yield (``{"prompt": ...}``)."""
-        return await self._call("tasks.start", {"id": task_id, "args": args or {}})
+        return await self._call_until_resumed(
+            "tasks.start", {"id": task_id, "args": args or {}, "call_id": uuid.uuid4().hex}
+        )
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``)."""
-        return await self._call("tasks.grade", payload)
+        return await self._call_until_resumed("tasks.grade", payload)
 
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
@@ -386,6 +413,24 @@ class HudClient:
             if self._control_down:
                 await self._redial()
             return await self._exchange(method, params, reply_timeout)
+
+    async def _call_until_resumed(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Call a method the env answers idempotently, re-sending it after a lost link.
+
+        The env keeps a started task and its grade for the session, so a retry on the
+        redialed connection collects the original outcome rather than repeating the
+        call. Gives up after ``control_outage_budget``.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + settings.control_outage_budget
+        while True:
+            try:
+                return await self._call(method, params)
+            except (EOFError, OSError, TimeoutError) as exc:
+                if self._aborted or self._endpoint is None or loop.time() >= deadline:
+                    raise
+                LOGGER.warning("control link lost during %r, retrying: %r", method, exc)
+                await asyncio.sleep(_CONTROL_REDIAL_INTERVAL_SECONDS)
 
     async def _exchange(
         self,
@@ -446,7 +491,7 @@ class HudClient:
         deadline = asyncio.timeout(settings.control_heartbeat_timeout)
         try:
             async with deadline:
-                self._reader, self._writer = await asyncio.open_connection(host, port)
+                self._reader, self._writer = await _open_control_connection(host, port)
         except TimeoutError:
             if not deadline.expired():
                 raise
@@ -490,7 +535,7 @@ async def _connect_ready(
     deadline = loop.time() + ready_timeout
     while True:
         try:
-            reader, writer = await asyncio.open_connection(host, port)
+            reader, writer = await _open_control_connection(host, port)
         except OSError:
             if loop.time() >= deadline:
                 raise

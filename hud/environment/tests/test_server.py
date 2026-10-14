@@ -186,7 +186,7 @@ async def test_task_frame_limit_and_retry(frame_size: int) -> None:
         "jsonrpc": "2.0",
         "id": 2,
         "method": "tasks.start",
-        "params": {"id": "task", "args": {"data": ""}},
+        "params": {"id": "task", "args": {"data": ""}, "call_id": "0" * 32},
     }
     data = "x" * (frame_size - (len(encode_frame(frame)) - 1))
     async with served(env) as client:
