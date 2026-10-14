@@ -143,7 +143,7 @@ def launched(capture: dict[str, Any], run: Run, variables: tuple[str, ...]) -> d
     }
 
 
-def outcome(run: Run) -> tuple[str, Any, str | None]:
+def outcome(run: Run) -> tuple[str | None, str | None, str | None]:
     return (run.trace.status, run.trace.content, run.trace.error)
 
 
