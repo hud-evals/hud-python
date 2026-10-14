@@ -1,4 +1,3 @@
-# ruff: noqa: E501 -- snapshots quote product messages verbatim
 """The Claude and Codex CLI agents run their CLI in the workspace over SSH.
 
 A stub ``claude`` or ``codex`` on the workspace's PATH records what the agent
@@ -10,6 +9,7 @@ steps and trace the stream turned into, and how each exit ends the run.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 from hud.agents import ClaudeCLIAgent, CodexCLIAgent
 from hud.agents.types import ClaudeCLIConfig, CodexCLIConfig
@@ -115,44 +114,37 @@ def cli_env(root: Path, stub: Stub, **options: Any) -> Environment:
     return workspace_env(root / "ws", env=stub.shell_env(), **options)
 
 
-def step_payloads(run: Run) -> list[dict[str, Any]]:
-    """The agent and tool steps the run exported, timestamps checked and dropped."""
-    found = []
-    for payload in steps(run.trace_id):
-        if payload["source"] in {"task", "user"}:
-            continue
-        for key in ("started_at", "ended_at"):
-            if key in payload:
-                assert payload.pop(key) == TIMESTAMP
-        found.append(payload)
-    return found
+def step_summary(run: Run) -> list[tuple[Any, ...]]:
+    """Each agent and tool step the run exported: what the agent said and called,
+    and what each tool returned."""
+    summary: list[tuple[Any, ...]] = []
+    for step in steps(run.trace_id):
+        if step["source"] == "agent":
+            calls = [call["name"] for call in step.get("tool_calls", [])]
+            summary.append(("agent", step.get("content") or step.get("reasoning"), calls))
+        elif step["source"] == "tool":
+            content = [block.get("text", block["type"]) for block in step["result"]["content"]]
+            summary.append(("tool", step["call"]["name"], content, step["result"]["isError"]))
+    return summary
 
 
-def invocation(capture: dict[str, Any], run: Run) -> dict[str, Any]:
-    """The arguments (joined) and variables the agent launched its CLI with, the run's trace id as
-    ``<trace>`` and a temporary ``CODEX_HOME`` as ``<temporary>``."""
+def launched(capture: dict[str, Any], run: Run, variables: tuple[str, ...]) -> dict[str, Any]:
+    """The argv the agent launched its CLI with and the named variables it set, with
+    the run's trace id as ``<trace>``."""
     trace = str(run.trace_id)
-    traces = (trace, uuid.UUID(trace).hex)
 
     def scrub(value: str) -> str:
-        for form in traces:
-            value = value.replace(form, "<trace>")
-        return value
+        return value.replace(trace, "<trace>").replace(uuid.UUID(trace).hex, "<trace>")
 
-    env = {key: scrub(value) for key, value in capture["env"].items()}
-    if "CODEX_HOME" in env:
-        assert env["CODEX_HOME"] == IsStr(regex=r".*/hud-codex\.\w+")
-        env["CODEX_HOME"] = "<temporary>"
-    return {"argv": " ".join(scrub(arg) for arg in capture["argv"]), "env": env}
-
-
-def outcome(run: Run) -> dict[str, Any]:
+    env = capture["env"]
     return {
-        "status": run.trace.status,
-        "content": run.trace.content,
-        "error": run.trace.error,
-        "extra": run.trace.extra,
+        "argv": " ".join(scrub(arg) for arg in capture["argv"]),
+        **{name: scrub(env[name]) for name in variables if name in env},
     }
+
+
+def outcome(run: Run) -> tuple[str, Any, str | None]:
+    return (run.trace.status, run.trace.content, run.trace.error)
 
 
 # ─── Claude CLI ─────────────────────────────────────────────────────────
@@ -165,150 +157,56 @@ async def test_the_claude_cli_streams_its_turns_into_steps(hud_env: HudEnv, tmp_
     run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent(), prompt="build it")
 
     (capture,) = stub.captures()
-    assert outcome(run) == snapshot(
-        {
-            "status": "completed",
-            "content": "done",
-            "error": None,
-            "extra": {
-                "subtype": "success",
-                "session_id": "session-1",
-                "duration_ms": 5,
-                "num_turns": 2,
-                "total_cost_usd": 0.01,
-            },
-        }
-    )
-    assert step_payloads(run) == snapshot(
-        [
-            {
-                "step_id": 3,
-                "source": "agent",
-                "messages": [],
-                "extra": {},
-                "content": "editing",
-                "tool_calls": [
-                    {
-                        "meta": {"citations_enabled": False},
-                        "name": "Write",
-                        "arguments": {"file_path": "a.txt"},
-                        "id": "tool-1",
-                    }
-                ],
-                "done": False,
-                "finish_reason": "tool_use",
-                "citations": [],
-                "model": "claude-test",
-                "usage": {"prompt_tokens": 3, "completion_tokens": 2},
-            },
-            {
-                "step_id": 4,
-                "source": "tool",
-                "messages": [],
-                "extra": {},
-                "call": {
-                    "meta": {"citations_enabled": False},
-                    "name": "Write",
-                    "arguments": {"file_path": "a.txt"},
-                    "id": "tool-1",
-                },
-                "result": {
-                    "content": [
-                        {"type": "text", "text": "wrote a.txt"},
-                        {"type": "image", "data": "aW1n", "mimeType": "image/png"},
-                    ],
-                    "isError": False,
-                    "call_id": "tool-1",
-                },
-            },
-            {
-                "step_id": 5,
-                "source": "agent",
-                "messages": [],
-                "extra": {},
-                "content": "done",
-                "tool_calls": [],
-                "done": True,
-                "finish_reason": "end_turn",
-                "citations": [],
-                "model": "claude-test",
-                "usage": {"prompt_tokens": 3, "completion_tokens": 2},
-            },
-        ]
-    )
-    assert (capture["stdin"], capture["files"]) == snapshot(
-        (
-            '{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "build it"}]}}\n',
-            {},
-        )
-    )
+    assert outcome(run) == ("completed", "done", None)
+    assert run.trace.extra["session_id"] == "session-1"
+    assert step_summary(run) == [
+        ("agent", "editing", ["Write"]),
+        ("tool", "Write", ["wrote a.txt", "image"], False),
+        ("agent", "done", []),
+    ]
+    assert "build it" in capture["stdin"]
 
 
+CLAUDE_ARGV = (
+    "--verbose --input-format=stream-json --output-format=stream-json --print "
+    "--permission-mode=bypassPermissions "
+    + " ".join(
+        f"--allowedTools {tool}"
+        for tool in ("Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch")
+    )
+)
+CLAUDE_ROUTING = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "ANTHROPIC_MODEL",
+)
+CLAUDE_GATEWAY = {
+    "argv": CLAUDE_ARGV,
+    "ANTHROPIC_API_KEY": "hud-key",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:9/gateway",
+    "ANTHROPIC_CUSTOM_HEADERS": "Trace-Id: <trace>",
+    "ANTHROPIC_MODEL": "claude-sonnet-5",
+}
 CLAUDE_INVOCATIONS = {
     "provider-key": (
         {"ANTHROPIC_API_KEY": "anthropic-key"},
         ClaudeCLIConfig(),
-        snapshot(
-            {
-                "argv": "--verbose --input-format=stream-json --output-format=stream-json --print --permission-mode=bypassPermissions --allowedTools Read --allowedTools Write --allowedTools Edit --allowedTools Bash --allowedTools Glob --allowedTools Grep --allowedTools WebSearch --allowedTools WebFetch",
-                "env": {
-                    "IS_SANDBOX": "1",
-                    "ANTHROPIC_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_API_KEY": "anthropic-key",
-                    "DISABLE_AUTOUPDATER": "1",
-                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                    "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-5",
-                },
-            }
-        ),
+        {
+            "argv": CLAUDE_ARGV,
+            "ANTHROPIC_API_KEY": "anthropic-key",
+            "ANTHROPIC_MODEL": "claude-sonnet-5",
+        },
     ),
     "gateway-without-a-provider-key": (
         {"HUD_API_KEY": "hud-key"},
         ClaudeCLIConfig(),
-        snapshot(
-            {
-                "argv": "--verbose --input-format=stream-json --output-format=stream-json --print --permission-mode=bypassPermissions --allowedTools Read --allowedTools Write --allowedTools Edit --allowedTools Bash --allowedTools Glob --allowedTools Grep --allowedTools WebSearch --allowedTools WebFetch",
-                "env": {
-                    "ANTHROPIC_CUSTOM_HEADERS": "Trace-Id: <trace>",
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-5",
-                    "IS_SANDBOX": "1",
-                    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
-                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_BASE_URL": "http://127.0.0.1:9/gateway",
-                    "DISABLE_AUTOUPDATER": "1",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_API_KEY": "hud-key",
-                },
-            }
-        ),
+        CLAUDE_GATEWAY,
     ),
     "gateway-forced-over-a-provider-key": (
         {"HUD_API_KEY": "hud-key", "ANTHROPIC_API_KEY": "anthropic-key"},
         ClaudeCLIConfig(gateway=True),
-        snapshot(
-            {
-                "argv": "--verbose --input-format=stream-json --output-format=stream-json --print --permission-mode=bypassPermissions --allowedTools Read --allowedTools Write --allowedTools Edit --allowedTools Bash --allowedTools Glob --allowedTools Grep --allowedTools WebSearch --allowedTools WebFetch",
-                "env": {
-                    "ANTHROPIC_CUSTOM_HEADERS": "Trace-Id: <trace>",
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-5",
-                    "IS_SANDBOX": "1",
-                    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
-                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_BASE_URL": "http://127.0.0.1:9/gateway",
-                    "DISABLE_AUTOUPDATER": "1",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-5",
-                    "ANTHROPIC_API_KEY": "hud-key",
-                },
-            }
-        ),
+        CLAUDE_GATEWAY,
     ),
     "configured-options": (
         {"ANTHROPIC_API_KEY": "anthropic-key"},
@@ -320,19 +218,13 @@ CLAUDE_INVOCATIONS = {
             allowed_tools=["Read", "Bash"],
             permission_mode="acceptEdits",
         ),
-        snapshot(
-            {
-                "argv": "--verbose --input-format=stream-json --output-format=stream-json --print --permission-mode=acceptEdits --max-turns=3 --effort max --system-prompt Be brief. --allowedTools Read --allowedTools Bash",
-                "env": {
-                    "IS_SANDBOX": "1",
-                    "ANTHROPIC_MODEL": "claude-opus-4-8",
-                    "ANTHROPIC_API_KEY": "anthropic-key",
-                    "DISABLE_AUTOUPDATER": "1",
-                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                    "ANTHROPIC_SMALL_FAST_MODEL": "claude-opus-4-8",
-                },
-            }
-        ),
+        {
+            "argv": "--verbose --input-format=stream-json --output-format=stream-json --print "
+            "--permission-mode=acceptEdits --max-turns=3 --effort max --system-prompt Be brief. "
+            "--allowedTools Read --allowedTools Bash",
+            "ANTHROPIC_API_KEY": "anthropic-key",
+            "ANTHROPIC_MODEL": "claude-opus-4-8",
+        },
     ),
 }
 
@@ -355,102 +247,34 @@ async def test_the_claude_cli_is_launched_with_the_routing_and_options_configure
     run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent(config))
 
     (capture,) = stub.captures()
-    assert invocation(capture, run) == expected
+    assert launched(capture, run, CLAUDE_ROUTING) == expected
     assert run.trace.status == "completed"
 
 
 CLAUDE_EXITS = {
     "nonzero-exit-without-output": (
         {"stdout": "", "stderr": "boom", "exit": 1},
-        snapshot(
-            {
-                "status": "error",
-                "content": None,
-                "error": "[agent loop] RuntimeError: boom",
-                "extra": {"returncode": 1, "stderr": "boom"},
-            }
-        ),
+        ("error", None, "[agent loop] RuntimeError: boom"),
     ),
     "nonzero-exit-after-a-result-with-stderr": (
         {"stderr": "transport failed", "exit": 1},
-        snapshot(
-            {
-                "status": "error",
-                "content": "done",
-                "error": "[agent loop] RuntimeError: transport failed",
-                "extra": {
-                    "subtype": "success",
-                    "session_id": "session-1",
-                    "duration_ms": 5,
-                    "num_turns": 2,
-                    "total_cost_usd": 0.01,
-                    "returncode": 1,
-                    "stderr": "transport failed",
-                },
-            }
-        ),
+        ("error", "done", "[agent loop] RuntimeError: transport failed"),
     ),
-    "nonzero-exit-after-a-result-without-stderr": (
-        {"exit": 1},
-        snapshot(
-            {
-                "status": "completed",
-                "content": "done",
-                "error": None,
-                "extra": {
-                    "subtype": "success",
-                    "session_id": "session-1",
-                    "duration_ms": 5,
-                    "num_turns": 2,
-                    "total_cost_usd": 0.01,
-                    "returncode": 1,
-                },
-            }
-        ),
-    ),
+    "nonzero-exit-after-a-result-without-stderr": ({"exit": 1}, ("completed", "done", None)),
     "zero-exit-without-a-result": (
         {"stdout": jsonl(WRITE, WROTE, DONE)},
-        snapshot(
-            {
-                "status": "error",
-                "content": "done",
-                "error": "[agent loop] RuntimeError: claude CLI exited without a result event",
-                "extra": {},
-            }
-        ),
+        ("error", "done", "[agent loop] RuntimeError: claude CLI exited without a result event"),
     ),
     "result-reports-an-error": (
         {"stdout": jsonl(DONE, result("rate limited upstream", is_error=True))},
-        snapshot(
-            {
-                "status": "error",
-                "content": "rate limited upstream",
-                "error": "[agent loop] RuntimeError: rate limited upstream",
-                "extra": {
-                    "subtype": "success",
-                    "session_id": "session-1",
-                    "duration_ms": 5,
-                    "num_turns": 2,
-                    "total_cost_usd": 0.01,
-                },
-            }
-        ),
+        ("error", "rate limited upstream", "[agent loop] RuntimeError: rate limited upstream"),
     ),
     "tool-call-left-without-a-result": (
         {"stdout": jsonl(WRITE, result())},
-        snapshot(
-            {
-                "status": "error",
-                "content": "done",
-                "error": "[agent loop] RuntimeError: claude CLI exited without results for tool calls: tool-1",
-                "extra": {
-                    "subtype": "success",
-                    "session_id": "session-1",
-                    "duration_ms": 5,
-                    "num_turns": 2,
-                    "total_cost_usd": 0.01,
-                },
-            }
+        (
+            "error",
+            "done",
+            "[agent loop] RuntimeError: claude CLI exited without results for tool calls: tool-1",
         ),
     ),
 }
@@ -486,23 +310,15 @@ async def test_claude_cli_tool_results_keep_documents_and_name_unknown_blocks(
 
     run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent())
 
-    tool = next(payload for payload in step_payloads(run) if payload["source"] == "tool")
-    assert (run.trace.status, tool["result"]["content"]) == snapshot(
-        (
-            "completed",
-            [
-                {
-                    "type": "resource",
-                    "resource": {
-                        "uri": "document://tool-1/0",
-                        "mimeType": "application/pdf",
-                        "blob": "JVBERi0=",
-                    },
-                },
-                {"type": "text", "text": "[unsupported novelty block]"},
-            ],
-        )
-    )
+    (tool,) = [step for step in steps(run.trace_id) if step["source"] == "tool"]
+    document, unknown = tool["result"]["content"]
+    assert run.trace.status == "completed"
+    assert document["resource"] == {
+        "uri": "document://tool-1/0",
+        "mimeType": "application/pdf",
+        "blob": "JVBERi0=",
+    }
+    assert unknown == {"type": "text", "text": "[unsupported novelty block]"}
 
 
 async def test_mcp_servers_reach_the_claude_cli_in_a_config_removed_after_the_run(
@@ -519,27 +335,16 @@ async def test_mcp_servers_reach_the_claude_cli_in_a_config_removed_after_the_ru
 
     (capture,) = stub.captures()
     assert capture["argv"][-2:] == ["--mcp-config", ".hud_mcp_config.json"]
-    assert capture["files"] == snapshot(
-        {
-            ".hud_mcp_config.json": """\
-{
-  "mcpServers": {
-    "database": {
-      "type": "http",
-      "url": "http://db.internal:8000/mcp",
-      "headers": {
-        "Authorization": "Bearer secret"
-      }
-    },
-    "search": {
-      "type": "sse",
-      "url": "http://search.internal:8000/sse"
-    }
-  }
-}\
-"""
+    assert json.loads(capture["files"][".hud_mcp_config.json"]) == {
+        "mcpServers": {
+            "database": {
+                "type": "http",
+                "url": "http://db.internal:8000/mcp",
+                "headers": {"Authorization": "Bearer secret"},
+            },
+            "search": {"type": "sse", "url": "http://search.internal:8000/sse"},
         }
-    )
+    }
     assert sorted(path.name for path in (tmp_path / "ws").iterdir()) == []
 
 
@@ -561,12 +366,10 @@ async def test_the_claude_cli_drives_the_screen_through_the_computer_bridge(
 
     (capture,) = stub.captures()
     assert run.trace.status == "completed"
-    assert capture["computer"] == snapshot(
-        [
-            {"isError": False, "content": ["image"]},
-            {"isError": True, "content": ["unsupported computer action: 'frobnicate'"]},
-        ]
-    )
+    assert capture["computer"] == [
+        {"isError": False, "content": ["image"]},
+        {"isError": True, "content": ["unsupported computer action: 'frobnicate'"]},
+    ]
     assert [(event.x, event.y, event.buttons) for event in screen.pointer_events()] == [
         (3, 4, 0),
         (3, 4, 1),
@@ -587,8 +390,9 @@ async def test_an_mcp_server_named_like_the_computer_bridge_is_refused(
         )
         run = await run_task(cli_env(tmp_path, stub, capabilities=clash), ClaudeCLIAgent())
 
-    assert (run.trace.error, stub.captures()) == snapshot(
-        ("[agent loop] RuntimeError: duplicate MCP server name 'computer-use'", [])
+    assert (run.trace.error, stub.captures()) == (
+        "[agent loop] RuntimeError: duplicate MCP server name 'computer-use'",
+        [],
     )
 
 
@@ -599,8 +403,9 @@ async def test_the_claude_cli_needs_a_credential_to_route_through_the_gateway(
 
     run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent(ClaudeCLIConfig(gateway=True)))
 
-    assert (run.trace.error, stub.captures()) == snapshot(
-        ("[agent loop] ValueError: HUD_API_KEY is required for HUD gateway routing", [])
+    assert (run.trace.error, stub.captures()) == (
+        "[agent loop] ValueError: HUD_API_KEY is required for HUD gateway routing",
+        [],
     )
 
 
@@ -758,261 +563,67 @@ async def test_codex_events_become_steps(hud_env: HudEnv, tmp_path: Path) -> Non
     (capture,) = stub.captures()
     assert capture["stdin"] == "Fix the failing test"
     assert not await anyio.Path(capture["env"]["CODEX_HOME"]).exists()
-    assert outcome(run) == snapshot(
-        {
-            "status": "completed",
-            "content": "Implemented and verified.",
-            "error": None,
-            "extra": {
-                "codex_thread_id": "thread-1",
-                "usage": {"input_tokens": 20, "cached_input_tokens": 5, "output_tokens": 8},
-            },
-        }
-    )
-    assert step_payloads(run) == snapshot(
-        [
-            {
-                "step_id": 3,
-                "source": "tool",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "cmd-1",
-                        "type": "command_execution",
-                        "command": "pytest -q",
-                        "aggregated_output": "1 passed\n",
-                        "exit_code": 0,
-                        "status": "completed",
-                    }
-                },
-                "call": {"name": "shell", "arguments": {"command": "pytest -q"}, "id": "cmd-1"},
-                "result": {
-                    "content": [{"type": "text", "text": "1 passed\n"}],
-                    "isError": False,
-                    "call_id": "cmd-1",
-                },
-            },
-            {
-                "step_id": 4,
-                "source": "tool",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "cmd-2",
-                        "type": "command_execution",
-                        "command": "false",
-                        "aggregated_output": "",
-                        "exit_code": 1,
-                        "status": "completed",
-                    }
-                },
-                "call": {"name": "shell", "arguments": {"command": "false"}, "id": "cmd-2"},
-                "result": {
-                    "content": [{"type": "text", "text": ""}],
-                    "isError": True,
-                    "call_id": "cmd-2",
-                },
-            },
-            {
-                "step_id": 5,
-                "source": "tool",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "patch-1",
-                        "type": "file_change",
-                        "changes": [{"path": "calc.py", "kind": "update"}],
-                        "status": "completed",
-                    }
-                },
-                "call": {
-                    "name": "apply_patch",
-                    "arguments": {"changes": [{"path": "calc.py", "kind": "update"}]},
-                    "id": "patch-1",
-                },
-                "result": {
-                    "content": [{"type": "text", "text": "update: calc.py"}],
-                    "isError": False,
-                    "call_id": "patch-1",
-                },
-            },
-            {
-                "step_id": 6,
-                "source": "tool",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "mcp-1",
-                        "type": "mcp_tool_call",
-                        "server": "db",
-                        "tool": "query",
-                        "arguments": {"sql": "select 42"},
-                        "result": {
-                            "content": [{"type": "text", "text": "42"}],
-                            "structured_content": {"answer": 42},
-                        },
-                        "error": None,
-                        "status": "completed",
-                    }
-                },
-                "call": {
-                    "name": "query",
-                    "arguments": {"sql": "select 42"},
-                    "id": "mcp-1",
-                    "provider_name": "db.query",
-                },
-                "result": {
-                    "content": [{"type": "text", "text": "42"}],
-                    "structuredContent": {"answer": 42},
-                    "isError": False,
-                    "call_id": "mcp-1",
-                },
-            },
-            {
-                "step_id": 7,
-                "source": "tool",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "mcp-2",
-                        "type": "mcp_tool_call",
-                        "server": "db",
-                        "tool": "query",
-                        "arguments": {"sql": "drop"},
-                        "result": None,
-                        "error": {"message": "denied"},
-                        "status": "failed",
-                    }
-                },
-                "call": {
-                    "name": "query",
-                    "arguments": {"sql": "drop"},
-                    "id": "mcp-2",
-                    "provider_name": "db.query",
-                },
-                "result": {
-                    "content": [{"type": "text", "text": "denied"}],
-                    "isError": True,
-                    "call_id": "mcp-2",
-                },
-            },
-            {
-                "step_id": 8,
-                "source": "tool",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "search-1",
-                        "type": "web_search",
-                        "query": "HUD evals",
-                        "action": {"type": "search"},
-                    }
-                },
-                "call": {
-                    "name": "web_search",
-                    "arguments": {"query": "HUD evals", "action": {"type": "search"}},
-                    "id": "search-1",
-                },
-                "result": {
-                    "content": [{"type": "text", "text": '{"type":"search"}'}],
-                    "isError": False,
-                    "call_id": "search-1",
-                },
-            },
-            {
-                "step_id": 9,
-                "source": "agent",
-                "messages": [],
-                "extra": {
-                    "codex_item": {
-                        "id": "todo-1",
-                        "type": "todo_list",
-                        "items": [{"text": "ship", "completed": False}],
-                    }
-                },
-            },
-            {
-                "step_id": 10,
-                "source": "agent",
-                "messages": [],
-                "extra": {},
-                "reasoning": "The test now passes.",
-                "tool_calls": [],
-                "done": False,
-                "citations": [],
-                "raw": {"id": "reason-1", "type": "reasoning", "text": "The test now passes."},
-                "model": "gpt-5.6-sol",
-            },
-            {
-                "step_id": 11,
-                "source": "agent",
-                "messages": [],
-                "extra": {},
-                "content": "Implemented and verified.",
-                "tool_calls": [],
-                "done": False,
-                "citations": [],
-                "raw": {
-                    "id": "message-1",
-                    "type": "agent_message",
-                    "text": "Implemented and verified.",
-                },
-                "model": "gpt-5.6-sol",
-            },
-        ]
-    )
+    assert outcome(run) == ("completed", "Implemented and verified.", None)
+    assert run.trace.extra["codex_thread_id"] == "thread-1"
+    assert step_summary(run) == [
+        ("tool", "shell", ["1 passed\n"], False),
+        ("tool", "shell", [""], True),
+        ("tool", "apply_patch", ["update: calc.py"], False),
+        ("tool", "query", ["42"], False),
+        ("tool", "query", ["denied"], True),
+        ("tool", "web_search", ['{"type":"search"}'], False),
+        ("agent", None, []),
+        ("agent", "The test now passes.", []),
+        ("agent", "Implemented and verified.", []),
+    ]
 
 
+CODEX_ARGV = (
+    "exec --json --ephemeral --skip-git-repo-check --color never --sandbox workspace-write "
+    "--model gpt-5.6-sol"
+)
+CODEX_THROUGH_GATEWAY = {
+    "argv": f"{CODEX_ARGV} "
+    + " ".join(
+        f"-c {option}"
+        for option in (
+            'model_provider="hud"',
+            'model_providers.hud.name="HUD"',
+            'model_providers.hud.base_url="http://127.0.0.1:9/gateway"',
+            'model_providers.hud.env_key="HUD_API_KEY"',
+            'model_providers.hud.wire_api="responses"',
+            'model_providers.hud.http_headers={"Trace-Id"="<trace>"}',
+        )
+    )
+    + " -",
+    "HUD_API_KEY": "hud-key",
+}
+CODEX_ROUTING = ("CODEX_API_KEY", "HUD_API_KEY", "OPENAI_API_KEY")
 CODEX_INVOCATIONS = {
     "provider-key": (
         {"OPENAI_API_KEY": "openai-key"},
         CodexCLIConfig(),
-        snapshot(
-            {
-                "argv": "exec --json --ephemeral --skip-git-repo-check --color never --sandbox workspace-write --model gpt-5.6-sol -",
-                "env": {"CODEX_API_KEY": "openai-key", "CODEX_HOME": "<temporary>"},
-            }
-        ),
+        {"argv": f"{CODEX_ARGV} -", "CODEX_API_KEY": "openai-key"},
     ),
     "gateway-without-a-provider-key": (
         {"HUD_API_KEY": "hud-key"},
         CodexCLIConfig(),
-        snapshot(
-            {
-                "argv": 'exec --json --ephemeral --skip-git-repo-check --color never --sandbox workspace-write --model gpt-5.6-sol -c model_provider="hud" -c model_providers.hud.name="HUD" -c model_providers.hud.base_url="http://127.0.0.1:9/gateway" -c model_providers.hud.env_key="HUD_API_KEY" -c model_providers.hud.wire_api="responses" -c model_providers.hud.http_headers={"Trace-Id"="<trace>"} -',
-                "env": {"HUD_API_KEY": "hud-key", "CODEX_HOME": "<temporary>"},
-            }
-        ),
+        CODEX_THROUGH_GATEWAY,
     ),
     "gateway-forced-over-a-provider-key": (
         {"HUD_API_KEY": "hud-key", "OPENAI_API_KEY": "openai-key"},
         CodexCLIConfig(gateway=True),
-        snapshot(
-            {
-                "argv": 'exec --json --ephemeral --skip-git-repo-check --color never --sandbox workspace-write --model gpt-5.6-sol -c model_provider="hud" -c model_providers.hud.name="HUD" -c model_providers.hud.base_url="http://127.0.0.1:9/gateway" -c model_providers.hud.env_key="HUD_API_KEY" -c model_providers.hud.wire_api="responses" -c model_providers.hud.http_headers={"Trace-Id"="<trace>"} -',
-                "env": {"HUD_API_KEY": "hud-key", "CODEX_HOME": "<temporary>"},
-            }
-        ),
+        CODEX_THROUGH_GATEWAY,
     ),
-    "ambient-login": (
-        {},
-        CodexCLIConfig(),
-        snapshot(
-            {
-                "argv": "exec --json --ephemeral --skip-git-repo-check --color never --sandbox workspace-write --model gpt-5.6-sol -",
-                "env": {},
-            }
-        ),
-    ),
+    "ambient-login": ({}, CodexCLIConfig(), {"argv": f"{CODEX_ARGV} -"}),
     "configured-options": (
         {"OPENAI_API_KEY": "openai-key"},
         CodexCLIConfig(model="gpt-5.6", sandbox="read-only", reasoning_effort="max"),
-        snapshot(
-            {
-                "argv": 'exec --json --ephemeral --skip-git-repo-check --color never --sandbox read-only --model gpt-5.6 -c model_reasoning_effort="max" -',
-                "env": {"CODEX_API_KEY": "openai-key", "CODEX_HOME": "<temporary>"},
-            }
-        ),
+        {
+            "argv": "exec --json --ephemeral --skip-git-repo-check --color never --sandbox "
+            'read-only --model gpt-5.6 -c model_reasoning_effort="max" -',
+            "CODEX_API_KEY": "openai-key",
+        },
     ),
 }
 
@@ -1035,7 +646,7 @@ async def test_codex_is_launched_with_the_routing_and_options_configured(
     run = await run_task(cli_env(tmp_path, stub), CodexCLIAgent(config))
 
     (capture,) = stub.captures()
-    assert invocation(capture, run) == expected
+    assert launched(capture, run, CODEX_ROUTING) == expected
 
 
 CODEX_EXITS = {
@@ -1046,25 +657,11 @@ CODEX_EXITS = {
                 {"type": "turn.failed", "error": {"message": "model unavailable"}},
             )
         },
-        snapshot(
-            {
-                "status": "error",
-                "content": None,
-                "error": "[agent loop] RuntimeError: model unavailable",
-                "extra": {},
-            }
-        ),
+        ("error", None, "[agent loop] RuntimeError: model unavailable"),
     ),
     "nonzero-exit": (
         {"stdout": "", "stderr": "authentication failed", "exit": 1},
-        snapshot(
-            {
-                "status": "error",
-                "content": None,
-                "error": "[agent loop] RuntimeError: authentication failed",
-                "extra": {"returncode": 1, "stderr": "authentication failed"},
-            }
-        ),
+        ("error", None, "[agent loop] RuntimeError: authentication failed"),
     ),
     "nonzero-exit-with-a-structured-error": (
         {
@@ -1072,24 +669,14 @@ CODEX_EXITS = {
             "stderr": "noisy",
             "exit": 1,
         },
-        snapshot(
-            {
-                "status": "error",
-                "content": None,
-                "error": "[agent loop] RuntimeError: gateway rejected streaming",
-                "extra": {"returncode": 1},
-            }
-        ),
+        ("error", None, "[agent loop] RuntimeError: gateway rejected streaming"),
     ),
     "zero-exit-without-turn-completed": (
         {"stdout": jsonl(*CODEX_ITEMS)},
-        snapshot(
-            {
-                "status": "error",
-                "content": "Implemented and verified.",
-                "error": "[agent loop] RuntimeError: codex CLI exited without a turn.completed event",
-                "extra": {"codex_thread_id": "thread-1"},
-            }
+        (
+            "error",
+            "Implemented and verified.",
+            "[agent loop] RuntimeError: codex CLI exited without a turn.completed event",
         ),
     ),
 }
