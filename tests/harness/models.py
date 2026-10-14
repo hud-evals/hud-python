@@ -21,6 +21,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from . import protocols
 from .services import Reply
 
 if TYPE_CHECKING:
@@ -205,6 +206,7 @@ class Models:
         self._turns: list[Turn] = []
         self._policy: Callable[[ModelRequest], Turn] | None = None
         self._responses: dict[str, int] = {}
+        self._calls: dict[str, set[str]] = {}
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
         services.route("gateway", "POST", "/chat/completions", handler=self._chat)
@@ -274,6 +276,8 @@ class Models:
     def _chat(self, raw: Request) -> Reply:
         request = self._decode(raw)
         body = request.body
+        if problems := protocols.chat(body):
+            return _rejected(problems)
         turn = self._next(request)
         if turn.fail is not None:
             return turn.fail
@@ -309,6 +313,10 @@ class Models:
     def _responses_api(self, raw: Request) -> Reply:
         request = self._decode(raw)
         body = request.body
+        with self._lock:
+            problems = protocols.responses(body, self._calls)
+        if problems:
+            return _rejected(problems)
         turn = self._next(request)
         if turn.fail is not None:
             return turn.fail
@@ -346,6 +354,8 @@ class Models:
             for tool in turn.tool_calls
         )
         output.extend(turn.native)
+        with self._lock:
+            self._calls[response_id] = {item["call_id"] for item in output if "call_id" in item}
         incomplete = turn.finish or ("max_output_tokens" if turn.truncated else None)
         return Reply(
             json={
@@ -373,6 +383,8 @@ class Models:
     def _anthropic(self, raw: Request) -> Reply:
         request = self._decode(raw)
         body = request.body
+        if problems := protocols.anthropic(body):
+            return _rejected(problems, anthropic=True)
         turn = self._next(request)
         if turn.fail is not None:
             return turn.fail
@@ -410,7 +422,10 @@ class Models:
         return Reply(stream=_anthropic_events(message), content_type="text/event-stream")
 
     def _gemini(self, raw: Request) -> Reply:
-        turn = self._next(self._decode(raw))
+        request = self._decode(raw)
+        if problems := protocols.gemini(request.body):
+            return _rejected(problems)
+        turn = self._next(request)
         if turn.fail is not None:
             return turn.fail
         parts: list[dict[str, Any]] = []
@@ -439,6 +454,14 @@ class Models:
                 "modelVersion": raw.params["model"],
             }
         )
+
+
+def _rejected(problems: list[str], *, anthropic: bool = False) -> Reply:
+    """The 400 a provider answers a request it rejects, in the shape its SDK parses."""
+    error = {"type": "invalid_request_error", "message": "; ".join(problems)}
+    return Reply(
+        status=400, json={"type": "error", "error": error} if anthropic else {"error": error}
+    )
 
 
 def _sse(kind: str, data: dict[str, Any]) -> bytes:
