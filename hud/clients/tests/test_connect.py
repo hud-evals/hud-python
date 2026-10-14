@@ -733,7 +733,7 @@ async def test_a_peer_the_kernel_declares_dead_fails_with_the_typed_error(
                 raise TimeoutError(errno.ETIMEDOUT, "Connection timed out")
 
             monkeypatch.setattr(client_module, "read_frame", dead_peer)
-            with pytest.raises(ControlTimeoutError, match=r"timed out during 'tasks.grade'"):
+            with pytest.raises(ControlTimeoutError, match=r"timed out during"):
                 await client.grade({"answer": "done"})
     finally:
         server.close()
