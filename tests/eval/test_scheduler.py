@@ -21,7 +21,7 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.eval.envs import containers, lab, minted, solve
+from tests.eval.envs import lab, minted, solve
 from tests.harness import RecordingProvider, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Provider, Run
-    from tests.harness import FakeDocker, FakeServices
+    from tests.harness import FakeServices
 
 
 class Counting(Agent):
@@ -442,31 +442,3 @@ async def test_a_module_taskset_runs_against_the_environments_it_defines(tmp_pat
     job = await Taskset.from_module(source).run(ScriptedAgent(solve))
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
-
-
-CONTAINER_ROWS = {
-    "an image row starts its image": (
-        ROWS[0].model_copy(update={"runtime_config": RuntimeConfig(image="lab")}),
-        1.0,
-    ),
-    "a same-env verifier rides the actor's container": (
-        ROWS[0].model_copy(
-            update={
-                "runtime_config": RuntimeConfig(image="lab"),
-                "verifier": Task(env="lab", id="frame", args={"result": {"score": 0.5}}),
-            }
-        ),
-        0.5,
-    ),
-}
-
-
-@pytest.mark.parametrize(("row", "reward"), CONTAINER_ROWS.values(), ids=CONTAINER_ROWS.keys())
-async def test_container_rows_start_their_image_without_a_runtime(
-    row: Task, reward: float, fake_docker: FakeDocker, tmp_path: Path
-) -> None:
-    async with containers(fake_docker, tmp_path / "rootfs", {"lab": lab()}):
-        job = await Taskset("images", [row]).run(ScriptedAgent(solve))
-
-    assert job.reward == reward
-    assert [command.split()[-1] for command in fake_docker.commands("run ")] == ["lab"]

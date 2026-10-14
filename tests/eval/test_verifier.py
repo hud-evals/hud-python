@@ -2,8 +2,8 @@
 
 The actor (``solve``) grades 0.25 and hands its answer on; the judge (``verify``)
 pays 1.0 only when that answer was ``secret``. A reward of 1.0 therefore proves
-the actor's result reached the verifier, through its grade frame or, across
-containers, through the session files the runtime transferred.
+the actor's result reached the verifier through its grade frame. Session files
+moving between containers are covered with real containers in ``test_docker``.
 """
 
 from __future__ import annotations
@@ -19,15 +19,13 @@ from pydantic import BaseModel
 
 from hud import Environment
 from hud.eval import (
-    DockerRuntime,
     LocalRuntime,
     Runtime,
     RuntimeConfig,
     RuntimeLimits,
-    Shared,
     Task,
 )
-from tests.eval.envs import actor, containers, judge
+from tests.eval.envs import actor, judge
 from tests.harness import RecordingProvider, ScriptedAgent, eventually, steps
 
 if TYPE_CHECKING:
@@ -35,7 +33,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Provider
-    from tests.harness import FakeDocker
 
 OWN_LIMITS = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=20))
 
@@ -110,13 +107,6 @@ CASES = {
             ANSWER,
         )
     ),
-    "session files reach a verifier in another container": Case("containers", graded(), ANSWER),
-    "session files reach a verifier in a fresh container of the same env": Case(
-        "same env, own container", graded(), ANSWER
-    ),
-    "a one-wide pool releases the actor's lease before the verifier takes one": Case(
-        "pooled container", graded(placements=["start:solve", "stop:solve"]), ANSWER
-    ),
     "the verifier stays authoritative when the agent raised after answering": Case(
         "separate",
         graded(status="error", error="[agent loop] RuntimeError: agent exploded"),
@@ -177,8 +167,8 @@ CASES = {
 }
 
 
-def arrange(case: Case, rootfs: Path) -> tuple[Task, Provider, dict[str, Environment]]:
-    """The row, the provider placing it, and the container images it needs."""
+def arrange(case: Case) -> tuple[Task, Provider]:
+    """The row and the provider placing it."""
     if case.placement in {"separate", "verifier unavailable"}:
         row = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
         judge_provider = (
@@ -187,56 +177,26 @@ def arrange(case: Case, rootfs: Path) -> tuple[Task, Provider, dict[str, Environ
             else LocalRuntime(judge(verdict=case.verdict))
         )
         provider = by_env({"actor": LocalRuntime(actor(grade=case.grade)), "judge": judge_provider})
-        return row, provider, {}
-    if case.placement in {"same env", "same env, own runtime"}:
-        env = judge(actor(Environment("reviewed"), grade=case.grade), verdict=case.verdict)
-        own = OWN_LIMITS if case.placement == "same env, own runtime" else None
-        row = Task(
-            env="reviewed",
-            id="solve",
-            verifier=Task(env="reviewed", id="verify", runtime_config=own),
-        )
-        return row, portable(LocalRuntime(env)), {}
-    if case.placement == "containers":
-        row = Task(
-            env="actor",
-            id="solve",
-            runtime_config=RuntimeConfig(image="actor"),
-            verifier=Task(env="judge", id="verify", runtime_config=RuntimeConfig(image="judge")),
-        )
-        images = {
-            "actor": actor(sessions=rootfs / "actor"),
-            "judge": judge(sessions=rootfs / "judge"),
-        }
-        return row, DockerRuntime(), images
-    image = RuntimeConfig(image="reviewed")
+        return row, provider
+    env = judge(actor(Environment("reviewed"), grade=case.grade), verdict=case.verdict)
+    own = OWN_LIMITS if case.placement == "same env, own runtime" else None
     row = Task(
         env="reviewed",
         id="solve",
-        runtime_config=image,
-        verifier=Task(env="reviewed", id="verify", runtime_config=image),
+        verifier=Task(env="reviewed", id="verify", runtime_config=own),
     )
-    sessions = rootfs / "reviewed"
-    env = judge(actor(Environment("reviewed"), sessions=sessions), sessions=sessions)
-    return row, DockerRuntime(), {"reviewed": env}
+    return row, portable(LocalRuntime(env))
 
 
 @pytest.mark.parametrize("case", CASES.values(), ids=CASES.keys())
 async def test_the_verifier_grade_is_the_grade_of_record(
     case: Case,
-    tmp_path: Path,
-    fake_docker: FakeDocker,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    rootfs = tmp_path / "rootfs"
-    row, inner, images = arrange(case, rootfs)
+    row, inner = arrange(case)
     recording = RecordingProvider(inner)
-    provider: Provider = (
-        Shared(recording, width=1) if case.placement == "pooled container" else recording
-    )
 
-    async with containers(fake_docker, rootfs, images):
-        job = await row.run(case.agent, runtime=provider, rollout_timeout=30)
+    job = await row.run(case.agent, runtime=recording, rollout_timeout=30)
     (run,) = job.runs
 
     assert {

@@ -1,9 +1,8 @@
-"""DockerRuntime: a row runs in a confined container or Compose project that is removed after.
+"""DockerRuntime: a row runs in a confined container or Compose project, removed after.
 
-The fake ``docker`` on ``PATH`` records every invocation and runs ``cp`` and
-``exec`` against a directory per container; its ``port`` answer points at an
-environment served in this process, so each placement really serves a rollout
-whose reward proves the container worked.
+The scenarios run real containers from the fixture image (this checkout's SDK
+serving a fixture environment) on the local Docker daemon, and check what the
+daemon reports about them. Requests DockerRuntime refuses never reach the daemon.
 """
 
 from __future__ import annotations
@@ -11,17 +10,16 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import re
+import subprocess
 import tarfile
 import textwrap
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from dirty_equals import IsStr
 
 import hud
-from hud import Environment
 from hud.eval import (
     ComposeProject,
     DockerRuntime,
@@ -33,221 +31,345 @@ from hud.eval import (
     rollout,
 )
 from hud.eval.runtime import DockerBindMount
-from tests.eval.envs import DF_FREE, actor, containers, judge, lab, solve
-from tests.harness import ScriptedAgent, eventually
+from hud.eval.runtime.docker import DockerEndpoint
+from tests.harness import ScriptedAgent
 
 if TYPE_CHECKING:
-    from hud.eval import Runtime
-    from tests.harness import FakeDocker
+    from collections.abc import Callable
 
 SECCOMP = Path(hud.__file__).parent / "eval" / "docker-seccomp.json"
-CONFINED = [f"seccomp={SECCOMP}", "systempaths=unconfined", "apparmor=unconfined"]
-ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
+ECHO = Task(env="echo", id="echo", args={"word": "tangerine"})
 
 
-def placed(config: RuntimeConfig | None) -> Task:
-    return ADD.model_copy(update={"runtime_config": config})
+def inspect(container: str) -> dict[str, Any]:
+    out = subprocess.run(
+        ["docker", "inspect", container], capture_output=True, text=True, check=True
+    ).stdout
+    return json.loads(out)[0]
 
 
-async def run_on(provider: DockerRuntime, row: Task) -> tuple[Runtime, float]:
-    """Acquire ``row``'s placement, run the rollout on it, and return both."""
-    async with provider(row) as runtime:
-        run = await rollout(row, ScriptedAgent(solve), runtime=runtime)
-    return runtime, run.reward
+def containers(**labels: str) -> list[str]:
+    filters = [arg for key, value in labels.items() for arg in ("--filter", f"label={key}={value}")]
+    out = subprocess.run(
+        ["docker", "ps", "--all", "--quiet", *filters], capture_output=True, text=True, check=True
+    ).stdout
+    return out.split()
 
 
-def docker_run(fake_docker: FakeDocker) -> list[str]:
-    (argv,) = [call.argv for call in fake_docker.calls if call.argv[:1] == ["run"]]
-    return argv
+def volume_exists(name: str) -> bool:
+    probe = subprocess.run(["docker", "volume", "inspect", name], capture_output=True, check=False)
+    return probe.returncode == 0
 
 
-def volumes_left(fake_docker: FakeDocker) -> set[str]:
-    """Session volumes created and never removed."""
-    created = {call.argv[2] for call in fake_docker.calls if call.argv[:2] == ["volume", "create"]}
-    removed = {call.argv[-1] for call in fake_docker.calls if call.argv[:2] == ["volume", "rm"]}
-    return created - removed
+def labelled() -> tuple[str, list[str]]:
+    """A label unique to this test and the ``docker run`` flags that set it."""
+    label = uuid.uuid4().hex
+    return label, ["--label", f"hud-test={label}"]
 
 
+@pytest.mark.e2e
+@pytest.mark.docker
 async def test_an_image_row_runs_in_a_confined_container_that_is_removed_after(
-    fake_docker: FakeDocker, tmp_path: Path
+    fixture_image: Callable[[str], str],
 ) -> None:
-    async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
-        _, reward = await run_on(DockerRuntime("lab:1"), ADD)
+    label, flags = labelled()
 
-    argv = docker_run(fake_docker)
-    assert reward == 1.0
-    assert [argv[i + 1] for i, arg in enumerate(argv) if arg == "--security-opt"] == CONFINED
-    assert "--privileged" not in argv
-    assert fake_docker.commands("rm --force ") == ["rm --force lab-1"]
-    assert volumes_left(fake_docker) == set()
+    async with DockerRuntime(fixture_image("echo"), run_args=flags)(ECHO) as runtime:
+        assert isinstance(runtime, DockerEndpoint)
+        held = inspect(runtime.container)
+        run = await rollout(ECHO, ScriptedAgent("tangerine"), runtime=runtime)
+
+    sessions = [mount["Name"] for mount in held["Mounts"] if mount["Type"] == "volume"]
+    assert run.reward == 1.0
+    assert any(option.startswith("seccomp=") for option in held["HostConfig"]["SecurityOpt"])
+    assert held["HostConfig"]["Privileged"] is False
+    assert containers(**{"hud-test": label}) == []
+    assert sessions and not any(volume_exists(name) for name in sessions)
 
 
-# What the row and the provider each set, and which wins, as docker run sees it.
-IMAGES: dict[str, tuple[dict[str, Any], RuntimeConfig | None, list[str], dict[str, Any]]] = {
-    "run args, env vars, bind mounts and resources reach docker run": (
-        {
-            "image": "lab:1",
-            "run_args": ["--network", "host"],
-            "env_vars": {"MODE": "eval"},
-            "bind_mounts": [DockerBindMount("/opt/data", "/data")],
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_the_rows_settings_win_over_the_providers_and_reach_the_container(
+    fixture_image: Callable[[str], str], tmp_path: Path
+) -> None:
+    (tmp_path / "data").mkdir()
+    _, flags = labelled()
+    provider = DockerRuntime(
+        "hud-test-fixture:missing",
+        run_args=flags,
+        env_vars={"MODE": "eval"},
+        bind_mounts=[DockerBindMount(str(tmp_path / "data"), "/data")],
+        runtime_config=RuntimeConfig(resources=RuntimeResources(cpu=2, memory_mb=1024)),
+    )
+    row = ECHO.model_copy(
+        update={
             "runtime_config": RuntimeConfig(
-                resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU())
-            ),
-        },
-        None,
-        [
-            *("--network", "host", "--env", "MODE=eval"),
-            *("--cpus", "2", "--memory", "4096m", "--gpus", "1"),
-            *("--mount", "type=bind,source=/opt/data,target=/data,readonly"),
-        ],
-        {},
-    ),
-    "the row's image replaces the provider's and keeps its resources": (
-        {"image": "lab:old", "runtime_config": {"resources": {"cpu": 1.5}}},
-        RuntimeConfig(image="lab:1"),
-        ["--cpus", "1.5"],
-        {},
-    ),
-    "the row's resources replace the provider's whole": (
-        {"image": "lab:1", "runtime_config": {"resources": {"cpu": 2, "memory_mb": 4096}}},
-        RuntimeConfig(resources=RuntimeResources(cpu=4)),
-        ["--cpus", "4"],
-        {},
-    ),
-    "a constructor runtime_config image beats the positional one": (
-        {"image": "lab:old", "runtime_config": {"image": "lab:1"}},
-        None,
-        [],
-        {},
-    ),
-    "a startup limit becomes the runtime's ready timeout": (
-        {"image": "lab:1"},
-        RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=300)),
-        [],
-        {"ready_timeout": 300},
-    ),
-}
+                image=fixture_image("echo"), resources=RuntimeResources(cpu=1, memory_mb=512)
+            )
+        }
+    )
+
+    async with provider(row) as runtime:
+        assert isinstance(runtime, DockerEndpoint)
+        held = inspect(runtime.container)
+        run = await rollout(row, ScriptedAgent("tangerine"), runtime=runtime)
+
+    (data,) = [mount for mount in held["Mounts"] if mount["Destination"] == "/data"]
+    assert run.reward == 1.0
+    assert (held["HostConfig"]["NanoCpus"], held["HostConfig"]["Memory"]) == (10**9, 512 * 2**20)
+    assert "MODE=eval" in held["Config"]["Env"]
+    assert data["RW"] is False
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_row_that_names_an_image_runs_there_without_a_runtime(
+    fixture_image: Callable[[str], str],
+) -> None:
+    row = ECHO.model_copy(update={"runtime_config": RuntimeConfig(image=fixture_image("echo"))})
+
+    job = await row.run(ScriptedAgent("tangerine"))
+
+    assert job.reward == 1.0
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+@pytest.mark.parametrize("fixture", ["broken", "stalls"], ids=["exits-at-once", "never-answers"])
+async def test_a_container_that_does_not_serve_fails_the_start_and_is_removed(
+    fixture: str, fixture_image: Callable[[str], str]
+) -> None:
+    label, flags = labelled()
+    limited = RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=10))
+    row = ECHO.model_copy(update={"runtime_config": limited})
+
+    run = await rollout(
+        row, ScriptedAgent("x"), runtime=DockerRuntime(fixture_image(fixture), run_args=flags)
+    )
+
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert (run.trace.error or "").startswith("[starting task]")
+    assert containers(**{"hud-test": label}) == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_more_disk_than_the_container_has_is_refused_and_the_container_removed(
+    fixture_image: Callable[[str], str],
+) -> None:
+    label, flags = labelled()
+    row = ECHO.model_copy(
+        update={"runtime_config": RuntimeConfig(resources=RuntimeResources(storage_mb=10**9))}
+    )
+
+    with pytest.raises(RuntimeError, match=r"requires 1000000000 MB of free disk"):
+        async with DockerRuntime(fixture_image("echo"), run_args=flags)(row):
+            pytest.fail("the request should be refused")
+
+    assert containers(**{"hud-test": label}) == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_container_past_its_run_limit_is_removed_while_held(
+    fixture_image: Callable[[str], str],
+) -> None:
+    label, flags = labelled()
+    row = ECHO.model_copy(
+        update={"runtime_config": RuntimeConfig(limits=RuntimeLimits(run_timeout_s=2))}
+    )
+
+    async with DockerRuntime(fixture_image("echo"), run_args=flags)(row):
+        await asyncio.sleep(4)
+        left = containers(**{"hud-test": label})
+
+    assert left == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+@pytest.mark.parametrize(("link", "reward"), [(False, 1.0), (True, 0.0)], ids=["files", "a-link"])
+async def test_a_verifier_in_its_own_container_receives_the_actors_session_files(
+    link: bool, reward: float, fixture_image: Callable[[str], str]
+) -> None:
+    image = RuntimeConfig(image=fixture_image("sessions"))
+    row = Task(
+        env="sessions",
+        id="solve",
+        args={"link": link},
+        runtime_config=image,
+        verifier=Task(env="sessions", id="verify", runtime_config=image),
+    )
+
+    run = await rollout(row, ScriptedAgent("secret"), runtime=DockerRuntime())
+
+    assert run.reward == reward
+    if link:
+        assert "runtime session contains a symbolic link" in (run.trace.error or "")
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_restored_session_archive_may_hold_only_files_and_directories(
+    fixture_image: Callable[[str], str], tmp_path: Path
+) -> None:
+    archive = tmp_path / "session.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        link = tarfile.TarInfo("escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/etc/passwd"
+        tar.addfile(link, io.BytesIO())
+
+    async with DockerRuntime(fixture_image("echo"))(ECHO) as runtime:
+        with pytest.raises(
+            ValueError, match="runtime session archive contains an unsupported entry"
+        ):
+            await runtime.restore_session("sess-12345678", archive)
+
+
+def compose_file(tmp_path: Path, document: str, env_file: str = "") -> ComposeProject:
+    (tmp_path / ".env").write_text(env_file)
+    path = tmp_path / "compose.yaml"
+    path.write_text(textwrap.dedent(document))
+    return ComposeProject(document=path)
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_compose_project_serves_main_confined_through_its_network_owner(
+    fixture_image: Callable[[str], str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOST_ONLY", "from-the-host")
+    project = compose_file(
+        tmp_path,
+        f"""
+        services:
+          main:
+            image: {fixture_image("echo")}
+            network_mode: service:gateway
+            environment:
+              MODE: ${{MODE}}
+              LITERAL: $$HOST_ONLY
+            depends_on: [gateway]
+          gateway:
+            image: python:3.12-slim
+            command: sleep infinity
+            healthcheck: {{test: [CMD, "true"], interval: 1s}}
+        """,
+        env_file="MODE=eval\n",
+    )
+    row = ECHO.model_copy(update={"runtime_config": RuntimeConfig(compose=project)})
+
+    async with DockerRuntime()(row) as runtime:
+        assert isinstance(runtime, DockerEndpoint)
+        held = inspect(runtime.container)
+        run = await rollout(row, ScriptedAgent("tangerine"), runtime=runtime)
+
+    compose = held["Config"]["Labels"]["com.docker.compose.project"]
+    assert run.reward == 1.0
+    assert any(option.startswith("seccomp=") for option in held["HostConfig"]["SecurityOpt"])
+    assert {"MODE=eval", "LITERAL=$HOST_ONLY"} <= set(held["Config"]["Env"])
+    assert containers(**{"com.docker.compose.project": compose}) == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_compose_project_whose_network_owner_dies_is_taken_down(
+    fixture_image: Callable[[str], str], tmp_path: Path
+) -> None:
+    project = compose_file(
+        tmp_path,
+        f"""
+        services:
+          main:
+            image: {fixture_image("echo")}
+            network_mode: service:gateway
+          gateway:
+            image: python:3.12-slim
+            command: python -c "print('gateway gave up'); raise SystemExit(1)"
+        """,
+    )
+    row = ECHO.model_copy(update={"runtime_config": RuntimeConfig(compose=project)})
+
+    with pytest.raises(RuntimeError):
+        async with DockerRuntime()(row):
+            pytest.fail("the project should not serve")
+
+    working_dir = {"com.docker.compose.project.working_dir": str(tmp_path)}
+    assert containers(**working_dir) == []
+
+
+CHAINED = """
+services:
+  main: {image: lab, network_mode: "service:gateway"}
+  gateway: {image: gateway}
+"""
 
 
 @pytest.mark.parametrize(
-    ("options", "config", "run_options", "params"), IMAGES.values(), ids=IMAGES.keys()
+    ("document", "config", "options", "error"),
+    [
+        pytest.param(
+            None,
+            RuntimeConfig(image="lab:1", resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
+            {},
+            "cannot select GPUs by type",
+            id="a-gpu-type",
+        ),
+        pytest.param(
+            None,
+            RuntimeConfig(resources=RuntimeResources(cpu=1)),
+            {},
+            "requires runtime_config.image or runtime_config.compose",
+            id="no-image",
+        ),
+        pytest.param(
+            CHAINED,
+            None,
+            {"run_args": ["--privileged"]},
+            "run_args apply only to image environments",
+            id="run-args-for-compose",
+        ),
+        pytest.param(
+            "services:\n  main: {image: lab, network_mode: 'service:relay'}\n"
+            "  relay: {image: relay, network_mode: 'service:main'}\n",
+            None,
+            {},
+            "network_mode service cycle includes 'main'",
+            id="a-network-cycle",
+        ),
+        pytest.param(
+            "include: [other.yaml]\nservices:\n  main: {image: lab}\n",
+            None,
+            {},
+            "does not support Compose include or extends",
+            id="an-include",
+        ),
+        pytest.param(
+            "services:\n  main: {image: $HOST_ONLY}\n",
+            None,
+            {},
+            "variable 'HOST_ONLY' is not set by the project .env",
+            id="a-host-variable",
+        ),
+    ],
 )
-async def test_a_row_and_its_provider_decide_what_docker_run_is_asked_for(
-    options: dict[str, Any],
+async def test_a_request_docker_cannot_serve_is_refused_before_the_daemon_is_asked(
+    document: str | None,
     config: RuntimeConfig | None,
-    run_options: list[str],
-    params: dict[str, Any],
-    fake_docker: FakeDocker,
+    options: dict[str, Any],
+    error: str,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
-        runtime, reward = await run_on(DockerRuntime(**options), placed(config))
+    monkeypatch.setenv("PATH", str(tmp_path / "no-docker"))
+    if document is not None:
+        config = RuntimeConfig(compose=compose_file(tmp_path, document))
+    row = ECHO.model_copy(update={"runtime_config": config})
 
-    argv = docker_run(fake_docker)
-    assert reward == 1.0
-    assert (argv[2 : argv.index("--security-opt")], argv[-1]) == (run_options, "lab:1")
-    assert runtime.params == params
-
-
-async def test_a_container_streams_its_logs_to_the_terminal(
-    fake_docker: FakeDocker, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    fake_docker.on(r"^logs --follow ", stdout="env says hello\n", stderr="env warns\n")
-    seen = {"out": "", "err": ""}
-
-    def heard() -> bool:
-        out, err = capfd.readouterr()
-        seen["out"] += out
-        seen["err"] += err
-        return "env says hello" in seen["out"] and "env warns" in seen["err"]
-
-    async with (
-        containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}),
-        DockerRuntime("lab:1")(ADD),
-    ):
-        await eventually(heard)
-
-
-LOW_DISK = "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 0 0 4194304 0% /\n"
-IMAGE_FAILURES: dict[str, tuple[RuntimeConfig, list[tuple[str, dict[str, Any]]], Any, bool]] = {
-    "a GPU type it cannot select": (
-        RuntimeConfig(image="lab:1", resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
-        [],
-        "DockerRuntime cannot select GPUs by type",
-        False,
-    ),
-    "no image at all": (
-        RuntimeConfig(resources=RuntimeResources(cpu=1)),
-        [],
-        "DockerRuntime requires runtime_config.image or runtime_config.compose",
-        False,
-    ),
-    "a Compose document that is not a local file": (
-        RuntimeConfig.model_validate({"compose": {"document": {"services": {"main": {}}}}}),
-        [],
-        "DockerRuntime requires compose as a local file path",
-        False,
-    ),
-    "a container that exits before serving": (
-        RuntimeConfig(image="lab:1"),
-        [(r"^logs --tail 40 ", {"stderr": "ImportError: boom\n"})],
-        "container for image 'lab:1' exited before serving port 8765:\nImportError: boom",
-        True,
-    ),
-    "less free disk than requested": (
-        RuntimeConfig(image="lab:1", resources=RuntimeResources(storage_mb=8192)),
-        [(r"^exec \S+ df -Pk /$", {"stdout": LOW_DISK})],
-        "DockerRuntime requires 8192 MB of free disk; the environment has 4096 MB",
-        True,
-    ),
-    "free disk it cannot read": (
-        RuntimeConfig(image="lab:1", resources=RuntimeResources(storage_mb=8192)),
-        [(r"^exec \S+ df -Pk /$", {"stdout": "df: not found\n"})],
-        "DockerRuntime could not measure the environment's free disk",
-        True,
-    ),
-    "a start slower than its startup limit": (
-        RuntimeConfig(image="lab:1", limits=RuntimeLimits(startup_timeout_s=1)),
-        [(r"^run ", {"stdout": "cid-1\n", "delay": 3})],
-        IsStr(regex=r"docker run --detach .* lab:1 timed out after 1s"),
-        False,
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("config", "rules", "error", "started"), IMAGE_FAILURES.values(), ids=IMAGE_FAILURES.keys()
-)
-async def test_an_image_that_cannot_serve_fails_its_acquisition_and_leaves_nothing_behind(
-    config: RuntimeConfig,
-    rules: list[tuple[str, dict[str, Any]]],
-    error: Any,
-    started: bool,
-    fake_docker: FakeDocker,
-) -> None:
-    for match, answer in rules:
-        fake_docker.on(match, **answer)
-
-    with pytest.raises((ValueError, RuntimeError)) as raised:
-        async with DockerRuntime()(placed(config)):
-            pytest.fail("the acquisition should fail")
-
-    assert str(raised.value) == error
-    assert fake_docker.commands("rm --force ") == (["rm --force cid-1"] if started else [])
-    assert volumes_left(fake_docker) == set()
-    if not rules:
-        assert fake_docker.calls == []
-
-
-async def test_a_container_past_its_run_limit_is_removed(fake_docker: FakeDocker) -> None:
-    fake_docker.on(r"^port ", stdout="127.0.0.1:43210\n")
-    row = placed(RuntimeConfig(image="lab:1", limits=RuntimeLimits(run_timeout_s=1)))
-
-    async with DockerRuntime()(row):
-        await asyncio.sleep(1.2)
-        removed_while_held = fake_docker.commands("rm --force ")
-
-    assert removed_while_held == ["rm --force cid-1"]
+    with pytest.raises(ValueError, match=error):
+        async with DockerRuntime(**options)(row):
+            pytest.fail("the request should be refused")
 
 
 def test_the_sandbox_profile_allows_workspace_namespaces_and_denies_kernel_interfaces() -> None:
@@ -262,384 +384,3 @@ def test_the_sandbox_profile_allows_workspace_namespaces_and_denies_kernel_inter
     assert profile["defaultAction"] == "SCMP_ACT_ALLOW"
     assert {"mount", "pivot_root", "setns", "umount", "umount2", "unshare"}.isdisjoint(denied)
     assert {"bpf", "keyctl", "perf_event_open", "ptrace", "userfaultfd"} <= denied
-
-
-def compose_file(tmp_path: Path, document: str, env_file: str = "TAG=1\n") -> Path:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".env").write_text(env_file)
-    path = project / "compose.yaml"
-    path.write_text(textwrap.dedent(document))
-    return path
-
-
-def staged(fake_docker: FakeDocker, name: str) -> Any:
-    """The staged Compose file ``name`` as ``compose up`` read it."""
-    (text,) = {
-        text
-        for call in fake_docker.calls
-        if " up --detach " in call.command
-        for path, text in call.files.items()
-        if path.endswith(name)
-    }
-    return json.loads(text)
-
-
-HEALTHCHECKED = """
-services:
-  main:
-    image: lab:${TAG}
-    command: hud serve env.py --port 8765
-    healthcheck: {test: [CMD, "true"]}
-  db:
-    image: postgres:16
-    healthcheck: {test: [CMD, pg_isready], interval: 1s}
-  cache:
-    image: redis
-    healthcheck: {test: [NONE]}
-  worker:
-    image: worker
-    healthcheck: {test: [CMD, "true"], disable: true}
-  tools:
-    image: tools
-    profiles: [debug]
-    healthcheck: {test: [CMD, "true"]}
-  idle:
-    image: idle
-    scale: 0
-    healthcheck: {test: [CMD, "true"]}
-"""
-
-CHAINED = """
-services:
-  main:
-    image: lab
-    network_mode: service:relay
-  relay:
-    image: relay
-    network_mode: service:gateway
-  gateway:
-    image: gateway
-"""
-
-SOCKET = "/var/run/docker.sock"
-COMPOSE: dict[str, tuple[str, bool, dict[str, Any], RuntimeConfig | None, dict[str, str], Any]] = {
-    "only services with a live healthcheck are awaited; resources land on main": (
-        HEALTHCHECKED,
-        False,
-        {"env_vars": {"MODE": "override"}, "bind_mounts": [DockerBindMount("/opt/data", "/data")]},
-        RuntimeConfig(resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU(count=2))),
-        {},
-        {
-            "awaited": ["main", "db"],
-            "published": "main",
-            "main": {"environment": {"MODE": "override"}, "cpus": 2.0, "mem_limit": "4096m"},
-            "mounts": ["/opt/data"],
-        },
-    ),
-    "the published port belongs to the end of main's network chain": (
-        CHAINED,
-        False,
-        {},
-        None,
-        {},
-        {"awaited": [], "published": "gateway", "main": {}, "mounts": []},
-    ),
-    "service access mounts the local daemon's socket": (
-        CHAINED,
-        True,
-        {},
-        None,
-        {"DOCKER_HOST": "unix:///run/user/docker.sock"},
-        {
-            "awaited": [],
-            "published": "gateway",
-            "main": {},
-            "mounts": ["/run/user/docker.sock"] * 2,
-        },
-    ),
-    "service access asks docker for its socket when DOCKER_HOST is unset": (
-        CHAINED,
-        True,
-        {},
-        None,
-        {},
-        {"awaited": [], "published": "gateway", "main": {}, "mounts": [SOCKET] * 2},
-    ),
-    "service access through a remote daemon mounts the socket it names": (
-        CHAINED,
-        True,
-        {"compose_service_socket": "/vm/run/docker.sock"},
-        None,
-        {"DOCKER_HOST": "tcp://docker.remote:2376"},
-        {"awaited": [], "published": "gateway", "main": {}, "mounts": ["/vm/run/docker.sock"] * 2},
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("document", "service_access", "options", "config", "environment", "launched"),
-    COMPOSE.values(),
-    ids=COMPOSE.keys(),
-)
-async def test_a_compose_row_runs_its_project_with_main_confined_and_takes_it_down(
-    document: str,
-    service_access: bool,
-    options: dict[str, Any],
-    config: RuntimeConfig | None,
-    environment: dict[str, str],
-    launched: dict[str, Any],
-    fake_docker: FakeDocker,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("DOCKER_HOST", raising=False)
-    for name, value in environment.items():
-        monkeypatch.setenv(name, value)
-    project = ComposeProject(
-        document=compose_file(tmp_path, document), service_access=service_access or None
-    )
-    row = placed(RuntimeConfig(compose=project).with_overrides(config))
-    fake_docker.on(r"^context inspect ", stdout=f"unix://{SOCKET}\n")
-    fake_docker.on(r"^compose .* ps --quiet main$", stdout="main-1\n")
-
-    async with containers(fake_docker, tmp_path / "rootfs", {"lab": lab()}) as addresses:
-        fake_docker.on(r"^compose .* port \w+ 8765$", stdout=f"{addresses['lab']}\n")
-        _, reward = await run_on(DockerRuntime(**options), row)
-
-    main = staged(fake_docker, "override.json")["services"]["main"]
-    awaited = [call.argv for call in fake_docker.calls if "--wait" in call.argv]
-    (published,) = [call.argv[-2] for call in fake_docker.calls if call.argv[-3:-2] == ["port"]]
-    session_volumes = [v for v in main["volumes"] if v["type"] == "volume"]
-    assert reward == 1.0
-    assert main["security_opt"] == CONFINED
-    assert [v["target"] for v in session_volumes] == ["/runtime/sessions", "/media/hud/sessions"]
-    assert {
-        "awaited": awaited[0][awaited[0].index("--no-build") + 1 :] if awaited else [],
-        "published": published,
-        "main": {key: main[key] for key in ("environment", "cpus", "mem_limit") if key in main},
-        "mounts": [v["source"] for v in main["volumes"] if v["type"] == "bind"],
-    } == launched
-    assert fake_docker.commands()[-1].endswith("down --volumes --remove-orphans")
-
-
-async def test_a_compose_storage_request_is_admitted_inside_main(
-    fake_docker: FakeDocker, tmp_path: Path
-) -> None:
-    project = ComposeProject(document=compose_file(tmp_path, CHAINED))
-    row = placed(RuntimeConfig(compose=project, resources=RuntimeResources(storage_mb=1024)))
-    fake_docker.on(r"^compose .* exec -T main df -Pk /$", stdout=DF_FREE)
-
-    async with containers(fake_docker, tmp_path / "rootfs", {"lab": lab()}) as addresses:
-        fake_docker.on(r"^compose .* port \w+ 8765$", stdout=f"{addresses['lab']}\n")
-        _, reward = await run_on(DockerRuntime(), row)
-
-    assert reward == 1.0
-    assert [command for command in fake_docker.commands() if "df -Pk" in command] != []
-
-
-INTERPOLATED = """
-services:
-  main:
-    image: ${REGISTRY}/lab:${TAG:-latest}
-    environment:
-      HOME_DIR: '$HOME'
-      PRICE: ${PRICE}
-      BASE: ${PREFIX}
-      LITERAL: $$PATH
-"""
-
-
-async def test_compose_variables_come_only_from_the_projects_env_file(
-    fake_docker: FakeDocker, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("TAG", "from-the-host")
-    monkeypatch.setenv("HOME", "/home/host")
-    env_file = "REGISTRY=registry.test\nPRICE=cost$5\nPREFIX=${REGISTRY}/base\n"
-    project = ComposeProject(document=compose_file(tmp_path, INTERPOLATED, env_file))
-    fake_docker.on(r"^compose .* port main 8765$", stdout="127.0.0.1:43210\n")
-
-    async with DockerRuntime()(placed(RuntimeConfig(compose=project))):
-        pass
-
-    main = staged(fake_docker, "compose.json")["services"]["main"]
-    assert main["image"] == "registry.test/lab:latest"
-    assert main["environment"] == {
-        "HOME_DIR": "$$HOME",
-        "PRICE": "cost$$5",
-        "BASE": "registry.test/base",
-        "LITERAL": "$$PATH",
-    }
-
-
-COMPOSE_FAILURES: dict[str, tuple[str, bool, dict[str, Any], RuntimeConfig | None, str, bool]] = {
-    "service access through a remote daemon without a socket": (
-        CHAINED,
-        True,
-        {"DOCKER_HOST": "tcp://docker.remote:2376"},
-        None,
-        "service access through a remote daemon requires compose_service_socket",
-        False,
-    ),
-    "a GPU type it cannot select": (
-        CHAINED,
-        False,
-        {},
-        RuntimeConfig(resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
-        "cannot select Compose GPUs by type",
-        False,
-    ),
-    "run args, which only apply to images": (
-        CHAINED,
-        False,
-        {"run_args": ["--privileged"]},
-        None,
-        "run_args apply only to image environments",
-        False,
-    ),
-    "a network chain that loops": (
-        "services:\n  main: {image: lab, network_mode: 'service:relay'}\n"
-        "  relay: {image: relay, network_mode: 'service:main'}\n",
-        False,
-        {},
-        None,
-        "network_mode service cycle includes 'main'",
-        False,
-    ),
-    "a network chain to a missing service": (
-        "services:\n  main: {image: lab, network_mode: 'service:gone'}\n",
-        False,
-        {},
-        None,
-        "network_mode references unknown service 'gone'",
-        False,
-    ),
-    "an include": (
-        "include: [other.yaml]\nservices:\n  main: {image: lab}\n",
-        False,
-        {},
-        None,
-        "does not support Compose include or extends",
-        False,
-    ),
-    "an extends": (
-        "services:\n  main: {image: lab, extends: {file: base.yaml, service: base}}\n",
-        False,
-        {},
-        None,
-        "does not support Compose include or extends",
-        False,
-    ),
-    "a variable only the host would set": (
-        "services:\n  main: {image: $HOST_ONLY}\n",
-        False,
-        {},
-        None,
-        "variable 'HOST_ONLY' is not set by the project .env",
-        False,
-    ),
-    "a required variable left unset": (
-        'services:\n  main: {image: "${IMAGE:?set IMAGE in .env}"}\n',
-        False,
-        {},
-        None,
-        "set IMAGE in .env",
-        False,
-    ),
-    "a network owner that exits before serving": (
-        CHAINED,
-        False,
-        {},
-        None,
-        "gateway service exited before serving port 8765:\nImportError: boom",
-        True,
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("document", "service_access", "change", "config", "error", "started"),
-    COMPOSE_FAILURES.values(),
-    ids=COMPOSE_FAILURES.keys(),
-)
-async def test_a_compose_project_that_cannot_serve_fails_and_is_taken_down(
-    document: str,
-    service_access: bool,
-    change: dict[str, Any],
-    config: RuntimeConfig | None,
-    error: str,
-    started: bool,
-    fake_docker: FakeDocker,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("DOCKER_HOST", raising=False)
-    if "DOCKER_HOST" in change:
-        monkeypatch.setenv("DOCKER_HOST", change["DOCKER_HOST"])
-    project = ComposeProject(
-        document=compose_file(tmp_path, document), service_access=service_access or None
-    )
-    row = placed(RuntimeConfig(compose=project).with_overrides(config))
-    fake_docker.on(r"^compose .* logs --tail 40 gateway$", stderr="ImportError: boom\n")
-
-    with pytest.raises((ValueError, RuntimeError), match=re.escape(error)):
-        async with DockerRuntime(run_args=change.get("run_args", ()))(row):
-            pytest.fail("the acquisition should fail")
-
-    commands = fake_docker.commands()
-    if started:
-        assert commands[-1].endswith("down --volumes --remove-orphans")
-    else:
-        assert not any(" up " in command for command in commands)
-
-
-async def test_a_container_session_moves_to_the_verifier_unless_it_holds_a_link(
-    fake_docker: FakeDocker, tmp_path: Path
-) -> None:
-    rootfs = tmp_path / "rootfs"
-    images = {
-        "actor": actor(sessions=rootfs / "actor"),
-        "linker": actor(Environment("linker"), sessions=rootfs / "linker", link=True),
-        "judge": judge(sessions=rootfs / "judge"),
-    }
-    verifier = Task(env="judge", id="verify", runtime_config=RuntimeConfig(image="judge"))
-
-    def row(env: str) -> Task:
-        return Task(env=env, id="solve", runtime_config=RuntimeConfig(image=env), verifier=verifier)
-
-    async with containers(fake_docker, rootfs, images):
-        moved = await rollout(row("actor"), ScriptedAgent("secret"), runtime=DockerRuntime())
-        linked = await rollout(row("linker"), ScriptedAgent("secret"), runtime=DockerRuntime())
-
-    assert moved.reward == 1.0
-    assert (linked.reward, linked.trace.error) == (
-        0.0,
-        IsStr(regex=r"(?s)\[snapshotting actor\] .*runtime session contains a symbolic link"),
-    )
-    assert not any(command.startswith("cp linker:") for command in fake_docker.commands())
-
-
-async def test_a_restored_session_archive_may_hold_only_files_and_directories(
-    fake_docker: FakeDocker, tmp_path: Path
-) -> None:
-    archive = tmp_path / "session.tar.gz"
-    with tarfile.open(archive, "w:gz") as tar:
-        data = b"secret"
-        work = tarfile.TarInfo("work.txt")
-        work.size = len(data)
-        tar.addfile(work, io.BytesIO(data))
-        link = tarfile.TarInfo("escape")
-        link.type = tarfile.SYMTYPE
-        link.linkname = "/etc/passwd"
-        tar.addfile(link)
-
-    async with (
-        containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}),
-        DockerRuntime("lab:1")(ADD) as runtime,
-    ):
-        with pytest.raises(
-            ValueError, match="runtime session archive contains an unsupported entry"
-        ):
-            await runtime.restore_session("sess-12345678", archive)
-
-    assert not any(command.startswith(("exec", "cp")) for command in fake_docker.commands())

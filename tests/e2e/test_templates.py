@@ -35,10 +35,8 @@ from .projects import ROWS, TEMPLATES, assert_lifecycle, generate
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from tests.harness import FakeServices, Hud, HudEnv, Models
+    from tests.harness import FakeServices, Hud, HudEnv, Models, Uv
     from tests.harness.cli import Result
-
-    from .projects import Uv
 
 SANDBOXED = {"coding"}
 TAKES_DATA_FILES = {"argument-hints"}

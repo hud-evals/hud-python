@@ -31,6 +31,7 @@ from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
 from .scenario import RecordingProvider, ScriptedAgent, eventually, served, task_row
 from .services import FakeServices, Reply, Request
 from .spans import ROBOT_STEP_SCHEMA, spans, steps
+from .uv import Uv
 
 __all__ = [
     "ROBOT_STEP_SCHEMA",
@@ -54,6 +55,7 @@ __all__ = [
     "ScriptedAgent",
     "ToolCall",
     "Turn",
+    "Uv",
     "answer",
     "call",
     "calls",

@@ -1,12 +1,11 @@
 """A rollout, wherever it runs: what the Run and the Job say for each way it can end.
 
-Each outcome runs under every placement, against a fixture environment served
-from source: in this process, in a child process, in a container started through
-the fake docker, attached by address, over the HUD runtime's tunnel, and in
-Modal and Daytona sandboxes through their fake SDKs (all but the first two served
-from a child process, as in production). The same row must
-end the same way in all of them. Rollout contracts that do not depend on
-placement follow the matrix.
+Each outcome runs under every placement, against a fixture environment: in this
+process, in a child process, attached by address, over the HUD runtime's tunnel
+(the fake platform relaying to a child process), and, in the lanes that have a
+Docker daemon or a Modal account, in a real container and a real Modal sandbox
+built from this checkout. The same row must end the same way in all of them.
+Rollout contracts that do not depend on placement follow the matrix.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from dirty_equals import IsStr
 from hud.agents.base import Agent
 from hud.capabilities import Connection
 from hud.eval import (
-    DaytonaRuntime,
     DockerRuntime,
     HUDRuntime,
     LocalRuntime,
@@ -37,7 +35,6 @@ from hud.telemetry.context import get_current_trace_id
 from tests.eval.envs import SUMS_SOURCE, lab, solve
 from tests.fixtures.envs import source
 from tests.harness import ScriptedAgent, eventually, steps
-from tests.harness.cloud import FakeDaytona, FakeModal
 from tests.harness.runtime import host_on_runtime
 
 if TYPE_CHECKING:
@@ -46,18 +43,18 @@ if TYPE_CHECKING:
 
     from hud.environment import Environment
     from hud.eval import Provider
-    from tests.harness import FakeDocker, FakeServices, HudEnv
+    from tests.harness import FakeServices, HudEnv
 
 
 @dataclass(frozen=True)
 class World:
-    """What a placement may stand up around the fixture: fake docker and fake HUD services."""
+    """What a placement may stand up around the fixture: the fake HUD services, and the
+    images and accounts it asks pytest for."""
 
     path: Path
-    fake_docker: FakeDocker
     services: FakeServices
     hud_env: HudEnv
-    monkeypatch: pytest.MonkeyPatch
+    fixtures: pytest.FixtureRequest
 
 
 @asynccontextmanager
@@ -79,10 +76,8 @@ async def child_process(world: World) -> AsyncIterator[Provider]:
 
 @asynccontextmanager
 async def container(world: World) -> AsyncIterator[Provider]:
-    async with served_apart(world.path) as address:
-        world.fake_docker.on(r"^run .* fixture:1$", stdout="fixture-1\n")
-        world.fake_docker.on(r"^port fixture-1 8765$", stdout=f"{address}\n")
-        yield DockerRuntime("fixture:1")
+    image = world.fixtures.getfixturevalue("fixture_image")
+    yield DockerRuntime(image(world.path.stem))
 
 
 @asynccontextmanager
@@ -101,17 +96,9 @@ async def hud_tunnel(world: World) -> AsyncIterator[Provider]:
 
 @asynccontextmanager
 async def modal(world: World) -> AsyncIterator[Provider]:
-    async with served_apart(world.path) as address:
-        host, port = address.rsplit(":", 1)
-        FakeModal({"hud-fixture": (host, int(port))}).install(world.monkeypatch)
-        yield ModalRuntime("hud-fixture")
-
-
-@asynccontextmanager
-async def daytona(world: World) -> AsyncIterator[Provider]:
-    async with served_apart(world.path) as address:
-        FakeDaytona(int(address.rsplit(":", 1)[1])).install(world.monkeypatch)
-        yield DaytonaRuntime("hud-fixture")
+    world.fixtures.getfixturevalue("modal_account")
+    image = world.fixtures.getfixturevalue("modal_image")
+    yield ModalRuntime(image=image(world.path.stem), workdir="/hud")
 
 
 PLACEMENTS: dict[str, Callable[[World], AbstractAsyncContextManager[Provider]]] = {
@@ -121,7 +108,11 @@ PLACEMENTS: dict[str, Callable[[World], AbstractAsyncContextManager[Provider]]] 
     "attached": attached,
     "hud-tunnel": hud_tunnel,
     "modal": modal,
-    "daytona": daytona,
+}
+# A placement on a real daemon or account runs in the lane that has one.
+NEEDS = {
+    "container": [pytest.mark.e2e, pytest.mark.docker],
+    "modal": [pytest.mark.e2e, pytest.mark.modal],
 }
 
 
@@ -231,15 +222,23 @@ OUTCOMES = {
 }
 
 
-@pytest.mark.parametrize("placement", PLACEMENTS)
-@pytest.mark.parametrize("outcome", OUTCOMES.values(), ids=OUTCOMES.keys())
+# A Modal sandbox takes longer to provision than the rollout deadlines here allow, so
+# those rows, whose phases the other placements already prove, are not paired with it.
+CELLS = [
+    pytest.param(outcome, placement, id=f"{name}-{placement}", marks=NEEDS.get(placement, ()))
+    for name, outcome in OUTCOMES.items()
+    for placement in PLACEMENTS
+    if not (placement == "modal" and outcome.rollout_timeout is not None)
+]
+
+
+@pytest.mark.parametrize(("outcome", "placement"), CELLS)
 async def test_a_rollout_ends_the_same_way_wherever_it_runs(
     outcome: Outcome,
     placement: str,
-    fake_docker: FakeDocker,
     services: FakeServices,
     hud_env: HudEnv,
-    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     row = Task(
         env=outcome.fixture,
@@ -248,7 +247,7 @@ async def test_a_rollout_ends_the_same_way_wherever_it_runs(
         agent_config=outcome.agent_config,
     )
 
-    world = World(source(outcome.fixture), fake_docker, services, hud_env, monkeypatch)
+    world = World(source(outcome.fixture), services, hud_env, request)
     async with PLACEMENTS[placement](world) as runtime:
         job = await row.run(
             outcome.agent(), runtime=runtime, rollout_timeout=outcome.rollout_timeout

@@ -32,7 +32,7 @@ MODELS = {
 FIXTURES: dict[str, tuple[str, str, dict[str, Any]]] = {
     "echo": ("echo", "echo", {"word": "tangerine"}),
     "tools": ("tools", "collect_code", {}),
-    "mcp": ("mcp", "look_up_both", {}),
+    "servers": ("servers", "look_up_both", {}),
     "workspace": ("workspace", "fix_the_file", {}),
     "picture": ("picture", "name_the_colour", {"colour": "red"}),
     "screen": ("screen", "click_target", {}),

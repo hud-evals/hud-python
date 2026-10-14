@@ -29,7 +29,7 @@ def server(name: str) -> FastMCP:
     return mcp
 
 
-env = Environment("mcp")
+env = Environment("servers")
 stack = AsyncExitStack()
 
 
