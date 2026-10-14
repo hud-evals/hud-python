@@ -443,8 +443,17 @@ class HudClient:
         if self._aborted or self._endpoint is None or self.manifest is None:
             raise ConnectionError("control link is down and cannot be redialed")
         host, port = self._endpoint
-        async with asyncio.timeout(settings.control_heartbeat_timeout):
-            self._reader, self._writer = await asyncio.open_connection(host, port)
+        deadline = asyncio.timeout(settings.control_heartbeat_timeout)
+        try:
+            async with deadline:
+                self._reader, self._writer = await asyncio.open_connection(host, port)
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            raise ControlTimeoutError(
+                f"env did not accept a control connection within "
+                f"{settings.control_heartbeat_timeout:g}s"
+            ) from None
         self._control_down = False
         await self._exchange(
             "hello",

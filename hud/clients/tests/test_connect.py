@@ -501,6 +501,46 @@ async def test_heartbeat_fails_with_the_last_error_once_the_outage_budget_is_spe
         await server.wait_closed()
 
 
+async def test_outage_that_blackholes_new_connections_fails_with_a_typed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+        finally:
+            writer.close()
+
+    real_open_connection = asyncio.open_connection
+    dials = 0
+
+    async def open_connection_then_hang(
+        host: str, port: int
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        nonlocal dials
+        dials += 1
+        if dials == 1:
+            return await real_open_connection(host, port)
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(client_module.asyncio, "open_connection", open_connection_then_hang)
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_heartbeat_timeout", 0.05)
+    monkeypatch.setattr(settings, "control_outage_budget", 0.2)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        with pytest.raises(ControlTimeoutError, match="did not accept a control connection"):
+            async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
+                await asyncio.Event().wait()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
 async def test_connect_uses_runtime_ready_timeout_param(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
