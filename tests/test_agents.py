@@ -1,9 +1,9 @@
 """Every provider agent against every fixture: a reward of 1 proves its whole path works.
 
 A cell earns its reward only when the agent turned its model's replies into the
-right actions on the environment's capabilities (an answer, MCP calls that keep
-state, a click on the screen). An agent without a capability earns nothing from
-it and still finishes cleanly.
+right actions on the environment's capabilities: an answer, MCP calls that keep
+state, a click on the screen, naming what a tool's image shows. An agent without
+a capability earns nothing from it and still finishes cleanly.
 
 The matrix runs twice. On every PR a scripted model answers from what the agent
 sent: the prompt and the tools it was offered. In the live lane each provider's
@@ -13,7 +13,8 @@ judges the requests the agent builds.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -50,13 +51,32 @@ CLICKS: dict[str, Turn] = {
     "gemini": call("click_at", x=500, y=500),
 }
 
-FIXTURES: dict[str, tuple[str, str, Callable[[str], Callable[[ModelRequest], Turn]]]] = {
-    "echo": ("echo", "echo", lambda provider: repeat_word),
-    "tools": ("tools", "collect_code", lambda provider: collect_digits()),
-    "screen": (
+
+def look_then_name(colour: str) -> Callable[[ModelRequest], Turn]:
+    """Call ``look``, then name ``colour``: a scripted model cannot see the image, so this
+    cell checks only that the image result is handed back without failing the run."""
+    return lambda request: say(colour) if request.tool_results else call("look")
+
+
+@dataclass(frozen=True)
+class Fixture:
+    module: str
+    template: str
+    args: dict[str, Any]
+    policy: Callable[[str], Callable[[ModelRequest], Turn]]
+
+
+FIXTURES = {
+    "echo": Fixture("echo", "echo", {"word": "tangerine"}, lambda provider: repeat_word),
+    "tools": Fixture("tools", "collect_code", {}, lambda provider: collect_digits()),
+    "screen": Fixture(
         "screen",
         "click_target",
+        {},
         lambda provider: click_once(CLICKS[provider]) if provider in CLICKS else repeat_word,
+    ),
+    "picture": Fixture(
+        "picture", "name_the_colour", {"colour": "red"}, lambda provider: look_then_name("red")
     ),
 }
 
@@ -72,12 +92,11 @@ async def test_each_provider_completes_each_fixture_it_can(
     provider: str, fixture: str, models: Models, hud_env: HudEnv
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
-    module, template, policy = FIXTURES[fixture]
-    models.respond(policy(provider))
-    args = {"word": "tangerine"} if module == "echo" else {}
+    cell = FIXTURES[fixture]
+    models.respond(cell.policy(provider))
 
-    job = await Task(env=module, id=template, args=args).run(
-        AGENTS[provider](), runtime=LocalRuntime(source(module))
+    job = await Task(env=cell.module, id=cell.template, args=cell.args).run(
+        AGENTS[provider](), runtime=LocalRuntime(source(cell.module))
     )
 
     (run,) = job.runs
@@ -104,11 +123,10 @@ LIVE_MODELS = {
 async def test_each_provider_completes_each_fixture_with_its_real_model(
     provider: str, fixture: str, live: HudEnv
 ) -> None:
-    module, template, _ = FIXTURES[fixture]
-    args = {"word": "tangerine"} if module == "echo" else {}
+    cell = FIXTURES[fixture]
 
-    job = await Task(env=module, id=template, args=args).run(
-        create_agent(LIVE_MODELS[provider]), runtime=LocalRuntime(source(module))
+    job = await Task(env=cell.module, id=cell.template, args=cell.args).run(
+        create_agent(LIVE_MODELS[provider]), runtime=LocalRuntime(source(cell.module))
     )
 
     (run,) = job.runs

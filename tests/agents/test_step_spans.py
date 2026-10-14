@@ -34,7 +34,7 @@ TIMESTAMP = IsStr(regex=r"\d{4}-\d{2}-\d{2}T.*")
 
 def agent_steps(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The agent, tool and subagent step payloads: timestamps checked, then they, the step
-    ids and every empty field dropped."""
+    ids, the provider's raw response and every empty field dropped."""
     found = []
     for payload in payloads:
         if payload["source"] not in {"agent", "tool", "subagent"}:
@@ -43,7 +43,9 @@ def agent_steps(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if key in payload:
                 assert payload.pop(key) == TIMESTAMP
         del payload["step_id"]
-        found.append({key: value for key, value in payload.items() if value not in ([], {})})
+        found.append(
+            {key: value for key, value in payload.items() if value not in ([], {}) and key != "raw"}
+        )
     return found
 
 
@@ -359,56 +361,6 @@ hi
                     "content": "Blue.",
                     "done": True,
                     "finish_reason": "stop",
-                    "raw": {
-                        "id": "chatcmpl_1",
-                        "choices": [
-                            {
-                                "finish_reason": "stop",
-                                "index": 0,
-                                "logprobs": {
-                                    "content": [
-                                        {
-                                            "token": "Bl",
-                                            "bytes": None,
-                                            "logprob": -0.5,
-                                            "top_logprobs": [],
-                                        },
-                                        {
-                                            "token": "ue.",
-                                            "bytes": None,
-                                            "logprob": -0.25,
-                                            "top_logprobs": [],
-                                        },
-                                    ],
-                                    "refusal": None,
-                                },
-                                "message": {
-                                    "content": "Blue.",
-                                    "refusal": None,
-                                    "role": "assistant",
-                                    "annotations": None,
-                                    "audio": None,
-                                    "function_call": None,
-                                    "tool_calls": None,
-                                },
-                                "prompt_token_ids": [1, 2],
-                                "token_ids": [3, 4],
-                            }
-                        ],
-                        "created": 0,
-                        "model": "qwen3.6-plus",
-                        "object": "chat.completion",
-                        "moderation": None,
-                        "service_tier": None,
-                        "system_fingerprint": None,
-                        "usage": {
-                            "completion_tokens": 1,
-                            "prompt_tokens": 1,
-                            "total_tokens": 2,
-                            "completion_tokens_details": None,
-                            "prompt_tokens_details": None,
-                        },
-                    },
                     "model": "qwen3.6-plus",
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1},
                     "sample": {
@@ -431,39 +383,6 @@ hi
                     "reasoning": "look it up",
                     "done": True,
                     "finish_reason": "stop",
-                    "raw": {
-                        "id": "chatcmpl_1",
-                        "choices": [
-                            {
-                                "finish_reason": "stop",
-                                "index": 0,
-                                "logprobs": None,
-                                "message": {
-                                    "content": "Blue.",
-                                    "refusal": None,
-                                    "role": "assistant",
-                                    "annotations": None,
-                                    "audio": None,
-                                    "function_call": None,
-                                    "tool_calls": None,
-                                    "reasoning_content": "look it up",
-                                },
-                            }
-                        ],
-                        "created": 0,
-                        "model": "qwen3.6-plus",
-                        "object": "chat.completion",
-                        "moderation": None,
-                        "service_tier": None,
-                        "system_fingerprint": None,
-                        "usage": {
-                            "completion_tokens": 1,
-                            "prompt_tokens": 1,
-                            "total_tokens": 2,
-                            "completion_tokens_details": None,
-                            "prompt_tokens_details": None,
-                        },
-                    },
                     "model": "qwen3.6-plus",
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1},
                 }

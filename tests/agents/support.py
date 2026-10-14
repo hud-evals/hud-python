@@ -1,4 +1,4 @@
-"""Fixture environments and request views shared by the agent scenarios.
+"""The environment, agents and MCP servers the agent scenarios share.
 
 Every scenario runs a real rollout: a :class:`~hud.Environment` serving a real
 workspace over SSH (and a fake screen or MCP servers when the row needs them),
@@ -9,10 +9,7 @@ scripted providers behind the fake gateway.
 from __future__ import annotations
 
 import asyncio
-import base64
 import io
-import json
-import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -33,10 +30,8 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.eval import Run
-    from tests.harness import ModelRequest
 
 PROMPT = "Do the task."
-DATA_URL = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.*)$", re.DOTALL)
 
 
 def claude(*, model: str = "claude-sonnet-4-6", **config: Any) -> Callable[[], Agent]:
@@ -136,99 +131,3 @@ def image(
     options: dict[str, Any] = {} if exif is None else {"exif": exif}
     Image.new(mode, size, color).save(buffer, format=format, **options)
     return buffer.getvalue()
-
-
-def describe_image(mime: str, data: str) -> str:
-    """``<mime WxH>`` for base64 image data, so a snapshot pins type and size, not bytes."""
-    try:
-        raw = base64.b64decode(data, altchars=b"-_" if "-" in data or "_" in data else None)
-        with Image.open(io.BytesIO(raw)) as decoded:
-            return f"<{mime} {decoded.width}x{decoded.height}>"
-    except (OSError, ValueError):
-        return f"<{mime} undecodable>"
-
-
-def wire(value: Any, *paths: Path, descriptions: bool = False) -> Any:
-    """A request body as a snapshot compares it.
-
-    Base64 images become ``<mime WxH>``, each of ``paths`` becomes ``<path0>``,
-    ``<path1>``, ... wherever it appears in a string, and tool and schema
-    ``description`` prose is dropped unless ``descriptions`` is set.
-    """
-    if isinstance(value, dict):
-        mime = value.get("media_type") or value.get("mimeType") or value.get("mime_type")
-        return {
-            key: (
-                describe_image(mime, item)
-                if key == "data" and isinstance(mime, str) and mime.startswith("image/")
-                else wire(item, *paths, descriptions=descriptions)
-            )
-            for key, item in value.items()
-            if descriptions or key != "description" or not isinstance(item, str)
-        }
-    if isinstance(value, list):
-        return [wire(item, *paths, descriptions=descriptions) for item in value]
-    if isinstance(value, str):
-        if (match := DATA_URL.match(value)) and match["mime"].startswith("image/"):
-            return describe_image(match["mime"], match["data"])
-        for index, path in enumerate(paths):
-            value = value.replace(str(path), f"<path{index}>")
-        return value
-    return value
-
-
-def tool_results(requests: list[ModelRequest]) -> list[Any]:
-    """The tool result entries a run handed back to its model, oldest first.
-
-    Responses requests carry only the items new since the previous response,
-    so their inputs are gathered from every request after the first; the other
-    protocols resend the whole conversation, so the last request holds them all.
-    ``cache_control`` markers, which move with the conversation, are dropped.
-    """
-    last = requests[-1]
-    if last.protocol == "responses":
-        return [item for request in requests[1:] for item in request.body["input"]]
-    if last.protocol == "gemini":
-        return [
-            part
-            for content in last.body["contents"]
-            if content["role"] == "user"
-            for part in content["parts"]
-            if "functionResponse" in part
-        ]
-    if last.protocol == "anthropic":
-        return [
-            {key: value for key, value in block.items() if key != "cache_control"}
-            for message in last.body["messages"][1:]
-            if message["role"] == "user"
-            for block in message["content"]
-        ]
-    return [message for message in last.body["messages"] if message["role"] == "tool"]
-
-
-def result_line(entry: dict[str, Any], *paths: Path) -> str:
-    """One tool result entry from :func:`tool_results` as the model sees it, in a line.
-
-    Images read ``<mime WxH>``; an Anthropic error result starts ``error:``.
-    """
-    entry = wire(entry, *paths)
-    if entry.get("role") == "tool":
-        return entry["content"]
-    if entry.get("type") == "tool_result":
-        parts = [block.get("text") or block["source"]["data"] for block in entry["content"]]
-        return ("error: " if entry["is_error"] else "") + " ".join(parts)
-    if entry.get("type") == "computer_call_output":
-        acknowledged = [check["id"] for check in entry.get("acknowledged_safety_checks", [])]
-        return " ".join([entry["output"]["image_url"], *(f"ack {id}" for id in acknowledged)])
-    if entry.get("type") == "shell_call_output":
-        limit = entry.get("max_output_length")
-        return json.dumps(entry["output"]) + ("" if limit is None else f" limit={limit}")
-    if "functionResponse" in entry:
-        response = entry["functionResponse"]
-        images = [part["inline_data"]["data"] for part in response.get("parts", [])]
-        return " ".join([response["name"], json.dumps(response["response"]), *images])
-    return "user: " + " ".join(block["text"] for block in entry["content"])
-
-
-def json_lines(text: str) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in text.splitlines() if line.strip()]

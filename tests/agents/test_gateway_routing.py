@@ -15,7 +15,6 @@ import textwrap
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from inline_snapshot import snapshot
 
 from hud import Environment
 from hud.agents import (
@@ -79,102 +78,39 @@ def serve_catalog(services: FakeServices) -> None:
 ROUTES = {
     "create-agent-shortcut": (
         lambda _url: create_agent("openai"),
-        snapshot(
-            {
-                "protocol": "responses",
-                "model": "gpt-5.6",
-                "credential": "Bearer hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("responses", "gpt-5.6", "Bearer hud-key"),
     ),
     "create-agent-ignores-a-provider-key": (
         lambda _url: create_agent("openai_compatible"),
-        snapshot(
-            {
-                "protocol": "chat",
-                "model": "gpt-5.4-mini",
-                "credential": "Bearer hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("chat", "gpt-5.4-mini", "Bearer hud-key"),
     ),
     "create-agent-claude": (
         lambda _url: create_agent("claude"),
-        snapshot(
-            {
-                "protocol": "anthropic",
-                "model": "claude-sonnet-4-6",
-                "credential": "hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("anthropic", "claude-sonnet-4-6", "hud-key"),
     ),
     "create-agent-gemini": (
         lambda _url: create_agent("gemini"),
-        snapshot(
-            {
-                "protocol": "gemini",
-                "model": "gemini-3.1-pro-preview",
-                "credential": "hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("gemini", "gemini-3.1-pro-preview", "hud-key"),
     ),
     "create-agent-catalog-id": (
         lambda _url: create_agent("ft:custom-123"),
-        snapshot(
-            {
-                "protocol": "chat",
-                "model": "gpt-5.5",
-                "credential": "Bearer hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("chat", "gpt-5.5", "Bearer hud-key"),
     ),
     "create-agent-catalog-slug-without-provider": (
         lambda _url: create_agent("deepseek-v4-flash"),
-        snapshot(
-            {
-                "protocol": "chat",
-                "model": "deepseek/deepseek-v4-flash",
-                "credential": "Bearer hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("chat", "deepseek/deepseek-v4-flash", "Bearer hud-key"),
     ),
     "create-agent-catalog-name-any-case": (
         lambda _url: create_agent("minimax-m3"),
-        snapshot(
-            {
-                "protocol": "chat",
-                "model": "MiniMax-M3",
-                "credential": "Bearer hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("chat", "MiniMax-M3", "Bearer hud-key"),
     ),
     "create-agent-catalog-display-name": (
         lambda _url: create_agent("Claude Sonnet 4.6"),
-        snapshot(
-            {
-                "protocol": "anthropic",
-                "model": "claude-sonnet-4-6",
-                "credential": "hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("anthropic", "claude-sonnet-4-6", "hud-key"),
     ),
     "reloaded-gateway-agent": (
         lambda _url: OpenAIAgent.load(create_agent("openai").dump()),
-        snapshot(
-            {
-                "protocol": "responses",
-                "model": "gpt-5.6",
-                "credential": "Bearer hud-key",
-                "trace_id": True,
-            }
-        ),
+        ("responses", "gpt-5.6", "Bearer hud-key"),
     ),
 }
 
@@ -182,7 +118,7 @@ ROUTES = {
 @pytest.mark.parametrize(("build", "expected"), ROUTES.values(), ids=ROUTES.keys())
 async def test_an_agent_reaches_its_model_with_the_credential_its_routing_chose(
     build: Callable[[str], Agent],
-    expected: Any,
+    expected: tuple[str, str, str],
     services: FakeServices,
     models: Models,
     hud_env: HudEnv,
@@ -201,15 +137,13 @@ async def test_an_agent_reaches_its_model_with_the_credential_its_routing_chose(
     run = await run_task(workspace_env(tmp_path / "ws"), build(models.url))
 
     (request,) = models.requests()
-    received = {
-        "protocol": request.protocol,
-        "model": request.model,
-        "credential": request.headers.get("authorization")
+    credential = (
+        request.headers.get("authorization")
         or request.headers.get("x-api-key")
-        or request.headers.get("x-goog-api-key"),
-        "trace_id": request.headers.get("trace-id") == run.trace_id,
-    }
-    assert received == expected
+        or request.headers.get("x-goog-api-key")
+    )
+    assert (request.protocol, request.model, credential) == expected
+    assert request.headers["trace-id"] == run.trace_id
 
 
 async def test_explicit_chat_credentials_reach_the_given_endpoint(
@@ -514,4 +448,47 @@ async def test_a_nested_rollout_names_its_parent_trace(models: Models, hud_env: 
     assert (headers["trace-id"], headers["x-hud-parent-trace-id"]) == (
         str(inner.trace_id),
         str(outer.trace_id),
+    )
+
+
+async def test_a_bedrock_inference_profile_is_invoked_on_bedrock_without_streaming(
+    services: FakeServices, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    pytest.importorskip("botocore", reason="needs the bedrock extra")
+    profile = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/claude"
+    hud_env.set(
+        AWS_ACCESS_KEY_ID="AKIA",
+        AWS_SECRET_ACCESS_KEY="secret",
+        AWS_REGION="us-east-1",
+        ANTHROPIC_BEDROCK_BASE_URL=services.url("gateway"),
+    )
+    services.route(
+        "gateway",
+        "POST",
+        "/model/{model:path}",
+        json={
+            "id": "msg_bedrock",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude",
+            "content": [{"type": "text", "text": "from bedrock"}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+    )
+
+    run = await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=profile)))
+
+    (request,) = services.requests("gateway", "POST")
+    assert run.trace.content == "from bedrock"
+    assert (request.path, request.headers["authorization"].split(" ")[0]) == (
+        f"/model/{profile}/invoke",
+        "AWS4-HMAC-SHA256",
+    )
+    body = request.json
+    assert (body["anthropic_version"], "model" in body, "stream" in body) == (
+        "bedrock-2023-05-31",
+        False,
+        False,
     )
