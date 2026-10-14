@@ -438,6 +438,44 @@ async def test_heartbeat_redials_and_resumes_the_session_after_the_control_link_
     assert "tasks.grade" in [request["method"] for request in connections[1]]
 
 
+async def test_heartbeat_timeout_on_a_blackholed_link_redials_instead_of_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connections: list[list[dict[str, object]]] = []
+    resumed = asyncio.Event()
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        requests: list[dict[str, object]] = []
+        connections.append(requests)
+        try:
+            while (request := await read_frame(reader)) is not None:
+                requests.append(request)
+                if len(connections) == 1 and len(requests) == 2:
+                    await reader.read()  # the link stays open but never answers the heartbeat
+                    return
+                if len(connections) == 2:
+                    resumed.set()
+                result = {"score": 1.0} if request["method"] == "tasks.grade" else HELLO_RESULT
+                await send_frame(writer, {"jsonrpc": "2.0", "id": request["id"], "result": result})
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_heartbeat_timeout", 0.05)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            await asyncio.wait_for(resumed.wait(), 5.0)
+            assert await client.grade({"answer": "done"}) == {"score": 1.0}
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert connections[1][0]["params"] == {"session_id": "s-1", "takeover": True}
+
+
 async def test_heartbeat_fails_with_the_last_error_once_the_outage_budget_is_spent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -181,11 +181,11 @@ class Settings(BaseSettings):
     )
 
     control_heartbeat_timeout: float = Field(
-        default=300.0,
+        default=60.0,
         gt=0,
         description="Seconds the env may take to answer a control-channel heartbeat before "
-        "the rollout fails with ControlTimeoutError. A liveness bound for a hung env, "
-        "not a latency target.",
+        "the client treats the link as down and redials. A liveness bound for a hung env "
+        "or a blackholed connection, not a latency target.",
         validation_alias="HUD_CONTROL_HEARTBEAT_TIMEOUT",
     )
 

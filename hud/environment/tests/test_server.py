@@ -198,6 +198,30 @@ async def test_task_frame_limit_and_retry(frame_size: int) -> None:
         assert (await client.grade({"answer": "done"}))["detail"] == data
 
 
+@pytest.mark.parametrize("hello_first", [False, True])
+async def test_non_json_frame_gets_parse_error_and_server_keeps_serving(hello_first: bool) -> None:
+    env = Environment("wire-garbage")
+    async with LocalRuntime(env)(Task(env=env.name, id="unused")) as runtime:
+        address = urlsplit(runtime.url)
+        reader, writer = await asyncio.open_connection(address.hostname, address.port)
+        try:
+            if hello_first:
+                await send_frame(writer, {"jsonrpc": "2.0", "id": 1, "method": "hello"})
+                assert await read_frame(reader) is not None
+            writer.write(b"GET / HTTP/1.1\r\n")
+            response = await asyncio.wait_for(read_frame(reader), timeout=5.0)
+            assert response is not None and response["id"] is None
+            assert response["error"]["code"] == -32700
+            assert "not valid JSON" in response["error"]["message"]
+            assert await asyncio.wait_for(read_frame(reader), timeout=5.0) is None
+        finally:
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+        async with connect(runtime) as client:
+            assert await client.list_tasks() == []
+
+
 @pytest.mark.parametrize("result_kind", ["prompt", "grade", "error"])
 async def test_oversized_response_releases_task_and_reports_error(result_kind: str) -> None:
     env = Environment("large-response")

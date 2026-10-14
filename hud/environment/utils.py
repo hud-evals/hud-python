@@ -18,6 +18,10 @@ class FrameTooLargeError(ValueError):
     """An encoded JSON-RPC frame exceeds its channel's byte limit."""
 
 
+class MalformedFrameError(ValueError):
+    """A received frame is not valid JSON."""
+
+
 # ─── JSON-RPC 2.0 framing ───
 
 
@@ -48,7 +52,7 @@ async def send_frame(
 async def read_frame(
     reader: asyncio.StreamReader, *, max_bytes: int | None = None
 ) -> dict[str, Any] | None:
-    """Read one frame; None on EOF. Oversized frames require closing the connection."""
+    """Read one frame; None on EOF. Oversized or malformed frames require closing the connection."""
     if max_bytes is None:
         line = await reader.readline()
     else:
@@ -75,7 +79,10 @@ async def read_frame(
             break
     if not line:
         return None
-    return json.loads(line)
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise MalformedFrameError(f"Control-channel frame is not valid JSON: {exc}") from exc
 
 
 def reply(msg_id: int | str, result: dict[str, Any]) -> dict[str, Any]:

@@ -34,6 +34,7 @@ from .env import Answer, current_session_id
 from .utils import (
     CONTROL_FRAME_LIMIT_BYTES,
     FrameTooLargeError,
+    MalformedFrameError,
     encode_frame,
     error,
     read_frame,
@@ -555,6 +556,8 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 await channel.session(first, reader, writer)
         except FrameTooLargeError as exc:
             await _send_control_error(writer, None, -32000, str(exc))
+        except MalformedFrameError as exc:
+            await _send_control_error(writer, None, -32700, str(exc))
         finally:
             with contextlib.suppress(Exception):
                 writer.close()
