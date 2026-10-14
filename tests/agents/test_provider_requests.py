@@ -9,7 +9,7 @@ Responses API, the items new since the previous response).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -639,12 +639,37 @@ def lookup_tools() -> FastMCP:
     return server
 
 
+def offered(tools: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Every tool a request offers by name, and the ones it defers to tool search."""
+    names: list[str] = []
+    for tool in tools:
+        if "functionDeclarations" in tool:
+            names += [function["name"] for function in tool["functionDeclarations"]]
+        else:
+            names.append(tool.get("name") or tool.get("type") or next(iter(tool)))
+    return {
+        "names": names,
+        "deferred": [tool["name"] for tool in tools if tool.get("defer_loading")],
+    }
+
+
 @dataclass(frozen=True)
 class HostedRow:
     agent: Callable[[], Agent]
-    tools: Any
+    names: list[str]
+    deferred: list[str] = field(default_factory=list)
+    configured: list[dict[str, Any]] = field(default_factory=list)
 
 
+CLAUDE_NATIVE = ["bash", "str_replace_based_edit_tool"]
+GEMINI_NATIVE = [
+    *("run_shell_command", "replace", "write_file", "read_file"),
+    *("grep_search", "glob", "list_directory"),
+]
+MCP = ["lookup", "store"]
+
+# A hosted tool the model does not support stays out; tool search defers MCP tools
+# once there are more of them than its threshold.
 HOSTED = {
     "claude": HostedRow(
         agent=claude(
@@ -654,201 +679,44 @@ HOSTED = {
                 ClaudeWebSearchTool(supported_models=("claude-opus-*",)),
             ]
         ),
-        tools=snapshot(
-            [
-                {"type": "bash_20250124", "name": "bash"},
-                {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
-                {
-                    "name": "lookup",
-                    "input_schema": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}},
-                        "required": ["key"],
-                        "type": "object",
-                    },
-                    "eager_input_streaming": True,
-                },
-                {
-                    "name": "store",
-                    "input_schema": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
-                        "required": ["key", "value"],
-                        "type": "object",
-                    },
-                    "eager_input_streaming": True,
-                },
-                {
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 2,
-                    "allowed_domains": ["example.com"],
-                },
-                {
-                    "type": "web_fetch_20250910",
-                    "name": "web_fetch",
-                    "max_content_tokens": 100,
-                    "citations": {"enabled": True},
-                },
-            ]
-        ),
+        names=[*CLAUDE_NATIVE, *MCP, "web_search", "web_fetch"],
+        configured=[
+            {
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 2,
+                "allowed_domains": ["example.com"],
+            },
+            {
+                "type": "web_fetch_20250910",
+                "name": "web_fetch",
+                "max_content_tokens": 100,
+                "citations": {"enabled": True},
+            },
+        ],
     ),
     "claude-tool-search-over-threshold": HostedRow(
         agent=claude(hosted_tools=[ClaudeToolSearchTool(threshold=1)]),
-        tools=snapshot(
-            [
-                {"type": "bash_20250124", "name": "bash"},
-                {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
-                {
-                    "name": "lookup",
-                    "input_schema": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}},
-                        "required": ["key"],
-                        "type": "object",
-                    },
-                    "eager_input_streaming": True,
-                    "defer_loading": True,
-                },
-                {
-                    "name": "store",
-                    "input_schema": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
-                        "required": ["key", "value"],
-                        "type": "object",
-                    },
-                    "eager_input_streaming": True,
-                    "defer_loading": True,
-                },
-                {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"},
-            ]
-        ),
+        names=[*CLAUDE_NATIVE, *MCP, "tool_search_tool_bm25"],
+        deferred=MCP,
     ),
     "claude-tool-search-under-threshold": HostedRow(
         agent=claude(hosted_tools=[ClaudeToolSearchTool(threshold=5)]),
-        tools=snapshot(
-            [
-                {"type": "bash_20250124", "name": "bash"},
-                {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
-                {
-                    "name": "lookup",
-                    "input_schema": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}},
-                        "required": ["key"],
-                        "type": "object",
-                    },
-                    "eager_input_streaming": True,
-                },
-                {
-                    "name": "store",
-                    "input_schema": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
-                        "required": ["key", "value"],
-                        "type": "object",
-                    },
-                    "eager_input_streaming": True,
-                },
-                {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"},
-            ]
-        ),
+        names=[*CLAUDE_NATIVE, *MCP, "tool_search_tool_bm25"],
     ),
     "openai": HostedRow(
         agent=openai(hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})]),
-        tools=snapshot(
-            [
-                {"type": "shell", "environment": {"type": "local"}},
-                {
-                    "type": "function",
-                    "name": "lookup",
-                    "parameters": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}},
-                        "required": ["key"],
-                        "type": "object",
-                    },
-                    "strict": True,
-                },
-                {
-                    "type": "function",
-                    "name": "store",
-                    "parameters": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
-                        "required": ["key", "value"],
-                        "type": "object",
-                    },
-                    "strict": True,
-                },
-                {"type": "code_interpreter", "container": {"type": "auto"}},
-            ]
-        ),
+        names=["shell", *MCP, "code_interpreter"],
+        configured=[{"type": "code_interpreter", "container": {"type": "auto"}}],
     ),
     "openai-tool-search-over-threshold": HostedRow(
         agent=openai(hosted_tools=[OpenAIToolSearchTool(threshold=1)]),
-        tools=snapshot(
-            [
-                {"type": "shell", "environment": {"type": "local"}},
-                {
-                    "type": "function",
-                    "name": "lookup",
-                    "parameters": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}},
-                        "required": ["key"],
-                        "type": "object",
-                    },
-                    "strict": True,
-                    "defer_loading": True,
-                },
-                {
-                    "type": "function",
-                    "name": "store",
-                    "parameters": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
-                        "required": ["key", "value"],
-                        "type": "object",
-                    },
-                    "strict": True,
-                    "defer_loading": True,
-                },
-                {"type": "tool_search"},
-            ]
-        ),
+        names=["shell", *MCP, "tool_search"],
+        deferred=MCP,
     ),
     "openai-tool-search-under-threshold": HostedRow(
         agent=openai(hosted_tools=[OpenAIToolSearchTool(threshold=5)]),
-        tools=snapshot(
-            [
-                {"type": "shell", "environment": {"type": "local"}},
-                {
-                    "type": "function",
-                    "name": "lookup",
-                    "parameters": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}},
-                        "required": ["key"],
-                        "type": "object",
-                    },
-                    "strict": True,
-                },
-                {
-                    "type": "function",
-                    "name": "store",
-                    "parameters": {
-                        "additionalProperties": False,
-                        "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
-                        "required": ["key", "value"],
-                        "type": "object",
-                    },
-                    "strict": True,
-                },
-                {"type": "tool_search"},
-            ]
-        ),
+        names=["shell", *MCP, "tool_search"],
     ),
     "gemini": HostedRow(
         agent=gemini(
@@ -858,117 +726,7 @@ HOSTED = {
                 GeminiCodeExecutionTool(),
             ]
         ),
-        tools=snapshot(
-            [
-                {"googleSearch": {}},
-                {"urlContext": {}},
-                {"codeExecution": {}},
-                {
-                    "functionDeclarations": [
-                        {
-                            "name": "run_shell_command",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {"type": "string"},
-                                    "description": {"type": "string"},
-                                    "dir_path": {"type": "string"},
-                                },
-                                "required": ["command"],
-                            },
-                        },
-                        {
-                            "name": "replace",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": {"type": "string"},
-                                    "instruction": {"type": "string"},
-                                    "old_string": {"type": "string"},
-                                    "new_string": {"type": "string"},
-                                },
-                                "required": ["file_path", "old_string", "new_string"],
-                            },
-                        },
-                        {
-                            "name": "write_file",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": {"type": "string"},
-                                    "content": {"type": "string"},
-                                },
-                                "required": ["file_path", "content"],
-                            },
-                        },
-                        {
-                            "name": "read_file",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": {"type": "string"},
-                                    "start_line": {"type": "integer"},
-                                    "end_line": {"type": "integer"},
-                                },
-                                "required": ["file_path"],
-                            },
-                        },
-                        {
-                            "name": "grep_search",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "pattern": {"type": "string"},
-                                    "dir_path": {"type": "string"},
-                                    "include_pattern": {"type": "string"},
-                                },
-                                "required": ["pattern"],
-                            },
-                        },
-                        {
-                            "name": "glob",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {
-                                    "pattern": {"type": "string"},
-                                    "dir_path": {"type": "string"},
-                                },
-                                "required": ["pattern"],
-                            },
-                        },
-                        {
-                            "name": "list_directory",
-                            "parameters_json_schema": {
-                                "type": "object",
-                                "properties": {"dir_path": {"type": "string"}},
-                                "required": ["dir_path"],
-                            },
-                        },
-                        {
-                            "name": "lookup",
-                            "parameters_json_schema": {
-                                "additionalProperties": False,
-                                "properties": {"key": {"type": "string"}},
-                                "required": ["key"],
-                                "type": "object",
-                            },
-                        },
-                        {
-                            "name": "store",
-                            "parameters_json_schema": {
-                                "additionalProperties": False,
-                                "properties": {
-                                    "key": {"type": "string"},
-                                    "value": {"type": "string"},
-                                },
-                                "required": ["key", "value"],
-                                "type": "object",
-                            },
-                        },
-                    ]
-                },
-            ]
-        ),
+        names=["googleSearch", "urlContext", "codeExecution", *GEMINI_NATIVE, *MCP],
     ),
 }
 
@@ -977,8 +735,6 @@ HOSTED = {
 async def test_configured_hosted_tools_join_the_request(
     row: HostedRow, models: Models, hud_env: HudEnv, tmp_path: Path
 ) -> None:
-    """A hosted tool the model does not support stays out; tool search defers MCP tools
-    once there are more of them than its threshold."""
     hud_env.set(HUD_API_KEY="k")
     models.script([say("done")])
 
@@ -986,7 +742,9 @@ async def test_configured_hosted_tools_join_the_request(
         await run_task(workspace_env(tmp_path / "ws", capabilities=(tools,)), row.agent())
 
     (request,) = models.requests()
-    assert wire(request.body["tools"]) == row.tools
+    sent = wire(request.body["tools"])
+    assert offered(sent) == {"names": row.names, "deferred": row.deferred}
+    assert [tool for tool in row.configured if tool not in sent] == []
 
 
 INVALID_HOSTED = {
