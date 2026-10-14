@@ -14,7 +14,7 @@ import io
 import json
 import struct
 import zlib
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import mcp.types as mcp_types
@@ -25,7 +25,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from hud import Environment
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIChatAgent
+from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 from hud.agents.gemini.tools import (
     GeminiCodeExecutionTool,
@@ -33,17 +33,9 @@ from hud.agents.gemini.tools import (
     GeminiUrlContextTool,
 )
 from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.capabilities import Capability
-from tests.agents.support import (
-    claude,
-    gemini,
-    image,
-    mcp_server,
-    openai,
-    run_task,
-    workspace_env,
-)
+from tests.agents.support import image, mcp_server, run_task, workspace_env
 from tests.harness import Turn, call, fake_screen, say
 
 if TYPE_CHECKING:
@@ -70,91 +62,115 @@ def lookup_tools() -> FastMCP:
     return server
 
 
-@dataclass(frozen=True)
-class Hosted:
-    agent: Callable[[], Agent]
-    configured: list[dict[str, Any]]
-    deferred: set[str] = field(default_factory=set)
-    withheld: str | None = None
+WEB_SEARCH = ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"])
+WEB_FETCH = ClaudeWebFetchTool(max_content_tokens=100, citations_enabled=True)
+GROUNDING = [GeminiGoogleSearchTool(), GeminiUrlContextTool(), GeminiCodeExecutionTool()]
 
 
-# A hosted tool the model does not support stays out; tool search defers MCP tools
-# once there are more of them than its threshold.
-HOSTED = {
-    "claude-web-tools": Hosted(
-        claude(
-            hosted_tools=[
-                ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"]),
-                ClaudeWebFetchTool(max_content_tokens=100, citations_enabled=True),
-                ClaudeWebSearchTool(supported_models=("claude-opus-*",)),
-            ]
+@pytest.mark.parametrize(
+    ("agent", "sent"),
+    [
+        pytest.param(
+            lambda: ClaudeAgent(
+                ClaudeConfig(model="claude-sonnet-4-6", hosted_tools=[WEB_SEARCH, WEB_FETCH])
+            ),
+            [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 2,
+                    "allowed_domains": ["example.com"],
+                },
+                {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                    "max_content_tokens": 100,
+                    "citations": {"enabled": True},
+                },
+            ],
+            id="claude-web-search-and-fetch",
         ),
-        [
-            {
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": 2,
-                "allowed_domains": ["example.com"],
-            },
-            {
-                "type": "web_fetch_20250910",
-                "name": "web_fetch",
-                "max_content_tokens": 100,
-                "citations": {"enabled": True},
-            },
-        ],
-        withheld="web_search",
-    ),
-    "claude-tool-search-over-threshold": Hosted(
-        claude(hosted_tools=[ClaudeToolSearchTool(threshold=1)]),
-        [{"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}],
-        deferred={"lookup", "store"},
-    ),
-    "claude-tool-search-under-threshold": Hosted(
-        claude(hosted_tools=[ClaudeToolSearchTool(threshold=5)]),
-        [{"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}],
-    ),
-    "openai-code-interpreter": Hosted(
-        openai(hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})]),
-        [{"type": "code_interpreter", "container": {"type": "auto"}}],
-    ),
-    "openai-tool-search-over-threshold": Hosted(
-        openai(hosted_tools=[OpenAIToolSearchTool(threshold=1)]),
-        [{"type": "tool_search"}],
-        deferred={"lookup", "store"},
-    ),
-    "openai-tool-search-under-threshold": Hosted(
-        openai(hosted_tools=[OpenAIToolSearchTool(threshold=5)]), [{"type": "tool_search"}]
-    ),
-    "gemini-grounding-tools": Hosted(
-        gemini(
-            hosted_tools=[
-                GeminiGoogleSearchTool(),
-                GeminiUrlContextTool(),
-                GeminiCodeExecutionTool(),
-            ]
+        pytest.param(
+            lambda: OpenAIAgent(
+                OpenAIConfig(
+                    model="gpt-5.6",
+                    hosted_tools=[OpenAICodeInterpreterTool(container={"type": "auto"})],
+                )
+            ),
+            [{"type": "code_interpreter", "container": {"type": "auto"}}],
+            id="openai-code-interpreter",
         ),
-        [{"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}}],
-    ),
-}
-
-
-@pytest.mark.parametrize("row", HOSTED.values(), ids=HOSTED.keys())
+        pytest.param(
+            lambda: GeminiAgent(
+                GeminiConfig(model="gemini-3.1-pro-preview", hosted_tools=GROUNDING)
+            ),
+            [{"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}}],
+            id="gemini-grounding",
+        ),
+    ],
+)
 async def test_configured_hosted_tools_join_the_request(
-    row: Hosted, models: Models, hud_env: HudEnv, tmp_path: Path
+    agent: Callable[[], Agent],
+    sent: list[dict[str, Any]],
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("done")])
+
+    await run_task(workspace_env(tmp_path / "ws"), agent())
+
+    (request,) = models.requests()
+    assert [tool for tool in sent if tool not in request.body["tools"]] == []
+
+
+async def test_a_hosted_tool_the_model_does_not_support_stays_out(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("done")])
+    opus_only = ClaudeWebSearchTool(supported_models=("claude-opus-*",))
+    agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", hosted_tools=[opus_only]))
+
+    await run_task(workspace_env(tmp_path / "ws"), agent)
+
+    (request,) = models.requests()
+    assert "web_search" not in request.tools
+
+
+@pytest.mark.parametrize(
+    "agent",
+    [
+        lambda threshold: ClaudeAgent(
+            ClaudeConfig(
+                model="claude-sonnet-4-6",
+                hosted_tools=[ClaudeToolSearchTool(threshold=threshold)],
+            )
+        ),
+        lambda threshold: OpenAIAgent(
+            OpenAIConfig(model="gpt-5.6", hosted_tools=[OpenAIToolSearchTool(threshold=threshold)])
+        ),
+    ],
+    ids=["claude", "openai"],
+)
+@pytest.mark.parametrize("threshold", [1, 5], ids=["over-threshold", "under-threshold"])
+async def test_tool_search_defers_mcp_tools_once_they_outnumber_its_threshold(
+    agent: Callable[[int], Agent],
+    threshold: int,
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
     models.script([say("done")])
 
     async with mcp_server(lookup_tools()) as tools:
-        await run_task(workspace_env(tmp_path / "ws", capabilities=(tools,)), row.agent())
+        await run_task(workspace_env(tmp_path / "ws", capabilities=(tools,)), agent(threshold))
 
     (request,) = models.requests()
-    sent = request.body["tools"]
-    assert [tool for tool in row.configured if tool not in sent] == []
-    assert {tool["name"] for tool in sent if tool.get("defer_loading")} == row.deferred
-    if row.withheld is not None:
-        assert [tool.get("name") for tool in sent].count(row.withheld) == 1
+    later = {tool["name"] for tool in request.body["tools"] if tool.get("defer_loading")}
+    assert later == ({"lookup", "store"} if threshold == 1 else set())
 
 
 INVALID_HOSTED = {
@@ -288,12 +304,12 @@ async def test_chat_completion_options_reach_every_request(
 
 CITATIONS = {
     "openai": (
-        openai(citations_enabled=True),
+        lambda: OpenAIAgent(OpenAIConfig(model="gpt-5.6", citations_enabled=True)),
         lambda body: body.get("include"),
         ["web_search_call.action.sources"],
     ),
     "gemini": (
-        gemini(citations_enabled=True),
+        lambda: GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", citations_enabled=True)),
         lambda body: [tool for tool in body["tools"] if "functionDeclarations" not in tool],
         [{"googleSearch": {}}],
     ),
@@ -396,7 +412,10 @@ async def test_an_image_claude_views_is_sent_within_its_limits(
         [call("str_replace_based_edit_tool", command="view", path=f"{root}/file"), say("done")]
     )
 
-    await run_task(workspace_env(root, files={"file": data}), claude()())
+    await run_task(
+        workspace_env(root, files={"file": data}),
+        ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")),
+    )
 
     (result,) = models.requests()[-1].body["messages"][-1]["content"]
     (block,) = result["content"]
@@ -438,9 +457,13 @@ async def test_claude_sends_only_its_newest_tool_result_images_when_asked(
             say("done"),
         ]
     )
-    agent = claude(
-        max_tool_result_images=limit, thinking={"type": "adaptive"} if limit is not None else None
-    )()
+    agent = ClaudeAgent(
+        ClaudeConfig(
+            model="claude-sonnet-4-6",
+            max_tool_result_images=limit,
+            thinking={"type": "adaptive"} if limit is not None else None,
+        )
+    )
 
     async with mcp_server(screenshots(), name="screenshots") as tools:
         env = Environment("shots", capabilities=[tools])
@@ -482,7 +505,7 @@ async def test_gemini_bounds_a_long_tool_output_to_its_head_and_tail(
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
     models.script([call("long_output"), say("done")])
-    agent = gemini(max_tool_result_chars=100)()
+    agent = GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", max_tool_result_chars=100))
 
     async with mcp_server(long_output()) as tools:
         await run_task(workspace_env(tmp_path / "ws", capabilities=(tools,)), agent)
@@ -537,7 +560,12 @@ async def test_gemini_withholds_the_predefined_functions_it_is_configured_to_exc
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
     models.script([say("done")])
-    agent = gemini(excluded_predefined_functions=["drag_and_drop", "search"])()
+    agent = GeminiAgent(
+        GeminiConfig(
+            model="gemini-3.1-pro-preview",
+            excluded_predefined_functions=["drag_and_drop", "search"],
+        )
+    )
 
     async with fake_screen() as screen:
         screen_capability = Capability.rfb(url=screen.url)
@@ -546,3 +574,38 @@ async def test_gemini_withholds_the_predefined_functions_it_is_configured_to_exc
     (request,) = models.requests()
     (computer,) = [tool["computerUse"] for tool in request.body["tools"] if "computerUse" in tool]
     assert computer["excluded_predefined_functions"] == ["drag_and_drop", "search"]
+
+
+def named(name: str, *tools: str) -> FastMCP:
+    mcp = FastMCP(name)
+    for tool in tools:
+        mcp.tool(name=tool, description=f"Run {tool}.")(lambda: tool)
+    return mcp
+
+
+async def test_mcp_tools_are_qualified_within_64_characters_and_a_clash_fails_the_run(
+    models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("done")])
+    long = "lookup_" * 10
+
+    async with (
+        mcp_server(named("company.tools", long + "a"), name="company.tools") as dotted,
+        mcp_server(named("company-tools", long + "b"), name="company-tools") as dashed,
+        mcp_server(named("a", "b__c"), name="a") as first,
+        mcp_server(named("a__b", "c"), name="a__b") as second,
+    ):
+        await run_task(
+            workspace_env(tmp_path / "long", capabilities=(dotted, dashed)),
+            OpenAIAgent(OpenAIConfig(model="gpt-5.6")),
+        )
+        clash = workspace_env(tmp_path / "clash", capabilities=(first, second))
+        clashed = await run_task(clash, OpenAIAgent(OpenAIConfig(model="gpt-5.6")))
+
+    (request,) = models.requests()
+    qualified = [name for name in request.tools if long[:20] in name]
+    assert len(qualified) == 2 and all(len(name) <= 64 for name in qualified)
+    assert clashed.trace.error == (
+        "[agent loop] ValueError: MCP tool name collision after qualification: 'a__b__c'"
+    )

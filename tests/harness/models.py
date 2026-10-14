@@ -226,6 +226,11 @@ class Models:
         """Answer every request with ``policy(request)``."""
         self._turns, self._policy = [], policy
 
+    def queue(self, turns: Sequence[Turn]) -> None:
+        """Answer requests with ``turns`` in arrival order, so a retried request gets the next."""
+        remaining = iter(turns)
+        self.respond(lambda _request: next(remaining))
+
     def requests(self) -> list[ModelRequest]:
         """Every model request so far, decoded, in arrival order."""
         return [self._decode(request) for request in self._services.requests("gateway", "POST")]

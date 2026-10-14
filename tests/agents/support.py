@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from PIL import Image
 
 from hud import Environment
-from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task, rollout
 from tests.harness import serve_asgi
@@ -32,26 +30,6 @@ if TYPE_CHECKING:
     from hud.eval import Run
 
 PROMPT = "Do the task."
-
-
-def claude(*, model: str = "claude-sonnet-4-6", **config: Any) -> Callable[[], Agent]:
-    """A ``ClaudeAgent`` factory; ``config`` sets ``ClaudeConfig`` fields besides the model."""
-    return lambda: ClaudeAgent(ClaudeConfig(model=model, **config))
-
-
-def openai(*, model: str = "gpt-5.6", **config: Any) -> Callable[[], Agent]:
-    """An ``OpenAIAgent`` (Responses API) factory, configured like ``claude``."""
-    return lambda: OpenAIAgent(OpenAIConfig(model=model, **config))
-
-
-def gemini(*, model: str = "gemini-3.1-pro-preview", **config: Any) -> Callable[[], Agent]:
-    """A ``GeminiAgent`` factory, configured like ``claude``."""
-    return lambda: GeminiAgent(GeminiConfig(model=model, **config))
-
-
-def chat(*, model: str = "qwen3.6-plus", **config: Any) -> Callable[[], Agent]:
-    """An ``OpenAIChatAgent`` (Chat Completions) factory, configured like ``claude``."""
-    return lambda: OpenAIChatAgent(OpenAIChatConfig(model=model, **config))
 
 
 def workspace_env(

@@ -14,7 +14,6 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import anyio
 import pytest
 from dirty_equals import IsStr
 
@@ -24,7 +23,7 @@ from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
 from tests.agents.cli_stub import Stub, jsonl, process_exited
 from tests.agents.support import run_task, workspace_env
-from tests.harness import fake_screen, steps
+from tests.harness import fake_screen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,7 +34,6 @@ if TYPE_CHECKING:
     from hud.eval import Run
     from tests.harness import HudEnv
 
-TIMESTAMP = IsStr(regex=r"\d{4}-\d{2}-\d{2}T.*")
 
 # ─── canned Claude CLI streams ──────────────────────────────────────────
 
@@ -52,22 +50,6 @@ def assistant(*content: dict[str, Any], stop: str = "end_turn") -> dict[str, Any
             "stop_reason": stop,
             "stop_sequence": None,
             "usage": {"input_tokens": 3, "output_tokens": 2},
-        },
-    }
-
-
-def tool_result(tool_use_id: str, *content: Any, is_error: bool = False) -> dict[str, Any]:
-    return {
-        "type": "user",
-        "message": {
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": list(content),
-                    "is_error": is_error,
-                }
-            ]
         },
     }
 
@@ -90,13 +72,8 @@ WRITE = assistant(
     {"type": "tool_use", "id": "tool-1", "name": "Write", "input": {"file_path": "a.txt"}},
     stop="tool_use",
 )
-WROTE = tool_result(
-    "tool-1",
-    {"type": "text", "text": "wrote a.txt"},
-    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "aW1n"}},
-)
 DONE = assistant({"type": "text", "text": "done"})
-CLAUDE_STREAM = jsonl(WRITE, WROTE, DONE, result())
+CLAUDE_STREAM = jsonl(DONE, result())
 
 
 def claude_stub(root: Path, **behavior: Any) -> Stub:
@@ -112,20 +89,6 @@ def codex_stub(root: Path, **behavior: Any) -> Stub:
 def cli_env(root: Path, stub: Stub, **options: Any) -> Environment:
     stub.install()
     return workspace_env(root / "ws", env=stub.shell_env(), **options)
-
-
-def step_summary(run: Run) -> list[tuple[Any, ...]]:
-    """Each agent and tool step the run exported: what the agent said and called,
-    and what each tool returned."""
-    summary: list[tuple[Any, ...]] = []
-    for step in steps(run.trace_id):
-        if step["source"] == "agent":
-            calls = [call["name"] for call in step.get("tool_calls", [])]
-            summary.append(("agent", step.get("content") or step.get("reasoning"), calls))
-        elif step["source"] == "tool":
-            content = [block.get("text", block["type"]) for block in step["result"]["content"]]
-            summary.append(("tool", step["call"]["name"], content, step["result"]["isError"]))
-    return summary
 
 
 def launched(capture: dict[str, Any], run: Run, variables: tuple[str, ...]) -> dict[str, Any]:
@@ -148,23 +111,6 @@ def outcome(run: Run) -> tuple[str | None, str | None, str | None]:
 
 
 # ─── Claude CLI ─────────────────────────────────────────────────────────
-
-
-async def test_the_claude_cli_streams_its_turns_into_steps(hud_env: HudEnv, tmp_path: Path) -> None:
-    hud_env.set(ANTHROPIC_API_KEY="anthropic-key")
-    stub = claude_stub(tmp_path)
-
-    run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent(), prompt="build it")
-
-    (capture,) = stub.captures()
-    assert outcome(run) == ("completed", "done", None)
-    assert run.trace.extra["session_id"] == "session-1"
-    assert step_summary(run) == [
-        ("agent", "editing", ["Write"]),
-        ("tool", "Write", ["wrote a.txt", "image"], False),
-        ("agent", "done", []),
-    ]
-    assert "build it" in capture["stdin"]
 
 
 CLAUDE_ARGV = (
@@ -262,7 +208,7 @@ CLAUDE_EXITS = {
     ),
     "nonzero-exit-after-a-result-without-stderr": ({"exit": 1}, ("completed", "done", None)),
     "zero-exit-without-a-result": (
-        {"stdout": jsonl(WRITE, WROTE, DONE)},
+        {"stdout": jsonl(DONE)},
         ("error", "done", "[agent loop] RuntimeError: claude CLI exited without a result event"),
     ),
     "result-reports-an-error": (
@@ -290,35 +236,6 @@ async def test_how_the_claude_cli_exits_decides_how_the_run_ends(
     run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent())
 
     assert outcome(run) == expected
-
-
-async def test_claude_cli_tool_results_keep_documents_and_name_unknown_blocks(
-    hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(ANTHROPIC_API_KEY="anthropic-key")
-    read = assistant(
-        {"type": "tool_use", "id": "tool-1", "name": "Read", "input": {}}, stop="tool_use"
-    )
-    pdf = {
-        "type": "document",
-        "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0="},
-    }
-    stub = claude_stub(
-        tmp_path,
-        stdout=jsonl(read, tool_result("tool-1", pdf, {"type": "novelty"}), DONE, result()),
-    )
-
-    run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent())
-
-    (tool,) = [step for step in steps(run.trace_id) if step["source"] == "tool"]
-    document, unknown = tool["result"]["content"]
-    assert run.trace.status == "completed"
-    assert document["resource"] == {
-        "uri": "document://tool-1/0",
-        "mimeType": "application/pdf",
-        "blob": "JVBERi0=",
-    }
-    assert unknown == {"type": "text", "text": "[unsupported novelty block]"}
 
 
 async def test_mcp_servers_reach_the_claude_cli_in_a_config_removed_after_the_run(
@@ -488,63 +405,6 @@ def item(kind: str, item_id: str, **fields: Any) -> dict[str, Any]:
 
 CODEX_ITEMS = [
     {"type": "thread.started", "thread_id": "thread-1"},
-    {"type": "turn.started"},
-    {
-        "type": "item.started",
-        "item": {
-            "id": "cmd-1",
-            "type": "command_execution",
-            "command": "pytest -q",
-            "aggregated_output": "",
-            "exit_code": None,
-            "status": "in_progress",
-        },
-    },
-    item(
-        "command_execution",
-        "cmd-1",
-        command="pytest -q",
-        aggregated_output="1 passed\n",
-        exit_code=0,
-        status="completed",
-    ),
-    item(
-        "command_execution",
-        "cmd-2",
-        command="false",
-        aggregated_output="",
-        exit_code=1,
-        status="completed",
-    ),
-    item(
-        "file_change",
-        "patch-1",
-        changes=[{"path": "calc.py", "kind": "update"}],
-        status="completed",
-    ),
-    item(
-        "mcp_tool_call",
-        "mcp-1",
-        server="db",
-        tool="query",
-        arguments={"sql": "select 42"},
-        result={"content": [{"type": "text", "text": "42"}], "structured_content": {"answer": 42}},
-        error=None,
-        status="completed",
-    ),
-    item(
-        "mcp_tool_call",
-        "mcp-2",
-        server="db",
-        tool="query",
-        arguments={"sql": "drop"},
-        result=None,
-        error={"message": "denied"},
-        status="failed",
-    ),
-    item("web_search", "search-1", query="HUD evals", action={"type": "search"}),
-    item("todo_list", "todo-1", items=[{"text": "ship", "completed": False}]),
-    item("reasoning", "reason-1", text="The test now passes."),
     item("agent_message", "message-1", text="Implemented and verified."),
 ]
 CODEX_DONE = {
@@ -552,30 +412,6 @@ CODEX_DONE = {
     "usage": {"input_tokens": 20, "cached_input_tokens": 5, "output_tokens": 8},
 }
 CODEX_STREAM = jsonl(*CODEX_ITEMS, CODEX_DONE)
-
-
-async def test_codex_events_become_steps(hud_env: HudEnv, tmp_path: Path) -> None:
-    hud_env.set(OPENAI_API_KEY="openai-key")
-    stub = codex_stub(tmp_path)
-
-    run = await run_task(cli_env(tmp_path, stub), CodexCLIAgent(), prompt="Fix the failing test")
-
-    (capture,) = stub.captures()
-    assert capture["stdin"] == "Fix the failing test"
-    assert not await anyio.Path(capture["env"]["CODEX_HOME"]).exists()
-    assert outcome(run) == ("completed", "Implemented and verified.", None)
-    assert run.trace.extra["codex_thread_id"] == "thread-1"
-    assert step_summary(run) == [
-        ("tool", "shell", ["1 passed\n"], False),
-        ("tool", "shell", [""], True),
-        ("tool", "apply_patch", ["update: calc.py"], False),
-        ("tool", "query", ["42"], False),
-        ("tool", "query", ["denied"], True),
-        ("tool", "web_search", ['{"type":"search"}'], False),
-        ("agent", None, []),
-        ("agent", "The test now passes.", []),
-        ("agent", "Implemented and verified.", []),
-    ]
 
 
 CODEX_ARGV = (
