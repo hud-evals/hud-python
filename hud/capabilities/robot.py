@@ -92,12 +92,7 @@ class RobotClient(CapabilityClient):
         seed: dict[str, Any] | None = None
         if token is not None or (isinstance(meta, dict) and meta.get("claim_required")):
             await ws.send(cast("Any", _packb({"claim": token})))
-            try:
-                first = await asyncio.wait_for(ws.recv(), timeout=30.0)
-            except TimeoutError as exc:
-                with contextlib.suppress(Exception):
-                    await ws.close()
-                raise RuntimeError("robot env timed out after slot claim") from exc
+            first = await ws.recv()
             if isinstance(first, str):
                 with contextlib.suppress(Exception):
                     await ws.close()

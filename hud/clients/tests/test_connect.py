@@ -330,16 +330,14 @@ async def test_heartbeat_transport_failure_interrupts_the_connection_body(
             heartbeat = await read_frame(reader)
             assert heartbeat is not None
             heartbeat_received.set()
-            await reader.read()
         finally:
             writer.close()
 
     monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
-    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_TIMEOUT_SECONDS", 0.01)
     server = await asyncio.start_server(handler, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     try:
-        with pytest.raises(TimeoutError):
+        with pytest.raises(EOFError, match="env closed connection during 'hello'"):
             async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
                 await asyncio.wait_for(heartbeat_received.wait(), 1.0)
                 try:
