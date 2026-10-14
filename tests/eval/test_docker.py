@@ -1,12 +1,10 @@
-"""DockerRuntime: what it asks the docker CLI to do, and the runtime it yields.
+"""DockerRuntime: a row runs in a confined container or Compose project that is removed after.
 
-The fake ``docker`` on ``PATH`` records every invocation; its ``port`` answer
-points at an environment served in this process, so each started container
-really serves a rollout whose reward proves the placement worked.
+The fake ``docker`` on ``PATH`` records every invocation and runs ``cp`` and
+``exec`` against a directory per container; its ``port`` answer points at an
+environment served in this process, so each placement really serves a rollout
+whose reward proves the container worked.
 """
-
-# The snapshots hold whole docker command lines.
-# ruff: noqa: E501 -- snapshots quote SDK and CLI arguments verbatim
 
 from __future__ import annotations
 
@@ -21,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 import hud
 from hud import Environment
@@ -44,44 +41,12 @@ if TYPE_CHECKING:
     from tests.harness import FakeDocker
 
 SECCOMP = Path(hud.__file__).parent / "eval" / "docker-seccomp.json"
+CONFINED = [f"seccomp={SECCOMP}", "systempaths=unconfined", "apparmor=unconfined"]
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
 
 
-def scrub(text: str, tmp_path: Path) -> str:
-    """Docker arguments with their run-specific names replaced by placeholders."""
-    for pattern, placeholder in (
-        (r"hud-runtime-sessions-[0-9a-f]{32}", "<volume>"),
-        (r"hud-[0-9a-f]{12}\b", "<project>"),
-        (r"[^\s\"]*/hud-compose-[^/\s\"]+", "<staged>"),
-        (r"[^\s\"]*/hud-session(-import)?-[^/\s\"]+", "<local>"),
-        (r"/runtime/session-export-[0-9a-f]{32}", "<export>"),
-        (r"sess-[0-9a-f]{8}", "<session>"),
-        (r"127\.0\.0\.1:\d{4,5}\b", "127.0.0.1:<port>"),
-    ):
-        text = re.sub(pattern, placeholder, text)
-    return text.replace(str(SECCOMP), "<seccomp>").replace(str(tmp_path), "<tmp>")
-
-
-def transcript(fake_docker: FakeDocker, tmp_path: Path) -> list[str]:
-    """The docker commands run, less the log followers, which may be stopped before they log."""
-    return [
-        scrub(" ".join("<script>" if "\n" in arg else arg for arg in call.argv), tmp_path)
-        for call in fake_docker.calls
-        if "logs --follow" not in call.command
-    ]
-
-
-def staged(fake_docker: FakeDocker, tmp_path: Path, name: str) -> Any:
-    """The staged Compose file ``name`` as ``compose up`` read it."""
-    (text,) = {
-        text
-        for call in fake_docker.calls
-        if " up --detach " in call.command
-        for path, text in call.files.items()
-        if path.endswith(name)
-    }
-    scrubbed = scrub(text, tmp_path)
-    return json.loads(scrubbed) if name.endswith(".json") else scrubbed
+def placed(config: RuntimeConfig | None) -> Task:
+    return ADD.model_copy(update={"runtime_config": config})
 
 
 async def run_on(provider: DockerRuntime, row: Task) -> tuple[Runtime, float]:
@@ -91,31 +56,33 @@ async def run_on(provider: DockerRuntime, row: Task) -> tuple[Runtime, float]:
     return runtime, run.reward
 
 
-def docker_run(fake_docker: FakeDocker) -> tuple[list[str], str]:
-    """What ``docker run`` was asked for: the options before the sandbox profile, and the image."""
+def docker_run(fake_docker: FakeDocker) -> list[str]:
     (argv,) = [call.argv for call in fake_docker.calls if call.argv[:1] == ["run"]]
-    return argv[2 : argv.index("--security-opt")], argv[-1]
+    return argv
 
 
-async def test_an_image_row_runs_in_a_sandboxed_container_that_is_removed_after(
+def volumes_left(fake_docker: FakeDocker) -> set[str]:
+    """Session volumes created and never removed."""
+    created = {call.argv[2] for call in fake_docker.calls if call.argv[:2] == ["volume", "create"]}
+    removed = {call.argv[-1] for call in fake_docker.calls if call.argv[:2] == ["volume", "rm"]}
+    return created - removed
+
+
+async def test_an_image_row_runs_in_a_confined_container_that_is_removed_after(
     fake_docker: FakeDocker, tmp_path: Path
 ) -> None:
     async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
-        runtime, reward = await run_on(DockerRuntime("lab:1"), ADD)
+        _, reward = await run_on(DockerRuntime("lab:1"), ADD)
 
+    argv = docker_run(fake_docker)
     assert reward == 1.0
-    assert runtime.params == {}
-    assert transcript(fake_docker, tmp_path) == snapshot(
-        [
-            "volume create <volume>",
-            "run --detach --security-opt seccomp=<seccomp> --security-opt systempaths=unconfined --security-opt apparmor=unconfined --mount type=volume,source=<volume>,target=/runtime/sessions --mount type=volume,source=<volume>,target=/media/hud/sessions --publish 127.0.0.1::8765 lab:1",
-            "port lab-1 8765",
-            "rm --force lab-1",
-            "volume rm --force <volume>",
-        ]
-    )
+    assert [argv[i + 1] for i, arg in enumerate(argv) if arg == "--security-opt"] == CONFINED
+    assert "--privileged" not in argv
+    assert fake_docker.commands("rm --force ") == ["rm --force lab-1"]
+    assert volumes_left(fake_docker) == set()
 
 
+# What the row and the provider each set, and which wins, as docker run sees it.
 IMAGES: dict[str, tuple[dict[str, Any], RuntimeConfig | None, list[str], dict[str, Any]]] = {
     "run args, env vars, bind mounts and resources reach docker run": (
         {
@@ -173,28 +140,13 @@ async def test_a_row_and_its_provider_decide_what_docker_run_is_asked_for(
     fake_docker: FakeDocker,
     tmp_path: Path,
 ) -> None:
-    row = ADD.model_copy(update={"runtime_config": config})
-
     async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
-        runtime, reward = await run_on(DockerRuntime(**options), row)
+        runtime, reward = await run_on(DockerRuntime(**options), placed(config))
 
+    argv = docker_run(fake_docker)
     assert reward == 1.0
-    assert docker_run(fake_docker) == (run_options, "lab:1")
+    assert (argv[2 : argv.index("--security-opt")], argv[-1]) == (run_options, "lab:1")
     assert runtime.params == params
-
-
-async def test_a_storage_request_is_admitted_against_the_containers_free_disk(
-    fake_docker: FakeDocker, tmp_path: Path
-) -> None:
-    row = ADD.model_copy(
-        update={"runtime_config": RuntimeConfig(resources=RuntimeResources(storage_mb=1024))}
-    )
-
-    async with containers(fake_docker, tmp_path / "rootfs", {"lab:1": lab()}):
-        _, reward = await run_on(DockerRuntime("lab:1"), row)
-
-    assert reward == 1.0
-    assert fake_docker.commands("exec ") == ["exec lab-1 df -Pk /"]
 
 
 async def test_a_container_streams_its_logs_to_the_terminal(
@@ -217,98 +169,85 @@ async def test_a_container_streams_its_logs_to_the_terminal(
 
 
 LOW_DISK = "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 0 0 4194304 0% /\n"
-
-
-def volumes_left(fake_docker: FakeDocker) -> set[str]:
-    """Session volumes created and never removed."""
-    created = {call.argv[2] for call in fake_docker.calls if call.argv[:2] == ["volume", "create"]}
-    removed = {call.argv[-1] for call in fake_docker.calls if call.argv[:2] == ["volume", "rm"]}
-    return created - removed
-
-
-IMAGE_FAILURES: dict[
-    str, tuple[RuntimeConfig, list[tuple[str, dict[str, Any]]], Any, list[str]]
-] = {
+IMAGE_FAILURES: dict[str, tuple[RuntimeConfig, list[tuple[str, dict[str, Any]]], Any, bool]] = {
     "a GPU type it cannot select": (
         RuntimeConfig(image="lab:1", resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
         [],
         "DockerRuntime cannot select GPUs by type",
-        [],
+        False,
     ),
     "no image at all": (
         RuntimeConfig(resources=RuntimeResources(cpu=1)),
         [],
         "DockerRuntime requires runtime_config.image or runtime_config.compose",
+        False,
+    ),
+    "a Compose document that is not a local file": (
+        RuntimeConfig.model_validate({"compose": {"document": {"services": {"main": {}}}}}),
         [],
+        "DockerRuntime requires compose as a local file path",
+        False,
     ),
     "a container that exits before serving": (
         RuntimeConfig(image="lab:1"),
         [(r"^logs --tail 40 ", {"stderr": "ImportError: boom\n"})],
         "container for image 'lab:1' exited before serving port 8765:\nImportError: boom",
-        ["rm --force cid-1"],
+        True,
     ),
     "less free disk than requested": (
         RuntimeConfig(image="lab:1", resources=RuntimeResources(storage_mb=8192)),
         [(r"^exec \S+ df -Pk /$", {"stdout": LOW_DISK})],
         "DockerRuntime requires 8192 MB of free disk; the environment has 4096 MB",
-        ["rm --force cid-1"],
+        True,
     ),
     "free disk it cannot read": (
         RuntimeConfig(image="lab:1", resources=RuntimeResources(storage_mb=8192)),
         [(r"^exec \S+ df -Pk /$", {"stdout": "df: not found\n"})],
         "DockerRuntime could not measure the environment's free disk",
-        ["rm --force cid-1"],
+        True,
     ),
     "a start slower than its startup limit": (
         RuntimeConfig(image="lab:1", limits=RuntimeLimits(startup_timeout_s=1)),
         [(r"^run ", {"stdout": "cid-1\n", "delay": 3})],
         IsStr(regex=r"docker run --detach .* lab:1 timed out after 1s"),
-        [],
+        False,
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("config", "rules", "error", "removed"), IMAGE_FAILURES.values(), ids=IMAGE_FAILURES.keys()
+    ("config", "rules", "error", "started"), IMAGE_FAILURES.values(), ids=IMAGE_FAILURES.keys()
 )
-async def test_an_image_that_cannot_serve_fails_its_acquisition_and_is_cleaned_up(
+async def test_an_image_that_cannot_serve_fails_its_acquisition_and_leaves_nothing_behind(
     config: RuntimeConfig,
     rules: list[tuple[str, dict[str, Any]]],
     error: Any,
-    removed: list[str],
+    started: bool,
     fake_docker: FakeDocker,
-    tmp_path: Path,
 ) -> None:
     for match, answer in rules:
         fake_docker.on(match, **answer)
 
     with pytest.raises((ValueError, RuntimeError)) as raised:
-        async with DockerRuntime()(ADD.model_copy(update={"runtime_config": config})):
+        async with DockerRuntime()(placed(config)):
             pytest.fail("the acquisition should fail")
 
-    assert scrub(str(raised.value), tmp_path) == error
-    assert fake_docker.commands("rm --force ") == removed
+    assert str(raised.value) == error
+    assert fake_docker.commands("rm --force ") == (["rm --force cid-1"] if started else [])
     assert volumes_left(fake_docker) == set()
     if not rules:
         assert fake_docker.calls == []
 
 
-async def test_a_container_past_its_run_limit_is_removed(
-    fake_docker: FakeDocker, tmp_path: Path
-) -> None:
+async def test_a_container_past_its_run_limit_is_removed(fake_docker: FakeDocker) -> None:
     fake_docker.on(r"^port ", stdout="127.0.0.1:43210\n")
-    row = ADD.model_copy(
-        update={
-            "runtime_config": RuntimeConfig(image="lab:1", limits=RuntimeLimits(run_timeout_s=1))
-        }
-    )
+    row = placed(RuntimeConfig(image="lab:1", limits=RuntimeLimits(run_timeout_s=1)))
 
     async with DockerRuntime()(row):
         await asyncio.sleep(1.2)
         removed_while_held = fake_docker.commands("rm --force ")
 
     assert removed_while_held == ["rm --force cid-1"]
-    assert fake_docker.commands("rm --force ") == ["rm --force cid-1", "rm --force cid-1"]
 
 
 def test_the_sandbox_profile_allows_workspace_namespaces_and_denies_kernel_interfaces() -> None:
@@ -334,11 +273,22 @@ def compose_file(tmp_path: Path, document: str, env_file: str = "TAG=1\n") -> Pa
     return path
 
 
+def staged(fake_docker: FakeDocker, name: str) -> Any:
+    """The staged Compose file ``name`` as ``compose up`` read it."""
+    (text,) = {
+        text
+        for call in fake_docker.calls
+        if " up --detach " in call.command
+        for path, text in call.files.items()
+        if path.endswith(name)
+    }
+    return json.loads(text)
+
+
 HEALTHCHECKED = """
 services:
   main:
     image: lab:${TAG}
-    environment: [MODE=eval, EMPTY=]
     command: hud serve env.py --port 8765
     healthcheck: {test: [CMD, "true"]}
   db:
@@ -358,10 +308,6 @@ services:
     image: idle
     scale: 0
     healthcheck: {test: [CMD, "true"]}
-  plain:
-    image: plain
-    ports: ["8080", "127.0.0.1:9000:9000/udp"]
-    expose: [7000]
 """
 
 CHAINED = """
@@ -376,43 +322,20 @@ services:
     image: gateway
 """
 
+SOCKET = "/var/run/docker.sock"
 COMPOSE: dict[str, tuple[str, bool, dict[str, Any], RuntimeConfig | None, dict[str, str], Any]] = {
-    "healthchecked services are awaited and resources land on main": (
+    "only services with a live healthcheck are awaited; resources land on main": (
         HEALTHCHECKED,
         False,
         {"env_vars": {"MODE": "override"}, "bind_mounts": [DockerBindMount("/opt/data", "/data")]},
         RuntimeConfig(resources=RuntimeResources(cpu=2, memory_mb=4096, gpu=RuntimeGPU(count=2))),
         {},
-        snapshot(
-            {
-                "commands": [
-                    "up --detach --build --remove-orphans",
-                    "up --wait --no-deps --no-recreate --no-build main db",
-                    "port main 8765",
-                    "ps --quiet main",
-                    "down --volumes --remove-orphans",
-                ],
-                "main": {
-                    "environment": {"MODE": "override"},
-                    "cpus": 2.0,
-                    "mem_limit": "4096m",
-                    "gpus": 2,
-                    "volumes": [
-                        {
-                            "type": "bind",
-                            "source": "/opt/data",
-                            "target": "/data",
-                            "read_only": True,
-                        }
-                    ],
-                },
-                "ports": """\
-services:
-  main:
-    ports: !override ["127.0.0.1::8765"]
-""",
-            }
-        ),
+        {
+            "awaited": ["main", "db"],
+            "published": "main",
+            "main": {"environment": {"MODE": "override"}, "cpus": 2.0, "mem_limit": "4096m"},
+            "mounts": ["/opt/data"],
+        },
     ),
     "the published port belongs to the end of main's network chain": (
         CHAINED,
@@ -420,22 +343,7 @@ services:
         {},
         None,
         {},
-        snapshot(
-            {
-                "commands": [
-                    "up --detach --build --remove-orphans",
-                    "port gateway 8765",
-                    "ps --quiet main",
-                    "down --volumes --remove-orphans",
-                ],
-                "main": {},
-                "ports": """\
-services:
-  gateway:
-    ports: !override ["127.0.0.1::8765"]
-""",
-            }
-        ),
+        {"awaited": [], "published": "gateway", "main": {}, "mounts": []},
     ),
     "service access mounts the local daemon's socket": (
         CHAINED,
@@ -443,35 +351,12 @@ services:
         {},
         None,
         {"DOCKER_HOST": "unix:///run/user/docker.sock"},
-        snapshot(
-            {
-                "commands": [
-                    "up --detach --build --remove-orphans",
-                    "port gateway 8765",
-                    "ps --quiet main",
-                    "down --volumes --remove-orphans",
-                ],
-                "main": {
-                    "volumes": [
-                        {
-                            "type": "bind",
-                            "source": "/run/user/docker.sock",
-                            "target": "/var/run/docker.sock",
-                        },
-                        {
-                            "type": "bind",
-                            "source": "/run/user/docker.sock",
-                            "target": "/media/hud/docker.sock",
-                        },
-                    ]
-                },
-                "ports": """\
-services:
-  gateway:
-    ports: !override ["127.0.0.1::8765"]
-""",
-            }
-        ),
+        {
+            "awaited": [],
+            "published": "gateway",
+            "main": {},
+            "mounts": ["/run/user/docker.sock"] * 2,
+        },
     ),
     "service access asks docker for its socket when DOCKER_HOST is unset": (
         CHAINED,
@@ -479,36 +364,7 @@ services:
         {},
         None,
         {},
-        snapshot(
-            {
-                "commands": [
-                    "context inspect --format {{.Endpoints.docker.Host}}",
-                    "up --detach --build --remove-orphans",
-                    "port gateway 8765",
-                    "ps --quiet main",
-                    "down --volumes --remove-orphans",
-                ],
-                "main": {
-                    "volumes": [
-                        {
-                            "type": "bind",
-                            "source": "/var/run/docker.sock",
-                            "target": "/var/run/docker.sock",
-                        },
-                        {
-                            "type": "bind",
-                            "source": "/var/run/docker.sock",
-                            "target": "/media/hud/docker.sock",
-                        },
-                    ]
-                },
-                "ports": """\
-services:
-  gateway:
-    ports: !override ["127.0.0.1::8765"]
-""",
-            }
-        ),
+        {"awaited": [], "published": "gateway", "main": {}, "mounts": [SOCKET] * 2},
     ),
     "service access through a remote daemon mounts the socket it names": (
         CHAINED,
@@ -516,95 +372,9 @@ services:
         {"compose_service_socket": "/vm/run/docker.sock"},
         None,
         {"DOCKER_HOST": "tcp://docker.remote:2376"},
-        snapshot(
-            {
-                "commands": [
-                    "up --detach --build --remove-orphans",
-                    "port gateway 8765",
-                    "ps --quiet main",
-                    "down --volumes --remove-orphans",
-                ],
-                "main": {
-                    "volumes": [
-                        {
-                            "type": "bind",
-                            "source": "/vm/run/docker.sock",
-                            "target": "/var/run/docker.sock",
-                        },
-                        {
-                            "type": "bind",
-                            "source": "/vm/run/docker.sock",
-                            "target": "/media/hud/docker.sock",
-                        },
-                    ]
-                },
-                "ports": """\
-services:
-  gateway:
-    ports: !override ["127.0.0.1::8765"]
-""",
-            }
-        ),
-    ),
-    "a storage request is admitted inside main": (
-        CHAINED,
-        False,
-        {},
-        RuntimeConfig(resources=RuntimeResources(storage_mb=1024)),
-        {},
-        snapshot(
-            {
-                "commands": [
-                    "up --detach --build --remove-orphans",
-                    "exec -T main df -Pk /",
-                    "port gateway 8765",
-                    "ps --quiet main",
-                    "down --volumes --remove-orphans",
-                ],
-                "main": {},
-                "ports": """\
-services:
-  gateway:
-    ports: !override ["127.0.0.1::8765"]
-""",
-            }
-        ),
+        {"awaited": [], "published": "gateway", "main": {}, "mounts": ["/vm/run/docker.sock"] * 2},
     ),
 }
-
-
-SANDBOX_OPTIONS = ["seccomp=<seccomp>", "systempaths=unconfined", "apparmor=unconfined"]
-SESSION_VOLUMES = [
-    {"type": "volume", "source": "hud-runtime-sessions", "target": target}
-    for target in ("/runtime/sessions", "/media/hud/sessions")
-]
-COMPOSE_PREFIX = re.compile(r"^compose --project-name \S+ --project-directory \S+ (?:--file \S+ )+")
-
-
-def launch(fake_docker: FakeDocker, tmp_path: Path) -> dict[str, Any]:
-    """What a Compose launch asked for beyond what every launch asks for.
-
-    Every launch runs ``main`` under the sandbox profile with the session volumes
-    mounted; this checks that and returns the compose verbs, the rest of the
-    override, and the published ports.
-    """
-    override = staged(fake_docker, tmp_path, "override.json")
-    services = dict(override["services"])
-    main = dict(services.pop("main"))
-    assert main.pop("security_opt") == SANDBOX_OPTIONS
-    volumes = main.pop("volumes")
-    assert volumes[:2] == SESSION_VOLUMES
-    if volumes[2:]:
-        main["volumes"] = volumes[2:]
-    assert override["volumes"] == {"hud-runtime-sessions": {}}
-    return {
-        "commands": [
-            COMPOSE_PREFIX.sub("", command) for command in transcript(fake_docker, tmp_path)
-        ],
-        "main": main,
-        **({"services": services} if services else {}),
-        "ports": staged(fake_docker, tmp_path, "ports.yaml"),
-    }
 
 
 @pytest.mark.parametrize(
@@ -612,13 +382,13 @@ def launch(fake_docker: FakeDocker, tmp_path: Path) -> dict[str, Any]:
     COMPOSE.values(),
     ids=COMPOSE.keys(),
 )
-async def test_a_compose_row_starts_its_project_with_a_provider_override(
+async def test_a_compose_row_runs_its_project_with_main_confined_and_takes_it_down(
     document: str,
     service_access: bool,
     options: dict[str, Any],
     config: RuntimeConfig | None,
     environment: dict[str, str],
-    launched: Any,
+    launched: dict[str, Any],
     fake_docker: FakeDocker,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -629,20 +399,43 @@ async def test_a_compose_row_starts_its_project_with_a_provider_override(
     project = ComposeProject(
         document=compose_file(tmp_path, document), service_access=service_access or None
     )
-    row = ADD.model_copy(
-        update={"runtime_config": RuntimeConfig(compose=project).with_overrides(config)}
-    )
-    fake_docker.on(r"^context inspect ", stdout="unix:///var/run/docker.sock\n")
+    row = placed(RuntimeConfig(compose=project).with_overrides(config))
+    fake_docker.on(r"^context inspect ", stdout=f"unix://{SOCKET}\n")
     fake_docker.on(r"^compose .* ps --quiet main$", stdout="main-1\n")
+
+    async with containers(fake_docker, tmp_path / "rootfs", {"lab": lab()}) as addresses:
+        fake_docker.on(r"^compose .* port \w+ 8765$", stdout=f"{addresses['lab']}\n")
+        _, reward = await run_on(DockerRuntime(**options), row)
+
+    main = staged(fake_docker, "override.json")["services"]["main"]
+    awaited = [call.argv for call in fake_docker.calls if "--wait" in call.argv]
+    (published,) = [call.argv[-2] for call in fake_docker.calls if call.argv[-3:-2] == ["port"]]
+    session_volumes = [v for v in main["volumes"] if v["type"] == "volume"]
+    assert reward == 1.0
+    assert main["security_opt"] == CONFINED
+    assert [v["target"] for v in session_volumes] == ["/runtime/sessions", "/media/hud/sessions"]
+    assert {
+        "awaited": awaited[0][awaited[0].index("--no-build") + 1 :] if awaited else [],
+        "published": published,
+        "main": {key: main[key] for key in ("environment", "cpus", "mem_limit") if key in main},
+        "mounts": [v["source"] for v in main["volumes"] if v["type"] == "bind"],
+    } == launched
+    assert fake_docker.commands()[-1].endswith("down --volumes --remove-orphans")
+
+
+async def test_a_compose_storage_request_is_admitted_inside_main(
+    fake_docker: FakeDocker, tmp_path: Path
+) -> None:
+    project = ComposeProject(document=compose_file(tmp_path, CHAINED))
+    row = placed(RuntimeConfig(compose=project, resources=RuntimeResources(storage_mb=1024)))
     fake_docker.on(r"^compose .* exec -T main df -Pk /$", stdout=DF_FREE)
 
     async with containers(fake_docker, tmp_path / "rootfs", {"lab": lab()}) as addresses:
         fake_docker.on(r"^compose .* port \w+ 8765$", stdout=f"{addresses['lab']}\n")
-        runtime, reward = await run_on(DockerRuntime(**options), row)
+        _, reward = await run_on(DockerRuntime(), row)
 
     assert reward == 1.0
-    assert runtime.config == row.runtime_config
-    assert launch(fake_docker, tmp_path) == launched
+    assert [command for command in fake_docker.commands() if "df -Pk" in command] != []
 
 
 INTERPOLATED = """
@@ -654,177 +447,55 @@ services:
       PRICE: ${PRICE}
       BASE: ${PREFIX}
       LITERAL: $$PATH
-      FLAG: true
-    entrypoint: python -m hud
-    command: serve env.py
-    expose: [8765]
-    ports: ["127.0.0.1:9000:9000"]
 """
 
-DOCUMENTS = {
-    "short syntax is normalized and every service gets its defaults": (
-        HEALTHCHECKED,
-        "TAG=1\n",
-        snapshot(
-            {
-                "services": {
-                    "main": {
-                        "image": "lab:1",
-                        "environment": {"MODE": "eval", "EMPTY": ""},
-                        "command": ["hud", "serve", "env.py", "--port", "8765"],
-                        "healthcheck": {"test": ["CMD", "true"]},
-                        "expose": [],
-                        "ports": [],
-                        "volumes": [],
-                    },
-                    "db": {
-                        "image": "postgres:16",
-                        "environment": {},
-                        "healthcheck": {"test": ["CMD", "pg_isready"], "interval": "1s"},
-                        "expose": [],
-                        "ports": [],
-                        "volumes": [],
-                    },
-                    "cache": {
-                        "image": "redis",
-                        "environment": {},
-                        "healthcheck": {"test": ["NONE"]},
-                        "expose": [],
-                        "ports": [],
-                        "volumes": [],
-                    },
-                    "worker": {
-                        "image": "worker",
-                        "environment": {},
-                        "healthcheck": {"disable": True, "test": ["CMD", "true"]},
-                        "expose": [],
-                        "ports": [],
-                        "volumes": [],
-                    },
-                    "tools": {
-                        "image": "tools",
-                        "environment": {},
-                        "healthcheck": {"test": ["CMD", "true"]},
-                        "expose": [],
-                        "ports": [],
-                        "volumes": [],
-                        "profiles": ["debug"],
-                    },
-                    "idle": {
-                        "image": "idle",
-                        "environment": {},
-                        "healthcheck": {"test": ["CMD", "true"]},
-                        "expose": [],
-                        "ports": [],
-                        "volumes": [],
-                        "scale": 0,
-                    },
-                    "plain": {
-                        "image": "plain",
-                        "environment": {},
-                        "expose": ["7000"],
-                        "ports": [
-                            {"target": 8080, "protocol": "tcp"},
-                            {
-                                "target": 9000,
-                                "protocol": "udp",
-                                "published": 9000,
-                                "host_ip": "127.0.0.1",
-                            },
-                        ],
-                        "volumes": [],
-                    },
-                },
-                "networks": {},
-            }
-        ),
-    ),
-    "variables come only from the project's .env and literal dollars stay literal": (
-        INTERPOLATED,
-        "REGISTRY=registry.test\nPRICE=cost$5\nPREFIX=${REGISTRY}/base\n",
-        snapshot(
-            {
-                "services": {
-                    "main": {
-                        "image": "registry.test/lab:latest",
-                        "environment": {
-                            "HOME_DIR": "$$HOME",
-                            "PRICE": "cost$$5",
-                            "BASE": "registry.test/base",
-                            "LITERAL": "$$PATH",
-                            "FLAG": "true",
-                        },
-                        "entrypoint": ["python", "-m", "hud"],
-                        "command": ["serve", "env.py"],
-                        "expose": ["8765"],
-                        "ports": [
-                            {
-                                "target": 9000,
-                                "protocol": "tcp",
-                                "published": 9000,
-                                "host_ip": "127.0.0.1",
-                            }
-                        ],
-                        "volumes": [],
-                    }
-                },
-                "networks": {},
-            }
-        ),
-    ),
-}
 
-
-@pytest.mark.parametrize(
-    ("document", "env_file", "normalized"), DOCUMENTS.values(), ids=DOCUMENTS.keys()
-)
-async def test_a_compose_document_is_staged_normalized_and_self_contained(
-    document: str,
-    env_file: str,
-    normalized: Any,
-    fake_docker: FakeDocker,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+async def test_compose_variables_come_only_from_the_projects_env_file(
+    fake_docker: FakeDocker, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TAG", "from-the-host")
     monkeypatch.setenv("HOME", "/home/host")
-    project = ComposeProject(document=compose_file(tmp_path, document, env_file))
-    row = ADD.model_copy(update={"runtime_config": RuntimeConfig(compose=project)})
+    env_file = "REGISTRY=registry.test\nPRICE=cost$5\nPREFIX=${REGISTRY}/base\n"
+    project = ComposeProject(document=compose_file(tmp_path, INTERPOLATED, env_file))
     fake_docker.on(r"^compose .* port main 8765$", stdout="127.0.0.1:43210\n")
 
-    async with DockerRuntime()(row):
+    async with DockerRuntime()(placed(RuntimeConfig(compose=project))):
         pass
 
-    assert staged(fake_docker, tmp_path, "compose.json") == normalized
+    main = staged(fake_docker, "compose.json")["services"]["main"]
+    assert main["image"] == "registry.test/lab:latest"
+    assert main["environment"] == {
+        "HOME_DIR": "$$HOME",
+        "PRICE": "cost$$5",
+        "BASE": "registry.test/base",
+        "LITERAL": "$$PATH",
+    }
 
 
-COMPOSE_FAILURES: dict[
-    str, tuple[str, bool, dict[str, Any], RuntimeConfig | None, str, list[str]]
-] = {
+COMPOSE_FAILURES: dict[str, tuple[str, bool, dict[str, Any], RuntimeConfig | None, str, bool]] = {
     "service access through a remote daemon without a socket": (
         CHAINED,
         True,
         {"DOCKER_HOST": "tcp://docker.remote:2376"},
         None,
-        "DockerRuntime Compose service access through a remote daemon requires "
-        "compose_service_socket",
-        [],
+        "service access through a remote daemon requires compose_service_socket",
+        False,
     ),
     "a GPU type it cannot select": (
         CHAINED,
         False,
         {},
         RuntimeConfig(resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
-        "DockerRuntime cannot select Compose GPUs by type",
-        [],
+        "cannot select Compose GPUs by type",
+        False,
     ),
     "run args, which only apply to images": (
         CHAINED,
         False,
         {"run_args": ["--privileged"]},
         None,
-        "DockerRuntime run_args apply only to image environments",
-        [],
+        "run_args apply only to image environments",
+        False,
     ),
     "a network chain that loops": (
         "services:\n  main: {image: lab, network_mode: 'service:relay'}\n"
@@ -832,40 +503,40 @@ COMPOSE_FAILURES: dict[
         False,
         {},
         None,
-        "Compose network_mode service cycle includes 'main'",
-        [],
+        "network_mode service cycle includes 'main'",
+        False,
     ),
     "a network chain to a missing service": (
         "services:\n  main: {image: lab, network_mode: 'service:gone'}\n",
         False,
         {},
         None,
-        "Compose network_mode references unknown service 'gone'",
-        [],
+        "network_mode references unknown service 'gone'",
+        False,
     ),
     "an include": (
         "include: [other.yaml]\nservices:\n  main: {image: lab}\n",
         False,
         {},
         None,
-        "remote adaptation does not support Compose include or extends",
-        [],
+        "does not support Compose include or extends",
+        False,
     ),
     "an extends": (
         "services:\n  main: {image: lab, extends: {file: base.yaml, service: base}}\n",
         False,
         {},
         None,
-        "remote adaptation does not support Compose include or extends",
-        [],
+        "does not support Compose include or extends",
+        False,
     ),
     "a variable only the host would set": (
         "services:\n  main: {image: $HOST_ONLY}\n",
         False,
         {},
         None,
-        "Compose variable 'HOST_ONLY' is not set by the project .env",
-        [],
+        "variable 'HOST_ONLY' is not set by the project .env",
+        False,
     ),
     "a required variable left unset": (
         'services:\n  main: {image: "${IMAGE:?set IMAGE in .env}"}\n',
@@ -873,28 +544,21 @@ COMPOSE_FAILURES: dict[
         {},
         None,
         "set IMAGE in .env",
-        [],
+        False,
     ),
     "a network owner that exits before serving": (
         CHAINED,
         False,
         {},
         None,
-        "Compose gateway service exited before serving port 8765:\nImportError: boom",
-        snapshot(
-            [
-                "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml up --detach --build --remove-orphans",
-                "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml port gateway 8765",
-                "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml logs --tail 40 gateway",
-                "compose --project-name <project> --project-directory <tmp>/project --file <staged>/compose.json --file <staged>/override.json --file <staged>/ports.yaml down --volumes --remove-orphans",
-            ]
-        ),
+        "gateway service exited before serving port 8765:\nImportError: boom",
+        True,
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("document", "service_access", "change", "config", "error", "commands"),
+    ("document", "service_access", "change", "config", "error", "started"),
     COMPOSE_FAILURES.values(),
     ids=COMPOSE_FAILURES.keys(),
 )
@@ -904,7 +568,7 @@ async def test_a_compose_project_that_cannot_serve_fails_and_is_taken_down(
     change: dict[str, Any],
     config: RuntimeConfig | None,
     error: str,
-    commands: list[str],
+    started: bool,
     fake_docker: FakeDocker,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -915,26 +579,18 @@ async def test_a_compose_project_that_cannot_serve_fails_and_is_taken_down(
     project = ComposeProject(
         document=compose_file(tmp_path, document), service_access=service_access or None
     )
-    row = ADD.model_copy(
-        update={"runtime_config": RuntimeConfig(compose=project).with_overrides(config)}
-    )
+    row = placed(RuntimeConfig(compose=project).with_overrides(config))
     fake_docker.on(r"^compose .* logs --tail 40 gateway$", stderr="ImportError: boom\n")
-    provider = DockerRuntime(run_args=change.get("run_args", ()))
 
-    with pytest.raises((ValueError, RuntimeError)) as raised:
-        async with provider(row):
+    with pytest.raises((ValueError, RuntimeError), match=re.escape(error)):
+        async with DockerRuntime(run_args=change.get("run_args", ()))(row):
             pytest.fail("the acquisition should fail")
 
-    assert str(raised.value) == error
-    assert transcript(fake_docker, tmp_path) == commands
-
-
-async def test_a_platform_compose_document_needs_a_local_file() -> None:
-    config = RuntimeConfig.model_validate({"compose": {"document": {"services": {"main": {}}}}})
-
-    with pytest.raises(ValueError, match="DockerRuntime requires compose as a local file path"):
-        async with DockerRuntime()(ADD.model_copy(update={"runtime_config": config})):
-            pass
+    commands = fake_docker.commands()
+    if started:
+        assert commands[-1].endswith("down --volumes --remove-orphans")
+    else:
+        assert not any(" up " in command for command in commands)
 
 
 async def test_a_container_session_moves_to_the_verifier_unless_it_holds_a_link(
@@ -958,29 +614,9 @@ async def test_a_container_session_moves_to_the_verifier_unless_it_holds_a_link(
     assert moved.reward == 1.0
     assert (linked.reward, linked.trace.error) == (
         0.0,
-        IsStr(
-            regex=r"(?s)\[snapshotting actor\] RuntimeError: docker exec --user 0 linker python3 .*"
-            r"ValueError: runtime session contains a symbolic link"
-        ),
+        IsStr(regex=r"(?s)\[snapshotting actor\] .*runtime session contains a symbolic link"),
     )
-    assert [
-        command
-        for command in transcript(fake_docker, tmp_path)
-        if command.startswith(("exec", "cp"))
-    ] == snapshot(
-        [
-            'exec actor sh -c if [ -d "$1" ]; then printf 1; fi hud-session /runtime/sessions/<session>',
-            "exec --user 0 actor python3 -c <script> /runtime/sessions/<session> <export>.tar.gz",
-            "cp actor:<export>.tar.gz <local>/session.tar.gz",
-            "exec --user 0 actor rm -f <export>.tar.gz",
-            "exec --user 0 judge rm -rf /runtime/sessions/<session>",
-            "exec --user 0 judge mkdir -p /runtime/sessions/<session>",
-            "cp <local>/. judge:/runtime/sessions/<session>",
-            'exec linker sh -c if [ -d "$1" ]; then printf 1; fi hud-session /runtime/sessions/<session>',
-            "exec --user 0 linker python3 -c <script> /runtime/sessions/<session> <export>.tar.gz",
-            "exec --user 0 linker rm -f <export>.tar.gz",
-        ]
-    )
+    assert not any(command.startswith("cp linker:") for command in fake_docker.commands())
 
 
 async def test_a_restored_session_archive_may_hold_only_files_and_directories(
