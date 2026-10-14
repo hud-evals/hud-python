@@ -199,52 +199,60 @@ async def test_connect_retries_through_accept_then_eof_until_the_env_serves() ->
     assert attempts == 3
 
 
-async def test_tunnel_connection_failure_warns_with_peer(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+async def _serve_tunnels(
+    outcomes: list[str],
+) -> tuple[asyncio.Server, int, list[bytes]]:
+    """A stub env: answers ``hello``, then settles each ``tunnel.open`` as the next outcome.
+
+    ``eof`` closes the connection, ``stall`` never answers, ``unavailable`` replies with a
+    dial error, ``invalid`` replies with invalid params, and ``open`` confirms the stream and
+    echoes its bytes. Returns the bytes each confirmed stream received.
+    """
+    received: list[bytes] = []
+    pending = iter(outcomes)
+
     async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            hello = await read_frame(reader)
-            assert hello is not None
-            await send_frame(
-                writer,
-                {
-                    "jsonrpc": "2.0",
-                    "id": hello["id"],
-                    "result": {
-                        **HELLO_RESULT,
-                        "bindings": [
-                            {
-                                "name": "shell",
-                                "protocol": "ssh/2",
-                                "url": "ssh://agent@environment:22",
-                            }
-                        ],
-                    },
-                },
-            )
-            await read_frame(reader)
+            first = await read_frame(reader)
+            assert first is not None
+            if first["method"] == "hello":
+                bindings = [{"name": "shell", "protocol": "ssh/2", "url": "ssh://agent@env:22"}]
+                result = {**HELLO_RESULT, "bindings": bindings}
+                await send_frame(writer, {"jsonrpc": "2.0", "id": first["id"], "result": result})
+                await read_frame(reader)
+                return
+            outcome = next(pending, "open")
+            if outcome in ("unavailable", "invalid"):
+                code = -32000 if outcome == "unavailable" else -32602
+                error = {"code": code, "message": outcome}
+                await send_frame(writer, {"jsonrpc": "2.0", "id": first["id"], "error": error})
+            elif outcome == "stall":
+                await reader.read()
+            elif outcome == "open":
+                await send_frame(writer, {"jsonrpc": "2.0", "id": first["id"], "result": {}})
+                data = await reader.readexactly(4)
+                received.append(data)
+                writer.write(data)
+                await writer.drain()
         finally:
             writer.close()
 
     server = await asyncio.start_server(handler, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    open_connection = asyncio.open_connection
+    return server, server.sockets[0].getsockname()[1], received
 
-    async def fail_tunnel_connection(host: str, peer_port: int):
-        assert (host, peer_port) == ("127.0.0.1", port)
-        raise OSError("peer unavailable")
 
+async def test_tunnel_rides_out_connections_the_env_drops_before_confirming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client_module, "_CAPABILITY_CONNECT_BASE_DELAY_SECONDS", 0.01)
+    server, port, received = await _serve_tunnels(["eof", "unavailable", "eof", "open"])
     try:
         async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
             route = urlsplit(client.binding("shell").url)
-            monkeypatch.setattr(client_module.asyncio, "open_connection", fail_tunnel_connection)
-            caplog.set_level(logging.WARNING, logger="hud.clients")
-
-            reader, writer = await open_connection(route.hostname, route.port)
+            reader, writer = await asyncio.open_connection(route.hostname, route.port)
             try:
-                assert await reader.read() == b""
+                writer.write(b"ping")
+                assert await asyncio.wait_for(reader.readexactly(4), 5.0) == b"ping"
             finally:
                 writer.close()
                 await writer.wait_closed()
@@ -252,7 +260,79 @@ async def test_tunnel_connection_failure_warns_with_peer(
         server.close()
         await server.wait_closed()
 
-    assert f"tunnel peer 127.0.0.1:{port} connection failed: peer unavailable" in caplog.messages
+    assert received == [b"ping"]
+
+
+async def test_tunnel_open_stalled_past_the_heartbeat_timeout_is_redialed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client_module, "_CAPABILITY_CONNECT_BASE_DELAY_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_heartbeat_timeout", 0.05)
+    server, port, received = await _serve_tunnels(["stall", "open"])
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            route = urlsplit(client.binding("shell").url)
+            reader, writer = await asyncio.open_connection(route.hostname, route.port)
+            try:
+                writer.write(b"ping")
+                assert await asyncio.wait_for(reader.readexactly(4), 5.0) == b"ping"
+            finally:
+                writer.close()
+                await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert received == [b"ping"]
+
+
+async def test_tunnel_refused_with_invalid_params_is_not_retried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    server, port, received = await _serve_tunnels(["invalid", "open"])
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            route = urlsplit(client.binding("shell").url)
+            caplog.set_level(logging.WARNING, logger="hud.clients")
+
+            reader, writer = await asyncio.open_connection(route.hostname, route.port)
+            try:
+                assert await asyncio.wait_for(reader.read(), 5.0) == b""
+            finally:
+                writer.close()
+                await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert received == []
+    assert any("hud rpc error -32602: invalid" in message for message in caplog.messages)
+
+
+async def test_tunnel_gives_up_once_the_outage_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(client_module, "_CAPABILITY_CONNECT_BASE_DELAY_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_outage_budget", 0.1)
+    server, port, received = await _serve_tunnels(["eof"] * 1000)
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            route = urlsplit(client.binding("shell").url)
+            caplog.set_level(logging.WARNING, logger="hud.clients")
+
+            reader, writer = await asyncio.open_connection(route.hostname, route.port)
+            try:
+                assert await asyncio.wait_for(reader.read(), 5.0) == b""
+            finally:
+                writer.close()
+                await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert received == []
+    assert any("tunnel 'shell'" in m and "failed" in m for m in caplog.messages)
 
 
 async def test_heartbeat_serializes_calls_without_aborting_on_protocol_errors(

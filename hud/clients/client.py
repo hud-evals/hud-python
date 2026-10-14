@@ -51,6 +51,7 @@ _CONTROL_REDIAL_INTERVAL_SECONDS = 10.0
 _SLOW_HEARTBEAT_SECONDS = 5.0
 _CAPABILITY_CONNECT_ATTEMPTS = 3
 _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
+_INVALID_PARAMS_CODE = -32602
 
 #: protocol -> CapabilityClient subclass, for ``HudClient.open``.
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
@@ -93,6 +94,55 @@ async def _open_control_connection(
         if option is not None:
             sock.setsockopt(socket.IPPROTO_TCP, option, value)
     return reader, writer
+
+
+async def _open_tunnel(
+    host: str, port: int, capability: str
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Open one capability stream: dial the env and complete the ``tunnel.open`` exchange.
+
+    Retries for up to ``control_outage_budget``. No byte of the local connection is read
+    before the env confirms the stream, so a failed attempt never delivered anything and
+    redialing is always safe. A refused request (invalid params) is not retried.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + settings.control_outage_budget
+    attempt = 0
+    while True:
+        try:
+            async with asyncio.timeout(settings.control_heartbeat_timeout):
+                up_reader, up_writer = await _open_control_connection(host, port)
+                try:
+                    await send_frame(
+                        up_writer,
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "tunnel.open",
+                            "params": {"capability": capability},
+                        },
+                        max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+                    )
+                    opened = await read_frame(up_reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                    if opened is None:
+                        raise EOFError("env closed the connection during 'tunnel.open'")
+                    if "error" in opened:
+                        err = opened["error"]
+                        raise HudProtocolError(
+                            int(err.get("code", -32000)), str(err.get("message", ""))
+                        )
+                except BaseException:
+                    up_writer.close()
+                    raise
+            return up_reader, up_writer
+        except (OSError, EOFError, TimeoutError, HudProtocolError) as exc:
+            refused = isinstance(exc, HudProtocolError) and exc.code == _INVALID_PARAMS_CODE
+            if refused or loop.time() >= deadline:
+                raise
+            LOGGER.warning("tunnel %r to %s:%d not open, retrying: %r", capability, host, port, exc)
+        delay = _CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt
+        await asyncio.sleep(min(delay, _CONTROL_REDIAL_INTERVAL_SECONDS))
+        attempt += 1
 
 
 class ControlTimeoutError(TimeoutError):
@@ -251,30 +301,15 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await _open_control_connection(host, port)
-                    except OSError as exc:
+                        up_reader, up_writer = await _open_tunnel(host, port, capability.name)
+                    except (OSError, EOFError, TimeoutError, HudProtocolError) as exc:
                         LOGGER.warning(
-                            "tunnel peer %s:%d connection failed: %s",
+                            "tunnel %r to %s:%d failed: %r",
+                            capability.name,
                             host,
                             port,
                             exc,
                         )
-                        writer.close()
-                        return
-                    await send_frame(
-                        up_writer,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "method": "tunnel.open",
-                            "params": {"capability": capability.name},
-                        },
-                        max_bytes=CONTROL_FRAME_LIMIT_BYTES,
-                    )
-                    opened = await read_frame(up_reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
-                    if opened is None or "error" in opened:
-                        LOGGER.warning("tunnel.open %r refused: %s", capability.name, opened)
-                        up_writer.close()
                         writer.close()
                         return
                     await splice((reader, writer), (up_reader, up_writer))

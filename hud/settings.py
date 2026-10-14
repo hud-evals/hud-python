@@ -183,9 +183,9 @@ class Settings(BaseSettings):
     control_heartbeat_timeout: float = Field(
         default=60.0,
         gt=0,
-        description="Seconds the env may take to answer a control-channel heartbeat before "
-        "the client treats the link as down and redials. A liveness bound for a hung env "
-        "or a blackholed connection, not a latency target.",
+        description="Seconds the env may take to answer a control-channel heartbeat, or to "
+        "confirm a capability tunnel, before the client treats the link as down and redials. "
+        "A liveness bound for a hung env or a blackholed connection, not a latency target.",
         validation_alias="HUD_CONTROL_HEARTBEAT_TIMEOUT",
     )
 
@@ -194,7 +194,8 @@ class Settings(BaseSettings):
         gt=0,
         description="Seconds the control channel may stay down (dropped or unresponsive) while "
         "the client redials and resumes the session, before the rollout fails with the last "
-        "control error.",
+        "control error. Also how long a capability tunnel keeps redialing before the local "
+        "connection is closed.",
         validation_alias="HUD_CONTROL_OUTAGE_BUDGET",
     )
 
