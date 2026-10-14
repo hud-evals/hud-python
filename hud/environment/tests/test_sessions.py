@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import pytest
 
 from hud.capabilities import Connection
 from hud.clients import HudProtocolError, connect
 from hud.environment import Environment, Workspace, WorkspaceRoute
+from hud.environment.utils import read_frame, send_frame
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
@@ -127,6 +129,38 @@ async def test_hello_cannot_resume_a_live_session() -> None:
         await a.start_task("echo", {"tag": "a"})
         with pytest.raises(HudProtocolError, match="live connection"):
             await b.hello(session_id=a.manifest.session_id)
+
+
+async def test_hello_takes_over_a_live_session_when_asked() -> None:
+    async with LocalRuntime(_env())(_SESSION) as runtime, connect(runtime) as a:
+        assert a.manifest is not None
+        await a.start_task("echo", {"tag": "a"})
+        port = urlsplit(runtime.url).port
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "hello",
+                    "params": {"session_id": a.manifest.session_id, "takeover": True},
+                },
+            )
+            resumed = await read_frame(reader)
+            assert resumed is not None
+            assert resumed["result"]["session_id"] == a.manifest.session_id
+            await send_frame(
+                writer,
+                {"jsonrpc": "2.0", "id": 2, "method": "tasks.grade", "params": {"answer": "x"}},
+            )
+            graded = await read_frame(reader)
+            assert graded is not None
+            assert graded["result"]["tag"] == "a"
+        finally:
+            writer.close()
+        with pytest.raises(EOFError):
+            await a.grade({"answer": "x"})
 
 
 async def test_a_finished_session_releases_its_connection_for_the_next_rollout(

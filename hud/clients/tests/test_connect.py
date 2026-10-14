@@ -380,7 +380,9 @@ async def test_heartbeat_fails_a_hung_env_with_a_typed_error(
             writer.close()
 
     monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(settings, "control_heartbeat_timeout", 0.05)
+    monkeypatch.setattr(settings, "control_outage_budget", 0.2)
     server = await asyncio.start_server(handler, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     try:
@@ -397,6 +399,68 @@ async def test_heartbeat_fails_a_hung_env_with_a_typed_error(
         await server.wait_closed()
 
     assert body_interrupted.is_set()
+
+
+async def test_heartbeat_redials_and_resumes_the_session_after_the_control_link_drops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connections: list[list[dict[str, object]]] = []
+    resumed = asyncio.Event()
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        requests: list[dict[str, object]] = []
+        connections.append(requests)
+        try:
+            while (request := await read_frame(reader)) is not None:
+                requests.append(request)
+                if len(connections) == 1 and len(requests) == 2:
+                    return  # the link drops under the first heartbeat
+                if len(connections) == 2:
+                    resumed.set()
+                result = {"score": 1.0} if request["method"] == "tasks.grade" else HELLO_RESULT
+                await send_frame(writer, {"jsonrpc": "2.0", "id": request["id"], "result": result})
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            await asyncio.wait_for(resumed.wait(), 5.0)
+            assert await client.grade({"answer": "done"}) == {"score": 1.0}
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert connections[1][0]["params"] == {"session_id": "s-1", "takeover": True}
+    assert "tasks.grade" in [request["method"] for request in connections[1]]
+
+
+async def test_heartbeat_fails_with_the_last_error_once_the_outage_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(writer, {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT})
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_outage_budget", 0.1)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        with pytest.raises(EOFError, match="closed connection during 'hello'"):
+            async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
+                await asyncio.Event().wait()
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 async def test_connect_uses_runtime_ready_timeout_param(

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import faulthandler
 import inspect
 import queue
 import secrets
@@ -46,6 +47,8 @@ PORT_ANNOUNCEMENT = "HUD_SIM_PORT="
 #: Reserved ``--init`` key for declaration-time attrs (contract / metadata / num_envs)
 #: applied after the child ctor — keeps them out of subclass ``__init__`` signatures.
 _HUD_STATE = "__hud_state__"
+# A sim touch running this long dumps every thread's stack to stderr (no timeout).
+_SIM_TOUCH_STALL_DUMP_SECONDS = 300.0
 
 
 @dataclass
@@ -569,6 +572,7 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
                     touches.append(bridge._sim_q.get_nowait())
             for fn, fut in touches:
                 if fut.set_running_or_notify_cancel():
+                    faulthandler.dump_traceback_later(_SIM_TOUCH_STALL_DUMP_SECONDS, repeat=True)
                     try:
                         result = fn()
                         if inspect.iscoroutine(result):  # async hook: unawaitable here
@@ -577,6 +581,8 @@ def serve_bridge(bridge: RobotBridge, *, host: str = "127.0.0.1", port: int = 0)
                         fut.set_result(result)
                     except BaseException as exc:  # propagate to the awaiting caller
                         fut.set_exception(exc)
+                    finally:
+                        faulthandler.cancel_dump_traceback_later()
             if kit:
                 kit.get_app().update()
         except KeyboardInterrupt:  # Ctrl-C: cancel serving, keep draining through teardown

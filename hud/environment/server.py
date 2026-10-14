@@ -242,7 +242,8 @@ class _ControlChannel:
         #: Suspended tasks by session id. An entry whose session has no live
         #: connection is parked, awaiting a resume (or adoption) to grade.
         self._runners: dict[str, TaskRunner] = {}
-        self._live: set[str] = set()
+        #: Control connection currently driving each session.
+        self._live: dict[str, asyncio.StreamWriter] = {}
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         await self._cancel_runner(session_id)
@@ -319,7 +320,7 @@ class _ControlChannel:
         """One control session: JSON-RPC dispatch for the connection's lifetime."""
         env = self.env
         session_id = "sess-" + secrets.token_hex(4)
-        self._live.add(session_id)
+        self._live[session_id] = writer
         session_token = current_session_id.set(session_id)
 
         async def reply_to(msg_id: int | str | None, result: dict[str, Any]) -> None:
@@ -345,7 +346,7 @@ class _ControlChannel:
                                     msg_id, -32602, "hello: 'session_id' must be a string"
                                 )
                                 continue
-                            if requested in self._live:
+                            if requested in self._live and params.get("takeover") is not True:
                                 await error_to(
                                     msg_id, -32600, f"session {requested!r} has a live connection"
                                 )
@@ -353,10 +354,14 @@ class _ControlChannel:
                             if requested not in self._runners:
                                 await error_to(msg_id, -32600, f"unknown session: {requested!r}")
                                 continue
-                            # Resume: this connection becomes the parked session.
-                            self._live.discard(session_id)
+                            # Resume: this connection becomes the session. A takeover
+                            # replaces a connection the client has given up on, which
+                            # may be half-open and never report its own close.
+                            self._live.pop(session_id)
+                            if (stale := self._live.pop(requested, None)) is not None:
+                                stale.close()
                             session_id = requested
-                            self._live.add(session_id)
+                            self._live[session_id] = writer
                             current_session_id.reset(session_token)
                             session_token = current_session_id.set(session_id)
                         raw_routes = params.get("workspace_routes", [])
@@ -448,7 +453,8 @@ class _ControlChannel:
                     LOGGER.exception("error handling %s", method)
                     await error_to(msg_id, -32000, str(exc))
         finally:
-            self._live.discard(session_id)
+            if self._live.get(session_id) is writer:
+                del self._live[session_id]
             # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
             # teardown (callers that abort must cancel first — see rollout timeout).
             self._release_if_idle(session_id)

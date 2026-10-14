@@ -189,6 +189,15 @@ class Settings(BaseSettings):
         validation_alias="HUD_CONTROL_HEARTBEAT_TIMEOUT",
     )
 
+    control_outage_budget: float = Field(
+        default=600.0,
+        gt=0,
+        description="Seconds the control channel may stay down (dropped or unresponsive) while "
+        "the client redials and resumes the session, before the rollout fails with the last "
+        "control error.",
+        validation_alias="HUD_CONTROL_OUTAGE_BUDGET",
+    )
+
     @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:
