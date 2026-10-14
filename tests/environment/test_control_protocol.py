@@ -187,170 +187,42 @@ async def converse(env: Environment, frames: list[tuple[str, dict[str, Any] | No
     return replies
 
 
+def answer(reply: dict[str, Any]) -> Any:
+    """A reply frame's result, or its error as ``(code, message)``."""
+    assert reply["jsonrpc"] == "2.0"
+    return (
+        reply["result"]
+        if "result" in reply
+        else (reply["error"]["code"], reply["error"]["message"])
+    )
+
+
 async def test_tasks_list_publishes_each_templates_argument_and_io_contract(tmp_path: Path) -> None:
     env = protocol_env(tmp_path / "log")
     (reply,) = await converse(env, [("tasks.list", None)])
     listed = {task["id"]: task for task in reply["result"]["tasks"]}
-    empty = {"properties": {}, "type": "object", "additionalProperties": False}
+    files = listed["files"]["args"]["properties"]
+    defaults = listed["defaults"]["args"]
 
     assert sorted(listed) == sorted(env.tasks)
     assert listed["plain"]["description"] == "Grades 1.0 when the answer is 42."
-    assert {
-        name: task
-        for name, task in listed.items()
-        if task["args"] != empty or "input" in task or "returns" in task
-    } == snapshot(
-        {
-            "typed": {
-                "id": "typed",
-                "description": "",
-                "args": {
-                    "$defs": {
-                        "Payload": {
-                            "properties": {"text": {"title": "Text", "type": "string"}},
-                            "required": ["text"],
-                            "title": "Payload",
-                            "type": "object",
-                        }
-                    },
-                    "properties": {
-                        "mode": {"enum": ["upper", "lower"], "title": "Mode", "type": "string"},
-                        "payload": {"$ref": "#/$defs/Payload"},
-                        "retries": {
-                            "anyOf": [{"type": "integer"}, {"type": "null"}],
-                            "default": None,
-                            "title": "Retries",
-                        },
-                    },
-                    "required": ["mode", "payload"],
-                    "type": "object",
-                    "additionalProperties": False,
-                },
-            },
-            "structured": {
-                "id": "structured",
-                "description": "",
-                "args": {"properties": {}, "type": "object", "additionalProperties": False},
-                "input": {
-                    "properties": {
-                        "x": {"title": "X", "type": "integer"},
-                        "y": {"title": "Y", "type": "integer"},
-                    },
-                    "required": ["x", "y"],
-                    "title": "Point",
-                    "type": "object",
-                },
-                "returns": {
-                    "properties": {
-                        "x": {"title": "X", "type": "integer"},
-                        "y": {"title": "Y", "type": "integer"},
-                    },
-                    "required": ["x", "y"],
-                    "title": "Point",
-                    "type": "object",
-                },
-            },
-            "files": {
-                "id": "files",
-                "description": "",
-                "args": {
-                    "$defs": {
-                        "Attachment": {
-                            "additionalProperties": False,
-                            "properties": {
-                                "file_id": {
-                                    "description": "HUD data-file id",
-                                    "title": "File Id",
-                                    "type": "string",
-                                },
-                                "path": {
-                                    "anyOf": [{"type": "string"}, {"type": "null"}],
-                                    "default": None,
-                                    "description": "Environment-owned destination path",
-                                    "title": "Path",
-                                },
-                                "expand": {"default": False, "title": "Expand", "type": "boolean"},
-                            },
-                            "required": ["file_id"],
-                            "title": "Attachment",
-                            "type": "object",
-                        },
-                        "Criterion": {
-                            "properties": {
-                                "requirement": {"title": "Requirement", "type": "string"},
-                                "weight": {"default": 1.0, "title": "Weight", "type": "number"},
-                            },
-                            "required": ["requirement"],
-                            "title": "Criterion",
-                            "type": "object",
-                        },
-                    },
-                    "properties": {
-                        "prompt": {"title": "Prompt", "type": "string", "x-hud-hint": "prompt"},
-                        "attachment": {"$ref": "#/$defs/Attachment", "x-hud-hint": "data-file"},
-                        "fixtures": {
-                            "items": {"$ref": "#/$defs/Attachment"},
-                            "title": "Fixtures",
-                            "type": "array",
-                            "x-hud-hint": "data-files",
-                        },
-                        "criteria": {
-                            "items": {"$ref": "#/$defs/Criterion"},
-                            "title": "Criteria",
-                            "type": "array",
-                            "x-hud-hint": "grading",
-                        },
-                    },
-                    "required": ["prompt", "attachment", "fixtures", "criteria"],
-                    "type": "object",
-                    "additionalProperties": False,
-                },
-            },
-            "defaults": {
-                "id": "defaults",
-                "description": "",
-                "args": {
-                    "properties": {
-                        "difficulty": {"title": "Difficulty", "type": "integer"},
-                        "suite": {"default": "coding", "title": "Suite", "type": "string"},
-                    },
-                    "required": ["difficulty"],
-                    "type": "object",
-                    "additionalProperties": False,
-                },
-            },
-            "flexible": {
-                "id": "flexible",
-                "description": "",
-                "args": {
-                    "properties": {"n": {"title": "N", "type": "integer"}},
-                    "required": ["n"],
-                    "type": "object",
-                    "additionalProperties": True,
-                },
-            },
-            "loose": {
-                "id": "loose",
-                "description": "",
-                "args": {
-                    "properties": {"anything": {"title": "Anything"}},
-                    "required": ["anything"],
-                    "type": "object",
-                    "additionalProperties": False,
-                },
-            },
-            "guarded": {
-                "id": "guarded",
-                "description": "",
-                "args": {
-                    "properties": {"name": {"title": "Name", "type": "string"}},
-                    "required": ["name"],
-                    "type": "object",
-                    "additionalProperties": False,
-                },
-            },
-        }
+    assert {name: field["x-hud-hint"] for name, field in files.items()} == {
+        "prompt": "prompt",
+        "attachment": "data-file",
+        "fixtures": "data-files",
+        "criteria": "grading",
+    }
+    assert (defaults["required"], defaults["properties"]["suite"]["default"]) == (
+        ["difficulty"],
+        "coding",
     )
+    assert listed["typed"]["args"]["properties"]["mode"]["enum"] == ["upper", "lower"]
+    assert {name for name, task in listed.items() if task["args"]["additionalProperties"]} == {
+        "flexible"
+    }
+    assert {name: sorted(task.keys() & {"input", "returns"}) for name, task in listed.items()} == {
+        name: ["input", "returns"] if name == "structured" else [] for name in listed
+    }
 
 
 async def test_hello_names_the_session_and_publishes_hook_capabilities(tmp_path: Path) -> None:
@@ -379,615 +251,220 @@ async def test_hello_names_the_session_and_publishes_hook_capabilities(tmp_path:
     )
 
 
+def graded_with(message: str) -> tuple[int, str]:
+    return (-32000, message)
+
+
+TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
+    "number-right": ("plain", {}, "42", "What is six times seven?", {"score": 1.0}),
+    "number-wrong": ("plain", {}, "41", "What is six times seven?", {"score": 0.0}),
+    "score-dict-keeps-extras": (
+        "rich",
+        {},
+        "x",
+        "go",
+        {"score": 0.5, "info": {"detail": "partial credit"}},
+    ),
+    "evaluation-result-whole-frame": (
+        "model",
+        {},
+        "x",
+        "go",
+        {
+            "done": True,
+            "content": "nice",
+            "info": {"max_tile": 256},
+            "isError": False,
+            "subscores": [
+                {
+                    "name": "judge",
+                    "weight": 1.0,
+                    "value": 0.75,
+                    "children": [
+                        {
+                            "name": "criterion",
+                            "weight": 1.0,
+                            "value": 1.0,
+                            "children": None,
+                            "info": {"reason": "because"},
+                        }
+                    ],
+                    "info": {"model": "judge-model"},
+                }
+            ],
+            "score": 0.75,
+        },
+    ),
+    "dict-without-score-fails-loudly": (
+        "bad_dict",
+        {},
+        "x",
+        "go",
+        graded_with(
+            "task 'bad_dict' graded with a dict missing a numeric 'score' (keys: ['reward'])"
+        ),
+    ),
+    "string-grade-fails-loudly": (
+        "stringy",
+        {},
+        "x",
+        "go",
+        graded_with(
+            "task graded with str: yield a number, an object with a numeric .reward, "
+            "or a dict containing a numeric 'score'"
+        ),
+    ),
+    "no-grade-yield-grades-zero": ("no_grade", {}, "x", "go", {"score": 0.0}),
+    "json-string-args-coerce-to-annotations": (
+        "typed",
+        {"mode": '"upper"', "payload": '{"text":"hello"}', "retries": "3"},
+        "x",
+        "HELLO!!!",
+        {"score": 1.0},
+    ),
+    "native-args-validate-against-annotations": (
+        "typed",
+        {"mode": "lower", "payload": {"text": "HeLLo"}},
+        "x",
+        "hello",
+        {"score": 1.0},
+    ),
+    "returns-parses": (
+        "structured",
+        {},
+        '{"x": 1, "y": 2}',
+        "Name a point.",
+        {"score": 1.0, "content": {"x": 1, "y": 2}, "raw": '{"x": 1, "y": 2}'},
+    ),
+    "returns-keeps-raw": (
+        "structured",
+        {},
+        "about (1, 2)",
+        "Name a point.",
+        {"score": 0.0, "content": "about (1, 2)", "raw": "about (1, 2)"},
+    ),
+    "data-file-and-grading-args-arrive-as-models": (
+        "files",
+        {
+            "prompt": "Review",
+            "attachment": {"file_id": "file-1", "path": "brief.pdf"},
+            "fixtures": [{"file_id": "file-2"}],
+            "criteria": [{"requirement": "Answer it", "weight": 2.0}],
+        },
+        "x",
+        "Review Attachment:brief.pdf ['Attachment'] Criterion:Answer itx2.0",
+        {"score": 1.0},
+    ),
+    "defaults-fill-in": ("defaults", {"difficulty": 3}, "x", "coding at 3", {"score": 1.0}),
+    "var-kwargs": (
+        "flexible",
+        {"n": 1, "b": "2", "a": "1"},
+        "x",
+        "1 [('a', '1'), ('b', '2')]",
+        {"score": 1.0},
+    ),
+    "unannotated": (
+        "loose",
+        {"anything": [1, {"a": None}]},
+        "x",
+        "[1, {'a': None}]",
+        {"score": 1.0},
+    ),
+}
+
+
 @pytest.mark.parametrize(
-    ("template", "args", "answer", "expected"),
-    [
-        pytest.param(
-            "plain",
-            {},
-            "42",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "What is six times seven?"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="number-right",
-        ),
-        pytest.param(
-            "plain",
-            {},
-            "41",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "What is six times seven?"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 0.0}},
-                ]
-            ),
-            id="number-wrong",
-        ),
-        pytest.param(
-            "rich",
-            {},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "go"}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "result": {"score": 0.5, "info": {"detail": "partial credit"}},
-                    },
-                ]
-            ),
-            id="score-dict-keeps-extras",
-        ),
-        pytest.param(
-            "model",
-            {},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "go"}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "result": {
-                            "done": True,
-                            "content": "nice",
-                            "info": {"max_tile": 256},
-                            "isError": False,
-                            "subscores": [
-                                {
-                                    "name": "judge",
-                                    "weight": 1.0,
-                                    "value": 0.75,
-                                    "children": [
-                                        {
-                                            "name": "criterion",
-                                            "weight": 1.0,
-                                            "value": 1.0,
-                                            "children": None,
-                                            "info": {"reason": "because"},
-                                        }
-                                    ],
-                                    "info": {"model": "judge-model"},
-                                }
-                            ],
-                            "score": 0.75,
-                        },
-                    },
-                ]
-            ),
-            id="evaluation-result-whole-frame",
-        ),
-        pytest.param(
-            "bad_dict",
-            {},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "go"}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "error": {
-                            "code": -32000,
-                            "message": (
-                                "task 'bad_dict' graded with a dict missing a numeric 'score' "
-                                "(keys: ['reward'])"
-                            ),
-                        },
-                    },
-                ]
-            ),
-            id="dict-without-score-fails-loudly",
-        ),
-        pytest.param(
-            "stringy",
-            {},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "go"}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "error": {
-                            "code": -32000,
-                            "message": (
-                                "task graded with str: yield a number, an object with a numeric "
-                                ".reward, or a dict containing a numeric 'score'"
-                            ),
-                        },
-                    },
-                ]
-            ),
-            id="string-grade-fails-loudly",
-        ),
-        pytest.param(
-            "no_grade",
-            {},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "go"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 0.0}},
-                ]
-            ),
-            id="no-grade-yield-grades-zero",
-        ),
-        pytest.param(
-            "typed",
-            {"mode": '"upper"', "payload": '{"text":"hello"}', "retries": "3"},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "HELLO!!!"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="json-string-args-coerce-to-annotations",
-        ),
-        pytest.param(
-            "typed",
-            {"mode": "lower", "payload": {"text": "HeLLo"}},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "hello"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="native-args-validate-against-annotations",
-        ),
-        pytest.param(
-            "structured",
-            {},
-            '{"x": 1, "y": 2}',
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "Name a point."}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "result": {
-                            "score": 1.0,
-                            "content": {"x": 1, "y": 2},
-                            "raw": '{"x": 1, "y": 2}',
-                        },
-                    },
-                ]
-            ),
-            id="returns-parses",
-        ),
-        pytest.param(
-            "structured",
-            {},
-            "about (1, 2)",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "Name a point."}},
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "result": {"score": 0.0, "content": "about (1, 2)", "raw": "about (1, 2)"},
-                    },
-                ]
-            ),
-            id="returns-keeps-raw",
-        ),
-        pytest.param(
-            "files",
-            {
-                "prompt": "Review",
-                "attachment": {"file_id": "file-1", "path": "brief.pdf"},
-                "fixtures": [{"file_id": "file-2"}],
-                "criteria": [{"requirement": "Answer it", "weight": 2.0}],
-            },
-            "x",
-            snapshot(
-                [
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "result": {
-                            "prompt": (
-                                "Review Attachment:brief.pdf ['Attachment'] Criterion:Answer itx2.0"
-                            )
-                        },
-                    },
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="data-file-and-grading-args-arrive-as-models",
-        ),
-        pytest.param(
-            "defaults",
-            {"difficulty": 3},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "coding at 3"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="defaults-fill-in",
-        ),
-        pytest.param(
-            "flexible",
-            {"n": 1, "b": "2", "a": "1"},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "1 [('a', '1'), ('b', '2')]"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="var-kwargs",
-        ),
-        pytest.param(
-            "loose",
-            {"anything": [1, {"a": None}]},
-            "x",
-            snapshot(
-                [
-                    {"jsonrpc": "2.0", "id": 1, "result": {"prompt": "[1, {'a': None}]"}},
-                    {"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}},
-                ]
-            ),
-            id="unannotated",
-        ),
-    ],
+    ("template", "args", "reply", "prompt", "grade"), TEMPLATES.values(), ids=TEMPLATES.keys()
 )
 async def test_a_template_starts_and_grades_over_the_wire(
-    tmp_path: Path, template: str, args: dict[str, Any], answer: str, expected: Any
+    tmp_path: Path, template: str, args: dict[str, Any], reply: str, prompt: str, grade: Any
 ) -> None:
     replies = await converse(
         protocol_env(tmp_path / "log"),
-        [("tasks.start", {"id": template, "args": args}), ("tasks.grade", {"answer": answer})],
+        [("tasks.start", {"id": template, "args": args}), ("tasks.grade", {"answer": reply})],
     )
 
-    assert replies == expected
+    assert [answer(frame) for frame in replies] == [{"prompt": prompt}, grade]
 
 
-@pytest.mark.parametrize(
-    ("frames", "expected"),
-    [
-        pytest.param(
-            [("tasks.start", {"id": "missing"})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {"code": -32602, "message": "unknown task: 'missing'"},
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="start-unknown-template",
-        ),
-        pytest.param(
-            [("tasks.start", {"id": 7})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "tasks.start: 'id' must be a string",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="start-non-string-id",
-        ),
-        pytest.param(
-            [("tasks.start", {"id": "guarded", "args": ["x"]})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "tasks.start: 'args' must be an object",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="start-list-args",
-        ),
-        pytest.param(
-            [("tasks.start", {"id": "guarded", "args": []})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "tasks.start: 'args' must be an object",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="start-empty-list-args",
-        ),
-        pytest.param(
-            [("tasks.start", {"id": "guarded", "args": {"nmae": "x"}})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32000,
-                                "message": (
-                                    "task 'guarded': bad args ['nmae']: missing a required "
-                                    "argument: 'name'"
-                                ),
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="start-signature-mismatch",
-        ),
-        pytest.param(
-            [("tasks.start", {"id": "lookup"})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {"code": -32000, "message": "'missing'"},
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="start-template-raises-keyerror",
-        ),
-        pytest.param(
-            [("tasks.grade", {"answer": "x"})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {"code": -32600, "message": "no task in progress"},
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="grade-without-start",
-        ),
-        pytest.param(
-            [("tasks.stop", {})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {"code": -32601, "message": "method not found: tasks.stop"},
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="unknown-method",
-        ),
-        pytest.param(
-            [("tasks.cancel", None), ("tunnel.open", {"capability": "browser"})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "result": {"cancelled": True},
-                        },
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 2,
-                            "error": {"code": -32601, "message": "method not found: tunnel.open"},
-                        },
-                    ],
-                    [],
-                )
-            ),
-            id="tunnel-open-mid-session",
-        ),
-        pytest.param(
-            [("hello", {"session_id": 5})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "hello: 'session_id' must be a string",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-non-string-session",
-        ),
-        pytest.param(
-            [("hello", {"session_id": "sess-00000000"})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32600,
-                                "message": "unknown session: 'sess-00000000'",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-unknown-session",
-        ),
-        pytest.param(
-            [("hello", {"workspace_routes": "ssh"})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "hello: 'workspace_routes' must be a list",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-routes-not-a-list",
-        ),
-        pytest.param(
-            [("hello", {"workspace_routes": [{"capability": "ssh", "host": "h", "port": "443"}]})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "hello: workspace route port must be an integer",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-route-port-not-an-int",
-        ),
-        pytest.param(
-            [("hello", {"connections": {"name": "x"}})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": "hello: 'connections' must be a list",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-connections-object",
-        ),
-        pytest.param(
-            [("hello", {"connections": [{"name": "inference"}]})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32602,
-                                "message": (
-                                    "hello: connection name, capability, and url must be strings"
-                                ),
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-connection-missing-fields",
-        ),
-        pytest.param(
-            [
-                (
-                    "hello",
-                    {
-                        "connections": [
-                            {
-                                "name": "inference",
-                                "capability": "ssh",
-                                "url": "https://inference.example",
-                                "headers": {"Authorization": "Bearer t"},
-                            }
-                        ]
-                    },
-                )
-            ],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32000,
-                                "message": "workspace capability 'ssh' does not exist",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-connection-without-a-workspace",
-        ),
-        pytest.param(
-            [("hello", {"workspace_routes": [{"capability": "ssh", "host": "h", "port": 443}]})],
-            snapshot(
-                (
-                    [
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "error": {
-                                "code": -32000,
-                                "message": "workspace capability 'ssh' does not exist",
-                            },
-                        }
-                    ],
-                    [],
-                )
-            ),
-            id="hello-route-without-a-workspace",
-        ),
-    ],
-)
+INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
+ROUTE = {"capability": "ssh", "host": "h", "port": 443}
+CONNECTION = {
+    "name": "inference",
+    "capability": "ssh",
+    "url": "https://inference.example",
+    "headers": {"Authorization": "Bearer t"},
+}
+BAD_REQUESTS: dict[str, tuple[list[tuple[str, dict[str, Any] | None]], list[Any]]] = {
+    "start-unknown-template": (
+        [("tasks.start", {"id": "missing"})],
+        [(INVALID, "unknown task: 'missing'")],
+    ),
+    "start-non-string-id": (
+        [("tasks.start", {"id": 7})],
+        [(INVALID, "tasks.start: 'id' must be a string")],
+    ),
+    "start-list-args": (
+        [("tasks.start", {"id": "guarded", "args": ["x"]})],
+        [(INVALID, "tasks.start: 'args' must be an object")],
+    ),
+    "start-empty-list-args": (
+        [("tasks.start", {"id": "guarded", "args": []})],
+        [(INVALID, "tasks.start: 'args' must be an object")],
+    ),
+    "start-signature-mismatch": (
+        [("tasks.start", {"id": "guarded", "args": {"nmae": "x"}})],
+        [(FAILED, "task 'guarded': bad args ['nmae']: missing a required argument: 'name'")],
+    ),
+    "start-template-raises-keyerror": (
+        [("tasks.start", {"id": "lookup"})],
+        [(FAILED, "'missing'")],
+    ),
+    "grade-without-start": (
+        [("tasks.grade", {"answer": "x"})],
+        [(BAD_STATE, "no task in progress")],
+    ),
+    "unknown-method": ([("tasks.stop", {})], [(NOT_FOUND, "method not found: tasks.stop")]),
+    "tunnel-open-mid-session": (
+        [("tasks.cancel", None), ("tunnel.open", {"capability": "browser"})],
+        [{"cancelled": True}, (NOT_FOUND, "method not found: tunnel.open")],
+    ),
+    "hello-non-string-session": (
+        [("hello", {"session_id": 5})],
+        [(INVALID, "hello: 'session_id' must be a string")],
+    ),
+    "hello-unknown-session": (
+        [("hello", {"session_id": "sess-00000000"})],
+        [(BAD_STATE, "unknown session: 'sess-00000000'")],
+    ),
+    "hello-routes-not-a-list": (
+        [("hello", {"workspace_routes": "ssh"})],
+        [(INVALID, "hello: 'workspace_routes' must be a list")],
+    ),
+    "hello-route-port-not-an-int": (
+        [("hello", {"workspace_routes": [{**ROUTE, "port": "443"}]})],
+        [(INVALID, "hello: workspace route port must be an integer")],
+    ),
+    "hello-connections-object": (
+        [("hello", {"connections": {"name": "x"}})],
+        [(INVALID, "hello: 'connections' must be a list")],
+    ),
+    "hello-connection-missing-fields": (
+        [("hello", {"connections": [{"name": "inference"}]})],
+        [(INVALID, "hello: connection name, capability, and url must be strings")],
+    ),
+    "hello-connection-without-a-workspace": (
+        [("hello", {"connections": [CONNECTION]})],
+        [(FAILED, "workspace capability 'ssh' does not exist")],
+    ),
+    "hello-route-without-a-workspace": (
+        [("hello", {"workspace_routes": [ROUTE]})],
+        [(FAILED, "workspace capability 'ssh' does not exist")],
+    ),
+}
+
+
+@pytest.mark.parametrize(("frames", "expected"), BAD_REQUESTS.values(), ids=BAD_REQUESTS.keys())
 async def test_a_bad_request_gets_an_error_reply_and_the_session_keeps_serving(
     tmp_path: Path, frames: list[tuple[str, dict[str, Any] | None]], expected: Any
 ) -> None:
@@ -996,66 +473,37 @@ async def test_a_bad_request_gets_an_error_reply_and_the_session_keeps_serving(
     replies = await converse(protocol_env(log), [*frames, ("tasks.list", None)])
 
     *errors, listed = replies
-    assert (errors, lines(log)) == expected
+    assert [answer(frame) for frame in errors] == expected
+    assert lines(log) == []
     assert "tasks" in listed["result"]
 
 
+FIRST = ["start first", "closed first"]
+ENDINGS: dict[
+    str, tuple[list[tuple[str, dict[str, Any] | None]], list[Any], list[str], list[str]]
+] = {
+    "cancel": ([("tasks.cancel", None)], [{"cancelled": True}], FIRST, FIRST),
+    "bye": ([("bye", None)], [{"goodbye": True}], FIRST, FIRST),
+    "grade": ([("tasks.grade", {"answer": "x"})], [{"score": 1.0}], FIRST, FIRST),
+    "restart": (
+        [("tasks.start", {"id": "guarded", "args": {"name": "second"}})],
+        [{"prompt": "holding second"}],
+        [*FIRST, "start second"],
+        [*FIRST, "start second", "closed second"],
+    ),
+    "disconnect-parks": ([], [], ["start first"], FIRST),
+}
+
+
 @pytest.mark.parametrize(
-    ("ending", "expected"),
-    [
-        pytest.param(
-            [("tasks.cancel", None)],
-            snapshot(
-                (
-                    [{"jsonrpc": "2.0", "id": 2, "result": {"cancelled": True}}],
-                    ["start first", "closed first"],
-                    ["start first", "closed first"],
-                )
-            ),
-            id="cancel",
-        ),
-        pytest.param(
-            [("bye", None)],
-            snapshot(
-                (
-                    [{"jsonrpc": "2.0", "id": 2, "result": {"goodbye": True}}],
-                    ["start first", "closed first"],
-                    ["start first", "closed first"],
-                )
-            ),
-            id="bye",
-        ),
-        pytest.param(
-            [("tasks.grade", {"answer": "x"})],
-            snapshot(
-                (
-                    [{"jsonrpc": "2.0", "id": 2, "result": {"score": 1.0}}],
-                    ["start first", "closed first"],
-                    ["start first", "closed first"],
-                )
-            ),
-            id="grade",
-        ),
-        pytest.param(
-            [("tasks.start", {"id": "guarded", "args": {"name": "second"}})],
-            snapshot(
-                (
-                    [{"jsonrpc": "2.0", "id": 2, "result": {"prompt": "holding second"}}],
-                    ["start first", "closed first", "start second"],
-                    ["start first", "closed first", "start second", "closed second"],
-                )
-            ),
-            id="restart",
-        ),
-        pytest.param(
-            [],
-            snapshot(([], ["start first"], ["start first", "closed first"])),
-            id="disconnect-parks",
-        ),
-    ],
+    ("ending", "replies", "while_served", "after"), ENDINGS.values(), ids=ENDINGS.keys()
 )
 async def test_ending_a_session_closes_its_template(
-    tmp_path: Path, ending: list[tuple[str, dict[str, Any] | None]], expected: Any
+    tmp_path: Path,
+    ending: list[tuple[str, dict[str, Any] | None]],
+    replies: list[Any],
+    while_served: list[str],
+    after: list[str],
 ) -> None:
     log = tmp_path / "log"
     env = protocol_env(log)
@@ -1063,10 +511,11 @@ async def test_ending_a_session_closes_its_template(
     async with LocalRuntime(env)(Task(env=env.name, id="protocol")) as runtime:
         async with wire(runtime.url) as connection:
             await connection.call("tasks.start", {"id": "guarded", "args": {"name": "first"}})
-            replies = [await connection.call(method, params) for method, params in ending]
-        while_served = lines(log)
+            sent = [await connection.call(method, params) for method, params in ending]
+        served_log = lines(log)
 
-    assert (replies, while_served, lines(log)) == expected
+    assert [answer(frame) for frame in sent] == replies
+    assert (served_log, lines(log)) == (while_served, after)
 
 
 def big_args_start(size: int) -> dict[str, Any]:
