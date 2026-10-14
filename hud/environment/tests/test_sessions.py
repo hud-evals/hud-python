@@ -328,3 +328,31 @@ async def test_a_start_retried_on_a_new_connection_joins_the_start_in_flight() -
     assert started is not None
     assert started["result"]["prompt"] == "ready"
     assert starts == 1
+
+
+async def test_hello_resumes_a_session_that_holds_no_task() -> None:
+    async with LocalRuntime(_env())(_SESSION) as runtime:
+        async with connect(runtime) as first:
+            assert first.manifest is not None
+            session_id = first.manifest.session_id
+        async with connect(runtime) as later:
+            await later.hello(session_id=session_id)
+            assert later.manifest is not None
+            assert later.manifest.session_id == session_id
+
+
+async def test_hello_cannot_resume_a_session_that_said_bye() -> None:
+    async with LocalRuntime(_env())(_SESSION) as runtime:
+        reader, writer = await asyncio.open_connection("127.0.0.1", urlsplit(runtime.url).port)
+        try:
+            await send_frame(writer, {"jsonrpc": "2.0", "id": 1, "method": "hello"})
+            hello = await read_frame(reader)
+            assert hello is not None
+            session_id = hello["result"]["session_id"]
+            await send_frame(writer, {"jsonrpc": "2.0", "id": 2, "method": "bye"})
+            assert await read_frame(reader) is not None
+        finally:
+            writer.close()
+        async with connect(runtime) as later:
+            with pytest.raises(HudProtocolError, match="unknown session"):
+                await later.hello(session_id=session_id)

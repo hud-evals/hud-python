@@ -256,6 +256,8 @@ class _ControlChannel:
         self._runners: dict[str, TaskRunner] = {}
         #: Control connection currently driving each session.
         self._live: dict[str, asyncio.StreamWriter] = {}
+        #: Ids of sessions that may be resumed: issued by this server and not ended by ``bye``.
+        self._resumable: set[str] = set()
         #: Grade of each session, kept from the first ``tasks.grade`` until the
         #: session's next start, cancel, or bye. A client that lost the reply
         #: resumes the session and re-sends ``tasks.grade`` to collect the same result.
@@ -360,6 +362,7 @@ class _ControlChannel:
         """One control session: JSON-RPC dispatch for the connection's lifetime."""
         env = self.env
         session_id = "sess-" + secrets.token_hex(4)
+        self._resumable.add(session_id)
         self._live[session_id] = writer
         session_token = current_session_id.set(session_id)
 
@@ -391,7 +394,7 @@ class _ControlChannel:
                                     msg_id, -32600, f"session {requested!r} has a live connection"
                                 )
                                 continue
-                            if requested not in self._runners and requested not in self._grades:
+                            if requested not in self._resumable:
                                 await error_to(msg_id, -32600, f"unknown session: {requested!r}")
                                 continue
                             # Resume: this connection becomes the session. A takeover
@@ -485,6 +488,7 @@ class _ControlChannel:
 
                     elif method == "bye":
                         await self.cancel(session_id)
+                        self._resumable.discard(session_id)
                         await reply_to(msg_id, {"goodbye": True})
                         return
 

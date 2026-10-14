@@ -663,3 +663,47 @@ async def test_control_connection_enables_keepalive_with_configured_timings(
         for _level, option, value in applied
         if option in (getattr(socket, "TCP_KEEPIDLE", None), getattr(socket, "TCP_KEEPALIVE", None))
     )
+
+
+async def test_redial_the_env_refuses_to_resume_never_continues_on_a_fresh_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connections: list[list[dict[str, object]]] = []
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        requests: list[dict[str, object]] = []
+        connections.append(requests)
+        first = len(connections) == 1
+        try:
+            while (request := await read_frame(reader)) is not None:
+                requests.append(request)
+                if first and request["method"] == "tasks.grade":
+                    return
+                if first or request["method"] != "hello":
+                    result: dict[str, object] = HELLO_RESULT
+                    await send_frame(
+                        writer, {"jsonrpc": "2.0", "id": request["id"], "result": result}
+                    )
+                else:
+                    error = {"code": -32600, "message": "unknown session: 's-1'"}
+                    await send_frame(
+                        writer, {"jsonrpc": "2.0", "id": request["id"], "error": error}
+                    )
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            for _ in range(2):
+                with pytest.raises(HudProtocolError, match="unknown session"):
+                    await client.grade({"answer": "done"})
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    methods = [request["method"] for requests in connections[1:] for request in requests]
+    assert methods
+    assert set(methods) == {"hello"}

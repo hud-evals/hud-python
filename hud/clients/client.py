@@ -499,16 +499,20 @@ class HudClient:
                 f"env did not accept a control connection within "
                 f"{settings.control_heartbeat_timeout:g}s"
             ) from None
+        try:
+            await self._exchange(
+                "hello",
+                {
+                    **self._attach_params,
+                    "session_id": self.manifest.session_id,
+                    "takeover": True,
+                },
+                settings.control_heartbeat_timeout,
+            )
+        except HudProtocolError:
+            self._writer.close()
+            raise
         self._control_down = False
-        await self._exchange(
-            "hello",
-            {
-                **self._attach_params,
-                "session_id": self.manifest.session_id,
-                "takeover": True,
-            },
-            settings.control_heartbeat_timeout,
-        )
 
 
 # ─── module-level entry points ────────────────────────────────────────
