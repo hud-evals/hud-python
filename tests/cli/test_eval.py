@@ -552,249 +552,59 @@ async def test_eval_attaches_to_an_already_served_environment(
 # ─── planning and validation ────────────────────────────────────────────
 
 
+PLAN = {
+    "dry_run": True,
+    "action": "eval",
+    "source": "tasks.py",
+    "agent": "openai",
+    "model": None,
+    "runtime": "local",
+    "remote": False,
+    "all": False,
+    "max_steps": 10,
+    "max_concurrent": 30,
+    "group_size": 1,
+    "task_ids": None,
+}
+
+
 @pytest.mark.parametrize(
-    ("config", "argv", "plan"),
+    ("config", "argv", "changes"),
     [
-        (
-            "",
-            ["tasks.py", "openai"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "local",
-                    "remote": False,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
-        (
-            "",
-            ["My Tasks", "openai"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "My Tasks",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hosted",
-                    "remote": True,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
-        (
-            "",
-            ["My Tasks", "openai", "--runtime", "hud"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "My Tasks",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hud",
-                    "remote": False,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
-        (
-            "",
-            ["tasks.py", "openai", "--full"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "local",
-                    "remote": False,
-                    "all": True,
-                    "max_steps": 100,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
-        (
-            "[eval]\nremote = true\n",
-            ["tasks.py", "openai"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hosted",
-                    "remote": True,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
+        ("", ["tasks.py", "openai"], {}),
+        ("", ["My Tasks", "openai"], {"source": "My Tasks", "runtime": "hosted", "remote": True}),
+        ("", ["My Tasks", "openai", "--runtime", "hud"], {"source": "My Tasks", "runtime": "hud"}),
+        ("", ["tasks.py", "openai", "--full"], {"all": True, "max_steps": 100}),
+        ("[eval]\nremote = true\n", ["tasks.py", "openai"], {"runtime": "hosted", "remote": True}),
         (
             "[eval]\nremote = false\n",
             ["My Tasks", "openai"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "My Tasks",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hosted",
-                    "remote": True,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
+            {"source": "My Tasks", "runtime": "hosted", "remote": True},
         ),
-        (
-            '[eval]\nremote = true\nruntime = "local"\n',
-            ["tasks.py", "openai"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "local",
-                    "remote": False,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
-        (
-            '[eval]\nremote = false\nruntime = "hud"\n',
-            ["tasks.py", "openai"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hud",
-                    "remote": False,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
-        (
-            "[eval]\nremote = true\n",
-            ["tasks.py", "openai", "--runtime", "local"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "local",
-                    "remote": False,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
-        ),
+        ('[eval]\nremote = true\nruntime = "local"\n', ["tasks.py", "openai"], {}),
+        ('[eval]\nremote = false\nruntime = "hud"\n', ["tasks.py", "openai"], {"runtime": "hud"}),
+        ("[eval]\nremote = true\n", ["tasks.py", "openai", "--runtime", "local"], {}),
         (
             "[eval]\nremote = false\n",
             ["tasks.py", "openai", "--remote"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hosted",
-                    "remote": True,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
+            {"runtime": "hosted", "remote": True},
         ),
         (
             '[eval]\nsource = "tasks.py"\nagent = "openai"\nmax_steps = 5\nruntime = "hosted"\n'
             'group_size = 2\ntask_ids = ["solve"]\n',
             [],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": None,
-                    "runtime": "hosted",
-                    "remote": True,
-                    "all": False,
-                    "max_steps": 5,
-                    "max_concurrent": 30,
-                    "group_size": 2,
-                    "task_ids": ["solve"],
-                }
-            ),
+            {
+                "runtime": "hosted",
+                "remote": True,
+                "max_steps": 5,
+                "group_size": 2,
+                "task_ids": ["solve"],
+            },
         ),
         (
             '[openai]\nmodel = "${MY_EVAL_MODEL}"\n',
             ["tasks.py", "openai", "-m", "x"],
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "eval",
-                    "source": "tasks.py",
-                    "agent": "openai",
-                    "model": "x",
-                    "runtime": "local",
-                    "remote": False,
-                    "all": False,
-                    "max_steps": 10,
-                    "max_concurrent": 30,
-                    "group_size": 1,
-                    "task_ids": None,
-                }
-            ),
+            {"model": "x"},
         ),
     ],
 )
@@ -805,7 +615,7 @@ def test_a_dry_run_prints_the_plan_and_runs_nothing(
     tasks: Path,
     config: str,
     argv: list[str],
-    plan: dict[str, Any],
+    changes: dict[str, Any],
 ) -> None:
     hud_env.set(MY_EVAL_MODEL="gpt-4o")
     (hud.cwd / ".hud_eval.toml").write_text(config)
@@ -813,7 +623,7 @@ def test_a_dry_run_prints_the_plan_and_runs_nothing(
     result = hud("eval", *argv, "--dry-run", "--json")
 
     assert result.exit_code == 0, result
-    assert result.json == plan
+    assert result.json == PLAN | changes
     assert services.requests() == []
     assert (hud.cwd / ".hud_eval.toml").read_text() == config
 
