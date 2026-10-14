@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from .client import HudClient, HudProtocolError, Manifest, ServerInfo, connect
+from .client import ControlTimeoutError, HudClient, HudProtocolError, Manifest, ServerInfo, connect
 
 __all__ = [
+    "ControlTimeoutError",
     "HudClient",
     "HudProtocolError",
     "Manifest",

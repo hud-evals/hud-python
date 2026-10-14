@@ -35,6 +35,7 @@ from hud.environment.utils import (
     send_frame,
     splice,
 )
+from hud.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -65,6 +66,10 @@ async def _connect_capability(
                 raise
             await asyncio.sleep(_CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
     raise RuntimeError("capability connect attempts must be positive")
+
+
+class ControlTimeoutError(TimeoutError):
+    """Raised when the env does not answer a control request within its liveness deadline."""
 
 
 class HudProtocolError(RuntimeError):
@@ -348,6 +353,8 @@ class HudClient:
         self,
         method: str,
         params: dict[str, Any],
+        *,
+        reply_timeout: float | None = None,
     ) -> dict[str, Any]:
         async with self._call_lock:
             msg_id = next(self._ids)
@@ -355,33 +362,39 @@ class HudClient:
                 {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
                 max_bytes=CONTROL_FRAME_LIMIT_BYTES,
             )
+            deadline = asyncio.timeout(reply_timeout)
             try:
-                self._writer.write(frame)
-                await self._writer.drain()
-                reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
-                if reply is None:
-                    raise EOFError(f"env closed connection during {method!r}")
-                if reply.get("id") != msg_id:
-                    self.abort()
-                    if reply.get("id") is not None or "error" not in reply:
+                async with deadline:
+                    self._writer.write(frame)
+                    await self._writer.drain()
+                    reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                    if reply is None:
+                        raise EOFError(f"env closed connection during {method!r}")
+                    if reply.get("id") != msg_id:
+                        self.abort()
+                        if reply.get("id") is not None or "error" not in reply:
+                            raise HudProtocolError(
+                                -32603,
+                                f"{method!r}: reply id did not match request",
+                            )
+                    if "error" in reply:
+                        err = reply["error"]
                         raise HudProtocolError(
-                            -32603,
-                            f"{method!r}: reply id did not match request",
+                            int(err.get("code", -32000)),
+                            str(err.get("message", "")),
                         )
-                if "error" in reply:
-                    err = reply["error"]
-                    raise HudProtocolError(
-                        int(err.get("code", -32000)),
-                        str(err.get("message", "")),
-                    )
-                result = reply.get("result")
-                if not isinstance(result, dict):
-                    raise HudProtocolError(-32603, f"{method!r}: result was not an object")
-                return result
+                    result = reply.get("result")
+                    if not isinstance(result, dict):
+                        raise HudProtocolError(-32603, f"{method!r}: result was not an object")
+                    return result
             except HudProtocolError:
                 raise
-            except BaseException:
+            except BaseException as exc:
                 self.abort()
+                if isinstance(exc, TimeoutError) and deadline.expired():
+                    raise ControlTimeoutError(
+                        f"env did not reply to {method!r} within {reply_timeout:g}s"
+                    ) from None
                 raise
 
 
@@ -482,8 +495,6 @@ async def connect(
     heartbeat_error: Exception | None = None
 
     async def heartbeat() -> None:
-        # Keeps the idle control link alive. A slow reply is not a failure; only a
-        # closed or broken connection is.
         nonlocal heartbeat_error
         while True:
             await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
@@ -494,7 +505,11 @@ async def connect(
                     params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
                 if connections:
                     params["connections"] = [connection.to_wire() for connection in connections]
-                await client._call("hello", params)
+                await client._call(
+                    "hello",
+                    params,
+                    reply_timeout=settings.control_heartbeat_timeout,
+                )
             except HudProtocolError as exc:
                 LOGGER.warning("control heartbeat failed: %s", exc)
                 return
@@ -519,6 +534,7 @@ async def connect(
 
 
 __all__ = [
+    "ControlTimeoutError",
     "HudClient",
     "HudProtocolError",
     "Manifest",

@@ -180,6 +180,15 @@ class Settings(BaseSettings):
         validation_alias="HUD_CLIENT_TIMEOUT",
     )
 
+    control_heartbeat_timeout: float = Field(
+        default=300.0,
+        gt=0,
+        description="Seconds the env may take to answer a control-channel heartbeat before "
+        "the rollout fails with ControlTimeoutError. A liveness bound for a hung env, "
+        "not a latency target.",
+        validation_alias="HUD_CONTROL_HEARTBEAT_TIMEOUT",
+    )
+
     @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:

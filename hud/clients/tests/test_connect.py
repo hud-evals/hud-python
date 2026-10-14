@@ -18,10 +18,11 @@ import pytest
 
 import hud.clients.client as client_module
 from hud.capabilities import Capability, CapabilityClient, Connection
-from hud.clients import HudProtocolError, connect
+from hud.clients import ControlTimeoutError, HudProtocolError, connect
 from hud.environment import WorkspaceRoute
 from hud.environment.utils import read_frame, send_frame
 from hud.eval.runtime import Runtime
+from hud.settings import settings
 
 HELLO_RESULT = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 
@@ -313,7 +314,51 @@ async def test_heartbeat_serializes_calls_without_aborting_on_protocol_errors(
     assert requests[1]["params"] == {"session_id": "s-1"}
 
 
-async def test_heartbeat_transport_failure_interrupts_the_connection_body(
+async def test_heartbeat_survives_a_slow_reply_from_a_live_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    heartbeat_received = asyncio.Event()
+    requests: list[dict[str, object]] = []
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            hello = await read_frame(reader)
+            assert hello is not None
+            await send_frame(
+                writer,
+                {"jsonrpc": "2.0", "id": hello["id"], "result": HELLO_RESULT},
+            )
+            heartbeat = await read_frame(reader)
+            assert heartbeat is not None
+            heartbeat_received.set()
+            await asyncio.sleep(5.5)
+            await send_frame(
+                writer,
+                {"jsonrpc": "2.0", "id": heartbeat["id"], "result": HELLO_RESULT},
+            )
+            while (request := await read_frame(reader)) is not None:
+                requests.append(request)
+                result = {"score": 1.0} if request["method"] == "tasks.grade" else HELLO_RESULT
+                await send_frame(writer, {"jsonrpc": "2.0", "id": request["id"], "result": result})
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+            await asyncio.wait_for(heartbeat_received.wait(), 1.0)
+            grade = await asyncio.wait_for(client.grade({"answer": "done"}), 10.0)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert grade == {"score": 1.0}
+    assert "tasks.grade" in [request["method"] for request in requests]
+
+
+async def test_heartbeat_fails_a_hung_env_with_a_typed_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     heartbeat_received = asyncio.Event()
@@ -330,14 +375,16 @@ async def test_heartbeat_transport_failure_interrupts_the_connection_body(
             heartbeat = await read_frame(reader)
             assert heartbeat is not None
             heartbeat_received.set()
+            await reader.read()
         finally:
             writer.close()
 
     monkeypatch.setattr(client_module, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_heartbeat_timeout", 0.05)
     server = await asyncio.start_server(handler, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     try:
-        with pytest.raises(EOFError, match="env closed connection during 'hello'"):
+        with pytest.raises(ControlTimeoutError, match=r"did not reply to 'hello' within 0\.05s"):
             async with connect(Runtime(f"tcp://127.0.0.1:{port}")):
                 await asyncio.wait_for(heartbeat_received.wait(), 1.0)
                 try:
