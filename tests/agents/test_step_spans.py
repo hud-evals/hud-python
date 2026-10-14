@@ -33,7 +33,8 @@ TIMESTAMP = IsStr(regex=r"\d{4}-\d{2}-\d{2}T.*")
 
 
 def agent_steps(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The agent, tool and subagent step payloads, with timestamps checked and dropped."""
+    """The agent, tool and subagent step payloads: timestamps checked, then they, the step
+    ids and every empty field dropped."""
     found = []
     for payload in payloads:
         if payload["source"] not in {"agent", "tool", "subagent"}:
@@ -41,7 +42,8 @@ def agent_steps(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for key in ("started_at", "ended_at"):
             if key in payload:
                 assert payload.pop(key) == TIMESTAMP
-        found.append(payload)
+        del payload["step_id"]
+        found.append({key: value for key, value in payload.items() if value not in ([], {})})
     return found
 
 
@@ -82,13 +84,9 @@ ROWS = {
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "Blue.",
                     "reasoning": "look it up",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "end_turn",
                     "citations": [
@@ -130,16 +128,11 @@ ROWS = {
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "refusal",
                     "refusal": "This request was blocked under the Usage Policy.",
-                    "citations": [],
                     "model": "claude-sonnet-4-6",
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1},
                 }
@@ -159,16 +152,11 @@ ROWS = {
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "refusal",
                     "refusal": "This request was refused (cyber).",
-                    "citations": [],
                     "model": "claude-sonnet-4-6",
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1},
                 }
@@ -214,13 +202,9 @@ ROWS = {
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "Blue.",
                     "reasoning": "look it up",
-                    "tool_calls": [],
                     "done": True,
                     "citations": [
                         {
@@ -269,13 +253,9 @@ ROWS = {
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "Blue.",
                     "reasoning": "look it up",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "STOP",
                     "citations": [
@@ -306,10 +286,7 @@ ROWS = {
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "",
                     "tool_calls": [
                         {
@@ -321,15 +298,11 @@ ROWS = {
                     ],
                     "done": False,
                     "finish_reason": "tool_use",
-                    "citations": [],
                     "model": "claude-sonnet-4-6",
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1},
                 },
                 {
-                    "step_id": 4,
                     "source": "tool",
-                    "messages": [],
-                    "extra": {},
                     "call": {
                         "meta": {"citations_enabled": False},
                         "name": "bash",
@@ -352,15 +325,10 @@ hi
                     },
                 },
                 {
-                    "step_id": 5,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "done",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "end_turn",
-                    "citations": [],
                     "model": "claude-sonnet-4-6",
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1},
                 },
@@ -387,15 +355,10 @@ hi
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "Blue.",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "stop",
-                    "citations": [],
                     "raw": {
                         "id": "chatcmpl_1",
                         "choices": [
@@ -463,16 +426,11 @@ hi
         steps=snapshot(
             [
                 {
-                    "step_id": 3,
                     "source": "agent",
-                    "messages": [],
-                    "extra": {},
                     "content": "Blue.",
                     "reasoning": "look it up",
-                    "tool_calls": [],
                     "done": True,
                     "finish_reason": "stop",
-                    "citations": [],
                     "raw": {
                         "id": "chatcmpl_1",
                         "choices": [
@@ -541,10 +499,7 @@ async def test_a_nested_rollout_exports_as_a_subagent_step(tmp_path: Path) -> No
     assert agent_steps(steps(run.trace_id)) == snapshot(
         [
             {
-                "step_id": 3,
                 "source": "subagent",
-                "messages": [],
-                "extra": {},
                 "subagent": {
                     "steps": [],
                     "status": "completed",
