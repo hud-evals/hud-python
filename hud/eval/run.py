@@ -340,6 +340,12 @@ class Run:
                 await self.client.cancel()
             return False
 
+        if self.trace.stop_reason == "provider_error":
+            self.grade = Grade(content=self.trace.error, is_error=True)
+            with contextlib.suppress(Exception):
+                await self.client.cancel()
+            return False
+
         answer: dict[str, Any] = {"answer": self.trace.content}
         started_at = now_iso()
 
@@ -602,6 +608,10 @@ async def rollout(
                         finally:
                             run.connections.clear()
                         _phase = "grading"
+
+                    if live.trace.stop_reason == "provider_error":
+                        _phase = "cleanup"
+                        return
 
                     if verifier is not None:
                         actor_result = live.grade.raw
