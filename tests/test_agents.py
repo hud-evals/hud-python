@@ -1,11 +1,14 @@
 """Every provider agent against every fixture: a reward of 1 proves its whole path works.
 
-Each scripted model answers the way that provider would, from what the agent
-actually sent: the prompt it was shown and the tools it was offered. A cell
-earns its reward only when the agent turned the model's replies into the right
-actions on the environment's capabilities (an answer, MCP calls that keep state,
-a click on the screen). An agent without a capability earns nothing from it and
-still finishes cleanly.
+A cell earns its reward only when the agent turned its model's replies into the
+right actions on the environment's capabilities (an answer, MCP calls that keep
+state, a click on the screen). An agent without a capability earns nothing from
+it and still finishes cleanly.
+
+The matrix runs twice. On every PR a scripted model answers from what the agent
+sent: the prompt and the tools it was offered. In the live lane each provider's
+real model answers through the HUD gateway, so the provider itself is what
+judges the requests the agent builds.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from hud.agents import create_agent
 from hud.eval import LocalRuntime, Task
 from tests.agents.support import chat, claude, gemini, openai
 from tests.fixtures.envs import collect_digits, repeat_word, source
@@ -74,6 +78,37 @@ async def test_each_provider_completes_each_fixture_it_can(
 
     job = await Task(env=module, id=template, args=args).run(
         AGENTS[provider](), runtime=LocalRuntime(source(module))
+    )
+
+    (run,) = job.runs
+    assert (run.reward, run.trace.status, run.trace.error) == (
+        REWARDS[provider, fixture],
+        "completed",
+        None,
+    )
+
+
+# The cheapest model each agent family serves through the gateway.
+LIVE_MODELS = {
+    "claude": "claude-haiku-4-5",
+    "openai": "gpt-5.4-mini",
+    "gemini": "gemini-3.8-flash",
+    "chat": "deepseek/deepseek-v4-flash",
+}
+
+
+@pytest.mark.e2e
+@pytest.mark.live
+@pytest.mark.parametrize("fixture", FIXTURES)
+@pytest.mark.parametrize("provider", AGENTS)
+async def test_each_provider_completes_each_fixture_with_its_real_model(
+    provider: str, fixture: str, live: HudEnv
+) -> None:
+    module, template, _ = FIXTURES[fixture]
+    args = {"word": "tangerine"} if module == "echo" else {}
+
+    job = await Task(env=module, id=template, args=args).run(
+        create_agent(LIVE_MODELS[provider]), runtime=LocalRuntime(source(module))
     )
 
     (run,) = job.runs

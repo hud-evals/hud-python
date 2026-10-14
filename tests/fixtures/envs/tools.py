@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 from contextlib import AsyncExitStack
 
@@ -48,7 +49,8 @@ async def collect_code(length: int = 4):
         'Call next_digit until it returns "done", then reply with every digit it returned, '
         "in order, as one string."
     )
-    yield 1.0 if answer == "".join(code) and revealed == code else 0.0
+    # A real model may wrap the code in prose; the digits it gives are what count.
+    yield 1.0 if re.sub(r"\D", "", answer) == "".join(code) and revealed == code else 0.0
 
 
 tasks = [collect_code()]
