@@ -10,6 +10,7 @@ handshake EOFs until ``hello`` answers or the deadline passes.
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import socket
 from typing import ClassVar
@@ -707,3 +708,33 @@ async def test_redial_the_env_refuses_to_resume_never_continues_on_a_fresh_sessi
     methods = [request["method"] for requests in connections[1:] for request in requests]
     assert methods
     assert set(methods) == {"hello"}
+
+
+async def test_a_peer_the_kernel_declares_dead_fails_with_the_typed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            while (request := await read_frame(reader)) is not None:
+                await send_frame(
+                    writer, {"jsonrpc": "2.0", "id": request["id"], "result": HELLO_RESULT}
+                )
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(client_module, "_CONTROL_REDIAL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "control_outage_budget", 0.05)
+    try:
+        async with connect(Runtime(f"tcp://127.0.0.1:{port}")) as client:
+
+            async def dead_peer(*_args: object, **_kwargs: object) -> None:
+                raise TimeoutError(errno.ETIMEDOUT, "Connection timed out")
+
+            monkeypatch.setattr(client_module, "read_frame", dead_peer)
+            with pytest.raises(ControlTimeoutError, match=r"timed out during 'tasks.grade'"):
+                await client.grade({"answer": "done"})
+    finally:
+        server.close()
+        await server.wait_closed()

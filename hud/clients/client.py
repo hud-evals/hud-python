@@ -473,10 +473,14 @@ class HudClient:
         except BaseException as exc:
             self._control_down = True
             self._writer.close()
-            if isinstance(exc, TimeoutError) and deadline.expired():
+            if isinstance(exc, TimeoutError):
+                if deadline.expired():
+                    raise ControlTimeoutError(
+                        f"env did not reply to {method!r} within {reply_timeout:g}s"
+                    ) from None
                 raise ControlTimeoutError(
-                    f"env did not reply to {method!r} within {reply_timeout:g}s"
-                ) from None
+                    f"control connection to the env timed out during {method!r}: {exc}"
+                ) from exc
             raise
 
     async def _redial(self) -> None:
