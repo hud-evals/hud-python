@@ -440,11 +440,16 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         for block in response.content:
             match block.type:
                 case "tool_use":
+                    arguments: dict[str, object] | str = dict(block.input) if block.input else {}
+                    if response.stop_reason == "max_tokens" and block is response.content[-1]:
+                        # Cut off mid-input: the SDK parses partial JSON leniently, so
+                        # hand dispatch the str form it refuses to execute.
+                        arguments = json.dumps(block.input)
                     result.tool_calls.append(
                         MCPToolCall(
                             id=block.id,
                             name=block.name,
-                            arguments=dict(block.input) if block.input else {},
+                            arguments=arguments,
                             _meta=mcp_types.RequestParams.Meta.model_validate(
                                 {"citations_enabled": citations_enabled},
                             ),
