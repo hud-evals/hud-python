@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import zipfile
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Reply
+from tests.harness import Reply, write_files
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -473,3 +474,70 @@ def test_imports_refuses_without_listing(
 
     assert result.exit_code == exit_code, result
     assert importer.services.requests("api", "GET", "/v2/imports") == []
+
+
+TASK_FILES = {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"}
+
+
+def harbor_task(root: Path) -> Path:
+    write_files(root / "hello", TASK_FILES)
+    return root / "hello"
+
+
+def test_import_bundles_linked_files_by_content_and_skips_linked_folders(
+    hud: Hud, importer: Importer, tmp_path: Path
+) -> None:
+    task = harbor_task(tmp_path / "src")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "data.txt").write_text("shared")
+    (task / "environment" / "data.txt").symlink_to(shared / "data.txt")
+    (task / "environment" / "linked").symlink_to(shared)
+    (task / "dangling").symlink_to(tmp_path / "missing")
+
+    result = hud("harbor", "import", str(task), "--taskset", "tb2", "--yes")
+
+    assert result.exit_code == 0, result
+    bundle = importer.bundle()
+    assert bundle.read("hello/environment/data.txt") == b"shared"
+    assert not any("linked" in name or "dangling" in name for name in bundle.namelist())
+
+
+@pytest.mark.parametrize(
+    ("files", "paths"),
+    [
+        pytest.param(
+            {f"{root}/hello/{name}": text for root in "ab" for name, text in TASK_FILES.items()},
+            ["a/hello", "b/hello"],
+            id="two-folders-one-name",
+        ),
+        pytest.param({"notes/README.md": "hi"}, ["notes"], id="a-folder-without-harbor-files"),
+        pytest.param({"task.toml": ""}, ["task.toml"], id="a-file"),
+    ],
+)
+def test_import_refuses_folders_it_cannot_bundle_before_any_request(
+    hud: Hud, importer: Importer, tmp_path: Path, files: dict[str, str], paths: list[str]
+) -> None:
+    write_files(tmp_path, files)
+
+    result = hud(
+        "harbor", "import", *(str(tmp_path / path) for path in paths), "--taskset", "tb2", "--yes"
+    )
+
+    assert result.exit_code != 0, result
+    assert importer.posted() == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any folder")
+def test_import_fails_on_a_folder_it_cannot_read(
+    hud: Hud, importer: Importer, tmp_path: Path
+) -> None:
+    task = harbor_task(tmp_path / "src")
+    (task / "environment").chmod(0)
+    try:
+        result = hud("harbor", "import", str(task), "--taskset", "tb2", "--yes", "--json")
+    finally:
+        (task / "environment").chmod(0o755)
+
+    assert result.exit_code != 0, result
+    assert "/v2/imports" not in importer.posted()
