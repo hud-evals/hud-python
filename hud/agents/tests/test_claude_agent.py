@@ -5,6 +5,7 @@ plus the pure ``_citation`` / ``_cache_last_user_block`` helpers.
 from __future__ import annotations
 
 import base64
+import json
 import random
 import struct
 import zlib
@@ -19,7 +20,7 @@ import httpx
 import httpx2
 import mcp.types as mcp_types
 import pytest
-from anthropic import APIStatusError, Omit
+from anthropic import APIStatusError, AsyncAnthropic, Omit
 from fastmcp.tools import ToolResult
 from mcp.types import ImageContent
 from PIL import Image
@@ -343,6 +344,120 @@ async def test_get_response_does_not_retry_non_transient_inline_stream_error(
     assert messages.calls == 1
     assert len(state.messages) == 1
     sleep.assert_not_awaited()
+
+
+def _streamed_message(stop_reason: str, *blocks: tuple[dict[str, Any], str]) -> httpx.Response:
+    """A Messages SSE stream: each block is its start payload plus one input/text delta."""
+    events: list[dict[str, Any]] = [
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-test",
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 0},
+            },
+        }
+    ]
+    for index, (start, delta) in enumerate(blocks):
+        delta_event = (
+            {"type": "input_json_delta", "partial_json": delta}
+            if "input" in start
+            else {"type": "text_delta", "text": delta}
+        )
+        events += [
+            {"type": "content_block_start", "index": index, "content_block": start},
+            {"type": "content_block_delta", "index": index, "delta": delta_event},
+            {"type": "content_block_stop", "index": index},
+        ]
+    events += [
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+            "usage": {"output_tokens": 1024},
+        },
+        {"type": "message_stop"},
+    ]
+    body = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
+    return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+
+async def test_tool_use_cut_off_by_max_tokens_is_not_executed() -> None:
+    # The real SDK stream accumulator parses the cut-off input JSON in partial mode,
+    # dropping the unfinished value and handing back a well-formed dict.
+    executed: list[str] = []
+    server = fastmcp.FastMCP("shell")
+
+    @server.tool
+    def bash(command: str, args: list[str] | None = None) -> str:
+        """Run a shell command."""
+        executed.append(command)
+        return "ran"
+
+    replies = [
+        _streamed_message(
+            "max_tokens",
+            (
+                {"type": "tool_use", "id": "toolu_1", "name": "bash", "input": {}},
+                '{"command": "ls"}',
+            ),
+            (
+                {"type": "tool_use", "id": "toolu_2", "name": "bash", "input": {}},
+                '{"command": "rm -rf build/tmp", "args": ["--keep", "src", "te',
+            ),
+        ),
+        _streamed_message("end_turn", ({"type": "text", "text": ""}, "done")),
+    ]
+    requests: list[dict[str, Any]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return replies[len(requests) - 1]
+
+    model_client = AsyncAnthropic(
+        api_key="test",
+        base_url="https://anthropic.invalid",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+        max_retries=0,
+    )
+    config = ClaudeConfig(model="claude-test", max_steps=2, model_client=model_client)
+    async with fastmcp.Client(server) as mcp_client:
+        cap = Capability.mcp(name="shell", url="https://tools.invalid/mcp")
+        connection = MCPClient(cap, mcp_client, AsyncExitStack())
+        trace = Trace()
+        run = cast(
+            "Run",
+            SimpleNamespace(
+                trace=trace,
+                record=trace.record,
+                client=SimpleNamespace(
+                    manifest=SimpleNamespace(bindings=[cap]),
+                    open=AsyncMock(return_value=connection),
+                ),
+                prompt_messages=[
+                    mcp_types.PromptMessage(
+                        role="user", content=mcp_types.TextContent(type="text", text="go")
+                    )
+                ],
+            ),
+        )
+        await ClaudeAgent(config)(run)
+
+    assert executed == ["ls"]
+    assert (trace.status, trace.content) == ("completed", "done")
+    results = {
+        block["tool_use_id"]: block
+        for message in requests[-1]["messages"]
+        for block in message["content"]
+        if block["type"] == "tool_result"
+    }
+    assert results["toolu_1"]["is_error"] is False
+    assert results["toolu_2"]["is_error"] is True
+    assert "arrived incomplete" in results["toolu_2"]["content"][0]["text"]
 
 
 def test_citation_char_location() -> None:
