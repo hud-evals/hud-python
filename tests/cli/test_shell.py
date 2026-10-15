@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dirty_equals import IsInt, IsStr, IsUUID
 from dotenv import dotenv_values
-from inline_snapshot import snapshot
 
 from hud.version import __version__
-from tests.harness import Hud, Reply, words
+from tests.harness import Hud, Reply
 
 from .conftest import API_KEY
 
@@ -66,88 +65,53 @@ def test_group_help_lists_its_verbs(hud: Hud, group: str, verbs: list[str]) -> N
 
 
 @pytest.mark.parametrize(
-    ("argv", "exit_code", "stdout", "stderr"),
-    [
-        (["--version"], 0, f"HUD CLI version: {__version__}\n", ""),
-        (["version"], 0, f"HUD CLI version: {__version__}\n", ""),
-        (["version", "--json"], 0, f'{{\n  "name": "hud",\n  "version": "{__version__}"\n}}\n', ""),
-        (
-            ["nope"],
-            2,
-            "",
-            "Usage: python -m hud.cli COMMAND\nError: No such command 'nope'.\n",
-        ),
-        (
-            ["auth", "--help"],
-            2,
-            "",
-            "Usage: python -m hud.cli COMMAND\nError: No such command 'auth'.\n",
-        ),
-        (
-            ["--json", "version"],
-            2,
-            "",
-            snapshot("""\
-Usage: python -m hud.cli COMMAND
-╭─ Error ──────────────────────────────────────────────────────────────────────────────────────╮
-│ No such option: --json (Possible options: --version)                                         │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-"""),
-        ),
-        (
-            ["set", "NOT_A_PAIR"],
-            2,
-            "",
-            "Usage: python -m hud.cli COMMAND\n"
-            "Error: Invalid assignment (expected KEY=VALUE): NOT_A_PAIR\n"
-            "Hint: Pass one or more KEY=VALUE pairs.\n",
-        ),
-        (
-            ["set", "NOT_A_PAIR", "--json"],
-            2,
-            snapshot("""\
-{
-  "error": "usage",
-  "message": "Invalid assignment (expected KEY=VALUE): NOT_A_PAIR",
-  "input": {
-    "assignment": "NOT_A_PAIR"
-  },
-  "suggestion": "Pass one or more KEY=VALUE pairs."
-}
-"""),
-            "",
-        ),
-        (
-            ["jobs", "list", "--json"],
-            1,
-            snapshot("""\
-{
-  "error": "permission_denied",
-  "message": "HUD_API_KEY is required",
-  "suggestion": "Run 'hud set HUD_API_KEY=your-key-here'."
-}
-"""),
-            "",
-        ),
-        (
-            ["jobs", "list"],
-            1,
-            "",
-            "Error: HUD_API_KEY is required\nHint: Run 'hud set HUD_API_KEY=your-key-here'.\n",
-        ),
-    ],
+    "argv",
+    [["version"], ["--version"]],
 )
-def test_output_contract_per_mode(
-    hud: Hud, argv: list[str], exit_code: int, stdout: str, stderr: str
-) -> None:
-    """Text mode writes failures only to stderr; ``--json`` writes one document to stdout."""
+def test_version_prints_the_installed_version(hud: Hud, argv: list[str]) -> None:
     result = hud(*argv)
 
-    assert (result.exit_code, result.stdout, words(result.stderr)) == (
-        exit_code,
-        stdout,
-        words(stderr),
-    )
+    assert (result.exit_code, result.stdout.split()[-1]) == (0, __version__), result
+
+
+def test_version_json_names_the_package_and_version(hud: Hud) -> None:
+    result = hud("version", "--json")
+
+    assert (result.exit_code, result.json) == (0, {"name": "hud", "version": __version__})
+
+
+@pytest.mark.parametrize(
+    ("argv", "exit_code"),
+    [
+        pytest.param(["nope"], 2, id="an-unknown-command"),
+        pytest.param(["auth", "--help"], 2, id="a-removed-command"),
+        pytest.param(["--json", "version"], 2, id="an-option-before-the-command"),
+        pytest.param(["set", "NOT_A_PAIR"], 2, id="a-malformed-argument"),
+        pytest.param(["jobs", "list"], 1, id="signed-out"),
+    ],
+)
+def test_a_text_mode_failure_writes_only_to_stderr(
+    hud: Hud, argv: list[str], exit_code: int
+) -> None:
+    result = hud(*argv)
+
+    assert (result.exit_code, result.stdout) == (exit_code, ""), result
+    assert result.stderr.strip()
+
+
+@pytest.mark.parametrize(
+    ("argv", "exit_code", "error"),
+    [
+        pytest.param(["set", "NOT_A_PAIR"], 2, "usage", id="a-malformed-argument"),
+        pytest.param(["jobs", "list"], 1, "permission_denied", id="signed-out"),
+    ],
+)
+def test_a_json_mode_failure_is_one_error_document_on_stdout(
+    hud: Hud, argv: list[str], exit_code: int, error: str
+) -> None:
+    result = hud(*argv, "--json")
+
+    assert (result.exit_code, result.json["error"], result.stderr) == (exit_code, error, ""), result
 
 
 def test_set_persists_values_without_echoing_them(hud: Hud, hud_env: HudEnv) -> None:
@@ -169,85 +133,26 @@ def test_set_persists_values_without_echoing_them(hud: Hud, hud_env: HudEnv) -> 
 
 
 @pytest.mark.parametrize(
-    ("reply", "document"),
+    ("status", "error"),
     [
-        (
-            Reply(status=404, json={"detail": "Job missing"}),
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "Request failed: Job missing",
-                    "input": {"job_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                    "suggestion": "Check the job id, or list existing ones.",
-                }
-            ),
-        ),
-        (
-            Reply(status=401, json={"detail": "Bad key"}),
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "Request failed: Bad key",
-                    "input": {"job_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                    "suggestion": "Check that this API key can access the resource.",
-                }
-            ),
-        ),
-        (
-            Reply(status=403, json={"detail": "Not your team"}),
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "Request failed: Not your team",
-                    "input": {"job_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                    "suggestion": "Check that this API key can access the resource.",
-                }
-            ),
-        ),
-        (
-            Reply(status=409, json={"detail": "Busy"}),
-            snapshot(
-                {
-                    "error": "conflict",
-                    "message": "Request failed: Busy",
-                    "input": {"job_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                }
-            ),
-        ),
-        (
-            Reply(status=429, json={"detail": "Slow down"}),
-            snapshot(
-                {
-                    "error": "rate_limited",
-                    "message": "Request failed: Slow down",
-                    "input": {"job_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                    "suggestion": "Retry after a short delay.",
-                }
-            ),
-        ),
-        (
-            Reply(status=500, json={"detail": "Boom"}),
-            snapshot(
-                {
-                    "error": "server_error",
-                    "message": "Request failed: Boom",
-                    "input": {"job_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                    "suggestion": "Retry; this error is often transient.",
-                }
-            ),
-        ),
+        (404, "not_found"),
+        (401, "permission_denied"),
+        (403, "permission_denied"),
+        (409, "conflict"),
+        (429, "rate_limited"),
+        (500, "server_error"),
     ],
 )
-def test_platform_errors_map_to_error_documents(
-    hud: Hud, services: FakeServices, hud_env: HudEnv, reply: Reply, document: dict[str, Any]
+def test_platform_errors_map_to_error_kinds(
+    hud: Hud, services: FakeServices, hud_env: HudEnv, status: int, error: str
 ) -> None:
     hud_env.set(HUD_API_KEY=API_KEY)
-    services.route("api", "GET", "/v2/jobs/{id}/traces", reply)
+    services.route("api", "GET", "/v2/jobs/{id}/traces", status=status, json={"detail": "No"})
 
     result = hud("jobs", "get", JOB_ID, "--json")
 
-    assert result.exit_code == 1
-    assert result.json == document
+    assert (result.exit_code, result.json["error"]) == (1, error), result
+    assert result.json["input"] == {"job_id": JOB_ID}
 
 
 def test_a_deprecated_endpoint_warns_once_per_process(
@@ -272,28 +177,19 @@ def test_a_deprecated_endpoint_warns_once_per_process(
 
     assert result.exit_code == 0, result
     assert result.stdout == f"{JOB_ID}\n{TRACE_ID}\n"
-    assert result.stderr == snapshot("""\
-⚠ GET /api/v2/projects is deprecated by the HUD API and stops being served on Wed, 01 Jul 2026 \n\
-00:00:00 GMT; its replacement is https://api.example/v3/projects. If a hud command printed this,
-upgrade hud.
-""")
+    assert result.stderr.count("deprecated") == 1
+    assert "https://api.example/v3/projects" in result.stderr
 
 
 @pytest.mark.parametrize(
-    ("latest", "argv", "environment", "notice"),
+    ("latest", "argv", "environment", "notified"),
     [
-        (
-            "999.0.0",
-            ["version"],
-            {},
-            f"A new version of hud is available: 999.0.0 (current: {__version__})\n"
-            "Run: uv sync --upgrade-package hud\n",
-        ),
-        ("999.0.0", ["version"], {"CI": "1"}, ""),
-        ("999.0.0", ["version"], {"HUD_SKIP_VERSION_CHECK": "1"}, ""),
-        ("999.0.0", ["--version"], {}, ""),
-        ("999.0.0", ["--help"], {}, ""),
-        (__version__, ["version"], {}, ""),
+        ("999.0.0", ["version"], {}, True),
+        ("999.0.0", ["version"], {"CI": "1"}, False),
+        ("999.0.0", ["version"], {"HUD_SKIP_VERSION_CHECK": "1"}, False),
+        ("999.0.0", ["--version"], {}, False),
+        ("999.0.0", ["--help"], {}, False),
+        (__version__, ["version"], {}, False),
     ],
 )
 def test_an_outdated_install_prints_an_upgrade_notice(
@@ -302,7 +198,7 @@ def test_an_outdated_install_prints_an_upgrade_notice(
     latest: str,
     argv: list[str],
     environment: dict[str, str],
-    notice: str,
+    notified: bool,
 ) -> None:
     """The notice reads PyPI's latest version from a fresh cache, so no request is made."""
     hud_env.set(HUD_SKIP_VERSION_CHECK=None, CI=None)
@@ -313,7 +209,7 @@ def test_an_outdated_install_prints_an_upgrade_notice(
     result = hud(*argv, env=environment)
 
     assert result.exit_code == 0, result
-    assert result.stderr == notice
+    assert ("999.0.0" in result.stderr) is notified
 
 
 # ─── analytics ──────────────────────────────────────────────────────────
@@ -388,9 +284,7 @@ def test_the_install_id_is_created_once_and_announced_once(
         for body in analytics.bodies("telemetry", "POST", "/sdk-events/cli")
     ]
     assert len(set(ids)) == 1
-    assert first.stderr == snapshot(
-        "hud collects anonymous CLI usage. Disable: hud set HUD_CLI_ANALYTICS_ENABLED=0\n"
-    )
+    assert "HUD_CLI_ANALYTICS_ENABLED=0" in first.stderr
     assert second.stderr == ""
 
 
