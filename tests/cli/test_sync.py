@@ -187,7 +187,7 @@ def test_a_stored_taskset_that_was_deleted_is_never_recreated(
     assert (len(uploads(projects)), tasksets.records) == (1, {})
 
 
-REMOTE = [
+REMOTE: list[dict[str, Any]] = [
     {"name": "one", "env": "e", "scenario": "solve", "args": {"n": 1}},
     {"name": "two", "env": "e", "scenario": "solve", "args": {"n": {"x": 2}}},
 ]
