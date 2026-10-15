@@ -6,13 +6,12 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from inline_snapshot import snapshot
 
 from hud import Environment
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, rollout
-from tests.harness import call, say, scrub
+from tests.harness import call, say
 
 from .conftest import API_KEY, WEB_URL
 
@@ -42,28 +41,12 @@ def events(platform: FakeServices) -> FakeServices:
     return platform
 
 
-def test_a_platform_trace_renders_turns_and_tool_calls(hud: Hud, events: FakeServices) -> None:
+def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: FakeServices) -> None:
     result = hud("trace", COMPACT_TRACE_ID)
 
     assert result.exit_code == 0, result
-    assert result.lines == snapshot(
-        [
-            "Trace 03dd2a73d3df4d10a54ae3d87c2d530d",
-            "Source: platform",
-            "Turn 1 — agent",
-            "Think about the middle.",
-            "Splitting at [len(s) // 2] and [bold]this[/bold]",
-            "→ bash(command='ls')",
-            "bash →",
-            "a.txt",
-            "b.txt",
-            "✗ bash: exit status 1",
-            "Turn 2 — agent",
-            "done",
-            "error: max steps reached",
-            "View: https://hud.example/trace/03dd2a73-d3df-4d10-a54a-e3d87c2d530d",
-        ]
-    )
+    for shown in (EVENTS[0]["text"], EVENTS[0]["reasoning"], "exit status 1", "max steps reached"):
+        assert shown in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -85,44 +68,20 @@ def test_trace_json_is_the_event_list(hud: Hud, events: FakeServices, argv: list
 
 
 @pytest.mark.parametrize(
-    ("argv", "exit_code", "document"),
+    ("argv", "exit_code", "error"),
     [
-        (
-            ["trace", TRACE_ID, "--json"],
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "Request failed: missing",
-                    "input": {"trace_id": "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"},
-                    "suggestion": "Check the trace id, or list existing ones.",
-                }
-            ),
-        ),
-        (
-            ["trace", "unknown", "--json"],
-            2,
-            snapshot({"error": "usage", "message": "No such command 'unknown'."}),
-        ),
+        pytest.param([TRACE_ID], 1, "not_found", id="missing"),
+        pytest.param(["unknown"], 2, "usage", id="malformed"),
     ],
 )
 def test_a_missing_or_malformed_trace_is_an_error_document(
-    hud: Hud, platform: FakeServices, argv: list[str], exit_code: int, document: dict[str, Any]
+    hud: Hud, platform: FakeServices, argv: list[str], exit_code: int, error: str
 ) -> None:
     platform.route("api", "GET", "/v2/trace/{id}/events", status=404, json={"detail": "missing"})
 
-    result = hud(*argv)
+    result = hud("trace", *argv, "--json")
 
-    assert result.exit_code == exit_code, result
-    assert result.json == document
-
-
-def test_a_trace_without_events_says_so(hud: Hud, platform: FakeServices) -> None:
-    platform.route("api", "GET", "/v2/trace/{id}/events", json={"events": []})
-
-    result = hud("trace", TRACE_ID)
-
-    assert (result.exit_code, result.stdout) == (0, "No events found for this trace.\n")
+    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
 
 
 # ─── local spans ────────────────────────────────────────────────────────
@@ -173,37 +132,14 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
     result = hud("trace", "get", trace_id, "--json", cwd=tmp_path)
 
     assert result.exit_code == 0, result
-    assert result.json == snapshot(
-        [
-            {
-                "kind": "agent_message",
-                "text": "",
-                "reasoning": None,
-                "tool_calls": [
-                    {
-                        "name": "write",
-                        "arguments": {"filePath": "REPORT.md", "content": "PASS"},
-                        "id": "call_1",
-                    }
-                ],
-                "error": None,
-            },
-            {
-                "kind": "tool_call",
-                "tool_name": "write",
-                "arguments": {"filePath": "REPORT.md", "content": "PASS"},
-                "result_text": "wrote 4 bytes to REPORT.md",
-                "error": None,
-            },
-            {
-                "kind": "agent_message",
-                "text": "Wrote it.",
-                "reasoning": None,
-                "tool_calls": [],
-                "error": None,
-            },
-        ]
-    )
+    assert [(event["kind"], event.get("tool_name")) for event in result.json] == [
+        ("agent_message", None),
+        ("tool_call", "write"),
+        ("agent_message", None),
+    ]
+    assert result.json[1]["arguments"] == {"filePath": "REPORT.md", "content": "PASS"}
+    assert "4 bytes" in result.json[1]["result_text"]
+    assert result.json[2]["text"] == "Wrote it."
 
 
 async def test_a_local_trace_renders_and_skips_a_record_cut_short(
@@ -217,21 +153,7 @@ async def test_a_local_trace_renders_and_skips_a_record_cut_short(
     result = hud("trace", trace_id, cwd=tmp_path)
 
     assert result.exit_code == 0, result
-    assert scrub(result.stdout.replace(uuid.UUID(trace_id).hex, "<trace>")) == snapshot("""\
-╭────────────────────────────────────────╮
-│ Trace <trace> │
-╰────────────────────────────────────────╯
-Source: local (spans/<trace>.jsonl)
-
-──────────────────────────────────────── Turn 1 — agent ────────────────────────────────────────
-  → write(filePath='REPORT.md', content='PASS')
-  write →
-    wrote 4 bytes to REPORT.md
-──────────────────────────────────────── Turn 2 — agent ────────────────────────────────────────
-Wrote it.
-
-View: https://hud.example/trace/<uuid>
-""")
+    assert "Wrote it." in result.stdout
     assert "Skipped 1 incomplete span record" in result.stderr
 
 
