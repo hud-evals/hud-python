@@ -149,7 +149,7 @@ class GeminiConfig(ToolAgentConfig):
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 40
-    max_output_tokens: int = 8192
+    max_output_tokens: int | None = None
     excluded_predefined_functions: list[str] = Field(default_factory=list)
     thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
     include_thoughts: bool = True

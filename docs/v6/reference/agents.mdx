@@ -70,6 +70,8 @@ filesystem. SSH-only runs support POSIX and Windows workspaces; `ClaudeCLIAgent`
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 
+`OpenAIConfig.max_output_tokens` and `GeminiConfig.max_output_tokens` are unset by default, so each request gets the model's own output limit. Set them to cap output per turn. Gemini counts thinking tokens toward the cap, so a low cap can truncate a thinking model before it answers.
+
 `OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
 request. Pass your own key when multiple agent instances should share the same cached prompt prefix.
 
