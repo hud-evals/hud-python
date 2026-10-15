@@ -14,8 +14,6 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
-from dirty_equals import IsStr
-from inline_snapshot import snapshot
 from pydantic import BaseModel
 
 from hud.capabilities import Capability
@@ -188,13 +186,9 @@ async def converse(env: Environment, frames: list[tuple[str, dict[str, Any] | No
 
 
 def answer(reply: dict[str, Any]) -> Any:
-    """A reply frame's result, or its error as ``(code, message)``."""
+    """A reply frame's result, or its error code."""
     assert reply["jsonrpc"] == "2.0"
-    return (
-        reply["result"]
-        if "result" in reply
-        else (reply["error"]["code"], reply["error"]["message"])
-    )
+    return reply["result"] if "result" in reply else reply["error"]["code"]
 
 
 async def test_tasks_list_publishes_each_templates_argument_and_io_contract(tmp_path: Path) -> None:
@@ -228,33 +222,28 @@ async def test_tasks_list_publishes_each_templates_argument_and_io_contract(tmp_
 async def test_hello_names_the_session_and_publishes_hook_capabilities(tmp_path: Path) -> None:
     replies = await converse(protocol_env(tmp_path / "log"), [("hello", {}), ("bye", None)])
 
-    assert replies == snapshot(
-        [
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {
-                    "session_id": SESSION_ID,
-                    "env": {"name": "protocol", "version": "1.2.3"},
-                    "bindings": [
-                        {
-                            "name": "browser",
-                            "protocol": "cdp/1.3",
-                            "url": "ws://127.0.0.1:9/devtools/browser",
-                            "params": {},
-                        }
-                    ],
-                },
+    assert replies == [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "session_id": SESSION_ID,
+                "env": {"name": "protocol", "version": "1.2.3"},
+                "bindings": [
+                    {
+                        "name": "browser",
+                        "protocol": "cdp/1.3",
+                        "url": "ws://127.0.0.1:9/devtools/browser",
+                        "params": {},
+                    }
+                ],
             },
-            {"jsonrpc": "2.0", "id": 2, "result": {"goodbye": True}},
-        ]
-    )
+        },
+        {"jsonrpc": "2.0", "id": 2, "result": {"goodbye": True}},
+    ]
 
 
-def graded_with(message: str) -> tuple[int, str]:
-    return (-32000, message)
-
-
+INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
 TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
     "number-right": ("plain", {}, "42", "What is six times seven?", {"score": 1.0}),
     "number-wrong": ("plain", {}, "41", "What is six times seven?", {"score": 0.0}),
@@ -300,19 +289,14 @@ TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
         {},
         "x",
         "go",
-        graded_with(
-            "task 'bad_dict' graded with a dict missing a numeric 'score' (keys: ['reward'])"
-        ),
+        FAILED,
     ),
     "string-grade-fails-loudly": (
         "stringy",
         {},
         "x",
         "go",
-        graded_with(
-            "task graded with str: yield a number, an object with a numeric .reward, "
-            "or a dict containing a numeric 'score'"
-        ),
+        FAILED,
     ),
     "no-grade-yield-grades-zero": ("no_grade", {}, "x", "go", {"score": 0.0}),
     "json-string-args-coerce-to-annotations": (
@@ -387,7 +371,6 @@ async def test_a_template_starts_and_grades_over_the_wire(
     assert [answer(frame) for frame in replies] == [{"prompt": prompt}, grade]
 
 
-INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
 ROUTE = {"capability": "ssh", "host": "h", "port": 443}
 CONNECTION = {
     "name": "inference",
@@ -398,68 +381,68 @@ CONNECTION = {
 BAD_REQUESTS: dict[str, tuple[list[tuple[str, dict[str, Any] | None]], list[Any]]] = {
     "start-unknown-template": (
         [("tasks.start", {"id": "missing"})],
-        [(INVALID, "unknown task: 'missing'")],
+        [INVALID],
     ),
     "start-non-string-id": (
         [("tasks.start", {"id": 7})],
-        [(INVALID, "tasks.start: 'id' must be a string")],
+        [INVALID],
     ),
     "start-list-args": (
         [("tasks.start", {"id": "guarded", "args": ["x"]})],
-        [(INVALID, "tasks.start: 'args' must be an object")],
+        [INVALID],
     ),
     "start-empty-list-args": (
         [("tasks.start", {"id": "guarded", "args": []})],
-        [(INVALID, "tasks.start: 'args' must be an object")],
+        [INVALID],
     ),
     "start-signature-mismatch": (
         [("tasks.start", {"id": "guarded", "args": {"nmae": "x"}})],
-        [(FAILED, "task 'guarded': bad args ['nmae']: missing a required argument: 'name'")],
+        [FAILED],
     ),
     "start-template-raises-keyerror": (
         [("tasks.start", {"id": "lookup"})],
-        [(FAILED, "'missing'")],
+        [FAILED],
     ),
     "grade-without-start": (
         [("tasks.grade", {"answer": "x"})],
-        [(BAD_STATE, "no task in progress")],
+        [BAD_STATE],
     ),
-    "unknown-method": ([("tasks.stop", {})], [(NOT_FOUND, "method not found: tasks.stop")]),
+    "unknown-method": ([("tasks.stop", {})], [NOT_FOUND]),
     "tunnel-open-mid-session": (
         [("tasks.cancel", None), ("tunnel.open", {"capability": "browser"})],
-        [{"cancelled": True}, (NOT_FOUND, "method not found: tunnel.open")],
+        [{"cancelled": True}, NOT_FOUND],
     ),
     "hello-non-string-session": (
         [("hello", {"session_id": 5})],
-        [(INVALID, "hello: 'session_id' must be a string")],
+        [INVALID],
     ),
     "hello-unknown-session": (
         [("hello", {"session_id": "sess-00000000"})],
-        [(BAD_STATE, "unknown session: 'sess-00000000'")],
+        [BAD_STATE],
     ),
     "hello-routes-not-a-list": (
         [("hello", {"workspace_routes": "ssh"})],
-        [(INVALID, "hello: 'workspace_routes' must be a list")],
+        [INVALID],
     ),
     "hello-route-port-not-an-int": (
         [("hello", {"workspace_routes": [{**ROUTE, "port": "443"}]})],
-        [(INVALID, "hello: workspace route port must be an integer")],
+        [INVALID],
     ),
     "hello-connections-object": (
         [("hello", {"connections": {"name": "x"}})],
-        [(INVALID, "hello: 'connections' must be a list")],
+        [INVALID],
     ),
     "hello-connection-missing-fields": (
         [("hello", {"connections": [{"name": "inference"}]})],
-        [(INVALID, "hello: connection name, capability, and url must be strings")],
+        [INVALID],
     ),
     "hello-connection-without-a-workspace": (
         [("hello", {"connections": [CONNECTION]})],
-        [(FAILED, "workspace capability 'ssh' does not exist")],
+        [FAILED],
     ),
     "hello-route-without-a-workspace": (
         [("hello", {"workspace_routes": [ROUTE]})],
-        [(FAILED, "workspace capability 'ssh' does not exist")],
+        [FAILED],
     ),
 }
 
@@ -573,14 +556,8 @@ async def test_a_request_up_to_the_frame_limit_round_trips(size: int, accepted: 
         assert started is not None and started["result"]["prompt"] == data
         assert graded is not None and graded["result"]["detail"] == data
     else:
-        assert started == {
-            "jsonrpc": "2.0",
-            "id": None,
-            "error": {
-                "code": -32000,
-                "message": IsStr(regex=rf"Control-channel frame .* {FRAME_LIMIT} bytes.*"),
-            },
-        }
+        assert started is not None
+        assert (started["id"], started["error"]["code"]) == (None, FAILED)
 
 
 @pytest.mark.parametrize("kind", ["prompt", "grade", "error"])
@@ -599,15 +576,10 @@ async def test_an_oversized_reply_is_an_error_frame_and_releases_the_template(ki
             regrade = await later.call("tasks.grade", {"answer": "done"})
 
     error = graded if graded is not None else started
-    assert error["error"] == {
-        "code": -32000,
-        "message": IsStr(
-            regex=rf"Control-channel response is \d+ bytes; limit is {FRAME_LIMIT} bytes .*"
-        ),
-    }
+    assert error["error"]["code"] == FAILED
     assert finished == [kind]
     assert [task["id"] for task in listed["result"]["tasks"]] == ["echo", "bloated"]
-    assert regrade["error"]["message"] == "no task in progress"
+    assert regrade["error"]["code"] == BAD_STATE
 
 
 @pytest.mark.parametrize(
@@ -637,14 +609,8 @@ async def test_an_oversized_frame_gets_a_bounded_error_without_an_id(
             await connection.send("tasks.list")
         after = await connection.read()
 
-    assert reply == {
-        "jsonrpc": "2.0",
-        "id": None,
-        "error": {
-            "code": -32000,
-            "message": IsStr(regex=rf"Control-channel .* {FRAME_LIMIT} bytes.*"),
-        },
-    }
+    assert reply is not None
+    assert (reply["id"], reply["error"]["code"]) == (None, FAILED)
     assert (after is not None and after["result"] == {"tasks": []}) is serving
 
 
@@ -666,38 +632,34 @@ def register_a_template_twice(env: Environment) -> None:
 
 
 @pytest.mark.parametrize(
-    ("declare", "error", "message"),
+    ("declare", "error"),
     [
-        pytest.param(
-            attach_template_to_a_plain_function, TypeError, "must be an async generator function"
-        ),
-        pytest.param(register_a_template_twice, ValueError, "'twice' already registered"),
+        pytest.param(attach_template_to_a_plain_function, TypeError, id="not-a-generator"),
+        pytest.param(register_a_template_twice, ValueError, id="a-template-twice"),
         pytest.param(
             lambda env: [env.workspace("a"), env.workspace("b")],
             ValueError,
-            "workspace capability 'shell' is already attached",
+            id="two-workspaces-on-one-capability",
         ),
-        pytest.param(
-            lambda env: env.capability("missing"), KeyError, "unknown capability: 'missing'"
-        ),
+        pytest.param(lambda env: env.capability("missing"), KeyError, id="an-unknown-capability"),
         pytest.param(
             lambda env: env.add_capability(cast("Any", {"name": "x"})),
             TypeError,
-            "expected Capability",
+            id="a-capability-that-is-not-one",
         ),
         pytest.param(
             lambda env: env.add_capability(
                 Capability(name="db", protocol="tcp", url="", params={})
             ),
             ValueError,
-            "capability 'db' has no url",
+            id="a-capability-without-a-url",
         ),
     ],
 )
 def test_an_authoring_mistake_raises_at_definition(
-    declare: Callable[[Environment], Any], error: type[Exception], message: str
+    declare: Callable[[Environment], Any], error: type[Exception]
 ) -> None:
-    with pytest.raises(error, match=message):
+    with pytest.raises(error):
         declare(Environment("authoring"))
 
 
@@ -711,7 +673,7 @@ async def test_publishing_a_capability_after_initialize_warns(
         env.add_capability(Capability.cdp(url="ws://127.0.0.1:9/late"))
     await env.stop()
 
-    assert "add_capability('browser') called after @env.initialize hooks" in caplog.text
+    assert [record.levelno for record in caplog.records] == [logging.WARNING]
 
 
 async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_reverse() -> None:

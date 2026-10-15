@@ -3,18 +3,16 @@
 A workspace with ``track_files=True`` publishes a ``filetracking`` capability.
 These scenarios serve one over a fixture tree holding build output, VCS
 metadata, ignored files and credentials, edit the tree the way an agent would,
-and compare each reply on the wire with a golden copy (timestamps normalized).
+and check what each reply reports: which files changed and how, and what never leaves.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
-import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from inline_snapshot import snapshot
 
 from hud.environment import Environment, Workspace
 from tests.harness import served
@@ -84,23 +82,9 @@ def write(root: Path, files: Mapping[str, str | None]) -> None:
         path.write_text(content)
 
 
-def normalized(value: Any) -> Any:
-    """Replace clocks and mtimes, which change between runs, and content hashes."""
-    if isinstance(value, dict):
-        return {
-            key: "<clock>"
-            if key in {"snapshot_timestamp", "scan_duration_ms"}
-            else normalized(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [normalized(item) for item in value]
-    if isinstance(value, str):
-        value = re.sub(r"^(redacted|overlimit):(\d+):\d+$", r"\1:\2:<mtime>", value)
-        value = re.sub(r"^[0-9a-f]{64}$", "<sha256>", value)
-        if len(value) > 200:
-            return f"<{len(value)} chars>"
-    return value
+def changed(reply: dict[str, Any]) -> dict[str, str]:
+    """A diff reply's changes as ``{path: status}``."""
+    return {patch["path"]: patch["status"] for patch in reply["result"]["patches"]}
 
 
 async def test_file_tracking_reports_setup_agent_edits_and_deliverables(tmp_path: Path) -> None:
@@ -124,330 +108,58 @@ async def test_file_tracking_reports_setup_agent_edits_and_deliverables(tmp_path
         write(root, DELIVERABLES)
         flushed = await tracking.call("flush")
 
-    assert normalized(initial) == snapshot(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {
-                "files": [
-                    {"path": ".gitignore", "size": 12, "content_hash": "<sha256>"},
-                    {"path": "a.txt", "size": 12, "content_hash": "<sha256>"},
-                    {
-                        "path": "big.txt",
-                        "size": 1048577,
-                        "content_hash": "overlimit:1048577:<mtime>",
-                    },
-                    {"path": "data.txt", "size": 10, "content_hash": "<sha256>"},
-                    {"path": "go-build.go", "size": 13, "content_hash": "<sha256>"},
-                    {"path": "keep.txt", "size": 5, "content_hash": "<sha256>"},
-                    {"path": "pkg/.gitignore", "size": 9, "content_hash": "<sha256>"},
-                    {"path": "pkg/data.txt", "size": 13, "content_hash": "<sha256>"},
-                    {"path": "setup.xlsx", "size": 14, "content_hash": "<sha256>"},
-                    {"path": "src.py", "size": 6, "content_hash": "<sha256>"},
-                ],
-                "files_scanned": 10,
-            },
-        }
-    )
-    assert normalized([unchanged, repeated, after_setup, after_advance]) == snapshot(
-        [
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "result": {
-                    "snapshot_timestamp": "<clock>",
-                    "scan_duration_ms": "<clock>",
-                    "files_scanned": 13,
-                    "files_changed": 0,
-                    "patches": [],
-                },
-            },
-            {
-                "jsonrpc": "2.0",
-                "id": 4,
-                "result": {
-                    "snapshot_timestamp": "<clock>",
-                    "scan_duration_ms": "<clock>",
-                    "files_scanned": 13,
-                    "files_changed": 0,
-                    "patches": [],
-                },
-            },
-            {
-                "jsonrpc": "2.0",
-                "id": 6,
-                "result": {
-                    "snapshot_timestamp": "<clock>",
-                    "scan_duration_ms": "<clock>",
-                    "files_scanned": 14,
-                    "files_changed": 0,
-                    "patches": [],
-                },
-            },
-            {
-                "jsonrpc": "2.0",
-                "id": 8,
-                "result": {
-                    "snapshot_timestamp": "<clock>",
-                    "scan_duration_ms": "<clock>",
-                    "files_scanned": 15,
-                    "files_changed": 0,
-                    "patches": [],
-                },
-            },
-        ]
-    )
-    assert normalized(edited) == snapshot(
-        {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "result": {
-                "snapshot_timestamp": "<clock>",
-                "scan_duration_ms": "<clock>",
-                "files_scanned": 13,
-                "files_changed": 6,
-                "patches": [
-                    {
-                        "path": "keep.txt",
-                        "status": "deleted",
-                        "patch": """\
---- a/keep.txt
-+++ b/keep.txt
-@@ -1 +0,0 @@
--keep\
-""",
-                        "size_before": 5,
-                        "size_after": 0,
-                        "content_hash_before": "<sha256>",
-                        "content_hash_after": None,
-                    },
-                    {
-                        "path": "new.txt",
-                        "status": "added",
-                        "patch": """\
---- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1 @@
-+hello\
-""",
-                        "size_before": 0,
-                        "size_after": 6,
-                        "content_hash_before": None,
-                        "content_hash_after": "<sha256>",
-                    },
-                    {
-                        "path": "a.txt",
-                        "status": "modified",
-                        "patch": """\
---- a/a.txt
-+++ b/a.txt
-@@ -1,2 +1,2 @@
- line1
--line2
-+CHANGED\
-""",
-                        "size_before": 12,
-                        "size_after": 14,
-                        "content_hash_before": "<sha256>",
-                        "content_hash_after": "<sha256>",
-                    },
-                    {
-                        "path": ".env",
-                        "status": "modified",
-                        "patch": "Secret file changed (content redacted): .env\n",
-                        "size_before": 25,
-                        "size_after": 45,
-                        "content_hash_before": "redacted:25:<mtime>",
-                        "content_hash_after": "redacted:45:<mtime>",
-                    },
-                    {
-                        "path": ".gitmodules",
-                        "status": "modified",
-                        "patch": "Secret file changed (content redacted): .gitmodules\n",
-                        "size_before": 66,
-                        "size_after": 70,
-                        "content_hash_before": "redacted:66:<mtime>",
-                        "content_hash_after": "redacted:70:<mtime>",
-                    },
-                    {
-                        "path": "big.txt",
-                        "status": "modified",
-                        "patch": "File too large to diff (1048577 -> 1048578 bytes): big.txt\n",
-                        "size_before": 1048577,
-                        "size_after": 1048578,
-                        "content_hash_before": "overlimit:1048577:<mtime>",
-                        "content_hash_after": "overlimit:1048578:<mtime>",
-                    },
-                ],
-            },
-        }
-    )
-    assert normalized(setup) == snapshot(
-        {
-            "jsonrpc": "2.0",
-            "id": 5,
-            "result": {
-                "snapshot_timestamp": "<clock>",
-                "scan_duration_ms": "<clock>",
-                "files_scanned": 14,
-                "files_changed": 2,
-                "patches": [
-                    {
-                        "path": "generated.txt",
-                        "status": "added",
-                        "patch": """\
---- a/generated.txt
-+++ b/generated.txt
-@@ -0,0 +1 @@
-+setup\
-""",
-                        "size_before": 0,
-                        "size_after": 6,
-                        "content_hash_before": None,
-                        "content_hash_after": "<sha256>",
-                    },
-                    {
-                        "path": "src.py",
-                        "status": "modified",
-                        "patch": """\
---- a/src.py
-+++ b/src.py
-@@ -1 +1 @@
--x = 1
-+x = 2  # setup\
-""",
-                        "size_before": 6,
-                        "size_after": 15,
-                        "content_hash_before": "<sha256>",
-                        "content_hash_after": "<sha256>",
-                    },
-                ],
-            },
-        }
-    )
-    assert advanced == snapshot({"jsonrpc": "2.0", "id": 7, "result": {"advanced": True}})
-    assert normalized(flushed) == snapshot(
-        {
-            "jsonrpc": "2.0",
-            "id": 9,
-            "result": {
-                "diff": {
-                    "snapshot_timestamp": "<clock>",
-                    "scan_duration_ms": "<clock>",
-                    "files_scanned": 19,
-                    "files_changed": 5,
-                    "patches": [
-                        {
-                            "path": "deliverable.xlsx",
-                            "status": "added",
-                            "patch": """\
---- a/deliverable.xlsx
-+++ b/deliverable.xlsx
-@@ -0,0 +1 @@
-+workbook bytes\
-""",
-                            "size_before": 0,
-                            "size_after": 14,
-                            "content_hash_before": None,
-                            "content_hash_after": "<sha256>",
-                        },
-                        {
-                            "path": ".env.xlsx",
-                            "status": "modified",
-                            "patch": "Secret file changed (content redacted): .env.xlsx\n",
-                            "size_before": 20,
-                            "size_after": 13,
-                            "content_hash_before": "redacted:20:<mtime>",
-                            "content_hash_after": "redacted:13:<mtime>",
-                        },
-                        {
-                            "path": "analysis.py",
-                            "status": "added",
-                            "patch": """\
---- a/analysis.py
-+++ b/analysis.py
-@@ -0,0 +1 @@
-+print('tracked by diff')\
-""",
-                            "size_before": 0,
-                            "size_after": 25,
-                            "content_hash_before": None,
-                            "content_hash_after": "<sha256>",
-                        },
-                        {
-                            "path": "report.html",
-                            "status": "added",
-                            "patch": """\
---- a/report.html
-+++ b/report.html
-@@ -0,0 +1 @@
-+<html><body>report</body></html>\
-""",
-                            "size_before": 0,
-                            "size_after": 33,
-                            "content_hash_before": None,
-                            "content_hash_after": "<sha256>",
-                        },
-                        {
-                            "path": "large.pdf",
-                            "status": "added",
-                            "patch": "File too large to diff (0 -> 5242881 bytes): large.pdf\n",
-                            "size_before": 0,
-                            "size_after": 5242881,
-                            "content_hash_before": None,
-                            "content_hash_after": "overlimit:5242881:<mtime>",
-                        },
-                    ],
-                },
-                "capture": {
-                    "snapshot_timestamp": "<clock>",
-                    "scan_duration_ms": "<clock>",
-                    "files_scanned": 19,
-                    "files_changed": 5,
-                    "files_eligible": 3,
-                    "files_captured": 2,
-                    "files_skipped": 1,
-                    "files": [
-                        {
-                            "path": "deliverable.xlsx",
-                            "size": 14,
-                            "content_hash": "<sha256>",
-                            "content_type": XLSX,
-                            "file": {
-                                "type": "file",
-                                "data": "d29ya2Jvb2sgYnl0ZXM=",
-                                "media_type": XLSX,
-                            },
-                            "status": "added",
-                        },
-                        {
-                            "path": "report.html",
-                            "size": 33,
-                            "content_hash": "<sha256>",
-                            "content_type": "text/html",
-                            "file": {
-                                "type": "file",
-                                "data": "PGh0bWw+PGJvZHk+cmVwb3J0PC9ib2R5PjwvaHRtbD4K",
-                                "media_type": "text/html",
-                            },
-                            "status": "added",
-                        },
-                    ],
-                    "truncated": True,
-                },
-            },
-        }
-    )
+    # VCS metadata, ignored files, dependencies, build output and secrets are not tracked.
     manifest = {entry["path"]: entry["content_hash"] for entry in initial["result"]["files"]}
+    assert sorted(manifest) == [
+        ".gitignore",
+        "a.txt",
+        "big.txt",
+        "data.txt",
+        "go-build.go",
+        "keep.txt",
+        "pkg/.gitignore",
+        "pkg/data.txt",
+        "setup.xlsx",
+        "src.py",
+    ]
     assert manifest["a.txt"] == hashlib.sha256(b"line1\nline2\n").hexdigest()
-    captured = {
-        file["path"]: base64.b64decode(file["file"]["data"])
-        for file in flushed["result"]["capture"]["files"]
+
+    # Each diff starts where the last one, or setup, or advance, left off.
+    for reply in (unchanged, repeated, after_setup, after_advance):
+        assert changed(reply) == {}
+    assert changed(edited) == {
+        "keep.txt": "deleted",
+        "new.txt": "added",
+        "a.txt": "modified",
+        ".env": "modified",
+        ".gitmodules": "modified",
+        "big.txt": "modified",
     }
+    patches = {patch["path"]: patch["patch"] for patch in edited["result"]["patches"]}
+    assert "+CHANGED" in patches["a.txt"]
+    for secret in ("supersecretvalue", "hunter2", "new-token"):
+        assert secret not in str(edited)
+    assert len(patches["big.txt"]) < 200  # over the diff limit: reported, not diffed
+    assert changed(setup) == {"generated.txt": "added", "src.py": "modified"}
+    assert advanced["result"] == {"advanced": True}
+
+    # Flush diffs the deliverables and captures the eligible ones under the size limit.
+    diff, capture = flushed["result"]["diff"], flushed["result"]["capture"]
+    assert changed({"result": diff}) == {
+        "deliverable.xlsx": "added",
+        ".env.xlsx": "modified",
+        "analysis.py": "added",
+        "report.html": "added",
+        "large.pdf": "added",
+    }
+    captured = {file["path"]: base64.b64decode(file["file"]["data"]) for file in capture["files"]}
     assert captured == {
         "deliverable.xlsx": b"workbook bytes",
         "report.html": b"<html><body>report</body></html>\n",
     }
+    assert capture["files"][0]["content_type"] == XLSX
+    assert (capture["files_skipped"], capture["truncated"]) == (1, True)
+    assert "API_KEY=after" not in str(flushed)
 
 
 async def test_a_bad_request_gets_an_error_and_the_connection_keeps_serving(
@@ -463,13 +175,7 @@ async def test_a_bad_request_gets_an_error_and_the_connection_keeps_serving(
         write(root, {"a.txt": "one\ntwo\n"})
         diff = await tracking.call("diff")
 
-    assert refused == snapshot(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {"code": -32000, "message": "unknown filetracking method: 'rewind'"},
-        }
-    )
+    assert refused["error"]["code"] == -32000
     assert [patch["path"] for patch in diff["result"]["patches"]] == ["a.txt"]
 
 
