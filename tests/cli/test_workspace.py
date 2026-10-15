@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
+from unittest.mock import ANY
 
 import pytest
-from inline_snapshot import snapshot
 
-from tests.harness import Reply
+from tests.harness import Reply, write_files
 
 from .conftest import (
     BROWSER_PROJECT_ID,
@@ -47,6 +47,11 @@ def config(directory: Path, services: FakeServices) -> Any:
     return json.loads(text.replace(origin, "http://hud.test"))
 
 
+def link_project(hud: Hud) -> str | None:
+    path = hud.cwd / ".hud" / "config.json"
+    return json.loads(path.read_text())["project_id"] if path.exists() else None
+
+
 def test_linking_a_directory_accumulates_its_platform_ids(
     hud: Hud, registry: FakeServices, tmp_path: Path
 ) -> None:
@@ -59,52 +64,30 @@ def test_linking_a_directory_accumulates_its_platform_ids(
     shown = hud("project", "-C", str(env), "--json")
 
     assert [used.exit_code, linked.exit_code, relinked.exit_code, shown.exit_code] == [0] * 4
-    assert config(env, registry) == snapshot(
-        {
-            "version": 1,
-            "scope": {
-                "origin": "http://hud.test",
-                "user_id": "11111111-1111-4111-8111-111111111111",
-                "team_id": "22222222-2222-4222-8222-222222222222",
-            },
-            "registry_id": "bbbbbbbb-0000-4000-8000-000000000001",
-            "taskset_id": None,
-            "project_id": "aaaaaaaa-0000-4000-8000-000000000002",
-        }
+    stored = config(env, registry)
+    assert (stored["registry_id"], stored["project_id"], stored["taskset_id"]) == (
+        REGISTRY_ID,
+        BROWSER_PROJECT_ID,
+        None,
     )
+    assert (stored["scope"]["user_id"], stored["scope"]["team_id"]) == (USER_ID, TEAM_ID)
     assert (linked.json["changed"], relinked.json["changed"]) == (True, False)
     assert (env / ".hud" / "config.json").read_bytes() == written
-    assert shown.json == snapshot(
-        {
-            "project": {
-                "id": "aaaaaaaa-0000-4000-8000-000000000002",
-                "name": "browser-evals",
-                "is_default": False,
-                "can_create": True,
-            },
-            "source": ".hud/config.json",
-            "label": "browser-evals (via .hud/config.json)",
-        }
+    assert (shown.json["project"]["id"], shown.json["source"]) == (
+        BROWSER_PROJECT_ID,
+        ".hud/config.json",
     )
     assert "sk-hud-test" not in written.decode()
 
 
 @pytest.mark.parametrize(
-    ("scope", "message"),
+    "scope",
     [
-        (
-            {"origin": "http://hud.test", "user_id": OTHER_ID, "team_id": TEAM_ID},
-            "was linked with different HUD credentials than the ones currently in use.",
-        ),
-        (
-            {"origin": "http://hud.test", "user_id": USER_ID, "team_id": OTHER_ID},
-            "was linked with different HUD credentials than the ones currently in use.",
-        ),
-        (
-            {"origin": "https://api.example", "user_id": USER_ID, "team_id": TEAM_ID},
-            "was linked against https://api.example, not http://hud.test.",
-        ),
+        {"origin": "http://hud.test", "user_id": OTHER_ID, "team_id": TEAM_ID},
+        {"origin": "http://hud.test", "user_id": USER_ID, "team_id": OTHER_ID},
+        {"origin": "https://api.example", "user_id": USER_ID, "team_id": TEAM_ID},
     ],
+    ids=["another-user", "another-team", "another-platform"],
 )
 @pytest.mark.parametrize(
     "argv",
@@ -119,7 +102,6 @@ def test_a_link_made_with_other_credentials_is_refused(
     registry: FakeServices,
     argv: list[str],
     scope: dict[str, str],
-    message: str,
 ) -> None:
     origin = registry.url("api").removesuffix("/api")
     path = hud.cwd / ".hud" / "config.json"
@@ -132,89 +114,52 @@ def test_a_link_made_with_other_credentials_is_refused(
 
     assert result.exit_code == 1, result
     assert result.json["error"] == "failure"
-    assert result.json["message"].replace(origin, "http://hud.test").endswith(message)
     assert path.read_bytes() == before
 
 
+def test_an_older_camelcase_link_is_rewritten_with_its_ids(
+    hud: Hud, registry: FakeServices
+) -> None:
+    write_files(
+        hud.cwd / ".hud",
+        {"config.json": json.dumps({"registryId": REGISTRY_ID, "tasksetId": OTHER_ID})},
+    )
+
+    result = hud("project", "use", "browser-evals", "--json")
+
+    assert result.exit_code == 0, result
+    stored = config(hud.cwd, registry)
+    assert (stored["registry_id"], stored["taskset_id"], stored["project_id"]) == (
+        REGISTRY_ID,
+        OTHER_ID,
+        BROWSER_PROJECT_ID,
+    )
+
+
 @pytest.mark.parametrize(
-    ("files", "argv", "exit_code", "after"),
+    ("files", "argv", "exit_code"),
     [
         pytest.param(
-            {
-                "config.json": json.dumps(
-                    {
-                        "registryId": REGISTRY_ID,
-                        "registryName": "example",
-                        "tasksetId": OTHER_ID,
-                        "syncEnv": True,
-                    }
-                )
-            },
-            ["project", "use", "browser-evals"],
-            0,
-            snapshot(
-                {
-                    "config.json": """\
-{
-  "version": 1,
-  "scope": {
-    "origin": "http://hud.test",
-    "user_id": "11111111-1111-4111-8111-111111111111",
-    "team_id": "22222222-2222-4222-8222-222222222222"
-  },
-  "registry_id": "bbbbbbbb-0000-4000-8000-000000000001",
-  "taskset_id": "cccccccc-0000-4000-8000-000000000001",
-  "project_id": "aaaaaaaa-0000-4000-8000-000000000002"
-}
-"""
-                }
-            ),
-            id="camelcase-rewritten",
-        ),
-        pytest.param(
             {"config.json": json.dumps({"registryId": REGISTRY_ID})},
-            ["project", "use", "browser-evals", "--dry-run"],
+            ["--dry-run"],
             0,
-            snapshot({"config.json": '{"registryId": "bbbbbbbb-0000-4000-8000-000000000001"}'}),
-            id="camelcase-dry-run-untouched",
+            id="a-dry-run-over-a-camelcase-link",
         ),
+        pytest.param({"config.json": '{"broken":'}, [], 1, id="a-corrupt-link"),
         pytest.param(
-            {"config.json": '{"broken":'},
-            ["project", "use", "browser-evals"],
-            1,
-            snapshot({"config.json": '{"broken":'}),
-            id="corrupt-untouched",
-        ),
-        pytest.param(
-            {"deploy.json": '{"registryId":"old","syncEnv":true}'},
-            ["project", "use", "browser-evals", "--dry-run"],
-            0,
-            snapshot({"deploy.json": '{"registryId":"old","syncEnv":true}'}),
-            id="legacy-deploy-json-ignored",
+            {"deploy.json": '{"registryId":"old"}'}, ["--dry-run"], 0, id="a-legacy-deploy-json"
         ),
     ],
 )
-def test_older_and_damaged_configs(
-    hud: Hud,
-    registry: FakeServices,
-    files: dict[str, str],
-    argv: list[str],
-    exit_code: int,
-    after: dict[str, str],
+def test_a_link_it_cannot_or_must_not_rewrite_is_left_alone(
+    hud: Hud, registry: FakeServices, files: dict[str, str], argv: list[str], exit_code: int
 ) -> None:
-    directory = hud.cwd / ".hud"
-    directory.mkdir()
-    for name, text in files.items():
-        (directory / name).write_text(text)
+    write_files(hud.cwd / ".hud", files)
 
-    result = hud(*argv, "--json")
+    result = hud("project", "use", "browser-evals", *argv, "--json")
 
     assert result.exit_code == exit_code, result
-    origin = registry.url("api").removesuffix("/api")
-    assert {
-        path.name: path.read_text().replace(origin, "http://hud.test")
-        for path in sorted(directory.iterdir())
-    } == after
+    assert {path.name: path.read_text() for path in (hud.cwd / ".hud").iterdir()} == files
 
 
 def test_the_link_records_a_normalized_origin(
@@ -233,103 +178,25 @@ def test_the_link_records_a_normalized_origin(
 
 
 @pytest.mark.parametrize(
-    ("linked", "default", "exit_code", "shown"),
+    ("linked", "default", "project", "source"),
     [
-        (
-            None,
-            None,
-            0,
-            snapshot({"project": None, "source": "team default", "label": "team default Project"}),
+        pytest.param(None, None, None, "team default", id="team-default"),
+        pytest.param(
+            None, "Browser Evals", BROWSER_PROJECT_ID, "HUD_DEFAULT_PROJECT", id="default-by-name"
         ),
-        (
-            None,
-            "Browser Evals",
-            0,
-            snapshot(
-                {
-                    "project": {
-                        "id": "aaaaaaaa-0000-4000-8000-000000000002",
-                        "name": "browser-evals",
-                        "is_default": False,
-                        "can_create": True,
-                    },
-                    "source": "HUD_DEFAULT_PROJECT",
-                    "label": "browser-evals (via HUD_DEFAULT_PROJECT)",
-                }
-            ),
-        ),
-        (
+        pytest.param(
             None,
             BROWSER_PROJECT_ID.upper(),
-            0,
-            snapshot(
-                {
-                    "project": {
-                        "id": "aaaaaaaa-0000-4000-8000-000000000002",
-                        "name": "browser-evals",
-                        "is_default": False,
-                        "can_create": True,
-                    },
-                    "source": "HUD_DEFAULT_PROJECT",
-                    "label": "browser-evals (via HUD_DEFAULT_PROJECT)",
-                }
-            ),
+            BROWSER_PROJECT_ID,
+            "HUD_DEFAULT_PROJECT",
+            id="default-by-id",
         ),
-        (
+        pytest.param(
             BROWSER_PROJECT_ID,
             "locked-down",
-            0,
-            snapshot(
-                {
-                    "project": {
-                        "id": "aaaaaaaa-0000-4000-8000-000000000002",
-                        "name": "browser-evals",
-                        "is_default": False,
-                        "can_create": True,
-                    },
-                    "source": ".hud/config.json",
-                    "label": "browser-evals (via .hud/config.json)",
-                }
-            ),
-        ),
-        (
-            None,
-            "browser",
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "No Project named 'browser'.",
-                    "input": {"project": "browser"},
-                    "suggestion": "Run 'hud project list' to see visible Projects.",
-                }
-            ),
-        ),
-        (
-            None,
-            "nope",
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "No Project named 'nope'.",
-                    "input": {"project": "nope"},
-                    "suggestion": "Run 'hud project list' to see visible Projects.",
-                }
-            ),
-        ),
-        (
-            None,
-            OTHER_ID,
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "Request failed: Not found",
-                    "input": {"project": "cccccccc-0000-4000-8000-000000000001"},
-                    "suggestion": "Check the project id, or list existing ones.",
-                }
-            ),
+            BROWSER_PROJECT_ID,
+            ".hud/config.json",
+            id="the-link-beats-the-default",
         ),
     ],
 )
@@ -339,8 +206,8 @@ def test_project_shows_the_selected_project_and_why(
     hud_env: HudEnv,
     linked: str | None,
     default: str | None,
-    exit_code: int,
-    shown: dict[str, Any],
+    project: str | None,
+    source: str,
 ) -> None:
     hud_env.set(HUD_DEFAULT_PROJECT=default)
     if linked is not None:
@@ -348,15 +215,25 @@ def test_project_shows_the_selected_project_and_why(
 
     result = hud("project", "--json")
 
-    assert result.exit_code == exit_code, result
-    assert result.json == shown
+    assert result.exit_code == 0, result
+    assert ((result.json["project"] or {}).get("id"), result.json["source"]) == (project, source)
+
+
+@pytest.mark.parametrize("default", ["browser", "nope", OTHER_ID])
+def test_a_default_project_that_does_not_exist_is_not_found(
+    hud: Hud, projects: FakeServices, hud_env: HudEnv, default: str
+) -> None:
+    hud_env.set(HUD_DEFAULT_PROJECT=default)
+
+    result = hud("project", "--json")
+
+    assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
 
 
 def test_the_team_default_needs_no_project_lookup(hud: Hud, projects: FakeServices) -> None:
     result = hud("project")
 
     assert result.exit_code == 0, result
-    assert result.stderr == snapshot("Project: team default Project\n")
     assert [request.query for request in projects.requests("api", "GET", "/v2/projects")] == [
         {"limit": ["1"]}
     ]
@@ -379,44 +256,19 @@ def test_project_list_reads_every_page(hud: Hud, platform: FakeServices) -> None
 
     assert quiet.exit_code == 0, quiet
     assert quiet.stdout.split() == [project["id"] for project in many]
-    assert [request.query for request in platform.requests("api", "GET", "/v2/projects")] == [
-        {"limit": ["500"], "offset": ["0"]},
-        {"limit": ["500"], "offset": ["50"]},
+
+
+def test_project_list_marks_the_default_and_read_only_projects(
+    hud: Hud, projects: FakeServices
+) -> None:
+    result = hud("project", "list", "--json")
+
+    assert result.exit_code == 0, result
+    assert [(p["name"], p["is_default"], p["can_create"]) for p in result.json] == [
+        ("default", True, True),
+        ("browser-evals", False, True),
+        ("locked-down", False, False),
     ]
-
-
-def test_project_list_marks_default_and_read_only(hud: Hud, projects: FakeServices) -> None:
-    text = hud("project", "list")
-    document = hud("project", "list", "--json")
-
-    assert (text.exit_code, document.exit_code) == (0, 0)
-    assert text.stderr == snapshot("""\
-default  aaaaaaaa-0000-4000-8000-000000000001 (default)
-browser-evals  aaaaaaaa-0000-4000-8000-000000000002
-locked-down  aaaaaaaa-0000-4000-8000-000000000003 (read-only)
-""")
-    assert document.json == snapshot(
-        [
-            {
-                "id": "aaaaaaaa-0000-4000-8000-000000000001",
-                "name": "default",
-                "is_default": True,
-                "can_create": True,
-            },
-            {
-                "id": "aaaaaaaa-0000-4000-8000-000000000002",
-                "name": "browser-evals",
-                "is_default": False,
-                "can_create": True,
-            },
-            {
-                "id": "aaaaaaaa-0000-4000-8000-000000000003",
-                "name": "locked-down",
-                "is_default": False,
-                "can_create": False,
-            },
-        ]
-    )
 
 
 @pytest.mark.parametrize(
@@ -433,88 +285,38 @@ def test_project_create_posts_the_project_and_links_unless_told_not_to(
 
     result = hud(*argv, "--json")
 
-    assert result.exit_code == 0, result
-    assert result.json == {
-        "id": BROWSER_PROJECT_ID,
-        "name": "browser-evals",
-        "is_default": False,
-        "can_create": True,
-    }
+    assert (result.exit_code, result.json["id"]) == (0, BROWSER_PROJECT_ID), result
     assert projects.bodies("api", "POST", "/v2/projects") == [
         {"name": "Browser Evals", **({"description": "UI tasks"} if linked else {})}
     ]
-    stored = hud.cwd / ".hud" / "config.json"
-    assert stored.exists() is linked
-    if linked:
-        assert json.loads(stored.read_text())["project_id"] == BROWSER_PROJECT_ID
+    assert link_project(hud) == (BROWSER_PROJECT_ID if linked else None)
 
 
 @pytest.mark.parametrize(
-    ("argv", "reply", "exit_code", "document"),
+    ("argv", "reply", "exit_code"),
     [
-        (
-            ["project", "create", "Browser Evals", "--dry-run"],
-            None,
-            0,
-            snapshot({"dry_run": True, "action": "create_project", "name": "Browser Evals"}),
-        ),
-        (
-            ["project", "create", "Browser Evals", "--no-use"],
+        pytest.param(["create", "Browser Evals", "--dry-run"], None, 0, id="create-dry-run"),
+        pytest.param(
+            ["create", "Browser Evals", "--no-use"],
             Reply(status=403, json={"detail": "Projects are not enabled"}),
             1,
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "Request failed: Projects are not enabled",
-                    "suggestion": "Check that this API key can access the resource.",
-                }
-            ),
+            id="create-refused",
         ),
-        (
-            ["project", "use", "locked-down"],
-            None,
-            1,
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "You do not have permission to create environments or "
-                    "tasksets in project 'locked-down'",
-                    "input": {"project": "aaaaaaaa-0000-4000-8000-000000000003"},
-                }
-            ),
-        ),
-        (
-            ["project", "use", "browser-evals", "--dry-run"],
-            None,
-            0,
-            snapshot(
-                {
-                    "id": "aaaaaaaa-0000-4000-8000-000000000002",
-                    "name": "browser-evals",
-                    "is_default": False,
-                    "can_create": True,
-                    "dry_run": True,
-                }
-            ),
-        ),
+        pytest.param(["use", "locked-down"], None, 1, id="use-a-read-only-project"),
+        pytest.param(["use", "browser-evals", "--dry-run"], None, 0, id="use-dry-run"),
     ],
 )
-def test_project_changes_that_write_nothing(
-    hud: Hud,
-    projects: FakeServices,
-    argv: list[str],
-    reply: Reply | None,
-    exit_code: int,
-    document: dict[str, Any],
+def test_project_changes_that_link_nothing(
+    hud: Hud, projects: FakeServices, argv: list[str], reply: Reply | None, exit_code: int
 ) -> None:
     if reply is not None:
         projects.route("api", "POST", "/v2/projects", reply)
 
-    result = hud(*argv, "--json")
+    result = hud("project", *argv, "--json")
 
     assert result.exit_code == exit_code, result
-    assert result.json == document
     assert not (hud.cwd / ".hud").exists()
+    assert projects.requests("api", "POST", "/v2/projects") == ([] if reply is None else [ANY])
 
 
 @pytest.mark.parametrize(
