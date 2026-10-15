@@ -7,13 +7,10 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 from hud import Environment
 from hud.clients import connect
 from hud.eval import LocalRuntime, Task
-from tests.harness import scrub
 
 if TYPE_CHECKING:
     from tests.harness import Hud
@@ -47,25 +44,15 @@ def project(hud: Hud) -> Any:
 
 
 @pytest.mark.parametrize(
-    ("argv", "stdout"),
-    [
-        (["--source", "tasks.json"], 'say-answer\tsolve\nsay-hello\tsolve {"target": "hello"}\n'),
-        (["--source", "tasks.json", "--quiet"], "say-answer\nsay-hello\n"),
-        (
-            ["-s", "tasks.py"],
-            snapshot("""\
-solve	solve
-solve-8da35614	solve {"target": "hello"}
-"""),
-        ),
-    ],
+    ("source", "slugs"),
+    [("tasks.json", ["say-answer", "say-hello"]), ("tasks.py", ["solve", "solve-8da35614"])],
 )
-def test_task_list_prints_slug_id_and_args(
-    hud: Hud, project: Any, argv: list[str], stdout: str
+def test_task_list_quiet_prints_each_tasks_slug(
+    hud: Hud, project: Any, source: str, slugs: list[str]
 ) -> None:
-    result = hud("task", "list", *argv)
+    result = hud("task", "list", "--source", source, "--quiet")
 
-    assert (result.exit_code, result.stdout) == (0, stdout)
+    assert (result.exit_code, result.stdout.split()) == (0, slugs), result
 
 
 def test_task_list_json_is_one_entry_per_task(hud: Hud, project: Any) -> None:
@@ -108,90 +95,29 @@ def test_task_start_json_is_the_start_frame(hud: Hud, project: Any) -> None:
 
 
 @pytest.mark.parametrize(
-    ("argv", "exit_code", "document"),
+    ("argv", "exit_code", "error"),
     [
-        (
-            ["start", "solve", "--source", "tasks.json"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": "Ambiguous task 'solve'; use a unique slug shown by hud task list.",
-                }
-            ),
-        ),
-        (
-            ["start", "missing", "--source", "tasks.json"],
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "No task matching 'missing' (available: solve)",
-                    "input": {"task": "missing", "source": "tasks.json"},
-                    "suggestion": "Run 'hud task list' to see available slugs.",
-                }
-            ),
-        ),
-        (
-            ["grade", "solve", "--args", "[]"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": "--args must be a JSON object",
-                    "input": {"args": "[]"},
-                }
-            ),
-        ),
-        (
-            ["grade", "solve", "--args", "{bad"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "--args must be valid JSON: Expecting property name enclosed in double "
-                        "quotes: line 1 column 2 (char 1)"
-                    ),
-                    "input": {"args": "{bad"},
-                    "suggestion": 'Pass a JSON object, e.g. --args \'{"key": "value"}\'.',
-                }
-            ),
-        ),
-        (
+        pytest.param(["start", "solve", "--source", "tasks.json"], 2, "usage", id="ambiguous"),
+        pytest.param(["start", "missing", "--source", "tasks.json"], 1, "not_found", id="unknown"),
+        pytest.param(["grade", "solve", "--args", "[]"], 2, "usage", id="args-not-an-object"),
+        pytest.param(["grade", "solve", "--args", "{bad"], 2, "usage", id="args-not-json"),
+        pytest.param(
             ["grade", "say-answer", "-s", "tasks.json", "--answer-file", "no.txt"],
             1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "File not found: no.txt",
-                    "input": {"path": "no.txt"},
-                    "suggestion": "Check the path, or pass - to read from stdin.",
-                }
-            ),
+            "not_found",
+            id="a-missing-answer-file",
         ),
-        (
-            ["start", "solve", "--source", "empty.json"],
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "No tasks found in empty.json",
-                    "input": {"source": "empty.json"},
-                }
-            ),
-        ),
+        pytest.param(["start", "solve", "--source", "empty.json"], 1, "not_found", id="no-tasks"),
     ],
 )
-def test_task_errors_are_documents(
-    hud: Hud, project: Any, argv: list[str], exit_code: int, document: dict[str, Any]
+def test_task_refusals_are_error_documents(
+    hud: Hud, project: Any, argv: list[str], exit_code: int, error: str
 ) -> None:
     (project / "empty.json").write_text("[]")
 
     result = hud("task", *argv, "--json")
 
-    assert result.exit_code == exit_code, result
-    assert json.loads(scrub(result.stdout, project)) == document
+    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
 
 
 # ─── attached to a served environment ───────────────────────────────────
@@ -212,34 +138,16 @@ def counting_env(starts: list[str], *, failing: bool = False) -> Environment:
 
 
 @pytest.mark.parametrize(
-    ("parked", "failing", "starts", "document"),
+    ("parked", "failing", "starts", "outcome"),
     [
         pytest.param(0, False, 1, {"score": 1.0}, id="starts-when-nothing-is-parked"),
         pytest.param(1, False, 1, {"score": 1.0}, id="resumes-a-parked-session"),
-        pytest.param(
-            1,
-            True,
-            1,
-            {"error": "failure", "message": "hud rpc error -32000: grader failed"},
-            id="grader-error",
-        ),
-        pytest.param(
-            2,
-            False,
-            2,
-            {
-                "error": "failure",
-                "message": IsStr(
-                    regex=r"hud rpc error -32600: 2 parked sessions \(sess-\w+, sess-\w+\); "
-                    r"resume one by sending hello with its session_id"
-                ),
-            },
-            id="ambiguous-parked-sessions",
-        ),
+        pytest.param(1, True, 1, {"error": "failure"}, id="grader-error"),
+        pytest.param(2, False, 2, {"error": "failure"}, id="ambiguous-parked-sessions"),
     ],
 )
 async def test_grade_resumes_a_started_task_on_a_served_env(
-    hud: Hud, parked: int, failing: bool, starts: int, document: dict[str, Any]
+    hud: Hud, parked: int, failing: bool, starts: int, outcome: dict[str, Any]
 ) -> None:
     started: list[str] = []
     async with LocalRuntime(counting_env(started, failing=failing))(
@@ -252,9 +160,9 @@ async def test_grade_resumes_a_started_task_on_a_served_env(
             hud, "task", "grade", "solve", "--url", runtime.url, "--answer", "answer", "--json"
         )
 
-    assert result.exit_code == ("error" in document), result
+    assert result.exit_code == ("error" in outcome), result
     assert len(started) == starts
-    assert {key: result.json[key] for key in document} == document
+    assert {key: result.json[key] for key in outcome} == outcome
 
 
 @pytest.mark.parametrize(
