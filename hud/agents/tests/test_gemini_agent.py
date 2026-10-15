@@ -167,6 +167,46 @@ async def test_malformed_function_call_is_a_normalized_error() -> None:
     assert result.usage is not None
 
 
+class ConfigRecordingModels:
+    def __init__(self, response: Any) -> None:
+        self._response = response
+        self.configs: list[Any] = []
+
+    async def generate_content(self, **kwargs: Any) -> Any:
+        self.configs.append(kwargs["config"])
+        return self._response
+
+
+async def _sent_output_cap(**config: Any) -> int | None:
+    resp_content = SimpleNamespace(
+        role="model",
+        parts=[SimpleNamespace(function_call=None, text="answer", thought=None)],
+    )
+    models = ConfigRecordingModels(
+        _api_response(
+            SimpleNamespace(content=resp_content, grounding_metadata=None, finish_reason=None)
+        )
+    )
+    agent = GeminiAgent(
+        GeminiConfig(
+            model="gemini-test",
+            include_thoughts=False,
+            model_client=SimpleNamespace(aio=SimpleNamespace(models=models)),
+            **config,
+        )
+    )
+    await agent.get_response(_state(agent))
+    return models.configs[0].max_output_tokens
+
+
+async def test_output_cap_defaults_to_the_model_limit() -> None:
+    assert await _sent_output_cap() is None
+
+
+async def test_configured_output_cap_is_sent() -> None:
+    assert await _sent_output_cap(max_output_tokens=4096) == 4096
+
+
 class RecordingModels:
     """Replays scripted responses, recording the contents each request carried."""
 
