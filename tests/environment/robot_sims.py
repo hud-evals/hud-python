@@ -1,20 +1,62 @@
-"""Sims the robot scenarios spawn in a child process, so they live at module level.
+"""The sims robot scenarios run, and the env that serves one in this process.
 
-A spawned sim re-imports its bridge class or env factory from this file by path.
-Each env reports, in its observation, the shape of the last action ``step`` got.
+A spawned sim re-imports its bridge class or env factory from this file by path,
+so they live at module level. Each gym env reports, in its observation, the
+shape of the last action ``step`` got.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from gymnasium.spaces import Box
 
-from hud.environment.robot import RobotBridge
+from hud.environment import Environment
+from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from numpy.typing import NDArray
+
+
+@asynccontextmanager
+async def sim_env(
+    sim: RobotBridge, name: str, *, control: DirectControl | None = None
+) -> AsyncIterator[tuple[Environment, RobotEndpoint]]:
+    """The docs' custom-bridge env for *sim*, which this process serves, started.
+
+    ``RobotEndpoint.remote`` attaches to a sim someone else runs; here that is
+    the test, so the whole control plane is real without a spawned sim program.
+    *control* adds direct control's motion tools. Each scenario declares the
+    template it is about.
+    """
+    await sim.start()
+    server = await sim.serve_control()
+    env = Environment(name)
+    endpoint = RobotEndpoint.remote("127.0.0.1", server.sockets[0].getsockname()[1]).attach(env)
+    if control is not None:
+        control.attach(endpoint)
+
+    @env.initialize
+    async def up() -> None:
+        await endpoint.start()
+        for capability in await endpoint.capabilities():
+            env.add_capability(capability)
+
+    @env.shutdown
+    async def down() -> None:
+        await endpoint.stop()
+
+    try:
+        await env.start()
+        yield env, endpoint
+    finally:
+        await env.stop()
+        server.close()
+        await sim.stop()
 
 
 class Reach(RobotBridge):

@@ -25,10 +25,11 @@ import pytest
 
 from hud.agents.base import Agent
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
-from hud.environment import Environment
-from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
+from hud.environment.robot import DirectControl, RobotBridge
 from hud.eval import LocalRuntime, Task, rollout
 from tests.harness import ROBOT_STEP_SCHEMA, steps
+
+from .robot_sims import sim_env
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from hud.capabilities import MCPClient
+    from hud.environment import Environment
     from hud.eval.run import Run
     from hud.types import MCPToolResult
 
@@ -139,35 +141,16 @@ class _ScriptedLLM(Agent):
 
 @asynccontextmanager
 async def _served(sim: RobotBridge, control: DirectControl) -> AsyncIterator[Environment]:
-    """The docs' custom-bridge env with direct control attached; *sim* runs in this process."""
-    await sim.start()
-    server = await sim.serve_control()
-    env = Environment("arm")
-    endpoint = RobotEndpoint.remote("127.0.0.1", server.sockets[0].getsockname()[1]).attach(env)
-    control.attach(endpoint)
+    """*sim* with direct control attached, as the ``arm`` env whose ``reach`` the sim grades."""
+    async with sim_env(sim, "arm", control=control) as (env, endpoint):
 
-    @env.initialize
-    async def _up() -> None:
-        await endpoint.start()
-        for cap in await endpoint.capabilities():
-            env.add_capability(cap)
+        @env.template()
+        async def reach() -> AsyncGenerator[Any, Any]:
+            ep = await endpoint.reset()
+            yield {"prompt": ep["prompt"]}
+            yield await endpoint.result()
 
-    @env.shutdown
-    async def _down() -> None:
-        await endpoint.stop()
-
-    @env.template()
-    async def reach() -> AsyncGenerator[Any, Any]:
-        ep = await endpoint.reset()
-        yield {"prompt": ep["prompt"]}
-        yield await endpoint.result()
-
-    try:
         yield env
-    finally:
-        await env.stop()
-        server.close()
-        await sim.stop()
 
 
 def _text(result: MCPToolResult) -> str:

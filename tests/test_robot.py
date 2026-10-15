@@ -24,23 +24,23 @@ import importlib.util
 import json
 import logging
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 
 from hud.agents.robot import Adapter, DatasetWriter, Model, RobotAgent
-from hud.environment import Environment
-from hud.environment.robot import RobotBridge, RobotEndpoint
+from hud.environment.robot import RobotBridge
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
+from tests.environment.robot_sims import sim_env
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import Iterator
     from pathlib import Path
 
     from numpy.typing import NDArray
 
+    from hud.environment import Environment
     from hud.eval import Provider, Run
     from tests.harness import HudEnv
 
@@ -112,40 +112,6 @@ class _StubSim(RobotBridge):
         ]
 
 
-@asynccontextmanager
-async def _sim_env(
-    sim: RobotBridge, name: str = "stub-sim"
-) -> AsyncIterator[tuple[Environment, RobotEndpoint]]:
-    """The docs' custom-bridge env, with *sim* served by this process.
-
-    ``RobotEndpoint.remote`` attaches to a sim someone else runs — here the test
-    itself, so the whole control plane is real without a spawned sim program.
-    Yields the env and its endpoint; each test declares the template it is about.
-    """
-    await sim.start()
-    control = await sim.serve_control()
-    env = Environment(name)
-    endpoint = RobotEndpoint.remote("127.0.0.1", control.sockets[0].getsockname()[1]).attach(env)
-
-    @env.initialize
-    async def _up() -> None:
-        await endpoint.start()
-        for cap in await endpoint.capabilities():
-            env.add_capability(cap)
-
-    @env.shutdown
-    async def _down() -> None:
-        await endpoint.stop()
-
-    try:
-        await env.start()  # publish the capability now; serving re-enters as a no-op
-        yield env, endpoint
-    finally:
-        await env.stop()
-        control.close()
-        await sim.stop()
-
-
 def _serving(env: Environment) -> Provider:
     """Placement that serves this one env — the substrate a vectorized sim shares."""
     return LocalRuntime(env)
@@ -204,7 +170,7 @@ async def test_single_env_rollout_drives_the_policy_and_grades_the_episode() -> 
     sim = _StubSim()
     adapter = _EchoAdapter()
 
-    async with _sim_env(sim) as (env, endpoint):
+    async with sim_env(sim, "stub-sim") as (env, endpoint):
 
         @env.template()
         async def episode(goal: str = "lift") -> AsyncGenerator[Any, Any]:
@@ -231,7 +197,7 @@ async def test_single_env_rollout_drives_the_policy_and_grades_the_episode() -> 
 async def test_agent_stop_hook_ends_the_rollout_before_the_env_terminates() -> None:
     sim = _StubSim()
 
-    async with _sim_env(sim) as (env, endpoint):
+    async with sim_env(sim, "stub-sim") as (env, endpoint):
 
         @env.template()
         async def episode() -> AsyncGenerator[Any, Any]:
@@ -255,7 +221,7 @@ async def test_the_slot_token_pins_each_rollout_to_its_own_slot() -> None:
     # get their own global reset (and slot 0), which is not the case under test.
     claimed = asyncio.Barrier(2)
 
-    async with _sim_env(sim) as (env, endpoint):
+    async with sim_env(sim, "stub-sim") as (env, endpoint):
 
         @env.template()
         async def episode(goal: str = "lift") -> AsyncGenerator[Any, Any]:
@@ -280,7 +246,7 @@ async def test_the_slot_token_pins_each_rollout_to_its_own_slot() -> None:
 async def test_a_vectorized_sim_refuses_a_tokenless_grade() -> None:
     sim = _StubSim(num_envs=2)
 
-    async with _sim_env(sim) as (_env, endpoint):
+    async with sim_env(sim, "stub-sim") as (_env, endpoint):
         first = await endpoint.reset(goal="lift")
         second = await endpoint.reset(goal="lift")
         assert first["token"] != second["token"]  # one token per slot, not per batch
@@ -432,7 +398,7 @@ class _Recorder(RobotAgent):
 
 
 async def _record(name: str, contract: dict[str, Any], agent: RobotAgent | None = None) -> Run:
-    async with _sim_env(_StubSim(contract=contract, side=RECORD_SIDE), name) as (env, endpoint):
+    async with sim_env(_StubSim(contract=contract, side=RECORD_SIDE), name) as (env, endpoint):
 
         @env.template()
         async def episode() -> AsyncGenerator[Any, Any]:
