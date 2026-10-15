@@ -10,6 +10,8 @@ benchmark. The flows (see ``docs/v6/advanced/robots.mdx``):
 - a vectorized sim, where the per-episode token pins each rollout to its slot;
 - ``env.gym`` behind a pre-written contract — the shape ``hud-evals/robot-template``
   ships (two cameras + an 8-D state, LIBERO-style).
+- ``RobotAgent(save=True)``, recording each rollout as a LeRobot episode with the
+  real ``lerobot`` package and reading it back (the ``lerobot`` lane).
 
 The policies here are stubs; the plumbing is not.
 """
@@ -17,7 +19,10 @@ The policies here are stubs; the plumbing is not.
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 import json
+import logging
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -25,19 +30,19 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from hud.agents.robot import Adapter, Model, RobotAgent
+from hud.agents.robot import Adapter, DatasetWriter, Model, RobotAgent
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
     from pathlib import Path
 
-    from hud.eval import Provider
+    from numpy.typing import NDArray
+
+    from hud.eval import Provider, Run
+    from tests.harness import HudEnv
 
 #: Ticks a stub sim runs before terminating — every gate here is a whole rollout.
 EPISODE_TICKS = 3
@@ -64,10 +69,13 @@ class _StubSim(RobotBridge):
     connection actually drove.
     """
 
-    def __init__(self, num_envs: int = 1) -> None:
+    def __init__(
+        self, num_envs: int = 1, *, contract: dict[str, Any] = STUB_CONTRACT, side: int = 16
+    ) -> None:
         super().__init__()
         self.num_envs = num_envs
-        self.contract = STUB_CONTRACT
+        self.contract = contract
+        self.side = side
         self.tick = 0
         self.executed = np.zeros(num_envs)
 
@@ -82,12 +90,18 @@ class _StubSim(RobotBridge):
 
     def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
         slots = np.arange(1, self.num_envs + 1, dtype=np.float32)
-        data = {
-            "observation/image": np.zeros((self.num_envs, 16, 16, 3), dtype=np.uint8),
-            "observation/state": np.stack(
-                [slots, np.full(self.num_envs, self.tick, dtype=np.float32)], axis=1
-            ),
+        cameras = [
+            name
+            for name, feature in self.contract["features"].items()
+            if feature.get("type") == "rgb"
+        ]
+        data: dict[str, NDArray[Any]] = {
+            camera: np.full((self.num_envs, self.side, self.side, 3), self.tick, dtype=np.uint8)
+            for camera in cameras
         }
+        data["observation/state"] = np.stack(
+            [slots, np.full(self.num_envs, self.tick, dtype=np.float32)], axis=1
+        )
         return data, np.full(self.num_envs, self.tick >= EPISODE_TICKS)
 
     def result_slots(self) -> list[dict[str, Any]]:
@@ -99,7 +113,9 @@ class _StubSim(RobotBridge):
 
 
 @asynccontextmanager
-async def _sim_env(sim: RobotBridge) -> AsyncIterator[tuple[Environment, RobotEndpoint]]:
+async def _sim_env(
+    sim: RobotBridge, name: str = "stub-sim"
+) -> AsyncIterator[tuple[Environment, RobotEndpoint]]:
     """The docs' custom-bridge env, with *sim* served by this process.
 
     ``RobotEndpoint.remote`` attaches to a sim someone else runs — here the test
@@ -108,7 +124,7 @@ async def _sim_env(sim: RobotBridge) -> AsyncIterator[tuple[Environment, RobotEn
     """
     await sim.start()
     control = await sim.serve_control()
-    env = Environment("stub-sim")
+    env = Environment(name)
     endpoint = RobotEndpoint.remote("127.0.0.1", control.sockets[0].getsockname()[1]).attach(env)
 
     @env.initialize
@@ -371,3 +387,202 @@ async def test_a_gym_sim_behind_a_prewritten_contract_runs_the_template_flow(
     assert adapter.image_keys == ["observation/image", "observation/wrist_image"]
     assert adapter.state_key == "observation/state"
     assert adapter.wired[0]["state"].shape == (8,)
+
+
+# ─── recording: RobotAgent(save=True) writes LeRobot datasets ──────────
+
+#: lerobot's video encoder hangs on frames under 32 px.
+RECORD_SIDE = 64
+
+
+def _recording_contract(
+    *, rate: int = 5, robot: str = "arm", cameras: tuple[str, ...] = ("observation/image",)
+) -> dict[str, Any]:
+    features: dict[str, Any] = {
+        camera: {"role": "observation", "type": "rgb"} for camera in cameras
+    }
+    features["observation/state"] = {"role": "observation", "names": ["slot", "tick"]}
+    features["action"] = {"role": "action", "names": ["a0", "a1"]}
+    return {"control_rate": rate, "robot_type": robot, "features": features}
+
+
+class _TickModel(Model):
+    """Acts ``[tick, 1]``; raises on the tick named by ``fail_at``."""
+
+    def __init__(self, fail_at: int | None) -> None:
+        self.fail_at = fail_at
+
+    def infer(self, batch: Any) -> Any:
+        state = next(value for value in batch["data"].values() if np.asarray(value).ndim == 1)
+        tick = float(np.asarray(state).reshape(-1)[1])
+        if tick == self.fail_at:
+            raise RuntimeError("policy crashed")
+        return np.array([[[tick, 1.0]]], dtype=np.float32)
+
+
+class _Recorder(RobotAgent):
+    save = True
+    max_steps = EPISODE_TICKS + 2
+    log_every = 0
+
+    def __init__(self, *, fail_at: int | None = None) -> None:
+        super().__init__()
+        self.model = _TickModel(fail_at)
+        self.adapter = None
+
+
+async def _record(name: str, contract: dict[str, Any], agent: RobotAgent | None = None) -> Run:
+    async with _sim_env(_StubSim(contract=contract, side=RECORD_SIDE), name) as (env, endpoint):
+
+        @env.template()
+        async def episode() -> AsyncGenerator[Any, Any]:
+            ep = await endpoint.reset()
+            yield {"prompt": ep["prompt"]}
+            yield await endpoint.result()
+
+        return await rollout(
+            Task(env=name, id="episode"), agent or _Recorder(), runtime=_serving(env)
+        )
+
+
+def _recorded(record_dir: Path) -> list[Any]:
+    """Every dataset under ``record_dir`` as ``lerobot`` reads it back, oldest first."""
+    lerobot_dataset: Any = importlib.import_module("lerobot.datasets.lerobot_dataset")
+    roots = sorted(path for path in record_dir.glob("*") if path.is_dir())
+    return [lerobot_dataset.LeRobotDataset(f"hud/{root.name}", root=root) for root in roots]
+
+
+def _frames(dataset: Any, episode: int) -> list[dict[str, Any]]:
+    """One episode's frames as state, action and task."""
+    return [
+        {
+            "state": frame["observation.state"].tolist(),
+            "action": frame["action"].tolist(),
+            "task": frame["task"],
+        }
+        for frame in (dataset[index] for index in range(dataset.num_frames))
+        if int(frame["episode_index"]) == episode
+    ]
+
+
+@pytest.fixture
+def recording(hud_env: HudEnv, tmp_path: Path) -> Iterator[Path]:
+    """``RECORD_DIR`` for this test; datasets still open are finalized afterwards."""
+    record_dir = tmp_path / "records"
+    hud_env.set(RECORD_DIR=str(record_dir))
+    yield record_dir
+    DatasetWriter.finalize()
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_a_recorded_rollout_saves_one_episode_of_observed_and_executed_frames(
+    recording: Path,
+) -> None:
+    run = await _record("arm", _recording_contract())
+    DatasetWriter.finalize()
+
+    (dataset,) = _recorded(recording)
+    assert run.reward == sum(range(EPISODE_TICKS))  # the sim saw every action
+    assert (dataset.meta.fps, dataset.meta.robot_type, dataset.meta.total_episodes) == (
+        5,
+        "arm",
+        1,
+    )
+    assert dataset.meta.features["observation.state"]["names"] == ["slot", "tick"]
+    image = dataset[0]["observation.images.observation_image"]
+    assert tuple(image.shape) == (3, RECORD_SIDE, RECORD_SIDE)
+    assert _frames(dataset, 0) == [
+        {"state": [1.0, float(tick)], "action": [float(tick), 1.0], "task": "stub task: none"}
+        for tick in range(EPISODE_TICKS)
+    ]
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_concurrent_rollouts_of_one_contract_share_a_dataset(recording: Path) -> None:
+    await asyncio.gather(
+        _record("left", _recording_contract()), _record("right", _recording_contract())
+    )
+    DatasetWriter.finalize()
+
+    (dataset,) = _recorded(recording)
+    assert [len(_frames(dataset, episode)) for episode in range(2)] == [EPISODE_TICKS] * 2
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_a_different_rate_or_robot_gets_its_own_dataset(recording: Path) -> None:
+    await asyncio.gather(
+        _record("five", _recording_contract(rate=5)),
+        _record("ten", _recording_contract(rate=10)),
+        _record("other", _recording_contract(robot="other")),
+    )
+    DatasetWriter.finalize()
+
+    found = [(d.meta.fps, d.meta.robot_type, d.meta.total_episodes) for d in _recorded(recording)]
+    assert sorted(found) == [(5, "arm", 1), (5, "other", 1), (10, "arm", 1)]
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_a_failed_rollout_keeps_the_frames_it_recorded(recording: Path) -> None:
+    run = await _record("arm", _recording_contract(), _Recorder(fail_at=2))
+    DatasetWriter.finalize()
+
+    (dataset,) = _recorded(recording)
+    assert run.trace.status == "error"
+    assert [frame["action"] for frame in _frames(dataset, 0)] == [[0.0, 1.0], [1.0, 1.0]]
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_nested_camera_names_stay_distinct_features(recording: Path) -> None:
+    await _record("stereo", _recording_contract(cameras=("left/image", "right/image")))
+    DatasetWriter.finalize()
+
+    (dataset,) = _recorded(recording)
+    assert {"observation.images.left_image", "observation.images.right_image"} <= set(
+        dataset.meta.features
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_features_that_flatten_to_one_key_fail_the_rollout_before_recording(
+    recording: Path,
+) -> None:
+    run = await _record("clash", _recording_contract(cameras=("cam/rgb", "cam_rgb")))
+
+    assert run.trace.status == "error"
+    assert _recorded(recording) == []
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+@pytest.mark.parametrize("repo", [None, "lab"], ids=["no-repo", "unreachable-hub"])
+async def test_a_dataset_stays_on_disk_whether_or_not_its_push_succeeds(
+    repo: str | None, recording: Path, hud_env: HudEnv, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hud_env.set(HF_REPO=repo, HF_ENDPOINT="http://127.0.0.1:9")
+
+    await _record("arm", _recording_contract())
+    DatasetWriter.finalize()
+
+    (dataset,) = _recorded(recording)
+    assert dataset.meta.total_episodes == 1
+    assert ("HF push failed" in capsys.readouterr().out) is (repo is not None)
+
+
+@pytest.mark.skipif(importlib.util.find_spec("lerobot") is not None, reason="lerobot installed")
+async def test_without_lerobot_recording_warns_and_the_rollout_still_runs(
+    hud_env: HudEnv, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    hud_env.set(RECORD_DIR=str(tmp_path / "records"))
+
+    with caplog.at_level(logging.WARNING, logger="hud.agents.robot.dataset"):
+        run = await _record("arm", _recording_contract())
+
+    assert run.reward == sum(range(EPISODE_TICKS))
+    assert any("lerobot" in entry.message for entry in caplog.records)
+    assert not (tmp_path / "records").exists()
