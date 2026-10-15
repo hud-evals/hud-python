@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from inline_snapshot import snapshot
 
 from hud import Environment, instrument
 from hud.agents.openai_compatible import OpenAIChatAgent
@@ -67,31 +66,27 @@ def _step_rows(spans: list[dict[str, Any]]) -> list[tuple[str, str, int]]:
         pytest.param(
             False,
             1.0,
-            snapshot(
-                [
-                    ("step.task", "OK", 1),
-                    ("step.user", "OK", 2),
-                    ("step.agent", "OK", 3),
-                    ("step.tool", "OK", 4),
-                    ("step.agent", "OK", 5),
-                    ("step.task", "OK", 6),
-                ]
-            ),
+            [
+                ("step.task", "OK", 1),
+                ("step.user", "OK", 2),
+                ("step.agent", "OK", 3),
+                ("step.tool", "OK", 4),
+                ("step.agent", "OK", 5),
+                ("step.task", "OK", 6),
+            ],
             id="graded",
         ),
         pytest.param(
             True,
             0.0,
-            snapshot(
-                [
-                    ("step.task", "OK", 1),
-                    ("step.user", "OK", 2),
-                    ("step.agent", "OK", 3),
-                    ("step.tool", "OK", 4),
-                    ("step.agent", "OK", 5),
-                    ("step.system", "ERROR", 6),
-                ]
-            ),
+            [
+                ("step.task", "OK", 1),
+                ("step.user", "OK", 2),
+                ("step.agent", "OK", 3),
+                ("step.tool", "OK", 4),
+                ("step.agent", "OK", 5),
+                ("step.system", "ERROR", 6),
+            ],
             id="grading-error",
         ),
     ],

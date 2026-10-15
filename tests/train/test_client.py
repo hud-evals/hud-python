@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import torch
 from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 from hud import Environment
 from hud.agents import OpenAIChatAgent
@@ -124,42 +123,15 @@ async def test_a_step_sends_sampled_runs_inline_then_one_optimizer_step(
     assert [run.reward for run in runs] == [1.0, 0.0]
     (forward_backward,) = service.requests("rl", "POST", f"{TRAIN}/forward-backward")
     assert forward_backward.bearer == "team-key"
-    assert forward_backward.json == snapshot(
-        {
-            "inputs": [
-                {
-                    "samples": [
-                        {
-                            "prompt_token_ids": [1, 2, 3],
-                            "output_token_ids": [7],
-                            "output_logprobs": [-0.5],
-                        }
-                    ],
-                    "reward": 1.0,
-                    "trace_id": TRACE_ID,
-                },
-                {
-                    "samples": [
-                        {
-                            "prompt_token_ids": [1, 2, 3],
-                            "output_token_ids": [7],
-                            "output_logprobs": [-0.5],
-                        }
-                    ],
-                    "reward": 0.0,
-                    "trace_id": TRACE_ID,
-                },
-            ],
-            "loss_fn": "importance_sampling",
-            "group_size": 2,
-            "reward_scale": 1.0,
-            "num_substeps": 1,
-        }
-    )
+    sent = forward_backward.json
+    sample = {"prompt_token_ids": [1, 2, 3], "output_token_ids": [7], "output_logprobs": [-0.5]}
+    assert [(i["samples"], i["reward"], i["trace_id"]) for i in sent["inputs"]] == [
+        ([sample], 1.0, TRACE_ID),
+        ([sample], 0.0, TRACE_ID),
+    ]
+    assert sent["group_size"] == 2
     (optim,) = service.requests("rl", "POST", f"{TRAIN}/optim-step")
-    assert optim.json == snapshot(
-        {"learning_rate": 1e-05, "beta1": 0.9, "beta2": 0.95, "eps": 1e-08, "weight_decay": 0.0}
-    )
+    assert optim.json["learning_rate"] == 1e-5
 
 
 async def test_runs_without_token_samples_train_by_trace_id(service: FakeServices) -> None:

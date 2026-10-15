@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 from hud import Environment, instrument
 from hud.agents.base import Agent
@@ -89,13 +88,11 @@ async def test_step_spans_carry_the_step_schema_payload_and_timing() -> None:
     exported = [span for span in spans(run.trace_id) if span["name"].startswith("step.")]
     assert [
         (span["name"], span["attributes"]["hud.schema"], span["status_code"]) for span in exported
-    ] == snapshot(
-        [
-            ("step.task", "hud.step.v1", "OK"),
-            ("step.user", "hud.step.v1", "OK"),
-            ("step.task", "hud.step.v1", "OK"),
-        ]
-    )
+    ] == [
+        ("step.task", "hud.step.v1", "OK"),
+        ("step.user", "hud.step.v1", "OK"),
+        ("step.task", "hud.step.v1", "OK"),
+    ]
     assert {span["attributes"]["hud.task_run_id"] for span in exported} == {run.trace_id}
     assert [step["step_id"] for step in steps(run.trace_id)] == [1, 2, 3]
     assert all(span["end_time"] == ISO for span in exported)
@@ -153,37 +150,35 @@ async def test_instrumented_calls_inside_a_run_record_their_arguments_and_outcom
         for span in spans(run.trace_id)
         if span["name"].startswith("probe.")
     }
-    assert probes == snapshot(
-        {
-            "probe.lookup": {
-                "status": "OK",
-                "message": None,
-                "events": {
-                    "hud.request": {
-                        "hud.payload": {"items": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "limit": 3}
-                    },
-                    "hud.result": {"hud.payload": {"found": [0, 1, 2]}},
+    assert probes == {
+        "probe.lookup": {
+            "status": "OK",
+            "message": None,
+            "events": {
+                "hud.request": {
+                    "hud.payload": {"items": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "limit": 3}
                 },
+                "hud.result": {"hud.payload": {"found": [0, 1, 2]}},
             },
-            "probe.quiet": {"status": "OK", "message": None, "events": {}},
-            "probe.fail": {
-                "status": "ERROR",
-                "message": "ValueError: bad input",
-                "events": {
-                    "hud.request": {"hud.payload": {"reason": "bad input"}},
-                    "exception": {"exception.message": "ValueError: bad input"},
-                },
+        },
+        "probe.quiet": {"status": "OK", "message": None, "events": {}},
+        "probe.fail": {
+            "status": "ERROR",
+            "message": "ValueError: bad input",
+            "events": {
+                "hud.request": {"hud.payload": {"reason": "bad input"}},
+                "exception": {"exception.message": "ValueError: bad input"},
             },
-            "probe.opaque": {
-                "status": "OK",
-                "message": None,
-                "events": {
-                    "hud.request": {"hud.payload": {"value": "<Unprintable: not serializable>"}},
-                    "hud.result": {"hud.payload": "<Unprintable: not serializable>"},
-                },
+        },
+        "probe.opaque": {
+            "status": "OK",
+            "message": None,
+            "events": {
+                "hud.request": {"hud.payload": {"value": "<Unprintable: not serializable>"}},
+                "hud.result": {"hud.payload": "<Unprintable: not serializable>"},
             },
-        }
-    )
+        },
+    }
 
 
 async def test_instrumented_calls_outside_a_run_export_nothing(hud_env: HudEnv) -> None:

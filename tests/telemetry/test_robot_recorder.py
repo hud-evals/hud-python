@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-from inline_snapshot import snapshot
 
 from hud.environment.robot import wrap
 
@@ -78,35 +77,31 @@ def test_each_episode_reports_its_own_trace_and_outcome(
         ]
         for trace, recorded in spans.items()
     }
-    assert exits == snapshot(
-        {
-            "trace-0": {
-                "status": "completed",
-                "reward": 1.0,
-                "metadata": {"env_index": 0, "episode_index": 0, "seed": None, "success": True},
-            },
-            "trace-1": {
-                "status": "completed",
-                "reward": 0.0,
-                "metadata": {"env_index": 1, "episode_index": 0, "seed": None, "success": False},
-            },
-            "trace-2": {
-                "status": "completed",
-                "reward": 0.2,
-                "metadata": {"env_index": 0, "episode_index": 1, "seed": None},
-            },
-        }
-    )
-    assert dict(sorted(steps.items())) == snapshot(
-        {
-            "trace-0": [("step.observation", 0), ("step.inference", 0), ("step.inference", 1)],
-            "trace-1": [
-                ("step.observation", 0),
-                ("step.inference", 0),
-                ("step.observation", 1),
-                ("step.inference", 1),
-                ("step.inference", 2),
-            ],
-            "trace-2": [("step.observation", 0), ("step.inference", 0)],
-        }
-    )
+    assert exits == {
+        "trace-0": {
+            "status": "completed",
+            "reward": 1.0,
+            "metadata": {"env_index": 0, "episode_index": 0, "seed": None, "success": True},
+        },
+        "trace-1": {
+            "status": "completed",
+            "reward": 0.0,
+            "metadata": {"env_index": 1, "episode_index": 0, "seed": None, "success": False},
+        },
+        "trace-2": {
+            "status": "completed",
+            "reward": 0.2,
+            "metadata": {"env_index": 0, "episode_index": 1, "seed": None},
+        },
+    }
+    assert dict(sorted(steps.items())) == {
+        "trace-0": [("step.observation", 0), ("step.inference", 0), ("step.inference", 1)],
+        "trace-1": [
+            ("step.observation", 0),
+            ("step.inference", 0),
+            ("step.observation", 1),
+            ("step.inference", 1),
+            ("step.inference", 2),
+        ],
+        "trace-2": [("step.observation", 0), ("step.inference", 0)],
+    }

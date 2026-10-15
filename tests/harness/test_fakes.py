@@ -11,7 +11,6 @@ from anthropic.types.beta import BetaMessageParam, BetaToolUseBlock
 from dirty_equals import IsStr
 from google import genai
 from google.genai.types import HttpOptions
-from inline_snapshot import snapshot
 from openai import AsyncOpenAI
 from openai.types.responses import ResponseFunctionToolCall
 from PIL import Image
@@ -78,17 +77,19 @@ async def test_a_reporting_rollout_reaches_the_fake_platform(
     )
 
     assert job.reward == 1.0
-    assert services.bodies("api", "POST", "/v2/trace/{id}/exit") == snapshot(
-        [{"status": "completed", "reward": 1.0, "evaluation_result": {"score": 1.0}}]
-    )
-    assert services.bodies("api", "POST", "/v2/trace/{id}/enter") == snapshot(
-        [{"job_id": HEX_ID, "group_id": HEX_ID, "task_slug": "add-1744f53e", "model": "unknown"}]
-    )
+    assert services.bodies("api", "POST", "/v2/trace/{id}/exit") == [
+        {"status": "completed", "reward": 1.0, "evaluation_result": {"score": 1.0}}
+    ]
+    assert services.bodies("api", "POST", "/v2/trace/{id}/enter") == [
+        {"job_id": HEX_ID, "group_id": HEX_ID, "task_slug": "add-1744f53e", "model": "unknown"}
+    ]
     (upload,) = services.requests("telemetry", "POST", "/trace/{id}/telemetry-upload")
     assert upload.bearer == "k"
-    assert [span["name"] for span in upload.json["telemetry"]] == snapshot(
-        ["step.task", "step.user", "step.task"]
-    )
+    assert [span["name"] for span in upload.json["telemetry"]] == [
+        "step.task",
+        "step.user",
+        "step.task",
+    ]
 
 
 async def test_a_scripted_chat_model_drives_an_agent_through_a_workspace(
@@ -120,9 +121,14 @@ async def test_a_scripted_chat_model_drives_an_agent_through_a_workspace(
     assert "write" in first.tools
     assert second.tool_results != []
     assert first.headers["authorization"] == "Bearer k"
-    assert [step["source"] for step in steps(run.trace_id)] == snapshot(
-        ["task", "user", "agent", "tool", "agent", "task"]
-    )
+    assert [step["source"] for step in steps(run.trace_id)] == [
+        "task",
+        "user",
+        "agent",
+        "tool",
+        "agent",
+        "task",
+    ]
 
 
 async def test_a_scripted_anthropic_turn_streams_through_the_anthropic_sdk(models: Models) -> None:

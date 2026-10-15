@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-from inline_snapshot import snapshot
 
 from hud.utils import PlatformClient, make_request, make_request_sync
 from hud.utils.exceptions import (
@@ -239,17 +238,15 @@ async def test_the_platform_client_sends_each_verb_under_v2_with_the_bearer(
     assert [
         (request.method, request.path, request.query, request.json, request.bearer)
         for request in services.requests("api")
-    ] == snapshot(
-        [
-            ("GET", "/v2/tasks", {"limit": ["5"], "ids": ["a", "b"]}, None, "k"),
-            ("POST", "/v2/tasks", {}, {"b": 2}, "k"),
-            ("PUT", "/v2/tasks/1", {}, {"c": 3}, "k"),
-            ("PATCH", "/v2/tasks/1", {}, {"d": 4}, "k"),
-            ("DELETE", "/v2/tasks/1", {}, None, "k"),
-            ("GET", "/v2/tasks", {"limit": ["1"]}, None, "k"),
-            ("POST", "/v2/tasks", {}, {"e": 5}, "k"),
-        ]
-    )
+    ] == [
+        ("GET", "/v2/tasks", {"limit": ["5"], "ids": ["a", "b"]}, None, "k"),
+        ("POST", "/v2/tasks", {}, {"b": 2}, "k"),
+        ("PUT", "/v2/tasks/1", {}, {"c": 3}, "k"),
+        ("PATCH", "/v2/tasks/1", {}, {"d": 4}, "k"),
+        ("DELETE", "/v2/tasks/1", {}, None, "k"),
+        ("GET", "/v2/tasks", {"limit": ["1"]}, None, "k"),
+        ("POST", "/v2/tasks", {}, {"e": 5}, "k"),
+    ]
 
 
 @pytest.mark.parametrize("api_key", [None, ""])
