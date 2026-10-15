@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import signal
 import sys
 import time
@@ -25,13 +26,13 @@ TRACE_ID = "00000000-0000-4000-a000-000000000002"
 
 
 def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
-    # Wide enough that no command's description wraps onto a line of its own.
-    result = Hud(hud.cwd, columns=200)()
+    result = hud()
 
     assert result.exit_code == 2
     assert result.stderr == ""
-    commands = result.lines[result.lines.index("Commands") + 1 :]
-    assert [line.split()[0] for line in commands] == [
+    # A wrapped description continues on a row whose name column is blank.
+    rows = re.findall(r"^│ (\S+)", result.stdout, flags=re.MULTILINE)
+    assert [row for row in rows if not row.startswith("-")] == [
         *("init", "serve", "deploy", "eval", "task", "project", "sync", "harbor"),
         *("qa", "jobs", "trace", "models", "set", "version"),
     ]
