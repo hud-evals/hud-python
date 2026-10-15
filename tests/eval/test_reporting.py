@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
@@ -75,9 +74,7 @@ async def test_a_taskset_reports_one_job_and_each_rollout_under_it(
 
     (job_enter,) = platform.requests("api", "POST", JOB_ENTER)
     assert (job_enter.params["id"], job_enter.bearer) == (job.id, "k")
-    assert job_enter.json == snapshot(
-        {"name": "pair (2 tasks) (2 times)", "group": 2, "taskset_id": "ts-1"}
-    )
+    assert job_enter.json == {"name": "pair (2 tasks) (2 times)", "group": 2, "taskset_id": "ts-1"}
     assert f"job: https://hud.test/jobs/{uuid.UUID(job.id)}" in caplog.messages
     enters = platform.requests("api", "POST", TRACE_ENTER)
     assert len(enters) == 4

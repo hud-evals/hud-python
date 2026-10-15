@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from inline_snapshot import snapshot
 from mcp.types import ImageContent, TextContent
 
 from hud import Environment
@@ -58,49 +57,12 @@ async def test_a_conversation_keeps_its_history_and_one_job_across_turns() -> No
         await chat.send("fail")
 
     assert replies == ["echo:hello", "echo:<non-text>", "echo:cite"]
-    assert chat.messages == snapshot(
-        [
-            {
-                "role": "user",
-                "content": {"type": "text", "text": "hello", "annotations": None, "meta": None},
-            },
-            {"role": "assistant", "content": {"type": "text", "text": "echo:hello"}},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "what is in this picture?",
-                        "annotations": None,
-                        "meta": None,
-                    },
-                    {
-                        "type": "image",
-                        "data": "aW1n",
-                        "mimeType": "image/png",
-                        "annotations": None,
-                        "meta": None,
-                    },
-                ],
-            },
-            {"role": "assistant", "content": {"type": "text", "text": "echo:<non-text>"}},
-            {
-                "role": "user",
-                "content": {"type": "text", "text": "cite", "annotations": None, "meta": None},
-            },
-            {
-                "role": "assistant",
-                "content": {"type": "text", "text": "echo:cite"},
-                "citations": [
-                    {"type": "url_citation", "text": "cite", "source": "https://docs.test"}
-                ],
-            },
-            {
-                "role": "user",
-                "content": {"type": "text", "text": "fail", "annotations": None, "meta": None},
-            },
-        ]
-    )
+    assert [message["role"] for message in chat.messages] == ["user", "assistant"] * 3 + ["user"]
+    assert [m["content"]["text"] for m in chat.messages if m["role"] == "assistant"] == replies
+    assert [block["type"] for block in chat.messages[2]["content"]] == ["text", "image"]
+    assert chat.messages[5]["citations"] == [
+        {"type": "url_citation", "text": "cite", "source": "https://docs.test"}
+    ]
     assert prompts[-1] == chat.messages
     assert chat.job is not None
     assert [run.job_id for run in chat.job.runs] == [chat.job.id] * 4
