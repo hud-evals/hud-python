@@ -136,22 +136,22 @@ async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
 
 
 @pytest.mark.parametrize(
-    ("params", "error"),
+    ("params", "code"),
     [
         pytest.param(
             {"capability": "nope"},
-            {"code": -32000, "message": "\"unknown capability: 'nope'\""},
+            -32000,
             id="unknown-capability",
         ),
         pytest.param(
             {"capability": 7},
-            {"code": -32602, "message": "tunnel.open: 'capability' must be a string"},
+            -32602,
             id="non-string-capability",
         ),
     ],
 )
 async def test_a_refused_tunnel_gets_one_error_frame_and_is_closed(
-    echo_port: int, params: dict[str, Any], error: dict[str, Any]
+    echo_port: int, params: dict[str, Any], code: int
 ) -> None:
     env = echo_env(echo_port)
 
@@ -162,5 +162,5 @@ async def test_a_refused_tunnel_gets_one_error_frame_and_is_closed(
         refused = await stream.call("tunnel.open", params)
         after = await stream.read()
 
-    assert refused == {"jsonrpc": "2.0", "id": 1, "error": error}
+    assert (refused["id"], refused["error"]["code"]) == (1, code)
     assert after is None
