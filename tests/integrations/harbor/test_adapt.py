@@ -194,7 +194,10 @@ def test_an_image_docker_cannot_resolve_is_reported_on_its_task(
         for failure in result.failures
     }
     assert "registry.invalid/missing" in messages["broken"]
-    assert "registry.invalid/cache" in messages["missing-sidecar-image"]
+    # Linux daemons name only the registry they could not reach; the finding names the service.
+    assert {"cache", "registry.invalid"} <= set(
+        re.findall(r"[\w.]+", messages["missing-sidecar-image"])
+    )
     assert "--platform linux/amd64" in messages["verifier-on-arm"]
     assert ("DOCKER_DEFAULT_PLATFORM=linux/amd64" in messages["verifier-on-arm"]) is (
         host != "amd64"
