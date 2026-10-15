@@ -18,7 +18,7 @@ from PIL import Image
 from hud import Environment
 from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task, rollout
-from tests.harness import serve_asgi
+from tests.harness import serve_asgi, write_files
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -71,17 +71,6 @@ async def run_task(env: Environment, agent: Agent, *, prompt: str = PROMPT, **op
     return await rollout(
         Task(env=env.name, id="task", args=args), agent, runtime=LocalRuntime(env), **options
     )
-
-
-def write_files(root: Path, files: Mapping[str, bytes | str]) -> None:
-    root.mkdir(parents=True, exist_ok=True)
-    for relative, content in files.items():
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(content, str):
-            path.write_text(content)
-        else:
-            path.write_bytes(content)
 
 
 @asynccontextmanager

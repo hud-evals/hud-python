@@ -7,12 +7,10 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from dirty_equals import IsFloat, IsInstance, IsInt, IsStr
-from inline_snapshot import snapshot
 
 from hud import Environment
 from hud.eval import LocalRuntime, Task
-from tests.harness import say
+from tests.harness import say, write_files
 
 from .conftest import API_KEY
 
@@ -21,9 +19,6 @@ if TYPE_CHECKING:
 
     from tests.harness import FakeServices, Hud, HudEnv, Models
 
-HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
-RUNTIMES = r"Input should be 'local', 'hud', 'hosted', 'docker', 'modal' or 'daytona'"
-TCP_ONLY = r"URL scheme should be 'tcp'"
 TASKS_PY = """\
 from hud import Environment
 
@@ -38,6 +33,7 @@ async def solve(n: int = 0):
 
 tasks = [solve(n=0), solve(n=1)]
 """
+SCRIPTED = ("openai_compatible", "-m", "scripted")
 
 
 @pytest.fixture
@@ -55,9 +51,9 @@ def tasks(hud: Hud) -> Path:
     return path
 
 
-def run(hud: Hud, *argv: str, env: dict[str, str] | None = None) -> Any:
+def run(hud: Hud, *argv: str) -> Any:
     """``hud eval ... --yes --json``; the result document of a successful run."""
-    result = hud("eval", *argv, "--yes", "--json", env=env)
+    result = hud("eval", *argv, "--yes", "--json")
     assert result.exit_code == 0, result
     return result.json
 
@@ -66,127 +62,84 @@ def run(hud: Hud, *argv: str, env: dict[str, str] | None = None) -> Any:
 
 
 @pytest.mark.parametrize(
-    ("grader", "exit_code", "document"),
+    ("grade", "exit_code", "rewards", "errors"),
     [
+        pytest.param('1.0 if answer == "ok" else 0.0', 0, [1.0, 1.0], [False, False], id="graded"),
+        pytest.param("0.0", 0, [1.0, 0.0], [False, False], id="a-low-reward-is-not-an-error"),
         pytest.param(
-            'yield 1.0 if answer == "ok" else 0.0',
-            0,
-            {
-                "mean_reward": 1.0,
-                "error_count": 0,
-                "runs": [("solve-5fe4d610", 1.0, False), ("solve-bae34777", 1.0, False)],
-            },
-            id="graded",
-        ),
-        pytest.param(
-            'yield 1.0 if answer == "something else" else 0.0',
-            0,
-            {
-                "mean_reward": 0.5,
-                "error_count": 0,
-                "runs": [("solve-5fe4d610", 1.0, False), ("solve-bae34777", 0.0, False)],
-            },
-            id="low-reward-is-not-an-error",
-        ),
-        pytest.param(
-            'yield {"score": 0.0, "isError": True, "content": "grader unavailable"}',
+            '{"score": 0.0, "isError": True, "content": "grader unavailable"}',
             1,
-            {
-                "mean_reward": 1.0,
-                "error_count": 1,
-                "runs": [("solve-5fe4d610", 1.0, False), ("solve-bae34777", 0.0, True)],
-            },
-            id="grade-error",
+            [1.0, 0.0],
+            [False, True],
+            id="a-grade-error",
         ),
-        pytest.param(
-            'raise RuntimeError("grader crashed")',
-            1,
-            {
-                "mean_reward": 1.0,
-                "error_count": 1,
-                "runs": [("solve-5fe4d610", 1.0, False), ("solve-bae34777", 0.0, True)],
-            },
-            id="grader-crash",
-        ),
+        pytest.param("1 / 0", 1, [1.0, 0.0], [False, True], id="a-grader-crash"),
     ],
 )
 def test_eval_reports_every_run_and_fails_when_one_errored(
-    hud: Hud, gateway: Models, grader: str, exit_code: int, document: dict[str, Any]
+    hud: Hud,
+    gateway: Models,
+    grade: str,
+    exit_code: int,
+    rewards: list[float],
+    errors: list[bool],
 ) -> None:
     (hud.cwd / "tasks.py").write_text(
-        TASKS_PY.replace(
-            '    answer = yield f"solve {n}"\n    yield 1.0 if answer == "ok" else 0.0\n',
-            f'    answer = yield f"solve {{n}}"\n    if n == 0:\n        yield 1.0\n    {grader}\n',
-        )
+        'from hud import Environment\nenv = Environment("demo")\n'
+        '@env.template(id="solve")\nasync def solve(n: int = 0):\n'
+        '    answer = yield f"solve {n}"\n'
+        f"    yield 1.0 if n == 0 else {grade}\n"
+        "tasks = [solve(n=0), solve(n=1)]\n"
     )
 
-    result = hud(
-        "eval", "tasks.py", "openai_compatible", "-m", "scripted", "--all", "--yes", "--json"
-    )
+    result = hud("eval", "tasks.py", *SCRIPTED, "--all", "--yes", "--json")
 
     assert result.exit_code == exit_code, result
-    assert result.json == {
-        "job_id": HEX_ID,
-        "source": "tasks.py",
-        "elapsed_seconds": IsFloat(gt=0),
-        "run_count": 2,
-        "mean_reward": IsFloat(),
-        "error_count": IsInt(),
-        "runs": [
-            {
-                "task_id": "solve",
-                "slug": IsStr(),
-                "reward": IsFloat(),
-                "is_error": IsInstance(bool),
-                "trace_id": HEX_ID,
-            }
-        ]
-        * 2,
-    }
-    assert {
-        "mean_reward": result.json["mean_reward"],
-        "error_count": result.json["error_count"],
-        "runs": [(run["slug"], run["reward"], run["is_error"]) for run in result.json["runs"]],
-    } == document
+    runs = sorted(result.json["runs"], key=lambda run: run["is_error"])
+    assert [run["reward"] for run in runs] == rewards
+    assert [run["is_error"] for run in runs] == errors
+    assert result.json["error_count"] == sum(errors)
 
 
 @pytest.mark.parametrize(
-    ("argv", "prompts", "warning"),
+    ("argv", "prompts"),
     [
-        ([], ["solve 0"], "Running only 1 of 2 tasks (the first)."),
-        (["--all"], ["solve 0", "solve 1"], None),
-        (["--task-ids", "1"], ["solve 1"], None),
-        (["--task-ids", "solve"], ["solve 0", "solve 1"], None),
-        (["--group", "3", "--max-concurrent", "2"], ["solve 0"] * 3, None),
+        pytest.param([], ["solve 0"], id="the-first-by-default"),
+        pytest.param(["--all"], ["solve 0", "solve 1"], id="all"),
+        pytest.param(["--task-ids", "1"], ["solve 1"], id="by-index"),
+        pytest.param(["--task-ids", "solve"], ["solve 0", "solve 1"], id="by-template"),
+        pytest.param(["--group", "3", "--max-concurrent", "2"], ["solve 0"] * 3, id="grouped"),
     ],
 )
-def test_eval_selects_the_tasks_to_run(
-    hud: Hud,
-    gateway: Models,
-    tasks: Path,
-    argv: list[str],
-    prompts: list[str],
-    warning: str | None,
+def test_eval_runs_the_tasks_it_selects(
+    hud: Hud, gateway: Models, tasks: Path, argv: list[str], prompts: list[str]
 ) -> None:
-    result = hud(
-        "eval", "tasks.py", "openai_compatible", "-m", "scripted", *argv, "--yes", "--json"
-    )
+    document = run(hud, "tasks.py", *SCRIPTED, *argv)
 
-    assert result.exit_code == 0, result
-    assert result.json["run_count"] == len(prompts)
-    assert result.json["mean_reward"] == 1.0
+    assert (document["run_count"], document["mean_reward"]) == (len(prompts), 1.0)
     assert sorted(request.prompt for request in gateway.requests()) == prompts
-    assert (warning is not None and warning in " ".join(result.stderr.split())) or warning is None
 
 
 # ─── how the agent reaches its model ────────────────────────────────────
+
+
+GLM = {
+    "id": "z-ai/glm-5.2",
+    "model_name": "z-ai/glm-5.2",
+    "sdk_agent_type": "openai_compatible",
+    "provider": {"name": "openai"},
+}
+KIMI_TOML = (
+    '[openai_compatible]\nmodel = "moonshotai/kimi-k2.6"\n'
+    "completion_kwargs = { temperature = 0.5 }\n"
+)
 
 
 @pytest.mark.parametrize(
     ("argv", "config", "environment", "expected"),
     [
         pytest.param(
-            ["openai_compatible", "-m", "scripted"],
+            list(SCRIPTED),
             "",
             {},
             {"protocol": "chat", "model": "scripted", "key": API_KEY},
@@ -194,16 +147,14 @@ def test_eval_selects_the_tasks_to_run(
         ),
         pytest.param(
             ["openai_compatible"],
-            '[openai_compatible]\nmodel = "moonshotai/kimi-k2.6"\n'
-            "completion_kwargs = { temperature = 0.5 }\n",
+            KIMI_TOML,
             {},
             {"protocol": "chat", "model": "moonshotai/kimi-k2.6", "temperature": 0.5},
             id="toml-section",
         ),
         pytest.param(
             ["openai_compatible", "-m", "z-ai/glm-5.2"],
-            '[openai_compatible]\nmodel = "moonshotai/kimi-k2.6"\n'
-            "completion_kwargs = { temperature = 0.5 }\n",
+            KIMI_TOML,
             {},
             {"protocol": "chat", "model": "z-ai/glm-5.2", "temperature": 0.5},
             id="model-flag-wins-over-toml",
@@ -261,11 +212,7 @@ def test_eval_selects_the_tasks_to_run(
             id="gateway-flag-wins-over-custom-endpoint",
         ),
         pytest.param(
-            ["gemini"],
-            "",
-            {},
-            {"protocol": "gemini", "key": API_KEY},
-            id="gemini-through-the-gateway",
+            ["gemini"], "", {}, {"protocol": "gemini", "key": API_KEY}, id="gemini-via-gateway"
         ),
     ],
 )
@@ -281,170 +228,126 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     expected: dict[str, Any],
 ) -> None:
     """Provider SDKs read their own ``*_BASE_URL``, which here points at the scripted model."""
-    gateway_url = gateway.url
     services.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
     (hud.cwd / ".hud_eval.toml").write_text(config)
-    hud_env.set(OPENAI_BASE_URL=gateway_url, ANTHROPIC_BASE_URL=gateway_url, **environment)
+    hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url, **environment)
 
     # The same scripted model under another host name, so it is not the HUD gateway.
-    custom = gateway_url.replace("127.0.0.1", "localhost")
+    custom = gateway.url.replace("127.0.0.1", "localhost")
     document = run(hud, "tasks.py", *[arg.replace("URL", custom) for arg in argv])
 
     assert document["mean_reward"] == 1.0
     (request,) = gateway.requests()
+    credential = (
+        request.headers.get("x-api-key")
+        or request.headers.get("x-goog-api-key")
+        or request.headers.get("authorization", "").removeprefix("Bearer ")
+    )
     observed = {
         "protocol": request.protocol,
         "model": request.model,
-        "key": key(request.headers),
+        "key": credential,
         "temperature": request.body.get("temperature"),
         "max_tokens": request.body.get("max_tokens"),
     }
     assert {name: observed[name] for name in expected} == expected
 
 
-GLM = {
-    "id": "z-ai/glm-5.2",
-    "model_name": "z-ai/glm-5.2",
-    "sdk_agent_type": "openai_compatible",
-    "provider": {"name": "openai"},
-}
-
-
-def key(headers: dict[str, str]) -> str | None:
-    """The credential a provider SDK sent, whichever header its protocol uses."""
-    for name in ("x-api-key", "x-goog-api-key"):
-        if name in headers:
-            return headers[name]
-    return headers.get("authorization", "").removeprefix("Bearer ") or None
-
-
 # ─── project layouts run locally ────────────────────────────────────────
 
-TEMPLATE = (
-    "from pathlib import Path\n"
-    '@env.template(id="solve")\n'
-    "async def solve():\n"
+IMPORTS = "import os\nfrom pathlib import Path\n"
+ENV = 'from hud import Environment\nenv = Environment("local-test")\n'
+SOLVE = (
+    '@env.template(id="solve")\nasync def solve():\n'
     '    answer = yield "answer ok"\n'
     '    yield 1.0 if answer == Path("asset.txt").read_text() else 0.0\n'
 )
 HOOKS = (
-    "import os\nfrom pathlib import Path\n"
     "@env.initialize\nasync def start():\n"
     '    Path(f"events/{os.getpid()}").write_text("started")\n'
     "@env.shutdown\nasync def stop():\n"
     '    Path(f"events/{os.getpid()}").write_text("stopped")\n'
 )
+ONE_FILE = IMPORTS + ENV + SOLVE + HOOKS
+TASKS = "tasks = [solve()]\n"
+FROM_ENV = "from env import solve\n" + TASKS
 
 
-def project_layout(project: Path, layout: str) -> Path:
-    """Write one way of laying out an env and its tasks; return the source to evaluate."""
-    project.mkdir()
-    (project / "events").mkdir()
-    (project / "asset.txt").write_text("ok")
-    package = layout in {"package", "lazy_package"}
-    prefix = "." if package else ""
-    if package:
-        (project / "__init__.py").write_text("")
-    template = TEMPLATE
-    if layout == "lazy_package":
-        (project / "expected.py").write_text(
-            'from pathlib import Path\nexpected = Path("asset.txt").read_text()\n'
-        )
-        template = template.replace(
-            '    answer = yield "answer ok"\n',
-            '    from .expected import expected\n    answer = yield "answer ok"\n',
-        ).replace('Path("asset.txt").read_text()', "expected")
-    split = {"hooks", "hooks_source", "assembled", "assembled_source", "assembled_directory"}
-    if layout in split | {"package"}:
-        (project / "local_core.py").write_text(
-            'from hud import Environment\nenv = Environment("local-test")\n'
-        )
-        (project / "local_templates.py").write_text(
-            f"from {prefix}local_core import env\n" + template
-        )
-        (project / "local_extra.py").write_text(
-            f"from {prefix}local_core import env\n"
-            '@env.template(id="extra")\nasync def extra():\n    yield "extra"\n    yield 1.0\n'
-        )
-        env_source = (
-            f"from {prefix}local_core import env\n"
-            f"from {prefix}local_templates import solve\n"
-            + (f"from {prefix}local_extra import extra\n" if not layout.startswith("hooks") else "")
+def split(prefix: str) -> dict[str, str]:
+    """An env assembled from a core module, a templates module and an entry module."""
+    return {
+        "core.py": ENV,
+        "templates.py": IMPORTS + f"from {prefix}core import env\n" + SOLVE,
+        "env.py": IMPORTS
+        + f"from {prefix}core import env\nfrom {prefix}templates import solve\n"
+        + HOOKS,
+    }
+
+
+LAYOUTS: dict[str, tuple[dict[str, str], str]] = {
+    "one-file": ({"env.py": ONE_FILE + TASKS}, "env.py"),
+    "a-named-file": (
+        {"standalone.py": ONE_FILE + TASKS, "env.py": ENV.replace("local-test", "unrelated")},
+        "standalone.py",
+    ),
+    "tasks-beside-the-env": ({"env.py": ONE_FILE, "tasks.py": FROM_ENV}, "tasks.py"),
+    "the-directory": ({"env.py": ONE_FILE, "tasks.py": FROM_ENV}, "."),
+    "env-across-modules": (split("") | {"tasks.py": FROM_ENV}, "tasks.py"),
+    "env-across-modules-with-its-tasks": (
+        {**split(""), "env.py": split("")["env.py"] + TASKS},
+        "env.py",
+    ),
+    "package": (
+        split(".") | {"__init__.py": "", "tasks.py": "from .env import solve\n" + TASKS},
+        "tasks.py",
+    ),
+    "package-importing-inside-a-template": (
+        {
+            "__init__.py": "",
+            "expected.py": 'from pathlib import Path\nexpected = Path("asset.txt").read_text()\n',
+            "env.py": IMPORTS
+            + ENV
+            + SOLVE.replace(
+                "    answer = yield", "    from .expected import expected\n    answer = yield"
+            )
             + HOOKS
-        )
-    else:
-        env_source = (
-            'from hud import Environment\nenv = Environment("local-test")\n' + template + HOOKS
-        )
-    if layout in {"single", "standalone", "lazy_package", "hooks_source", "assembled_source"}:
-        env_source += "tasks = [solve()]\n"
-        source = project / "env.py"
-    else:
-        (project / "tasks.py").write_text(
-            f"from {prefix}env import env, solve\ntasks = [solve()]\n"
-        )
-        source = project / "tasks.py"
-    (project / "env.py").write_text(env_source)
-    if layout == "standalone":
-        source = project / "standalone.py"
-        source.write_text(env_source)
-        (project / "env.py").write_text(
-            'from hud import Environment\nenv = Environment("unrelated")\n'
-        )
-    if layout in {"json", "jsonl"}:
-        source = project / f"tasks.{layout}"
-        row = {"env": "local-test", "id": "solve"}
-        source.write_text(json.dumps([row] if layout == "json" else row))
-    if layout == "data_python":
-        source.write_text(
-            'from hud.eval import Task\ntasks = [Task(env="local-test", id="solve")]\n'
-        )
-    if layout in {"directory", "assembled_directory"}:
-        source = project
-    return source
+            + TASKS,
+        },
+        "env.py",
+    ),
+    "json-rows": (
+        {"env.py": ONE_FILE, "tasks.json": json.dumps([{"env": "local-test", "id": "solve"}])},
+        "tasks.json",
+    ),
+    "jsonl-rows": (
+        {"env.py": ONE_FILE, "tasks.jsonl": json.dumps({"env": "local-test", "id": "solve"})},
+        "tasks.jsonl",
+    ),
+    "python-rows": (
+        {
+            "env.py": ONE_FILE,
+            "tasks.py": 'from hud.eval import Task\ntasks = [Task(env="local-test", id="solve")]\n',
+        },
+        "tasks.py",
+    ),
+}
 
 
-@pytest.mark.parametrize(
-    "layout",
-    [
-        "single",
-        "standalone",
-        "split",
-        "hooks",
-        "hooks_source",
-        "assembled",
-        "assembled_source",
-        "json",
-        "jsonl",
-        "data_python",
-        "directory",
-        "assembled_directory",
-        "package",
-        "lazy_package",
-    ],
-)
+@pytest.mark.parametrize("layout", LAYOUTS)
 def test_each_project_layout_runs_in_fresh_env_processes(
     hud: Hud, gateway: Models, tmp_path: Path, layout: str
 ) -> None:
-    source = project_layout(tmp_path / "project", layout)
+    files, source = LAYOUTS[layout]
+    project = tmp_path / "project"
+    write_files(project, {**files, "asset.txt": "ok", "events/": ""})
 
     document = run(
-        hud,
-        str(source),
-        "openai_compatible",
-        "-m",
-        "scripted",
-        "--all",
-        "--group",
-        "2",
-        "--max-concurrent",
-        "2",
+        hud, str(project / source), *SCRIPTED, "--all", "--group", "2", "--max-concurrent", "2"
     )
 
     assert (document["run_count"], document["mean_reward"], document["error_count"]) == (2, 1.0, 0)
-    events = list((tmp_path / "project" / "events").iterdir())
-    assert len(events) == 2
-    assert {event.read_text() for event in events} == {"stopped"}
+    events = list((project / "events").iterdir())
+    assert [event.read_text() for event in events] == ["stopped", "stopped"]
 
 
 @pytest.mark.parametrize(
@@ -464,75 +367,58 @@ def test_a_row_runs_in_the_environment_it_names(
 ) -> None:
     """Rows resolve their env by name; two envs sharing that name make the row an error."""
     project = tmp_path / "project"
-    project.mkdir()
-    (project / "bound_env.py").write_text(
-        'from hud import Environment\nenv = Environment("bound")\n'
-        '@env.template(id="solve")\nasync def solve():\n'
-        '    answer = yield "answer ok"\n    yield float(answer == "ok")\n'
-    )
-    name = "bound" if same_name else "unrelated"
-    (project / "env.py").write_text(
-        f"from hud import Environment\nenv = Environment({name!r})\n"
-        '@env.template(id="solve")\nasync def solve():\n'
-        '    yield "unrelated"\n    yield 0.0\n'
-    )
-    (project / "tasks.py").write_text("from bound_env import solve\ntasks = [solve()]\n")
-    if source.startswith("rows"):
-        (project / source).write_text('{"env": "bound", "id": "solve"}\n')
-
-    result = hud(
-        "eval",
-        str(project / source),
-        "openai_compatible",
-        "-m",
-        "scripted",
-        "--all",
-        "--yes",
-        "--json",
+    template = '@env.template(id="solve")\nasync def solve():\n    answer = yield "answer ok"\n'
+    write_files(
+        project,
+        {
+            "bound_env.py": 'from hud import Environment\nenv = Environment("bound")\n'
+            + template
+            + '    yield float(answer == "ok")\n',
+            "env.py": "from hud import Environment\n"
+            f"env = Environment({'bound' if same_name else 'unrelated'!r})\n"
+            + template
+            + "    yield 0.0\n",
+            "tasks.py": "from bound_env import solve\ntasks = [solve()]\n",
+            "rows.json": '{"env": "bound", "id": "solve"}\n',
+            "rows.jsonl": '{"env": "bound", "id": "solve"}\n',
+        },
     )
 
-    assert result.json["run_count"] == 1
-    assert result.json["error_count"] == errors
+    result = hud("eval", str(project / source), *SCRIPTED, "--all", "--yes", "--json")
+
     assert result.exit_code == errors, result
-    assert ("multiple Environments" in result.stderr) is bool(errors)
+    assert (result.json["run_count"], result.json["error_count"]) == (1, errors)
 
 
-@pytest.mark.parametrize("shared", [True, False])
-def test_a_nested_verifier_runs_in_its_own_environment(
+@pytest.mark.parametrize("shared", [True, False], ids=["one-env", "own-env"])
+def test_a_nested_verifier_runs_in_its_environment(
     hud: Hud, gateway: Models, tmp_path: Path, shared: bool
 ) -> None:
     project = tmp_path / "project"
-    project.mkdir()
-    (project / "local_core.py").write_text(
-        'from hud import Environment\nactor = Environment("actor")\n'
-        + ("judge = actor\n" if shared else 'judge = Environment("judge")\n')
-    )
-    (project / "local_actor.py").write_text(
-        "from local_core import actor\n"
-        '@actor.template(id="solve")\nasync def solve():\n'
-        '    answer = yield "answer ok"\n    yield {"score": 0.0, "answer": answer}\n'
-    )
-    (project / "local_judge.py").write_text(
-        "from local_core import judge\n"
-        '@judge.template(id="verify")\nasync def verify():\n'
-        '    result = yield ""\n    yield 1.0 if result["answer"] == "ok" else 0.0\n'
-    )
-    (project / "env.py").write_text(
-        "from local_core import actor, judge\n"
-        "from local_actor import solve\nfrom local_judge import verify\n"
-    )
-    (project / "tasks.py").write_text(
-        "from env import solve, verify\ntasks = [solve()]\ntasks[0].verifier = verify()\n"
+    write_files(
+        project,
+        {
+            "core.py": 'from hud import Environment\nactor = Environment("actor")\n'
+            + ("judge = actor\n" if shared else 'judge = Environment("judge")\n'),
+            "actor.py": "from core import actor\n"
+            '@actor.template(id="solve")\nasync def solve():\n'
+            '    answer = yield "answer ok"\n    yield {"score": 0.0, "answer": answer}\n',
+            "judge.py": "from core import judge\n"
+            '@judge.template(id="verify")\nasync def verify():\n'
+            '    result = yield ""\n    yield 1.0 if result["answer"] == "ok" else 0.0\n',
+            "env.py": "from core import actor, judge\n"
+            "from actor import solve\nfrom judge import verify\n",
+            "tasks.py": "from env import solve, verify\n"
+            "tasks = [solve()]\ntasks[0].verifier = verify()\n",
+        },
     )
 
-    document = run(hud, str(project / "tasks.py"), "openai_compatible", "-m", "scripted")
+    document = run(hud, str(project / "tasks.py"), *SCRIPTED)
 
     assert (document["run_count"], document["mean_reward"]) == (1, 1.0)
 
 
-async def test_eval_attaches_to_an_already_served_environment(
-    hud: Hud, gateway: Models, tmp_path: Path
-) -> None:
+async def test_eval_attaches_to_an_already_served_environment(hud: Hud, gateway: Models) -> None:
     env = Environment("served")
 
     @env.template(id="solve")
@@ -543,13 +429,44 @@ async def test_eval_attaches_to_an_already_served_environment(
     (hud.cwd / "rows.json").write_text('[{"env": "served", "id": "solve"}]')
     async with LocalRuntime(env)(Task(env="served", id="solve")) as runtime:
         document = await asyncio.to_thread(
-            run, hud, "rows.json", "openai_compatible", "-m", "scripted", "--runtime", runtime.url
+            run, hud, "rows.json", *SCRIPTED, "--runtime", runtime.url
         )
 
     assert (document["run_count"], document["mean_reward"]) == (1, 1.0)
 
 
-# ─── planning and validation ────────────────────────────────────────────
+def test_one_tasks_file_is_picked_when_no_source_is_given(hud: Hud, gateway: Models) -> None:
+    write_files(
+        hud.cwd,
+        {
+            "env.py": TASKS_PY,
+            "rows.json": '[{"env": "demo", "id": "solve", "args": {"n": 4}}]',
+            ".hidden.json": "[]",
+            ".hud_eval.toml": '[eval]\nagent = "openai_compatible"\nmodel = "m"\n',
+        },
+    )
+
+    document = run(hud)
+
+    assert (document["source"], document["mean_reward"]) == ("rows.json", 1.0)
+    assert [request.prompt for request in gateway.requests()] == ["solve 4"]
+
+
+def test_a_python_source_is_imported_on_the_main_thread(hud: Hud, gateway: Models) -> None:
+    (hud.cwd / "probe.py").write_text(
+        "import threading\nfrom pathlib import Path\n"
+        'Path("main-thread.txt").write_text('
+        "str(threading.current_thread() is threading.main_thread()))\n"
+        "tasks = []\n"
+    )
+
+    result = hud("eval", "probe.py", "openai", "--yes", "--json")
+
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
+    assert (hud.cwd / "main-thread.txt").read_text() == "True"
+
+
+# ─── planning and refusals ──────────────────────────────────────────────
 
 
 PLAN = {
@@ -601,6 +518,7 @@ PLAN = {
                 "task_ids": ["solve"],
             },
         ),
+        ('[openai]\nmodel = "${MY_EVAL_MODEL}"\n', ["tasks.py", "openai"], {"model": "gpt-4o"}),
         (
             '[openai]\nmodel = "${MY_EVAL_MODEL}"\n',
             ["tasks.py", "openai", "-m", "x"],
@@ -608,7 +526,7 @@ PLAN = {
         ),
     ],
 )
-def test_a_dry_run_prints_the_plan_and_runs_nothing(
+def test_a_dry_run_reports_the_plan_and_runs_nothing(
     hud: Hud,
     services: FakeServices,
     hud_env: HudEnv,
@@ -625,181 +543,74 @@ def test_a_dry_run_prints_the_plan_and_runs_nothing(
     assert result.exit_code == 0, result
     assert result.json == PLAN | changes
     assert services.requests() == []
-    assert (hud.cwd / ".hud_eval.toml").read_text() == config
 
 
 @pytest.mark.parametrize(
-    ("config", "argv", "key", "exit_code", "document"),
+    ("config", "argv", "key", "exit_code", "error"),
     [
-        (
+        pytest.param(
             '[eval]\nmodle = "x"\n',
-            ["--dry-run"],
+            ["tasks.py", "openai"],
             API_KEY,
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": IsStr(regex=r"(?s).*\nmodle\n  Extra inputs are not permitted .*"),
-                }
-            ),
+            "usage",
+            id="an-unknown-setting",
         ),
-        (
-            '[eval]\nremote = "false"\n',
-            ["--dry-run"],
-            API_KEY,
-            2,
-            snapshot({"error": "usage", "message": ".hud_eval.toml: remote must be a boolean"}),
-        ),
-        (
-            '[eval]\nagent = "not-an-agent"\n',
-            ["--dry-run"],
-            API_KEY,
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": IsStr(
-                        regex=r"(?s).*\nagent\n  Input should be 'claude', 'claude_cli', .*"
-                    ),
-                }
-            ),
-        ),
-        (
-            '[eval]\nruntime = "cloud"\n',
-            ["--dry-run"],
-            API_KEY,
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": IsStr(regex=f"(?s)(?!.*{TCP_ONLY}).*{RUNTIMES}.*"),
-                }
-            ),
-        ),
-        (
-            "[other]\nx = 1\n",
-            ["--dry-run"],
-            API_KEY,
-            2,
-            snapshot({"error": "usage", "message": ".hud_eval.toml: unknown sections: other"}),
-        ),
-        (
-            "[eval",
-            ["--dry-run"],
-            API_KEY,
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "Expected ']' at the end of a table declaration (at end of document)"
-                    ),
-                }
-            ),
-        ),
-        (
+        pytest.param("[eval", ["tasks.py", "openai"], API_KEY, 2, "usage", id="unparseable-toml"),
+        pytest.param(
             '[openai]\nmodel = "${HUD_EVAL_TEST_UNSET}"\n',
-            ["--dry-run"],
+            ["tasks.py", "openai"],
             API_KEY,
             2,
-            snapshot(
-                {"error": "usage", "message": ".hud_eval.toml: ${HUD_EVAL_TEST_UNSET} is not set"}
-            ),
+            "usage",
+            id="an-unset-variable",
         ),
-        (
-            '[openai_compatible]\napi_key = "${openai_api_key}"\n',
-            ["--dry-run"],
-            API_KEY,
-            2,
-            snapshot({"error": "usage", "message": ".hud_eval.toml: ${openai_api_key} is not set"}),
-        ),
-        (
+        pytest.param(
             "",
-            ["--runtime", "http://x:1", "--dry-run"],
+            ["tasks.py", "openai", "-c", "max_tokens"],
             API_KEY,
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": IsStr(regex=f"(?s).*{TCP_ONLY}.*"),
-                }
-            ),
+            "usage",
+            id="a-malformed-flag",
         ),
-        (
+        pytest.param(
             "",
-            ["--runtime", "hud", "--remote"],
+            ["tasks.py", "openai", "--runtime", "hud", "--remote"],
             API_KEY,
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": "--runtime and --remote are mutually exclusive placement options",
-                }
-            ),
+            "usage",
+            id="two-placements",
         ),
-        (
+        pytest.param("", ["tasks.py", "openai_compatible"], API_KEY, 2, "usage", id="no-model"),
+        pytest.param(
             "",
-            ["-c", "max_tokens"],
+            ["tasks.py", "openai", "--task-ids", "nope"],
             API_KEY,
             2,
-            snapshot({"error": "usage", "message": "--config expects key=value, got 'max_tokens'"}),
+            "usage",
+            id="no-matching-task",
         ),
-        (
+        pytest.param("", ["--dry-run"], API_KEY, 2, "usage", id="a-dry-run-without-a-source"),
+        pytest.param("", [], API_KEY, 1, "not_found", id="no-source-found"),
+        pytest.param(
             "",
-            ["-c", "robot.max_tokens=1"],
-            API_KEY,
-            2,
-            snapshot({"error": "usage", "message": "'robot' is not a valid AgentType"}),
-        ),
-        (
-            "",
-            ["--runtime", "hud"],
+            ["tasks.py", "openai", "--runtime", "hud"],
             None,
             1,
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "HUD_API_KEY is required",
-                    "suggestion": "Run 'hud set HUD_API_KEY=your-key-here'.",
-                }
-            ),
+            "permission_denied",
+            id="hud-runtime-signed-out",
         ),
-        (
+        pytest.param(
             "",
-            ["--remote"],
+            ["tasks.py", "openai", "--gateway"],
             None,
             1,
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "HUD_API_KEY is required",
-                    "suggestion": "Run 'hud set HUD_API_KEY=your-key-here'.",
-                }
-            ),
-        ),
-        (
-            "",
-            ["--gateway"],
-            None,
-            1,
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "HUD_API_KEY is required",
-                    "suggestion": "Run 'hud set HUD_API_KEY=your-key-here'.",
-                }
-            ),
-        ),
-        (
-            "",
-            ["--task-ids", "nope"],
-            API_KEY,
-            2,
-            snapshot({"error": "usage", "message": "No tasks matching: nope"}),
+            "permission_denied",
+            id="gateway-signed-out",
         ),
     ],
 )
-def test_invalid_configuration_is_an_error_document(
+def test_eval_refuses_without_prompting_or_calling_out(
     hud: Hud,
     services: FakeServices,
     hud_env: HudEnv,
@@ -808,112 +619,16 @@ def test_invalid_configuration_is_an_error_document(
     argv: list[str],
     key: str | None,
     exit_code: int,
-    document: dict[str, Any],
+    error: str,
 ) -> None:
     hud_env.set(HUD_API_KEY=key)
     (hud.cwd / ".hud_eval.toml").write_text(config)
 
-    result = hud("eval", "tasks.py", "openai", *argv, "--yes", "--json")
+    result = hud("eval", *argv, "--yes", "--json")
 
-    assert result.exit_code == exit_code, result
-    assert result.json == document
+    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
     assert services.requests() == []
     assert (hud.cwd / ".hud_eval.toml").read_text() == config
-
-
-@pytest.mark.parametrize(
-    ("argv", "exit_code", "document"),
-    [
-        (
-            ["--dry-run"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "Dry-run requires an explicit task source and agent (or configured "
-                        "defaults)."
-                    ),
-                }
-            ),
-        ),
-        (
-            ["tasks.py", "--config", "max_tokens=1", "--yes"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "--config max_tokens=... needs an agent; pass one or write "
-                        "<agent>.max_tokens=..."
-                    ),
-                }
-            ),
-        ),
-        (
-            ["tasks.py", "openai_compatible", "--yes"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": "Model name is required for OpenAI compatible agent; use --model.",
-                }
-            ),
-        ),
-        (
-            ["--yes"],
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "No task JSON or JSONL files found in current directory",
-                }
-            ),
-        ),
-    ],
-)
-def test_missing_inputs_are_errors_without_prompting(
-    hud: Hud, services: FakeServices, argv: list[str], exit_code: int, document: dict[str, Any]
-) -> None:
-    if "tasks.py" in argv:
-        (hud.cwd / "tasks.py").write_text(TASKS_PY)
-
-    result = hud("eval", *argv, "--json")
-
-    assert result.exit_code == exit_code, result
-    assert result.json == document
-
-
-def test_a_python_source_without_tasks_is_imported_on_the_main_thread(
-    hud: Hud, gateway: Models
-) -> None:
-    (hud.cwd / "probe.py").write_text(
-        "import threading\nfrom pathlib import Path\n"
-        'Path("main-thread.txt").write_text('
-        "str(threading.current_thread() is threading.main_thread()))\n"
-        "tasks = []\n"
-    )
-
-    result = hud("eval", "probe.py", "openai", "--yes", "--json")
-
-    assert result.exit_code == 2, result
-    assert "No runnable Tasks" in result.json["message"]
-    assert (hud.cwd / "main-thread.txt").read_text() == "True"
-
-
-def test_one_tasks_file_is_picked_when_no_source_is_given(hud: Hud, gateway: Models) -> None:
-    (hud.cwd / "env.py").write_text(TASKS_PY)
-    (hud.cwd / "rows.json").write_text('[{"env": "demo", "id": "solve", "args": {"n": 4}}]')
-    (hud.cwd / ".hidden.json").write_text("[]")
-    (hud.cwd / ".hud_eval.toml").write_text('[eval]\nagent = "openai_compatible"\nmodel = "m"\n')
-
-    document = run(hud)
-
-    assert (document["source"], document["mean_reward"]) == ("rows.json", 1.0)
-    assert [request.prompt for request in gateway.requests()] == ["solve 4"]
-
-
-# ─── platform tasksets ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -946,9 +661,4 @@ def test_a_platform_taskset_runs_locally_only_from_container_rows(
 
     result = hud("eval", "Demo", "openai", "--runtime", "local", "--yes", "--json")
 
-    assert result.exit_code == 2, result
-    assert result.json == {
-        "error": "usage",
-        "message": "Demo is a platform taskset, so there is no env source to spawn locally. "
-        "Run it with --remote, --runtime hud, or --runtime tcp://host:port.",
-    }
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Reply
+from tests.harness import Reply, write_files
 
 from .conftest import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
 
@@ -91,16 +91,6 @@ def environment(directory: Path, name: str = "example") -> Path:
     return directory
 
 
-def write(root: Path, files: dict[str, str]) -> None:
-    for name, text in files.items():
-        path = root / name
-        if name.endswith("/"):
-            path.mkdir(parents=True)
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-
-
 def uploaded(services: FakeServices) -> list[str]:
     """Member names of the build context tarball the platform received."""
     (put,) = services.requests("api", "PUT", "/upload/build-1")
@@ -117,7 +107,7 @@ def test_deploy_uploads_the_context_triggers_the_build_and_links_the_directory(
     hud: Hud, builds: FakeServices, tmp_path: Path
 ) -> None:
     env = environment(hud.cwd / "env")
-    write(
+    write_files(
         env,
         {
             "server/pkg/tool.py": "print('tool')\n",
@@ -182,7 +172,7 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
     hud: Hud, builds: FakeServices
 ) -> None:
     environment(hud.cwd)
-    write(
+    write_files(
         hud.cwd,
         {
             "main.py": "",
@@ -245,7 +235,7 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
 def test_the_environment_name_comes_from_its_declaration(
     hud: Hud, projects: FakeServices, files: dict[str, str], argv: list[str], name: str
 ) -> None:
-    write(hud.cwd, files)
+    write_files(hud.cwd, files)
 
     result = hud("deploy", *argv, "--dry-run", "--no-env", "--json")
 
@@ -257,7 +247,7 @@ def test_a_dry_run_plans_without_prompting_writing_or_posting(
     hud: Hud, projects: FakeServices, hud_env: HudEnv
 ) -> None:
     environment(hud.cwd)
-    write(hud.cwd, {".env": "SECRET=hidden", "vars.env": "KEY1=v\n"})
+    write_files(hud.cwd, {".env": "SECRET=hidden", "vars.env": "KEY1=v\n"})
     before = sorted(path.name for path in hud.cwd.rglob("*"))
 
     result = hud(
@@ -281,7 +271,7 @@ def test_a_compose_runtime_config_reaches_the_build_as_its_document(
     hud: Hud, builds: FakeServices
 ) -> None:
     environment(hud.cwd)
-    write(
+    write_files(
         hud.cwd,
         {
             "project/compose.json": '{"services":{"main":{"image":"postgres:16"}}}',
@@ -448,7 +438,7 @@ def test_deploy_refuses_before_uploading(
     projects.route(
         "api", "GET", f"/v2/registry/{REGISTRY_ID}", json={"id": REGISTRY_ID, "name": "other-env"}
     )
-    write(hud.cwd, files)
+    write_files(hud.cwd, files)
 
     result = hud("deploy", *argv, "--json")
 

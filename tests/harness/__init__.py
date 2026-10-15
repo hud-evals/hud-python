@@ -13,6 +13,7 @@ from .cdp import Command, FakeBrowser, fake_browser
 from .cli import Hud, Result, scrub, words
 from .config import HudEnv
 from .control import ControlPeer, answer, control_peer, hang_up, hold
+from .files import write_files
 from .models import (
     ModelRequest,
     Models,
@@ -79,4 +80,5 @@ __all__ = [
     "stream_error",
     "task_row",
     "words",
+    "write_files",
 ]
