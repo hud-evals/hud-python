@@ -220,6 +220,32 @@ async def test_streamed_chunks_form_one_model_turn() -> None:
     assert turn.parts == parts
 
 
+def _sse_client(*hops: list[dict[str, Any]]) -> tuple[genai.Client, list[httpx.Request]]:
+    """A ``genai.Client`` whose n-th request streams the n-th hop's events over SSE."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        events = hops[len(requests) - 1]
+        return httpx.Response(
+            200,
+            content=b"".join(
+                b"data: " + json.dumps(event).encode() + b"\r\n\r\n" for event in events
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = genai.Client(
+        api_key="hud-key",
+        http_options=genai_types.HttpOptions(
+            base_url="https://gateway.test",
+            api_version="v1beta",
+            async_client_args={"transport": httpx.MockTransport(handler)},
+        ),
+    )
+    return client, requests
+
+
 async def test_turn_streams_through_the_sdk() -> None:
     """A turn arrives over the SDK's SSE stream and is recorded as one model turn."""
     events: list[dict[str, Any]] = [
@@ -248,26 +274,7 @@ async def test_turn_streams_through_the_sdk() -> None:
             "modelVersion": "gemini-4-argon",
         },
     ]
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            content=b"".join(
-                b"data: " + json.dumps(event).encode() + b"\r\n\r\n" for event in events
-            ),
-            headers={"content-type": "text/event-stream"},
-        )
-
-    client = genai.Client(
-        api_key="hud-key",
-        http_options=genai_types.HttpOptions(
-            base_url="https://gateway.test",
-            api_version="v1beta",
-            async_client_args={"transport": httpx.MockTransport(handler)},
-        ),
-    )
+    client, requests = _sse_client(events)
     agent = GeminiAgent(GeminiConfig(model="gemini-4-argon", model_client=client))
     state = _state(agent)
 
@@ -287,6 +294,74 @@ async def test_turn_streams_through_the_sdk() -> None:
         ("39", None, None),
         ("1", None, None),
         ("", None, b"sig"),
+    ]
+
+
+async def test_turn_past_the_per_request_cap_continues_as_one_turn() -> None:
+    """A stream that stops at the per-request cap resumes with its continuation token, and
+    both hops form one model turn."""
+    first_hop: list[dict[str, Any]] = [
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Working it out.", "thought": True}],
+                    }
+                }
+            ]
+        },
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "", "thoughtSignature": "c2lnLTE="}],
+                    },
+                    "finishReason": "CONTINUATION",
+                    "continuationToken": "dG9rZW4tMQ==",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "thoughtsTokenCount": 65526,
+                "totalTokenCount": 65536,
+            },
+        },
+    ]
+    second_hop: list[dict[str, Any]] = [
+        {
+            "candidates": [
+                {"content": {"role": "model", "parts": [{"text": "42"}]}, "finishReason": "STOP"}
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 12,
+            },
+            "modelVersion": "gemini-4-argon",
+        }
+    ]
+    client, requests = _sse_client(first_hop, second_hop)
+    agent = GeminiAgent(GeminiConfig(model="gemini-4-argon", model_client=client))
+    state = _state(agent)
+
+    result = await agent.get_response(state)
+
+    first, second = (json.loads(request.content) for request in requests)
+    assert second == {**first, "continuationToken": "dG9rZW4tMQ=="}
+    assert result.content == "42"
+    assert result.reasoning == "Working it out."
+    assert result.done is True
+    assert result.finish_reason == "STOP"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 20
+    turns = [content for content in state.messages if content.role == "model"]
+    assert len(turns) == 1
+    assert [(part.text, part.thought_signature) for part in turns[0].parts or []] == [
+        ("Working it out.", None),
+        ("", b"sig-1"),
+        ("42", None),
     ]
 
 
