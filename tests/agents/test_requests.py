@@ -563,6 +563,20 @@ async def test_gemini_withholds_the_predefined_functions_it_is_configured_to_exc
     assert computer["excluded_predefined_functions"] == ["drag_and_drop", "search"]
 
 
+@pytest.mark.parametrize(("configured", "sent"), [({}, None), ({"max_output_tokens": 4096}, 4096)])
+async def test_gemini_leaves_the_output_cap_to_the_model_unless_one_is_configured(
+    configured: dict[str, Any], sent: int | None, models: Models, hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("done")])
+    agent = GeminiAgent(GeminiConfig(model="gemini-3.1-pro-preview", **configured))
+
+    await run_task(workspace_env(tmp_path / "ws"), agent)
+
+    (request,) = models.requests()
+    assert request.body.get("generationConfig", {}).get("maxOutputTokens") == sent
+
+
 def named(name: str, *tools: str) -> FastMCP:
     mcp = FastMCP(name)
     for tool in tools:
