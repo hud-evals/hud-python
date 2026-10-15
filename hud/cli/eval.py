@@ -299,7 +299,7 @@ def eval_command(
             "action": "eval",
             "source": cfg.source,
             "agent": agent_type.value,
-            "model": cfg.model,
+            "model": cfg.model or cfg.agent_config.get(agent_type.value, {}).get("model"),
             "runtime": planned,
             "remote": planned is Placement.HOSTED,
             "all": cfg.all,
