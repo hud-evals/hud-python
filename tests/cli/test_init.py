@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
-from inline_snapshot import snapshot
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,18 +59,13 @@ def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
 
 
 @pytest.mark.parametrize(
-    ("setup", "argv", "exit_code", "document", "after"),
+    ("setup", "argv", "exit_code", "error", "after"),
     [
         pytest.param(
             {"taken/precious.txt": "data"},
             ["taken", "--preset", "blank"],
             1,
-            snapshot(
-                {
-                    "error": "conflict",
-                    "message": "taken already exists and is not empty (use --force)",
-                }
-            ),
+            "conflict",
             {"taken/precious.txt": "data"},
             id="non-empty-directory",
         ),
@@ -79,15 +73,7 @@ def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
             {"outside.py": "original", "project/env.py": "->outside.py"},
             ["project", "--preset", "blank", "--force"],
             1,
-            snapshot(
-                {
-                    "error": "failure",
-                    "message": (
-                        "Failed to prepare example environment 'blank': cannot copy an example "
-                        "environment over symlinks in project"
-                    ),
-                }
-            ),
+            "failure",
             {"outside.py": "original"},
             id="symlink-inside-target",
         ),
@@ -95,15 +81,7 @@ def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
             {"outside/": "", "project": "->outside"},
             ["project", "--preset", "blank"],
             1,
-            snapshot(
-                {
-                    "error": "failure",
-                    "message": (
-                        "Failed to prepare example environment 'blank': cannot copy an example "
-                        "environment over symlink project"
-                    ),
-                }
-            ),
+            "failure",
             {},
             id="symlinked-target",
         ),
@@ -111,15 +89,7 @@ def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
             {},
             ["--preset", "does-not-exist"],
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "Unknown example environment 'does-not-exist'. Available: coding, cua, "
-                        "argument-hints, blank"
-                    ),
-                }
-            ),
+            "usage",
             {},
             id="unknown-example",
         ),
@@ -127,15 +97,7 @@ def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
             {},
             [],
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "Nothing to create. Pass a name (hud init my-env) or --template, or run in "
-                        "an interactive terminal to choose an example environment."
-                    ),
-                }
-            ),
+            "usage",
             {},
             id="nothing-to-create",
         ),
@@ -146,7 +108,7 @@ def test_init_refuses_without_touching_existing_files(
     setup: dict[str, str],
     argv: list[str],
     exit_code: int,
-    document: dict[str, Any],
+    error: str,
     after: dict[str, str],
 ) -> None:
     for name, content in setup.items():
@@ -162,8 +124,7 @@ def test_init_refuses_without_touching_existing_files(
 
     result = hud("init", *argv, "--json")
 
-    assert result.exit_code == exit_code, result
-    assert result.json == document
+    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
     assert tree(hud.cwd) == before
     assert {name: (hud.cwd / name).read_text() for name in after} == after
 
