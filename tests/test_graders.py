@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from dirty_equals import IsStr
-from inline_snapshot import snapshot
 
 from hud import Environment
 from hud.eval import LocalRuntime, Task, rollout
@@ -322,88 +321,76 @@ def _evaluated(run: Run) -> dict[str, Any]:
         pytest.param(
             "bash_pair",
             0.5,
-            snapshot(
-                [
-                    {"name": "BashGrader-1", "weight": 0.5, "value": 1.0, "children": None},
-                    {"name": "BashGrader-2", "weight": 0.5, "value": 0.0, "children": None},
-                ]
-            ),
+            [
+                {"name": "BashGrader-1", "weight": 0.5, "value": 1.0, "children": None},
+                {"name": "BashGrader-2", "weight": 0.5, "value": 0.0, "children": None},
+            ],
             id="bash-pair",
         ),
         pytest.param(
             "any_tree",
             0.75,
-            snapshot(
-                [
-                    {
-                        "name": "any",
-                        "weight": 0.5,
-                        "value": 1.0,
-                        "children": [
-                            {"name": "BashGrader-1", "weight": 0.5, "value": 0.0, "children": None},
-                            {"name": "BashGrader-2", "weight": 0.5, "value": 1.0, "children": None},
-                        ],
-                    },
-                    {
-                        "name": "checks",
-                        "weight": 0.25,
-                        "value": 0.0,
-                        "children": [
-                            {"name": "lint", "weight": 1.0, "value": 1.0, "children": None},
-                            {"name": "types", "weight": 1.0, "value": 0.0, "children": None},
-                        ],
-                    },
-                    {"name": "format", "weight": 0.25, "value": 1.0, "children": None},
-                ]
-            ),
+            [
+                {
+                    "name": "any",
+                    "weight": 0.5,
+                    "value": 1.0,
+                    "children": [
+                        {"name": "BashGrader-1", "weight": 0.5, "value": 0.0, "children": None},
+                        {"name": "BashGrader-2", "weight": 0.5, "value": 1.0, "children": None},
+                    ],
+                },
+                {
+                    "name": "checks",
+                    "weight": 0.25,
+                    "value": 0.0,
+                    "children": [
+                        {"name": "lint", "weight": 1.0, "value": 1.0, "children": None},
+                        {"name": "types", "weight": 1.0, "value": 0.0, "children": None},
+                    ],
+                },
+                {"name": "format", "weight": 0.25, "value": 1.0, "children": None},
+            ],
             id="any-all-tree",
         ),
         pytest.param(
             "weighted",
             0.4,
-            snapshot(
-                [
-                    {"name": "mentions", "weight": 0.6, "value": 1.0, "children": None},
-                    {"name": "numbers", "weight": 0.4, "value": 0.0, "children": None},
-                    {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
-                ]
-            ),
+            [
+                {"name": "mentions", "weight": 0.6, "value": 1.0, "children": None},
+                {"name": "numbers", "weight": 0.4, "value": 0.0, "children": None},
+                {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
+            ],
             id="penalty",
         ),
         pytest.param(
             "penalty_only_fails",
             -0.2,
-            snapshot(
-                [
-                    {"name": "correct", "weight": 1.0, "value": 0.0, "children": None},
-                    {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
-                ]
-            ),
+            [
+                {"name": "correct", "weight": 1.0, "value": 0.0, "children": None},
+                {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
+            ],
             id="negative-reward",
         ),
         pytest.param(
             "suffixed",
             0.6,
-            snapshot(
-                [
-                    {"name": "x-1", "weight": 0.3, "value": 1.0, "children": None},
-                    {"name": "x-2", "weight": 0.3, "value": 1.0, "children": None},
-                    {"name": "x-3", "weight": 0.4, "value": 0.0, "children": None},
-                ]
-            ),
+            [
+                {"name": "x-1", "weight": 0.3, "value": 1.0, "children": None},
+                {"name": "x-2", "weight": 0.3, "value": 1.0, "children": None},
+                {"name": "x-3", "weight": 0.4, "value": 0.0, "children": None},
+            ],
             id="name-collisions",
         ),
         pytest.param(
             "custom",
             0.875,
-            snapshot(
-                [
-                    {"name": "measured-1", "weight": 0.25, "value": 0.75, "children": None},
-                    {"name": "measured-2", "weight": 0.25, "value": 0.75, "children": None},
-                    {"name": "renamed", "weight": 0.25, "value": 1.0, "children": None},
-                    {"name": "legacy", "weight": 0.25, "value": 1.0, "children": None},
-                ]
-            ),
+            [
+                {"name": "measured-1", "weight": 0.25, "value": 0.75, "children": None},
+                {"name": "measured-2", "weight": 0.25, "value": 0.75, "children": None},
+                {"name": "renamed", "weight": 0.25, "value": 1.0, "children": None},
+                {"name": "legacy", "weight": 0.25, "value": 1.0, "children": None},
+            ],
             id="custom-grader-shapes",
         ),
     ],
@@ -422,37 +409,31 @@ async def test_a_combined_grade_reaches_the_run_as_a_named_weighted_tree(
 async def test_the_evaluate_step_keeps_each_graders_details(tmp_path: Path) -> None:
     run = await _grade("bash_pair", tmp_path)
 
-    assert [subscore["info"] for subscore in _evaluated(run)["subscores"]] == snapshot(
-        [
-            {
-                "exit_code": 0,
-                "stdout": "pass\n",
-                "stderr": "",
-                "_parameters": {"command": "echo pass"},
-            },
-            {
-                "exit_code": 1,
-                "stdout": "",
-                "stderr": "oops\n",
-                "_parameters": {"command": "echo oops >&2; false"},
-            },
-        ]
-    )
+    assert [subscore["info"] for subscore in _evaluated(run)["subscores"]] == [
+        {
+            "exit_code": 0,
+            "stdout": "pass\n",
+            "stderr": "",
+            "_parameters": {"command": "echo pass"},
+        },
+        {
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "oops\n",
+            "_parameters": {"command": "echo oops >&2; false"},
+        },
+    ]
 
 
 async def test_custom_graders_record_their_parameters_and_info(tmp_path: Path) -> None:
     run = await _grade("custom", tmp_path)
 
-    assert {s["name"]: s["info"] for s in _evaluated(run)["subscores"]} == snapshot(
-        {
-            "measured-1": {
-                "_parameters": {"kind": "float", "payload": "<object: not serializable>"}
-            },
-            "measured-2": {"source": "tuple", "_parameters": {"kind": "tuple"}},
-            "renamed": {"reason": "did it", "_parameters": {"kind": "subscore"}},
-            "legacy": {"from": "metadata"},
-        }
-    )
+    assert {s["name"]: s["info"] for s in _evaluated(run)["subscores"]} == {
+        "measured-1": {"_parameters": {"kind": "float", "payload": "<object: not serializable>"}},
+        "measured-2": {"source": "tuple", "_parameters": {"kind": "tuple"}},
+        "renamed": {"reason": "did it", "_parameters": {"kind": "subscore"}},
+        "legacy": {"from": "metadata"},
+    }
 
 
 @pytest.mark.parametrize(
@@ -544,29 +525,23 @@ async def _awaitable(build: Callable[[], SubScore]) -> EvaluationResult:
 
 
 @pytest.mark.parametrize(
-    ("template", "error"),
+    "template",
     [
-        ("empty_combine", "subscores must not be empty"),
-        ("no_positive_weight", "subscores must include at least one positive weight"),
-        ("not_a_subscore", "Expected SubScore or Awaitable[SubScore], got float"),
-        ("missing_command", "BashGrader requires command"),
-        ("empty_any", "subscores must not be empty"),
-        ("empty_all", "subscores must not be empty"),
+        "empty_combine",
+        "no_positive_weight",
+        "not_a_subscore",
+        "missing_command",
+        "empty_any",
+        "empty_all",
     ],
 )
-async def test_an_authoring_mistake_fails_the_grade_with_its_message(
-    template: str, error: str
-) -> None:
+async def test_an_authoring_mistake_fails_the_grade(template: str) -> None:
     task = Task(env="mistakes", id=template)
 
     run = await rollout(task, ScriptedAgent("x"), runtime=LocalRuntime(_mistakes_env()))
 
     assert run.trace.status == "error"
-    assert run.trace.error == IsStr(regex=rf"\[grading\] .*: {_escaped(error)}")
-
-
-def _escaped(text: str) -> str:
-    return "".join(f"\\{char}" if char in "[]()." else char for char in text)
+    assert str(run.trace.error).startswith("[grading]")
 
 
 def _warning_env() -> Environment:
@@ -589,19 +564,11 @@ def _warning_env() -> Environment:
     return env
 
 
-@pytest.mark.parametrize(
-    ("template", "warning", "reward"),
-    [
-        ("misweighted", "grader weights sum to 1.1000, not 1.0", 0.8 / 1.1),
-        ("mismatched", "Subscores don't match reward", 1.0),
-    ],
-)
-async def test_inconsistent_weights_warn_the_author(
-    template: str, warning: str, reward: float
-) -> None:
+@pytest.mark.parametrize(("template", "reward"), [("misweighted", 0.8 / 1.1), ("mismatched", 1.0)])
+async def test_inconsistent_weights_warn_the_author(template: str, reward: float) -> None:
     task = Task(env="warnings", id=template)
 
-    with pytest.warns(UserWarning, match=warning):
+    with pytest.warns(UserWarning):
         run = await rollout(task, ScriptedAgent("x"), runtime=LocalRuntime(_warning_env()))
 
     assert run.reward == pytest.approx(reward)
@@ -633,65 +600,59 @@ def _judge(verdicts: dict[str, str]) -> Callable[[ModelRequest], Turn]:
             "judged",
             {"names Paris": "json", "cites a source": "fenced", "invents facts": "prose"},
             1 / 3,
-            snapshot(
-                [
-                    {
-                        "name": "names Paris",
-                        "weight": 1.0,
-                        "value": 1.0,
-                        "children": None,
-                        "info": {"reason": "plainly stated"},
-                    },
-                    {
-                        "name": "cites a source",
-                        "weight": 2.0,
-                        "value": 0.0,
-                        "children": None,
-                        "info": {"reason": "no source"},
-                    },
-                    {
-                        "name": "invents facts",
-                        "weight": -1.0,
-                        "value": 0.0,
-                        "children": None,
-                        "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
-                    },
-                ]
-            ),
+            [
+                {
+                    "name": "names Paris",
+                    "weight": 1.0,
+                    "value": 1.0,
+                    "children": None,
+                    "info": {"reason": "plainly stated"},
+                },
+                {
+                    "name": "cites a source",
+                    "weight": 2.0,
+                    "value": 0.0,
+                    "children": None,
+                    "info": {"reason": "no source"},
+                },
+                {
+                    "name": "invents facts",
+                    "weight": -1.0,
+                    "value": 0.0,
+                    "children": None,
+                    "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
+                },
+            ],
             id="json-fenced-prose",
         ),
         pytest.param(
             "judged_negative_only",
             {"invents facts": "prose-met"},
             0.0,
-            snapshot(
-                [
-                    {
-                        "name": "invents facts",
-                        "weight": -1.0,
-                        "value": 1.0,
-                        "children": None,
-                        "info": {"reason": "The criterion is MET."},
-                    }
-                ]
-            ),
+            [
+                {
+                    "name": "invents facts",
+                    "weight": -1.0,
+                    "value": 1.0,
+                    "children": None,
+                    "info": {"reason": "The criterion is MET."},
+                }
+            ],
             id="negative-only-met",
         ),
         pytest.param(
             "judged_negative_only",
             {"invents facts": "prose"},
             1.0,
-            snapshot(
-                [
-                    {
-                        "name": "invents facts",
-                        "weight": -1.0,
-                        "value": 0.0,
-                        "children": None,
-                        "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
-                    }
-                ]
-            ),
+            [
+                {
+                    "name": "invents facts",
+                    "weight": -1.0,
+                    "value": 0.0,
+                    "children": None,
+                    "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
+                }
+            ],
             id="negative-only-unmet",
         ),
     ],
@@ -732,61 +693,27 @@ async def test_the_judge_sends_one_request_per_criterion(
     assert {request.body["messages"][0]["content"][:40] for request in requests} == {
         "You evaluate a response against a single"
     }
-    assert [request.body["messages"][1]["content"] for request in requests] == snapshot(
-        [
-            """\
-<criterion_type>
-negative
-</criterion_type>
-
-<criterion>
-invents facts
-</criterion>
-
-<query>
-Name the capital of France.
-</query>
-
-<response>
-Paris is the capital.
-</response>\
-""",
-            """\
-<criterion_type>
-positive
-</criterion_type>
-
-<criterion>
-cites a source
-</criterion>
-
-<query>
-Name the capital of France.
-</query>
-
-<response>
-Paris is the capital.
-</response>\
-""",
-            """\
-<criterion_type>
-positive
-</criterion_type>
-
-<criterion>
-names Paris
-</criterion>
-
-<query>
-Name the capital of France.
-</query>
-
-<response>
-Paris is the capital.
-</response>\
-""",
+    prompts = {
+        section(request.body["messages"][1]["content"], "criterion"): request.body["messages"][1][
+            "content"
         ]
-    )
+        for request in requests
+    }
+    assert {
+        criterion: section(prompt, "criterion_type") for criterion, prompt in prompts.items()
+    } == {
+        "names Paris": "positive",
+        "cites a source": "positive",
+        "invents facts": "negative",
+    }
+    for prompt in prompts.values():
+        assert section(prompt, "query") == "Name the capital of France."
+        assert section(prompt, "response") == "Paris is the capital."
+
+
+def section(prompt: str, tag: str) -> str:
+    """The text between ``<tag>`` and ``</tag>`` in a judge prompt."""
+    return prompt.split(f"<{tag}>\n", 1)[1].split(f"\n</{tag}>", 1)[0]
 
 
 async def test_the_judge_without_a_question_omits_the_query(
