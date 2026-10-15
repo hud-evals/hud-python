@@ -130,7 +130,7 @@ class Oracle(Agent):
         run.trace.content = stdout
 
 
-def adapted(case: Case, wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
+def adapted(case: Case, sdk_wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
     dataset = tmp_path / "harbor-fixtures"
     shutil.copytree(
         TASKS / case.fixture,
@@ -138,7 +138,7 @@ def adapted(case: Case, wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
         symlinks=True,
         ignore=shutil.ignore_patterns("expected.toml", "managed"),
     )
-    result = harbor.adapt(dataset, hud_requirement=str(wheel))
+    result = harbor.adapt(dataset, hud_requirement=str(sdk_wheel))
     assert result.failures == ()
     return result
 
@@ -162,9 +162,9 @@ def report(run: Run) -> str:
 
 @pytest.mark.parametrize("case", RUNNABLE, ids=[case.id for case in RUNNABLE])
 async def test_a_harbor_task_grades_as_its_fixture_expects(
-    case: Case, wheel: Path, tmp_path: Path
+    case: Case, sdk_wheel: Path, tmp_path: Path
 ) -> None:
-    taskset = adapted(case, wheel, tmp_path).taskset
+    taskset = adapted(case, sdk_wheel, tmp_path).taskset
     docker = DockerRuntime(env_vars=case.env_vars, bind_mounts=case.bind_mounts)
     runtime: Provider = Shared(docker, width=case.shared_width) if case.shared_width else docker
     oracle = Oracle(
@@ -187,12 +187,12 @@ async def test_a_harbor_task_grades_as_its_fixture_expects(
 
 @pytest.mark.parametrize("case", REFUSED, ids=[case.id for case in REFUSED])
 def test_a_controller_with_an_unusable_configuration_refuses_to_serve(
-    case: Case, wheel: Path, tmp_path: Path
+    case: Case, sdk_wheel: Path, tmp_path: Path
 ) -> None:
     # Providers yield once the control port is published, before the serve
     # process proves itself, so the refusal is observed by running the main
     # service of the adapted project in the foreground.
-    (row,) = adapted(case, wheel, tmp_path).taskset
+    (row,) = adapted(case, sdk_wheel, tmp_path).taskset
     assert row.runtime_config is not None and row.runtime_config.compose is not None
     compose = row.runtime_config.compose.document
     assert isinstance(compose, Path)
