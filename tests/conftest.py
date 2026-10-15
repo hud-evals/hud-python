@@ -12,6 +12,7 @@ they skip themselves when what they need is missing.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -202,6 +203,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         "sandbox": (_sandbox_available, "needs Linux, root, and bubblewrap"),
         "live": (lambda: real_hud_api_key() is not None, "needs HUD_API_KEY"),
         "modal": (_modal_available, "needs a Modal account"),
+        "lerobot": (
+            lambda: importlib.util.find_spec("lerobot") is not None,
+            "needs lerobot[dataset]",
+        ),
     }
     available: dict[str, bool] = {}
     for item in items:

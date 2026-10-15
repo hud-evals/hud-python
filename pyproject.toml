@@ -273,6 +273,7 @@ markers = [
     "e2e: needs something outside the test process; runs only when selected with -m",
     "docker: needs a running Docker daemon",
     "modal: needs a Modal account (a token in the environment or ~/.modal.toml)",
+    "lerobot: needs the lerobot[dataset] package",
     "sandbox: needs Linux, root, and bubblewrap",
     "live: needs a real HUD account (HUD_API_KEY) and spends credits",
     "hosted: deploys to and runs on the HUD platform",

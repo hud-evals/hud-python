@@ -120,6 +120,24 @@ jobs:
           uv run --python 3.12 --all-extras
           pytest -m "e2e and modal" -n 4 --timeout 1200 --durations 20
 
+  lerobot:
+    name: LeRobot
+    # Records robot rollouts with the real lerobot package (and torch), which no
+    # extra installs, so it runs on its own schedule.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Run LeRobot scenarios
+        run: >-
+          uv run --python 3.12 --all-extras --with 'lerobot[dataset]'
+          pytest -m "e2e and lerobot" -n 4 --timeout 600 --durations 20
+
   cookbooks:
     name: Cookbooks
     # Cookbooks live outside the package, so SDK changes can break them silently.
