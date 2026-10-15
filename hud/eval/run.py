@@ -680,6 +680,24 @@ async def rollout(
                         run.record(Step(source="system", error=detail))
                     run.trace.stop_reason = "timeout"
         except asyncio.CancelledError:
+            if run is None:
+                # Cancelled before the run is live, but the trace was already
+                # entered: synthesize a run so the exit still gets reported.
+                run = Run.failed("rollout cancelled before launch")
+                run.trace.status = "cancelled"
+            else:
+                run.trace.status = "error" if run.trace.stop_reason == "timeout" else "cancelled"
+            # trace_exit skips a run without a trace id: the normal path binds
+            # it below, so bind it here for the cancel exit.
+            run.trace.trace_id = trace_id
+            try:
+                await asyncio.wait_for(asyncio.shield(trace_exit(run)), timeout=2.0)
+            except Exception:
+                logger.warning(
+                    "cancelled rollout failed to report trace exit for %s",
+                    trace_id,
+                    exc_info=True,
+                )
             if client is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(client.cancel(), timeout=2.0)
