@@ -44,6 +44,7 @@ class FakeScreen:
     #: (counted across connections, from 1); 0 never drops.
     drop_on_update: int = 0
     updates: int = 0
+    sessions: set[asyncio.Task[None]] = field(default_factory=set)
 
     @property
     def url(self) -> str:
@@ -57,6 +58,9 @@ class FakeScreen:
 
     async def _session(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.connections += 1
+        session = asyncio.current_task()
+        assert session is not None
+        self.sessions.add(session)
         try:
             writer.write(b"RFB 003.008\n")
             await reader.readexactly(12)
@@ -101,6 +105,7 @@ class FakeScreen:
             pass
         finally:
             writer.close()
+            self.sessions.discard(session)
 
 
 @asynccontextmanager
@@ -117,3 +122,5 @@ async def fake_screen(
     screen.port = server.sockets[0].getsockname()[1]
     async with server:
         yield screen
+        # Read what a client sent before it hung up; 3.11's server exit does not wait.
+        await asyncio.gather(*screen.sessions)
