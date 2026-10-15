@@ -702,7 +702,10 @@ async def rollout(
             # handshake — where str(exc) would drop them.
             detail = "".join(traceback.format_exception_only(exc)).strip()
             if run is None:
-                logger.warning("rollout failed before launch (%s): %s", _phase, detail)
+                # No run exists yet, so this log is the only place the traceback survives.
+                logger.warning(
+                    "rollout failed before launch (%s): %s", _phase, detail, exc_info=True
+                )
                 run = Run.failed(f"[{_phase}] {detail}")
             else:
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
