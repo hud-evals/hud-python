@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import io
-import json
-import subprocess
 from typing import TYPE_CHECKING
 
 import httpx
@@ -28,7 +26,7 @@ from tests.harness import KeyEvent, Reply, ScriptedAgent, call, fake_screen, say
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeDocker, FakeServices, Hud, HudEnv, Models
+    from tests.harness import FakeServices, Hud, HudEnv, Models
 
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
 
@@ -206,28 +204,6 @@ def test_the_hud_cli_runs_against_the_fake_platform(
     (request,) = services.requests("api", "GET", "/v2/jobs")
     assert request.query == {"limit": ["20"]}
     assert request.bearer == "k"
-
-
-def test_fake_docker_logs_invocations_and_answers_from_rules(
-    fake_docker: FakeDocker, tmp_path: Path
-) -> None:
-    compose = tmp_path / "compose.json"
-    compose.write_text(json.dumps({"services": {}}))
-    fake_docker.on(r"^port cid-1", stdout="127.0.0.1:43210\n")
-
-    run = subprocess.run(["docker", "run", "image"], capture_output=True, text=True, check=True)
-    port = subprocess.run(
-        ["docker", "port", "cid-1", "8765"], capture_output=True, text=True, check=True
-    )
-    subprocess.run(["docker", "compose", "-f", str(compose), "up"], check=True)
-
-    assert (run.stdout, port.stdout) == ("cid-1\n", "127.0.0.1:43210\n")
-    assert fake_docker.commands() == [
-        "run image",
-        "port cid-1 8765",
-        f"compose -f {compose} up",
-    ]
-    assert fake_docker.calls[-1].files == {str(compose): '{"services": {}}'}
 
 
 async def test_the_fake_screen_serves_frames_and_records_input() -> None:

@@ -10,6 +10,77 @@
               "artifacts": [],
               "collect": [],
               "description": "",
+              "id": "caffe-cifar-10",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "columns": {
+            "category": "machine-learning"
+          },
+          "env": "dataset-grouping-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "caffe-cifar-10"
+        },
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
+              "id": "sam-cell-seg",
+              "separate_verifier": false,
+              "verifier_timeout": 600.0
+            }
+          },
+          "columns": {
+            "category": "machine-learning"
+          },
+          "env": "dataset-grouping-<h1>",
+          "id": "run",
+          "runtime_config": {
+            "compose": {
+              "document": "compose.yaml",
+              "root": ".",
+              "service_access": null
+            },
+            "limits": null,
+            "resources": null
+          },
+          "slug": "sam-cell-seg"
+        }
+      ],
+      "tree": [
+        "compose-project/environment/Dockerfile",
+        "compose-project/main/Dockerfile",
+        "compose-project/main/config.json",
+        "compose-project/main/install.sh",
+        "compose-project/tests/caffe-cifar-10/test.sh",
+        "compose-project/tests/sam-cell-seg/test.sh",
+        "compose.yaml",
+        "env.py",
+        "tasks.json"
+      ]
+    },
+    "dataset-grouping-<h2>": {
+      "tasks.json": [
+        {
+          "args": {
+            "instruction": "Solve the task.\n",
+            "task": {
+              "artifacts": [],
+              "collect": [],
+              "description": "",
               "id": "cancel-async-tasks",
               "separate_verifier": false,
               "verifier_timeout": 600.0
@@ -18,7 +89,7 @@
           "columns": {
             "category": "systems"
           },
-          "env": "dataset-grouping-<h1>",
+          "env": "dataset-grouping-<h2>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -43,7 +114,7 @@
         "tasks.json"
       ]
     },
-    "dataset-grouping-<h2>": {
+    "dataset-grouping-<h3>": {
       "tasks.json": [
         {
           "agent_config": {
@@ -82,7 +153,7 @@
               "build"
             ]
           },
-          "env": "dataset-grouping-<h2>",
+          "env": "dataset-grouping-<h3>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -110,7 +181,7 @@
           "columns": {
             "category": "games"
           },
-          "env": "dataset-grouping-<h2>",
+          "env": "dataset-grouping-<h3>",
           "id": "run",
           "runtime_config": {
             "compose": {
@@ -131,77 +202,6 @@
         "compose-project/main/install.sh",
         "compose-project/tests/build-pmars/test.sh",
         "compose-project/tests/chess-best-move/test.sh",
-        "compose.yaml",
-        "env.py",
-        "tasks.json"
-      ]
-    },
-    "dataset-grouping-<h3>": {
-      "tasks.json": [
-        {
-          "args": {
-            "instruction": "Solve the task.\n",
-            "task": {
-              "artifacts": [],
-              "collect": [],
-              "description": "",
-              "id": "caffe-cifar-10",
-              "separate_verifier": false,
-              "verifier_timeout": 600.0
-            }
-          },
-          "columns": {
-            "category": "machine-learning"
-          },
-          "env": "dataset-grouping-<h3>",
-          "id": "run",
-          "runtime_config": {
-            "compose": {
-              "document": "compose.yaml",
-              "root": ".",
-              "service_access": null
-            },
-            "limits": null,
-            "resources": null
-          },
-          "slug": "caffe-cifar-10"
-        },
-        {
-          "args": {
-            "instruction": "Solve the task.\n",
-            "task": {
-              "artifacts": [],
-              "collect": [],
-              "description": "",
-              "id": "sam-cell-seg",
-              "separate_verifier": false,
-              "verifier_timeout": 600.0
-            }
-          },
-          "columns": {
-            "category": "machine-learning"
-          },
-          "env": "dataset-grouping-<h3>",
-          "id": "run",
-          "runtime_config": {
-            "compose": {
-              "document": "compose.yaml",
-              "root": ".",
-              "service_access": null
-            },
-            "limits": null,
-            "resources": null
-          },
-          "slug": "sam-cell-seg"
-        }
-      ],
-      "tree": [
-        "compose-project/environment/Dockerfile",
-        "compose-project/main/Dockerfile",
-        "compose-project/main/config.json",
-        "compose-project/main/install.sh",
-        "compose-project/tests/caffe-cifar-10/test.sh",
-        "compose-project/tests/sam-cell-seg/test.sh",
         "compose.yaml",
         "env.py",
         "tasks.json"

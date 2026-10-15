@@ -1,2 +1,2 @@
-FROM nvidia/cuda:12.0-runtime-ubuntu22.04
+FROM alpine:3.20
 WORKDIR /workspace

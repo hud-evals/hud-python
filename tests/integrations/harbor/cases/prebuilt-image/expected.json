@@ -8,9 +8,9 @@
           "main": {
             "build": {
               "args": {
-                "BASE_IMAGE": "registry.example/base:latest",
+                "BASE_IMAGE": "golang:1.23-alpine",
                 "HUD_REQUIREMENT": "hud",
-                "VERIFIER_IMAGE": "registry.example/base:latest"
+                "VERIFIER_IMAGE": "golang:1.23-alpine"
               },
               "context": "./compose-project/main",
               "target": "plain"

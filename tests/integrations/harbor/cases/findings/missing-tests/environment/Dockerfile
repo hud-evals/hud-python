@@ -1,2 +1,2 @@
-FROM python:3.11-slim
+FROM busybox:1.37
 WORKDIR /workspace

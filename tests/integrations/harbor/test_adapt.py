@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,37 +29,33 @@ from hud.integrations import harbor
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.harness import FakeDocker, HudEnv
+    from tests.harness import HudEnv
 
 CASES = Path(__file__).parent / "cases"
 SECRET = "sk-live-secret"
 HASH = re.compile(r"\b[0-9a-f]{12}(?:[0-9a-f]{4})?\b")
-RESOLVE_DIR = re.compile(r"[^\s\"']*/hud-harbor-resolve-[^/\s\"']+")
 
 
-def load_case(
-    case: str, tmp_path: Path, fake_docker: FakeDocker, hud_env: HudEnv
-) -> tuple[Path, set[str]]:
-    """Copy ``case`` into ``tmp_path``, load its ``docker.json``, and return what it observes."""
+# The cases whose generated Compose document is part of what they check.
+COMPOSE_CASES = {
+    "compose-main-build",
+    "compose-variables",
+    "prebuilt-image",
+    "resources-and-budgets",
+    "shared-collect-sidecar",
+    "sidecars",
+    "source-builds-and-volumes",
+}
+
+
+def load_case(case: str, tmp_path: Path, hud_env: HudEnv) -> Path:
+    """Copy ``case`` into ``tmp_path``, with a host secret its templates must never leak."""
     dataset = tmp_path / case
     shutil.copytree(
-        CASES / case,
-        dataset,
-        symlinks=True,
-        ignore=shutil.ignore_patterns("docker.json", "expected.json"),
+        CASES / case, dataset, symlinks=True, ignore=shutil.ignore_patterns("expected.json")
     )
-    spec = json.loads((CASES / case / "docker.json").read_text("utf-8"))
-    fake_docker.images(
-        dataset,
-        builds=spec.get("builds"),
-        pulls=spec.get("pulls"),
-        platform=spec.get("platform", "linux/amd64"),
-    )
-    for failure in spec.get("fail", []):
-        fake_docker.on(failure["match"], stderr=failure["stderr"], exit=1)
-    # A host value a template names must never reach anything adapt writes.
     hud_env.set(HARBOR_JUDGE_KEY=SECRET)
-    return dataset, set(spec.get("observe", []))
+    return dataset
 
 
 def mask(document: Any) -> Any:
@@ -118,58 +115,41 @@ def assert_stock_compose_complete(compose_path: Path) -> dict[str, Any]:
     return project
 
 
-def observe(
-    result: harbor.AdaptResult, dataset: Path, fake_docker: FakeDocker, extra: set[str]
-) -> Any:
-    def scrub(text: str) -> str:
-        return RESOLVE_DIR.sub("<resolve>", text.replace(str(dataset), "<case>"))
-
+def observe(result: harbor.AdaptResult, dataset: Path, case: str) -> Any:
+    """What adapt wrote for each environment, and each task it could not adapt as
+    ``[task, code, kind]``."""
     projects: dict[str, Any] = {}
     adapted = dataset / ".hud-adapt"
     for context in sorted(adapted.iterdir()) if adapted.is_dir() else []:
         compose = assert_stock_compose_complete(context / "compose.yaml")
         projects[context.name] = {
             "tree": listing(context),
-            **({"compose.yaml": compose} if "compose" in extra else {}),
+            **({"compose.yaml": compose} if case in COMPOSE_CASES else {}),
             "tasks.json": json.loads((context / "tasks.json").read_text("utf-8")),
         }
-    docker = [
-        {
-            "argv": scrub(call.command),
-            **(
-                {
-                    "files": {
-                        Path(path).name: json.loads(content) for path, content in call.files.items()
-                    }
-                }
-                if call.files
-                else {}
-            ),
-        }
-        for call in fake_docker.calls
-    ]
     return mask(
         {
             "failures": [
-                [failure.task, finding.code, finding.kind, scrub(finding.message)]
+                [failure.task, finding.code, finding.kind]
                 for failure in result.failures
                 for finding in failure.findings
             ],
             "projects": projects,
-            **({"docker": docker} if "docker" in extra else {}),
         }
     )
 
 
+@pytest.mark.e2e
+@pytest.mark.docker
 @pytest.mark.parametrize("case", sorted(path.name for path in CASES.iterdir()))
 def test_adapting_a_harbor_dataset_writes_its_projects_and_reports_its_failures(
-    case: str, tmp_path: Path, fake_docker: FakeDocker, hud_env: HudEnv
+    case: str, tmp_path: Path, hud_env: HudEnv
 ) -> None:
-    dataset, extra = load_case(case, tmp_path, fake_docker, hud_env)
+    dataset = load_case(case, tmp_path, hud_env)
 
     result = harbor.adapt(dataset, hud_requirement="hud")
 
-    assert observe(result, dataset, fake_docker, extra) == external_file(
+    assert observe(result, dataset, case) == external_file(
         CASES / case / "expected.json", format=".json"
     )
     rows = list(result.taskset)
@@ -193,6 +173,34 @@ def test_adapting_a_harbor_dataset_writes_its_projects_and_reports_its_failures(
     assert leaked == []
 
 
+@pytest.mark.e2e
+@pytest.mark.docker
+def test_an_image_docker_cannot_resolve_is_reported_on_its_task(
+    tmp_path: Path, hud_env: HudEnv
+) -> None:
+    """A verifier that cannot build on a non-amd64 daemon says how to adapt for one platform."""
+    dataset = load_case("image-failures", tmp_path, hud_env)
+    host = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Arch}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    result = harbor.adapt(dataset, hud_requirement="hud")
+
+    messages = {
+        failure.task: " ".join(finding.message for finding in failure.findings)
+        for failure in result.failures
+    }
+    assert "registry.invalid/missing" in messages["broken"]
+    assert "registry.invalid/cache" in messages["missing-sidecar-image"]
+    assert "--platform linux/amd64" in messages["verifier-on-arm"]
+    assert ("DOCKER_DEFAULT_PLATFORM=linux/amd64" in messages["verifier-on-arm"]) is (
+        host != "amd64"
+    )
+
+
 def test_adapt_raises_when_the_source_holds_no_harbor_tasks(tmp_path: Path) -> None:
     (tmp_path / "empty").mkdir()
 
@@ -209,15 +217,11 @@ def test_adapt_raises_when_the_source_holds_no_harbor_tasks(tmp_path: Path) -> N
     ],
 )
 def test_adapt_aborts_without_a_docker_daemon_instead_of_failing_tasks(
-    docker_state: str,
-    message: str,
-    tmp_path: Path,
-    fake_docker: FakeDocker,
-    hud_env: HudEnv,
+    docker_state: str, message: str, tmp_path: Path, hud_env: HudEnv
 ) -> None:
-    dataset, _ = load_case("plain-image", tmp_path, fake_docker, hud_env)
+    dataset = load_case("plain-image", tmp_path, hud_env)
     if docker_state == "daemon unreachable":
-        fake_docker.on(r"^version", stderr="Cannot connect to the Docker daemon", exit=1)
+        hud_env.set(DOCKER_HOST=f"unix://{tmp_path}/no-daemon.sock")
     else:
         (tmp_path / "empty-path").mkdir()
         hud_env.set(PATH=str(tmp_path / "empty-path"))
@@ -240,6 +244,8 @@ def wheel(task: Path) -> str:
     return str(built)
 
 
+@pytest.mark.e2e
+@pytest.mark.docker
 @pytest.mark.parametrize(
     ("change", "apply", "rebuilds"),
     [
@@ -257,11 +263,10 @@ def test_the_environment_image_identity_follows_only_what_the_image_contains(
     apply: Callable[[Path], str],
     rebuilds: bool,
     tmp_path: Path,
-    fake_docker: FakeDocker,
     hud_env: HudEnv,
 ) -> None:
     del change
-    dataset, _ = load_case("plain-image", tmp_path, fake_docker, hud_env)
+    dataset = load_case("plain-image", tmp_path, hud_env)
     task = dataset / "task-a"
     (dataset / "outside.txt").write_text("first\n", encoding="utf-8")
     (task / "environment" / "outside").symlink_to(dataset / "outside.txt")

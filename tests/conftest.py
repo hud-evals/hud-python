@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dotenv import dotenv_values
 
-from tests.harness import FakeDocker, FakeServices, Hud, HudEnv, Models, Uv
+from tests.harness import FakeServices, Hud, HudEnv, Models, Uv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -88,11 +88,6 @@ def models(services: FakeServices) -> Models:
 def hud(tmp_path: Path) -> Hud:
     """The real ``hud`` CLI, run in a subprocess from ``tmp_path / "work"``."""
     return Hud(tmp_path / "work")
-
-
-@pytest.fixture
-def fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeDocker:
-    return FakeDocker(tmp_path / "fake-docker", monkeypatch)
 
 
 @pytest.fixture(scope="session")

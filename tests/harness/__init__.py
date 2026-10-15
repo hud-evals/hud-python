@@ -1,9 +1,11 @@
-"""The black-box test harness: fakes of everything outside the SDK.
+"""The test harness: stand-ins for what tests cannot use for real.
 
 Tests drive the SDK through its public boundaries (the ``hud`` CLI, exported
-API, wire protocols, files) and fake only what lies outside it: the HUD
-services, model providers, docker and VNC servers. The fixtures wiring these in
-live in ``tests/conftest.py``.
+API, files) against the real outside world where they can: real models and
+CLIs, Docker and Modal run in their own lanes. What stays here stands in for
+what cannot run in a test, the HUD services and a desktop screen, and for
+faults a real system will not produce on demand: scripted model replies,
+dropped connections. The fixtures wiring these in live in ``tests/conftest.py``.
 """
 
 from .asgi import serve_asgi
@@ -11,7 +13,6 @@ from .cdp import Command, FakeBrowser, fake_browser
 from .cli import Hud, Result, scrub, words
 from .config import HudEnv
 from .control import ControlPeer, answer, control_peer, hang_up, hold
-from .docker import FakeDocker
 from .models import (
     ModelRequest,
     Models,
@@ -38,7 +39,6 @@ __all__ = [
     "Command",
     "ControlPeer",
     "FakeBrowser",
-    "FakeDocker",
     "FakeScreen",
     "FakeServices",
     "FlakyRelay",

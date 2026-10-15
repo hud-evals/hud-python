@@ -57,7 +57,7 @@
               "artifacts": [],
               "collect": [],
               "description": "",
-              "id": "cpu-only",
+              "id": "gpu",
               "separate_verifier": false,
               "verifier_timeout": 600.0
             }
@@ -71,9 +71,19 @@
               "service_access": null
             },
             "limits": null,
-            "resources": null
+            "resources": {
+              "cpu": 4.0,
+              "gpu": {
+                "count": 2,
+                "type": [
+                  "H100"
+                ]
+              },
+              "memory_mb": 8192,
+              "storage_mb": 32768
+            }
           },
-          "slug": "cpu-only"
+          "slug": "gpu"
         }
       ],
       "tree": [
@@ -81,7 +91,7 @@
         "compose-project/main/Dockerfile",
         "compose-project/main/config.json",
         "compose-project/main/install.sh",
-        "compose-project/tests/cpu-only/test.sh",
+        "compose-project/tests/gpu/test.sh",
         "compose.yaml",
         "env.py",
         "tasks.json"
@@ -326,7 +336,7 @@
               "artifacts": [],
               "collect": [],
               "description": "",
-              "id": "gpu",
+              "id": "cpu-only",
               "separate_verifier": false,
               "verifier_timeout": 600.0
             }
@@ -340,19 +350,9 @@
               "service_access": null
             },
             "limits": null,
-            "resources": {
-              "cpu": 4.0,
-              "gpu": {
-                "count": 2,
-                "type": [
-                  "H100"
-                ]
-              },
-              "memory_mb": 8192,
-              "storage_mb": 32768
-            }
+            "resources": null
           },
-          "slug": "gpu"
+          "slug": "cpu-only"
         }
       ],
       "tree": [
@@ -360,7 +360,7 @@
         "compose-project/main/Dockerfile",
         "compose-project/main/config.json",
         "compose-project/main/install.sh",
-        "compose-project/tests/gpu/test.sh",
+        "compose-project/tests/cpu-only/test.sh",
         "compose.yaml",
         "env.py",
         "tasks.json"

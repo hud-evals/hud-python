@@ -1,1 +1,2 @@
-FROM memcached:1.6
+FROM busybox:1.37
+EXPOSE 11211/tcp 11211/udp
