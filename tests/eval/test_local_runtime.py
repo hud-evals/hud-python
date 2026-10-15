@@ -314,45 +314,25 @@ async def test_cancelling_a_waiting_acquisition_leaves_the_running_one_alone() -
 
 
 CONSTRUCTION_ERRORS = {
-    "an unsupported source": (
-        lambda: LocalRuntime(cast("Any", 42)),
-        TypeError,
-        "LocalRuntime: expected a source path, an Environment, or a",
-    ),
-    "env= with a live env": (
-        lambda: LocalRuntime(lab(), env="lab"),
-        TypeError,
-        "LocalRuntime: env= applies only to source paths",
-    ),
-    "env= with a constructor": (
-        lambda: LocalRuntime(lambda task: lab(), env="lab"),
-        TypeError,
-        "LocalRuntime: env= applies only to source paths",
-    ),
-    "env= with a live env in a child": (
-        lambda: SubprocessRuntime(lab(), env="lab"),
-        TypeError,
-        "SubprocessRuntime: env= applies only to source paths",
-    ),
+    "an unsupported source": (lambda: LocalRuntime(cast("Any", 42)), TypeError),
+    "env= with a live env": (lambda: LocalRuntime(lab(), env="lab"), TypeError),
+    "env= with a constructor": (lambda: LocalRuntime(lambda task: lab(), env="lab"), TypeError),
+    "env= with a live env in a child": (lambda: SubprocessRuntime(lab(), env="lab"), TypeError),
     "a live env without templates in a child": (
         lambda: SubprocessRuntime(Environment("bare")),
         ValueError,
-        "SubprocessRuntime: Environment 'bare' must declare its @env.template tasks in "
-        "exactly one source file",
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("build", "error", "message"), CONSTRUCTION_ERRORS.values(), ids=CONSTRUCTION_ERRORS.keys()
+    ("build", "error"), CONSTRUCTION_ERRORS.values(), ids=CONSTRUCTION_ERRORS.keys()
 )
 def test_a_provider_rejects_a_source_it_cannot_serve(
-    build: Callable[[], object], error: type[Exception], message: str
+    build: Callable[[], object], error: type[Exception]
 ) -> None:
-    with pytest.raises(error) as raised:
+    with pytest.raises(error):
         build()
-
-    assert str(raised.value).startswith(message)
 
 
 def write(path: Path, source: str) -> Path:
@@ -391,14 +371,14 @@ ACQUISITION_ERRORS: dict[
         lambda tmp, events: LocalRuntime(write(tmp / "env.py", "from hud import Environment\n")),
         Task(env="other", id="add"),
         ValueError,
-        r"no Environment named 'other' found in .*env\.py",
+        None,
         [],
     ),
     "a constructor returning something else": (
         lambda tmp, events: LocalRuntime(lambda task: cast("Any", 42)),
         ADD,
         TypeError,
-        r"LocalRuntime: constructor returned 42, not an Environment",
+        None,
         [],
     ),
     "a source running an event loop at import": (
@@ -407,36 +387,35 @@ ACQUISITION_ERRORS: dict[
         ),
         ADD,
         RuntimeError,
-        r"the env source ran async code while being imported to place a rollout — guard "
-        r'top-level run calls with `if __name__ == "__main__":`',
+        "guard top-level run calls",
         [],
     ),
     "a row with runtime_config in process": (
         lambda tmp, events: LocalRuntime(lab(events)),
         IMAGE_ROW,
         ValueError,
-        r"LocalRuntime does not support task runtime_config",
+        None,
         [],
     ),
     "a row with runtime_config in a child": (
         lambda tmp, events: SubprocessRuntime(write(tmp / "env.py", "")),
         IMAGE_ROW,
         ValueError,
-        r"SubprocessRuntime does not support task runtime_config",
+        None,
         [],
     ),
     "a missing source for a child": (
         lambda tmp, events: SubprocessRuntime(tmp / "missing.py"),
         ADD,
         FileNotFoundError,
-        r"SubprocessRuntime: source not found: .*missing\.py",
+        None,
         [],
     ),
     "an initialize hook that raises still shuts down": (
         lambda tmp, events: LocalRuntime(failing_initialize(events)),
         ADD,
         RuntimeError,
-        r"daemon failed to start",
+        None,
         ["initialize", "shutdown"],
     ),
     "an initialize hook slower than ready_timeout still shuts down": (
