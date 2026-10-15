@@ -74,6 +74,8 @@ config; `__call__(run)` takes only the run.
 
 `GeminiConfig.temperature`, `top_p`, and `top_k` are unset by default too, so each request uses the model's own sampling; Gemini 4 models ignore sampling parameters. `GeminiConfig.thinking_level` accepts `minimal`, `low`, `medium`, or `high`, but each model supports its own subset (Gemini 4 Argon rejects `minimal`); unset leaves the model's default. Gemini 4 long decode, which lets a turn run past the model's per-request output cap, needs `max_output_tokens` above 65,536 and `google-genai` 2.30.1 or later; the SDK then continues the turn across requests, and its hops are recorded as one turn. A turn that stops at the per-request cap, as every long turn does with `max_output_tokens` unset, ends the run with `stop_reason="length"`.
 
+`GeminiAgent` streams each turn, so a long generation is not cut off by a request timeout. Leave `include_thoughts` on for long-thinking runs: the streamed thought summaries keep the stream active, while with it off the model sends nothing until it starts answering.
+
 `OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
 request. Pass your own key when multiple agent instances should share the same cached prompt prefix.
 
