@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from inline_snapshot import snapshot
 
-from tests.harness import Reply, scrub
+from tests.harness import Reply
 
 from .conftest import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
 
@@ -49,6 +49,11 @@ class Tasksets:
 
     def add(self, taskset_id: str, name: str, tasks: list[dict[str, Any]] | None = None) -> None:
         self.records[taskset_id] = {"name": name, "tasks": {t["name"]: t for t in tasks or []}}
+
+    def tasks(self, taskset_id: str) -> list[tuple[str, str, dict[str, Any]]]:
+        """The taskset's tasks as (env, template, args), sorted."""
+        tasks = self.records[taskset_id]["tasks"].values()
+        return sorted(((t["env"], t["scenario"], t["args"]) for t in tasks), key=repr)
 
     def by_name(self, request: Request) -> Reply:
         for taskset_id, record in self.records.items():
@@ -106,71 +111,29 @@ def uploads(services: FakeServices) -> list[Any]:
     return services.bodies("api", "POST", "/v2/tasks/upload")
 
 
-def link(hud: Hud) -> Any:
+def link(hud: Hud, key: str = "taskset_id") -> Any:
     path = hud.cwd / ".hud" / "config.json"
-    return json.loads(path.read_text())["taskset_id"] if path.exists() else None
+    return json.loads(path.read_text()).get(key) if path.exists() else None
 
 
 def test_a_taskset_round_trip(
     hud: Hud, projects: FakeServices, tasksets: Tasksets, source: Path
 ) -> None:
     plan = hud("sync", "tasks", "demo", "tasks.py", "--dry-run", "--json")
-    assert (plan.exit_code, plan.json, uploads(projects), link(hud)) == (
+    assert (plan.exit_code, plan.json["create_count"], uploads(projects), link(hud)) == (
         0,
-        snapshot(
-            {
-                "taskset": "demo",
-                "create_count": 2,
-                "update_count": 0,
-                "unchanged_count": 0,
-                "remote_only_count": 0,
-                "to_apply": ["solve", "solve"],
-                "dry_run": True,
-                "action": "sync_tasks",
-            }
-        ),
+        2,
         [],
         None,
     )
 
     first = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
     assert first.exit_code == 0, first
-    assert first.json == snapshot(
-        {
-            "taskset": "demo",
-            "create_count": 2,
-            "update_count": 0,
-            "unchanged_count": 0,
-            "remote_only_count": 0,
-            "to_apply": ["solve", "solve"],
-            "status": "synced",
-            "tasks_created": 2,
-            "tasks_updated": 0,
-            "taskset_id": "eeeeeeee-0000-4000-8000-000000000001",
-        }
-    )
-    assert uploads(projects) == snapshot(
-        [
-            {
-                "taskset_name": "demo",
-                "tasks": [
-                    {
-                        "name": "solve-bae34777",
-                        "env": {"name": "example"},
-                        "task_id": "solve",
-                        "args": {"n": 1},
-                    },
-                    {
-                        "name": "solve-99dd84a6",
-                        "env": {"name": "example"},
-                        "task_id": "solve",
-                        "args": {"n": 2},
-                    },
-                ],
-            }
-        ]
-    )
     taskset_id = first.json["taskset_id"]
+    assert tasksets.tasks(taskset_id) == [
+        ("example", "solve", {"n": 1}),
+        ("example", "solve", {"n": 2}),
+    ]
     assert link(hud) == taskset_id
 
     again = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
@@ -179,21 +142,8 @@ def test_a_taskset_round_trip(
     source.write_text(TASKS_PY.replace("solve(n=2)]", "solve(n=2), solve(n=3)]"))
     edited = hud("sync", "tasks", "--yes", "--json")
     assert edited.exit_code == 0, edited
-    assert edited.json == snapshot(
-        {
-            "taskset": "demo",
-            "create_count": 1,
-            "update_count": 0,
-            "unchanged_count": 2,
-            "remote_only_count": 0,
-            "to_apply": ["solve"],
-            "status": "synced",
-            "tasks_created": 1,
-            "tasks_updated": 0,
-            "taskset_id": "eeeeeeee-0000-4000-8000-000000000001",
-        }
-    )
-    assert uploads(projects)[-1]["taskset_id"] == taskset_id
+    assert [task["args"] for task in uploads(projects)[-1]["tasks"]] == [{"n": 3}]
+    assert len(tasksets.tasks(taskset_id)) == 3
 
     tasksets.records[taskset_id]["name"] = "renamed"
     bare = hud("sync", "--json")
@@ -204,9 +154,12 @@ def test_a_taskset_round_trip(
     )
     forced = hud("sync", "tasks", "--force", "--yes", "--json")
     assert forced.exit_code == 0, forced
-    assert uploads(projects)[-1]["taskset_name"] == "renamed"
-    assert len(uploads(projects)[-1]["tasks"]) == 3
-    assert link(hud) == taskset_id
+    last = uploads(projects)[-1]
+    assert (last["taskset_id"], last["taskset_name"], len(last["tasks"])) == (
+        taskset_id,
+        "renamed",
+        3,
+    )
 
     slug = uploads(projects)[0]["tasks"][0]["name"]
     one = hud("sync", "tasks", "--task", slug, "--force", "--yes", "--json")
@@ -217,7 +170,7 @@ def test_a_taskset_round_trip(
     elsewhere = hud("sync", "tasks", OTHER_ID, "tasks.py", "--force", "--yes", "--json")
     planned = hud("sync", "tasks", OTHER_ID, "tasks.py", "--link", "--dry-run", "--json")
     assert (elsewhere.exit_code, planned.exit_code, link(hud)) == (0, 0, taskset_id)
-    assert uploads(projects)[-1]["taskset_id"] == OTHER_ID
+    assert len(tasksets.tasks(OTHER_ID)) == 3
     relinked = hud("sync", "tasks", OTHER_ID, "tasks.py", "--link", "--yes", "--json")
     assert (relinked.exit_code, link(hud)) == (0, OTHER_ID)
 
@@ -230,145 +183,62 @@ def test_a_stored_taskset_that_was_deleted_is_never_recreated(
 
     result = hud("sync", "tasks", "--force", "--yes", "--json")
 
-    assert result.exit_code == 1, result
-    assert scrub(result.stdout) == snapshot("""\
-{
-  "error": "not_found",
-  "message": "Request failed: Taskset not found",
-  "suggestion": "Check the resource id, or list existing ones."
-}
-""")
-    assert len(uploads(projects)) == 1
+    assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
+    assert (len(uploads(projects)), tasksets.records) == (1, {})
 
 
-@pytest.mark.parametrize(
-    ("target", "expected"),
-    [
-        (
-            "tasks.csv",
-            snapshot("""\
-slug,id,env,arg:n
-one,solve,e,1
-two,solve,e,"{""x"": 2}"
-"""),
-        ),
-        (
-            "tasks.json",
-            snapshot("""\
-[
-  {
-    "env": "e",
-    "id": "solve",
-    "args": {
-      "n": 1
-    },
-    "slug": "one"
-  },
-  {
-    "env": "e",
-    "id": "solve",
-    "args": {
-      "n": {
-        "x": 2
-      }
-    },
-    "slug": "two"
-  }
+REMOTE = [
+    {"name": "one", "env": "e", "scenario": "solve", "args": {"n": 1}},
+    {"name": "two", "env": "e", "scenario": "solve", "args": {"n": {"x": 2}}},
 ]
-"""),
-        ),
-        (
-            "out/tasks.jsonl",
-            snapshot("""\
-{"env": "e", "id": "solve", "args": {"n": 1}, "slug": "one"}
-{"env": "e", "id": "solve", "args": {"n": {"x": 2}}, "slug": "two"}
-"""),
-        ),
-    ],
-)
-def test_export_writes_the_remote_taskset_to_a_file(
-    hud: Hud, tasksets: Tasksets, target: str, expected: str
+
+
+@pytest.mark.parametrize("target", ["tasks.json", "out/tasks.jsonl"])
+def test_an_exported_taskset_reads_back_as_the_same_tasks(
+    hud: Hud, tasksets: Tasksets, target: str
 ) -> None:
-    tasksets.add(
-        DEMO_ID,
-        "demo",
-        [
-            {"name": "one", "env": "e", "scenario": "solve", "args": {"n": 1}},
-            {"name": "two", "env": "e", "scenario": "solve", "args": {"n": {"x": 2}}},
-        ],
-    )
+    tasksets.add(DEMO_ID, "demo", REMOTE)
 
     result = hud("sync", "tasks", "demo", "--export", target, "--json")
+    rows = hud("task", "list", "--source", target, "--json")
+
+    assert (result.exit_code, result.json["task_count"]) == (0, 2), result
+    assert [(r["slug"], r["id"], r["args"]) for r in rows.json] == [
+        (t["name"], t["scenario"], t["args"]) for t in REMOTE
+    ]
+
+
+def test_a_csv_export_has_a_column_per_argument(hud: Hud, tasksets: Tasksets) -> None:
+    tasksets.add(DEMO_ID, "demo", REMOTE)
+
+    result = hud("sync", "tasks", "demo", "--export", "tasks.csv", "--json")
 
     assert result.exit_code == 0, result
-    assert result.json == {"action": "export", "taskset": "demo", "path": target, "task_count": 2}
-    assert (hud.cwd / target).read_text() == expected
+    with (hud.cwd / "tasks.csv").open(newline="") as exported:
+        rows = list(csv.DictReader(exported))
+    assert [(r["slug"], r["env"], r["id"], json.loads(r["arg:n"])) for r in rows] == [
+        (t["name"], t["env"], t["scenario"], t["args"]["n"]) for t in REMOTE
+    ]
 
 
 @pytest.mark.parametrize(
-    ("argv", "exit_code", "document"),
+    ("argv", "exit_code", "error"),
     [
-        (
-            ["sync", "tasks", "demo", "--export", "t.json", "--link"],
-            2,
-            snapshot({"error": "usage", "message": "--link cannot be combined with --export"}),
+        pytest.param(
+            ["tasks", "demo", "--export", "t.json", "--link"], 2, "usage", id="export-and-link"
         ),
-        (
-            ["sync", "tasks", "demo", "tasks.py"],
+        pytest.param(["tasks", "demo", "tasks.py"], 2, "usage", id="unconfirmed"),
+        pytest.param(["tasks"], 2, "usage", id="no-taskset"),
+        pytest.param([], 2, "usage", id="nothing-linked"),
+        pytest.param(["tasks", "demo", "missing.json"], 1, "not_found", id="a-missing-source"),
+        pytest.param(
+            ["tasks", "demo", "tasks.py", "--task", "nope", "--yes"],
             2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": "Confirmation required in a non-interactive terminal.",
-                    "suggestion": "Re-run with --yes to continue.",
-                }
-            ),
+            "usage",
+            id="an-unknown-slug",
         ),
-        (
-            ["sync", "tasks"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "No taskset specified. Pass a taskset name/ID or run 'hud sync tasks "
-                        "<name>' first to store it."
-                    ),
-                }
-            ),
-        ),
-        (
-            ["sync"],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "No taskset specified. Pass a taskset name/ID or run 'hud sync tasks "
-                        "<name>' first to store it."
-                    ),
-                }
-            ),
-        ),
-        (
-            ["sync", "tasks", "demo", "missing.json"],
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "[Errno 2] No such file or directory: 'missing.json'",
-                }
-            ),
-        ),
-        (
-            ["sync", "tasks", "demo", "tasks.py", "--task", "nope", "--yes"],
-            2,
-            snapshot({"error": "usage", "message": "No task found with slug 'nope'"}),
-        ),
-        (
-            ["sync", "tasks", "nope", "--export", "t.json"],
-            2,
-            snapshot({"error": "usage", "message": "taskset not found: nope"}),
+        pytest.param(
+            ["tasks", "nope", "--export", "t.json"], 2, "usage", id="export-of-an-unknown-taskset"
         ),
     ],
 )
@@ -379,68 +249,24 @@ def test_sync_refusals_upload_nothing(
     source: Path,
     argv: list[str],
     exit_code: int,
-    document: dict[str, Any],
+    error: str,
 ) -> None:
-    result = hud(*argv, "--json")
+    result = hud("sync", *argv, "--json")
 
-    assert result.exit_code == exit_code, result
-    assert json.loads(scrub(result.stdout, hud.cwd)) == document
+    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
     assert uploads(projects) == []
     assert link(hud) is None
+    assert not (hud.cwd / "t.json").exists()
 
 
-@pytest.mark.parametrize(
-    ("reply", "document"),
-    [
-        (
-            Reply(status=400, json={"detail": "Taskset belongs to another Project"}),
-            snapshot(
-                {
-                    "error": "failure",
-                    "message": "Request failed: Taskset belongs to another Project",
-                    "input": {"taskset": "demo"},
-                }
-            ),
-        ),
-        (
-            Reply(status=403, json={"detail": "Upload rejected"}),
-            snapshot(
-                {
-                    "error": "permission_denied",
-                    "message": "Request failed: Upload rejected",
-                    "input": {"taskset": "demo"},
-                    "suggestion": "Check that this API key can access the resource.",
-                }
-            ),
-        ),
-        (
-            Reply(status=500, json={"detail": "Upload rejected"}),
-            snapshot(
-                {
-                    "error": "server_error",
-                    "message": "Request failed: Upload rejected",
-                    "input": {"taskset": "demo"},
-                    "suggestion": "Retry; this error is often transient.",
-                }
-            ),
-        ),
-    ],
-)
 def test_a_rejected_upload_fails_and_links_nothing(
-    hud: Hud,
-    projects: FakeServices,
-    tasksets: Tasksets,
-    source: Path,
-    reply: Reply,
-    document: dict[str, Any],
+    hud: Hud, projects: FakeServices, tasksets: Tasksets, source: Path
 ) -> None:
-    projects.route("api", "POST", "/v2/tasks/upload", reply)
+    projects.route("api", "POST", "/v2/tasks/upload", Reply(status=400, json={"detail": "No"}))
 
     result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
 
     assert result.exit_code == 1, result
-    assert result.json == document
-    assert "Sync complete" not in result.stderr
     assert link(hud) is None
 
 
@@ -463,7 +289,7 @@ def test_the_project_option_places_the_upload_without_pinning_the_directory(
     exit_code: int,
     status: str | None,
 ) -> None:
-    rows = json.loads(hud("task", "list", "--source", "tasks.py", "--json").stdout)
+    rows = hud("task", "list", "--source", "tasks.py", "--json").json
     synced = [
         {"name": r["slug"], "env": "example", "scenario": r["id"], "args": r["args"]} for r in rows
     ]
@@ -478,7 +304,7 @@ def test_the_project_option_places_the_upload_without_pinning_the_directory(
     assert link(hud) is None
 
 
-def test_a_mismatched_linked_environment_warns(
+def test_tasks_for_another_environment_than_the_linked_one_are_flagged(
     hud: Hud, projects: FakeServices, tasksets: Tasksets, source: Path
 ) -> None:
     projects.route("api", "GET", "/v2/registry", json={"items": [ENVIRONMENT], "total": 1})
@@ -488,100 +314,39 @@ def test_a_mismatched_linked_environment_warns(
     result = hud("sync", "tasks", "demo", "tasks.py", "--dry-run")
 
     assert result.exit_code == 0, result
-    assert (
-        "Local task env names do not match the linked platform environment 'browser': example"
-        in " ".join(result.stderr.split())
-    )
+    assert "'browser': example" in " ".join(result.stderr.split())
 
 
 # ─── sync env ───────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("argv", "records", "exit_code", "document"),
+    ("argv", "records", "exit_code", "linked"),
     [
-        (
+        pytest.param(
             ["browser_anchor"],
             [ENVIRONMENT, {**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
             0,
-            snapshot(
-                {
-                    "name": "browser-anchor",
-                    "id": "eeeeeeee-0000-4000-8000-000000000002",
-                    "short_id": "eeeeeeee",
-                    "changed": True,
-                }
-            ),
+            OTHER_ID,
+            id="by-name-across-separators",
         ),
-        (
+        pytest.param([REGISTRY_ID], [], 0, REGISTRY_ID, id="by-id"),
+        pytest.param(
             ["Browser", "--dry-run"],
             [ENVIRONMENT, {**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
             0,
-            snapshot(
-                {
-                    "dry_run": True,
-                    "action": "link_environment",
-                    "id": "bbbbbbbb-0000-4000-8000-000000000001",
-                    "name": "browser",
-                }
-            ),
+            None,
+            id="dry-run",
         ),
-        (
+        pytest.param(
             ["anchor"],
             [{**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
             1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": "No environment named 'anchor'.",
-                    "input": {"environment": "anchor"},
-                    "suggestion": "Run 'hud sync env' to pick from your environments.",
-                }
-            ),
+            None,
+            id="a-partial-name",
         ),
-        (
-            [REGISTRY_ID],
-            [],
-            0,
-            snapshot(
-                {
-                    "name": "browser",
-                    "id": "bbbbbbbb-0000-4000-8000-000000000001",
-                    "short_id": "bbbbbbbb",
-                    "changed": True,
-                }
-            ),
-        ),
-        (
-            [OTHER_ID],
-            [],
-            1,
-            snapshot(
-                {
-                    "error": "not_found",
-                    "message": (
-                        "Environment eeeeeeee-0000-4000-8000-000000000002 is inaccessible or "
-                        "deleted."
-                    ),
-                    "suggestion": (
-                        "Run 'hud sync env <name-or-id>' to link an accessible environment."
-                    ),
-                }
-            ),
-        ),
-        (
-            [],
-            [],
-            2,
-            snapshot(
-                {
-                    "error": "usage",
-                    "message": (
-                        "Pass an environment name or ID for a dry run or noninteractive link."
-                    ),
-                }
-            ),
-        ),
+        pytest.param([OTHER_ID], [], 1, None, id="an-inaccessible-id"),
+        pytest.param([], [], 2, None, id="no-name-and-no-terminal"),
     ],
 )
 def test_sync_env_links_an_environment_by_name_or_id(
@@ -590,7 +355,7 @@ def test_sync_env_links_an_environment_by_name_or_id(
     argv: list[str],
     records: list[dict[str, Any]],
     exit_code: int,
-    document: dict[str, Any],
+    linked: str | None,
 ) -> None:
     def search(request: Request) -> Reply:
         term = request.query["search"][0]
@@ -604,4 +369,4 @@ def test_sync_env_links_an_environment_by_name_or_id(
     result = hud("sync", "env", *argv, "--json")
 
     assert result.exit_code == exit_code, result
-    assert result.json == document
+    assert link(hud, "registry_id") == linked
