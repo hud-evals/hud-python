@@ -31,8 +31,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Output-token-cap finish reasons: OpenAI chat "length", Responses "max_output_tokens",
-# Claude "max_tokens", Gemini "MAX_TOKENS".
-TRUNCATION_FINISH_REASONS = frozenset({"length", "max_output_tokens", "max_tokens", "MAX_TOKENS"})
+# Claude "max_tokens", Gemini "MAX_TOKENS", and Gemini "CONTINUATION" (a per-request
+# cap hit by a turn that was not continued).
+TRUNCATION_FINISH_REASONS = frozenset(
+    {"length", "max_output_tokens", "max_tokens", "MAX_TOKENS", "CONTINUATION"}
+)
 MAX_CONSECUTIVE_SSH_FAILURES = 3
 
 MessageT = TypeVar("MessageT")

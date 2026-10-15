@@ -177,7 +177,7 @@ class ConfigRecordingModels:
         return self._response
 
 
-async def _sent_output_cap(**config: Any) -> int | None:
+async def _sent_config(**config: Any) -> Any:
     resp_content = SimpleNamespace(
         role="model",
         parts=[SimpleNamespace(function_call=None, text="answer", thought=None)],
@@ -196,15 +196,25 @@ async def _sent_output_cap(**config: Any) -> int | None:
         )
     )
     await agent.get_response(_state(agent))
-    return models.configs[0].max_output_tokens
+    return models.configs[0]
 
 
 async def test_output_cap_defaults_to_the_model_limit() -> None:
-    assert await _sent_output_cap() is None
+    assert (await _sent_config()).max_output_tokens is None
 
 
 async def test_configured_output_cap_is_sent() -> None:
-    assert await _sent_output_cap(max_output_tokens=4096) == 4096
+    assert (await _sent_config(max_output_tokens=4096)).max_output_tokens == 4096
+
+
+async def test_sampling_defaults_to_the_model() -> None:
+    sent = await _sent_config()
+    assert (sent.temperature, sent.top_p, sent.top_k) == (None, None, None)
+
+
+async def test_configured_sampling_is_sent() -> None:
+    sent = await _sent_config(temperature=0.5, top_p=0.9, top_k=20)
+    assert (sent.temperature, sent.top_p, sent.top_k) == (0.5, 0.9, 20)
 
 
 class RecordingModels:
