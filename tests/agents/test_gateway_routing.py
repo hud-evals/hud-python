@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
 from hud.agents import (
     ClaudeAgent,
     ClaudeCLIAgent,
@@ -39,6 +38,7 @@ from hud.agents.types import (
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.utils.exceptions import HudAuthenticationError
 from tests.agents.support import run_task, workspace_env
+from tests.fixtures.envs import source
 from tests.harness import Reply, say
 
 if TYPE_CHECKING:
@@ -293,18 +293,8 @@ AWS = {
 }
 
 
-def _env() -> Environment:
-    env = Environment("routing")
-
-    @env.template()
-    async def answer():
-        reply = yield "Reply with ok."
-        yield 1.0 if reply == "ok" else 0.0
-
-    return env
-
-
-TASK = Task(env="routing", id="answer")
+TASK = Task(env="echo", id="echo", args={"word": "ok"})
+ECHO = source("echo")
 
 AGENTS: dict[str, Callable[[bool], Agent]] = {
     "openai": lambda gateway: OpenAIAgent(OpenAIConfig(model="m", max_steps=2, gateway=gateway)),
@@ -321,14 +311,6 @@ PROVIDER_KEYS = {
     "gemini": "GEMINI_API_KEY",
 }
 AUTH_HEADERS = {"openai": "authorization", "anthropic": "x-api-key", "gemini": "x-goog-api-key"}
-
-
-def _point_provider_sdks_at(hud_env: HudEnv, provider: Models) -> None:
-    hud_env.set(
-        OPENAI_BASE_URL=provider.url,
-        ANTHROPIC_BASE_URL=provider.url,
-        GOOGLE_GEMINI_BASE_URL=provider.url,
-    )
 
 
 @pytest.mark.parametrize(
@@ -352,14 +334,18 @@ async def test_a_provider_key_routes_direct_unless_the_gateway_is_forced(
     gateway: bool,
     reached: str,
 ) -> None:
-    _point_provider_sdks_at(hud_env, provider)
+    hud_env.set(
+        OPENAI_BASE_URL=provider.url,
+        ANTHROPIC_BASE_URL=provider.url,
+        GOOGLE_GEMINI_BASE_URL=provider.url,
+    )
     hud_env.set(
         HUD_API_KEY="hud-key", **{PROVIDER_KEYS[family]: "own-key" if provider_key else None}
     )
     models.script([say("ok")])
     provider.script([say("ok")])
 
-    run = await rollout(TASK, AGENTS[family](gateway), runtime=LocalRuntime(_env()))
+    run = await rollout(TASK, AGENTS[family](gateway), runtime=LocalRuntime(ECHO))
 
     served = {"gateway": models.requests(), "provider": provider.requests()}
     assert run.reward == 1.0
@@ -410,9 +396,7 @@ async def test_each_gateway_request_carries_its_own_runs_trace_id(
     hud_env.set(HUD_API_KEY="hud-key")
     models.script([say("ok")])
 
-    job = await Taskset("t", [TASK]).run(
-        AGENTS[family](True), runtime=LocalRuntime(_env()), group=3
-    )
+    job = await Taskset("t", [TASK]).run(AGENTS[family](True), runtime=LocalRuntime(ECHO), group=3)
 
     assert sorted(request.headers["trace-id"] for request in models.requests()) == sorted(
         str(run.trace_id) for run in job.runs
@@ -429,7 +413,7 @@ class Delegating(Agent):
 
     async def __call__(self, run: Run) -> None:
         agent = OpenAIChatAgent(OpenAIChatConfig(model="m", max_steps=2))
-        inner = await rollout(TASK, agent, runtime=LocalRuntime(_env()))
+        inner = await rollout(TASK, agent, runtime=LocalRuntime(ECHO))
         self.inner.append(inner)
         run.trace.content = inner.trace.content
 
@@ -439,7 +423,7 @@ async def test_a_nested_rollout_names_its_parent_trace(models: Models, hud_env: 
     models.script([say("ok")])
     agent = Delegating()
 
-    outer = await rollout(TASK, agent, runtime=LocalRuntime(_env()))
+    outer = await rollout(TASK, agent, runtime=LocalRuntime(ECHO))
 
     (request,) = models.requests()
     (inner,) = agent.inner

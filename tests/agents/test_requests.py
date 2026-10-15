@@ -35,7 +35,9 @@ from hud.agents.gemini.tools import (
 from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.capabilities import Capability
+from hud.eval import LocalRuntime, Task
 from tests.agents.support import image, mcp_server, run_task, workspace_env
+from tests.fixtures.envs import source
 from tests.harness import Turn, call, fake_screen, say
 
 if TYPE_CHECKING:
@@ -44,22 +46,6 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from tests.harness import HudEnv, ModelRequest, Models
-
-
-def lookup_tools() -> FastMCP:
-    server = FastMCP("lookup")
-
-    @server.tool()
-    def lookup(key: str) -> str:
-        """Look a key up."""
-        return key
-
-    @server.tool()
-    def store(key: str, value: str) -> str:
-        """Store a value."""
-        return value
-
-    return server
 
 
 WEB_SEARCH = ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"])
@@ -165,12 +151,13 @@ async def test_tool_search_defers_mcp_tools_once_they_outnumber_its_threshold(
     hud_env.set(HUD_API_KEY="k")
     models.script([say("done")])
 
-    async with mcp_server(lookup_tools()) as tools:
-        await run_task(workspace_env(tmp_path / "ws", capabilities=(tools,)), agent(threshold))
+    await Task(env="servers", id="look_up_both").run(
+        agent(threshold), runtime=LocalRuntime(source("servers"))
+    )
 
     (request,) = models.requests()
     later = {tool["name"] for tool in request.body["tools"] if tool.get("defer_loading")}
-    assert later == ({"lookup", "store"} if threshold == 1 else set())
+    assert later == ({"database__lookup", "search__lookup"} if threshold == 1 else set())
 
 
 INVALID_HOSTED = {
