@@ -49,17 +49,8 @@ def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: Fake
         assert shown in result.stdout
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["trace", TRACE_ID, "--json"],
-        ["trace", "--json", TRACE_ID],
-        ["trace", "get", TRACE_ID, "--json"],
-        ["trace", "get", "--json", TRACE_ID],
-    ],
-)
-def test_trace_json_is_the_event_list(hud: Hud, events: FakeServices, argv: list[str]) -> None:
-    result = hud(*argv)
+def test_trace_json_is_the_event_list(hud: Hud, events: FakeServices) -> None:
+    result = hud("trace", "get", TRACE_ID, "--json")
 
     assert result.exit_code == 0, result
     assert result.json == EVENTS

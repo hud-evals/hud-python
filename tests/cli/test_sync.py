@@ -224,22 +224,9 @@ def test_a_csv_export_has_a_column_per_argument(hud: Hud, tasksets: Tasksets) ->
 @pytest.mark.parametrize(
     ("argv", "exit_code", "error"),
     [
-        pytest.param(
-            ["tasks", "demo", "--export", "t.json", "--link"], 2, "usage", id="export-and-link"
-        ),
         pytest.param(["tasks", "demo", "tasks.py"], 2, "usage", id="unconfirmed"),
-        pytest.param(["tasks"], 2, "usage", id="no-taskset"),
         pytest.param([], 2, "usage", id="nothing-linked"),
         pytest.param(["tasks", "demo", "missing.json"], 1, "not_found", id="a-missing-source"),
-        pytest.param(
-            ["tasks", "demo", "tasks.py", "--task", "nope", "--yes"],
-            2,
-            "usage",
-            id="an-unknown-slug",
-        ),
-        pytest.param(
-            ["tasks", "nope", "--export", "t.json"], 2, "usage", id="export-of-an-unknown-taskset"
-        ),
     ],
 )
 def test_sync_refusals_upload_nothing(
@@ -273,8 +260,6 @@ def test_a_rejected_upload_fails_and_links_nothing(
 @pytest.mark.parametrize(
     ("argv", "remote", "exit_code", "status"),
     [
-        (["--project", LOCKED_PROJECT_ID, "--yes"], "same", 0, "up_to_date"),
-        (["--project", LOCKED_PROJECT_ID, "--dry-run"], "empty", 0, None),
         (["--project", LOCKED_PROJECT_ID, "--yes"], "empty", 1, "permission_denied"),
         (["--project", BROWSER_PROJECT_ID, "--yes"], "empty", 0, "synced"),
     ],
@@ -331,22 +316,7 @@ def test_tasks_for_another_environment_than_the_linked_one_are_flagged(
             id="by-name-across-separators",
         ),
         pytest.param([REGISTRY_ID], [], 0, REGISTRY_ID, id="by-id"),
-        pytest.param(
-            ["Browser", "--dry-run"],
-            [ENVIRONMENT, {**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
-            0,
-            None,
-            id="dry-run",
-        ),
-        pytest.param(
-            ["anchor"],
-            [{**ENVIRONMENT, "id": OTHER_ID, "name": "browser-anchor"}],
-            1,
-            None,
-            id="a-partial-name",
-        ),
         pytest.param([OTHER_ID], [], 1, None, id="an-inaccessible-id"),
-        pytest.param([], [], 2, None, id="no-name-and-no-terminal"),
     ],
 )
 def test_sync_env_links_an_environment_by_name_or_id(

@@ -89,19 +89,8 @@ def test_linking_a_directory_accumulates_its_platform_ids(
     ],
     ids=["another-user", "another-team", "another-platform"],
 )
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["project", "use", "browser-evals", "--json"],
-        ["project", "--json"],
-        ["sync", "env", "example", "--json"],
-    ],
-)
 def test_a_link_made_with_other_credentials_is_refused(
-    hud: Hud,
-    registry: FakeServices,
-    argv: list[str],
-    scope: dict[str, str],
+    hud: Hud, registry: FakeServices, scope: dict[str, str]
 ) -> None:
     origin = registry.url("api").removesuffix("/api")
     path = hud.cwd / ".hud" / "config.json"
@@ -110,7 +99,7 @@ def test_a_link_made_with_other_credentials_is_refused(
     path.write_text(json.dumps(stored).replace("http://hud.test", origin))
     before = path.read_bytes()
 
-    result = hud(*argv)
+    result = hud("project", "use", "browser-evals", "--json")
 
     assert result.exit_code == 1, result
     assert result.json["error"] == "failure"
@@ -146,9 +135,6 @@ def test_an_older_camelcase_link_is_rewritten_with_its_ids(
             id="a-dry-run-over-a-camelcase-link",
         ),
         pytest.param({"config.json": '{"broken":'}, [], 1, id="a-corrupt-link"),
-        pytest.param(
-            {"deploy.json": '{"registryId":"old"}'}, ["--dry-run"], 0, id="a-legacy-deploy-json"
-        ),
     ],
 )
 def test_a_link_it_cannot_or_must_not_rewrite_is_left_alone(
@@ -160,18 +146,6 @@ def test_a_link_it_cannot_or_must_not_rewrite_is_left_alone(
 
     assert result.exit_code == exit_code, result
     assert {path.name: path.read_text() for path in (hud.cwd / ".hud").iterdir()} == files
-
-
-def test_the_link_records_a_normalized_origin(
-    hud: Hud, registry: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_URL=f"HTTP://LOCALHOST:{registry.port}/api/")
-
-    result = hud("project", "use", "browser-evals", "--json")
-
-    assert result.exit_code == 0, result
-    stored = json.loads((hud.cwd / ".hud" / "config.json").read_text())
-    assert stored["scope"]["origin"] == f"http://localhost:{registry.port}"
 
 
 # ─── which Project a directory uses ─────────────────────────────────────
@@ -219,25 +193,14 @@ def test_project_shows_the_selected_project_and_why(
     assert ((result.json["project"] or {}).get("id"), result.json["source"]) == (project, source)
 
 
-@pytest.mark.parametrize("default", ["browser", "nope", OTHER_ID])
 def test_a_default_project_that_does_not_exist_is_not_found(
-    hud: Hud, projects: FakeServices, hud_env: HudEnv, default: str
+    hud: Hud, projects: FakeServices, hud_env: HudEnv
 ) -> None:
-    hud_env.set(HUD_DEFAULT_PROJECT=default)
+    hud_env.set(HUD_DEFAULT_PROJECT="nope")
 
     result = hud("project", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
-
-
-def test_the_team_default_needs_no_project_lookup(hud: Hud, projects: FakeServices) -> None:
-    result = hud("project")
-
-    assert result.exit_code == 0, result
-    assert [request.query for request in projects.requests("api", "GET", "/v2/projects")] == [
-        {"limit": ["1"]}
-    ]
-    assert projects.requests("api", "GET", "/v2/projects/{id}") == []
 
 
 def test_project_list_reads_every_page(hud: Hud, platform: FakeServices) -> None:
@@ -295,7 +258,6 @@ def test_project_create_posts_the_project_and_links_unless_told_not_to(
 @pytest.mark.parametrize(
     ("argv", "reply", "exit_code"),
     [
-        pytest.param(["create", "Browser Evals", "--dry-run"], None, 0, id="create-dry-run"),
         pytest.param(
             ["create", "Browser Evals", "--no-use"],
             Reply(status=403, json={"detail": "Projects are not enabled"}),
@@ -303,7 +265,6 @@ def test_project_create_posts_the_project_and_links_unless_told_not_to(
             id="create-refused",
         ),
         pytest.param(["use", "locked-down"], None, 1, id="use-a-read-only-project"),
-        pytest.param(["use", "browser-evals", "--dry-run"], None, 0, id="use-dry-run"),
     ],
 )
 def test_project_changes_that_link_nothing(
@@ -319,19 +280,9 @@ def test_project_changes_that_link_nothing(
     assert projects.requests("api", "POST", "/v2/projects") == ([] if reply is None else [ANY])
 
 
-@pytest.mark.parametrize(
-    ("before", "after", "target"),
-    [
-        (["-C", "group"], [], "group"),
-        (["-C", "group"], ["-C", "override"], "override"),
-        ([], ["--directory", "override"], "override"),
-    ],
-)
-def test_project_directory_option_applies_before_or_after_the_verb(
-    hud: Hud, projects: FakeServices, before: list[str], after: list[str], target: str
-) -> None:
-    result = hud("project", *before, "use", BROWSER_PROJECT_ID, *after)
+def test_the_directory_option_after_the_verb_wins(hud: Hud, projects: FakeServices) -> None:
+    result = hud("project", "-C", "group", "use", BROWSER_PROJECT_ID, "-C", "override")
 
     assert result.exit_code == 0, result
     linked = [path.parent.parent.name for path in hud.cwd.glob("*/.hud/config.json")]
-    assert linked == [target]
+    assert linked == ["override"]

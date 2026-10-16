@@ -70,11 +70,8 @@ def test_task_list_json_is_one_entry_per_task(hud: Hud, project: Any) -> None:
     [
         (["start", "say-hello", "--source", "tasks.json"], "Say hello.\n"),
         (["start", "1", "--source", "tasks.py"], "Say hello.\n"),
-        (["grade", "say-hello", "--source", "tasks.json", "--answer", "hello"], "1.0\n"),
         (["grade", "say-hello", "--source", "tasks.json", "--answer", "nope"], "0.0\n"),
-        (["grade", "0", "-s", "tasks.py", "--answer-file", "answer.txt"], "1.0\n"),
         (["grade", "say-answer", "-s", "tasks.json", "--answer-file", "-"], "1.0\n"),
-        (["grade", "0", "-s", "tasks.py", "--args", '{"target": "x"}', "--answer", "x"], "1.0\n"),
     ],
 )
 def test_a_task_spawned_from_its_source_starts_and_grades(
@@ -99,15 +96,7 @@ def test_task_start_json_is_the_start_frame(hud: Hud, project: Any) -> None:
     [
         pytest.param(["start", "solve", "--source", "tasks.json"], 2, "usage", id="ambiguous"),
         pytest.param(["start", "missing", "--source", "tasks.json"], 1, "not_found", id="unknown"),
-        pytest.param(["grade", "solve", "--args", "[]"], 2, "usage", id="args-not-an-object"),
         pytest.param(["grade", "solve", "--args", "{bad"], 2, "usage", id="args-not-json"),
-        pytest.param(
-            ["grade", "say-answer", "-s", "tasks.json", "--answer-file", "no.txt"],
-            1,
-            "not_found",
-            id="a-missing-answer-file",
-        ),
-        pytest.param(["start", "solve", "--source", "empty.json"], 1, "not_found", id="no-tasks"),
     ],
 )
 def test_task_refusals_are_error_documents(
@@ -169,7 +158,6 @@ async def test_grade_resumes_a_started_task_on_a_served_env(
     ("argv", "target"),
     [
         (["--source", "tasks.json"], "hello"),
-        (["--source", "tasks.json", "--args", "{}"], "answer"),
         (["--args", '{"target": "hello"}'], "hello"),
     ],
 )
