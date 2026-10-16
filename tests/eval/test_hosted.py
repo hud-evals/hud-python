@@ -24,13 +24,13 @@ from hud.eval import (
     Taskset,
 )
 from hud.telemetry.context import set_trace_context
-from tests.harness import Reply, ScriptedAgent, eventually
+from tests.support import Reply, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.agents.base import Agent
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 SUBMIT = "/v2/rollouts/submit"
 CANCEL = "/v2/rollouts/cancel"

@@ -10,12 +10,12 @@ from fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.harness import Reply, serve_asgi
+from tests.support import Reply, serve_asgi
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from tests.harness import FakeServices, HudEnv, Request
+    from tests.support import FakeServices, HudEnv, Request
 
 OUTPUT_SCHEMA = {
     "type": "object",

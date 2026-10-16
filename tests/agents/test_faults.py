@@ -21,7 +21,7 @@ from fastmcp import FastMCP
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from tests.agents.support import mcp_server, run_task, workspace_env
-from tests.harness import (
+from tests.support import (
     Reply,
     Turn,
     call,
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.agents.base import Agent
-    from tests.harness import FlakyRelay, HudEnv, ModelRequest, Models
+    from tests.support import FlakyRelay, HudEnv, ModelRequest, Models
 
 CLAUDE = ClaudeConfig(model="claude-sonnet-4-6")
 OPENAI = OpenAIConfig(model="gpt-5.6")

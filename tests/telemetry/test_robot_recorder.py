@@ -9,7 +9,7 @@ import numpy as np
 from hud.environment.robot import wrap
 
 if TYPE_CHECKING:
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 
 class TwoArmSim:

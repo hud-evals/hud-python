@@ -9,7 +9,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import Hud
+    from tests.support import Hud
 
 
 def tree(root: Path) -> list[str]:

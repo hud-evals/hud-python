@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.harness import HudEnv
+    from tests.support import HudEnv
 
 ENV_PY = """\
 import os

@@ -10,13 +10,13 @@ from dirty_equals import IsStr
 from hud import Environment, instrument
 from hud.agents.base import Agent
 from hud.eval import LocalRuntime, Task, Taskset, rollout
-from tests.harness import ScriptedAgent, spans, steps
+from tests.support import ScriptedAgent, spans, steps
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 ISO = IsStr(regex=r"\d{4}-\d\d-\d\dT.*")
 

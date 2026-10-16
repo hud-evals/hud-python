@@ -8,12 +8,12 @@ import pytest
 
 from hud import Environment
 from hud.settings import Settings
-from tests.harness import served
+from tests.support import served
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, HudEnv
+    from tests.support import FakeServices, Hud, HudEnv
 
 SERVICE_URLS = {
     "HUD_TELEMETRY_URL": "https://telemetry.hud.ai/v3/api",

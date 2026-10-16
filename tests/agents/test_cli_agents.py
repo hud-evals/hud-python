@@ -23,7 +23,7 @@ from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
 from tests.agents.cli_stub import Stub, jsonl, process_exited
 from tests.agents.support import run_task, workspace_env
-from tests.harness import fake_screen
+from tests.support import fake_screen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from hud import Environment
     from hud.agents.base import Agent
     from hud.eval import Run
-    from tests.harness import HudEnv
+    from tests.support import HudEnv
 
 
 # ─── canned Claude CLI streams ──────────────────────────────────────────

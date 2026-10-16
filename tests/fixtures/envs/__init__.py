@@ -15,12 +15,12 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tests.harness import call, say
+from tests.support import call, say
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.harness import ModelRequest, Turn
+    from tests.support import ModelRequest, Turn
 
 HERE = Path(__file__).parent
 

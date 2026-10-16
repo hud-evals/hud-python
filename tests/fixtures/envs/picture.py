@@ -16,7 +16,7 @@ from PIL import Image
 
 from hud import Environment
 from hud.capabilities import Capability
-from tests.harness import serve_asgi
+from tests.support import serve_asgi
 
 server = FastMCP(name="picture")
 shown: list[str] = []

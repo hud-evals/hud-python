@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.harness import steps
+from tests.support import steps
 
 from .lifecycle import assert_clean_lifecycle, evaluated, scripted
 from .projects import ROOT
@@ -27,7 +27,7 @@ from .projects import ROOT
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import Hud, HudEnv, Models
+    from tests.support import Hud, HudEnv, Models
 
 COOKBOOKS = ROOT / "cookbooks"
 MODULES = sorted(path for path in COOKBOOKS.rglob("*.py") if ".venv" not in path.parts)

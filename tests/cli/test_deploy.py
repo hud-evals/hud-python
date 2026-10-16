@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Reply, write_files
+from tests.support import Reply, write_files
 
 from .conftest import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from starlette.websockets import WebSocket
 
-    from tests.harness import FakeServices, Hud, HudEnv, Request
+    from tests.support import FakeServices, Hud, HudEnv, Request
 
 REGISTRY_ID = "bbbbbbbb-0000-4000-8000-000000000001"
 FIXED = {"source", "build_id", "name", "no_cache"}

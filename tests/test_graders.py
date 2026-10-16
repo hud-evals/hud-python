@@ -28,7 +28,7 @@ from hud.graders import (
     normalize,
     numeric_match,
 )
-from tests.harness import ScriptedAgent, Turn, say
+from tests.support import ScriptedAgent, Turn, say
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     Grade: TypeAlias = Callable[[str], Awaitable[EvaluationResult]]
 
     from hud.eval import Run
-    from tests.harness import HudEnv, ModelRequest, Models
+    from tests.support import HudEnv, ModelRequest, Models
 
 # ─── text helpers ────────────────────────────────────────────────────────────
 

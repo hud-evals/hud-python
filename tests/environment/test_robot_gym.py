@@ -23,7 +23,7 @@ from hud.capabilities.robot import RobotClient
 from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
 from hud.telemetry.robot import JobRecorder
-from tests.harness import served
+from tests.support import served
 
 from .robot_sims import Reach, plain_env, vector_env
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 CONTRACT = {"control_rate": 10, "features": {"action": {"role": "action", "names": ["a"]}}}
 

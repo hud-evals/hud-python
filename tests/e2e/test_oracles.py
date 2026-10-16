@@ -16,14 +16,14 @@ from hud.agents import ClaudeAgent
 from hud.agents.types import ClaudeConfig
 from hud.eval import Taskset
 from tests.fixtures.envs import collect_digits, read_token, repeat_word, source
-from tests.harness import steps
+from tests.support import steps
 
 from .lifecycle import task_calls
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.harness import Hud, HudEnv, ModelRequest, Models, Turn
+    from tests.support import Hud, HudEnv, ModelRequest, Models, Turn
 
 MODEL = "claude-sonnet-4-6"
 MAX_STEPS = 8

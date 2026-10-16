@@ -26,15 +26,15 @@ from hud.eval import (
     Taskset,
 )
 from tests.eval.envs import lab, solve
-from tests.harness import Reply, ScriptedAgent, eventually
-from tests.harness.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
+from tests.support import Reply, ScriptedAgent, eventually
+from tests.support.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from starlette.websockets import WebSocket
 
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
 

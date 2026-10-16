@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Reply
+from tests.support import Reply
 
 if TYPE_CHECKING:
-    from tests.harness import FakeServices, Hud
+    from tests.support import FakeServices, Hud
 
 SONNET_ID = "00000000-0000-4000-a000-000000000001"
 MINE_ID = "00000000-0000-4000-a000-000000000002"

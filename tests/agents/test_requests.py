@@ -38,14 +38,14 @@ from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task
 from tests.agents.support import image, mcp_server, run_task, workspace_env
 from tests.fixtures.envs import source
-from tests.harness import Turn, call, fake_screen, say
+from tests.support import Turn, call, fake_screen, say
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from hud.agents.base import Agent
-    from tests.harness import HudEnv, ModelRequest, Models
+    from tests.support import HudEnv, ModelRequest, Models
 
 
 WEB_SEARCH = ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"])

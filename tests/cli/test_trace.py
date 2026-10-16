@@ -11,14 +11,14 @@ from hud import Environment
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, rollout
-from tests.harness import call, say
+from tests.support import call, say
 
 from .conftest import API_KEY, WEB_URL
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, HudEnv, Models
+    from tests.support import FakeServices, Hud, HudEnv, Models
 
 TRACE_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 COMPACT_TRACE_ID = "03dd2a73d3df4d10a54ae3d87c2d530d"

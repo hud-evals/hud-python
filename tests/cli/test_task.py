@@ -13,7 +13,7 @@ from hud.clients import connect
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from tests.harness import Hud
+    from tests.support import Hud
 
 ENV_PY = """\
 from hud import Environment

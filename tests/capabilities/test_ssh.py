@@ -1,7 +1,7 @@
 """``SSHClient`` against a served workspace, through a relay that fails on demand.
 
 Every test serves a real ``env.workspace`` on loopback and connects to its
-``ssh`` binding through :func:`tests.harness.relay`, which can sever the
+``ssh`` binding through :func:`tests.support.relay`, which can sever the
 connection mid-command, refuse reconnects, or stall a handshake.
 """
 
@@ -20,7 +20,7 @@ import pytest
 
 from hud import Environment
 from hud.capabilities import Connection, SSHClient
-from tests.harness import FlakyRelay, eventually, relay, served
+from tests.support import FlakyRelay, eventually, relay, served
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -10,14 +10,14 @@ import pytest
 
 from hud import Environment
 from hud.eval import LocalRuntime, Task
-from tests.harness import say, write_files
+from tests.support import say, write_files
 
 from .conftest import API_KEY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, HudEnv, Models
+    from tests.support import FakeServices, Hud, HudEnv, Models
 
 TASKS_PY = """\
 from hud import Environment

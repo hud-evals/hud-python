@@ -1,4 +1,4 @@
-"""Fixtures wiring the black-box harness (``tests/harness``) into every test.
+"""Fixtures wiring the test support package (``tests/support``) into every test.
 
 Every test runs against an isolated SDK configuration: a temporary home, no
 developer credentials, telemetry uploads off, and every HUD service URL pointed
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dotenv import dotenv_values
 
-from tests.harness import FakeServices, Hud, HudEnv, Models, Uv
+from tests.support import FakeServices, Hud, HudEnv, Models, Uv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

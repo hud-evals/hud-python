@@ -18,13 +18,13 @@ from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.telemetry import flush
 from hud.telemetry.context import get_trace_headers, set_trace_context
 from tests.eval.envs import lab, solve
-from tests.harness import Reply, ScriptedAgent, eventually
+from tests.support import Reply, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
     from hud.eval import Run
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})

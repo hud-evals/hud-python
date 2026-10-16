@@ -27,7 +27,7 @@ from hud.agents.base import Agent
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment.robot import DirectControl, RobotBridge
 from hud.eval import LocalRuntime, Task, rollout
-from tests.harness import ROBOT_STEP_SCHEMA, steps
+from tests.support import ROBOT_STEP_SCHEMA, steps
 
 from .robot_sims import sim_env
 

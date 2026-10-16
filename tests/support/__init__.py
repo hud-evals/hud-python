@@ -1,4 +1,4 @@
-"""The test harness: stand-ins for what tests cannot use for real.
+"""Test support: stand-ins for what tests cannot use for real, and the ``hud`` runner.
 
 Tests drive the SDK through its public boundaries (the ``hud`` CLI, exported
 API, files) against the real outside world where they can: real models and

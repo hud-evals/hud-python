@@ -20,12 +20,12 @@ from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, RFBClient
 from hud.eval import LocalRuntime, Task, Taskset, rollout
-from tests.harness import KeyEvent, Reply, ScriptedAgent, call, fake_screen, say, steps
+from tests.support import KeyEvent, Reply, ScriptedAgent, call, fake_screen, say, steps
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, HudEnv, Models
+    from tests.support import FakeServices, Hud, HudEnv, Models
 
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
 

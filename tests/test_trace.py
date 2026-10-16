@@ -6,7 +6,7 @@ import pytest
 
 from hud import Environment, Trace
 from hud.eval import LocalRuntime, Task, rollout
-from tests.harness import ScriptedAgent
+from tests.support import ScriptedAgent
 
 
 def _env() -> Environment:

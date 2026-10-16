@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.environment import Environment, Workspace
-from tests.harness import served
+from tests.support import served
 
 from .conftest import wire
 

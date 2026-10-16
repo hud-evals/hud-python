@@ -18,7 +18,7 @@ from hud.eval import LocalRuntime, Task
 from tests.fixtures.envs import source
 
 if TYPE_CHECKING:
-    from tests.harness import HudEnv
+    from tests.support import HudEnv
 
 # The cheapest model of each agent family the gateway serves; Gemini's must support
 # computer use.

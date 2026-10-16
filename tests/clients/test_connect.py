@@ -1,6 +1,6 @@
 """``hud.clients.connect`` and ``HudClient`` against a scripted control-channel peer.
 
-The peer (:func:`tests.harness.control_peer`) is the env side of the wire:
+The peer (:func:`tests.support.control_peer`) is the env side of the wire:
 it answers each connection from a script and records every frame, so the
 frames the client sends are pinned literally. Capability streams it tunnels
 reach real servers: a served workspace's SSH daemon through a flaky relay.
@@ -33,7 +33,7 @@ from hud.capabilities import (
 from hud.clients import HudClient, HudProtocolError, connect
 from hud.environment import WorkspaceRoute
 from hud.eval.runtime import Runtime
-from tests.harness import (
+from tests.support import (
     answer,
     control_peer,
     eventually,

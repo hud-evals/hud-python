@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Reply, write_files
+from tests.support import Reply, write_files
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, Request
+    from tests.support import FakeServices, Hud, Request
 
 TASKSET = "44444444-4444-4444-8444-444444444444"
 FILE = "55555555-5555-4555-8555-555555555555"

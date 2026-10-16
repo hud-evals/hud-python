@@ -1,8 +1,8 @@
 """Fail when a test reaches into hud internals.
 
 Tests drive the SDK through its public boundaries and fake only what lies outside
-it (see "Testing" in AGENTS.md). This flags, in test modules outside the harness
-(``tests/harness``, the one place allowed to configure the SDK):
+it (see "Testing" in AGENTS.md). This flags, in test modules outside the support package
+(``tests/support``, the one place allowed to configure the SDK):
 
 - patching a hud name: ``monkeypatch.setattr``, ``patch``, ``patch.object`` or
   ``mocker.patch`` aimed at a ``"hud..."`` path or at anything imported from hud;
@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATHS = [ROOT / "tests", *sorted(ROOT.glob("environments/*/tests"))]
-HARNESS = ROOT / "tests" / "harness"
+SUPPORT = ROOT / "tests" / "support"
 BASELINE = Path(__file__).with_name("check_tests_baseline.json")
 PATCHERS = {"setattr", "delattr", "patch"}
 PATCH_METHODS = {"object", "dict", "multiple"}
@@ -116,7 +116,7 @@ def main(argv: list[str]) -> int:
         file
         for root in roots
         for file in ([root] if root.is_file() else root.rglob("*.py"))
-        if HARNESS not in file.parents and "tasks" not in file.relative_to(ROOT).parts
+        if SUPPORT not in file.parents and "tasks" not in file.relative_to(ROOT).parts
     )
     baseline: dict[str, int] = json.loads(BASELINE.read_text("utf-8")) if BASELINE.exists() else {}
     findings = {str(file.relative_to(ROOT)): check(file) for file in files}

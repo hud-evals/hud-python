@@ -19,10 +19,10 @@ from hud.utils.exceptions import (
     HudTimeoutError,
 )
 from hud.utils.hints import CREDITS_EXHAUSTED, RATE_LIMIT_HIT
-from tests.harness import Reply
+from tests.support import Reply
 
 if TYPE_CHECKING:
-    from tests.harness import FakeServices, Hud, HudEnv, Request
+    from tests.support import FakeServices, Hud, HudEnv, Request
 
 
 async def _request(asynchronous: bool, url: str, **kwargs: Any) -> Any:

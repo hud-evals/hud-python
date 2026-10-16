@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.harness import FakeServices, Models
+from tests.support import FakeServices, Models
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

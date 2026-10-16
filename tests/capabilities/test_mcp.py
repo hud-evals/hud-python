@@ -10,7 +10,7 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.harness import serve_asgi
+from tests.support import serve_asgi
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send

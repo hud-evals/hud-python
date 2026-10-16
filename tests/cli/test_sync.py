@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Reply
+from tests.support import Reply
 
 from .conftest import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, Request
+    from tests.support import FakeServices, Hud, Request
 
 DEMO_ID = "eeeeeeee-0000-4000-8000-000000000001"
 OTHER_ID = "eeeeeeee-0000-4000-8000-000000000002"

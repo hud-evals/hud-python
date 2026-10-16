@@ -27,7 +27,7 @@ from hud.environment import (
 )
 from hud.eval import LocalRuntime, Task
 from hud.graders import EvaluationResult, SubScore
-from tests.harness import served
+from tests.support import served
 
 from .conftest import FRAME_LIMIT, SESSION_ID, encode, wire
 

@@ -34,8 +34,8 @@ from hud.eval import (
 from hud.telemetry.context import get_current_trace_id
 from tests.eval.envs import SUMS_SOURCE, lab, solve
 from tests.fixtures.envs import source
-from tests.harness import ScriptedAgent, eventually, steps
-from tests.harness.runtime import host_on_runtime
+from tests.support import ScriptedAgent, eventually, steps
+from tests.support.runtime import host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
     from hud.environment import Environment
     from hud.eval import Provider
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 
 @dataclass(frozen=True)

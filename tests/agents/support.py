@@ -18,7 +18,7 @@ from PIL import Image
 from hud import Environment
 from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task, rollout
-from tests.harness import serve_asgi, write_files
+from tests.support import serve_asgi, write_files
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping

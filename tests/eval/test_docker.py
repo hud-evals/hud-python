@@ -32,7 +32,7 @@ from hud.eval import (
 )
 from hud.eval.runtime import DockerBindMount
 from hud.eval.runtime.docker import DockerEndpoint
-from tests.harness import ScriptedAgent
+from tests.support import ScriptedAgent
 
 if TYPE_CHECKING:
     from collections.abc import Callable

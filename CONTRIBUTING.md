@@ -43,7 +43,7 @@ uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks; CI checks th
 ### Writing Tests
 
 Tests are black-box: they drive the SDK through a public boundary and fake only
-what lies outside it. `tests/harness` holds the fakes, and `tests/conftest.py`
+what lies outside it. `tests/support` holds the fakes, and `tests/conftest.py`
 provides them as fixtures:
 
 - `hud_env`: the SDK's configuration. Every test starts with a temporary home,

@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from hud.environment import Environment
     from hud.eval import Provider, Run
-    from tests.harness import HudEnv
+    from tests.support import HudEnv
 
 #: Ticks a stub sim runs before terminating — every gate here is a whole rollout.
 EPISODE_TICKS = 3

@@ -125,7 +125,7 @@ Python `>=3.11, <3.13`.
 ## Testing
 
 Tests are black-box: they drive the SDK through a public boundary and fake only
-what lies outside it. The harness in `tests/harness` holds those fakes: the HUD
+what lies outside it. `tests/support` holds those fakes: the HUD
 services, scripted model providers, a `docker` executable, a VNC screen, and the
 real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
 

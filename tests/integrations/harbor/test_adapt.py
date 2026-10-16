@@ -29,7 +29,7 @@ from hud.integrations import harbor
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.harness import HudEnv
+    from tests.support import HudEnv
 
 CASES = Path(__file__).parent / "cases"
 SECRET = "sk-live-secret"

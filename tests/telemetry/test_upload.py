@@ -15,11 +15,11 @@ from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.telemetry import flush
-from tests.harness import Reply, ScriptedAgent, call, say
+from tests.support import Reply, ScriptedAgent, call, say
 
 if TYPE_CHECKING:
     from hud.eval import Run
-    from tests.harness import FakeServices, HudEnv, Models
+    from tests.support import FakeServices, HudEnv, Models
 
 UPLOAD = "/trace/{id}/telemetry-upload"
 ROOT = Path(__file__).parents[2]
@@ -212,7 +212,7 @@ def test_spans_still_queued_at_interpreter_exit_are_uploaded(
             import asyncio
             from hud import Environment
             from hud.eval import LocalRuntime, Task, rollout
-            from tests.harness import ScriptedAgent
+            from tests.support import ScriptedAgent
 
             env = Environment("upload")
 

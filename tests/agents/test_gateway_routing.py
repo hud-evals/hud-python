@@ -39,14 +39,14 @@ from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.utils.exceptions import HudAuthenticationError
 from tests.agents.support import run_task, workspace_env
 from tests.fixtures.envs import source
-from tests.harness import Reply, say
+from tests.support import Reply, say
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.harness import FakeServices, HudEnv, Models, Request
+    from tests.support import FakeServices, HudEnv, Models, Request
 
 CATALOG = [
     {

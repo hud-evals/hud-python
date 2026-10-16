@@ -14,12 +14,12 @@ from dirty_equals import IsInt, IsStr, IsUUID
 from dotenv import dotenv_values
 
 from hud.version import __version__
-from tests.harness import Hud, Reply
+from tests.support import Hud, Reply
 
 from .conftest import API_KEY
 
 if TYPE_CHECKING:
-    from tests.harness import FakeServices, HudEnv
+    from tests.support import FakeServices, HudEnv
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"

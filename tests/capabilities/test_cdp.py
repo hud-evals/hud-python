@@ -1,4 +1,4 @@
-"""``CDPClient`` against the harness DevTools endpoint."""
+"""``CDPClient`` against the fake DevTools endpoint."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 from hud.capabilities import Capability, CDPClient
 from hud.capabilities.cdp import CDPError
-from tests.harness import Command, fake_browser
+from tests.support import Command, fake_browser
 
 ENABLED = ["Page.enable", "Runtime.enable", "DOM.enable"]
 

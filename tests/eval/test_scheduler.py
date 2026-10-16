@@ -22,14 +22,14 @@ from hud.eval import (
     Taskset,
 )
 from tests.eval.envs import lab, minted, solve
-from tests.harness import RecordingProvider, ScriptedAgent, eventually
+from tests.support import RecordingProvider, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
     from hud.eval import Provider, Run
-    from tests.harness import FakeServices
+    from tests.support import FakeServices
 
 
 class Counting(Agent):

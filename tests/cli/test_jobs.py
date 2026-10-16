@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 if TYPE_CHECKING:
-    from tests.harness import FakeServices, Hud
+    from tests.support import FakeServices, Hud
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 COMPACT_JOB_ID = "03dd2a73d3df4d10a54ae3d87c2d530d"

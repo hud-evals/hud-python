@@ -18,7 +18,7 @@ import pytest
 from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-from tests.harness import served
+from tests.support import served
 
 from .conftest import FRAME_LIMIT, encode, wire
 

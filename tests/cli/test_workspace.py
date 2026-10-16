@@ -8,7 +8,7 @@ from unittest.mock import ANY
 
 import pytest
 
-from tests.harness import Reply, write_files
+from tests.support import Reply, write_files
 
 from .conftest import (
     BROWSER_PROJECT_ID,
@@ -20,7 +20,7 @@ from .conftest import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, Hud, HudEnv
+    from tests.support import FakeServices, Hud, HudEnv
 
 REGISTRY_ID = "bbbbbbbb-0000-4000-8000-000000000001"
 OTHER_ID = "cccccccc-0000-4000-8000-000000000001"

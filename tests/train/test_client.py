@@ -16,11 +16,11 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Run, Task, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
-from tests.harness import Reply, ScriptedAgent
+from tests.support import Reply, ScriptedAgent
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from tests.harness import FakeServices, HudEnv, Request
+    from tests.support import FakeServices, HudEnv, Request
 
 MODEL_ID = "00000000-0000-4000-8000-000000000001"
 TRAIN = f"/v1/models/{MODEL_ID}/train"

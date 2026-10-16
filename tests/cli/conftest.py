@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.harness import Hud, Reply
+from tests.support import Hud, Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.harness import FakeServices, HudEnv, Request
+    from tests.support import FakeServices, HudEnv, Request
 
 API_KEY = "sk-hud-test"
 USER_ID = "11111111-1111-4111-8111-111111111111"

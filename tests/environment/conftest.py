@@ -15,8 +15,8 @@ from urllib.parse import urlsplit
 
 from dirty_equals import IsStr
 
-# The sandbox area's tests import ``served`` from here; it lives in the harness.
-from tests.harness import served
+# The sandbox area's tests import ``served`` from here; it lives in tests/support.
+from tests.support import served
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

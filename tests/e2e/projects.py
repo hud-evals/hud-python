@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tests.harness import Hud, Uv
+from tests.support import Hud, Uv
 
 from .lifecycle import assert_clean_lifecycle
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from tests.harness import say
+from tests.support import say
 
 if TYPE_CHECKING:
-    from tests.harness import ModelRequest, Turn
-    from tests.harness.cli import Result
+    from tests.support import ModelRequest, Turn
+    from tests.support.cli import Result
 
 # Tool steps may fail without failing the run: a real model can call a tool badly.
 LIFECYCLE_SOURCES = {"task", "agent", "system"}
