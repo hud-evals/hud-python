@@ -1,0 +1,55 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    MUJOCO_GL=osmesa
+
+# git: LIBERO clone. libosmesa6-dev and libglew-dev: software OpenGL for MuJoCo rendering, so
+# no GPU is needed. libgl1 and libglib2.0-0: OpenCV runtime libraries.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git libgl1 libosmesa6-dev libglew-dev libegl1 libglib2.0-0 patchelf \
+    && rm -rf /var/lib/apt/lists/*
+
+# LIBERO imports torch at module level only to load its saved initial states. The CPU wheels
+# avoid ~5 GB of CUDA libraries, and torchvision must come from the same index.
+RUN pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# LIBERO's setup.py declares no dependencies, so the sim stack is explicit.
+RUN pip install --no-cache-dir \
+    robosuite==1.4.0 mujoco==3.8.1 numpy==2.2.6 bddl==1.0.1 easydict \
+    matplotlib gym hydra-core future numba h5py \
+    msgpack websockets aiohttp requests pyyaml av pillow "imageio[ffmpeg]" \
+    opencv-python-headless
+
+# LIBERO at a pinned commit, installed editable so its bddl files, initial states and assets
+# (~420 MB, all in the repo, so nothing downloads at runtime) resolve inside the clone. Two
+# fixes upstream lacks: the package __init__ that find_packages needs, and torch.load with
+# weights_only=False, because torch>=2.6 refuses the pickled initial states otherwise.
+RUN git clone https://github.com/Lifelong-Robot-Learning/LIBERO /opt/LIBERO \
+    && git -C /opt/LIBERO checkout 8f1084e3132a39270c3a13ebe37270a43ece2a01 \
+    && touch /opt/LIBERO/libero/__init__.py \
+    && sed -i 's/torch.load(init_states_path)/torch.load(init_states_path, weights_only=False)/' \
+        /opt/LIBERO/libero/libero/benchmark/__init__.py \
+    && pip install --no-cache-dir -e /opt/LIBERO
+
+# LIBERO prompts on stdin for its config at first import, which fails in a container. Write
+# the config it would have written, then check the import.
+RUN python -c "import os, yaml; \
+d = '/opt/LIBERO/libero/libero'; \
+os.makedirs('/root/.libero', exist_ok=True); \
+yaml.safe_dump({'benchmark_root': d, 'bddl_files': d + '/bddl_files', \
+'init_states': d + '/init_files', 'datasets': d + '/../datasets', \
+'assets': d + '/assets'}, open('/root/.libero/config.yaml', 'w'))" \
+    && python -c "from libero.libero import benchmark; print('libero import OK')"
+
+# openpi-client, pulled in by the robot extra, over-pins numpy<2; the sim stack needs 2.2.6 and
+# only uses openpi-client's version-agnostic msgpack codec.
+RUN pip install --no-cache-dir "hud[robot]==0.6.20" \
+    && pip install --no-cache-dir numpy==2.2.6
+
+WORKDIR /app
+COPY env.py bridge.py control.py ./
+COPY contracts/ contracts/
+
+EXPOSE 8765
+CMD ["hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]

@@ -1,0 +1,26 @@
+[
+  {
+    "env": "robot-libero",
+    "id": "libero_spatial",
+    "slug": "libero-spatial-bowl-on-stove-to-plate",
+    "args": {"libero_task_id": 7, "init_state_id": 0}
+  },
+  {
+    "env": "robot-libero",
+    "id": "libero_object",
+    "slug": "libero-object-cream-cheese-to-basket",
+    "args": {"libero_task_id": 1, "init_state_id": 0}
+  },
+  {
+    "env": "robot-libero",
+    "id": "libero_goal",
+    "slug": "libero-goal-open-middle-drawer",
+    "args": {"libero_task_id": 0, "init_state_id": 0}
+  },
+  {
+    "env": "robot-libero",
+    "id": "libero_10",
+    "slug": "libero-10-cream-cheese-and-butter-to-basket",
+    "args": {"libero_task_id": 1, "init_state_id": 0}
+  }
+]
