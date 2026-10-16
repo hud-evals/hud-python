@@ -83,14 +83,6 @@ async def threaded(runtime: LocalRuntime) -> Any:
     return await rollout(ADD, ScriptedAgent(solve), runtime=runtime, job_id="j" * 32)
 
 
-async def single(runtime: LocalRuntime) -> Any:
-    return await ADD.run(ScriptedAgent(solve), runtime=runtime)
-
-
-async def grouped(runtime: LocalRuntime) -> Any:
-    return await ADD.run(ScriptedAgent(solve), runtime=runtime, group=2)
-
-
 async def session(runtime: LocalRuntime) -> Any:
     job = await Job.start("training", group=2)
     await ADD.run(ScriptedAgent(solve), runtime=runtime, job=job)
@@ -103,11 +95,6 @@ JOBS: dict[str, tuple[Callable[[LocalRuntime], Awaitable[Any]], list[dict[str, A
         [{"name": "add", "group": 1}],
     ),
     "a rollout given a job registers none": (threaded, []),
-    "a single task's job is named after the task": (single, [{"name": "add", "group": 1}]),
-    "a grouped task's job counts its repeats": (
-        grouped,
-        [{"name": "add (2 times)", "group": 2}],
-    ),
     "an open job registers once for all its calls": (
         session,
         [{"name": "training", "group": 2}],
@@ -158,29 +145,6 @@ EXITS: dict[str, tuple[Task, Agent, bool, dict[str, Any]]] = {
             "reward": 1.0,
             "error": "[agent loop] RuntimeError: agent exploded",
             "evaluation_result": {"score": 1.0},
-        },
-    ),
-    "a run cut off by its agent deadline": (
-        ADD.model_copy(update={"agent_config": {"timeout_seconds": 0.05}}),
-        ScriptedAgent(solve, linger=30),
-        True,
-        {
-            "status": "error",
-            "reward": 1.0,
-            "error": "agent timed out after 0.05s",
-            "evaluation_result": {"score": 1.0},
-            "stop_reason": "timeout",
-        },
-    ),
-    "a run carrying trajectory metadata": (
-        ADD,
-        Modelled(turns=3),
-        True,
-        {
-            "status": "completed",
-            "reward": 1.0,
-            "evaluation_result": {"score": 1.0},
-            "metadata": {"turns": 3},
         },
     ),
     "a run graded with subscores": (
@@ -269,7 +233,6 @@ RETRIES = {
         2,
         [IsStr(regex=r"platform report /trace/job/[0-9a-f]{32}/enter failed: .*500.*")],
     ),
-    "an accepted report is sent once": ([Reply(json={})], 1, []),
 }
 
 

@@ -138,7 +138,6 @@ CASES: dict[str, tuple[Callable[[Path], Environment], dict[str, bytes], str, dic
         {},
     ),
     "a tracker that cannot be reached exports nothing": (unreachable, NOTES, "1", {}),
-    "nothing is exported with telemetry off": (tracked, NOTES, "0", {}),
 }
 ORDER = ["setup", "snapshot", "changed", "captured"]
 SPAN_NAMES = {

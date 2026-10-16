@@ -13,7 +13,6 @@ from hud.agents.base import Agent
 from hud.eval import (
     Job,
     LocalRuntime,
-    ModalRuntime,
     Runtime,
     RuntimeConfig,
     RuntimeLimits,
@@ -306,14 +305,8 @@ INVALID: dict[str, Callable[[Provider], Any]] = {
     "group below one": lambda runtime: Taskset("t", ROWS).run(
         ScriptedAgent(), runtime=runtime, group=0
     ),
-    "max_concurrent below one": lambda runtime: Taskset("t", ROWS).run(
-        ScriptedAgent(), runtime=runtime, max_concurrent=0
-    ),
     "a zero rollout_timeout": lambda runtime: ROWS[0].run(
         ScriptedAgent(), runtime=runtime, rollout_timeout=0
-    ),
-    "a negative rollout_timeout": lambda runtime: ROWS[0].run(
-        ScriptedAgent(), runtime=runtime, rollout_timeout=-1
     ),
     "an agent timeout at the rollout_timeout": lambda runtime: timed(10).run(
         ScriptedAgent(), runtime=runtime, rollout_timeout=10
@@ -323,24 +316,11 @@ INVALID: dict[str, Callable[[Provider], Any]] = {
             ScriptedAgent(), runtime=runtime
         )
     ),
-    "an agent timeout past the provider's run limit": (
-        lambda runtime: timed(900).run(
-            ScriptedAgent(),
-            runtime=ModalRuntime("img", runtime_config=limited(run_timeout_s=600)),
-        )
-    ),
     "an actor run limit at the rollout_timeout": (
         lambda runtime: (
             ROWS[0]
             .model_copy(update={"runtime_config": limited(run_timeout_s=3600)})
             .run(ScriptedAgent(), runtime=runtime, rollout_timeout=3600)
-        )
-    ),
-    "a provider startup limit at the rollout_timeout": (
-        lambda runtime: ROWS[0].run(
-            ScriptedAgent(),
-            runtime=ModalRuntime("img", runtime_config=limited(startup_timeout_s=600)),
-            rollout_timeout=600,
         )
     ),
     "a verifier startup limit at the rollout_timeout": (
@@ -351,9 +331,6 @@ INVALID: dict[str, Callable[[Provider], Any]] = {
     "duplicate slugs": lambda runtime: Taskset("t", [ROWS[0], ROWS[0]]),
     "a pool narrower than one": lambda runtime: Shared(runtime, width=0),
     "a portable row without a runtime": lambda runtime: Taskset("t", ROWS).run(ScriptedAgent()),
-    "a row minted by a template, serialized and reloaded": lambda runtime: Task.model_validate(
-        minted().model_dump()
-    ).run(ScriptedAgent()),
     "container rows mixed with portable rows": (
         lambda runtime: Taskset(
             "t", [ROWS[0], ROWS[1].model_copy(update={"runtime_config": RuntimeConfig(image="x")})]

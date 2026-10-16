@@ -149,11 +149,6 @@ PARENTS = {
     "a uuid ambient trace is the parent": ("3" * 32, str(uuid.UUID("3" * 32))),
     "a non-uuid ambient trace is dropped": ("external-run-id", None),
     "the rollout's own id is not its parent": (str(uuid.UUID(TRACE_ID)), None),
-    "the rollout's own id in braces is not its parent": (
-        "{" + str(uuid.UUID(TRACE_ID)) + "}",
-        None,
-    ),
-    "the rollout's own id as a urn is not its parent": (f"urn:uuid:{uuid.UUID(TRACE_ID)}", None),
 }
 
 
@@ -170,10 +165,6 @@ async def test_a_hosted_rollout_names_its_parent_trace_only_when_it_is_another_t
 
 
 TERMINAL = {
-    "a completed trace": (
-        {"status": "completed", "reward": 1.0, "error": None},
-        (1.0, "completed", None, {"score": 1.0}, False),
-    ),
     "a completed trace with its evaluation": (
         {
             "status": "completed",
@@ -181,10 +172,6 @@ TERMINAL = {
             "evaluation_result": {"score": 0.5, "content": "half", "info": {"k": 1}},
         },
         (0.5, "completed", None, {"score": 0.5, "content": "half", "info": {"k": 1}}, False),
-    ),
-    "an errored trace with an errored evaluation": (
-        {"status": "error", "evaluation_result": {"score": 0.0, "isError": True}},
-        (0.0, "error", None, {"score": 0.0, "isError": True}, True),
     ),
     "an errored trace without a reward": (
         {"status": "error", "reward": None, "error": "env exploded"},

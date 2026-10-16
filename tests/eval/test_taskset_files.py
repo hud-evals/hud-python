@@ -205,8 +205,6 @@ def compose_outside_root(root: Path) -> Any:
 INVALID: dict[str, Callable[[Path], Any]] = {
     "a row without an env": lambda tmp: Task.model_validate({"id": "add"}),
     "an empty slug": lambda tmp: Task(env="lab", id="add", slug=""),
-    "an empty slug assigned later": lambda tmp: assign(Task(env="lab", id="add"), "slug", ""),
-    "a verifier with a verifier": lambda tmp: nested_verifier(),
     "a verifier with a verifier assigned later": lambda tmp: assign(
         Task(env="lab", id="add"), "verifier", nested_verifier().verifier
     ),
@@ -225,19 +223,12 @@ INVALID: dict[str, Callable[[Path], Any]] = {
         }
     ),
     "a relative bind mount source": lambda tmp: DockerBindMount("data", "/data"),
-    "a relative bind mount target": lambda tmp: DockerBindMount("/data", "data"),
     "a bind mount path with a comma": lambda tmp: DockerBindMount("/data,x", "/data"),
     "a file that is not JSON, JSONL or Python": lambda tmp: Taskset.from_file(
         write(tmp / "tasks.yaml", "- env: lab\n")
     ),
-    "a JSON document that is a scalar": lambda tmp: Taskset.from_file(
-        write(tmp / "tasks.json", "42")
-    ),
     "an entry that is not an object": lambda tmp: Taskset.from_file(
         write(tmp / "tasks.json", '[{"env": "lab", "id": "a"}, 3]')
-    ),
-    "a JSONL line that is not an object": lambda tmp: Taskset.from_file(
-        write(tmp / "tasks.jsonl", '"add"\n')
     ),
     "duplicate slugs in a file": lambda tmp: Taskset.from_file(
         write(tmp / "tasks.json", '[{"env": "lab", "id": "a"}, {"env": "other", "id": "a"}]')

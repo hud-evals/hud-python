@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import textwrap
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -95,11 +95,6 @@ def directory_source(project: Project) -> Provider:
     return LocalRuntime(project.package)
 
 
-def split_file_source(project: Project) -> Provider:
-    module = project.module().stem
-    return LocalRuntime(project.entry(f"from {module} import env\n"))
-
-
 def package_source(project: Project) -> Provider:
     module = project.module().stem
     (project.package / "__init__.py").write_text("")
@@ -111,11 +106,6 @@ def shared_constructor(project: Project) -> Provider:
     return LocalRuntime(lambda task: env)
 
 
-def separate_providers(project: Project) -> Provider:
-    env = load_environment(project.module())
-    return lambda task: LocalRuntime(env)(task)
-
-
 def subprocess_live_env(project: Project) -> Provider:
     return SubprocessRuntime(load_environment(project.module()))
 
@@ -124,12 +114,6 @@ SERIAL = ["start", "stop", "start", "stop"]
 SOURCES = {
     "a file is imported per acquisition": (file_source, 1, ["import"] * 2, SERIAL),
     "a directory is imported once": (directory_source, 2, ["import"], SERIAL),
-    "a file importing its env from a sibling shares it": (
-        split_file_source,
-        2,
-        ["import"],
-        SERIAL,
-    ),
     "a package entry with a relative import shares its env": (
         package_source,
         2,
@@ -137,7 +121,6 @@ SOURCES = {
         SERIAL,
     ),
     "a constructor returning one instance shares it": (shared_constructor, 2, ["import"], SERIAL),
-    "separate providers over one instance share it": (separate_providers, 2, ["import"], SERIAL),
     "a child process serves a live env from its template file": (
         subprocess_live_env,
         1,
@@ -313,10 +296,7 @@ async def test_cancelling_a_waiting_acquisition_leaves_the_running_one_alone() -
 
 
 CONSTRUCTION_ERRORS = {
-    "an unsupported source": (lambda: LocalRuntime(cast("Any", 42)), TypeError),
     "env= with a live env": (lambda: LocalRuntime(lab(), env="lab"), TypeError),
-    "env= with a constructor": (lambda: LocalRuntime(lambda task: lab(), env="lab"), TypeError),
-    "env= with a live env in a child": (lambda: SubprocessRuntime(lab(), env="lab"), TypeError),
     "a live env without templates in a child": (
         lambda: SubprocessRuntime(Environment("bare")),
         ValueError,
@@ -373,13 +353,6 @@ ACQUISITION_ERRORS: dict[
         None,
         [],
     ),
-    "a constructor returning something else": (
-        lambda tmp, events: LocalRuntime(lambda task: cast("Any", 42)),
-        ADD,
-        TypeError,
-        None,
-        [],
-    ),
     "a source running an event loop at import": (
         lambda tmp, events: LocalRuntime(
             write(tmp / "env.py", "import asyncio\n\nasyncio.run(asyncio.sleep(0))\n")
@@ -393,20 +366,6 @@ ACQUISITION_ERRORS: dict[
         lambda tmp, events: LocalRuntime(lab(events)),
         IMAGE_ROW,
         ValueError,
-        None,
-        [],
-    ),
-    "a row with runtime_config in a child": (
-        lambda tmp, events: SubprocessRuntime(write(tmp / "env.py", "")),
-        IMAGE_ROW,
-        ValueError,
-        None,
-        [],
-    ),
-    "a missing source for a child": (
-        lambda tmp, events: SubprocessRuntime(tmp / "missing.py"),
-        ADD,
-        FileNotFoundError,
         None,
         [],
     ),

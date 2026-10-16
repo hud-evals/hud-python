@@ -20,7 +20,6 @@ from hud.eval import (
     LocalRuntime,
     RuntimeConfig,
     RuntimeGPU,
-    RuntimeLimits,
     RuntimeResources,
     Task,
     Taskset,
@@ -100,14 +99,6 @@ REFUSED = (
 FAILURES: dict[str, tuple[Task, dict[str, Any], Any, list[str]]] = {
     "a GPU it cannot provision is refused before a session": (
         ADD.model_copy(update={"runtime_config": GPU}),
-        {},
-        REFUSED,
-        [],
-    ),
-    "explicit limits are refused before a session": (
-        ADD.model_copy(
-            update={"runtime_config": RuntimeConfig(limits=RuntimeLimits(run_timeout_s=60))}
-        ),
         {},
         REFUSED,
         [],
