@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -174,6 +175,8 @@ class Grade:
         score = data.get("score")
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             raise HudProtocolError(-32603, "tasks.grade: result must include a numeric 'score'")
+        if not math.isfinite(score):
+            raise HudProtocolError(-32603, f"tasks.grade: 'score' must be finite, got {score!r}")
         raw_info = data.get("info")
         raw = dict(data)
         return cls(

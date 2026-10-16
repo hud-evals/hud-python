@@ -59,6 +59,27 @@ async def test_non_numeric_grade_errors_loudly() -> None:
                 run.trace.content = "x"
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("shape", ["number", "dict", "model"])
+async def test_non_finite_grade_errors_loudly(shape: str, value: float) -> None:
+    env = Environment("badgrade")
+
+    @env.template()
+    async def non_finite():
+        yield "go"
+        if shape == "number":
+            yield value
+        elif shape == "dict":
+            yield {"score": value}
+        else:
+            yield EvaluationResult(reward=value)
+
+    async with served(env) as client:
+        with pytest.raises(HudProtocolError, match="non-finite reward"):
+            async with Run(client, "non_finite", {}) as run:
+                run.trace.content = "x"
+
+
 async def test_score_dict_passes_through_with_extra_keys() -> None:
     env = Environment("richgrade")
 

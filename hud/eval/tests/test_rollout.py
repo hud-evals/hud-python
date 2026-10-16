@@ -33,9 +33,11 @@ from hud.agents.base import Agent
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Connection
+from hud.clients import HudProtocolError
 from hud.clients.client import HudClient
 from hud.environment import Answer, Environment
 from hud.eval import (
+    Grade,
     Job,
     LocalRuntime,
     Runtime,
@@ -710,6 +712,36 @@ async def test_scoreless_verifier_frame_is_an_ungraded_error(
     assert "numeric 'score'" in (run.trace.error or "")
     assert run.grade.raw == {}
     assert job.errors == [run]
+
+
+@pytest.mark.parametrize("reward", [float("nan"), float("inf")])
+async def test_non_finite_reward_is_an_ungraded_error(reward: float) -> None:
+    env = Environment("unscored")
+
+    @env.template()
+    async def solve(broken: bool):
+        yield "answer"
+        yield reward if broken else 1.0
+
+    graded, broken = [
+        await rollout(
+            Task(env="unscored", id="solve", args={"broken": flag}),
+            _FnAgent(lambda _prompt: "x"),
+            runtime=LocalRuntime(env),
+        )
+        for flag in (False, True)
+    ]
+    job = Job(id="unscored", name="unscored", runs=[graded, broken])
+
+    assert broken.trace.is_error
+    assert job.errors == [broken]
+    assert job.reward == 1.0
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_grade_frame_rejects_non_finite_score(value: float) -> None:
+    with pytest.raises(HudProtocolError, match="'score' must be finite"):
+        Grade.from_dict({"score": value})
 
 
 async def test_zero_score_verifier_grade_counts_an_errored_rollout() -> None:
