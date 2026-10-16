@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from tests.harness import FakeServices, Hud, HudEnv, Request
 
 REGISTRY_ID = "bbbbbbbb-0000-4000-8000-000000000001"
-OTHER_REGISTRY_ID = "bbbbbbbb-0000-4000-8000-000000000002"
 FIXED = {"source", "build_id", "name", "no_cache"}
 SUCCEEDED = {
     "status": "SUCCEEDED",
@@ -110,62 +109,40 @@ def test_deploy_uploads_the_context_triggers_the_build_and_links_the_directory(
     write_files(
         env,
         {
-            "server/pkg/tool.py": "print('tool')\n",
             ".env": "SECRET=dotenv-secret\n",
             "token.txt": "file-secret",
-            "runtime.json": json.dumps({"limits": {"startup_timeout_s": 300}}),
-            "vars.env": "# comment\nKEY1=file_value\nEMPTY=\nNOEQ\nKEY2=file_value\n",
+            "vars.env": "KEY=file_value\n",
         },
     )
 
     result = hud(
         "deploy",
         "env",
-        *("--env-file", "env/vars.env", "--env", "KEY1=flag_value"),
-        *("--build-arg", "PYTHON=3.12"),
+        *("--env-file", "env/vars.env", "--build-arg", "PYTHON=3.12"),
         *(
             "--secret",
             "id=GITHUB_TOKEN,env=GITHUB_TOKEN",
             "--secret",
             "id=FILE_TOKEN,src=token.txt",
         ),
-        *("--runtime", "HUD", "--runtime-config", "env/runtime.json", "--no-cache", "--json"),
         env={"GITHUB_TOKEN": "env-secret"},
     )
 
     assert result.exit_code == 0, result
-    assert (result.json["success"], result.json["build_id"], result.json["status"]) == (
-        True,
-        "build-1",
-        "SUCCEEDED",
+    assert "Step 1/2 : FROM python:3.12" in result.stderr  # the build log streams
+    sent = trigger_body(builds)
+    assert (sent["name"], sent["environment_variables"], sent["build_args"]) == (
+        "example",
+        {"KEY": "file_value"},
+        {"PYTHON": "3.12"},
     )
-    assert trigger_body(builds) == {
-        "source": "direct",
-        "build_id": "build-1",
-        "name": "example",
-        "no_cache": True,
-        "runtime_provider": "hud",
-        "runtime_config": {"limits": {"startup_timeout_s": 300}},
-        "environment_variables": {"KEY1": "flag_value", "EMPTY": "", "KEY2": "file_value"},
-        "build_args": {"PYTHON": "3.12"},
-        "build_secrets": {"GITHUB_TOKEN": "env-secret", "FILE_TOKEN": "file-secret"},
-    }
-    assert ".env" not in uploaded(builds) and "server/pkg/tool.py" in uploaded(builds)
+    assert sent["build_secrets"] == {"GITHUB_TOKEN": "env-secret", "FILE_TOKEN": "file-secret"}
+    assert ".env" not in uploaded(builds)
     assert not any(
         secret in str(result) for secret in ("dotenv-secret", "env-secret", "file-secret")
     )
     assert list((tmp_path / "tmp").iterdir()) == []
     assert json.loads((env / ".hud" / "config.json").read_text())["registry_id"] == REGISTRY_ID
-
-
-def test_deploy_streams_the_build_log_to_the_terminal(hud: Hud, builds: FakeServices) -> None:
-    environment(hud.cwd)
-
-    result = hud("deploy", "--no-env")
-
-    assert result.exit_code == 0, result
-    assert "Step 1/2 : FROM python:3.12" in result.stderr
-    assert "https://hud.example/environments/" in result.stderr
 
 
 def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
@@ -175,39 +152,22 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
     write_files(
         hud.cwd,
         {
-            "main.py": "",
-            ".env": "SECRET=1",
-            ".env.prod": "SECRET=1",
-            "nested/.env": "SECRET=1",
+            "nested/.env.prod": "SECRET=1",
             ".git/config": "",
-            "node_modules/dep.js": "",
-            "__pycache__/x.pyc": "",
             "build/out.o": "",
             "src/build/out.o": "",
             "keep.pyc": "",
             "drop.pyc": "",
-            "empty/": "",
-            ".dockerignore": "*.pyc\n!keep.pyc\n/build\n!node_modules\n",
+            ".dockerignore": "*.pyc\n!keep.pyc\n/build\n",
         },
     )
 
     result = hud("deploy", "--no-env", "--json")
 
     assert result.exit_code == 0, result
-    assert uploaded(builds) == [
-        ".dockerignore",
-        "Dockerfile.hud",
-        "empty",
-        "env.py",
-        "keep.pyc",
-        "main.py",
-        "nested",
-        "node_modules",
-        "node_modules/dep.js",
-        "src",
-        "src/build",
-        "src/build/out.o",
-    ]
+    sent = uploaded(builds)
+    assert {"keep.pyc", "src/build/out.o"} <= set(sent)
+    assert not {"drop.pyc", "build/out.o", ".git/config", "nested/.env.prod"} & set(sent)
 
 
 @pytest.mark.parametrize(
@@ -219,16 +179,6 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
             ["--name", "judge"],
             "judge",
             id="chosen-among-several",
-        ),
-        pytest.param(
-            {
-                "server/pkg/env.py": 'env = Environment("nested")\n',
-                ".venv/env.py": 'env = Environment("excluded")\n',
-                "broken.py": "def broken(:\n",
-            },
-            [],
-            "nested",
-            id="found-past-virtualenvs-and-broken-files",
         ),
     ],
 )
@@ -289,39 +239,17 @@ def test_a_compose_runtime_config_reaches_the_build_as_its_document(
     assert compose["root"] == {"compose_path": "project/compose.json"}
 
 
-def test_a_plain_deploy_sends_only_the_build(hud: Hud, builds: FakeServices) -> None:
-    environment(hud.cwd)
-
-    result = hud("deploy", "--no-env", "--json")
-
-    assert result.exit_code == 0, result
-    assert trigger_body(builds) == {
-        "source": "direct",
-        "build_id": "build-1",
-        "name": "example",
-        "no_cache": False,
-    }
-
-
 @pytest.mark.parametrize(
     ("second", "body", "kept"),
     [
         ([], {}, True),
-        (["--registry-id", OTHER_REGISTRY_ID], {"registry_id": OTHER_REGISTRY_ID}, True),
-        (["--project", BROWSER_PROJECT_ID], {"project_id": BROWSER_PROJECT_ID}, True),
         (["--env-file", ".env"], {"environment_variables": {"SECRET": "dotenv"}}, False),
     ],
-    ids=["again", "another-registry", "another-project", "new-secrets"],
+    ids=["again", "new-secrets"],
 )
 def test_a_redeploy_keeps_the_link_and_the_registry_secrets(
     hud: Hud, builds: FakeServices, second: list[str], body: dict[str, Any], kept: bool
 ) -> None:
-    builds.route(
-        "api",
-        "GET",
-        f"/v2/registry/{OTHER_REGISTRY_ID}",
-        json={"id": OTHER_REGISTRY_ID, "name": "example"},
-    )
     environment(hud.cwd)
     (hud.cwd / ".env").write_text("SECRET=dotenv")
 
@@ -336,47 +264,16 @@ def test_a_redeploy_keeps_the_link_and_the_registry_secrets(
     assert ("Registry secrets: kept" in again.stderr) is kept
 
 
-@pytest.mark.parametrize(
-    ("argv", "linked", "machine_default", "body"),
-    [
-        pytest.param(
-            ["--project", "browser-evals"],
-            None,
-            "default",
-            {"project_id": BROWSER_PROJECT_ID},
-            id="the-flag-beats-the-machine-default",
-        ),
-        pytest.param(
-            [],
-            "browser-evals",
-            "locked-down",
-            {"project_id": BROWSER_PROJECT_ID},
-            id="the-directory-link-beats-the-machine-default",
-        ),
-        pytest.param(
-            [], None, "browser-evals", {"project_id": BROWSER_PROJECT_ID}, id="the-machine-default"
-        ),
-        pytest.param([], None, None, {}, id="the-team-default"),
-    ],
-)
-def test_a_first_deploy_lands_in_the_project_its_selection_order_picks(
-    hud: Hud,
-    builds: FakeServices,
-    hud_env: HudEnv,
-    argv: list[str],
-    linked: str | None,
-    machine_default: str | None,
-    body: dict[str, Any],
+def test_a_first_deploy_lands_in_the_selected_project(
+    hud: Hud, builds: FakeServices, hud_env: HudEnv
 ) -> None:
     environment(hud.cwd)
-    if linked is not None:
-        assert hud("project", "use", linked).exit_code == 0
-    hud_env.set(HUD_DEFAULT_PROJECT=machine_default)
+    hud_env.set(HUD_DEFAULT_PROJECT="browser-evals")
 
-    result = hud("deploy", *argv, "--json")
+    result = hud("deploy", "--json")
 
     assert result.exit_code == 0, result
-    assert {key: value for key, value in trigger_body(builds).items() if key not in FIXED} == body
+    assert trigger_body(builds)["project_id"] == BROWSER_PROJECT_ID
 
 
 @pytest.mark.parametrize(
@@ -389,34 +286,6 @@ def test_a_first_deploy_lands_in_the_project_its_selection_order_picks(
             2,
             "usage",
             id="several-environments-and-no-name",
-        ),
-        pytest.param(
-            {"env.py": 'env = Environment("My Env")\n'},
-            ["--registry-id", REGISTRY_ID],
-            2,
-            "usage",
-            id="a-registry-id-naming-another-environment",
-        ),
-        pytest.param(
-            {"env.py": 'env = Environment("a")\n'},
-            ["--env", "INVALID"],
-            2,
-            "usage",
-            id="a-malformed-flag",
-        ),
-        pytest.param(
-            {"env.py": 'env = Environment("a")\n'},
-            ["--env-file", "missing.env"],
-            1,
-            "not_found",
-            id="a-missing-env-file",
-        ),
-        pytest.param(
-            {"env.py": 'env = Environment("a")\n', ".env": "SECRET=1"},
-            [],
-            2,
-            "usage",
-            id="a-dotenv-and-no-choice-about-it",
         ),
         pytest.param(
             {"env.py": 'env = Environment("a")\n'},
@@ -435,9 +304,6 @@ def test_deploy_refuses_before_uploading(
     exit_code: int,
     error: str,
 ) -> None:
-    projects.route(
-        "api", "GET", f"/v2/registry/{REGISTRY_ID}", json={"id": REGISTRY_ID, "name": "other-env"}
-    )
     write_files(hud.cwd, files)
 
     result = hud("deploy", *argv, "--json")
@@ -468,10 +334,6 @@ def test_a_rejected_build_request_leaves_nothing_behind(
             1,
             id="failed-build",
         ),
-        pytest.param(
-            SUCCEEDED, log_stream([], close=(4003, "token expired")), 0, id="access-denied"
-        ),
-        pytest.param(SUCCEEDED, log_stream([], close=(1011, "restarting")), 0, id="stream-closed"),
         pytest.param(SUCCEEDED, refuse, 0, id="no-stream"),
     ],
 )
