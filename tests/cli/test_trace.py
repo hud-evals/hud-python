@@ -13,12 +13,10 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, rollout
 from tests.support import call, say
 
-from .conftest import API_KEY, WEB_URL
-
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, Hud, HudEnv, Models
+    from tests.support import Hud, HudEnv, Models, Platform
 
 TRACE_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 COMPACT_TRACE_ID = "03dd2a73d3df4d10a54ae3d87c2d530d"
@@ -36,12 +34,11 @@ EVENTS: list[dict[str, Any]] = [
 
 
 @pytest.fixture
-def events(platform: FakeServices) -> FakeServices:
-    platform.route("api", "GET", "/v2/trace/{id}/events", json={"events": EVENTS})
-    return platform
+def events(platform: Platform) -> None:
+    platform.trace(TRACE_ID).events = EVENTS
 
 
-def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: FakeServices) -> None:
+def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None) -> None:
     result = hud("trace", COMPACT_TRACE_ID)
 
     assert result.exit_code == 0, result
@@ -49,13 +46,10 @@ def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: Fake
         assert shown in result.stdout
 
 
-def test_trace_json_is_the_event_list(hud: Hud, events: FakeServices) -> None:
+def test_trace_json_is_the_event_list(hud: Hud, events: None) -> None:
     result = hud("trace", "get", TRACE_ID, "--json")
 
-    assert result.exit_code == 0, result
-    assert result.json == EVENTS
-    (request,) = events.requests("api", "GET", "/v2/trace/{id}/events")
-    assert request.params == {"id": TRACE_ID}
+    assert (result.exit_code, result.json) == (0, EVENTS), result
 
 
 @pytest.mark.parametrize(
@@ -66,10 +60,8 @@ def test_trace_json_is_the_event_list(hud: Hud, events: FakeServices) -> None:
     ],
 )
 def test_a_missing_or_malformed_trace_is_an_error_document(
-    hud: Hud, platform: FakeServices, argv: list[str], exit_code: int, error: str
+    hud: Hud, platform: Platform, argv: list[str], exit_code: int, error: str
 ) -> None:
-    platform.route("api", "GET", "/v2/trace/{id}/events", status=404, json={"detail": "missing"})
-
     result = hud("trace", *argv, "--json")
 
     assert (result.exit_code, result.json["error"]) == (exit_code, error), result
@@ -87,7 +79,7 @@ async def write_a_report(
     rollout and of ``hud``, so rendered paths stay short.
     """
     monkeypatch.chdir(tmp_path)
-    hud_env.set(HUD_API_KEY=API_KEY, HUD_WEB_URL=WEB_URL, HUD_TELEMETRY_LOCAL_DIR="spans")
+    hud_env.set(HUD_TELEMETRY_LOCAL_DIR="spans")
     workspace = tmp_path / "workspace"
     report = workspace / "REPORT.md"
     env = Environment("report")
@@ -112,7 +104,7 @@ async def write_a_report(
 
 async def test_a_local_trace_lists_tool_calls_with_their_results(
     hud: Hud,
-    services: FakeServices,
+    platform: Platform,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
@@ -134,7 +126,12 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
 
 
 async def test_a_local_trace_renders_and_skips_a_record_cut_short(
-    hud: Hud, models: Models, hud_env: HudEnv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hud: Hud,
+    platform: Platform,
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     trace_id = await write_a_report(models, hud_env, tmp_path, monkeypatch)
     spans = tmp_path / "spans" / f"{uuid.UUID(trace_id).hex}.jsonl"
@@ -149,7 +146,7 @@ async def test_a_local_trace_renders_and_skips_a_record_cut_short(
 
 
 def test_a_trace_missing_from_the_local_spans_is_read_from_the_platform(
-    hud: Hud, events: FakeServices, hud_env: HudEnv, tmp_path: Path
+    hud: Hud, events: None, hud_env: HudEnv, tmp_path: Path
 ) -> None:
     spans = tmp_path / "spans"
     spans.mkdir()
@@ -158,7 +155,4 @@ def test_a_trace_missing_from_the_local_spans_is_read_from_the_platform(
 
     result = hud("trace", "get", TRACE_ID, "--json")
 
-    assert result.exit_code == 0, result
-    assert result.json == EVENTS
-    (request,) = events.requests("api", "GET", "/v2/trace/{id}/events")
-    assert request.params == {"id": TRACE_ID}
+    assert (result.exit_code, result.json) == (0, EVENTS), result

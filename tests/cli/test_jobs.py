@@ -7,147 +7,88 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud
+    from tests.support import Hud, Platform
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 COMPACT_JOB_ID = "03dd2a73d3df4d10a54ae3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
-JOBS = [
-    {
-        "id": JOB_ID,
-        "name": "nightly",
-        "taskset_name": "browser",
-        "status": "completed",
-        "created_at": "2026-10-01T00:00:00Z",
-    },
-    {"id": "00000000-0000-4000-a000-000000000009", "name": None, "status": None},
-]
-TRACES = [
-    {
-        "id": TRACE_ID,
-        "status": "completed",
-        "reward": 0.75,
-        "start_time": "2026-10-01T00:00:01Z",
-        "error": None,
-    },
-    {"id": "00000000-0000-4000-a000-000000000003", "status": "error", "error": "x" * 60},
-]
+UNTOUCHED = ["running", "queued", "completed"]
 
 
 @pytest.fixture
-def jobs(platform: FakeServices) -> FakeServices:
-    platform.route("api", "GET", "/v2/jobs", json={"items": JOBS})
-    platform.route("api", "GET", "/v2/jobs/{id}/traces", json={"items": TRACES})
-    return platform
+def job(platform: Platform) -> list[dict[str, Any]]:
+    """A job with one rollout running, one queued and one finished; returns its traces."""
+    traces: list[dict[str, Any]] = [
+        {"id": TRACE_ID, "status": "running", "start_time": "2026-10-01T00:00:01Z"},
+        {"id": "00000000-0000-4000-a000-000000000003", "status": "queued"},
+        {"id": "00000000-0000-4000-a000-000000000004", "status": "completed", "reward": 0.75},
+    ]
+    platform.add_job(traces, id=JOB_ID, name="nightly", status="running")
+    return traces
 
 
-@pytest.mark.parametrize(
-    ("argv", "limit"),
-    [(["jobs", "--quiet"], "20"), (["jobs", "list", "-n", "7", "--quiet"], "7")],
-)
-def test_jobs_lists_recent_job_ids(
-    hud: Hud, jobs: FakeServices, argv: list[str], limit: str
+@pytest.mark.parametrize(("argv", "shown"), [([], 20), (["list", "-n", "7"], 7)])
+def test_jobs_lists_the_most_recent_job_ids(
+    hud: Hud, platform: Platform, argv: list[str], shown: int
 ) -> None:
-    result = hud(*argv)
+    ids = [platform.add_job(name=f"job-{n}", status="completed") for n in range(25)]
 
-    assert (result.exit_code, result.stdout.split()) == (0, [job["id"] for job in JOBS]), result
-    (request,) = jobs.requests("api", "GET", "/v2/jobs")
-    assert request.query == {"limit": [limit]}
+    result = hud("jobs", *argv, "--quiet")
 
-
-def test_jobs_list_json_is_the_platform_items(hud: Hud, jobs: FakeServices) -> None:
-    result = hud("jobs", "list", "--json")
-
-    assert (result.exit_code, result.json) == (0, JOBS), result
+    assert (result.exit_code, result.stdout.split()) == (0, ids[:shown]), result
 
 
-def test_a_compact_job_id_reads_the_jobs_traces(hud: Hud, jobs: FakeServices) -> None:
-    result = hud("jobs", COMPACT_JOB_ID, "--json", "--limit", "7")
+def test_a_compact_job_id_reads_the_jobs_traces(hud: Hud, job: list[dict[str, Any]]) -> None:
+    result = hud("jobs", COMPACT_JOB_ID, "--json", "--limit", "2")
 
-    assert (result.exit_code, result.json) == (0, TRACES), result
-    (request,) = jobs.requests("api", "GET", "/v2/jobs/{id}/traces")
-    assert (request.path, request.query) == (f"/v2/jobs/{JOB_ID}/traces", {"limit": ["7"]})
+    assert (result.exit_code, result.json) == (0, job[:2]), result
 
 
-def test_a_malformed_job_reference_is_a_usage_error(hud: Hud, platform: FakeServices) -> None:
+def test_a_malformed_job_reference_is_a_usage_error(hud: Hud, platform: Platform) -> None:
     result = hud("jobs", "get", "not-a-job", "--json")
 
-    assert result.exit_code == 2, result
-    assert result.json["error"] == "usage"
-    assert platform.requests("api", path="/v2/jobs{rest:path}") == []
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
 
 
 # ─── cancel ─────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("argv", "path", "body", "reply"),
+    ("argv", "statuses"),
     [
+        pytest.param([JOB_ID, "--yes"], ["cancelled", "cancelled", "completed"], id="a-job"),
         pytest.param(
-            ["jobs", "cancel", JOB_ID, "--yes"],
-            "/v2/rollouts/cancel_job",
-            {"job_id": JOB_ID},
-            {"cancelled": 3},
-            id="a-job",
+            [JOB_ID, "--trace-id", TRACE_ID], ["cancelled", "queued", "completed"], id="one-trace"
         ),
-        pytest.param(
-            ["jobs", "cancel", JOB_ID, "--trace-id", TRACE_ID],
-            "/v2/rollouts/cancel",
-            {"job_id": JOB_ID, "trace_id": TRACE_ID},
-            {"status": "accepted"},
-            id="one-trace",
-        ),
-        pytest.param(
-            ["jobs", "cancel", "--all", "--yes"],
-            "/v2/rollouts/cancel_user_jobs",
-            {},
-            {"jobs_cancelled": 1, "total_tasks_cancelled": 2, "job_details": []},
-            id="every-job",
-        ),
+        pytest.param(["--all", "--yes"], ["cancelled", "cancelled", "completed"], id="every-job"),
     ],
 )
-def test_cancel_posts_the_rollout_cancellation(
-    hud: Hud,
-    platform: FakeServices,
-    argv: list[str],
-    path: str,
-    body: dict[str, Any],
-    reply: dict[str, Any],
+def test_cancel_stops_the_live_rollouts_it_names(
+    hud: Hud, job: list[dict[str, Any]], argv: list[str], statuses: list[str]
 ) -> None:
-    platform.route("api", "POST", path, json=reply)
-
-    result = hud(*argv, "--json")
+    result = hud("jobs", "cancel", *argv, "--json")
 
     assert result.exit_code == 0, result
-    assert result.json.items() >= reply.items()
-    assert [request.path for request in platform.requests("api", "POST")] == [path]
-    assert platform.bodies("api", "POST", path) == [body]
+    assert [trace["status"] for trace in job] == statuses
 
 
 @pytest.mark.parametrize(
     "argv",
-    [
-        pytest.param(["jobs", "cancel", JOB_ID], id="a-job-unconfirmed"),
-        pytest.param(["jobs", "cancel"], id="nothing-named"),
-    ],
+    [pytest.param([JOB_ID], id="a-job-unconfirmed"), pytest.param([], id="nothing-named")],
 )
 def test_cancel_refuses_without_a_confirmed_target(
-    hud: Hud, platform: FakeServices, argv: list[str]
+    hud: Hud, job: list[dict[str, Any]], argv: list[str]
 ) -> None:
-    result = hud(*argv, "--json")
+    result = hud("jobs", "cancel", *argv, "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert platform.requests("api", "POST") == []
+    assert [trace["status"] for trace in job] == UNTOUCHED
 
 
-def test_a_cancel_dry_run_names_its_action_and_posts_nothing(
-    hud: Hud, platform: FakeServices
+def test_a_cancel_dry_run_names_its_action_and_stops_nothing(
+    hud: Hud, job: list[dict[str, Any]]
 ) -> None:
     result = hud("jobs", "cancel", JOB_ID, "--dry-run", "--json")
 
-    assert (result.exit_code, result.json["dry_run"], result.json["action"]) == (
-        0,
-        True,
-        "cancel_job",
-    )
-    assert platform.requests("api", "POST") == []
+    assert (result.exit_code, result.json["action"]) == (0, "cancel_job"), result
+    assert [trace["status"] for trace in job] == UNTOUCHED

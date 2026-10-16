@@ -6,10 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply
-
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud
+    from tests.support import Hud, Platform
 
 SONNET_ID = "00000000-0000-4000-a000-000000000001"
 MINE_ID = "00000000-0000-4000-a000-000000000002"
@@ -46,9 +44,10 @@ CHECKPOINTS = [
 
 
 @pytest.fixture
-def catalog(platform: FakeServices) -> FakeServices:
-    platform.route("api", "GET", "/v2/models", json={"items": CATALOG, "total": len(CATALOG)})
-    platform.route("api", "GET", "/v2/models/{id}/checkpoints", json=CHECKPOINTS)
+def catalog(platform: Platform) -> Platform:
+    for model in CATALOG:
+        platform.add_model(**model)
+    platform.checkpoints[MINE_ID] = [dict(checkpoint) for checkpoint in CHECKPOINTS]
     return platform
 
 
@@ -60,25 +59,25 @@ def catalog(platform: FakeServices) -> FakeServices:
     ],
 )
 def test_quiet_prints_one_identifier_per_line(
-    hud: Hud, catalog: FakeServices, argv: list[str], stdout: list[str]
+    hud: Hud, catalog: Platform, argv: list[str], stdout: list[str]
 ) -> None:
     result = hud(*argv)
 
     assert (result.exit_code, result.stdout.split("\n")[:-1]) == (0, stdout), result
 
 
-def test_models_list_json_is_the_catalog_sorted_by_name(hud: Hud, catalog: FakeServices) -> None:
+def test_models_list_reads_every_page_and_sorts_by_name(hud: Hud, catalog: Platform) -> None:
+    catalog.page_size = 1
+
     result = hud("models", "list", "--json")
 
     assert result.exit_code == 0, result
     assert [model["id"] for model in result.json] == [SONNET_ID, MINE_ID]
-    (request,) = catalog.requests("api", "GET", "/v2/models")
-    assert request.query == {"limit": ["100"], "offset": ["0"]}
 
 
 @pytest.mark.parametrize("model", ["owner/model + version", MINE_ID])
 def test_checkpoints_and_head_read_the_resolved_model(
-    hud: Hud, catalog: FakeServices, model: str
+    hud: Hud, catalog: Platform, model: str
 ) -> None:
     checkpoints = hud("models", "checkpoints", model, "--json")
     head = hud("models", "head", model, "--json")
@@ -89,28 +88,22 @@ def test_checkpoints_and_head_read_the_resolved_model(
         "ckpt-0002-step",
     ]
     assert (head.json["model_id"], head.json["head"]["id"]) == (MINE_ID, "ckpt-0002-step")
-    assert {r.path for r in catalog.requests("api", "GET", "/v2/models/{id}/checkpoints")} == {
-        f"/v2/models/{MINE_ID}/checkpoints"
-    }
 
 
-@pytest.mark.parametrize(("argv", "set_to"), [([], ["ckpt-0001-base"]), (["--dry-run"], [])])
+@pytest.mark.parametrize(
+    ("argv", "served"), [([], "ckpt-0001-base"), (["--dry-run"], "ckpt-0002-step")]
+)
 def test_head_set_moves_the_served_checkpoint(
-    hud: Hud, catalog: FakeServices, argv: list[str], set_to: list[str]
+    hud: Hud, catalog: Platform, argv: list[str], served: str
 ) -> None:
-    catalog.route("api", "PUT", "/v2/models/{id}/head", json={})
+    moved = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", *argv, "--json")
+    head = hud("models", "head", "my-sonnet", "--json")
 
-    result = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", *argv, "--json")
-
-    assert (result.exit_code, result.json["checkpoint_id"]) == (0, "ckpt-0001-base"), result
-    assert [
-        body["checkpoint_id"] for body in catalog.bodies("api", "PUT", f"/v2/models/{MINE_ID}/head")
-    ] == set_to
+    assert (moved.exit_code, moved.json["checkpoint_id"]) == (0, "ckpt-0001-base"), moved
+    assert head.json["head"]["id"] == served
 
 
-def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: FakeServices) -> None:
-    catalog.route("api", "GET", "/v2/models/{id}/checkpoints", json=[])
-
+def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: Platform) -> None:
     head = hud("models", "head", "claude-sonnet-4-6", "--json")
     checkpoints = hud("models", "checkpoints", "claude-sonnet-4-6", "--json")
 
@@ -122,49 +115,29 @@ def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: FakeServices
     )
 
 
+def test_fork_creates_a_trainable_model_from_its_source(hud: Hud, catalog: Platform) -> None:
+    result = hud("models", "fork", "Claude Sonnet", "--name", "fresh", "--json")
+
+    assert result.exit_code == 0, result
+    (forked,) = [model for model in catalog.models if model["id"] == result.json["id"]]
+    assert (forked["model_name"], forked["forked_from"]) == ("team/fresh", SONNET_ID)
+
+
 @pytest.mark.parametrize(
-    ("argv", "reply", "exit_code", "outcome"),
+    ("argv", "exit_code", "outcome"),
     [
-        pytest.param(
-            [],
-            Reply(json={"id": MINE_ID, "name": "my-sonnet", "model_name": "team/my-sonnet"}),
-            0,
-            {"id": MINE_ID},
-            id="created",
-        ),
-        pytest.param(
-            ["--if-not-exists"],
-            Reply(status=409, json={"detail": "Model exists"}),
-            0,
-            {"id": MINE_ID, "existed": True},
-            id="already-there-and-allowed",
-        ),
-        pytest.param(
-            [],
-            Reply(status=409, json={"detail": "Model exists"}),
-            1,
-            {"error": "conflict"},
-            id="already-there",
-        ),
+        pytest.param(["--if-not-exists"], 0, {"id": MINE_ID, "existed": True}, id="allowed"),
+        pytest.param([], 1, {"error": "conflict"}, id="refused"),
     ],
 )
-def test_fork_creates_a_trainable_model(
-    hud: Hud,
-    catalog: FakeServices,
-    argv: list[str],
-    reply: Reply,
-    exit_code: int,
-    outcome: dict[str, Any],
+def test_forking_onto_an_existing_name(
+    hud: Hud, catalog: Platform, argv: list[str], exit_code: int, outcome: dict[str, Any]
 ) -> None:
-    catalog.route("api", "POST", "/v2/models/fork", reply)
-
     result = hud("models", "fork", "Claude Sonnet", "--name", "my-sonnet", *argv, "--json")
 
     assert result.exit_code == exit_code, result
     assert {key: result.json[key] for key in outcome} == outcome
-    assert catalog.bodies("api", "POST", "/v2/models/fork") == [
-        {"source_model_id": SONNET_ID, "name": "my-sonnet"}
-    ]
+    assert len(catalog.models) == len(CATALOG)
 
 
 @pytest.mark.parametrize(
@@ -175,15 +148,15 @@ def test_fork_creates_a_trainable_model(
     ],
 )
 def test_dry_runs_and_unknown_models_change_nothing(
-    hud: Hud, catalog: FakeServices, argv: list[str], exit_code: int
+    hud: Hud, catalog: Platform, argv: list[str], exit_code: int
 ) -> None:
     result = hud("models", *argv, "--json")
 
     assert result.exit_code == exit_code, result
-    assert catalog.requests("api", "POST") + catalog.requests("api", "PUT") == []
+    assert len(catalog.models) == len(CATALOG)
 
 
-def test_a_misspelt_model_suggests_the_close_name(hud: Hud, catalog: FakeServices) -> None:
+def test_a_misspelt_model_suggests_the_close_name(hud: Hud, catalog: Platform) -> None:
     result = hud("models", "fork", "claude-sonet-4-6", "--name", "mine", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result

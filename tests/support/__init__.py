@@ -29,6 +29,7 @@ from .models import (
     shell_call,
     stream_error,
 )
+from .platform import Platform
 from .relay import FlakyRelay, relay
 from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
 from .scenario import RecordingProvider, ScriptedAgent, eventually, run_task, served
@@ -49,6 +50,7 @@ __all__ = [
     "KeyEvent",
     "ModelRequest",
     "Models",
+    "Platform",
     "PointerEvent",
     "RecordingProvider",
     "Reply",

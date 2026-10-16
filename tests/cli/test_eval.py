@@ -11,13 +11,12 @@ import pytest
 from hud import Environment
 from hud.eval import LocalRuntime, Task
 from tests.support import say, write_files
-
-from .conftest import API_KEY
+from tests.support.platform import API_KEY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, Hud, HudEnv, Models
+    from tests.support import Hud, HudEnv, Models, Platform
 
 TASKS_PY = """\
 from hud import Environment
@@ -37,9 +36,8 @@ SCRIPTED = ("openai_compatible", "-m", "scripted")
 
 
 @pytest.fixture
-def gateway(models: Models, hud_env: HudEnv) -> Models:
+def gateway(models: Models, platform: Platform) -> Models:
     """A signed-in user whose agents reach a scripted model that always answers "ok"."""
-    hud_env.set(HUD_API_KEY=API_KEY)
     models.script([say("ok")])
     return models
 
@@ -181,7 +179,7 @@ KIMI_TOML = (
 )
 def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     hud: Hud,
-    services: FakeServices,
+    platform: Platform,
     gateway: Models,
     hud_env: HudEnv,
     tasks: Path,
@@ -191,7 +189,7 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     expected: dict[str, Any],
 ) -> None:
     """Provider SDKs read their own ``*_BASE_URL``, which here points at the scripted model."""
-    services.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
+    platform.add_model(**GLM)
     (hud.cwd / ".hud_eval.toml").write_text(config)
     hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url, **environment)
 
@@ -424,7 +422,7 @@ PLAN = {
 )
 def test_a_dry_run_reports_the_plan_and_runs_nothing(
     hud: Hud,
-    services: FakeServices,
+    platform: Platform,
     hud_env: HudEnv,
     tasks: Path,
     config: str,
@@ -438,7 +436,7 @@ def test_a_dry_run_reports_the_plan_and_runs_nothing(
 
     assert result.exit_code == 0, result
     assert result.json == PLAN | changes
-    assert services.requests() == []
+    assert platform.services.requests() == []
 
 
 @pytest.mark.parametrize(
@@ -473,7 +471,7 @@ def test_a_dry_run_reports_the_plan_and_runs_nothing(
 )
 def test_eval_refuses_without_prompting_or_calling_out(
     hud: Hud,
-    services: FakeServices,
+    platform: Platform,
     hud_env: HudEnv,
     tasks: Path,
     config: str,
@@ -488,22 +486,14 @@ def test_eval_refuses_without_prompting_or_calling_out(
     result = hud("eval", *argv, "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (exit_code, error), result
-    assert services.requests() == []
+    assert platform.services.requests() == []
     assert (hud.cwd / ".hud_eval.toml").read_text() == config
 
 
 def test_a_platform_taskset_without_container_rows_cannot_run_locally(
-    hud: Hud, services: FakeServices, hud_env: HudEnv
+    hud: Hud, platform: Platform
 ) -> None:
-    task = {"name": "one", "env": "demo", "scenario": "solve"}
-    hud_env.set(HUD_API_KEY=API_KEY)
-    taskset = "eeeeeeee-0000-4000-8000-000000000001"
-    services.route(
-        "api", "GET", "/v2/tasksets/by-name/{name}", json={"taskset_id": taskset, "name": "Demo"}
-    )
-    services.route(
-        "api", "GET", f"/v2/tasksets/{taskset}/export", json={"name": "Demo", "tasks": [task]}
-    )
+    platform.add_taskset("Demo", [{"name": "one", "env": "demo", "scenario": "solve"}])
 
     result = hud("eval", "Demo", "openai", "--runtime", "local", "--yes", "--json")
 

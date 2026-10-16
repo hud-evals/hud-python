@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply
-
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud
+    from tests.support import Hud, Platform
 
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 TASK_ID = "00000000-0000-4000-a000-000000000005"
@@ -40,9 +38,9 @@ CHECKS = [
 
 
 @pytest.fixture(autouse=True)
-def catalog(platform: FakeServices) -> None:
+def catalog(platform: Platform) -> None:
     """The platform's QA check catalog, which ``hud qa`` reads to place checks by level."""
-    platform.route("api", "GET", "/v2/qa/checks", json={"checks": CHECKS})
+    platform.qa_checks = CHECKS
 
 
 def row(status: str = "completed", **fields: Any) -> dict[str, Any]:
@@ -69,6 +67,14 @@ def verdict(tag: str, *, check_key: str = CHECK) -> dict[str, Any]:
     return row(check_key=check_key, verdict=tag, result=result)
 
 
+def started(platform: Platform) -> list[tuple[str, str]]:
+    """The (check, subject) pairs QA runs were started for."""
+    return [
+        (r["check_key"], r.get("subject_trace_id") or r["subject_task_id"])
+        for r in platform.qa_results
+    ]
+
+
 @pytest.mark.parametrize(
     ("argv", "keys"),
     [
@@ -91,89 +97,60 @@ def test_qa_list_json_is_the_catalog(hud: Hud) -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        pytest.param(["missing_check", TRACE_ID], id="an-unknown-check"),
-        pytest.param([f"{CHECK},{TASK_CHECK}", TRACE_ID], id="trace-and-task-checks-together"),
+        pytest.param(["missing_check", TRACE_ID, "--json"], id="an-unknown-check"),
+        pytest.param(
+            [f"{CHECK},{TASK_CHECK}", TRACE_ID, "--json"], id="trace-and-task-checks-together"
+        ),
+        pytest.param([TASK_CHECK, TASK_ID, "--dry-run", "--json"], id="a-dry-run"),
     ],
 )
-def test_qa_run_refuses_before_starting_anything(
-    hud: Hud, platform: FakeServices, argv: list[str]
+def test_qa_run_refusals_and_dry_runs_start_nothing(
+    hud: Hud, platform: Platform, argv: list[str]
 ) -> None:
-    result = hud("qa", "run", *argv, "--json")
+    result = hud("qa", "run", *argv)
 
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert platform.requests("api", "POST") == []
+    assert result.exit_code == (0 if "--dry-run" in argv else 2), result
+    assert platform.qa_results == []
 
 
 @pytest.mark.parametrize(
-    ("argv", "body"),
+    ("argv", "runs"),
     [
         (
             [f"{CHECK}, {OTHER_CHECK},{CHECK}", TRACE_ID.upper()],
-            {"check_keys": [CHECK, OTHER_CHECK], "trace_ids": [TRACE_ID], "overwrite": False},
+            [(CHECK, TRACE_ID), (OTHER_CHECK, TRACE_ID)],
         ),
-        (
-            [TASK_CHECK, TASK_ID],
-            {"check_keys": [TASK_CHECK], "task_ids": [TASK_ID], "overwrite": False},
-        ),
+        ([TASK_CHECK, TASK_ID], [(TASK_CHECK, TASK_ID)]),
     ],
     ids=["deduplicated-and-normalised", "task-level"],
 )
-def test_qa_run_without_waiting_starts_one_run(
-    hud: Hud, platform: FakeServices, argv: list[str], body: dict[str, Any]
+def test_qa_run_without_waiting_starts_each_check_once(
+    hud: Hud, platform: Platform, argv: list[str], runs: list[tuple[str, str]]
 ) -> None:
-    queued = [row("queued", check_key=key) for key in body["check_keys"]]
-    platform.route("api", "POST", "/v2/qa/runs", json={"results": queued})
-
     result = hud("qa", "run", *argv, "--no-wait", "--json")
 
-    assert (result.exit_code, result.json) == (0, queued), result
-    assert platform.bodies("api", "POST", "/v2/qa/runs") == [body]
-    assert platform.requests("api", "GET", "/v2/qa/results") == []
-
-
-def test_a_dry_run_plans_the_run_at_its_level_and_starts_nothing(
-    hud: Hud, platform: FakeServices
-) -> None:
-    result = hud("qa", "run", TASK_CHECK, TASK_ID, "--dry-run", "--json")
-
     assert result.exit_code == 0, result
-    assert (result.json["level"], result.json["task_ids"]) == ("task", [TASK_ID])
-    assert platform.requests("api", "POST") == []
+    assert [r["status"] for r in result.json] == ["queued"] * len(runs)
+    assert started(platform) == runs
 
 
 @pytest.mark.parametrize(
-    ("posted", "polled", "exit_code", "verdicts"),
+    ("outcome", "exit_code", "verdicts"),
     [
-        pytest.param([verdict("passed")], [], 0, ["passed"], id="settled"),
-        pytest.param(
-            [row("queued")],
-            [[row("running")], [verdict("failed")]],
-            1,
-            ["failed"],
-            id="polls-until-done",
-        ),
-        pytest.param(
-            [row("queued")],
-            [[verdict("failed", check_key=OTHER_CHECK), verdict("passed")]],
-            0,
-            ["passed"],
-            id="ignores-other-checks",
-        ),
-        pytest.param([row("error", error="invalid result")], [], 1, [None], id="errored"),
+        pytest.param(verdict("passed"), 0, ["passed"], id="passed"),
+        pytest.param(verdict("failed"), 1, ["failed"], id="failed"),
+        pytest.param(row("error", error="invalid result"), 1, [None], id="errored"),
     ],
 )
 def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     hud: Hud,
-    platform: FakeServices,
-    posted: list[dict[str, Any]],
-    polled: list[list[dict[str, Any]]],
+    platform: Platform,
+    outcome: dict[str, Any],
     exit_code: int,
     verdicts: list[str | None],
 ) -> None:
-    platform.route("api", "POST", "/v2/qa/runs", json={"results": posted})
-    platform.route(
-        "api", "GET", "/v2/qa/results", *[Reply(json={"results": rows}) for rows in polled]
-    )
+    platform.qa_results.append({**verdict("failed", check_key=OTHER_CHECK), "id": "earlier"})
+    platform.qa_outcomes[CHECK] = outcome
 
     result = hud("qa", "run", CHECK, TRACE_ID, "--json")
 
@@ -181,13 +158,9 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     assert [(r["check_key"], r["verdict"]) for r in result.json] == [
         (CHECK, tag) for tag in verdicts
     ]
-    assert len(platform.requests("api", "GET", "/v2/qa/results")) == len(polled)
 
 
-def test_qa_run_times_out_while_checks_are_running(hud: Hud, platform: FakeServices) -> None:
-    platform.route("api", "POST", "/v2/qa/runs", json={"results": [row("queued")]})
-    platform.route("api", "GET", "/v2/qa/results", json={"results": [row("running")]})
-
+def test_qa_run_times_out_while_checks_are_running(hud: Hud, platform: Platform) -> None:
     result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "timeout"), result
@@ -234,17 +207,14 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
             ["passed", "failed"],
             id="legacy-false-negative",
         ),
-        pytest.param(
-            [row("queued"), row("error", error="Analysis crashed.")],
-            ["failed"],
-            id="pending-and-errored",
-        ),
+        pytest.param([row("error", error="Analysis crashed.")], ["failed"], id="errored"),
     ],
 )
 def test_qa_results_read_a_verdict_from_each_result_shape(
-    hud: Hud, platform: FakeServices, results: list[dict[str, Any]], verdicts: list[str]
+    hud: Hud, platform: Platform, results: list[dict[str, Any]], verdicts: list[str]
 ) -> None:
-    platform.route("api", "GET", "/v2/qa/results", json={"results": results})
+    other_trace = row(subject_trace_id="00000000-0000-4000-a000-000000000009")
+    platform.qa_results += [*results, other_trace]
 
     text = hud("qa", "results", TRACE_ID)
     document = hud("qa", "results", TRACE_ID, "--json")
@@ -254,18 +224,23 @@ def test_qa_results_read_a_verdict_from_each_result_shape(
     assert [
         line.removeprefix("Verdict: ") for line in text.lines if line.startswith("Verdict:")
     ] == verdicts
-    assert [sent.query for sent in platform.requests("api", "GET", "/v2/qa/results")] == [
-        {"trace_ids": [TRACE_ID]}
-    ] * 2
 
 
-def test_task_results_with_history_ask_for_the_task_history(
-    hud: Hud, platform: FakeServices
+@pytest.mark.parametrize(
+    ("argv", "shown"),
+    [([], ["latest"]), (["--history"], ["older", "latest"])],
+    ids=["latest-only", "with-history"],
+)
+def test_task_results_include_superseded_ones_only_with_history(
+    hud: Hud, platform: Platform, argv: list[str], shown: list[str]
 ) -> None:
-    platform.route("api", "GET", "/v2/qa/results", json={"results": []})
+    task = {"check_key": TASK_CHECK, "subject_type": "task", "subject_task_id": TASK_ID}
+    platform.qa_results += [
+        {**row(**task), "id": "older", "subject_task_version_id": "v1", "superseded": True},
+        {**row(**task), "id": "latest", "subject_task_version_id": "v2"},
+    ]
 
-    result = hud("qa", "results", "--level", "task", TASK_ID, "--history", "--json")
+    result = hud("qa", "results", "--level", "task", TASK_ID, *argv, "--json")
 
-    assert (result.exit_code, result.json) == (0, []), result
-    (request,) = platform.requests("api", "GET", "/v2/qa/results")
-    assert request.query == {"task_ids": [TASK_ID], "include_history": ["True"]}
+    assert result.exit_code == 0, result
+    assert [r["id"] for r in result.json] == shown

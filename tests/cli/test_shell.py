@@ -16,10 +16,8 @@ from dotenv import dotenv_values
 from hud.version import __version__
 from tests.support import Hud, Reply
 
-from .conftest import API_KEY
-
 if TYPE_CHECKING:
-    from tests.support import FakeServices, HudEnv
+    from tests.support import HudEnv, Platform
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
@@ -111,10 +109,11 @@ def test_set_persists_values_without_echoing_them(hud: Hud, hud_env: HudEnv) -> 
     ],
 )
 def test_platform_errors_map_to_error_kinds(
-    hud: Hud, services: FakeServices, hud_env: HudEnv, status: int, error: str
+    hud: Hud, platform: Platform, status: int, error: str
 ) -> None:
-    hud_env.set(HUD_API_KEY=API_KEY)
-    services.route("api", "GET", "/v2/jobs/{id}/traces", status=status, json={"detail": "No"})
+    platform.services.route(
+        "api", "GET", "/v2/jobs/{id}/traces", status=status, json={"detail": "No"}
+    )
 
     result = hud("jobs", "get", JOB_ID, "--json")
 
@@ -154,11 +153,10 @@ def test_an_outdated_install_prints_an_upgrade_notice(
 
 
 @pytest.fixture
-def analytics(services: FakeServices, hud_env: HudEnv) -> FakeServices:
-    """CLI analytics on, posting to the fake telemetry service."""
+def analytics(platform: Platform, hud_env: HudEnv) -> Platform:
+    """CLI analytics on, posting to the platform."""
     hud_env.set(HUD_CLI_ANALYTICS_ENABLED="1", CI=None)
-    services.route("telemetry", "POST", "/sdk-events/cli", json={})
-    return services
+    return platform
 
 
 def event(
@@ -179,90 +177,73 @@ def event(
 
 
 @pytest.mark.parametrize(
-    ("argv", "key", "expected"),
+    ("argv", "expected"),
     [
-        (["version"], None, [event("version", None, 0, None)]),
-        (["jobs", "list", "--json"], None, [event("jobs", "list", 1, "HudAuthenticationError")]),
-        (["set", "NOT_A_PAIR"], None, [event("set", None, 2, "CliError")]),
-        (["secret-name", "arg"], None, [event("other", None, 2, "UsageError")]),
-        (["--version"], None, []),
+        (["version"], [event("version", None, 0, None)]),
+        (["jobs", "list", "--json"], [event("jobs", "list", 1, "HudAuthenticationError")]),
+        (["set", "NOT_A_PAIR"], [event("set", None, 2, "CliError")]),
+        (["secret-name", "arg"], [event("other", None, 2, "UsageError")]),
+        (["--version"], []),
     ],
 )
 def test_each_invocation_posts_one_anonymous_event(
     hud: Hud,
-    analytics: FakeServices,
+    analytics: Platform,
     hud_env: HudEnv,
     argv: list[str],
-    key: str | None,
     expected: list[dict[str, Any]],
 ) -> None:
-    hud_env.set(HUD_API_KEY=key)
-    analytics.route("api", "GET", "/v2/jobs", status=403, json={"detail": "Not your team"})
+    hud_env.set(HUD_API_KEY=None)
 
     hud(*argv)
 
-    posted = [body["events"] for body in analytics.bodies("telemetry", "POST", "/sdk-events/cli")]
-    assert [event for events in posted for event in events] == expected
-    assert "secret-name" not in json.dumps(posted)
+    assert analytics.cli_events == expected
+    assert "secret-name" not in json.dumps(analytics.cli_events)
 
 
-def test_the_install_id_is_created_once_and_announced_once(
-    hud: Hud, analytics: FakeServices
-) -> None:
+def test_the_install_id_is_created_once_and_announced_once(hud: Hud, analytics: Platform) -> None:
     first = hud("version")
     second = hud("version")
 
-    ids = [
-        body["events"][0]["install_id"]
-        for body in analytics.bodies("telemetry", "POST", "/sdk-events/cli")
-    ]
-    assert len(set(ids)) == 1
+    assert len({event["install_id"] for event in analytics.cli_events}) == 1
     assert "HUD_CLI_ANALYTICS_ENABLED=0" in first.stderr
     assert second.stderr == ""
 
 
-def test_analytics_opt_out_posts_nothing(
-    hud: Hud, analytics: FakeServices, hud_env: HudEnv
-) -> None:
+def test_analytics_opt_out_posts_nothing(hud: Hud, analytics: Platform, hud_env: HudEnv) -> None:
     hud_env.set(HUD_CLI_ANALYTICS_ENABLED="0")
 
     hud("version")
 
-    assert analytics.requests("telemetry") == []
+    assert analytics.services.requests("telemetry") == []
 
 
 def test_a_stalled_analytics_endpoint_does_not_hold_up_the_command(
-    hud: Hud, analytics: FakeServices
+    hud: Hud, analytics: Platform
 ) -> None:
-    analytics.route("telemetry", "POST", "/sdk-events/cli", Reply(json={}, delay=20))
+    analytics.services.route("telemetry", "POST", "/sdk-events/cli", Reply(json={}, delay=20))
 
     started = time.monotonic()
     result = hud("version")
     elapsed = time.monotonic() - started
 
     assert result.exit_code == 0
-    assert len(analytics.requests("telemetry")) == 1
+    assert len(analytics.services.requests("telemetry")) == 1
     # Without the bound the command would outlast the 20 s stall; with it, a few seconds.
     assert elapsed < 15, elapsed
 
 
-def test_an_interrupted_command_reports_exit_130(
-    hud: Hud, analytics: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY=API_KEY)
-    pending = {"subject_trace_id": TRACE_ID, "check_key": "failure_analysis", "status": "queued"}
+def test_an_interrupted_command_reports_exit_130(hud: Hud, analytics: Platform) -> None:
     check = {"key": "failure_analysis", "subject_type": "trace", "title": "Failure Analysis"}
-    analytics.route("api", "GET", "/v2/qa/checks", json={"checks": [check]})
-    analytics.route("api", "POST", "/v2/qa/runs", json={"results": [pending]})
+    analytics.qa_checks = [check]
     process = hud.start("qa", "run", "failure_analysis", TRACE_ID)
 
     deadline = time.monotonic() + 30
-    while not analytics.requests("api", "POST", "/v2/qa/runs"):
+    while not analytics.qa_results:
         assert time.monotonic() < deadline, "hud qa run never posted the run"
         time.sleep(0.05)
     process.send_signal(signal.SIGINT)
     process.communicate(timeout=30)
 
     assert process.returncode == 130
-    (body,) = analytics.bodies("telemetry", "POST", "/sdk-events/cli")
-    assert body["events"] == [event("qa", "run", 130, "KeyboardInterrupt")]
+    assert analytics.cli_events == [event("qa", "run", 130, "KeyboardInterrupt")]

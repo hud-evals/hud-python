@@ -4,75 +4,43 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
-from unittest.mock import ANY
 
 import pytest
 
 from tests.support import Reply, write_files
-
-from .conftest import (
-    BROWSER_PROJECT_ID,
-    DEFAULT_PROJECT_ID,
-    TEAM_ID,
-    USER_ID,
-)
+from tests.support.platform import BROWSER_PROJECT_ID, DEFAULT_PROJECT_ID, TEAM_ID, USER_ID
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from tests.support import Hud, HudEnv, Platform
 
-    from tests.support import FakeServices, Hud, HudEnv
-
-REGISTRY_ID = "bbbbbbbb-0000-4000-8000-000000000001"
 OTHER_ID = "cccccccc-0000-4000-8000-000000000001"
-PROJECT_CREATED = {
-    "id": BROWSER_PROJECT_ID,
-    "name": "browser-evals",
-    "capabilities": {"create": True},
-}
 
 
-@pytest.fixture
-def registry(projects: FakeServices) -> FakeServices:
-    """One deployed environment, ``example``."""
-    record = {"id": REGISTRY_ID, "name": "example", "latest_build": {"version": 3}}
-    projects.route("api", "GET", f"/v2/registry/{REGISTRY_ID}", json=record)
-    projects.route("api", "GET", "/v2/registry", json={"items": [record], "total": 1})
-    return projects
-
-
-def config(directory: Path, services: FakeServices) -> Any:
-    """``.hud/config.json`` with the fake platform's origin made stable."""
-    text = (directory / ".hud" / "config.json").read_text()
-    origin = services.url("api").removesuffix("/api")
-    return json.loads(text.replace(origin, "http://hud.test"))
-
-
-def link_project(hud: Hud) -> str | None:
+def link(hud: Hud) -> dict[str, Any] | None:
     path = hud.cwd / ".hud" / "config.json"
-    return json.loads(path.read_text())["project_id"] if path.exists() else None
+    return json.loads(path.read_text()) if path.exists() else None
 
 
-def test_linking_a_directory_accumulates_its_platform_ids(
-    hud: Hud, registry: FakeServices, tmp_path: Path
-) -> None:
-    env = tmp_path / "env"
+def test_linking_a_directory_accumulates_its_platform_ids(hud: Hud, platform: Platform) -> None:
+    example = platform.add_environment("example")
 
-    used = hud("project", "use", "Browser Evals", "-C", str(env), "--json")
-    linked = hud("sync", "env", "example", str(env), "--json")
-    written = (env / ".hud" / "config.json").read_bytes()
-    relinked = hud("sync", "env", REGISTRY_ID, str(env), "--json")
-    shown = hud("project", "-C", str(env), "--json")
+    used = hud("project", "use", "Browser Evals", "--json")
+    linked = hud("sync", "env", "example", "--json")
+    written = (hud.cwd / ".hud" / "config.json").read_bytes()
+    relinked = hud("sync", "env", example, "--json")
+    shown = hud("project", "--json")
 
     assert [used.exit_code, linked.exit_code, relinked.exit_code, shown.exit_code] == [0] * 4
-    stored = config(env, registry)
+    stored = link(hud)
+    assert stored is not None
     assert (stored["registry_id"], stored["project_id"], stored["taskset_id"]) == (
-        REGISTRY_ID,
+        example,
         BROWSER_PROJECT_ID,
         None,
     )
     assert (stored["scope"]["user_id"], stored["scope"]["team_id"]) == (USER_ID, TEAM_ID)
     assert (linked.json["changed"], relinked.json["changed"]) == (True, False)
-    assert (env / ".hud" / "config.json").read_bytes() == written
+    assert (hud.cwd / ".hud" / "config.json").read_bytes() == written
     assert (shown.json["project"]["id"], shown.json["source"]) == (
         BROWSER_PROJECT_ID,
         ".hud/config.json",
@@ -83,43 +51,42 @@ def test_linking_a_directory_accumulates_its_platform_ids(
 @pytest.mark.parametrize(
     "scope",
     [
-        {"origin": "http://hud.test", "user_id": OTHER_ID, "team_id": TEAM_ID},
-        {"origin": "http://hud.test", "user_id": USER_ID, "team_id": OTHER_ID},
+        {"origin": "here", "user_id": OTHER_ID, "team_id": TEAM_ID},
+        {"origin": "here", "user_id": USER_ID, "team_id": OTHER_ID},
         {"origin": "https://api.example", "user_id": USER_ID, "team_id": TEAM_ID},
     ],
     ids=["another-user", "another-team", "another-platform"],
 )
 def test_a_link_made_with_other_credentials_is_refused(
-    hud: Hud, registry: FakeServices, scope: dict[str, str]
+    hud: Hud, platform: Platform, scope: dict[str, str]
 ) -> None:
-    origin = registry.url("api").removesuffix("/api")
-    path = hud.cwd / ".hud" / "config.json"
-    path.parent.mkdir()
+    origin = platform.services.url("api").removesuffix("/api")
     stored = {"version": 1, "scope": scope, "project_id": DEFAULT_PROJECT_ID}
-    path.write_text(json.dumps(stored).replace("http://hud.test", origin))
-    before = path.read_bytes()
+    write_files(
+        hud.cwd / ".hud", {"config.json": json.dumps(stored).replace('"here"', f'"{origin}"')}
+    )
+    before = (hud.cwd / ".hud" / "config.json").read_bytes()
 
     result = hud("project", "use", "browser-evals", "--json")
 
-    assert result.exit_code == 1, result
-    assert result.json["error"] == "failure"
-    assert path.read_bytes() == before
+    assert (result.exit_code, result.json["error"]) == (1, "failure"), result
+    assert (hud.cwd / ".hud" / "config.json").read_bytes() == before
 
 
-def test_an_older_camelcase_link_is_rewritten_with_its_ids(
-    hud: Hud, registry: FakeServices
-) -> None:
+def test_an_older_camelcase_link_is_rewritten_with_its_ids(hud: Hud, platform: Platform) -> None:
+    example = platform.add_environment("example")
     write_files(
         hud.cwd / ".hud",
-        {"config.json": json.dumps({"registryId": REGISTRY_ID, "tasksetId": OTHER_ID})},
+        {"config.json": json.dumps({"registryId": example, "tasksetId": OTHER_ID})},
     )
 
     result = hud("project", "use", "browser-evals", "--json")
 
     assert result.exit_code == 0, result
-    stored = config(hud.cwd, registry)
+    stored = link(hud)
+    assert stored is not None
     assert (stored["registry_id"], stored["taskset_id"], stored["project_id"]) == (
-        REGISTRY_ID,
+        example,
         OTHER_ID,
         BROWSER_PROJECT_ID,
     )
@@ -129,7 +96,7 @@ def test_an_older_camelcase_link_is_rewritten_with_its_ids(
     ("files", "argv", "exit_code"),
     [
         pytest.param(
-            {"config.json": json.dumps({"registryId": REGISTRY_ID})},
+            {"config.json": json.dumps({"registryId": OTHER_ID})},
             ["--dry-run"],
             0,
             id="a-dry-run-over-a-camelcase-link",
@@ -138,7 +105,7 @@ def test_an_older_camelcase_link_is_rewritten_with_its_ids(
     ],
 )
 def test_a_link_it_cannot_or_must_not_rewrite_is_left_alone(
-    hud: Hud, registry: FakeServices, files: dict[str, str], argv: list[str], exit_code: int
+    hud: Hud, platform: Platform, files: dict[str, str], argv: list[str], exit_code: int
 ) -> None:
     write_files(hud.cwd / ".hud", files)
 
@@ -176,7 +143,7 @@ def test_a_link_it_cannot_or_must_not_rewrite_is_left_alone(
 )
 def test_project_shows_the_selected_project_and_why(
     hud: Hud,
-    projects: FakeServices,
+    platform: Platform,
     hud_env: HudEnv,
     linked: str | None,
     default: str | None,
@@ -194,7 +161,7 @@ def test_project_shows_the_selected_project_and_why(
 
 
 def test_a_default_project_that_does_not_exist_is_not_found(
-    hud: Hud, projects: FakeServices, hud_env: HudEnv
+    hud: Hud, platform: Platform, hud_env: HudEnv
 ) -> None:
     hud_env.set(HUD_DEFAULT_PROJECT="nope")
 
@@ -203,26 +170,20 @@ def test_a_default_project_that_does_not_exist_is_not_found(
     assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
 
 
-def test_project_list_reads_every_page(hud: Hud, platform: FakeServices) -> None:
-    many = [
-        {"id": f"dddddddd-0000-4000-8000-{index:012d}", "name": f"p{index}"} for index in range(51)
+def test_project_list_reads_every_page(hud: Hud, platform: Platform) -> None:
+    platform.page_size = 2
+    platform.projects += [
+        {"id": f"dddddddd-0000-4000-8000-{n:012d}", "name": f"p{n}"} for n in range(3)
     ]
-    platform.route(
-        "api",
-        "GET",
-        "/v2/projects",
-        Reply(json={"items": many[:50], "total": 51}),
-        Reply(json={"items": many[50:], "total": 51}),
-    )
 
     quiet = hud("project", "list", "--quiet")
 
     assert quiet.exit_code == 0, quiet
-    assert quiet.stdout.split() == [project["id"] for project in many]
+    assert quiet.stdout.split() == [project["id"] for project in platform.projects]
 
 
 def test_project_list_marks_the_default_and_read_only_projects(
-    hud: Hud, projects: FakeServices
+    hud: Hud, platform: Platform
 ) -> None:
     result = hud("project", "list", "--json")
 
@@ -235,52 +196,39 @@ def test_project_list_marks_the_default_and_read_only_projects(
 
 
 @pytest.mark.parametrize(
-    ("argv", "linked"),
-    [
-        (["project", "create", "Browser Evals", "--description", "UI tasks"], True),
-        (["project", "create", "Browser Evals", "--no-use"], False),
-    ],
+    ("flags", "linked"), [(["--description", "UI tasks"], True), (["--no-use"], False)]
 )
-def test_project_create_posts_the_project_and_links_unless_told_not_to(
-    hud: Hud, projects: FakeServices, argv: list[str], linked: bool
+def test_project_create_makes_the_project_and_links_unless_told_not_to(
+    hud: Hud, platform: Platform, flags: list[str], linked: bool
 ) -> None:
-    projects.route("api", "POST", "/v2/projects", json=PROJECT_CREATED)
+    result = hud("project", "create", "UI Evals", *flags, "--json")
 
-    result = hud(*argv, "--json")
-
-    assert (result.exit_code, result.json["id"]) == (0, BROWSER_PROJECT_ID), result
-    assert projects.bodies("api", "POST", "/v2/projects") == [
-        {"name": "Browser Evals", **({"description": "UI tasks"} if linked else {})}
-    ]
-    assert link_project(hud) == (BROWSER_PROJECT_ID if linked else None)
+    assert result.exit_code == 0, result
+    (created,) = [project for project in platform.projects if project["name"] == "UI Evals"]
+    assert result.json["id"] == created["id"]
+    assert created.get("description") == ("UI tasks" if linked else None)
+    assert (link(hud) or {}).get("project_id") == (created["id"] if linked else None)
 
 
-@pytest.mark.parametrize(
-    ("argv", "reply", "exit_code"),
-    [
-        pytest.param(
-            ["create", "Browser Evals", "--no-use"],
-            Reply(status=403, json={"detail": "Projects are not enabled"}),
-            1,
-            id="create-refused",
-        ),
-        pytest.param(["use", "locked-down"], None, 1, id="use-a-read-only-project"),
-    ],
-)
-def test_project_changes_that_link_nothing(
-    hud: Hud, projects: FakeServices, argv: list[str], reply: Reply | None, exit_code: int
-) -> None:
-    if reply is not None:
-        projects.route("api", "POST", "/v2/projects", reply)
+def test_a_refused_project_creation_links_nothing(hud: Hud, platform: Platform) -> None:
+    platform.services.route(
+        "api", "POST", "/v2/projects", Reply(status=403, json={"detail": "Not enabled"})
+    )
 
-    result = hud("project", *argv, "--json")
+    result = hud("project", "create", "UI Evals", "--json")
 
-    assert result.exit_code == exit_code, result
-    assert not (hud.cwd / ".hud").exists()
-    assert projects.requests("api", "POST", "/v2/projects") == ([] if reply is None else [ANY])
+    assert result.exit_code == 1, result
+    assert link(hud) is None
 
 
-def test_the_directory_option_after_the_verb_wins(hud: Hud, projects: FakeServices) -> None:
+def test_using_a_read_only_project_links_nothing(hud: Hud, platform: Platform) -> None:
+    result = hud("project", "use", "locked-down", "--json")
+
+    assert (result.exit_code, result.json["error"]) == (1, "permission_denied"), result
+    assert link(hud) is None
+
+
+def test_the_directory_option_after_the_verb_wins(hud: Hud, platform: Platform) -> None:
     result = hud("project", "-C", "group", "use", BROWSER_PROJECT_ID, "-C", "override")
 
     assert result.exit_code == 0, result
