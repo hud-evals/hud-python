@@ -73,26 +73,6 @@ def fail(status: int, message: str = "scripted provider error") -> Turn:
     return Turn(fail=Reply(status=status, json={"error": {"type": "error", "message": message}}))
 
 
-def computer_call(
-    *actions: dict[str, Any],
-    id: str = "call_computer",
-    pending_safety_checks: Sequence[dict[str, Any]] = (),
-) -> Turn:
-    """A Responses ``computer_call`` running ``actions`` in order."""
-    return Turn(
-        native=(
-            {
-                "type": "computer_call",
-                "id": f"cu_{id}",
-                "call_id": id,
-                "actions": list(actions),
-                "pending_safety_checks": list(pending_safety_checks),
-                "status": "completed",
-            },
-        )
-    )
-
-
 def shell_call(*commands: str, id: str = "call_shell", **action: Any) -> Turn:
     """A Responses ``shell_call``; ``action`` adds ``timeout_ms`` or ``max_output_length``."""
     return Turn(
@@ -115,16 +95,6 @@ def stream_error(kind: str, *, headers: dict[str, str] | None = None) -> Turn:
         _sse("error", {"error": {"type": kind, "message": f"scripted {kind}"}}),
     ]
     return Turn(fail=Reply(stream=events, headers=headers or {}, content_type="text/event-stream"))
-
-
-def interrupted() -> Turn:
-    """An Anthropic stream whose connection drops after the message starts."""
-
-    def events() -> Iterator[bytes]:
-        yield _sse("message_start", {"message": _message_start("m")})
-        raise ConnectionResetError("scripted interruption")
-
-    return Turn(fail=Reply(stream=events(), content_type="text/event-stream"))
 
 
 @dataclass(frozen=True)

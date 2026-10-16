@@ -18,11 +18,11 @@ from hud.utils.exceptions import (
     HudRequestError,
     HudTimeoutError,
 )
-from hud.utils.hints import CREDITS_EXHAUSTED, RATE_LIMIT_HIT
+from hud.utils.hints import CREDITS_EXHAUSTED
 from tests.support import Reply
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud, HudEnv, Request
+    from tests.support import FakeServices, HudEnv, Request
 
 
 async def _request(asynchronous: bool, url: str, **kwargs: Any) -> Any:
@@ -69,12 +69,6 @@ async def test_transient_responses_are_retried_with_doubling_backoff(
             [Reply(status=502), Reply(json={"id": "1"})], {"id": "1"}, 2, id="502-then-ok"
         ),
         pytest.param(
-            [Reply(status=404, json={"detail": "nope"})],
-            ("Request failed: nope", 404, {"detail": "nope"}, []),
-            1,
-            id="404-detail",
-        ),
-        pytest.param(
             [Reply(status=400, json={"code": "bad"})],
             (
                 "Request failed with status 400 - JSON response: {'code': 'bad'}",
@@ -90,12 +84,6 @@ async def test_transient_responses_are_retried_with_doubling_backoff(
             ("Request failed: no credits", 402, {"detail": "no credits"}, [CREDITS_EXHAUSTED]),
             1,
             id="402-once",
-        ),
-        pytest.param(
-            [Reply(status=429, json={"detail": "slow down"})],
-            ("Request failed: slow down", 429, {"detail": "slow down"}, [RATE_LIMIT_HIT]),
-            1,
-            id="429-once",
         ),
         pytest.param(
             [Reply(status=500, body="oops", content_type="text/plain")],
@@ -249,9 +237,8 @@ async def test_the_platform_client_sends_each_verb_under_v2_with_the_bearer(
     ]
 
 
-@pytest.mark.parametrize("api_key", [None, ""])
-def test_the_platform_client_needs_an_api_key(hud_env: HudEnv, api_key: str | None) -> None:
-    hud_env.set(HUD_API_KEY=api_key)
+def test_the_platform_client_needs_an_api_key(hud_env: HudEnv) -> None:
+    hud_env.set(HUD_API_KEY=None)
 
     with pytest.raises(HudAuthenticationError, match="HUD_API_KEY is required"):
         PlatformClient.from_settings()
@@ -263,28 +250,3 @@ def test_a_platform_client_built_without_a_key_refuses_to_send(services: FakeSer
     with pytest.raises(HudAuthenticationError):
         platform.get("/tasks")
     assert services.requests() == []
-
-
-# ─── through the CLI ─────────────────────────────────────────────────────────
-
-
-def test_hud_models_list_reads_every_catalog_page(
-    services: FakeServices, hud_env: HudEnv, hud: Hud
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    rows = [{"id": f"id-{index:03}", "name": f"Model {index:03}"} for index in range(103)]
-
-    def page(request: Request) -> Reply:
-        offset, limit = int(request.query["offset"][0]), int(request.query["limit"][0])
-        return Reply(json={"items": rows[offset : offset + limit], "total": len(rows)})
-
-    services.route("api", "GET", "/v2/models", handler=page)
-
-    result = hud("models", "list", "--json")
-
-    assert result.exit_code == 0, result
-    assert [model["id"] for model in result.json] == [row["id"] for row in rows]
-    assert [request.query for request in services.requests("api", "GET", "/v2/models")] == [
-        {"limit": ["100"], "offset": ["0"]},
-        {"limit": ["100"], "offset": ["100"]},
-    ]

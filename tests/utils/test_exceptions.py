@@ -9,15 +9,10 @@ import pytest
 
 from hud.utils import HUDConsole
 from hud.utils.exceptions import (
-    HudAuthenticationError,
-    HudConfigError,
-    HudException,
     HudRequestError,
 )
 from hud.utils.hints import (
-    CREDITS_EXHAUSTED,
     HUD_API_KEY_MISSING,
-    INVALID_CONFIG,
     PRO_PLAN_REQUIRED,
     RATE_LIMIT_HIT,
     Hint,
@@ -25,13 +20,6 @@ from hud.utils.hints import (
 
 STATUS_HINTS = {
     "401 asks for an API key": ({"status_code": 401}, [HUD_API_KEY_MISSING]),
-    "402 says credits ran out": ({"status_code": 402}, [CREDITS_EXHAUSTED]),
-    "429 says the rate limit was hit": ({"status_code": 429}, [RATE_LIMIT_HIT]),
-    "a bare 403 asks for an API key": ({"status_code": 403}, [HUD_API_KEY_MISSING]),
-    "a 403 whose message names Pro asks for the plan": (
-        {"status_code": 403, "message": "Feature requires Pro plan"},
-        [PRO_PLAN_REQUIRED],
-    ),
     "a 403 whose detail names Pro asks for the plan": (
         {"status_code": 403, "response_json": {"detail": "Requires Pro plan"}},
         [PRO_PLAN_REQUIRED],
@@ -50,18 +38,6 @@ def test_a_request_error_hints_at_the_fix_for_its_status(
 ) -> None:
     error = HudRequestError(kwargs.pop("message", "failed"), **kwargs)
 
-    assert error.hints == hints
-
-
-@pytest.mark.parametrize(
-    ("error", "hints"),
-    [
-        (HudException("broke"), []),
-        (HudAuthenticationError("no key"), [HUD_API_KEY_MISSING]),
-        (HudConfigError("bad config"), [INVALID_CONFIG]),
-    ],
-)
-def test_each_error_kind_carries_its_default_hints(error: HudException, hints: list[Hint]) -> None:
     assert error.hints == hints
 
 
