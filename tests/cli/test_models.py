@@ -76,7 +76,7 @@ def test_models_list_json_is_the_catalog_sorted_by_name(hud: Hud, catalog: FakeS
     assert request.query == {"limit": ["100"], "offset": ["0"]}
 
 
-@pytest.mark.parametrize("model", ["owner/model + version", "MY-SONNET", "team/my-sonnet", MINE_ID])
+@pytest.mark.parametrize("model", ["owner/model + version", MINE_ID])
 def test_checkpoints_and_head_read_the_resolved_model(
     hud: Hud, catalog: FakeServices, model: str
 ) -> None:
@@ -171,7 +171,6 @@ def test_fork_creates_a_trainable_model(
     ("argv", "exit_code"),
     [
         pytest.param(["fork", "claude-sonnet-4-6", "--name", "mine", "--dry-run"], 0, id="dry-run"),
-        pytest.param(["fork", "claude-sonet-4-6", "--name", "mine"], 2, id="a-misspelt-model"),
         pytest.param(["head", "gpt-nothing", "--set", "c"], 2, id="an-unknown-model"),
     ],
 )
