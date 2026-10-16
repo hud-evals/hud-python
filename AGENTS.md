@@ -138,11 +138,11 @@ real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
 - Never hand-build what a producer emits. Run the producer, so the test covers
   the seam between it and its consumer.
 - Assert what a user or a peer observes: the reward, run and trace fields,
-  output and exit codes, files, request bodies, wire frames. Prefer fixture
-  environments whose reward proves the path ran.
-- Write a scenario once per contract, as a table; a new case is a new row. Use
-  inline snapshots only where a whole output is the contract: request bodies the
-  platform parses, `--json` documents, docker and cloud-SDK transcripts.
+  output and exit codes, files, what the platform recorded, wire frames. Prefer
+  fixture environments whose reward proves the path ran.
+- Write a scenario once per contract, as a table; a new case is a new row.
+  Assert the fields the case is about, never a recorded copy of a whole output:
+  no snapshots of argv, request bodies or rendered text.
 - Do not add tests to check your own change. Check it with a temporary script,
   and extend a scenario only when the change adds or fixes a contract; a bug fix
   lands with the scenario row that failed before it.

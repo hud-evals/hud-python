@@ -49,9 +49,13 @@ provides them as fixtures:
 - `hud_env`: the SDK's configuration. Every test starts with a temporary home,
   no credentials, and service URLs pointed at a closed port; `hud_env.set(...)`
   changes environment variables the way a user would.
-- `services`: a local stand-in for the HUD API, telemetry, gateway, runtime and
-  training services. Declare replies with `services.route(...)` and read what
-  the SDK sent with `services.requests(...)`; anything undeclared answers 404.
+- `platform`: the HUD platform, signed in. Seed what a test needs
+  (`platform.add_taskset(...)`, `platform.add_model(...)`) and check what the
+  code left behind (`platform.tasksets`, `platform.builds`, `platform.traces`).
+  `reporting` is the same platform with telemetry uploads on.
+- `services`: the HTTP layer under `platform`, for services the platform fake
+  does not model and for faults: `platform.services.route(...)` overrides a
+  route; anything undeclared answers 404.
 - `models`: scripted model providers behind the fake gateway, speaking OpenAI
   Chat Completions and Responses, Anthropic Messages and Gemini. Script turns
   with `models.script([call("bash", command="ls"), say("done")])`.
@@ -70,14 +74,11 @@ provides them as fixtures:
 For example:
 
 ```python
-async def test_a_reporting_rollout_reaches_the_platform(services, hud_env):
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
-    services.route("api", "POST", "/v2/trace/{id}/exit", json={})
-
+async def test_a_graded_rollout_reports_its_reward(reporting):
     job = await Taskset("demo", [row]).run(ScriptedAgent("3"), runtime=LocalRuntime(env))
 
-    assert job.reward == 1.0
-    assert services.bodies("api", "POST", "/v2/trace/{id}/exit") == snapshot(...)
+    (trace,) = reporting.traces.values()
+    assert (job.reward, trace.exit["reward"]) == (1.0, 1.0)
 ```
 
 Rules, enforced by `scripts/check_tests.py` and in review:
@@ -85,9 +86,8 @@ Rules, enforced by `scripts/check_tests.py` and in review:
 - Never patch a `hud` name, import a private one, or touch a private attribute.
 - Never hand-build what a producer emits; run the producer.
 - Write one scenario per contract as a table, and add a row for a new case.
-- Use inline snapshots (`inline-snapshot`) only where a whole output is the
-  contract. Record them with `uv run pytest --inline-snapshot=create` and review
-  every change to one like any other diff.
+- Assert the fields a case is about, not a recorded copy of a whole output: no
+  snapshots of argv, request bodies or rendered text.
 - Do not commit a test to check your own change; use a temporary script.
 
 ### Code Quality

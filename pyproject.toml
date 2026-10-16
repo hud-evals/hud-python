@@ -136,7 +136,6 @@ dev = [
     "pytest-cov",
     "pytest-xdist",
     "pytest-timeout",
-    "inline-snapshot",
     "dirty-equals",
     "ty==0.0.67",
 ]
