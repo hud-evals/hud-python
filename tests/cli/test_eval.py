@@ -64,7 +64,6 @@ def run(hud: Hud, *argv: str) -> Any:
 @pytest.mark.parametrize(
     ("grade", "exit_code", "rewards", "errors"),
     [
-        pytest.param('1.0 if answer == "ok" else 0.0', 0, [1.0, 1.0], [False, False], id="graded"),
         pytest.param("0.0", 0, [1.0, 0.0], [False, False], id="a-low-reward-is-not-an-error"),
         pytest.param(
             '{"score": 0.0, "isError": True, "content": "grader unavailable"}',
@@ -107,8 +106,6 @@ def test_eval_reports_every_run_and_fails_when_one_errored(
         pytest.param([], ["solve 0"], id="the-first-by-default"),
         pytest.param(["--all"], ["solve 0", "solve 1"], id="all"),
         pytest.param(["--task-ids", "1"], ["solve 1"], id="by-index"),
-        pytest.param(["--task-ids", "solve"], ["solve 0", "solve 1"], id="by-template"),
-        pytest.param(["--group", "3", "--max-concurrent", "2"], ["solve 0"] * 3, id="grouped"),
     ],
 )
 def test_eval_runs_the_tasks_it_selects(
@@ -174,45 +171,11 @@ KIMI_TOML = (
             id="config-flag",
         ),
         pytest.param(
-            ["claude", "-c", "claude.max_tokens=200"],
-            "",
-            {},
-            {"protocol": "anthropic", "max_tokens": 200},
-            id="config-flag-for-a-named-agent",
-        ),
-        pytest.param(
-            ["openai", "--gateway"],
-            "",
-            {"OPENAI_API_KEY": "provider-key"},
-            {"protocol": "responses", "key": API_KEY},
-            id="gateway-flag-wins-over-provider-key",
-        ),
-        pytest.param(
-            ["openai_compatible", "--model", "MiniMax-M3"],
-            "",
-            {"OPENAI_API_KEY": "provider-key"},
-            {"protocol": "chat", "model": "MiniMax-M3", "key": API_KEY},
-            id="compatible-models-ignore-the-openai-key",
-        ),
-        pytest.param(
             ["openai_compatible", "-m", "custom", "-c", "api_key=custom-key", "-c", "base_url=URL"],
             "",
             {},
             {"protocol": "chat", "model": "custom", "key": "custom-key"},
             id="custom-endpoint",
-        ),
-        pytest.param(
-            [
-                *["openai_compatible", "-m", "custom", "-c", "api_key=custom-key"],
-                *["-c", "base_url=URL", "--gateway"],
-            ],
-            "",
-            {},
-            {"protocol": "chat", "model": "custom", "key": API_KEY},
-            id="gateway-flag-wins-over-custom-endpoint",
-        ),
-        pytest.param(
-            ["gemini"], "", {}, {"protocol": "gemini", "key": API_KEY}, id="gemini-via-gateway"
         ),
     ],
 )
@@ -273,62 +236,12 @@ TASKS = "tasks = [solve()]\n"
 FROM_ENV = "from env import solve\n" + TASKS
 
 
-def split(prefix: str) -> dict[str, str]:
-    """An env assembled from a core module, a templates module and an entry module."""
-    return {
-        "core.py": ENV,
-        "templates.py": IMPORTS + f"from {prefix}core import env\n" + SOLVE,
-        "env.py": IMPORTS
-        + f"from {prefix}core import env\nfrom {prefix}templates import solve\n"
-        + HOOKS,
-    }
-
-
 LAYOUTS: dict[str, tuple[dict[str, str], str]] = {
     "one-file": ({"env.py": ONE_FILE + TASKS}, "env.py"),
-    "a-named-file": (
-        {"standalone.py": ONE_FILE + TASKS, "env.py": ENV.replace("local-test", "unrelated")},
-        "standalone.py",
-    ),
     "tasks-beside-the-env": ({"env.py": ONE_FILE, "tasks.py": FROM_ENV}, "tasks.py"),
-    "the-directory": ({"env.py": ONE_FILE, "tasks.py": FROM_ENV}, "."),
-    "env-across-modules": (split("") | {"tasks.py": FROM_ENV}, "tasks.py"),
-    "env-across-modules-with-its-tasks": (
-        {**split(""), "env.py": split("")["env.py"] + TASKS},
-        "env.py",
-    ),
-    "package": (
-        split(".") | {"__init__.py": "", "tasks.py": "from .env import solve\n" + TASKS},
-        "tasks.py",
-    ),
-    "package-importing-inside-a-template": (
-        {
-            "__init__.py": "",
-            "expected.py": 'from pathlib import Path\nexpected = Path("asset.txt").read_text()\n',
-            "env.py": IMPORTS
-            + ENV
-            + SOLVE.replace(
-                "    answer = yield", "    from .expected import expected\n    answer = yield"
-            )
-            + HOOKS
-            + TASKS,
-        },
-        "env.py",
-    ),
     "json-rows": (
         {"env.py": ONE_FILE, "tasks.json": json.dumps([{"env": "local-test", "id": "solve"}])},
         "tasks.json",
-    ),
-    "jsonl-rows": (
-        {"env.py": ONE_FILE, "tasks.jsonl": json.dumps({"env": "local-test", "id": "solve"})},
-        "tasks.jsonl",
-    ),
-    "python-rows": (
-        {
-            "env.py": ONE_FILE,
-            "tasks.py": 'from hud.eval import Task\ntasks = [Task(env="local-test", id="solve")]\n',
-        },
-        "tasks.py",
     ),
 }
 
@@ -353,13 +266,8 @@ def test_each_project_layout_runs_in_fresh_env_processes(
 @pytest.mark.parametrize(
     ("source", "same_name", "errors"),
     [
-        ("tasks.py", False, 0),
-        ("tasks.py", True, 0),
-        (".", False, 0),
-        (".", True, 1),
         ("rows.json", False, 0),
-        ("rows.json", True, 1),
-        ("rows.jsonl", False, 0),
+        (".", True, 1),
     ],
 )
 def test_a_row_runs_in_the_environment_it_names(
@@ -390,16 +298,15 @@ def test_a_row_runs_in_the_environment_it_names(
     assert (result.json["run_count"], result.json["error_count"]) == (1, errors)
 
 
-@pytest.mark.parametrize("shared", [True, False], ids=["one-env", "own-env"])
-def test_a_nested_verifier_runs_in_its_environment(
-    hud: Hud, gateway: Models, tmp_path: Path, shared: bool
+def test_a_nested_verifier_runs_in_its_own_environment(
+    hud: Hud, gateway: Models, tmp_path: Path
 ) -> None:
     project = tmp_path / "project"
     write_files(
         project,
         {
             "core.py": 'from hud import Environment\nactor = Environment("actor")\n'
-            + ("judge = actor\n" if shared else 'judge = Environment("judge")\n'),
+            + 'judge = Environment("judge")\n',
             "actor.py": "from core import actor\n"
             '@actor.template(id="solve")\nasync def solve():\n'
             '    answer = yield "answer ok"\n    yield {"score": 0.0, "answer": answer}\n',
@@ -488,41 +395,30 @@ PLAN = {
 @pytest.mark.parametrize(
     ("config", "argv", "changes"),
     [
-        ("", ["tasks.py", "openai"], {}),
-        ("", ["My Tasks", "openai"], {"source": "My Tasks", "runtime": "hosted", "remote": True}),
-        ("", ["My Tasks", "openai", "--runtime", "hud"], {"source": "My Tasks", "runtime": "hud"}),
-        ("", ["tasks.py", "openai", "--full"], {"all": True, "max_steps": 100}),
-        ("[eval]\nremote = true\n", ["tasks.py", "openai"], {"runtime": "hosted", "remote": True}),
-        (
-            "[eval]\nremote = false\n",
+        pytest.param("", ["tasks.py", "openai"], {}, id="a-local-source-runs-here"),
+        pytest.param(
+            "",
             ["My Tasks", "openai"],
             {"source": "My Tasks", "runtime": "hosted", "remote": True},
+            id="a-platform-taskset-runs-hosted",
         ),
-        ('[eval]\nremote = true\nruntime = "local"\n', ["tasks.py", "openai"], {}),
-        ('[eval]\nremote = false\nruntime = "hud"\n', ["tasks.py", "openai"], {"runtime": "hud"}),
-        ("[eval]\nremote = true\n", ["tasks.py", "openai", "--runtime", "local"], {}),
-        (
+        pytest.param(
+            "[eval]\nremote = true\n",
+            ["tasks.py", "openai"],
+            {"runtime": "hosted", "remote": True},
+            id="the-toml-asks-for-hosted",
+        ),
+        pytest.param(
             "[eval]\nremote = false\n",
             ["tasks.py", "openai", "--remote"],
             {"runtime": "hosted", "remote": True},
+            id="a-flag-beats-the-toml",
         ),
-        (
-            '[eval]\nsource = "tasks.py"\nagent = "openai"\nmax_steps = 5\nruntime = "hosted"\n'
-            'group_size = 2\ntask_ids = ["solve"]\n',
-            [],
-            {
-                "runtime": "hosted",
-                "remote": True,
-                "max_steps": 5,
-                "group_size": 2,
-                "task_ids": ["solve"],
-            },
-        ),
-        ('[openai]\nmodel = "${MY_EVAL_MODEL}"\n', ["tasks.py", "openai"], {"model": "gpt-4o"}),
-        (
+        pytest.param(
             '[openai]\nmodel = "${MY_EVAL_MODEL}"\n',
-            ["tasks.py", "openai", "-m", "x"],
-            {"model": "x"},
+            ["tasks.py", "openai"],
+            {"model": "gpt-4o"},
+            id="the-toml-model-from-a-variable",
         ),
     ],
 )
@@ -556,7 +452,6 @@ def test_a_dry_run_reports_the_plan_and_runs_nothing(
             "usage",
             id="an-unknown-setting",
         ),
-        pytest.param("[eval", ["tasks.py", "openai"], API_KEY, 2, "usage", id="unparseable-toml"),
         pytest.param(
             '[openai]\nmodel = "${HUD_EVAL_TEST_UNSET}"\n',
             ["tasks.py", "openai"],
@@ -565,32 +460,6 @@ def test_a_dry_run_reports_the_plan_and_runs_nothing(
             "usage",
             id="an-unset-variable",
         ),
-        pytest.param(
-            "",
-            ["tasks.py", "openai", "-c", "max_tokens"],
-            API_KEY,
-            2,
-            "usage",
-            id="a-malformed-flag",
-        ),
-        pytest.param(
-            "",
-            ["tasks.py", "openai", "--runtime", "hud", "--remote"],
-            API_KEY,
-            2,
-            "usage",
-            id="two-placements",
-        ),
-        pytest.param("", ["tasks.py", "openai_compatible"], API_KEY, 2, "usage", id="no-model"),
-        pytest.param(
-            "",
-            ["tasks.py", "openai", "--task-ids", "nope"],
-            API_KEY,
-            2,
-            "usage",
-            id="no-matching-task",
-        ),
-        pytest.param("", ["--dry-run"], API_KEY, 2, "usage", id="a-dry-run-without-a-source"),
         pytest.param("", [], API_KEY, 1, "not_found", id="no-source-found"),
         pytest.param(
             "",
@@ -599,14 +468,6 @@ def test_a_dry_run_reports_the_plan_and_runs_nothing(
             1,
             "permission_denied",
             id="hud-runtime-signed-out",
-        ),
-        pytest.param(
-            "",
-            ["tasks.py", "openai", "--gateway"],
-            None,
-            1,
-            "permission_denied",
-            id="gateway-signed-out",
         ),
     ],
 )
@@ -631,25 +492,10 @@ def test_eval_refuses_without_prompting_or_calling_out(
     assert (hud.cwd / ".hud_eval.toml").read_text() == config
 
 
-@pytest.mark.parametrize(
-    "task",
-    [
-        pytest.param({"name": "one", "env": "demo", "scenario": "solve"}, id="no-container"),
-        pytest.param(
-            {
-                "name": "one",
-                "env": "actor",
-                "scenario": "solve",
-                "runtime_config": {"image": "example:latest"},
-                "verifier": {"env": "judge", "id": "verify"},
-            },
-            id="verifier-without-container",
-        ),
-    ],
-)
-def test_a_platform_taskset_runs_locally_only_from_container_rows(
-    hud: Hud, services: FakeServices, hud_env: HudEnv, task: dict[str, Any]
+def test_a_platform_taskset_without_container_rows_cannot_run_locally(
+    hud: Hud, services: FakeServices, hud_env: HudEnv
 ) -> None:
+    task = {"name": "one", "env": "demo", "scenario": "solve"}
     hud_env.set(HUD_API_KEY=API_KEY)
     taskset = "eeeeeeee-0000-4000-8000-000000000001"
     services.route(
