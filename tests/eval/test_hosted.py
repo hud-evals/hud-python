@@ -30,23 +30,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.agents.base import Agent
-    from tests.support import FakeServices, HudEnv
+    from tests.support import HudEnv, Platform
+    from tests.support.platform import Trace
 
 SUBMIT = "/v2/rollouts/submit"
-CANCEL = "/v2/rollouts/cancel"
-POLL = "/v2/trace/{id}"
 TRACE_ID = "1" * 32
 JOB_ID = "2" * 32
 ROW = Task(env="sums", id="add", args={"a": 1, "b": 2})
-
-
-@pytest.fixture
-def platform(services: FakeServices, hud_env: HudEnv) -> FakeServices:
-    """The fake platform accepting submissions, with a key set."""
-    hud_env.set(HUD_API_KEY="k")
-    services.route("api", "POST", SUBMIT, json={"status": "queued"})
-    services.route("api", "POST", CANCEL, json={})
-    return services
+RUNNING = [{"status": "running"}]
 
 
 def chat_agent() -> OpenAIChatAgent:
@@ -55,25 +46,28 @@ def chat_agent() -> OpenAIChatAgent:
     )
 
 
-def submitted(platform: FakeServices) -> dict[str, Any]:
-    (request,) = platform.requests("api", "POST", SUBMIT)
-    assert request.bearer == "k"
-    return request.json
+def hosted(platform: Platform) -> Trace:
+    """The one trace the platform was asked to run or to cancel."""
+    (trace,) = platform.traces.values()
+    return trace
+
+
+def submitted(platform: Platform) -> dict[str, Any]:
+    body = hosted(platform).submitted
+    assert body is not None
+    return body
 
 
 async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completion(
-    platform: FakeServices, tmp_path: Path
+    platform: Platform, tmp_path: Path
 ) -> None:
     compose = tmp_path / "compose.yaml"
     compose.write_text("services:\n  main:\n    image: sums:latest\n")
-    platform.route(
-        "api",
-        "GET",
-        POLL,
-        Reply(json={"status": "pending"}),
-        Reply(json={"status": "running"}),
-        Reply(json={"status": "completed", "reward": 0.5}),
-    )
+    platform.next_rollout = [
+        {"status": "pending"},
+        {"status": "running"},
+        {"status": "completed", "reward": 0.5},
+    ]
     row = Task(
         env="sums",
         id="add",
@@ -117,8 +111,6 @@ async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completi
     assert body["agent"]["config"]["timeout_seconds"] == 45.0
     assert (body["verifier"]["env"], body["verifier"]["args"]) == ("judge", {"expected": 3})
     assert "secret" not in str(body)
-    polls = platform.requests("api", "GET", POLL)
-    assert [poll.params["id"] for poll in polls] == [str(uuid.UUID(TRACE_ID))] * 3
     assert (run.reward, run.trace.status, run.trace_id, run.job_id, run.group_id, run.slug) == (
         0.5,
         "completed",
@@ -144,10 +136,8 @@ async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completi
     ],
 )
 async def test_a_hosted_rollout_sends_its_agent_as_it_dumps_without_credentials(
-    agent: Agent, registered: str, platform: FakeServices
+    agent: Agent, registered: str, platform: Platform
 ) -> None:
-    platform.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
-
     await HostedRuntime(poll_interval=0).run(ROW, agent, job_id=JOB_ID, trace_id=TRACE_ID)
 
     sent = submitted(platform)["agent"]
@@ -169,10 +159,8 @@ PARENTS = {
 
 @pytest.mark.parametrize(("ambient", "parent"), PARENTS.values(), ids=PARENTS.keys())
 async def test_a_hosted_rollout_names_its_parent_trace_only_when_it_is_another_trace(
-    ambient: str, parent: str | None, platform: FakeServices
+    ambient: str, parent: str | None, platform: Platform
 ) -> None:
-    platform.route("api", "GET", POLL, json={"status": "completed", "reward": 1.0})
-
     with set_trace_context(ambient):
         await HostedRuntime(poll_interval=0).run(
             ROW, chat_agent(), job_id=JOB_ID, trace_id=TRACE_ID
@@ -219,9 +207,9 @@ TERMINAL = {
 
 @pytest.mark.parametrize(("state", "folded"), TERMINAL.values(), ids=TERMINAL.keys())
 async def test_a_terminal_trace_folds_into_the_run_and_its_job(
-    state: dict[str, Any], folded: tuple[Any, ...], platform: FakeServices
+    state: dict[str, Any], folded: tuple[Any, ...], platform: Platform
 ) -> None:
-    platform.route("api", "GET", POLL, json=state)
+    platform.next_rollout = [state]
 
     job = await Taskset("hosted", [ROW]).run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
@@ -234,67 +222,56 @@ async def test_a_terminal_trace_folds_into_the_run_and_its_job(
     assert (body["job_id"], body["group_id"]) == (str(uuid.UUID(job.id)), run.group_id)
 
 
-STALLS = {
-    "a trace that never finishes": (
-        Reply(json={"status": "queued"}),
-        Reply(json={"status": "running"}),
-    ),
-    "a submission that never returns": (Reply(json={"status": "queued"}, delay=5), None),
-}
-
-
-@pytest.mark.parametrize(("submit", "poll"), STALLS.values(), ids=STALLS.keys())
+@pytest.mark.parametrize("submission_stalls", [False, True], ids=["running", "unsubmitted"])
 async def test_a_hosted_rollout_past_its_deadline_is_cancelled_remotely(
-    submit: Reply, poll: Reply | None, platform: FakeServices
+    submission_stalls: bool, platform: Platform
 ) -> None:
-    platform.route("api", "POST", SUBMIT, submit)
-    if poll is not None:
-        platform.route("api", "GET", POLL, poll)
+    platform.next_rollout = RUNNING
+    if submission_stalls:
+        platform.services.route("api", "POST", SUBMIT, Reply(json={"status": "queued"}, delay=5))
 
     job = await ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0), rollout_timeout=0.2)
-    await eventually(lambda: platform.requests("api", "POST", CANCEL) != [])
+    await eventually(lambda: platform.traces != {} and hosted(platform).cancelled)
 
     (run,) = job.runs
     assert (run.trace.status, run.trace.stop_reason) == ("error", "timeout")
-    assert platform.bodies("api", "POST", CANCEL) == [{"trace_id": str(uuid.UUID(run.trace_id))}]
+    assert set(platform.traces) == {run.trace_id}
 
 
 async def test_the_deprecated_constructor_timeout_is_the_default_deadline(
-    platform: FakeServices,
+    platform: Platform,
 ) -> None:
-    platform.route("api", "GET", POLL, json={"status": "running"})
+    platform.next_rollout = RUNNING
     with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
         runtime = HostedRuntime(poll_interval=0, run_timeout=0.2)
 
     job = await ROW.run(chat_agent(), runtime=runtime)
 
     assert job.runs[0].trace.stop_reason == "timeout"
-    await eventually(lambda: platform.requests("api", "POST", CANCEL) != [])
+    await eventually(lambda: hosted(platform).cancelled)
 
 
-async def test_cancelling_a_hosted_rollout_cancels_it_remotely(platform: FakeServices) -> None:
-    platform.route("api", "GET", POLL, json={"status": "running"})
+async def test_cancelling_a_hosted_rollout_cancels_it_remotely(platform: Platform) -> None:
+    platform.next_rollout = RUNNING
     pending = asyncio.create_task(ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0)))
-    await eventually(lambda: platform.requests("api", "GET", POLL) != [])
+    await eventually(lambda: platform.traces != {})
 
     pending.cancel()
     with pytest.raises(asyncio.CancelledError):
         await pending
-    await eventually(lambda: platform.requests("api", "POST", CANCEL) != [])
 
-    trace_id = submitted(platform)["trace_id"]
-    assert platform.bodies("api", "POST", CANCEL) == [{"trace_id": trace_id}]
+    await eventually(lambda: hosted(platform).cancelled)
 
 
 REFUSALS: dict[str, tuple[Agent, dict[str, str | None]]] = {
-    "an agent the platform cannot run": (ScriptedAgent("3"), {"HUD_API_KEY": "k"}),
+    "an agent the platform cannot run": (ScriptedAgent("3"), {}),
     "no API key": (chat_agent(), {"HUD_API_KEY": None}),
 }
 
 
 @pytest.mark.parametrize(("agent", "variables"), REFUSALS.values(), ids=REFUSALS.keys())
 async def test_a_hosted_rollout_that_cannot_be_submitted_is_a_failed_run(
-    agent: Agent, variables: dict[str, str | None], services: FakeServices, hud_env: HudEnv
+    agent: Agent, variables: dict[str, str | None], platform: Platform, hud_env: HudEnv
 ) -> None:
     hud_env.set(**variables)
 
@@ -302,15 +279,17 @@ async def test_a_hosted_rollout_that_cannot_be_submitted_is_a_failed_run(
 
     (run,) = job.runs
     assert (run.trace.status, run in job.errors) == ("error", True)
-    assert services.requests() == []
+    assert platform.services.requests() == []
 
 
-async def test_a_rejected_submission_is_a_failed_run(platform: FakeServices) -> None:
-    platform.route("api", "POST", SUBMIT, json={"detail": "unknown env 'sums'"}, status=422)
+async def test_a_rejected_submission_is_a_failed_run(platform: Platform) -> None:
+    platform.services.route(
+        "api", "POST", SUBMIT, json={"detail": "unknown env 'sums'"}, status=422
+    )
 
     job = await ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
     (run,) = job.runs
     assert run.trace.status == "error"
     assert "unknown env 'sums'" in str(run.trace.error)
-    assert platform.requests("api", "GET", POLL) == []
+    assert platform.services.requests("api", "GET") == []

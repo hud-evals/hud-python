@@ -18,32 +18,33 @@ from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.telemetry import flush
 from hud.telemetry.context import get_trace_headers, set_trace_context
 from tests.support import Reply, ScriptedAgent, eventually, lab, solve
+from tests.support.platform import WEB_URL, Trace, key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv
+    from tests.support import HudEnv, Platform
 
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
 JOB_ENTER = "/v2/trace/job/{id}/enter"
-TRACE_ENTER = "/v2/trace/{id}/enter"
-TRACE_EXIT = "/v2/trace/{id}/exit"
 
 
 @pytest.fixture
-def platform(services: FakeServices, hud_env: HudEnv) -> Iterator[FakeServices]:
-    """The fake platform accepting every report, with telemetry on and a key set.
+def reporting(platform: Platform, hud_env: HudEnv) -> Iterator[Platform]:
+    """The platform, with telemetry on.
 
     Span uploads drain before the test ends, so none reaches a later test's platform.
     """
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1", HUD_WEB_URL="https://hud.test")
-    for path in (JOB_ENTER, TRACE_ENTER, TRACE_EXIT):
-        services.route("api", "POST", path, json={})
-    services.route("telemetry", "POST", "/trace/{id}/telemetry-upload", json={})
-    yield services
+    hud_env.set(HUD_TELEMETRY_ENABLED="1")
+    yield platform
     assert flush(timeout=10)
+
+
+def reported(platform: Platform, run: Run) -> Trace:
+    assert run.trace_id is not None
+    return platform.traces[key(run.trace_id)]
 
 
 class Modelled(Agent):
@@ -62,7 +63,7 @@ class Modelled(Agent):
 
 
 async def test_a_taskset_reports_one_job_and_each_rollout_under_it(
-    platform: FakeServices, caplog: pytest.LogCaptureFixture
+    reporting: Platform, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO, logger="hud.eval.job")
     rows = [ADD, Task(env="lab", id="add", args={"a": 1, "b": 1})]
@@ -71,23 +72,17 @@ async def test_a_taskset_reports_one_job_and_each_rollout_under_it(
         Modelled(), runtime=LocalRuntime(lab()), group=2
     )
 
-    (job_enter,) = platform.requests("api", "POST", JOB_ENTER)
-    assert (job_enter.params["id"], job_enter.bearer) == (job.id, "k")
-    assert job_enter.json == {"name": "pair (2 tasks) (2 times)", "group": 2, "taskset_id": "ts-1"}
-    assert f"job: https://hud.test/jobs/{uuid.UUID(job.id)}" in caplog.messages
-    enters = platform.requests("api", "POST", TRACE_ENTER)
-    assert len(enters) == 4
-    assert {request.params["id"] for request in enters} == {run.trace_id for run in job.runs}
-    bodies = [request.json for request in enters]
-    assert sorted(body.pop("task_slug") for body in bodies) == sorted(
+    assert reporting.jobs == {
+        key(job.id): {"name": "pair (2 tasks) (2 times)", "group": 2, "taskset_id": "ts-1"}
+    }
+    assert f"job: {WEB_URL}/jobs/{uuid.UUID(job.id)}" in caplog.messages
+    assert len(reporting.traces) == len(job.runs) == 4
+    enters = [dict(trace.enter or {}) for trace in reporting.traces.values()]
+    assert sorted(enter.pop("task_slug") for enter in enters) == sorted(
         row.slug for row in rows for _ in range(2)
     )
-    assert bodies == [{"job_id": job.id, "group_id": HEX_ID, "model": "claude-test"}] * 4
-    assert {body["job_id"] for body in platform.bodies("api", "POST", TRACE_ENTER)} == {job.id}
-    exits = platform.requests("api", "POST", TRACE_EXIT)
-    assert len(exits) == 4
-    assert {request.params["id"] for request in exits} == {run.trace_id for run in job.runs}
-    assert [request.json for request in exits] == [
+    assert enters == [{"job_id": job.id, "group_id": HEX_ID, "model": "claude-test"}] * 4
+    assert [reported(reporting, run).exit for run in job.runs] == [
         {"status": "completed", "reward": 1.0, "evaluation_result": {"score": 1.0}}
     ] * 4
 
@@ -136,15 +131,13 @@ JOBS: dict[str, tuple[Callable[[LocalRuntime], Awaitable[Any]], list[dict[str, A
 async def test_each_execution_registers_the_job_its_rollouts_report_under(
     start: Callable[[LocalRuntime], Awaitable[Any]],
     bodies: list[dict[str, Any]],
-    platform: FakeServices,
+    reporting: Platform,
 ) -> None:
     await start(LocalRuntime(lab()))
 
-    assert platform.bodies("api", "POST", JOB_ENTER) == bodies
-    job_ids = {request.params["id"] for request in platform.requests("api", "POST", JOB_ENTER)}
-    assert {body["job_id"] for body in platform.bodies("api", "POST", TRACE_ENTER)} == (
-        job_ids or {"j" * 32}
-    )
+    assert list(reporting.jobs.values()) == bodies
+    reported_under = {key((trace.enter or {})["job_id"]) for trace in reporting.traces.values()}
+    assert reported_under == (set(reporting.jobs) or {"j" * 32})
 
 
 @asynccontextmanager
@@ -239,13 +232,11 @@ EXITS: dict[str, tuple[Task, Agent, bool, dict[str, Any]]] = {
 
 @pytest.mark.parametrize(("row", "agent", "placed", "body"), EXITS.values(), ids=EXITS.keys())
 async def test_a_finished_rollout_reports_its_outcome(
-    row: Task, agent: Agent, placed: bool, body: dict[str, Any], platform: FakeServices
+    row: Task, agent: Agent, placed: bool, body: dict[str, Any], reporting: Platform
 ) -> None:
     run = await rollout(row, agent, runtime=LocalRuntime(lab()) if placed else unavailable)
 
-    (exit_request,) = platform.requests("api", "POST", TRACE_EXIT)
-    assert exit_request.params["id"] == run.trace_id
-    assert exit_request.json == body
+    assert reported(reporting, run).exit == body
 
 
 PARENTS = {
@@ -272,16 +263,15 @@ async def test_a_nested_rollout_reports_and_propagates_its_parent_trace(
     trace_id: str,
     headers: dict[str, str],
     parent: str | None,
-    platform: FakeServices,
+    reporting: Platform,
 ) -> None:
     agent = Modelled()
 
     with set_trace_context(ambient):
         run = await rollout(ADD, agent, runtime=LocalRuntime(lab()), trace_id=trace_id)
 
-    (enter,) = platform.bodies("api", "POST", TRACE_ENTER)
     assert (run.trace_id, agent.headers) == (trace_id, [headers])
-    assert enter.get("parent_trace_id") == parent
+    assert (reported(reporting, run).enter or {}).get("parent_trace_id") == parent
 
 
 RETRIES = {
@@ -300,14 +290,14 @@ async def test_reporting_never_fails_the_run(
     replies: list[Reply],
     attempts: int,
     warnings: list[Any],
-    platform: FakeServices,
+    reporting: Platform,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    platform.route("api", "POST", JOB_ENTER, *replies)
+    reporting.services.route("api", "POST", JOB_ENTER, *replies)
 
     job = await Job.start("flaky")
 
-    assert len(platform.requests("api", "POST", JOB_ENTER)) == attempts
+    assert len(reporting.services.requests("api", "POST", JOB_ENTER)) == attempts
     assert [
         record.getMessage()
         for record in caplog.records
@@ -317,25 +307,25 @@ async def test_reporting_never_fails_the_run(
 
 
 GATES = {
-    "telemetry on without a key": {"HUD_TELEMETRY_ENABLED": "1", "HUD_API_KEY": None},
-    "a key with telemetry off": {"HUD_TELEMETRY_ENABLED": "0", "HUD_API_KEY": "k"},
+    "telemetry on without a key": {"HUD_API_KEY": None},
+    "a key with telemetry off": {"HUD_TELEMETRY_ENABLED": "0"},
 }
 
 
 @pytest.mark.parametrize("variables", GATES.values(), ids=GATES.keys())
 async def test_nothing_is_reported_unless_telemetry_is_on_with_a_key(
-    variables: dict[str, str | None], services: FakeServices, hud_env: HudEnv
+    variables: dict[str, str | None], reporting: Platform, hud_env: HudEnv
 ) -> None:
     hud_env.set(**variables)
 
     job = await ADD.run(ScriptedAgent(solve), runtime=LocalRuntime(lab()))
 
     assert job.reward == 1.0
-    assert services.requests() == []
+    assert reporting.services.requests() == []
 
 
 async def test_a_cancelled_rollout_reports_its_start_but_no_outcome(
-    platform: FakeServices,
+    reporting: Platform,
 ) -> None:
     agent = ScriptedAgent(solve, delay=30)
     pending = asyncio.create_task(rollout(ADD, agent, runtime=LocalRuntime(lab())))
@@ -345,5 +335,5 @@ async def test_a_cancelled_rollout_reports_its_start_but_no_outcome(
     with pytest.raises(asyncio.CancelledError):
         await pending
 
-    assert len(platform.requests("api", "POST", TRACE_ENTER)) == 1
-    assert platform.requests("api", "POST", TRACE_EXIT) == []
+    (trace,) = reporting.traces.values()
+    assert (trace.enter is not None, trace.exit) == (True, None)

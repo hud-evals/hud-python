@@ -20,9 +20,13 @@ from typing import TYPE_CHECKING, Any
 from .services import Reply
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from starlette.websockets import WebSocket
 
     from .services import FakeServices, Request
+
+    Handler = Callable[[Request], Reply | Awaitable[Reply]]
 
 API_KEY = "sk-hud-test"
 USER_ID = "11111111-1111-4111-8111-111111111111"
@@ -74,12 +78,20 @@ class Build:
 
 @dataclass
 class Trace:
-    """What the platform knows of one trace."""
+    """What the platform knows of one trace.
+
+    A rollout reported from this process has an ``enter`` and an ``exit``; a hosted
+    one has the ``submitted`` request and the ``states`` its polls read, each read
+    moving to the next and the last one staying.
+    """
 
     enter: dict[str, Any] | None = None
     exit: dict[str, Any] | None = None
     spans: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    submitted: dict[str, Any] | None = None
+    states: list[dict[str, Any]] = field(default_factory=list)
+    cancelled: bool = False
 
 
 @dataclass
@@ -149,6 +161,8 @@ class Platform:
         self.jobs: dict[str, dict[str, Any]] = {}
         self.job_traces: dict[str, list[dict[str, Any]]] = {}
         self.traces: dict[str, Trace] = {}
+        #: The states the next hosted rollout's trace moves through as it is polled.
+        self.next_rollout: list[dict[str, Any]] = [{"status": "completed", "reward": 1.0}]
         self.imports: dict[str, Import] = {}
         #: How the next import runs: the statuses it moves through and the report it leaves.
         self.next_import = Import("", taskset_id="")
@@ -216,52 +230,70 @@ class Platform:
     # ─── serving ──────────────────────────────────────────────────────
 
     def _serve(self) -> None:
-        route = self.services.route
-        route("api", "GET", "/v2/auth/me", json={"user_id": USER_ID, "team_id": TEAM_ID})
-        route("api", "GET", "/v2/projects", handler=self._list_projects)
-        route("api", "GET", "/v2/projects/{id}", handler=self._get_project)
-        route("api", "POST", "/v2/projects", handler=self._create_project)
-        route("api", "GET", "/v2/registry", handler=self._list_environments)
-        route("api", "GET", "/v2/registry/{id}", handler=self._get_environment)
-        route("api", "GET", "/v2/tasksets/by-name/{name}", handler=self._taskset_by_name)
-        route("api", "GET", "/v2/tasksets/{id}", handler=self._get_taskset)
-        route("api", "GET", "/v2/tasksets/{id}/export", handler=self._export_taskset)
-        route("api", "POST", "/v2/tasksets", handler=self._create_taskset)
-        route("api", "POST", "/v2/tasks/upload", handler=self._upload_tasks)
-        route("api", "POST", "/v2/builds/upload-url", handler=self._build_upload_url)
-        route("api", "PUT", "/uploads/{id}", handler=self._receive_upload)
-        route("api", "POST", "/v2/builds/trigger", handler=self._trigger_build)
-        route("api", "GET", "/v2/builds/{id}/status", handler=self._build_status)
-        self.services.websocket("api", "/v2/builds/{id}/logs", self._build_log)
-        route("api", "GET", "/v2/models", handler=self._list_models)
-        route("api", "GET", "/v2/models/{id}/checkpoints", handler=self._checkpoints)
-        route("api", "PUT", "/v2/models/{id}/head", handler=self._set_head)
-        route("api", "POST", "/v2/models/fork", handler=self._fork_model)
-        route("api", "POST", "/v2/trace/job/{id}/enter", handler=self._enter_job)
-        route("api", "POST", "/v2/trace/{id}/enter", handler=self._enter_trace)
-        route("api", "POST", "/v2/trace/{id}/exit", handler=self._exit_trace)
-        route("api", "GET", "/v2/trace/{id}/events", handler=self._trace_events)
-        route("telemetry", "POST", "/trace/{id}/telemetry-upload", handler=self._upload_spans)
-        route("api", "GET", "/v2/jobs", handler=self._list_jobs)
-        route("api", "GET", "/v2/jobs/{id}/traces", handler=self._job_traces)
-        route("api", "POST", "/v2/rollouts/cancel_job", handler=self._cancel_job)
-        route("api", "POST", "/v2/rollouts/cancel", handler=self._cancel_trace)
-        route("api", "POST", "/v2/rollouts/cancel_user_jobs", handler=self._cancel_every_job)
-        route("api", "POST", "/v2/imports/uploads", handler=self._import_upload_url)
-        route("api", "POST", "/v2/data/{id}/complete", handler=self._complete_upload)
-        route("api", "DELETE", "/v2/data/{id}", handler=self._delete_upload)
-        route("api", "POST", "/v2/imports", handler=self._start_import)
-        route("api", "GET", "/v2/imports", handler=self._list_imports)
-        route("api", "GET", "/v2/imports/{id}", handler=self._get_import)
-        route("api", "GET", "/v2/imports/{id}/report", handler=self._import_report)
-        route("api", "POST", "/v2/imports/{id}/cancel", handler=self._cancel_import)
-        route("api", "GET", "/v2/imports/formats", handler=self._import_formats)
+        def route(service: str, method: str, path: str, handler: Handler) -> None:
+            self.services.route(service, method, path, handler=self._signed_in(handler))
+
         route(
-            "api", "GET", "/v2/qa/checks", handler=lambda _: Reply(json={"checks": self.qa_checks})
+            "api",
+            "GET",
+            "/v2/auth/me",
+            lambda _: Reply(json={"user_id": USER_ID, "team_id": TEAM_ID}),
         )
-        route("api", "POST", "/v2/qa/runs", handler=self._start_qa)
-        route("api", "GET", "/v2/qa/results", handler=self._qa_results)
-        route("telemetry", "POST", "/sdk-events/cli", handler=self._cli_events)
+        route("api", "GET", "/v2/projects", self._list_projects)
+        route("api", "GET", "/v2/projects/{id}", self._get_project)
+        route("api", "POST", "/v2/projects", self._create_project)
+        route("api", "GET", "/v2/registry", self._list_environments)
+        route("api", "GET", "/v2/registry/{id}", self._get_environment)
+        route("api", "GET", "/v2/tasksets/by-name/{name}", self._taskset_by_name)
+        route("api", "GET", "/v2/tasksets/{id}", self._get_taskset)
+        route("api", "GET", "/v2/tasksets/{id}/export", self._export_taskset)
+        route("api", "POST", "/v2/tasksets", self._create_taskset)
+        route("api", "POST", "/v2/tasks/upload", self._upload_tasks)
+        route("api", "POST", "/v2/builds/upload-url", self._build_upload_url)
+        self.services.route("api", "PUT", "/uploads/{id}", handler=self._receive_upload)
+        route("api", "POST", "/v2/builds/trigger", self._trigger_build)
+        route("api", "GET", "/v2/builds/{id}/status", self._build_status)
+        self.services.websocket("api", "/v2/builds/{id}/logs", self._build_log)
+        route("api", "GET", "/v2/models", self._list_models)
+        route("api", "GET", "/v2/models/{id}/checkpoints", self._checkpoints)
+        route("api", "PUT", "/v2/models/{id}/head", self._set_head)
+        route("api", "POST", "/v2/models/fork", self._fork_model)
+        route("api", "POST", "/v2/trace/job/{id}/enter", self._enter_job)
+        route("api", "POST", "/v2/trace/{id}/enter", self._enter_trace)
+        route("api", "POST", "/v2/trace/{id}/exit", self._exit_trace)
+        route("api", "GET", "/v2/trace/{id}/events", self._trace_events)
+        route("api", "POST", "/v2/rollouts/submit", self._submit_rollout)
+        route("api", "GET", "/v2/trace/{id}", self._poll_trace)
+        route("telemetry", "POST", "/trace/{id}/telemetry-upload", self._upload_spans)
+        route("api", "GET", "/v2/jobs", self._list_jobs)
+        route("api", "GET", "/v2/jobs/{id}/traces", self._job_traces)
+        route("api", "POST", "/v2/rollouts/cancel_job", self._cancel_job)
+        route("api", "POST", "/v2/rollouts/cancel", self._cancel_trace)
+        route("api", "POST", "/v2/rollouts/cancel_user_jobs", self._cancel_every_job)
+        route("api", "POST", "/v2/imports/uploads", self._import_upload_url)
+        route("api", "POST", "/v2/data/{id}/complete", self._complete_upload)
+        route("api", "DELETE", "/v2/data/{id}", self._delete_upload)
+        route("api", "POST", "/v2/imports", self._start_import)
+        route("api", "GET", "/v2/imports", self._list_imports)
+        route("api", "GET", "/v2/imports/{id}", self._get_import)
+        route("api", "GET", "/v2/imports/{id}/report", self._import_report)
+        route("api", "POST", "/v2/imports/{id}/cancel", self._cancel_import)
+        route("api", "GET", "/v2/imports/formats", self._import_formats)
+        route("api", "GET", "/v2/qa/checks", lambda _: Reply(json={"checks": self.qa_checks}))
+        route("api", "POST", "/v2/qa/runs", self._start_qa)
+        route("api", "GET", "/v2/qa/results", self._qa_results)
+        self.services.route("telemetry", "POST", "/sdk-events/cli", handler=self._cli_events)
+
+    @staticmethod
+    def _signed_in(handler: Handler) -> Handler:
+        """``handler``, answering 401 to a request without the user's HUD key."""
+
+        def answer(request: Request) -> Reply | Awaitable[Reply]:
+            if request.bearer != API_KEY:
+                return Reply(status=401, json={"detail": "Invalid API key"})
+            return handler(request)
+
+        return answer
 
     # projects and the registry
 
@@ -462,17 +494,29 @@ class Platform:
         return Reply(json={"cancelled": self._cancel(traces)})
 
     def _cancel_trace(self, request: Request) -> Reply:
-        trace_id = key(request.json["trace_id"])
-        found = [
-            trace
-            for traces in self.job_traces.values()
-            for trace in traces
-            if key(trace["id"]) == trace_id
-        ]
-        if not found:
-            return not_found("Trace")
-        self._cancel(found)
+        trace_id = request.json["trace_id"]
+        self.trace(trace_id).cancelled = True
+        self._cancel(
+            [
+                trace
+                for traces in self.job_traces.values()
+                for trace in traces
+                if key(trace["id"]) == key(trace_id)
+            ]
+        )
         return Reply(json={"status": "accepted"})
+
+    def _submit_rollout(self, request: Request) -> Reply:
+        trace = self.trace(request.json["trace_id"])
+        trace.submitted = request.json
+        trace.states = [dict(state) for state in self.next_rollout]
+        return Reply(json={"status": "queued"})
+
+    def _poll_trace(self, request: Request) -> Reply:
+        trace = self.traces.get(key(request.params["id"]))
+        if trace is None or not trace.states:
+            return not_found("Trace")
+        return Reply(json=trace.states.pop(0) if len(trace.states) > 1 else trace.states[0])
 
     def _cancel_every_job(self, request: Request) -> Reply:
         del request
