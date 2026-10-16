@@ -7,11 +7,17 @@ Import this module early (e.g., in hud/__init__.py) to apply patches.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import ssl
+import time
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 if TYPE_CHECKING:
-    import httpx
+    from collections.abc import Awaitable, Callable
+
     from mcp.client.streamable_http import StreamWriter
 
 logger = logging.getLogger(__name__)
@@ -23,6 +29,83 @@ def _format_exception(exc: BaseException) -> str:
     if detail:
         return f"{type(exc).__name__}: {detail}"
     return type(exc).__name__
+
+
+_RETRYABLE_TRANSPORT_EXCEPTIONS = (
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.TimeoutException,
+    ssl.SSLError,
+)
+_INITIAL_BACKOFF_SECONDS = 0.5
+_MAX_BACKOFF_SECONDS = 60.0
+
+
+def _is_retryable_transport_error(exc: BaseException) -> bool:
+    """Whether a failed MCP request is a transient transport problem worth retrying."""
+    from hud.utils.requests import is_retryable_response
+
+    if isinstance(exc, _RETRYABLE_TRANSPORT_EXCEPTIONS):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return is_retryable_response(exc.response)
+    return False
+
+
+def _transport_retry_wait(exc: BaseException, backoff: float) -> float:
+    """Seconds to wait before retrying ``exc``: the jittered backoff, or the server's Retry-After
+    when that is longer.
+
+    Retry-After is a minimum, not a replacement: this loop retries until a deadline, so
+    following a short Retry-After alone would knock about once a second the whole time.
+    """
+    from hud.utils.requests import jittered_backoff, retry_after_wait
+
+    wait = jittered_backoff(backoff)
+    if isinstance(exc, httpx.HTTPStatusError):
+        asked = retry_after_wait(exc.response)
+        if asked is not None:
+            return max(asked, wait)
+    return wait
+
+
+async def _retry_transport_request(
+    attempt: Callable[[], Awaitable[None]],
+    *,
+    deadline: float,
+    global_timeout: float,
+    send_error_response: Callable[[Exception], Awaitable[None]],
+) -> None:
+    """Run ``attempt`` until it succeeds, retrying transient transport errors.
+
+    Retries stop at ``deadline`` (monotonic time), where the error is delivered
+    to the waiting caller. Each wait is the exponential backoff with jitter, or the
+    server's Retry-After when that is longer, and never runs past the deadline.
+    """
+    backoff = _INITIAL_BACKOFF_SECONDS
+    while True:
+        try:
+            await attempt()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if not _is_retryable_transport_error(e):
+                logger.exception("Request handler error: %s", _format_exception(e))
+                await send_error_response(e)
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.error(
+                    "MCP request failed after timeout (%.0fs): %s",
+                    global_timeout,
+                    _format_exception(e),
+                )
+                await send_error_response(e)
+                return
+            logger.warning("Retrying MCP request after error: %s", _format_exception(e))
+            await asyncio.sleep(min(_transport_retry_wait(e, backoff), remaining))
+            backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
 
 
 def patch_json_response_error_propagation() -> None:
@@ -95,11 +178,6 @@ def patch_streamable_http_error_handling() -> None:
             start_get_stream: Any,
             tg: Any,
         ) -> None:
-            import asyncio
-            import ssl
-            import time
-
-            import httpx
             from mcp.client.streamable_http import RequestContext
             from mcp.shared.message import ClientMessageMetadata, SessionMessage
             from mcp.types import ErrorData, JSONRPCError, JSONRPCMessage, JSONRPCRequest
@@ -114,20 +192,6 @@ def patch_streamable_http_error_handling() -> None:
                 default_timeout = float(settings.__class__.model_fields["client_timeout"].default)
                 global_timeout = configured_timeout if configured_timeout > 0 else default_timeout
                 deadline = time.monotonic() + global_timeout
-                retryable_exceptions = (
-                    httpx.ConnectError,
-                    httpx.ReadError,
-                    httpx.TimeoutException,
-                    ssl.SSLError,
-                )
-                retryable_status_codes = (502, 503, 504)
-
-                def is_retryable(exc: Exception) -> bool:
-                    if isinstance(exc, retryable_exceptions):
-                        return True
-                    if isinstance(exc, httpx.HTTPStatusError):
-                        return exc.response.status_code in retryable_status_codes
-                    return False
 
                 async def send_error_response(exc: Exception) -> None:
                     """Send an error response to the client."""
@@ -150,40 +214,18 @@ def patch_streamable_http_error_handling() -> None:
                     else:
                         await ctx.read_stream_writer.send(exc)
 
-                backoff = 0.5
-                max_backoff = 60.0
-                while True:
-                    try:
-                        if is_resumption:
-                            await self._handle_resumption_request(ctx)
-                        else:
-                            await self._handle_post_request(ctx)
-                        return
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as e:
-                        if is_retryable(e):
-                            if time.monotonic() >= deadline:
-                                logger.error(
-                                    "MCP request failed after timeout (%.0fs): %s",
-                                    global_timeout,
-                                    _format_exception(e),
-                                )
-                                await send_error_response(e)
-                                return
-                            logger.warning(
-                                "Retrying MCP request after error: %s",
-                                _format_exception(e),
-                            )
-                            await asyncio.sleep(backoff)
-                            backoff = min(backoff * 2, max_backoff)
-                        else:
-                            logger.exception(
-                                "Request handler error: %s",
-                                _format_exception(e),
-                            )
-                            await send_error_response(e)
-                            return
+                async def attempt() -> None:
+                    if is_resumption:
+                        await self._handle_resumption_request(ctx)
+                    else:
+                        await self._handle_post_request(ctx)
+
+                await _retry_transport_request(
+                    attempt,
+                    deadline=deadline,
+                    global_timeout=global_timeout,
+                    send_error_response=send_error_response,
+                )
 
             try:
                 async with write_stream_reader:
