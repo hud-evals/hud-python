@@ -15,5 +15,3 @@ telemetry-dump/
 *.gif
 .DS_Store
 
-# This featured example ships the tested dependency resolution.
-!uv.lock
