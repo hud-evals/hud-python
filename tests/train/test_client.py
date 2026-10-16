@@ -95,18 +95,15 @@ def _trainable_agent() -> OpenAIChatAgent:
     )
 
 
-async def test_a_step_trains_on_the_sampled_runs_and_serves_the_new_checkpoint(
+async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
     trainable: Platform,
 ) -> None:
     _sampling_gateway(trainable.services)
     runs = await _runs(_trainable_agent())
-    client = TrainingClient("owner/model")
 
-    result = await client.step(runs, learning_rate=1e-5, group_size=2)
+    result = await TrainingClient("owner/model").step(runs, learning_rate=1e-5, group_size=2)
 
-    head = await client.head()
-    assert head is not None
-    assert result.checkpoint_id == head.id
+    assert result.checkpoint_id == trainable.optim_result["checkpoint_id"]
     assert [run.reward for run in runs] == [1.0, 0.0]
     training = trainable.training[MODEL_ID]
     (sent,) = training.batches

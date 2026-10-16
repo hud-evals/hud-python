@@ -1,12 +1,13 @@
-"""The HUD platform as tests see it: state a test seeds, and state it inspects.
+"""The HUD platform as tests see it: records a test seeds, and requests it records.
 
 One ``Platform`` answers the platform API through ``FakeServices``: projects,
 the environment registry, tasksets, builds, Harbor imports, the model catalog
-and its training service, jobs and traces (with the spans uploaded to them), QA
-and CLI analytics. A test seeds what it
-needs (a taskset, a deployed environment, a model) and checks what the code
-under test left behind (the tasks uploaded, the build triggered, a trace's exit)
-instead of reading request bodies. A fault is a route override on
+and its training service, jobs and traces, QA and CLI analytics. It answers from
+what a test seeded and records what the code sent; it implements none of the
+platform's own rules (what a cancel stops, which checkpoint is served, how QA
+results settle), which the platform tests itself. It keeps state only where a
+flow reads back what it wrote: a build triggered with the id its upload got, a
+taskset found again by the name a sync created. A fault is a route override on
 ``platform.services``, which wins over the platform's own routes.
 """
 
@@ -37,7 +38,6 @@ DEFAULT_PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000001"
 BROWSER_PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000002"
 LOCKED_PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000003"
 LIVE_IMPORT = {"queued", "starting", "running", "cancelling"}
-LIVE_ROLLOUT = {"queued", "running"}
 
 
 def key(identifier: str) -> str:
@@ -169,9 +169,20 @@ class Platform:
         self.builds: dict[str, Build] = {}
         self.models: list[dict[str, Any]] = []
         self.checkpoints: dict[str, list[dict[str, Any]]] = {}
+        self.heads: dict[str, str] = {}
         self.training: dict[str, Training] = {}
+        #: What every optimizer step answers.
+        self.optim_result: dict[str, Any] = {
+            "step": 1,
+            "checkpoint_id": "ckpt-trained",
+            "sampler_path": "sampler/ckpt-trained",
+            "state_path": "state/ckpt-trained",
+            "model": "owner/model",
+        }
         self.jobs: dict[str, dict[str, Any]] = {}
         self.job_traces: dict[str, list[dict[str, Any]]] = {}
+        #: Rollout cancellations as (scope, request body): ``job``, ``trace`` or ``all``.
+        self.cancellations: list[tuple[str, dict[str, Any]]] = []
         self.traces: dict[str, Trace] = {}
         #: The states the next hosted rollout's trace moves through as it is polled.
         self.next_rollout: list[dict[str, Any]] = [{"status": "completed", "reward": 1.0}]
@@ -183,9 +194,9 @@ class Platform:
         ]
         self.qa_checks: list[dict[str, Any]] = []
         self.qa_results: list[dict[str, Any]] = []
-        #: What a check's queued result settles to, by check key; a check missing here
-        #: stays running. Each read of the results moves an unsettled one a step.
-        self.qa_outcomes: dict[str, dict[str, Any]] = {}
+        #: What successive reads of the results return, the last one repeating; empty
+        #: returns ``qa_results``, which starting a run adds to.
+        self.qa_polls: list[list[dict[str, Any]]] = []
         self.cli_events: list[dict[str, Any]] = []
         self._serve()
 
@@ -312,11 +323,10 @@ class Platform:
     # projects and the registry
 
     def _list_projects(self, request: Request) -> Reply:
-        search = request.query.get("search", [""])[0]
         offset = int(request.query.get("offset", ["0"])[0])
         limit = min(int(request.query.get("limit", ["500"])[0]), self.page_size)
-        matches = [project for project in self.projects if search in project["name"]]
-        return Reply(json={"items": matches[offset : offset + limit], "total": len(matches)})
+        page = self.projects[offset : offset + limit]
+        return Reply(json={"items": page, "total": len(self.projects)})
 
     def _get_project(self, request: Request) -> Reply:
         found = [project for project in self.projects if project["id"] == request.params["id"]]
@@ -334,9 +344,9 @@ class Platform:
         return Reply(json=project)
 
     def _list_environments(self, request: Request) -> Reply:
-        search = request.query.get("search", [""])[0]
-        matches = [env for env in self.environments.values() if search in env["name"]]
-        return Reply(json={"items": matches, "total": len(matches)})
+        del request
+        listed = list(self.environments.values())
+        return Reply(json={"items": listed, "total": len(listed)})
 
     def _get_environment(self, request: Request) -> Reply:
         found = self.environments.get(request.params["id"])
@@ -446,20 +456,16 @@ class Platform:
         return Reply(json=self.checkpoints.get(request.params["id"], []))
 
     def _set_head(self, request: Request) -> Reply:
-        head = request.json["checkpoint_id"]
-        checkpoints = self.checkpoints.get(request.params["id"], [])
-        if head not in {checkpoint["id"] for checkpoint in checkpoints}:
-            return not_found("Checkpoint")
-        for checkpoint in checkpoints:
-            checkpoint["is_active"] = checkpoint["id"] == head
+        self.heads[request.params["id"]] = request.json["checkpoint_id"]
         return Reply(json={})
 
     def _fork_model(self, request: Request) -> Reply:
         body = request.json
-        slug = f"team/{body['name']}"
-        if any(model.get("model_name") == slug for model in self.models):
-            return Reply(status=409, json={"detail": "Model exists"})
-        self.add_model(name=body["name"], model_name=slug, forked_from=body["source_model_id"])
+        self.add_model(
+            name=body["name"],
+            model_name=f"team/{body['name']}",
+            forked_from=body["source_model_id"],
+        )
         return Reply(json=self.models[-1])
 
     # training
@@ -471,25 +477,9 @@ class Platform:
         return Reply(json={"metrics": {}, "num_datums": len(datums)})
 
     def _optim_step(self, request: Request) -> Reply:
-        """Apply the step, then save and promote a checkpoint, as the service does."""
-        model_id = request.params["id"]
-        training = self.training.setdefault(model_id, Training())
+        training = self.training.setdefault(request.params["id"], Training())
         training.steps.append(request.json)
-        checkpoint = {"id": f"ckpt-{next(self._ids)}", "name": f"step-{len(training.steps)}"}
-        checkpoints = self.checkpoints.setdefault(model_id, [])
-        for earlier in checkpoints:
-            earlier["is_active"] = False
-        checkpoints.append({**checkpoint, "is_active": True})
-        (model,) = [model for model in self.models if model["id"] == model_id]
-        return Reply(
-            json={
-                "step": len(training.steps),
-                "checkpoint_id": checkpoint["id"],
-                "sampler_path": f"sampler/{checkpoint['id']}",
-                "state_path": f"state/{checkpoint['id']}",
-                "model": model["model_name"],
-            }
-        )
+        return Reply(json=self.optim_result)
 
     # jobs and traces
 
@@ -514,39 +504,20 @@ class Platform:
         return Reply(json={})
 
     def _list_jobs(self, request: Request) -> Reply:
-        limit = int(request.query.get("limit", ["20"])[0])
-        return Reply(json={"items": list(self.jobs.values())[:limit]})
+        del request
+        return Reply(json={"items": list(self.jobs.values())})
 
     def _job_traces(self, request: Request) -> Reply:
         traces = self.job_traces.get(key(request.params["id"]))
-        if traces is None:
-            return not_found("Job")
-        limit = int(request.query.get("limit", ["50"])[0])
-        return Reply(json={"items": traces[:limit]})
-
-    def _cancel(self, traces: list[dict[str, Any]]) -> int:
-        live = [trace for trace in traces if trace.get("status") in LIVE_ROLLOUT]
-        for trace in live:
-            trace["status"] = "cancelled"
-        return len(live)
+        return Reply(json={"items": traces}) if traces is not None else not_found("Job")
 
     def _cancel_job(self, request: Request) -> Reply:
-        traces = self.job_traces.get(key(request.json["job_id"]))
-        if traces is None:
-            return not_found("Job")
-        return Reply(json={"cancelled": self._cancel(traces)})
+        self.cancellations.append(("job", request.json))
+        return Reply(json={"cancelled": 2})
 
     def _cancel_trace(self, request: Request) -> Reply:
-        trace_id = request.json["trace_id"]
-        self.trace(trace_id).cancelled = True
-        self._cancel(
-            [
-                trace
-                for traces in self.job_traces.values()
-                for trace in traces
-                if key(trace["id"]) == key(trace_id)
-            ]
-        )
+        self.cancellations.append(("trace", request.json))
+        self.trace(request.json["trace_id"]).cancelled = True
         return Reply(json={"status": "accepted"})
 
     def _submit_rollout(self, request: Request) -> Reply:
@@ -562,16 +533,8 @@ class Platform:
         return Reply(json=trace.states.pop(0) if len(trace.states) > 1 else trace.states[0])
 
     def _cancel_every_job(self, request: Request) -> Reply:
-        del request
-        cancelled = {job_id: self._cancel(traces) for job_id, traces in self.job_traces.items()}
-        details = [{"job_id": job_id, "cancelled": n} for job_id, n in cancelled.items() if n]
-        return Reply(
-            json={
-                "jobs_cancelled": len(details),
-                "total_tasks_cancelled": sum(cancelled.values()),
-                "job_details": details,
-            }
-        )
+        self.cancellations.append(("all", request.json))
+        return Reply(json={"jobs_cancelled": 1, "total_tasks_cancelled": 2, "job_details": []})
 
     # Harbor imports
 
@@ -602,14 +565,11 @@ class Platform:
         return Reply(json=started.advance())
 
     def _list_imports(self, request: Request) -> Reply:
-        taskset = request.query.get("taskset_id", [None])[0]
-        kind = request.query.get("format", [None])[0]
+        del request
         listed = [
             started.record(started.statuses[0])
             for started in self.imports.values()
             if started.taskset_id
-            and taskset in (None, started.taskset_id)
-            and kind in (None, started.format)
         ]
         return Reply(json={"imports": listed, "total": len(listed)})
 
@@ -650,21 +610,9 @@ class Platform:
         return Reply(json={"results": started})
 
     def _qa_results(self, request: Request) -> Reply:
-        traces = set(request.query.get("trace_ids", []))
-        tasks = set(request.query.get("task_ids", []))
-        history = request.query.get("include_history") == ["True"]
-        found = [
-            result
-            for result in self.qa_results
-            if (result.get("subject_trace_id") in traces or result.get("subject_task_id") in tasks)
-            and (history or not result.get("superseded"))
-        ]
-        for result in found:
-            if result["status"] == "queued":
-                result["status"] = "running"
-            elif result["status"] == "running" and result["check_key"] in self.qa_outcomes:
-                result.update(self.qa_outcomes[result["check_key"]])
-        return Reply(json={"results": found})
+        del request
+        polled = self.qa_polls.pop(0) if len(self.qa_polls) > 1 else (self.qa_polls or [None])[0]
+        return Reply(json={"results": self.qa_results if polled is None else polled})
 
     # CLI analytics
 

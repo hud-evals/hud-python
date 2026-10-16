@@ -143,8 +143,8 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     exit_code: int,
     verdicts: list[str | None],
 ) -> None:
-    platform.qa_results.append({**verdict("failed", check_key=OTHER_CHECK), "id": "earlier"})
-    platform.qa_outcomes[CHECK] = outcome
+    another_check = verdict("failed", check_key=OTHER_CHECK)
+    platform.qa_polls = [[row("running"), another_check], [outcome, another_check]]
 
     result = hud("qa", "run", CHECK, TRACE_ID, "--json")
 
@@ -155,6 +155,8 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
 
 
 def test_qa_run_times_out_while_checks_are_running(hud: Hud, platform: Platform) -> None:
+    platform.qa_polls = [[row("running")]]
+
     result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "timeout"), result
@@ -207,8 +209,7 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
 def test_qa_results_read_a_verdict_from_each_result_shape(
     hud: Hud, platform: Platform, results: list[dict[str, Any]], verdicts: list[str]
 ) -> None:
-    other_trace = row(subject_trace_id="00000000-0000-4000-a000-000000000009")
-    platform.qa_results += [*results, other_trace]
+    platform.qa_results += results
 
     text = hud("qa", "results", TRACE_ID)
     document = hud("qa", "results", TRACE_ID, "--json")
@@ -221,20 +222,18 @@ def test_qa_results_read_a_verdict_from_each_result_shape(
 
 
 @pytest.mark.parametrize(
-    ("argv", "shown"),
-    [([], ["latest"]), (["--history"], ["older", "latest"])],
+    ("argv", "query"),
+    [
+        ([], {"task_ids": [TASK_ID]}),
+        (["--history"], {"task_ids": [TASK_ID], "include_history": ["True"]}),
+    ],
     ids=["latest-only", "with-history"],
 )
-def test_task_results_include_superseded_ones_only_with_history(
-    hud: Hud, platform: Platform, argv: list[str], shown: list[str]
+def test_task_results_ask_for_the_history_only_when_told(
+    hud: Hud, platform: Platform, argv: list[str], query: dict[str, list[str]]
 ) -> None:
-    task = {"check_key": TASK_CHECK, "subject_type": "task", "subject_task_id": TASK_ID}
-    platform.qa_results += [
-        {**row(**task), "id": "older", "subject_task_version_id": "v1", "superseded": True},
-        {**row(**task), "id": "latest", "subject_task_version_id": "v2"},
-    ]
-
     result = hud("qa", "results", "--level", "task", TASK_ID, *argv, "--json")
 
     assert result.exit_code == 0, result
-    assert [r["id"] for r in result.json] == shown
+    (asked,) = platform.services.requests("api", "GET", "/v2/qa/results")
+    assert asked.query == query

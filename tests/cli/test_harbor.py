@@ -285,16 +285,16 @@ def test_cancel_stops_only_a_live_import(
     assert platform.imports[IMPORT].cancelled is cancelled
 
 
-def test_imports_lists_a_tasksets_harbor_imports(hud: Hud, platform: Platform) -> None:
-    tb2, other = platform.add_taskset("tb2"), platform.add_taskset("other")
+def test_imports_asks_for_a_tasksets_harbor_imports(hud: Hud, platform: Platform) -> None:
+    tb2 = platform.add_taskset("tb2")
     platform.imports[IMPORT] = Import(IMPORT, tb2)
-    platform.imports["elsewhere"] = Import("elsewhere", other)
-    platform.imports["parquet"] = Import("parquet", tb2, format="parquet")
 
     result = hud("harbor", "imports", "--taskset", "tb2", "--json")
 
     assert result.exit_code == 0, result
     assert [item["id"] for item in result.json["imports"]] == [IMPORT]
+    (listed,) = platform.services.requests("api", "GET", "/v2/imports")
+    assert (listed.query["taskset_id"], listed.query["format"]) == ([tb2], ["harbor"])
 
 
 def test_imports_of_an_unknown_taskset_is_not_found(hud: Hud, platform: Platform) -> None:

@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tests.support import Reply
+
 if TYPE_CHECKING:
     from tests.support import Hud, Platform
 
@@ -90,17 +92,14 @@ def test_checkpoints_and_head_read_the_resolved_model(
     assert (head.json["model_id"], head.json["head"]["id"]) == (MINE_ID, "ckpt-0002-step")
 
 
-@pytest.mark.parametrize(
-    ("argv", "served"), [([], "ckpt-0001-base"), (["--dry-run"], "ckpt-0002-step")]
-)
-def test_head_set_moves_the_served_checkpoint(
-    hud: Hud, catalog: Platform, argv: list[str], served: str
+@pytest.mark.parametrize(("argv", "sent"), [([], {MINE_ID: "ckpt-0001-base"}), (["--dry-run"], {})])
+def test_head_set_asks_the_platform_to_serve_the_checkpoint(
+    hud: Hud, catalog: Platform, argv: list[str], sent: dict[str, str]
 ) -> None:
-    moved = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", *argv, "--json")
-    head = hud("models", "head", "my-sonnet", "--json")
+    result = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", *argv, "--json")
 
-    assert (moved.exit_code, moved.json["checkpoint_id"]) == (0, "ckpt-0001-base"), moved
-    assert head.json["head"]["id"] == served
+    assert (result.exit_code, result.json["checkpoint_id"]) == (0, "ckpt-0001-base"), result
+    assert catalog.heads == sent
 
 
 def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: Platform) -> None:
@@ -133,11 +132,14 @@ def test_fork_creates_a_trainable_model_from_its_source(hud: Hud, catalog: Platf
 def test_forking_onto_an_existing_name(
     hud: Hud, catalog: Platform, argv: list[str], exit_code: int, outcome: dict[str, Any]
 ) -> None:
+    catalog.services.route(
+        "api", "POST", "/v2/models/fork", Reply(status=409, json={"detail": "Model exists"})
+    )
+
     result = hud("models", "fork", "Claude Sonnet", "--name", "my-sonnet", *argv, "--json")
 
     assert result.exit_code == exit_code, result
     assert {key: result.json[key] for key in outcome} == outcome
-    assert len(catalog.models) == len(CATALOG)
 
 
 @pytest.mark.parametrize(
