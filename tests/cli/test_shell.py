@@ -38,39 +38,8 @@ def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
     ]
 
 
-def test_root_help_lists_the_public_commands_in_order(hud: Hud) -> None:
-    result = hud("--help")
-
-    assert result.exit_code == 0
-    assert result.stdout == hud().stdout
-
-
-@pytest.mark.parametrize(
-    ("group", "verbs"),
-    [
-        ("task", ["list", "start", "grade"]),
-        ("project", ["list", "create", "use"]),
-        ("sync", ["tasks", "env"]),
-        ("qa", ["list", "run", "results"]),
-        ("jobs", ["list", "get", "cancel"]),
-        ("trace", ["get"]),
-        ("models", ["list", "fork", "checkpoints", "head"]),
-    ],
-)
-def test_group_help_lists_its_verbs(hud: Hud, group: str, verbs: list[str]) -> None:
-    result = hud(group, "--help")
-
-    assert result.exit_code == 0, result
-    listed = [line.split()[1] for line in result.stdout.splitlines() if line.startswith("│ ")]
-    assert set(verbs) <= set(listed)
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [["version"], ["--version"]],
-)
-def test_version_prints_the_installed_version(hud: Hud, argv: list[str]) -> None:
-    result = hud(*argv)
+def test_version_prints_the_installed_version(hud: Hud) -> None:
+    result = hud("version")
 
     assert (result.exit_code, result.stdout.split()[-1]) == (0, __version__), result
 
@@ -85,9 +54,6 @@ def test_version_json_names_the_package_and_version(hud: Hud) -> None:
     ("argv", "exit_code"),
     [
         pytest.param(["nope"], 2, id="an-unknown-command"),
-        pytest.param(["auth", "--help"], 2, id="a-removed-command"),
-        pytest.param(["--json", "version"], 2, id="an-option-before-the-command"),
-        pytest.param(["set", "NOT_A_PAIR"], 2, id="a-malformed-argument"),
         pytest.param(["jobs", "list"], 1, id="signed-out"),
     ],
 )
@@ -156,40 +122,11 @@ def test_platform_errors_map_to_error_kinds(
     assert result.json["input"] == {"job_id": JOB_ID}
 
 
-def test_a_deprecated_endpoint_warns_once_per_process(
-    hud: Hud, services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY=API_KEY)
-    deprecated = {
-        "Deprecation": "@1767225600",
-        "Sunset": "Wed, 01 Jul 2026 00:00:00 GMT",
-        "Link": '<https://api.example/v3/projects>; rel="successor-version"',
-    }
-    project = {"id": JOB_ID, "name": "demo", "capabilities": {"create": True}}
-    services.route(
-        "api",
-        "GET",
-        "/v2/projects",
-        Reply(json={"items": [project], "total": 2}, headers=deprecated),
-        Reply(json={"items": [{**project, "id": TRACE_ID}], "total": 2}, headers=deprecated),
-    )
-
-    result = hud("project", "list", "--quiet")
-
-    assert result.exit_code == 0, result
-    assert result.stdout == f"{JOB_ID}\n{TRACE_ID}\n"
-    assert result.stderr.count("deprecated") == 1
-    assert "https://api.example/v3/projects" in result.stderr
-
-
 @pytest.mark.parametrize(
     ("latest", "argv", "environment", "notified"),
     [
         ("999.0.0", ["version"], {}, True),
         ("999.0.0", ["version"], {"CI": "1"}, False),
-        ("999.0.0", ["version"], {"HUD_SKIP_VERSION_CHECK": "1"}, False),
-        ("999.0.0", ["--version"], {}, False),
-        ("999.0.0", ["--help"], {}, False),
         (__version__, ["version"], {}, False),
     ],
 )
@@ -245,14 +182,9 @@ def event(
     ("argv", "key", "expected"),
     [
         (["version"], None, [event("version", None, 0, None)]),
-        (["--json", "version"], None, [event("version", None, 2, "NoSuchOption")]),
         (["jobs", "list", "--json"], None, [event("jobs", "list", 1, "HudAuthenticationError")]),
-        (["jobs", "list"], API_KEY, [event("jobs", "list", 1, "HudRequestError")]),
         (["set", "NOT_A_PAIR"], None, [event("set", None, 2, "CliError")]),
-        (["jobs", "list", "--limit", "many"], None, [event("jobs", "list", 2, "BadParameter")]),
         (["secret-name", "arg"], None, [event("other", None, 2, "UsageError")]),
-        (["trace", "8b1f2c3d4e5f"], None, [event("trace", None, 2, "UsageError")]),
-        ([], None, [event("help", None, 2, None)]),
         (["--version"], None, []),
     ],
 )

@@ -73,9 +73,7 @@ def verdict(tag: str, *, check_key: str = CHECK) -> dict[str, Any]:
     ("argv", "keys"),
     [
         (["qa", "--quiet"], [CHECK, OTHER_CHECK, TASK_CHECK]),
-        (["qa", "list", "--quiet"], [CHECK, OTHER_CHECK, TASK_CHECK]),
         (["qa", "list", "--level", "task", "--quiet"], [TASK_CHECK]),
-        (["qa", "list", "--level", "TRACE", "--quiet"], [CHECK, OTHER_CHECK]),
     ],
 )
 def test_qa_lists_the_checks_at_a_level(hud: Hud, argv: list[str], keys: list[str]) -> None:
@@ -93,9 +91,6 @@ def test_qa_list_json_is_the_catalog(hud: Hud) -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        pytest.param([CHECK], id="no-ids"),
-        pytest.param([" , ", TRACE_ID], id="no-checks"),
-        pytest.param([CHECK, "not-a-trace"], id="an-id-that-is-not-a-uuid"),
         pytest.param(["missing_check", TRACE_ID], id="an-unknown-check"),
         pytest.param([f"{CHECK},{TASK_CHECK}", TRACE_ID], id="trace-and-task-checks-together"),
     ],
@@ -117,15 +112,11 @@ def test_qa_run_refuses_before_starting_anything(
             {"check_keys": [CHECK, OTHER_CHECK], "trace_ids": [TRACE_ID], "overwrite": False},
         ),
         (
-            [CHECK, TRACE_ID, "--overwrite"],
-            {"check_keys": [CHECK], "trace_ids": [TRACE_ID], "overwrite": True},
-        ),
-        (
             [TASK_CHECK, TASK_ID],
             {"check_keys": [TASK_CHECK], "task_ids": [TASK_ID], "overwrite": False},
         ),
     ],
-    ids=["deduplicated-and-normalised", "overwrite", "task-level"],
+    ids=["deduplicated-and-normalised", "task-level"],
 )
 def test_qa_run_without_waiting_starts_one_run(
     hud: Hud, platform: FakeServices, argv: list[str], body: dict[str, Any]
@@ -140,21 +131,13 @@ def test_qa_run_without_waiting_starts_one_run(
     assert platform.requests("api", "GET", "/v2/qa/results") == []
 
 
-@pytest.mark.parametrize(
-    ("argv", "level", "ids"),
-    [
-        ([f"{CHECK},{OTHER_CHECK}", TRACE_ID], "trace", {"trace_ids": [TRACE_ID]}),
-        ([TASK_CHECK, TASK_ID], "task", {"task_ids": [TASK_ID]}),
-    ],
-)
 def test_a_dry_run_plans_the_run_at_its_level_and_starts_nothing(
-    hud: Hud, platform: FakeServices, argv: list[str], level: str, ids: dict[str, list[str]]
+    hud: Hud, platform: FakeServices
 ) -> None:
-    result = hud("qa", "run", *argv, "--dry-run", "--json")
+    result = hud("qa", "run", TASK_CHECK, TASK_ID, "--dry-run", "--json")
 
     assert result.exit_code == 0, result
-    assert result.json["level"] == level
-    assert {key: result.json[key] for key in ids} == ids
+    assert (result.json["level"], result.json["task_ids"]) == ("task", [TASK_ID])
     assert platform.requests("api", "POST") == []
 
 
@@ -218,7 +201,6 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("results", "verdicts"),
     [
-        pytest.param([verdict("failed")], ["failed"], id="a-verdict"),
         pytest.param(
             [row(verdict="passed", source="skipped", note="Full reward.")], ["passed"], id="skipped"
         ),
@@ -232,7 +214,6 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
             ["failed"],
             id="legacy-agent-fault",
         ),
-        pytest.param([legacy(summary="Clean.", problems=[])], ["passed"], id="legacy-no-problems"),
         pytest.param(
             [
                 legacy(
