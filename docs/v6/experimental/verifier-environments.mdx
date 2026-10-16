@@ -137,7 +137,10 @@ runtime, the phases remain isolated:
   artifact paths and `/logs`;
 - `/tests/test.sh` runs from the verifier image with its own user, workdir, environment, network
   mode, allowlist, and credentials directory; and
-- verifier output is read from `/logs/verifier/reward.json` or `/logs/verifier/reward.txt`.
+- verifier output is read from `/logs/verifier/reward.json` (a number, or an object with a
+  `reward` or `score` number) or, when that file is absent, `/logs/verifier/reward.txt`. A
+  boolean, non-finite, or missing reward, or a verifier past its timeout, is an error result
+  rather than a score.
 
 `RuntimeConfig.compose.service_access=True` mounts a Docker socket in the generated `main` service.
 

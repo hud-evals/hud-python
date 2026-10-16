@@ -1,0 +1,6 @@
+services:
+  main: {}
+  observer:
+    image: python:3.11-alpine
+    command: ["python", "-m", "http.server", "9000"]
+    expose: [9000]

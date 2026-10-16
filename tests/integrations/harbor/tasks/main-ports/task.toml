@@ -1,0 +1,18 @@
+[environment.healthcheck]
+command = "curl -fsS http://127.0.0.1:8765/marker && curl -fsS http://127.0.0.1:8080/marker"
+interval_sec = 0.1
+timeout_sec = 5
+retries = 50
+
+[verifier]
+timeout_sec = 30
+
+[[verifier.collect]]
+service = "observer"
+command = '''
+python - <<'PY'
+from urllib.request import urlopen
+assert urlopen('http://main:8080/marker').read() == b'nested'
+PY
+'''
+timeout_sec = 10

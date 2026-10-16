@@ -26,7 +26,7 @@ The live handle for one task - the lifecycle plus the agent's `Trace`. You get t
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
 | `run.grade` | `Grade` | Structured grade result. |
 | `run.reward` | `float` | The graded reward (`grade.reward`, set on exit). |
-| `run.evaluation` | `dict` | The raw grade payload (`grade.raw`). |
+| `run.evaluation` | `dict` | A persistence-safe copy of the grade frame: `grade.raw` with each `subscores` entry reduced to its summary. |
 | `run.runtime` | `str \| None` | Control-channel url the run executed against (the placement record). |
 | `run.trace_id` | `str \| None` | Keys the trajectory for training. |
 | `run.slug` | `str \| None` | The task slug this run came from, set by the runner; how [`Job.results`](#job) keys runs back to their task without positional zip. |
@@ -63,12 +63,14 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 | `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
-| `reward` | `float` | Property: mean reward across runs (`0.0` for an empty job). |
+| `reward` | `float` | Property: mean reward across graded runs (`0.0` when none were graded). Runs in `errors` are excluded rather than averaged in as zero. |
+| `errors` | `list[Run]` | Property: runs that ended without a valid grade - a grading error, or a failed trace with no grade frame. A run that timed out or raised after the task started still counts toward `reward` when its environment returned a grade. |
 | `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
 
 ```python
 job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
-print(job.reward)   # mean across every run
+print(job.reward)       # mean across graded runs
+print(len(job.errors))  # runs excluded for lack of a grade
 ```
 
 Each `run` call mints its own job by default. To gather many calls under one id - a training session, a

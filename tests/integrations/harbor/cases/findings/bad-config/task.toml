@@ -1,0 +1,3 @@
+[environment]
+cpus = -1
+network_mode = "sometimes"

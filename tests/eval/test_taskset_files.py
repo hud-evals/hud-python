@@ -1,0 +1,275 @@
+"""Taskset files and platform tasksets: the portable row format a taskset is
+written to, read from, and fetched as."""
+
+from __future__ import annotations
+
+import json
+import textwrap
+import uuid
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+from hud import Environment
+from hud.eval import (
+    ComposeProject,
+    RuntimeConfig,
+    RuntimeGPU,
+    RuntimeLimits,
+    RuntimeResources,
+    RuntimeTPU,
+    Task,
+    Taskset,
+)
+from hud.eval.runtime import DockerBindMount
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from tests.support import Platform
+
+
+def authored_rows(root: Path) -> list[Task]:
+    """One row per shape a taskset file carries."""
+    compose = root / "project" / "compose.yaml"
+    compose.parent.mkdir(parents=True)
+    compose.write_text("services:\n  main:\n    image: lab:${TAG}\n")
+    (compose.parent / ".env").write_text("TAG=1\n")
+    env = Environment("lab")
+
+    @env.template()
+    async def add(a: int, b: int):
+        yield f"add {a} {b}"
+        yield 1.0
+
+    return [
+        add(a=2, b=3),
+        Task(
+            env="lab",
+            id="add",
+            args={"a": 1, "b": 1},
+            slug="one-plus-one",
+            validation=[{"name": "answer", "arguments": {"expected": 2}}],
+            agent_config={"timeout_seconds": 30.0},
+            columns={"difficulty": "easy"},
+        ),
+        Task(
+            env="gpu",
+            id="train",
+            slug="train-on-gpus",
+            runtime_config=RuntimeConfig(
+                image="registry.test/trainer:1",
+                resources=RuntimeResources(
+                    cpu=8,
+                    memory_mb=32768,
+                    storage_mb=102400,
+                    gpu=RuntimeGPU(type=["H100", "A100"], count=2),
+                    os="linux",
+                ),
+                limits=RuntimeLimits(startup_timeout_s=600, run_timeout_s=7200),
+            ),
+        ),
+        Task(
+            env="tpu",
+            id="train",
+            slug="train-on-tpus",
+            runtime_config=RuntimeConfig(
+                resources=RuntimeResources(tpu=RuntimeTPU(type="v5e", topology="2x4"))
+            ),
+        ),
+        Task(
+            env="actor",
+            id="solve",
+            runtime_config=RuntimeConfig(image="actor:1"),
+            verifier=Task(
+                env="judge",
+                id="verify",
+                args={"expected": "secret"},
+                runtime_config=RuntimeConfig(resources=None),
+            ),
+        ),
+        Task(
+            env="compose",
+            id="solve",
+            slug="solve-in-compose",
+            runtime_config=RuntimeConfig(
+                compose=ComposeProject(document=compose, root=compose.parent, service_access=True)
+            ),
+        ),
+    ]
+
+
+async def test_a_taskset_written_as_json_reads_back_row_for_row(tmp_path: Path) -> None:
+    rows = authored_rows(tmp_path)
+
+    written = Taskset("demo", rows).to_file(tmp_path / "out" / "tasks.json")
+
+    compose = json.loads(written.read_text())[-1]["runtime_config"]["compose"]
+    assert (compose["document"], compose["root"]) == ("../project/compose.yaml", "../project")
+    loaded = Taskset.from_file(written)
+    assert loaded.name == "tasks"
+    assert [row.model_dump() for row in loaded] == [row.model_dump() for row in rows]
+
+
+def test_a_rows_slug_names_its_task_and_args() -> None:
+    row = Task(env="lab", id="add", args={"a": 2, "b": 3})
+
+    assert Task(env="lab", id="add").slug == "add"
+    assert row.slug == "add-001a8858"
+    assert Task(env="lab", id="add", args={"b": 3, "a": 2}).slug == row.slug
+    assert Task(env="lab", id="add", args={"a": 3, "b": 3}).slug != row.slug
+
+
+def write(path: Path, text: str) -> Path:
+    path.write_text(textwrap.dedent(text))
+    return path
+
+
+def test_a_module_contributes_its_public_tasks_lists_and_tasksets(tmp_path: Path) -> None:
+    source = write(
+        tmp_path / "tasks.py",
+        """
+        from hud import Task, Taskset
+
+        single = Task(env="lab", id="single")
+        listed = [Task(env="lab", id="first"), Task(env="lab", id="second"), "not a task"]
+        grouped = Taskset("group", [Task(env="lab", id="grouped")])
+        _private = Task(env="lab", id="private")
+        """,
+    )
+
+    assert sorted(row.slug for row in Taskset.from_module(source)) == [
+        "first",
+        "grouped",
+        "second",
+        "single",
+    ]
+
+
+def nested_verifier() -> Task:
+    inner = Task(env="judge", id="verify", verifier=Task(env="judge", id="again"))
+    return Task(env="lab", id="add", verifier=inner)
+
+
+def assign(row: Task, field: str, value: Any) -> None:
+    setattr(row, field, value)
+
+
+def compose_outside_root(root: Path) -> Any:
+    (root / "a").mkdir()
+    (root / "b").mkdir()
+    document = write(root / "b" / "compose.yaml", "services: {main: {image: lab}}\n")
+    return ComposeProject(document=document, root=root / "a")
+
+
+INVALID: dict[str, Callable[[Path], Any]] = {
+    "a verifier with a verifier assigned later": lambda tmp: assign(
+        Task(env="lab", id="add"), "verifier", nested_verifier().verifier
+    ),
+    "both an image and a Compose project": lambda tmp: RuntimeConfig(
+        image="lab", compose=ComposeProject(document=write(tmp / "c.yaml", "services: {}\n"))
+    ),
+    "a Compose file outside its project root": compose_outside_root,
+    "a local Compose file under a platform root": lambda tmp: ComposeProject.model_validate(
+        {
+            "document": str(write(tmp / "c.yaml", "services: {}\n")),
+            "root": {"compose_path": "c"},
+        }
+    ),
+    "a relative bind mount source": lambda tmp: DockerBindMount("data", "/data"),
+    "a bind mount path with a comma": lambda tmp: DockerBindMount("/data,x", "/data"),
+    "duplicate slugs in a file": lambda tmp: Taskset.from_file(
+        write(tmp / "tasks.json", '[{"env": "lab", "id": "a"}, {"env": "other", "id": "a"}]')
+    ),
+}
+
+
+@pytest.mark.parametrize("build", INVALID.values(), ids=INVALID.keys())
+def test_a_malformed_row_or_file_is_rejected(build: Callable[[Path], Any], tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        build(tmp_path)
+
+
+def test_a_platform_compose_record_round_trips_without_local_paths() -> None:
+    record = {
+        "compose": {
+            "document": {"services": {"main": {"image": "lab:1"}}, "networks": {}},
+            "root": {"compose_path": "recipe/compose.yaml"},
+        }
+    }
+
+    config = RuntimeConfig.model_validate(record)
+
+    dumped = config.model_dump(mode="json", exclude_unset=True)["compose"]
+    assert (dumped["root"], dumped["document"]["services"]["main"]["image"]) == (
+        {"compose_path": "recipe/compose.yaml"},
+        "lab:1",
+    )
+    assert (
+        RuntimeConfig.model_validate(config.model_dump(mode="json", exclude_unset=True)) == config
+    )
+
+
+def test_a_local_compose_project_serializes_as_its_document_for_the_platform(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "artifact"
+    compose = project / "recipe" / "compose.yaml"
+    compose.parent.mkdir(parents=True)
+    compose.write_text("services:\n  main:\n    image: lab:1\n    build: {context: ./main}\n")
+    config = RuntimeConfig(compose=ComposeProject(document=compose, root=project))
+
+    dumped = config.model_dump(mode="json", exclude_unset=True)["compose"]
+    assert dumped["root"] == {"compose_path": "recipe/compose.yaml"}
+    assert dumped["document"]["services"]["main"]["build"] == {"context": "./main"}
+    assert RuntimeConfig.model_validate({"compose": dumped}).compose is not None
+
+
+EXPORTED = [
+    {"env": "lab", "scenario": "add", "args": {"a": 2, "b": 3}, "name": "two-plus-three"},
+    {
+        "env": "actor",
+        "scenario": "solve",
+        "name": "solve",
+        "columns": {"difficulty": "hard"},
+        "runtime_config": {"image": "actor:1"},
+        "verifier": {"env": "judge", "id": "verify"},
+    },
+]
+
+
+@pytest.mark.parametrize("reference", ["name", "id"])
+def test_a_platform_taskset_becomes_portable_rows_by_name_or_id(
+    platform: Platform, reference: str
+) -> None:
+    taskset_id = platform.add_taskset("Demo Set", EXPORTED)
+    platform.tasksets[taskset_id]["tasks"]["junk"] = "not a record"
+
+    taskset = Taskset.from_api("Demo Set" if reference == "name" else taskset_id)
+
+    assert (taskset.name, taskset.taskset_id) == ("Demo Set", taskset_id)
+    assert list(taskset) == [
+        Task(env="lab", id="add", args={"a": 2, "b": 3}, slug="two-plus-three"),
+        Task(
+            env="actor",
+            id="solve",
+            slug="solve",
+            columns={"difficulty": "hard"},
+            runtime_config=RuntimeConfig(image="actor:1"),
+            verifier=Task(env="judge", id="verify"),
+        ),
+    ]
+
+
+def test_a_taskset_whose_export_is_gone_is_empty(platform: Platform) -> None:
+    gone = str(uuid.UUID(int=7))
+
+    taskset = Taskset.from_api(gone)
+
+    assert (taskset.name, taskset.taskset_id, list(taskset)) == (gone, gone, [])
+
+
+def test_an_unknown_platform_taskset_name_is_an_error(platform: Platform) -> None:
+    with pytest.raises(ValueError, match="taskset not found: missing"):
+        Taskset.from_api("missing")

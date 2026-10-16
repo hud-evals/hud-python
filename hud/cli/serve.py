@@ -14,7 +14,7 @@ from rich.markup import escape
 
 from hud.cli import parse_key_value
 from hud.environment import load_environment
-from hud.environment.server import serve
+from hud.environment.server import serve_until_terminated
 from hud.utils.hud_console import HUDConsole
 
 hud_console = HUDConsole()
@@ -69,6 +69,6 @@ def serve_command(
     )
     hud_console.hint("Press Ctrl+C to stop.")
     try:
-        asyncio.run(serve(env, host, port))
+        asyncio.run(serve_until_terminated(env, host, port))
     except KeyboardInterrupt:
         hud_console.info("Stopped.")

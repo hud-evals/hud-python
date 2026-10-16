@@ -908,7 +908,8 @@ class DirectControl:
             axis = self._axes[name]
             if axis.kind == "scalar":
                 if self._reads_grip or self._quantity[name] != "grip":
-                    parts.append(f"{name}={float(proprio[axis.index] - goal[axis.index]):.4f}")
+                    offset = float(proprio[axis.index] - goal[axis.index])
+                    parts.append(f"{name}={_decimal(offset)}")
                 continue
             assert axis.block is not None
             key = id(axis.block)
@@ -916,7 +917,7 @@ class DirectControl:
                 continue
             reported.add(key)
             angle = angular_distance(axis.block.read(proprio), axis.block.read(goal))
-            parts.append(f"orientation={angle:.4f} rad")
+            parts.append(f"orientation={_decimal(angle)} rad")
         return ", ".join(parts)
 
 
@@ -967,7 +968,12 @@ def _offset(gap: _Gap) -> str:
 
 
 def _labeled(pairs: Iterable[tuple[str, Any]]) -> str:
-    return ", ".join(f"{name}={value:.4f}" for name, value in pairs)
+    return ", ".join(f"{name}={_decimal(float(value))}" for name, value in pairs)
+
+
+def _decimal(value: float) -> str:
+    """Four decimals, unsigned when the value rounds to zero, so ``-0.0000`` never shows."""
+    return f"{round(value, 4) + 0.0:.4f}"
 
 
 def _png(frame: NDArray[Any]) -> str:

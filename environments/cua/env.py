@@ -4,6 +4,7 @@
 # param crashes the sync/deploy manifest path (TypeAdapter on a string forward-ref). Keep
 # annotations as real objects.
 import asyncio
+import os
 from collections.abc import Awaitable
 from typing import Annotated, Any
 
@@ -17,7 +18,8 @@ env = Environment(name="cua")  # literal name - `hud deploy` static-parses it
 _task_started = False
 
 _HOST = "127.0.0.1"
-_VNC_PORT = 5900
+# supervisord runs x11vnc on 5900; tests point this at their own VNC listener.
+_VNC_PORT = int(os.environ.get("VNC_PORT", "5900"))
 
 
 async def _listening(host: str, port: int, timeout: float = 30.0) -> None:
@@ -38,7 +40,7 @@ async def _listening(host: str, port: int, timeout: float = 30.0) -> None:
 @env.initialize
 async def _up() -> None:
     await _listening(_HOST, _VNC_PORT)
-    env.add_capability(Capability.rfb(name="screen", url=f"rfb://{_HOST}", display=0))
+    env.add_capability(Capability.rfb(name="screen", url=f"rfb://{_HOST}:{_VNC_PORT}"))
 
 
 @env.template()

@@ -1,0 +1,18 @@
+artifacts = [
+  "/tmp/result",
+  { source = "/app/outputs", destination = "results/outputs", exclude = ["*.tmp", "cache"] },
+]
+
+[task]
+description = "Build pMARS."
+keywords = ["c", "build"]
+
+[metadata]
+category = "systems"
+difficulty = "medium"
+
+[agent]
+timeout_sec = 45
+
+[verifier]
+timeout_sec = 30

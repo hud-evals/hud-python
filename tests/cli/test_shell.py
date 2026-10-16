@@ -1,0 +1,230 @@
+"""The ``hud`` shell: help, version, ``hud set``, the error contract, analytics, notices."""
+
+from __future__ import annotations
+
+import json
+import signal
+import sys
+import time
+from typing import TYPE_CHECKING, Any
+
+import pytest
+from dirty_equals import IsInt, IsStr, IsUUID
+from dotenv import dotenv_values
+
+from hud.version import __version__
+from tests.support import Hud, Reply
+
+if TYPE_CHECKING:
+    from tests.support import HudEnv, Platform
+
+JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+TRACE_ID = "00000000-0000-4000-a000-000000000002"
+
+
+def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
+    result = hud()
+
+    assert (result.exit_code, result.stderr) == (2, "")
+    assert "Usage:" in result.stdout and "COMMAND" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("argv", "exit_code"),
+    [
+        pytest.param(["nope"], 2, id="an-unknown-command"),
+        pytest.param(["jobs", "list"], 1, id="signed-out"),
+    ],
+)
+def test_a_text_mode_failure_writes_only_to_stderr(
+    hud: Hud, argv: list[str], exit_code: int
+) -> None:
+    result = hud(*argv)
+
+    assert (result.exit_code, result.stdout) == (exit_code, ""), result
+    assert result.stderr.strip()
+
+
+@pytest.mark.parametrize(
+    ("argv", "exit_code", "error"),
+    [
+        pytest.param(["set", "NOT_A_PAIR"], 2, "usage", id="a-malformed-argument"),
+        pytest.param(["jobs", "list"], 1, "permission_denied", id="signed-out"),
+    ],
+)
+def test_a_json_mode_failure_is_one_error_document_on_stdout(
+    hud: Hud, argv: list[str], exit_code: int, error: str
+) -> None:
+    result = hud(*argv, "--json")
+
+    assert (result.exit_code, result.json["error"], result.stderr) == (exit_code, error, ""), result
+
+
+def test_set_persists_values_without_echoing_them(hud: Hud, hud_env: HudEnv) -> None:
+    secret = "sk-secret # with 'quotes'"
+
+    first = hud("set", "HUD_API_KEY=" + secret, "B=x # y", "--json")
+    second = hud("set", "HUD_DEFAULT_PROJECT=example")
+
+    path = hud_env.home / ".hud" / ".env"
+    assert first.exit_code == 0, first
+    assert first.json == {"path": str(path), "keys": ["HUD_API_KEY", "B"]}
+    assert second.exit_code == 0, second
+    assert secret not in first.stdout + first.stderr + second.stdout + second.stderr
+    assert dotenv_values(path, interpolate=False) == {
+        "HUD_API_KEY": secret,
+        "B": "x # y",
+        "HUD_DEFAULT_PROJECT": "example",
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (404, "not_found"),
+        (401, "permission_denied"),
+        (403, "permission_denied"),
+        (409, "conflict"),
+        (429, "rate_limited"),
+        (500, "server_error"),
+    ],
+)
+def test_platform_errors_map_to_error_kinds(
+    hud: Hud, platform: Platform, status: int, error: str
+) -> None:
+    platform.services.route(
+        "api", "GET", "/v2/jobs/{id}/traces", status=status, json={"detail": "No"}
+    )
+
+    result = hud("jobs", "get", JOB_ID, "--json")
+
+    assert (result.exit_code, result.json["error"]) == (1, error), result
+    assert result.json["input"] == {"job_id": JOB_ID}
+
+
+@pytest.mark.parametrize(
+    ("latest", "argv", "environment", "notified"),
+    [
+        ("999.0.0", ["version"], {}, True),
+        ("999.0.0", ["version"], {"CI": "1"}, False),
+        (__version__, ["version"], {}, False),
+    ],
+)
+def test_an_outdated_install_prints_an_upgrade_notice(
+    hud: Hud,
+    hud_env: HudEnv,
+    latest: str,
+    argv: list[str],
+    environment: dict[str, str],
+    notified: bool,
+) -> None:
+    """The notice reads PyPI's latest version from a fresh cache, so no request is made."""
+    hud_env.set(HUD_SKIP_VERSION_CHECK=None, CI=None)
+    cache = hud_env.home / ".hud" / ".cache" / "version_check.json"
+    cache.parent.mkdir(parents=True)
+    cache.write_text(json.dumps({"latest": latest, "checked_at": time.time()}))
+
+    result = hud(*argv, env=environment)
+
+    assert result.exit_code == 0, result
+    assert ("999.0.0" in result.stderr) is notified
+
+
+# ─── analytics ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def analytics(platform: Platform, hud_env: HudEnv) -> Platform:
+    """CLI analytics on, posting to the platform."""
+    hud_env.set(HUD_CLI_ANALYTICS_ENABLED="1", CI=None)
+    return platform
+
+
+def event(
+    command: str, subcommand: str | None, exit_code: int, error: str | None
+) -> dict[str, Any]:
+    return {
+        "command": command,
+        "subcommand": subcommand,
+        "exit_code": exit_code,
+        "error_class": error,
+        "duration_ms": IsInt(ge=0),
+        "cli_version": __version__,
+        "python_version": IsStr(regex=r"3\.\d+\.\d+"),
+        "os": sys.platform,
+        "is_ci": False,
+        "install_id": IsUUID,
+    }
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["version"], [event("version", None, 0, None)]),
+        (["jobs", "list", "--json"], [event("jobs", "list", 1, "HudAuthenticationError")]),
+        (["set", "NOT_A_PAIR"], [event("set", None, 2, "CliError")]),
+        (["secret-name", "arg"], [event("other", None, 2, "UsageError")]),
+        (["--version"], []),
+    ],
+)
+def test_each_invocation_posts_one_anonymous_event(
+    hud: Hud,
+    analytics: Platform,
+    hud_env: HudEnv,
+    argv: list[str],
+    expected: list[dict[str, Any]],
+) -> None:
+    hud_env.set(HUD_API_KEY=None)
+
+    hud(*argv)
+
+    assert analytics.cli_events == expected
+    assert "secret-name" not in json.dumps(analytics.cli_events)
+
+
+def test_the_install_id_is_created_once_and_announced_once(hud: Hud, analytics: Platform) -> None:
+    first = hud("version")
+    second = hud("version")
+
+    assert len({event["install_id"] for event in analytics.cli_events}) == 1
+    assert "HUD_CLI_ANALYTICS_ENABLED=0" in first.stderr
+    assert second.stderr == ""
+
+
+def test_analytics_opt_out_posts_nothing(hud: Hud, analytics: Platform, hud_env: HudEnv) -> None:
+    hud_env.set(HUD_CLI_ANALYTICS_ENABLED="0")
+
+    hud("version")
+
+    assert analytics.services.requests("telemetry") == []
+
+
+def test_a_stalled_analytics_endpoint_does_not_hold_up_the_command(
+    hud: Hud, analytics: Platform
+) -> None:
+    analytics.services.route("telemetry", "POST", "/sdk-events/cli", Reply(json={}, delay=20))
+
+    started = time.monotonic()
+    result = hud("version")
+    elapsed = time.monotonic() - started
+
+    assert result.exit_code == 0
+    assert len(analytics.services.requests("telemetry")) == 1
+    # Without the bound the command would outlast the 20 s stall; with it, a few seconds.
+    assert elapsed < 15, elapsed
+
+
+def test_an_interrupted_command_reports_exit_130(hud: Hud, analytics: Platform) -> None:
+    check = {"key": "failure_analysis", "subject_type": "trace", "title": "Failure Analysis"}
+    analytics.qa_checks = [check]
+    process = hud.start("qa", "run", "failure_analysis", TRACE_ID)
+
+    deadline = time.monotonic() + 30
+    while not analytics.qa_results:
+        assert time.monotonic() < deadline, "hud qa run never posted the run"
+        time.sleep(0.05)
+    process.send_signal(signal.SIGINT)
+    process.communicate(timeout=30)
+
+    assert process.returncode == 130
+    assert analytics.cli_events == [event("qa", "run", 130, "KeyboardInterrupt")]

@@ -158,7 +158,7 @@ job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=8, max_concurren
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `agent` | `Agent` | The shared, stateless agent driven across every rollout. |
-| `runtime` | `Provider \| HostedRuntime \| None` | Where each rollout runs; omit it and placement is inferred (local source serves itself, else the HUD tunnel by env name). See [runtime](/v6/reference/runtime). |
+| `runtime` | `Provider \| HostedRuntime \| None` | Where each rollout runs; omit it and placement is inferred: a platform taskset (`Taskset.from_api`) runs over the HUD tunnel, a row whose `runtime_config` names an image or Compose project starts it under `DockerRuntime`, a row minted by a live environment runs against it, and any other row raises `ValueError`. See [runtime](/v6/reference/runtime). |
 | `group` | `int \| None` | Repeats each task N times for GRPO. |
 | `max_concurrent` | `int \| None` | Caps how many rollouts run in parallel. |
 | `job` | `Job \| None` | An open [`Job`](/v6/reference/types#job) to accumulate into; defaults to a fresh job per call. |

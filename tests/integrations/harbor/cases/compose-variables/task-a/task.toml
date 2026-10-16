@@ -1,0 +1,7 @@
+[environment]
+cpus = 2
+memory_mb = 4096
+
+[environment.env]
+LITERAL = "from-task"
+TEMPLATED = "${HARBOR_JUDGE_KEY}"

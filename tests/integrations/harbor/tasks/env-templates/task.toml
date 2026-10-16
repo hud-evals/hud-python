@@ -1,0 +1,11 @@
+[environment.env]
+GREETING = "${HARBOR_GREETING:-hello}"
+JUDGE_KEY = "${HARBOR_JUDGE_KEY}"
+EMBEDDED = "Bearer ${HARBOR_JUDGE_KEY}"
+
+[verifier]
+timeout_sec = 120
+
+[verifier.env]
+VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"
+EMPTY_DEFAULT = "${HARBOR_UNSET:-}"

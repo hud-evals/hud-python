@@ -1,0 +1,5 @@
+services:
+  main:
+    healthcheck:
+      test: [CMD, 'true']
+      interval: 2 seconds

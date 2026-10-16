@@ -360,8 +360,11 @@ class RobotBridge(ABC):
     async def _tick_loop(self) -> None:
         """Barrier: wait for live claimed actions, step once, fan out."""
         while True:
+            # asyncio.timeout, not wait_for: on 3.11 wait_for drops a cancel that lands as
+            # the event is set, and stop() would wait on this loop forever.
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
+                async with asyncio.timeout(self.step_timeout):
+                    await self._action_event.wait()
             self._action_event.clear()
 
             claimed = self._registry.claimed()
@@ -376,7 +379,8 @@ class RobotBridge(ABC):
             while any(s.action is None for s in live):
                 self._action_event.clear()
                 try:
-                    await asyncio.wait_for(self._action_event.wait(), timeout=self.step_timeout)
+                    async with asyncio.timeout(self.step_timeout):
+                        await self._action_event.wait()
                 except TimeoutError:
                     # Connected but silent too long — fail it (its agent would
                     # otherwise hang on an observation) and drop out so peers proceed.

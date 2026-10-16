@@ -17,6 +17,8 @@ from hud.utils import gateway
 if TYPE_CHECKING:
     from google import genai
 
+    from hud.agents.tools.base import AgentTool
+
 
 from .settings import gemini_agent_settings
 from .tools import (
@@ -86,13 +88,18 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         self.max_output_tokens = config.max_output_tokens
         self.thinking_level = config.thinking_level
         self.include_thoughts = config.include_thoughts
-        self.excluded_predefined_functions = list(config.excluded_predefined_functions)
         self.max_tool_result_chars = config.max_tool_result_chars
         self.max_recent_turn_with_screenshots = (
             gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
+
+    def _tool_options(self, tool_cls: type[AgentTool[Any]]) -> dict[str, Any]:
+        options = super()._tool_options(tool_cls)
+        if issubclass(tool_cls, GeminiComputerTool):
+            options["excluded_predefined_functions"] = self.config.excluded_predefined_functions
+        return options
 
     async def _initialize_state(
         self, *, prompt: list[mcp_types.PromptMessage]

@@ -1,0 +1,10 @@
+artifacts = [
+  { source = "/app/outputs", destination = "results", exclude = ["*.tmp", "cache"] },
+]
+
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30
