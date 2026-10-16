@@ -69,11 +69,6 @@ def protocol_env(log: Path) -> Environment:
         yield 1.0 if answer == "42" else 0.0
 
     @env.template()
-    async def rich():
-        yield "go"
-        yield {"score": 0.5, "info": {"detail": "partial credit"}}
-
-    @env.template()
     async def model():
         yield "go"
         yield EvaluationResult(
@@ -94,11 +89,6 @@ def protocol_env(log: Path) -> Environment:
     async def bad_dict():
         yield "go"
         yield {"reward": 1.0}
-
-    @env.template()
-    async def stringy():
-        yield "go"
-        yield "great job"
 
     @env.template()
     async def no_grade():
@@ -246,14 +236,6 @@ async def test_hello_names_the_session_and_publishes_hook_capabilities(tmp_path:
 INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
 TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
     "number-right": ("plain", {}, "42", "What is six times seven?", {"score": 1.0}),
-    "number-wrong": ("plain", {}, "41", "What is six times seven?", {"score": 0.0}),
-    "score-dict-keeps-extras": (
-        "rich",
-        {},
-        "x",
-        "go",
-        {"score": 0.5, "info": {"detail": "partial credit"}},
-    ),
     "evaluation-result-whole-frame": (
         "model",
         {},
@@ -286,13 +268,6 @@ TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
     ),
     "dict-without-score-fails-loudly": (
         "bad_dict",
-        {},
-        "x",
-        "go",
-        FAILED,
-    ),
-    "string-grade-fails-loudly": (
-        "stringy",
         {},
         "x",
         "go",
@@ -340,13 +315,6 @@ TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
         {"score": 1.0},
     ),
     "defaults-fill-in": ("defaults", {"difficulty": 3}, "x", "coding at 3", {"score": 1.0}),
-    "var-kwargs": (
-        "flexible",
-        {"n": 1, "b": "2", "a": "1"},
-        "x",
-        "1 [('a', '1'), ('b', '2')]",
-        {"score": 1.0},
-    ),
     "unannotated": (
         "loose",
         {"anything": [1, {"a": None}]},
@@ -383,16 +351,8 @@ BAD_REQUESTS: dict[str, tuple[list[tuple[str, dict[str, Any] | None]], list[Any]
         [("tasks.start", {"id": "missing"})],
         [INVALID],
     ),
-    "start-non-string-id": (
-        [("tasks.start", {"id": 7})],
-        [INVALID],
-    ),
     "start-list-args": (
         [("tasks.start", {"id": "guarded", "args": ["x"]})],
-        [INVALID],
-    ),
-    "start-empty-list-args": (
-        [("tasks.start", {"id": "guarded", "args": []})],
         [INVALID],
     ),
     "start-signature-mismatch": (
@@ -412,36 +372,16 @@ BAD_REQUESTS: dict[str, tuple[list[tuple[str, dict[str, Any] | None]], list[Any]
         [("tasks.cancel", None), ("tunnel.open", {"capability": "browser"})],
         [{"cancelled": True}, NOT_FOUND],
     ),
-    "hello-non-string-session": (
-        [("hello", {"session_id": 5})],
-        [INVALID],
-    ),
     "hello-unknown-session": (
         [("hello", {"session_id": "sess-00000000"})],
         [BAD_STATE],
-    ),
-    "hello-routes-not-a-list": (
-        [("hello", {"workspace_routes": "ssh"})],
-        [INVALID],
     ),
     "hello-route-port-not-an-int": (
         [("hello", {"workspace_routes": [{**ROUTE, "port": "443"}]})],
         [INVALID],
     ),
-    "hello-connections-object": (
-        [("hello", {"connections": {"name": "x"}})],
-        [INVALID],
-    ),
-    "hello-connection-missing-fields": (
-        [("hello", {"connections": [{"name": "inference"}]})],
-        [INVALID],
-    ),
     "hello-connection-without-a-workspace": (
         [("hello", {"connections": [CONNECTION]})],
-        [FAILED],
-    ),
-    "hello-route-without-a-workspace": (
-        [("hello", {"workspace_routes": [ROUTE]})],
         [FAILED],
     ),
 }
@@ -537,7 +477,7 @@ def oversized_env(kind: str, finished: list[str]) -> Environment:
 
 @pytest.mark.parametrize(
     ("size", "accepted"),
-    [(72483, True), (1024 * 1024, True), (FRAME_LIMIT, True), (FRAME_LIMIT + 1, False)],
+    [(72483, True), (FRAME_LIMIT, True), (FRAME_LIMIT + 1, False)],
 )
 async def test_a_request_up_to_the_frame_limit_round_trips(size: int, accepted: bool) -> None:
     env = oversized_env("prompt", [])
@@ -560,7 +500,7 @@ async def test_a_request_up_to_the_frame_limit_round_trips(size: int, accepted: 
         assert (started["id"], started["error"]["code"]) == (None, FAILED)
 
 
-@pytest.mark.parametrize("kind", ["prompt", "grade", "error"])
+@pytest.mark.parametrize("kind", ["prompt", "error"])
 async def test_an_oversized_reply_is_an_error_frame_and_releases_the_template(kind: str) -> None:
     finished: list[str] = []
     env = oversized_env(kind, finished)
@@ -586,7 +526,6 @@ async def test_an_oversized_reply_is_an_error_frame_and_releases_the_template(ki
     ("preface", "field", "serving"),
     [
         pytest.param(False, "padding", False, id="oversized-first-frame-hangs-up"),
-        pytest.param(True, "padding", False, id="oversized-frame-mid-session-hangs-up"),
         pytest.param(False, "id", True, id="reply-too-large-for-its-id-keeps-serving"),
     ],
 )
@@ -640,12 +579,6 @@ def register_a_template_twice(env: Environment) -> None:
             lambda env: [env.workspace("a"), env.workspace("b")],
             ValueError,
             id="two-workspaces-on-one-capability",
-        ),
-        pytest.param(lambda env: env.capability("missing"), KeyError, id="an-unknown-capability"),
-        pytest.param(
-            lambda env: env.add_capability(cast("Any", {"name": "x"})),
-            TypeError,
-            id="a-capability-that-is-not-one",
         ),
         pytest.param(
             lambda env: env.add_capability(

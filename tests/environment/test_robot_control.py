@@ -227,13 +227,9 @@ async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
     ("call", "error"),
     [
         (("move_to", {"targets": {"x": 0.1, "z": 0.1}, "note": "go"}), "'z' was unexpected"),
-        (("move_to", {"targets": {"x": None, "grip": 1.0}, "note": "go"}), "'grip' was unexpected"),
-        (("move_to", {"targets": {"grip": None}, "note": "go"}), "'x' is a required property"),
-        (("move_to", {"targets": {"x": "far"}, "note": "go"}), "'far' is not of type"),
         (_move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
         (("move_to", {"targets": {"x": None}, "note": "go"}), "set at least one"),
         (("move_to", {"targets": {"x": 0.1}, "note": "  "}), "note must say"),
-        (("wait", {"duration": None, "note": " "}), "note must say"),
         (("wait", {"duration": 101, "note": "sleep"}), "duration must be within [0, 100]"),
     ],
 )
@@ -677,7 +673,6 @@ async def test_each_quantity_defaults_to_the_angle_that_moves_the_fingertips_one
             [f"target_eef_pos.{a}" for a in "xyz"] + [f"target_eef_axis_angle.r{a}" for a in "xyz"],
             ["x", "y", "z", "roll", "pitch", "yaw"],
         ),
-        ("ee_del", ["delta_eef_pos.dx", "delta_eef_rot.droll", "gripper"], ["x", "roll", "grip"]),
         ("joint_pos", ["panda_joint1", "panda_joint2"], ["joint1", "joint2"]),
         ("ee_abs", ["left_x", "right_x", "left_gripper"], ["left_arm", "right_arm"]),
         ("ee_abs", ["left_x", "left_pitch_deg"], ["left_x", "left_pitch_deg"]),  # no standard

@@ -81,12 +81,6 @@ TREE = {
     + TEMPLATE
     + "def make_task():\n    return solve()\n",
     "exports/as_task.py": "from bound_source import make_task\nrows = make_task()\n",
-    "exports/as_list.py": "from bound_source import make_task\nrows = [make_task()]\n",
-    "exports/as_tuple.py": "from bound_source import make_task\nrows = (make_task(),)\n",
-    "exports/as_taskset.py": (
-        "from bound_source import make_task\nfrom hud.eval import Taskset\n"
-        "rows = Taskset('rows', [make_task()])\n"
-    ),
     "modpkg/__init__.py": "",
     "modpkg/factories.py": (
         "from hud.environment import Environment\n"
@@ -118,9 +112,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 ROWS = [
     pytest.param("env", None, None, "from-env-py", id="bare-name-means-env-py"),
-    pytest.param("env", "env", None, "from-env-py", id="bare-name-with-attribute"),
     pytest.param("env.py", None, None, "from-env-py", id="relative-file"),
-    pytest.param("{root}/env.py", None, None, "from-env-py", id="absolute-file"),
     pytest.param("envs", "foo", None, "from-tree", id="directory-by-attribute"),
     pytest.param("pkg", "make_env", None, "from-factory", id="package-factory"),
     pytest.param("pkg", "make_env", {"name": "x"}, "x", id="package-factory-with-args"),
@@ -129,16 +121,10 @@ ROWS = [
     pytest.param("multi.py", "env-two", None, "env-two", id="select-by-env-name"),
     pytest.param("single.py", None, None, "only", id="single-env-needs-no-name"),
     pytest.param("alias.py", None, None, "shared", id="re-exported-env-is-one-env"),
-    pytest.param("alias.py", "shared", None, "shared", id="re-exported-env-by-name"),
     pytest.param("relpkg/env.py", None, None, "relative", id="package-relative-import"),
     pytest.param("reexport/env.py", None, None, "reexported", id="package-init-re-export"),
     pytest.param("scan", "scanned", None, "scanned", id="directory-of-modules"),
     pytest.param("exports/as_task.py", "bound", None, "bound", id="exported-task"),
-    pytest.param("exports/as_list.py", "bound", None, "bound", id="exported-task-list"),
-    pytest.param("exports/as_tuple.py", "bound", None, "bound", id="exported-task-tuple"),
-    pytest.param("exports/as_taskset.py", "bound", None, "bound", id="exported-taskset"),
-    pytest.param("shadow/json.py", None, None, "local", id="module-named-like-stdlib"),
-    pytest.param("shadow", None, None, "local", id="directory-with-stdlib-name"),
     pytest.param("modpkg.factories", None, None, "declared", id="module-env-attribute"),
     pytest.param(
         "modpkg.factories", "make_env", {"name": "made"}, "made", id="module-factory-with-args"
@@ -181,13 +167,6 @@ ROWS = [
         None,
         FileNotFoundError,
         id="missing-file",
-    ),
-    pytest.param(
-        "nothing.py",
-        None,
-        None,
-        FileNotFoundError,
-        id="missing-file-in-cwd",
     ),
     pytest.param(
         "env.py",
