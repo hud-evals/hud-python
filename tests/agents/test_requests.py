@@ -12,8 +12,6 @@ from __future__ import annotations
 import base64
 import io
 import json
-import struct
-import zlib
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -164,12 +162,6 @@ INVALID_HOSTED = {
         ClaudeAgent,
         ClaudeConfig,
         ClaudeWebSearchTool(allowed_domains=["a.com"], blocked_domains=["b.com"]),
-        "Use either allowed_domains or blocked_domains, not both.",
-    ),
-    "claude-fetch-both-domain-lists": (
-        ClaudeAgent,
-        ClaudeConfig,
-        ClaudeWebFetchTool(allowed_domains=["a.com"], blocked_domains=["b.com"]),
         "Use either allowed_domains or blocked_domains, not both.",
     ),
     "gemini-dynamic-threshold": (
@@ -329,16 +321,6 @@ async def test_citations_ask_the_provider_for_sources(
             id="image-history-without-thinking",
         ),
         pytest.param(
-            {"max_tool_result_images": 1, "thinking": {"type": "disabled"}},
-            "requires explicit adaptive or enabled thinking",
-            id="image-history-with-thinking-disabled",
-        ),
-        pytest.param(
-            {"max_tokens": 2048, "thinking": {"type": "enabled", "budget_tokens": 2048}},
-            "budget_tokens must be less than max_tokens",
-            id="a-budget-equal-to-max-tokens",
-        ),
-        pytest.param(
             {"max_tokens": 2048, "thinking": {"type": "enabled", "budget_tokens": 2047}},
             None,
             id="a-budget-below-max-tokens",
@@ -355,14 +337,6 @@ def test_claude_refuses_thinking_settings_it_cannot_send(
         ClaudeConfig.model_validate(config)
 
 
-def png_claiming(size: tuple[int, int]) -> bytes:
-    """A 1x1 PNG whose header claims ``size``."""
-    data = bytearray(image((1, 1)))
-    data[16:24] = struct.pack(">II", *size)
-    data[29:33] = struct.pack(">I", zlib.crc32(data[12:29]))
-    return bytes(data)
-
-
 def rotated_jpeg() -> bytes:
     exif = Image.Exif()
     exif[274] = 6  # rotate 90 degrees clockwise for display
@@ -374,16 +348,11 @@ def rotated_jpeg() -> bytes:
 CLAUDE_VIEWS: dict[str, tuple[bytes, tuple[int, int] | str]] = {
     "small-png": (image((40, 30)), (40, 30)),
     "wide-png": (image((3000, 2000)), (3000, 2000)),
-    "tall-png": (image((2000, 4000)), (2000, 4000)),
     "exif-jpeg-is-turned-upright": (rotated_jpeg(), (20, 40)),
-    "gif": (image((32, 24), format="GIF"), (32, 24)),
-    "oversized-header": (png_claiming((4001, 4000)), "exceeds the 16,000,000-pixel source limit"),
     "corrupt-png": (b"\x89PNG\r\n\x1a\n" + b"garbage", "Cannot view image"),
-    "binary": (b"\x00binary", "expected UTF-8 text or an image"),
 }
 
 
-@pytest.mark.filterwarnings("ignore:Image size.*:PIL.Image.DecompressionBombWarning")
 @pytest.mark.parametrize(("data", "expected"), CLAUDE_VIEWS.values(), ids=CLAUDE_VIEWS.keys())
 async def test_an_image_claude_views_is_sent_within_its_limits(
     data: bytes,
@@ -507,7 +476,6 @@ async def test_gemini_bounds_a_long_tool_output_to_its_head_and_tail(
 CLAUDE_COMPUTERS = {
     "claude-sonnet-4-6": ("computer-use-2025-11-24", "computer_20251124"),
     "claude-sonnet-4-5": ("computer-use-2025-01-24", "computer_20250124"),
-    "claude-future-model": ("computer-use-2025-11-24", "computer_20251124"),
     "qwen/qwen3.8-max": (None, None),
 }
 

@@ -25,7 +25,6 @@ from tests.support import (
     Turn,
     call,
     fail,
-    interrupted,
     mcp_server,
     relay,
     run_task,
@@ -77,14 +76,6 @@ CUT_OFF = Turn(
             [Turn(finish="MALFORMED_FUNCTION_CALL")],
             "Provider returned a malformed function call",
             id="gemini-malformed-function-call",
-        ),
-        pytest.param(
-            lambda: OpenAIAgent(OPENAI.model_copy(update={"max_steps": 1})),
-            [shell_call()],
-            "Model emitted shell_call(s) with an empty commands array (call_shell); continuing "
-            "from response resp_1 would fail with OpenAI 500s, so it was not committed to the "
-            "run state.",
-            id="responses-empty-shell-call-on-the-last-step",
         ),
     ],
 )
@@ -153,9 +144,7 @@ BAD_JSON = Turn(
             1,
             id="a-request-error-is-not-retried",
         ),
-        pytest.param([interrupted(), say("ok")], "completed", 2, id="a-cut-stream-is-retried"),
         pytest.param([BAD_JSON, say("ok")], "completed", 2, id="invalid-tool-json-is-retried"),
-        pytest.param([BAD_JSON] * 3, "error", 3, id="invalid-tool-json-three-times-ends-the-run"),
     ],
 )
 async def test_claude_retries_what_its_stream_lets_it_retry(

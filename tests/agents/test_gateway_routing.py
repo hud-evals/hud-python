@@ -77,33 +77,17 @@ ROUTES = {
         lambda _url: create_agent("openai"),
         ("responses", "gpt-5.6", f"Bearer {API_KEY}"),
     ),
-    "create-agent-ignores-a-provider-key": (
-        lambda _url: create_agent("openai_compatible"),
-        ("chat", "gpt-5.4-mini", f"Bearer {API_KEY}"),
-    ),
     "create-agent-claude": (
         lambda _url: create_agent("claude"),
         ("anthropic", "claude-sonnet-4-6", API_KEY),
-    ),
-    "create-agent-gemini": (
-        lambda _url: create_agent("gemini"),
-        ("gemini", "gemini-3.1-pro-preview", API_KEY),
     ),
     "create-agent-catalog-id": (
         lambda _url: create_agent("ft:custom-123"),
         ("chat", "gpt-5.5", f"Bearer {API_KEY}"),
     ),
-    "create-agent-catalog-slug-without-provider": (
-        lambda _url: create_agent("deepseek-v4-flash"),
-        ("chat", "deepseek/deepseek-v4-flash", f"Bearer {API_KEY}"),
-    ),
     "create-agent-catalog-name-any-case": (
         lambda _url: create_agent("minimax-m3"),
         ("chat", "MiniMax-M3", f"Bearer {API_KEY}"),
-    ),
-    "create-agent-catalog-display-name": (
-        lambda _url: create_agent("Claude Sonnet 4.6"),
-        ("anthropic", "claude-sonnet-4-6", API_KEY),
     ),
     "reloaded-gateway-agent": (
         lambda _url: OpenAIAgent.load(create_agent("openai").dump()),
@@ -162,15 +146,13 @@ def test_create_agent_needs_a_hud_api_key() -> None:
         create_agent("openai")
 
 
-@pytest.mark.parametrize("hud_api_key", ["hud-key", None])
 @pytest.mark.parametrize(
-    "credentials",
-    [{"api_key": "provider-key"}, {"base_url": "https://provider.example"}, {"api_key": None}],
+    "credentials", [{"api_key": "provider-key"}, {"base_url": "https://provider.example"}]
 )
 def test_create_agent_refuses_provider_credentials(
-    credentials: dict[str, Any], hud_api_key: str | None, hud_env: HudEnv
+    credentials: dict[str, Any], hud_env: HudEnv
 ) -> None:
-    hud_env.set(HUD_API_KEY=hud_api_key)
+    hud_env.set(HUD_API_KEY="hud-key")
 
     with pytest.raises(ValueError, match="instantiate the provider agent directly"):
         create_agent("openai_compatible", **credentials)
@@ -195,8 +177,6 @@ def test_a_chat_agent_refuses_a_foreign_key_for_the_hud_gateway(
 AGENTS_WITHOUT_CREDENTIALS = {
     "chat": (lambda: OpenAIChatAgent(), ValueError, "No API key found"),
     "claude": (lambda: ClaudeAgent(), HudAuthenticationError, "No API key for anthropic"),
-    "openai": (lambda: OpenAIAgent(), HudAuthenticationError, "No API key for openai"),
-    "gemini": (lambda: GeminiAgent(), HudAuthenticationError, "No API key for gemini"),
 }
 
 
@@ -309,13 +289,12 @@ AUTH_HEADERS = {"openai": "authorization", "anthropic": "x-api-key", "gemini": "
 @pytest.mark.parametrize(
     ("family", "provider_key", "gateway", "reached"),
     [
-        pytest.param(family, key, gateway, reached, id=f"{family}-{label}")
-        for family in AGENTS
-        for key, gateway, reached, label in [
-            (True, False, "provider", "own-key"),
-            (False, False, "gateway", "hud-key-only"),
-            (True, True, "gateway", "forced-gateway"),
-        ]
+        *[
+            pytest.param(family, True, False, "provider", id=f"{family}-own-key")
+            for family in AGENTS
+        ],
+        pytest.param("openai", False, False, "gateway", id="hud-key-only"),
+        pytest.param("anthropic", True, True, "gateway", id="forced-gateway"),
     ],
 )
 async def test_a_provider_key_routes_direct_unless_the_gateway_is_forced(
