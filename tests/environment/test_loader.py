@@ -359,20 +359,25 @@ async def announced_port(process: asyncio.subprocess.Process) -> int:
 
 
 @pytest.mark.parametrize(
-    ("command", "error"),
+    ("command", "code", "error"),
     [
-        pytest.param([*SERVER, "multi.py"], "multiple Environments in multi.py", id="ambiguous"),
-        pytest.param([*SERVER, "nothing.py"], "no environment source at nothing.py", id="missing"),
+        pytest.param([*SERVER, "multi.py"], 1, "multiple Environments in multi.py", id="ambiguous"),
+        pytest.param(
+            [*SERVER, "nothing.py"], 1, "no environment source at nothing.py", id="missing"
+        ),
+        pytest.param(
+            [*HUD_SERVE, "pkg:make_env", "--arg", "name"], 2, "--arg", id="a-malformed-factory-arg"
+        ),
     ],
 )
 async def test_the_serving_process_exits_with_the_load_error(
-    tree: Path, command: list[str], error: str
+    tree: Path, command: list[str], code: int, error: str
 ) -> None:
     process = await asyncio.create_subprocess_exec(
         *command, cwd=tree, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
 
-    assert process.returncode == 1
+    assert process.returncode == code
     assert b"HUD_SERVE_PORT=" not in stdout
     assert error in stderr.decode()
