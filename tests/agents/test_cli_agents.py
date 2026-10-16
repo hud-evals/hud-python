@@ -22,8 +22,7 @@ from hud.agents.types import ClaudeCLIConfig, CodexCLIConfig
 from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
 from tests.agents.cli_stub import Stub, jsonl, process_exited
-from tests.agents.support import run_task, workspace_env
-from tests.support import fake_screen
+from tests.support import fake_screen, run_task, workspace_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable

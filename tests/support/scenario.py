@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from hud.agents.base import Agent
 from hud.clients import connect
-from hud.eval import LocalRuntime, Task
+from hud.eval import LocalRuntime, Task, rollout
+
+from .envs import PROMPT as WORKSPACE_PROMPT
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -92,6 +94,11 @@ async def eventually(condition: Callable[[], bool], *, within: float = 10.0) -> 
             await asyncio.sleep(0.01)
 
 
-def task_row(env: Environment, template: str, **args: Any) -> Task:
-    """The data row for ``template`` on ``env``, as a taskset file would carry it."""
-    return Task(env=env.name, id=template, args=args)
+async def run_task(
+    env: Environment, agent: Agent, *, prompt: str = WORKSPACE_PROMPT, **options: Any
+) -> Run:
+    """Roll ``agent`` out on ``env``'s ``task`` in this process."""
+    args = {} if prompt == WORKSPACE_PROMPT else {"prompt": prompt}
+    return await rollout(
+        Task(env=env.name, id="task", args=args), agent, runtime=LocalRuntime(env), **options
+    )

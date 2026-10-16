@@ -15,8 +15,7 @@ import pytest
 
 from hud.environment import Environment, load_environment
 from hud.eval import LocalRuntime, RuntimeConfig, SubprocessRuntime, Task, Taskset
-from tests.eval.envs import lab, solve
-from tests.support import ScriptedAgent, eventually
+from tests.support import ScriptedAgent, eventually, lab, solve
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -10,7 +10,7 @@ from fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.support import Reply, serve_asgi
+from tests.support import Reply, mcp_server
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -170,9 +170,8 @@ async def test_a_fastmcp_tool_wraps_plain_results_and_skips_output_validation() 
         wrong: Any = "not an int"
         return wrong
 
-    async with serve_asgi(mcp.http_app(path="/mcp")) as port:
-        url = f"http://127.0.0.1:{port}/mcp"
-        client = await MCPClient.connect(Capability.mcp(url=url, transport="streamable-http"))
+    async with mcp_server(mcp) as served:
+        client = await MCPClient.connect(served)
         try:
             wrapped = await client.call_tool("numbers", {})
             off_schema = await client.call_tool("mistyped", {})

@@ -40,8 +40,8 @@ from tests.support import (
     fake_browser,
     fake_screen,
     hang_up,
+    mcp_server,
     relay,
-    serve_asgi,
     served,
 )
 
@@ -413,25 +413,25 @@ async def test_each_protocol_opens_as_its_own_client_through_the_env_port() -> N
     async with (
         fake_screen(width=4, height=2) as screen,
         fake_browser(replies={"Page.navigate": {"result": {"frameId": "f-1"}}}) as browser,
-        serve_asgi(tools.http_app(path="/mcp")) as mcp_port,
+        mcp_server(tools) as mcp,
     ):
         env = Environment(
             "multi",
             capabilities=[
                 Capability.rfb(name="screen", url=screen.url),
                 Capability.cdp(name="browser", url=browser.url),
-                Capability.mcp(name="tools", url=f"http://127.0.0.1:{mcp_port}/mcp"),
+                mcp,
             ],
         )
         async with served(env) as client:
             rfb = await client.open("screen")
             cdp = await client.open("browser")
-            mcp = await client.open("tools")
+            tools_client = await client.open("tools")
             assert isinstance(rfb, RFBClient)
             assert isinstance(cdp, CDPClient)
-            assert isinstance(mcp, MCPClient)
+            assert isinstance(tools_client, MCPClient)
             _, mime = await rfb.screenshot_png()
             navigated = await cdp.send("Page.navigate", {"url": "https://example.com"})
-            listed = [tool.name for tool in await mcp.list_tools()]
+            listed = [tool.name for tool in await tools_client.list_tools()]
 
     assert (mime, navigated, listed) == ("image/png", {"frameId": "f-1"}, ["ping"])

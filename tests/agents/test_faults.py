@@ -20,17 +20,19 @@ from fastmcp import FastMCP
 
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
-from tests.agents.support import mcp_server, run_task, workspace_env
 from tests.support import (
     Reply,
     Turn,
     call,
     fail,
     interrupted,
+    mcp_server,
     relay,
+    run_task,
     say,
     shell_call,
     stream_error,
+    workspace_env,
 )
 
 if TYPE_CHECKING:

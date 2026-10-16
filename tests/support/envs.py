@@ -1,8 +1,11 @@
-"""Fixture environments for the rollout engine scenarios.
+"""In-process environments the scenarios share.
 
-Each template's reward proves the path it names ran: ``add`` pays 1.0 only for
-the right sum, so a graded run shows the prompt reached the agent and the answer
-reached the grader. Hooks append to an ``events`` list the test owns.
+``lab`` carries one template per way a task can start or grade; ``add`` pays 1.0
+only for the right sum, so a graded run proves the prompt reached the agent and
+the answer reached the grader. Hooks append to an ``events`` list the test owns.
+``actor`` and ``judge`` make a verifier pair; ``workspace_env`` serves a real
+workspace over SSH for the agent scenarios. Environments that must load from a
+file, in a child process or a container, live in ``tests/fixtures/envs``.
 """
 
 from __future__ import annotations
@@ -12,7 +15,13 @@ from typing import TYPE_CHECKING, Any
 
 from hud import Environment
 
+from .files import write_files
+
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
+
+    from hud.capabilities import Capability
     from hud.eval import Task
 
 SUMS_SOURCE = """
@@ -159,5 +168,41 @@ def judge(env: Environment | None = None, *, verdict: str = "check") -> Environm
             yield 0.0
         else:
             yield 1.0 if result["answer"] == "secret" else 0.0
+
+    return env
+
+
+PROMPT = "Do the task."
+
+
+def workspace_env(
+    root: Path,
+    *,
+    files: Mapping[str, bytes | str] | None = None,
+    passes: Callable[[Path], bool] = lambda _root: True,
+    capabilities: tuple[Capability, ...] = (),
+    name: str = "ws",
+    settle: float = 0.0,
+    **workspace: Any,
+) -> Environment:
+    """An environment serving ``root`` over SSH with one template, ``task``.
+
+    ``files`` seed the workspace before each run; the task scores 1.0 when
+    ``passes(root)`` holds ``settle`` seconds after the agent finishes, long
+    enough for anything the agent left running to show. ``workspace`` goes to
+    :meth:`Environment.workspace` (``env=`` for the shell environment).
+    """
+    env = Environment(name, capabilities=capabilities)
+    env.workspace(root, guest_path=str(root), **workspace)
+
+    @env.initialize
+    async def seed() -> None:
+        write_files(root, files or {})
+
+    @env.template()
+    async def task(prompt: str = PROMPT):
+        yield prompt
+        await asyncio.sleep(settle)
+        yield 1.0 if passes(root) else 0.0
 
     return env

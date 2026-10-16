@@ -23,8 +23,7 @@ from hud.eval import (
     RuntimeLimits,
     Task,
 )
-from tests.eval.envs import actor, judge
-from tests.support import RecordingProvider, ScriptedAgent, eventually, steps
+from tests.support import RecordingProvider, ScriptedAgent, actor, eventually, judge, steps
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

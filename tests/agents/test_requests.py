@@ -36,9 +36,8 @@ from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchT
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task
-from tests.agents.support import image, mcp_server, run_task, workspace_env
 from tests.fixtures.envs import source
-from tests.support import Turn, call, fake_screen, say
+from tests.support import Turn, call, fake_screen, image, mcp_server, run_task, say, workspace_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -32,9 +32,8 @@ from hud.eval import (
     rollout,
 )
 from hud.telemetry.context import get_current_trace_id
-from tests.eval.envs import SUMS_SOURCE, lab, solve
 from tests.fixtures.envs import source
-from tests.support import ScriptedAgent, eventually, steps
+from tests.support import ScriptedAgent, eventually, lab, solve, steps
 from tests.support.runtime import host_on_runtime
 
 if TYPE_CHECKING:
@@ -422,17 +421,12 @@ CASES = {
 
 
 @pytest.mark.parametrize("case", CASES.values(), ids=CASES.keys())
-async def test_a_rollout_always_returns_a_run_that_says_where_it_failed(
-    case: Case, tmp_path: Path
-) -> None:
+async def test_a_rollout_always_returns_a_run_that_says_where_it_failed(case: Case) -> None:
     events: list[str] = []
     env = lab(events)
-    source = tmp_path / "env.py"
-    source.write_text(SUMS_SOURCE)
     providers: dict[str, Provider] = {
         "live": LocalRuntime(env),
         "constructor": LocalRuntime(lambda task: env),
-        "subprocess": SubprocessRuntime(source),
         "hanging": hanging_provider,
         "broken": broken_provider(noted("sandbox closed", "env output: ImportError: bugs")),
     }
