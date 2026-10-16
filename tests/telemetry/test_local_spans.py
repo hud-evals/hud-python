@@ -10,13 +10,14 @@ from dirty_equals import IsStr
 from hud import Environment, instrument
 from hud.agents.base import Agent
 from hud.eval import LocalRuntime, Task, Taskset, rollout
+from hud.telemetry import flush
 from tests.support import ScriptedAgent, spans, steps
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv
+    from tests.support import HudEnv, Platform
 
 ISO = IsStr(regex=r"\d{4}-\d\d-\d\dT.*")
 
@@ -45,7 +46,7 @@ TASK = Task(env="spans", id="answer")
     ],
 )
 async def test_spans_are_written_where_the_configuration_says(
-    services: FakeServices,
+    reporting: Platform,
     hud_env: HudEnv,
     tmp_path: Path,
     uploads: str,
@@ -53,9 +54,7 @@ async def test_spans_are_written_where_the_configuration_says(
     written_to: str | None,
     uploaded: bool,
 ) -> None:
-    services.route("telemetry", "POST", "/trace/{id}/telemetry-upload", json={})
     hud_env.set(
-        HUD_API_KEY="k",
         HUD_TELEMETRY_ENABLED=uploads,
         HUD_TELEMETRY_LOCAL_DIR=str(tmp_path / local_dir) if local_dir else None,
     )
@@ -66,7 +65,8 @@ async def test_spans_are_written_where_the_configuration_says(
     (run,) = job.runs
     written = {name: spans(run.trace_id, path) != [] for name, path in directories.items()}
     assert written == {name: name == written_to for name in directories}
-    assert (services.requests("telemetry") != []) is uploaded
+    assert flush(timeout=10)
+    assert any(trace.spans for trace in reporting.traces.values()) is uploaded
 
 
 async def test_an_unwritable_span_directory_does_not_fail_the_run(

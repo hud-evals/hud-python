@@ -20,17 +20,10 @@ from tests.support import Reply, ScriptedAgent
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from tests.support import FakeServices, HudEnv, Request
+    from tests.support import FakeServices, Platform, Request
 
 MODEL_ID = "00000000-0000-4000-8000-000000000001"
 TRAIN = f"/v1/models/{MODEL_ID}/train"
-OPTIM = {
-    "step": 1,
-    "checkpoint_id": "ckpt-1",
-    "sampler_path": "s",
-    "state_path": "t",
-    "model": "owner/model",
-}
 TRACE_ID = IsStr(regex=r"[0-9a-f]{32}")
 
 
@@ -46,18 +39,10 @@ def _env() -> Environment:
 
 
 @pytest.fixture
-def service(services: FakeServices, hud_env: HudEnv) -> FakeServices:
-    """The model catalog and the training service for ``owner/model``."""
-    hud_env.set(HUD_API_KEY="hud-key")
-    services.route(
-        "api",
-        "GET",
-        "/v2/models",
-        json={"items": [{"id": MODEL_ID, "model_name": "owner/model"}], "total": 1},
-    )
-    services.route("rl", "POST", f"{TRAIN}/forward-backward", json={"metrics": {}, "num_datums": 2})
-    services.route("rl", "POST", f"{TRAIN}/optim-step", json=OPTIM)
-    return services
+def trainable(platform: Platform) -> Platform:
+    """The platform, with ``owner/model`` in its catalog."""
+    platform.add_model(id=MODEL_ID, model_name="owner/model")
+    return platform
 
 
 def _sampling_gateway(services: FakeServices) -> None:
@@ -110,71 +95,68 @@ def _trainable_agent() -> OpenAIChatAgent:
     )
 
 
-async def test_a_step_sends_sampled_runs_inline_then_one_optimizer_step(
-    service: FakeServices,
+async def test_a_step_trains_on_the_sampled_runs_and_serves_the_new_checkpoint(
+    trainable: Platform,
 ) -> None:
-    _sampling_gateway(service)
+    _sampling_gateway(trainable.services)
     runs = await _runs(_trainable_agent())
-    client = TrainingClient("owner/model", api_key="team-key")
+    client = TrainingClient("owner/model")
 
     result = await client.step(runs, learning_rate=1e-5, group_size=2)
 
-    assert result.checkpoint_id == "ckpt-1"
+    head = await client.head()
+    assert head is not None
+    assert result.checkpoint_id == head.id
     assert [run.reward for run in runs] == [1.0, 0.0]
-    (forward_backward,) = service.requests("rl", "POST", f"{TRAIN}/forward-backward")
-    assert forward_backward.bearer == "team-key"
-    sent = forward_backward.json
+    training = trainable.training[MODEL_ID]
+    (sent,) = training.batches
     sample = {"prompt_token_ids": [1, 2, 3], "output_token_ids": [7], "output_logprobs": [-0.5]}
     assert [(i["samples"], i["reward"], i["trace_id"]) for i in sent["inputs"]] == [
         ([sample], 1.0, TRACE_ID),
         ([sample], 0.0, TRACE_ID),
     ]
     assert sent["group_size"] == 2
-    (optim,) = service.requests("rl", "POST", f"{TRAIN}/optim-step")
-    assert optim.json["learning_rate"] == 1e-5
+    assert [step["learning_rate"] for step in training.steps] == [1e-5]
 
 
-async def test_runs_without_token_samples_train_by_trace_id(service: FakeServices) -> None:
+async def test_runs_without_token_samples_train_by_trace_id(trainable: Platform) -> None:
     runs = await _runs(ScriptedAgent("ok"))
 
     await TrainingClient("owner/model").forward_backward(runs, group_size=2)
 
-    (request,) = service.requests("rl", "POST", f"{TRAIN}/forward-backward")
-    assert request.json["inputs"] == [str(run.trace_id) for run in runs]
-    assert request.bearer == "hud-key"
+    (batch,) = trainable.training[MODEL_ID].batches
+    assert batch["inputs"] == [str(run.trace_id) for run in runs]
 
 
 async def test_the_model_slug_resolves_once_with_the_clients_own_key(
-    service: FakeServices,
+    trainable: Platform,
 ) -> None:
     runs = await _runs(ScriptedAgent("ok"))
+    trainable.keys = {"team-key"}
     client = TrainingClient("owner/model", api_key="team-key")
 
     await client.forward_backward(runs, group_size=2)
     await client.optim_step(learning_rate=1e-5)
 
-    (catalog,) = service.requests("api", "GET", "/v2/models")
-    assert catalog.bearer == "team-key"
-    assert [request.path for request in service.requests("rl")] == [
-        f"{TRAIN}/forward-backward",
-        f"{TRAIN}/optim-step",
-    ]
+    training = trainable.training[MODEL_ID]
+    assert (len(training.batches), len(training.steps)) == (1, 1)
+    assert len(trainable.services.requests("api", "GET", "/v2/models")) == 1
 
 
 @pytest.mark.parametrize("status", [502, 503, 504])
-async def test_an_optimizer_step_is_never_retried(service: FakeServices, status: int) -> None:
-    service.route("rl", "POST", f"{TRAIN}/optim-step", Reply(status=status), Reply(json=OPTIM))
+async def test_an_optimizer_step_is_never_retried(trainable: Platform, status: int) -> None:
+    trainable.services.route("rl", "POST", f"{TRAIN}/optim-step", Reply(status=status))
 
     with pytest.raises(HudRequestError) as raised:
         await TrainingClient(MODEL_ID).optim_step(learning_rate=1e-5)
 
     assert raised.value.status_code == status
-    assert len(service.requests("rl", "POST", f"{TRAIN}/optim-step")) == 1
+    assert len(trainable.services.requests("rl", "POST", f"{TRAIN}/optim-step")) == 1
 
 
-async def test_a_custom_loss_sends_its_gradients_to_backward(service: FakeServices) -> None:
+async def test_a_custom_loss_sends_its_gradients_to_backward(trainable: Platform) -> None:
     runs = await _runs(ScriptedAgent("ok"))
-    service.route(
+    trainable.services.route(
         "rl",
         "POST",
         f"{TRAIN}/forward",
@@ -192,7 +174,6 @@ async def test_a_custom_loss_sends_its_gradients_to_backward(service: FakeServic
             ],
         },
     )
-    service.route("rl", "POST", f"{TRAIN}/backward", json={"metrics": {}, "num_datums": 2})
 
     def loss(
         data: list[DatumTensors], logprobs: list[torch.Tensor]
@@ -203,14 +184,14 @@ async def test_a_custom_loss_sends_its_gradients_to_backward(service: FakeServic
 
     await TrainingClient(MODEL_ID).forward_backward_custom(runs, loss, group_size=2)
 
-    (forward,) = service.requests("rl", "POST", f"{TRAIN}/forward")
-    (backward,) = service.requests("rl", "POST", f"{TRAIN}/backward")
-    assert forward.json == {
+    (forward,) = trainable.services.bodies("rl", "POST", f"{TRAIN}/forward")
+    (backward,) = trainable.training[MODEL_ID].batches
+    assert forward == {
         "inputs": [str(run.trace_id) for run in runs],
         "group_size": 2,
         "reward_scale": 1.0,
     }
-    assert backward.json == {
+    assert backward == {
         "forward_id": "fwd-1",
         "weights": [[1.0, 1.0], [0.5, 0.5]],
         "metrics": {"loss": 2.25},
@@ -251,14 +232,13 @@ async def _timed_out() -> list[Run]:
     ],
 )
 async def test_an_untrainable_batch_is_refused_before_anything_is_sent(
-    service: FakeServices, runs: Any, group_size: int | None, message: str
+    trainable: Platform, runs: Any, group_size: int | None, message: str
 ) -> None:
     batch = await runs()
 
     with pytest.raises(ValueError, match=message):
         await TrainingClient("owner/model").forward_backward(batch, group_size=group_size)
-    assert service.requests("rl") == []
-    assert service.requests("api", "GET", "/v2/models") == []
+    assert trainable.services.requests() == []
 
 
 def _two_tasks() -> list[Task]:
@@ -291,7 +271,7 @@ async def _single(run: Run) -> list[Run]:
     ],
 )
 async def test_a_batch_with_no_reward_spread_warns_that_it_trains_nothing(
-    service: FakeServices,
+    trainable: Platform,
     caplog: pytest.LogCaptureFixture,
     answers: list[str],
     order: list[int],
@@ -306,4 +286,4 @@ async def test_a_batch_with_no_reward_spread_warns_that_it_trains_nothing(
         )
 
     assert ("accumulates no gradient" in caplog.text) is warns
-    assert len(service.requests("rl")) == 1
+    assert len(trainable.training[MODEL_ID].batches) == 1

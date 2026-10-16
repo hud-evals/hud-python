@@ -9,7 +9,7 @@ import numpy as np
 from hud.environment.robot import wrap
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, HudEnv
+    from tests.support import Platform
 
 
 class TwoArmSim:
@@ -44,31 +44,16 @@ class TwoArmSim:
         pass
 
 
-def test_each_episode_reports_its_own_trace_and_outcome(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
-    for path in ("/v2/trace/job/{id}/enter", "/v2/trace/{id}/enter", "/v2/trace/{id}/exit"):
-        services.route("api", "POST", path, json={})
-    services.route("telemetry", "POST", "/trace/{id}/telemetry-upload", json={})
-
+def test_each_episode_reports_its_own_trace_and_outcome(reporting: Platform) -> None:
     env = wrap(TwoArmSim(), contract=None)
     env.reset()
     for _ in TwoArmSim.DONES:
         env.step(np.zeros((2, 2)))
     env.close()
 
-    opened = [
-        request.params["id"] for request in services.requests("api", "POST", "/v2/trace/{id}/enter")
-    ]
-    label = {trace_id: f"trace-{index}" for index, trace_id in enumerate(opened)}
-    exits = {
-        label[request.params["id"]]: request.json
-        for request in services.requests("api", "POST", "/v2/trace/{id}/exit")
-    }
-    spans: dict[str, list[dict[str, Any]]] = {}
-    for upload in services.requests("telemetry", "POST", "/trace/{id}/telemetry-upload"):
-        spans.setdefault(label[upload.params["id"]], []).extend(upload.json["telemetry"])
+    traces = {f"trace-{n}": trace for n, trace in enumerate(reporting.traces.values())}
+    exits = {label: trace.exit for label, trace in traces.items()}
+    spans = {label: trace.spans for label, trace in traces.items()}
     steps = {
         trace: [
             (span["name"], span["attributes"]["hud.payload"]["tick"])

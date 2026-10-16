@@ -13,7 +13,7 @@ from tests.support import served
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, Hud, HudEnv
+    from tests.support import Hud, HudEnv, Platform
 
 SERVICE_URLS = {
     "HUD_TELEMETRY_URL": "https://telemetry.hud.ai/v3/api",
@@ -34,7 +34,7 @@ SERVICE_URLS = {
     ],
 )
 def test_the_api_key_comes_from_env_then_project_env_then_hud_set(
-    services: FakeServices,
+    platform: Platform,
     hud_env: HudEnv,
     hud: Hud,
     process: str | None,
@@ -42,7 +42,7 @@ def test_the_api_key_comes_from_env_then_project_env_then_hud_set(
     user: str,
     sent: str,
 ) -> None:
-    services.route("api", "GET", "/v2/jobs", json={"items": []})
+    platform.keys = {sent}
     assert hud("set", f"HUD_API_KEY={user}").exit_code == 0
     if project is not None:
         (hud.cwd / ".env").write_text(f"HUD_API_KEY={project}\n")
@@ -51,7 +51,6 @@ def test_the_api_key_comes_from_env_then_project_env_then_hud_set(
     result = hud("jobs", "list", "--json")
 
     assert result.exit_code == 0, result
-    assert [request.bearer for request in services.requests("api", "GET", "/v2/jobs")] == [sent]
 
 
 def test_service_urls_default_to_the_hud_platform(hud_env: HudEnv) -> None:

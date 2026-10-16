@@ -1,8 +1,9 @@
 """The HUD platform as tests see it: state a test seeds, and state it inspects.
 
 One ``Platform`` answers the platform API through ``FakeServices``: projects,
-the environment registry, tasksets, builds, Harbor imports, the model catalog,
-jobs and traces (with the spans uploaded to them), QA and CLI analytics. A test seeds what it
+the environment registry, tasksets, builds, Harbor imports, the model catalog
+and its training service, jobs and traces (with the spans uploaded to them), QA
+and CLI analytics. A test seeds what it
 needs (a taskset, a deployed environment, a model) and checks what the code
 under test left behind (the tasks uploaded, the build triggered, a trace's exit)
 instead of reading request bodies. A fault is a route override on
@@ -132,12 +133,22 @@ class Import:
         return self.record(status)
 
 
+@dataclass
+class Training:
+    """One model's training: the gradient batches sent to it and the optimizer steps taken."""
+
+    batches: list[dict[str, Any]] = field(default_factory=list)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+
+
 class Platform:
     """The fake HUD platform; see the module docstring."""
 
     def __init__(self, services: FakeServices) -> None:
         self.services = services
         self._ids = count(1)
+        #: The keys the platform accepts; any other bearer is answered 401.
+        self.keys = {API_KEY}
         #: The most items a list endpoint returns at once, whatever the caller asks for.
         self.page_size = 500
         #: How the next build ends: what its status reports and what its log sends.
@@ -158,6 +169,7 @@ class Platform:
         self.builds: dict[str, Build] = {}
         self.models: list[dict[str, Any]] = []
         self.checkpoints: dict[str, list[dict[str, Any]]] = {}
+        self.training: dict[str, Training] = {}
         self.jobs: dict[str, dict[str, Any]] = {}
         self.job_traces: dict[str, list[dict[str, Any]]] = {}
         self.traces: dict[str, Trace] = {}
@@ -258,6 +270,9 @@ class Platform:
         route("api", "GET", "/v2/models/{id}/checkpoints", self._checkpoints)
         route("api", "PUT", "/v2/models/{id}/head", self._set_head)
         route("api", "POST", "/v2/models/fork", self._fork_model)
+        route("rl", "POST", "/v1/models/{id}/train/forward-backward", self._accumulate)
+        route("rl", "POST", "/v1/models/{id}/train/backward", self._accumulate)
+        route("rl", "POST", "/v1/models/{id}/train/optim-step", self._optim_step)
         route("api", "POST", "/v2/trace/job/{id}/enter", self._enter_job)
         route("api", "POST", "/v2/trace/{id}/enter", self._enter_trace)
         route("api", "POST", "/v2/trace/{id}/exit", self._exit_trace)
@@ -284,12 +299,11 @@ class Platform:
         route("api", "GET", "/v2/qa/results", self._qa_results)
         self.services.route("telemetry", "POST", "/sdk-events/cli", handler=self._cli_events)
 
-    @staticmethod
-    def _signed_in(handler: Handler) -> Handler:
-        """``handler``, answering 401 to a request without the user's HUD key."""
+    def _signed_in(self, handler: Handler) -> Handler:
+        """``handler``, answering 401 to a request without an accepted key."""
 
         def answer(request: Request) -> Reply | Awaitable[Reply]:
-            if request.bearer != API_KEY:
+            if request.bearer not in self.keys:
                 return Reply(status=401, json={"detail": "Invalid API key"})
             return handler(request)
 
@@ -447,6 +461,35 @@ class Platform:
             return Reply(status=409, json={"detail": "Model exists"})
         self.add_model(name=body["name"], model_name=slug, forked_from=body["source_model_id"])
         return Reply(json=self.models[-1])
+
+    # training
+
+    def _accumulate(self, request: Request) -> Reply:
+        batch = request.json
+        self.training.setdefault(request.params["id"], Training()).batches.append(batch)
+        datums = batch.get("inputs") or batch.get("weights") or []
+        return Reply(json={"metrics": {}, "num_datums": len(datums)})
+
+    def _optim_step(self, request: Request) -> Reply:
+        """Apply the step, then save and promote a checkpoint, as the service does."""
+        model_id = request.params["id"]
+        training = self.training.setdefault(model_id, Training())
+        training.steps.append(request.json)
+        checkpoint = {"id": f"ckpt-{next(self._ids)}", "name": f"step-{len(training.steps)}"}
+        checkpoints = self.checkpoints.setdefault(model_id, [])
+        for earlier in checkpoints:
+            earlier["is_active"] = False
+        checkpoints.append({**checkpoint, "is_active": True})
+        (model,) = [model for model in self.models if model["id"] == model_id]
+        return Reply(
+            json={
+                "step": len(training.steps),
+                "checkpoint_id": checkpoint["id"],
+                "sampler_path": f"sampler/{checkpoint['id']}",
+                "state_path": f"state/{checkpoint['id']}",
+                "model": model["model_name"],
+            }
+        )
 
     # jobs and traces
 

@@ -24,6 +24,7 @@ from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
 from hud.telemetry.robot import JobRecorder
 from tests.support import served
+from tests.support.platform import WEB_URL
 
 from .robot_sims import Reach, plain_env, vector_env
 
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from tests.support import FakeServices, HudEnv
+    from tests.support import Platform
 
 CONTRACT = {"control_rate": 10, "features": {"action": {"role": "action", "names": ["a"]}}}
 
@@ -141,26 +142,15 @@ COMPACT_JOB = "03dd2a73d3df4d10a54ae3d87c2d530d"
 CANONICAL_JOB = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 
 
-@pytest.fixture
-def platform(services: FakeServices, hud_env: HudEnv) -> FakeServices:
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
-    for path in ("/v2/trace/job/{id}/enter", "/v2/trace/{id}/enter", "/v2/trace/{id}/exit"):
-        services.route("api", "POST", path, json={})
-    services.route("telemetry", "POST", "/trace/{id}/telemetry-upload", json={})
-    return services
-
-
 @pytest.mark.parametrize("job_id", [COMPACT_JOB, CANONICAL_JOB])
-def test_a_shared_job_id_is_reported_canonically(platform: FakeServices, job_id: str) -> None:
+def test_a_shared_job_id_is_reported_canonically(reporting: Platform, job_id: str) -> None:
     recorder = JobRecorder("suite", 1, record_indices=[], job_id=job_id)
 
-    assert recorder.job_url == f"{platform.url('web')}/jobs/{CANONICAL_JOB}"
-    assert [request.path for request in platform.requests("api")] == [
+    assert recorder.job_url == f"{WEB_URL}/jobs/{CANONICAL_JOB}"
+    assert [request.path for request in reporting.services.requests("api")] == [
         f"/v2/trace/job/{CANONICAL_JOB}/enter"
     ]
-    assert platform.bodies("api", "POST", "/v2/trace/job/{id}/enter") == [
-        {"name": "suite", "group": 1}
-    ]
+    assert list(reporting.jobs.values()) == [{"name": "suite", "group": 1}]
 
 
 @pytest.mark.parametrize(
@@ -171,22 +161,18 @@ def test_a_shared_job_id_is_reported_canonically(platform: FakeServices, job_id:
     ],
 )
 def test_a_seeded_recording_keeps_the_trace_id_of_its_job_id_spelling(
-    platform: FakeServices, job_id: str, trace_id: str
+    reporting: Platform, job_id: str, trace_id: str
 ) -> None:
     JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id).record(done=np.array([True]))
 
-    entered = platform.requests("api", "POST", "/v2/trace/{id}/enter")
-    assert [(request.params["id"], request.json) for request in entered] == [
-        (trace_id, {"job_id": CANONICAL_JOB})
-    ]
-    exited = platform.bodies("api", "POST", "/v2/trace/{id}/exit")
-    assert exited == [
-        {
-            "status": "completed",
-            "reward": 0.0,
-            "metadata": {"env_index": 0, "episode_index": 0, "seed": 7},
-        }
-    ]
+    (recorded,) = reporting.traces
+    trace = reporting.traces[recorded]
+    assert (recorded, trace.enter) == (trace_id, {"job_id": CANONICAL_JOB})
+    assert trace.exit == {
+        "status": "completed",
+        "reward": 0.0,
+        "metadata": {"env_index": 0, "episode_index": 0, "seed": 7},
+    }
 
 
 def test_a_job_id_must_be_a_uuid() -> None:

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dotenv import dotenv_values
 
+from hud.telemetry import flush
 from tests.support import FakeServices, Hud, HudEnv, Models, Platform, Uv
 from tests.support import platform as platform_module
 
@@ -85,6 +86,17 @@ def platform(services: FakeServices, hud_env: HudEnv) -> Platform:
     """The fake HUD platform, signed in with a HUD key."""
     hud_env.set(HUD_API_KEY=platform_module.API_KEY, HUD_WEB_URL=platform_module.WEB_URL)
     return Platform(services)
+
+
+@pytest.fixture
+def reporting(platform: Platform, hud_env: HudEnv) -> Iterator[Platform]:
+    """The platform with telemetry uploads on.
+
+    Span uploads drain before the test ends, so none reaches a later test's platform.
+    """
+    hud_env.set(HUD_TELEMETRY_ENABLED="1")
+    yield platform
+    assert flush(timeout=10)
 
 
 @pytest.fixture

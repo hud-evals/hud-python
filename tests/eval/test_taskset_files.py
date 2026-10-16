@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support import FakeServices, HudEnv
+    from tests.support import Platform
 
 
 def authored_rows(root: Path) -> list[Task]:
@@ -289,80 +289,29 @@ def test_a_local_compose_project_serializes_as_its_document_for_the_platform(
     assert RuntimeConfig.model_validate({"compose": dumped}).compose is not None
 
 
-EXPORT = {
-    "name": "Demo Set",
-    "tasks": [
-        {"env": "lab", "scenario": "add", "args": {"a": 2, "b": 3}, "name": "two-plus-three"},
-        {
-            "env": "actor",
-            "scenario": "solve",
-            "name": "solve",
-            "columns": {"difficulty": "hard"},
-            "runtime_config": {"image": "actor:1"},
-            "verifier": {"env": "judge", "id": "verify"},
-        },
-        "not a record",
-    ],
-}
-TASKSET_ID = str(uuid.UUID(int=7))
-FETCHES: dict[str, tuple[str, list[Any], tuple[str, str | None, list[str]], list[str]]] = {
-    "a name resolves to its taskset, then its rows": (
-        "Demo Set",
-        [("by-name", {"taskset_id": TASKSET_ID, "name": "Demo Set"}), ("export", EXPORT)],
-        ("Demo Set", TASKSET_ID, ["two-plus-three", "solve"]),
-        ["/v2/tasksets/by-name/Demo Set", f"/v2/tasksets/{TASKSET_ID}/export"],
-    ),
-    "an id is fetched directly": (
-        TASKSET_ID,
-        [("export", EXPORT)],
-        ("Demo Set", TASKSET_ID, ["two-plus-three", "solve"]),
-        [f"/v2/tasksets/{TASKSET_ID}/export"],
-    ),
-    "a taskset whose export is gone is empty": (
-        TASKSET_ID,
-        [("export", None)],
-        (TASKSET_ID, TASKSET_ID, []),
-        [f"/v2/tasksets/{TASKSET_ID}/export"],
-    ),
-}
+EXPORTED = [
+    {"env": "lab", "scenario": "add", "args": {"a": 2, "b": 3}, "name": "two-plus-three"},
+    {
+        "env": "actor",
+        "scenario": "solve",
+        "name": "solve",
+        "columns": {"difficulty": "hard"},
+        "runtime_config": {"image": "actor:1"},
+        "verifier": {"env": "judge", "id": "verify"},
+    },
+]
 
 
-@pytest.mark.parametrize(
-    ("name", "replies", "fetched", "paths"), FETCHES.values(), ids=FETCHES.keys()
-)
-def test_a_platform_taskset_is_fetched_by_name_or_id(
-    name: str,
-    replies: list[tuple[str, Any]],
-    fetched: tuple[str, str | None, list[str]],
-    paths: list[str],
-    services: FakeServices,
-    hud_env: HudEnv,
+@pytest.mark.parametrize("reference", ["name", "id"])
+def test_a_platform_taskset_becomes_portable_rows_by_name_or_id(
+    platform: Platform, reference: str
 ) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    for endpoint, body in replies:
-        path = (
-            "/v2/tasksets/by-name/{name}" if endpoint == "by-name" else "/v2/tasksets/{id}/export"
-        )
-        if body is None:
-            services.route("api", "GET", path, json={"detail": "not found"}, status=404)
-        else:
-            services.route("api", "GET", path, json=body)
+    taskset_id = platform.add_taskset("Demo Set", EXPORTED)
+    platform.tasksets[taskset_id]["tasks"]["junk"] = "not a record"
 
-    taskset = Taskset.from_api(name)
+    taskset = Taskset.from_api("Demo Set" if reference == "name" else taskset_id)
 
-    assert (taskset.name, taskset.taskset_id, [row.slug for row in taskset]) == fetched
-    assert [request.path for request in services.requests()] == paths
-    assert {request.bearer for request in services.requests()} == {"k"}
-
-
-def test_platform_export_records_become_portable_rows(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    services.route("api", "GET", "/v2/tasksets/{id}/export", json=EXPORT)
-
-    taskset = Taskset.from_api(TASKSET_ID)
-
+    assert (taskset.name, taskset.taskset_id) == ("Demo Set", taskset_id)
     assert list(taskset) == [
         Task(env="lab", id="add", args={"a": 2, "b": 3}, slug="two-plus-three"),
         Task(
@@ -376,11 +325,14 @@ def test_platform_export_records_become_portable_rows(
     ]
 
 
-def test_an_unknown_platform_taskset_name_is_an_error(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    services.route("api", "GET", "/v2/tasksets/by-name/{name}", json={}, status=404)
+def test_a_taskset_whose_export_is_gone_is_empty(platform: Platform) -> None:
+    gone = str(uuid.UUID(int=7))
 
+    taskset = Taskset.from_api(gone)
+
+    assert (taskset.name, taskset.taskset_id, list(taskset)) == (gone, gone, [])
+
+
+def test_an_unknown_platform_taskset_name_is_an_error(platform: Platform) -> None:
     with pytest.raises(ValueError, match="taskset not found: missing"):
         Taskset.from_api("missing")

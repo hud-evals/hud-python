@@ -15,13 +15,12 @@ from dirty_equals import IsStr
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
-from hud.telemetry import flush
 from hud.telemetry.context import get_trace_headers, set_trace_context
 from tests.support import Reply, ScriptedAgent, eventually, lab, solve
 from tests.support.platform import WEB_URL, Trace, key
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from hud.eval import Run
     from tests.support import HudEnv, Platform
@@ -29,17 +28,6 @@ if TYPE_CHECKING:
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
 JOB_ENTER = "/v2/trace/job/{id}/enter"
-
-
-@pytest.fixture
-def reporting(platform: Platform, hud_env: HudEnv) -> Iterator[Platform]:
-    """The platform, with telemetry on.
-
-    Span uploads drain before the test ends, so none reaches a later test's platform.
-    """
-    hud_env.set(HUD_TELEMETRY_ENABLED="1")
-    yield platform
-    assert flush(timeout=10)
 
 
 def reported(platform: Platform, run: Run) -> Trace:

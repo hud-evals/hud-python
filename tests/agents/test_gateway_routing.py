@@ -38,14 +38,15 @@ from hud.agents.types import (
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.utils.exceptions import HudAuthenticationError
 from tests.fixtures.envs import source
-from tests.support import Reply, run_task, say, workspace_env
+from tests.support import run_task, say, workspace_env
+from tests.support.platform import API_KEY
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv, Models, Request
+    from tests.support import FakeServices, HudEnv, Models, Platform
 
 CATALOG = [
     {
@@ -64,52 +65,49 @@ CATALOG = [
 ]
 
 
-def serve_catalog(services: FakeServices) -> None:
+def serve_catalog(platform: Platform) -> None:
     """The gateway model catalog, served two entries a page."""
-
-    def page(request: Request) -> Reply:
-        offset = int(request.query.get("offset", ["0"])[0])
-        return Reply(json={"items": CATALOG[offset : offset + 2], "total": len(CATALOG)})
-
-    services.route("api", "GET", "/v2/models", handler=page)
+    platform.page_size = 2
+    for model in CATALOG:
+        platform.add_model(**model)
 
 
 ROUTES = {
     "create-agent-shortcut": (
         lambda _url: create_agent("openai"),
-        ("responses", "gpt-5.6", "Bearer hud-key"),
+        ("responses", "gpt-5.6", f"Bearer {API_KEY}"),
     ),
     "create-agent-ignores-a-provider-key": (
         lambda _url: create_agent("openai_compatible"),
-        ("chat", "gpt-5.4-mini", "Bearer hud-key"),
+        ("chat", "gpt-5.4-mini", f"Bearer {API_KEY}"),
     ),
     "create-agent-claude": (
         lambda _url: create_agent("claude"),
-        ("anthropic", "claude-sonnet-4-6", "hud-key"),
+        ("anthropic", "claude-sonnet-4-6", API_KEY),
     ),
     "create-agent-gemini": (
         lambda _url: create_agent("gemini"),
-        ("gemini", "gemini-3.1-pro-preview", "hud-key"),
+        ("gemini", "gemini-3.1-pro-preview", API_KEY),
     ),
     "create-agent-catalog-id": (
         lambda _url: create_agent("ft:custom-123"),
-        ("chat", "gpt-5.5", "Bearer hud-key"),
+        ("chat", "gpt-5.5", f"Bearer {API_KEY}"),
     ),
     "create-agent-catalog-slug-without-provider": (
         lambda _url: create_agent("deepseek-v4-flash"),
-        ("chat", "deepseek/deepseek-v4-flash", "Bearer hud-key"),
+        ("chat", "deepseek/deepseek-v4-flash", f"Bearer {API_KEY}"),
     ),
     "create-agent-catalog-name-any-case": (
         lambda _url: create_agent("minimax-m3"),
-        ("chat", "MiniMax-M3", "Bearer hud-key"),
+        ("chat", "MiniMax-M3", f"Bearer {API_KEY}"),
     ),
     "create-agent-catalog-display-name": (
         lambda _url: create_agent("Claude Sonnet 4.6"),
-        ("anthropic", "claude-sonnet-4-6", "hud-key"),
+        ("anthropic", "claude-sonnet-4-6", API_KEY),
     ),
     "reloaded-gateway-agent": (
         lambda _url: OpenAIAgent.load(create_agent("openai").dump()),
-        ("responses", "gpt-5.6", "Bearer hud-key"),
+        ("responses", "gpt-5.6", f"Bearer {API_KEY}"),
     ),
 }
 
@@ -118,19 +116,18 @@ ROUTES = {
 async def test_an_agent_reaches_its_model_with_the_credential_its_routing_chose(
     build: Callable[[str], Agent],
     expected: tuple[str, str, str],
-    services: FakeServices,
+    platform: Platform,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
     hud_env.set(
-        HUD_API_KEY="hud-key",
         OPENAI_API_KEY="openai-key",
         ANTHROPIC_API_KEY="anthropic-key",
         OPENAI_BASE_URL=models.url,
         ANTHROPIC_BASE_URL=models.url,
     )
-    serve_catalog(services)
+    serve_catalog(platform)
     models.script([say("done")])
 
     run = await run_task(workspace_env(tmp_path / "ws"), build(models.url))
@@ -179,11 +176,8 @@ def test_create_agent_refuses_provider_credentials(
         create_agent("openai_compatible", **credentials)
 
 
-def test_create_agent_names_close_matches_for_an_unknown_model(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="hud-key")
-    serve_catalog(services)
+def test_create_agent_names_close_matches_for_an_unknown_model(platform: Platform) -> None:
+    serve_catalog(platform)
 
     with pytest.raises(ValueError, match=r"'minimax-m4' not found .* Did you mean: MiniMax-M3"):
         create_agent("minimax-m4")
