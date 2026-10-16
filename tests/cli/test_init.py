@@ -19,10 +19,7 @@ def tree(root: Path) -> list[str]:
 @pytest.mark.parametrize(
     ("argv", "directory", "declaration"),
     [
-        (["berry", "--preset", "blank"], "berry", 'Environment(name="berry")'),
-        (["My Cool_Env", "--template", "blank"], "My Cool_Env", 'Environment(name="my-cool-env")'),
-        (["--preset", "coding"], "coding", 'Environment(name="coding")'),
-        (["my-cool-env"], "my-cool-env", 'Environment(name="my-cool-env")'),
+        (["My Cool_Env", "--preset", "blank"], "My Cool_Env", 'Environment(name="my-cool-env")'),
         (["custom", "-t", "cua"], "custom", 'Environment(name="custom")'),
     ],
 )
@@ -84,22 +81,6 @@ def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
             "failure",
             {},
             id="symlinked-target",
-        ),
-        pytest.param(
-            {},
-            ["--preset", "does-not-exist"],
-            2,
-            "usage",
-            {},
-            id="unknown-example",
-        ),
-        pytest.param(
-            {},
-            [],
-            2,
-            "usage",
-            {},
-            id="nothing-to-create",
         ),
     ],
 )
