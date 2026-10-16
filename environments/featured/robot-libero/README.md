@@ -13,6 +13,12 @@ each). A task is a template plus `libero_task_id` and `init_state_id`, and is
 graded by LIBERO's own success check. The simulator renders on the CPU
 (OSMesa), so no GPU is needed.
 
+`tasks.json` holds five example tasks, one per suite, which make up the featured
+`robot-libero` taskset: bowl on stove to plate (`libero_spatial`), cream cheese
+to basket (`libero_object`), open the middle drawer (`libero_goal`), cream cheese
+and butter to basket (`libero_10`), and moka pot on the stove (`libero_90`).
+Sync them with `hud sync tasks robot-libero tasks.json`, or write your own.
+
 Every control tick streams to the trace, so each episode replays with camera
 video and state and action plots.
 

@@ -28,7 +28,7 @@ def test_tasks_name_templates_of_the_env() -> None:
     tasks = json.loads((ROOT / "tasks.json").read_text())
     suites = {"libero_spatial", "libero_object", "libero_goal", "libero_10", "libero_90"}
     assert {task["env"] for task in tasks} == {"robot-libero"}
-    assert {task["id"] for task in tasks} <= suites
+    assert {task["id"] for task in tasks} == suites
     assert len({task["slug"] for task in tasks}) == len(tasks)
 
 
