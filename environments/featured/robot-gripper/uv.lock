@@ -1612,7 +1612,7 @@ wheels = [
 ]
 
 [[package]]
-name = "worldsim"
+name = "robot-gripper"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

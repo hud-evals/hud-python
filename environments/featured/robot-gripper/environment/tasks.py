@@ -27,4 +27,4 @@ _move.slug = "move-mug"
 _grasp = force_grasp(scene_id="tabletop-v1", target_object="mug", min_grip_force=0.5, hold_steps=100)
 _grasp.slug = "force-grasp-mug"
 
-taskset = Taskset("worldsim-tabletop", [_drawer, _pick, _move, _grasp])
+taskset = Taskset("robot-gripper-tabletop", [_drawer, _pick, _move, _grasp])

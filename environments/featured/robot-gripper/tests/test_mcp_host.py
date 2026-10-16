@@ -18,9 +18,9 @@ def test_host_serves_mcp_without_a_transport_mode(monkeypatch):
     package.server = simulator
     monkeypatch.setitem(sys.modules, "sim", package)
     monkeypatch.setitem(sys.modules, "sim.server", simulator)
-    monkeypatch.setenv("WORLDSIM_SIM_PORT", "8769")
-    monkeypatch.delenv("WORLDSIM_SIM_SERVE", raising=False)
-    monkeypatch.delenv("WORLDSIM_VIEWER", raising=False)
+    monkeypatch.setenv("ROBOT_GRIPPER_SIM_PORT", "8769")
+    monkeypatch.delenv("ROBOT_GRIPPER_SIM_SERVE", raising=False)
+    monkeypatch.delenv("ROBOT_GRIPPER_VIEWER", raising=False)
 
     host.main()
 

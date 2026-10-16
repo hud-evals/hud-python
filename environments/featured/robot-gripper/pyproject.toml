@@ -1,5 +1,5 @@
 [project]
-name = "worldsim"
+name = "robot-gripper"
 version = "0.1.0"
 description = "MCP-controlled tabletop gripper simulation with height-based task scoring"
 requires-python = ">=3.12,<3.13"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Live 3D viewer (WORLDSIM_VIEWER=1; the sim process renders it - see sim/host.py).
+# Live 3D viewer (ROBOT_GRIPPER_VIEWER=1; the sim process renders it - see sim/host.py).
 # Needs a display; the Gizmo desktop shell uses imgui-bundle, the bare Newton
 # ViewerGL fallback uses pyglet.
 viewer = [

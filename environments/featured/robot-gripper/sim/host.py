@@ -3,7 +3,7 @@
 A GL viewer must own the process main thread, but an env's asyncio server pins it
 forever, so the env spawns the sim as a separate process (`SimHost`): the
 FastMCP server is served on a worker
-thread, and the main thread runs the viewer when `WORLDSIM_VIEWER=1` (else it just serves).
+thread, and the main thread runs the viewer when `ROBOT_GRIPPER_VIEWER=1` (else it just serves).
 
 `SimHost` is the env-side handle (spawn / wait-until-up / stop); everything from
 `main()` down runs in the spawned process. It stays a module separate from
@@ -50,7 +50,7 @@ class SimHost:
         return f"http://{HOST}:{self.port}/mcp"
 
     async def start(self, timeout: float = 120.0) -> None:
-        child_env = {**os.environ, "WORLDSIM_SIM_PORT": str(self.port)}
+        child_env = {**os.environ, "ROBOT_GRIPPER_SIM_PORT": str(self.port)}
         self._proc = subprocess.Popen([sys.executable, "-m", "sim.host"], cwd=str(ROOT), env=child_env)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -77,7 +77,7 @@ class SimHost:
 
 
 def main() -> None:
-    port = int(os.environ["WORLDSIM_SIM_PORT"])
+    port = int(os.environ["ROBOT_GRIPPER_SIM_PORT"])
 
     import sim.server as sim_server
 
@@ -88,7 +88,7 @@ def main() -> None:
     driver = threading.Thread(target=_run, daemon=True)
     driver.start()
 
-    if os.environ.get("WORLDSIM_VIEWER") == "1":
+    if os.environ.get("ROBOT_GRIPPER_VIEWER") == "1":
         sim_server.run_viewer(driver)  # owns the main thread; headless-safe fallback
     else:
         driver.join()

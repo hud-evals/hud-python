@@ -7,7 +7,7 @@ The Newton-backed `_Sim` and its tools. This is served in its own process by
 The LLM tasks use the floating-gripper tabletop scene over MCP.
 
 An optional live 3D viewer (`run_viewer`, off by default) renders the running
-scene in a window - `sim/host.py` runs it on the main thread when `WORLDSIM_VIEWER=1`.
+scene in a window - `sim/host.py` runs it on the main thread when `ROBOT_GRIPPER_VIEWER=1`.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ from fastmcp.utilities.types import Image as MCPImage  # returned by render() so
 
 SCENES_DIR = Path(os.environ.get("SCENES_DIR", Path(__file__).resolve().parents[1] / "scenes"))
 
-server = FastMCP(name="worldsim-newton")
+server = FastMCP(name="robot-gripper-newton")
 
 _SCENE_FILES = ("scene.xml", "scene.mjcf", "scene.usd", "scene.usda", "scene.urdf")
 
