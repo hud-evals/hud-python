@@ -46,6 +46,11 @@ episode per task (`init_state_id` 0), on the absolute interface:
 | `libero_goal` | 5/10 | [job](https://hud.ai/jobs/3e7cd8b167264b0c8c8de98c16c0b8e3) |
 | `libero_10` | 3/10 | [job](https://hud.ai/jobs/55adc5df8824415e815dc24f16b5bb30) |
 
+Those jobs ran on the same simulator code deployed as a registry environment
+named `libero`. The deployed `robot-libero` image was checked end to end with the
+`libero-spatial-bowl-on-stove-to-plate` task: reward 1.0
+([job](https://hud.ai/jobs/eae5516b-f85a-4a05-a412-fad5298948d0)).
+
 These are short checks, not benchmark scores. Failures are mostly the model
 declaring the goal met when it was not, or the simulator's 1000-step horizon
 ending the episode first.
