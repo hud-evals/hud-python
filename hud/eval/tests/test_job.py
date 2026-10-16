@@ -6,7 +6,7 @@ No network: the platform client is replaced with a recorder.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -15,6 +15,8 @@ from hud.eval.run import Grade, Run
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+    from hud.clients.client import HudClient
 
 
 class _Recorder:
@@ -130,6 +132,28 @@ async def test_trace_exit_omits_reward_for_an_ungraded_run(
 
     _, body = recorder.calls[0]
     assert body["status"] == "error"
+    assert "reward" not in body
+
+
+class _ErrorEvaluationClient:
+    async def start_task(self, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+    async def grade(self, answer: dict[str, Any]) -> dict[str, Any]:
+        return {"score": 0.0, "content": "verifier timed out", "isError": True}
+
+
+async def test_trace_exit_reports_the_message_of_an_error_evaluation(
+    recorder: _Recorder,
+) -> None:
+    async with Run(cast("HudClient", _ErrorEvaluationClient()), "task", {}) as run:
+        run.trace.trace_id = "abc"
+
+    await job_mod.trace_exit(run)
+
+    _, body = recorder.calls[0]
+    assert body["status"] == "error"
+    assert body["error"] == "verifier timed out"
     assert "reward" not in body
 
 
