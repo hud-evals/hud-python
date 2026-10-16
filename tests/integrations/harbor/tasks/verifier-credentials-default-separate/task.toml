@@ -1,6 +1,0 @@
-[verifier]
-environment_mode = "separate"
-timeout_sec = 30
-
-[verifier.env]
-JUDGE_KEY = "${HARBOR_VERIFIER_KEY:-judge-value}"

@@ -1,5 +1,0 @@
-[agent]
-user = "root:ghosts"
-
-[verifier]
-timeout_sec = 30

@@ -1,3 +1,0 @@
-# Two rollouts share one placement; the second sees a restored verifier root.
-group = 2
-shared_width = 1

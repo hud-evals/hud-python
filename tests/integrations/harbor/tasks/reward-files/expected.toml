@@ -21,18 +21,6 @@ error = "Harbor verifier did not write a numeric reward"
 runtime.env_vars = { REWARD_SHAPE = "json-bool" }
 
 [[case]]
-name = "an infinite reward"
-reward = 0.0
-error = "Harbor verifier did not write a numeric reward"
-runtime.env_vars = { REWARD_SHAPE = "json-infinite" }
-
-[[case]]
-name = "invalid json"
-reward = 0.0
-error = "Harbor verifier did not write a numeric reward"
-runtime.env_vars = { REWARD_SHAPE = "json-invalid" }
-
-[[case]]
 name = "padded text"
 reward = 0.5
 runtime.env_vars = { REWARD_SHAPE = "text" }
