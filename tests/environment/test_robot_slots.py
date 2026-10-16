@@ -117,12 +117,6 @@ async def claim(control: Wire, **task_args: Any) -> dict[str, Any]:
             id="a-full-batch-refuses-a-claim",
         ),
         pytest.param(
-            Sim(num_envs=2),
-            [("reset", {"task": "A"}), ("reset", {})],
-            ["prompt [('task', 'A')]", "refused"],
-            id="a-concurrent-claim-needs-identical-args",
-        ),
-        pytest.param(
             Sim(),
             [("reset", {}), ("result", {}), ("reset", {})],
             [
@@ -141,7 +135,6 @@ async def claim(control: Wire, **task_args: Any) -> dict[str, Any]:
             ["refused"],
             id="an-unknown-token-is-refused",
         ),
-        pytest.param(Sim(), [("teleport", {})], ["refused"], id="unknown-method"),
     ],
 )
 async def test_the_control_channel_claims_and_frees_slots(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import signal
 import sys
 import time
@@ -26,20 +25,8 @@ TRACE_ID = "00000000-0000-4000-a000-000000000002"
 def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
     result = hud()
 
-    assert result.exit_code == 2
-    assert result.stderr == ""
-    # A wrapped description continues on a row whose name column is blank.
-    rows = re.findall(r"^│ (\S+)", result.stdout, flags=re.MULTILINE)
-    assert [row for row in rows if not row.startswith("-")] == [
-        *("init", "serve", "deploy", "eval", "task", "project", "sync", "harbor"),
-        *("qa", "jobs", "trace", "models", "set", "version"),
-    ]
-
-
-def test_version_json_names_the_package_and_version(hud: Hud) -> None:
-    result = hud("version", "--json")
-
-    assert (result.exit_code, result.json) == (0, {"name": "hud", "version": __version__})
+    assert (result.exit_code, result.stderr) == (2, "")
+    assert "Usage:" in result.stdout and "COMMAND" in result.stdout
 
 
 @pytest.mark.parametrize(

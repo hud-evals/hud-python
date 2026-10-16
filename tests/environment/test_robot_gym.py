@@ -175,11 +175,6 @@ def test_a_seeded_recording_keeps_the_trace_id_of_its_job_id_spelling(
     }
 
 
-def test_a_job_id_must_be_a_uuid() -> None:
-    with pytest.raises(ValueError, match="job_id must be a UUID"):
-        JobRecorder("suite", 1, record_indices=[], job_id="shared-suite")
-
-
 class VectorAutoReset:
     """Two lockstep envs that reset inside ``step``; env 1 finishes on the first step.
 

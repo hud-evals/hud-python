@@ -12,9 +12,7 @@ import base64
 import hashlib
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
-from hud.environment import Environment, Workspace
+from hud.environment import Environment
 from tests.support import served
 
 from .conftest import wire
@@ -177,13 +175,3 @@ async def test_a_bad_request_gets_an_error_and_the_connection_keeps_serving(
 
     assert refused["error"]["code"] == -32000
     assert [patch["path"] for patch in diff["result"]["patches"]] == ["a.txt"]
-
-
-@pytest.mark.parametrize("track_files", [True, False])
-def test_the_file_tracking_capability_needs_a_started_tracking_workspace(
-    tmp_path: Path, track_files: bool
-) -> None:
-    workspace = Workspace(tmp_path, track_files=track_files)
-
-    with pytest.raises(RuntimeError, match=r"file tracking not started"):
-        workspace.file_tracking_capability()

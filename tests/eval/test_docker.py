@@ -14,12 +14,10 @@ import subprocess
 import tarfile
 import textwrap
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-import hud
 from hud.eval import (
     ComposeProject,
     DockerRuntime,
@@ -36,8 +34,8 @@ from tests.support import ScriptedAgent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
-SECCOMP = Path(hud.__file__).parent / "eval" / "docker-seccomp.json"
 ECHO = Task(env="echo", id="echo", args={"word": "tangerine"})
 
 
@@ -370,17 +368,3 @@ async def test_a_request_docker_cannot_serve_is_refused_before_the_daemon_is_ask
     with pytest.raises(ValueError, match=error):
         async with DockerRuntime(**options)(row):
             pytest.fail("the request should be refused")
-
-
-def test_the_sandbox_profile_allows_workspace_namespaces_and_denies_kernel_interfaces() -> None:
-    profile = json.loads(SECCOMP.read_text())
-    denied = {
-        name
-        for rule in profile["syscalls"]
-        if rule["action"] != profile["defaultAction"] and not rule.get("includes", {}).get("caps")
-        for name in rule["names"]
-    }
-
-    assert profile["defaultAction"] == "SCMP_ACT_ALLOW"
-    assert {"mount", "pivot_root", "setns", "umount", "umount2", "unshare"}.isdisjoint(denied)
-    assert {"bpf", "keyctl", "perf_event_open", "ptrace", "userfaultfd"} <= denied

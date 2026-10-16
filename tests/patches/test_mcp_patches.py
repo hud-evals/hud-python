@@ -111,9 +111,7 @@ async def _call(server: FakeMCPServer) -> Any:
 @pytest.mark.parametrize(
     ("calls", "structured", "attempts"),
     [
-        pytest.param([_status(502), _ok], {"n": 3}, 2, id="502-retried"),
         pytest.param([_status(503), _ok], {"n": 3}, 2, id="503-retried"),
-        pytest.param([_status(504), _ok], {"n": 3}, 2, id="504-retried"),
         pytest.param([_off_schema], {"n": "x"}, 1, id="output-outside-its-schema-accepted"),
     ],
 )

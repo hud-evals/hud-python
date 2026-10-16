@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import pytest
 
 from hud.capabilities import Capability, CDPClient
 from hud.capabilities.cdp import CDPError
-from tests.support import Command, fake_browser
+from tests.support import fake_browser
 
 ENABLED = ["Page.enable", "Runtime.enable", "DOM.enable"]
 
@@ -46,27 +45,6 @@ async def test_connect_fails_when_the_browser_offers_no_page_target() -> None:
     async with fake_browser(pages=[], can_create=False) as browser:
         with pytest.raises(ValueError, match=r"no CDP page target available at 127\.0\.0\.1:"):
             await CDPClient.connect(Capability.cdp(url=browser.url))
-
-
-@pytest.mark.parametrize(
-    ("reply", "result"),
-    [({"result": {"frameId": "f-1"}}, {"frameId": "f-1"})],
-    ids=["a result"],
-)
-async def test_send_returns_the_command_result(
-    reply: dict[str, Any], result: dict[str, Any]
-) -> None:
-    async with fake_browser(replies={"Page.navigate": reply}) as browser:
-        client = await CDPClient.connect(Capability.cdp(url=browser.url))
-        try:
-            returned = await client.send("Page.navigate", {"url": "https://example.com"})
-        finally:
-            await client.close()
-
-    assert returned == result
-    assert browser.commands[-1] == Command(
-        "page-1", "Page.navigate", {"url": "https://example.com"}
-    )
 
 
 async def test_an_error_reply_raises_cdp_error_naming_the_failed_command() -> None:

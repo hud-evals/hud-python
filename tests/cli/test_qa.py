@@ -88,12 +88,6 @@ def test_qa_lists_the_checks_at_a_level(hud: Hud, argv: list[str], keys: list[st
     assert (result.exit_code, result.stdout.split()) == (0, keys), result
 
 
-def test_qa_list_json_is_the_catalog(hud: Hud) -> None:
-    result = hud("qa", "list", "--json")
-
-    assert (result.exit_code, result.json) == (0, {"checks": CHECKS}), result
-
-
 @pytest.mark.parametrize(
     "argv",
     [

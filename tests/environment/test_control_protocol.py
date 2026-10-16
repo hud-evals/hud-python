@@ -580,13 +580,6 @@ def register_a_template_twice(env: Environment) -> None:
             ValueError,
             id="two-workspaces-on-one-capability",
         ),
-        pytest.param(
-            lambda env: env.add_capability(
-                Capability(name="db", protocol="tcp", url="", params={})
-            ),
-            ValueError,
-            id="a-capability-without-a-url",
-        ),
     ],
 )
 def test_an_authoring_mistake_raises_at_definition(

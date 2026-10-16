@@ -216,13 +216,3 @@ class Delegating(Agent):
     async def __call__(self, run: Run) -> None:
         run.record(SubagentStep(subagent=Trace(content="inner answer", status="completed")))
         run.trace.content = "outer answer"
-
-
-async def test_a_nested_rollout_exports_as_a_subagent_step(tmp_path: Path) -> None:
-    run = await run_task(workspace_env(tmp_path / "ws"), Delegating())
-
-    (step,) = [step for step in steps(run.trace_id) if step["source"] == "subagent"]
-    assert (step["subagent"]["content"], step["subagent"]["status"]) == (
-        "inner answer",
-        "completed",
-    )

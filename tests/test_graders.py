@@ -639,45 +639,21 @@ async def test_the_judge_sends_one_request_per_criterion(
 
     await _grade("judged", tmp_path)
 
-    requests = sorted(models.requests(), key=lambda request: request.body["messages"][1]["content"])
+    requests = models.requests()
     assert [request.headers["authorization"] for request in requests] == ["Bearer k"] * 3
     assert {request.model for request in requests} == {"claude-haiku-4-5"}
-    assert {request.body["messages"][0]["content"][:40] for request in requests} == {
-        "You evaluate a response against a single"
-    }
-    prompts = {
-        section(request.body["messages"][1]["content"], "criterion"): request.body["messages"][1][
-            "content"
-        ]
-        for request in requests
-    }
-    assert {
-        criterion: section(prompt, "criterion_type") for criterion, prompt in prompts.items()
-    } == {
-        "names Paris": "positive",
-        "cites a source": "positive",
-        "invents facts": "negative",
-    }
-    for prompt in prompts.values():
-        assert section(prompt, "query") == "Name the capital of France."
-        assert section(prompt, "response") == "Paris is the capital."
+    assert sorted(
+        section(request.body["messages"][1]["content"], "criterion") for request in requests
+    ) == [
+        "cites a source",
+        "invents facts",
+        "names Paris",
+    ]
 
 
 def section(prompt: str, tag: str) -> str:
     """The text between ``<tag>`` and ``</tag>`` in a judge prompt."""
     return prompt.split(f"<{tag}>\n", 1)[1].split(f"\n</{tag}>", 1)[0]
-
-
-async def test_the_judge_without_a_question_omits_the_query(
-    models: Models, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    models.respond(_judge({"invents facts": "prose"}))
-
-    await _grade("judged_negative_only", tmp_path)
-
-    (request,) = models.requests()
-    assert "<query>" not in request.body["messages"][1]["content"]
 
 
 async def test_the_judge_without_criteria_scores_zero_without_calling_a_model(

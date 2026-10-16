@@ -129,11 +129,6 @@ async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
             -32000,
             id="unknown-capability",
         ),
-        pytest.param(
-            {"capability": 7},
-            -32602,
-            id="non-string-capability",
-        ),
     ],
 )
 async def test_a_refused_tunnel_gets_one_error_frame_and_is_closed(

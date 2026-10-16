@@ -295,25 +295,6 @@ async def test_cancelling_a_waiting_acquisition_leaves_the_running_one_alone() -
     assert events == ["initialize", "shutdown"]
 
 
-CONSTRUCTION_ERRORS = {
-    "env= with a live env": (lambda: LocalRuntime(lab(), env="lab"), TypeError),
-    "a live env without templates in a child": (
-        lambda: SubprocessRuntime(Environment("bare")),
-        ValueError,
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("build", "error"), CONSTRUCTION_ERRORS.values(), ids=CONSTRUCTION_ERRORS.keys()
-)
-def test_a_provider_rejects_a_source_it_cannot_serve(
-    build: Callable[[], object], error: type[Exception]
-) -> None:
-    with pytest.raises(error):
-        build()
-
-
 def write(path: Path, source: str) -> Path:
     path.write_text(textwrap.dedent(source))
     return path

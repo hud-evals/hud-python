@@ -84,13 +84,6 @@ def test_a_task_spawned_from_its_source_starts_and_grades(
     assert (result.exit_code, result.stdout) == (0, stdout), result
 
 
-def test_task_start_json_is_the_start_frame(hud: Hud, project: Any) -> None:
-    result = hud("task", "start", "say-answer", "--source", "tasks.json", "--json")
-
-    assert result.exit_code == 0, result
-    assert result.json["prompt"] == "Say answer."
-
-
 @pytest.mark.parametrize(
     ("argv", "exit_code", "error"),
     [

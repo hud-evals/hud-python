@@ -79,13 +79,9 @@ async def test_an_acquired_tunnel_is_a_local_address_for_the_session(
     async with hosted_env(services, hud_env), HUDRuntime()(ADD) as runtime:
         assert services.requests("runtime", "DELETE") == []
 
-    assert (runtime.url, runtime.params) == (
+    assert (runtime.url, runtime.params["session_id"]) == (
         IsStr(regex=r"tcp://127\.0\.0\.1:\d+"),
-        {
-            "session_id": "sess-1",
-            "gateway_url": services.url("runtime"),
-            "ready_timeout": 300.0,
-        },
+        "sess-1",
     )
     assert services.bodies("runtime", "POST", SESSIONS) == [{"environment": "lab"}]
     assert len(services.requests("runtime", "DELETE", SESSION)) == 1

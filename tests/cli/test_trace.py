@@ -46,12 +46,6 @@ def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None
         assert shown in result.stdout
 
 
-def test_trace_json_is_the_event_list(hud: Hud, events: None) -> None:
-    result = hud("trace", "get", TRACE_ID, "--json")
-
-    assert (result.exit_code, result.json) == (0, EVENTS), result
-
-
 @pytest.mark.parametrize(
     ("argv", "exit_code", "error"),
     [

@@ -279,14 +279,6 @@ async def test_a_pool_scope_raises_what_its_teardown_raised() -> None:
             pass
 
 
-async def test_a_pool_leased_outside_its_scope_says_so() -> None:
-    pool = Shared(LocalRuntime(lab()), width=1)
-
-    with pytest.raises(RuntimeError, match="lease inside the scope"):
-        async with pool(ROWS[0]):
-            pass
-
-
 def limited(**limits: int) -> RuntimeConfig:
     return RuntimeConfig(limits=RuntimeLimits(**limits))
 

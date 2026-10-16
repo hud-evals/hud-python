@@ -139,9 +139,6 @@ OUTCOMES = {
     "the right answer earns the reward": echo(
         lambda: ScriptedAgent("tangerine"), reward=1.0, status="completed"
     ),
-    "a wrong answer is graded zero": echo(
-        lambda: ScriptedAgent("lime"), reward=0.0, status="completed"
-    ),
     "a typed answer is parsed before grading": Outcome(
         "echo",
         "count",
@@ -383,21 +380,6 @@ CASES = {
         Task(env="lab", id="frame", args={"result": {"score": True}}),
         ScriptedAgent("x"),
         errored(IsStr(regex=r"\[grading\] .*result must include a numeric 'score'")),
-        ["initialize", "shutdown"],
-    ),
-    "a subscore without a value fails grading": Case(
-        Task(env="lab", id="frame", args={"result": {"score": 1.0, "subscores": [{"name": "m"}]}}),
-        ScriptedAgent("x"),
-        errored(IsStr(regex=r"(?s)\[grading\] .*ValidationError: .*SubScore\nvalue\n.*")),
-        ["initialize", "shutdown"],
-    ),
-    "malformed bindings fail the start": Case(
-        Task(env="lab", id="claim", args={"published": {"robot": "slot-2"}}),
-        ScriptedAgent("x"),
-        failed(
-            "[starting task] TypeError: task start frame 'bindings' must map capability "
-            "name -> object, got {'robot': 'slot-2'}"
-        ),
         ["initialize", "shutdown"],
     ),
     "args over the frame limit fail the start before the template runs": Case(

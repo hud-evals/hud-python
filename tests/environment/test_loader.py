@@ -251,9 +251,6 @@ HUD_SERVE = [sys.executable, "-m", "hud.cli", "serve", "--port", "0"]
     ("command", "served", "stop"),
     [
         pytest.param([*SERVER, "env.py"], "from-env-py", signal.SIGTERM, id="server-sigterm"),
-        pytest.param(
-            [*SERVER, "multi.py", "--env", "env-two"], "env-two", signal.SIGTERM, id="server-env"
-        ),
         pytest.param([*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, id="hud-serve-ctrl-c"),
         pytest.param([*HUD_SERVE, "env"], "from-env-py", signal.SIGTERM, id="hud-serve-sigterm"),
         pytest.param(

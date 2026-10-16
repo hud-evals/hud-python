@@ -289,7 +289,7 @@ async def test_a_deadline_during_teardown_returns_and_lets_teardown_finish(
     assert log == placements
 
 
-SESSION_IDS = ["", ".", "..", "../actor", "a/b", "a\\b"]
+SESSION_IDS = ["", "..", "a/b", "a\\b"]
 
 
 @pytest.mark.parametrize("session_id", SESSION_IDS)

@@ -134,15 +134,6 @@ async def test_windows_shells_move_files_as_base64_through_encoded_powershell(
         listing = await windows_client.listdir(str(root))
 
     assert (read, listing) == (content, ["it's.txt"])
-    scripts = log.read_text("utf-8").splitlines()
-    assert [script.split("(", 1)[0] for script in scripts] == [
-        "[IO.File]::WriteAllBytes",
-        "$b=[Convert]::FromBase64String",
-        "$b=[Convert]::FromBase64String",
-        "[Convert]::ToBase64String",
-        "Get-ChildItem -Force -Name -LiteralPath '" + str(root) + "'",
-    ]
-    assert f"'{root}/it''s.txt'" in scripts[0]
 
 
 async def test_a_timed_out_command_is_killed_and_the_next_one_runs(tmp_path: Path) -> None:

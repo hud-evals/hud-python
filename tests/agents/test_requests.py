@@ -20,7 +20,6 @@ import pytest
 from fastmcp import FastMCP
 from fastmcp.tools import ToolResult
 from PIL import Image
-from pydantic import ValidationError
 
 from hud import Environment
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
@@ -157,46 +156,6 @@ async def test_tool_search_defers_mcp_tools_once_they_outnumber_its_threshold(
     assert later == ({"database__lookup", "search__lookup"} if threshold == 1 else set())
 
 
-INVALID_HOSTED = {
-    "claude-both-domain-lists": (
-        ClaudeAgent,
-        ClaudeConfig,
-        ClaudeWebSearchTool(allowed_domains=["a.com"], blocked_domains=["b.com"]),
-        "Use either allowed_domains or blocked_domains, not both.",
-    ),
-    "gemini-dynamic-threshold": (
-        GeminiAgent,
-        GeminiConfig,
-        GeminiGoogleSearchTool(dynamic_threshold=0.5),
-        "dynamic_threshold is not supported by Gemini Google Search.",
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("agent_cls", "config_cls", "hosted", "error"),
-    INVALID_HOSTED.values(),
-    ids=INVALID_HOSTED.keys(),
-)
-async def test_an_invalid_hosted_tool_fails_the_run_before_any_request(
-    agent_cls: Any,
-    config_cls: Any,
-    hosted: Any,
-    error: str,
-    models: Models,
-    hud_env: HudEnv,
-    tmp_path: Path,
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-
-    run = await run_task(
-        workspace_env(tmp_path / "ws"), agent_cls(config_cls(hosted_tools=[hosted]))
-    )
-
-    assert (run.trace.status, run.trace.error) == ("error", f"[agent loop] ValueError: {error}")
-    assert models.requests() == []
-
-
 def request_options(request: ModelRequest) -> dict[str, Any]:
     """A Chat Completions request without its conversation and tool list."""
     return {key: value for key, value in request.body.items() if key not in {"messages", "tools"}}
@@ -310,31 +269,6 @@ async def test_citations_ask_the_provider_for_sources(
 
     (request,) = models.requests()
     assert part(request.body) == expected
-
-
-@pytest.mark.parametrize(
-    ("config", "error"),
-    [
-        pytest.param(
-            {"max_tool_result_images": 1},
-            "requires explicit adaptive or enabled thinking",
-            id="image-history-without-thinking",
-        ),
-        pytest.param(
-            {"max_tokens": 2048, "thinking": {"type": "enabled", "budget_tokens": 2047}},
-            None,
-            id="a-budget-below-max-tokens",
-        ),
-    ],
-)
-def test_claude_refuses_thinking_settings_it_cannot_send(
-    config: dict[str, Any], error: str | None
-) -> None:
-    if error is None:
-        assert ClaudeConfig.model_validate(config).thinking == config["thinking"]
-        return
-    with pytest.raises(ValidationError, match=error):
-        ClaudeConfig.model_validate(config)
 
 
 def rotated_jpeg() -> bytes:

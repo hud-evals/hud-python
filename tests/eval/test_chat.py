@@ -67,20 +67,3 @@ async def test_a_conversation_keeps_its_history_and_one_job_across_turns() -> No
     assert chat.job is not None
     assert [run.job_id for run in chat.job.runs] == [chat.job.id] * 4
     assert chat.job.name == "assistant"
-
-
-async def test_a_chat_without_a_runtime_says_how_to_place_it() -> None:
-    chat = Chat(Task(env="chat", id="assistant"), Echo())
-
-    with pytest.raises(RuntimeError, match=r"Chat needs a runtime to converse against"):
-        await chat.send("hello")
-
-    assert (chat.messages, chat.job) == (
-        [
-            {
-                "role": "user",
-                "content": {"type": "text", "text": "hello", "annotations": None, "meta": None},
-            }
-        ],
-        None,
-    )

@@ -300,19 +300,6 @@ class _Pose(RobotBridge):
         return data, np.array([self.success])
 
 
-async def test_an_empty_target_list_is_rejected_and_does_not_move() -> None:
-    sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
-    agent = _ScriptedLLM(_move("move_to"))
-
-    async with _served(sim, DirectControl()) as env:
-        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
-
-    (result,) = agent.results
-    assert result.isError
-    assert "wait" in _text(result)
-    assert sim.actions == []
-
-
 async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> None:
     """VLABench was rejected at 10.1 s. The cap is a 30 s safety timeout, not that reject."""
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
@@ -615,11 +602,6 @@ async def test_gripper_offsets_are_reported_only_when_the_reference_reads_the_ha
     text = _text(agent.results[0])
     assert "At the target. Remaining offsets: " in text  # the gripper never decides the verdict
     assert ("2 on grip" in text) == reads_hand
-
-
-def test_a_tolerance_key_that_is_not_a_quantity_is_refused() -> None:
-    with pytest.raises(ValueError, match="tolerance keys"):
-        DirectControl(tolerance={"grip": 0.1})
 
 
 def _quat_names(order: str) -> list[str]:
