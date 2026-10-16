@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 \
 # LIBERO's setup.py declares no dependencies, so the sim stack is explicit.
 RUN pip install --no-cache-dir \
     robosuite==1.4.0 mujoco==3.8.1 numpy==2.2.6 bddl==1.0.1 easydict \
-    matplotlib gym hydra-core future numba h5py \
+    matplotlib gym hydra-core future numba h5py termcolor cloudpickle tqdm \
     msgpack websockets aiohttp requests pyyaml av pillow "imageio[ffmpeg]" \
     opencv-python-headless
 
@@ -40,7 +40,8 @@ os.makedirs('/root/.libero', exist_ok=True); \
 yaml.safe_dump({'benchmark_root': d, 'bddl_files': d + '/bddl_files', \
 'init_states': d + '/init_files', 'datasets': d + '/../datasets', \
 'assets': d + '/assets'}, open('/root/.libero/config.yaml', 'w'))" \
-    && python -c "from libero.libero import benchmark; print('libero import OK')"
+    && python -c "from libero.libero import benchmark; \
+from libero.libero.envs import OffScreenRenderEnv; print('libero import OK')"
 
 # openpi-client, pulled in by the robot extra, over-pins numpy<2; the sim stack needs 2.2.6 and
 # only uses openpi-client's version-agnostic msgpack codec.
