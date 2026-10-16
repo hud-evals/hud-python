@@ -1,13 +1,17 @@
-"""``GeminiAgent`` — ``get_response`` parsing over a fake Generate Content client,
+"""``GeminiAgent`` — ``get_response`` over a fake streaming Generate Content client,
 plus ``_make_tool_call`` mapping and ``_grounding_citations``.
 """
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
+import httpx
 import mcp.types as mcp_types
+from google import genai
+from google.genai import types as genai_types
 
 from hud.agents.gemini.agent import GeminiAgent, _grounding_citations
 from hud.agents.tool_agent import RunState
@@ -15,15 +19,22 @@ from hud.agents.types import GeminiConfig
 from hud.types import MCPToolResult, Step, Trace
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from hud.eval.run import Run
+
+
+async def _chunks(*chunks: Any) -> AsyncIterator[Any]:
+    for chunk in chunks:
+        yield chunk
 
 
 class FakeModels:
     def __init__(self, response: Any) -> None:
         self._response = response
 
-    async def generate_content(self, **_kwargs: Any) -> Any:
-        return self._response
+    async def generate_content_stream(self, **_kwargs: Any) -> AsyncIterator[Any]:
+        return _chunks(self._response)
 
 
 class FakeGenai:
@@ -109,7 +120,7 @@ async def test_get_response_done_text_only() -> None:
 
 
 async def test_get_response_no_candidates_raises() -> None:
-    agent = _agent(SimpleNamespace(candidates=[]))
+    agent = _agent(SimpleNamespace(candidates=[], model_version=None, usage_metadata=None))
     try:
         await agent.get_response(_state(agent))
     except RuntimeError:
@@ -151,6 +162,209 @@ def test_grounding_citations() -> None:
     assert cites[0].type == "grounding"
 
 
+def _chunk(*parts: genai_types.Part, finish_reason: str | None = None) -> Any:
+    return genai_types.GenerateContentResponse(
+        candidates=[
+            genai_types.Candidate(
+                content=genai_types.Content(role="model", parts=list(parts)),
+                finish_reason=genai_types.FinishReason(finish_reason) if finish_reason else None,
+            )
+        ],
+        model_version="gemini-test-v2",
+    )
+
+
+async def test_streamed_chunks_form_one_model_turn() -> None:
+    """Every streamed part joins one model turn as received; text and thoughts concatenate."""
+    parts = [
+        genai_types.Part(text="Checking ", thought=True),
+        genai_types.Part(text="divisors.", thought=True),
+        genai_types.Part(text="It is 17 *"),
+        genai_types.Part(text=" 23."),
+        genai_types.Part(
+            function_call=genai_types.FunctionCall(name="bash", args={"command": "ls"}),
+            thought_signature=b"sig-1",
+        ),
+        genai_types.Part(text="", thought_signature=b"sig-2"),
+    ]
+    stream = _chunks(
+        _chunk(*parts[:2]),
+        _chunk(*parts[2:4]),
+        _chunk(*parts[4:], finish_reason="STOP"),
+    )
+
+    async def generate_content_stream(**_kwargs: Any) -> AsyncIterator[Any]:
+        return stream
+
+    agent = GeminiAgent(
+        GeminiConfig(
+            model="gemini-test",
+            model_client=SimpleNamespace(
+                aio=SimpleNamespace(
+                    models=SimpleNamespace(generate_content_stream=generate_content_stream)
+                )
+            ),
+        )
+    )
+    state = _state(agent)
+
+    result = await agent.get_response(state)
+
+    assert result.content == "It is 17 * 23."
+    assert result.reasoning == "Checking divisors."
+    assert [tc.name for tc in result.tool_calls] == ["bash"]
+    assert result.finish_reason == "STOP"
+    assert result.model == "gemini-test-v2"
+    turn = state.messages[-1]
+    assert turn.role == "model"
+    assert turn.parts == parts
+
+
+def _sse_client(*hops: list[dict[str, Any]]) -> tuple[genai.Client, list[httpx.Request]]:
+    """A ``genai.Client`` whose n-th request streams the n-th hop's events over SSE."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        events = hops[len(requests) - 1]
+        return httpx.Response(
+            200,
+            content=b"".join(
+                b"data: " + json.dumps(event).encode() + b"\r\n\r\n" for event in events
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = genai.Client(
+        api_key="hud-key",
+        http_options=genai_types.HttpOptions(
+            base_url="https://gateway.test",
+            api_version="v1beta",
+            async_client_args={"transport": httpx.MockTransport(handler)},
+        ),
+    )
+    return client, requests
+
+
+async def test_turn_streams_through_the_sdk() -> None:
+    """A turn arrives over the SDK's SSE stream and is recorded as one model turn."""
+    events: list[dict[str, Any]] = [
+        {
+            "candidates": [
+                {"content": {"role": "model", "parts": [{"text": "Thinking.", "thought": True}]}}
+            ]
+        },
+        {"candidates": [{"content": {"role": "model", "parts": [{"text": "39"}]}}]},
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "1"}, {"text": "", "thoughtSignature": "c2ln"}],
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 7,
+                "candidatesTokenCount": 2,
+                "thoughtsTokenCount": 5,
+                "totalTokenCount": 14,
+            },
+            "modelVersion": "gemini-4-argon",
+        },
+    ]
+    client, requests = _sse_client(events)
+    agent = GeminiAgent(GeminiConfig(model="gemini-4-argon", model_client=client))
+    state = _state(agent)
+
+    result = await agent.get_response(state)
+
+    [request] = requests
+    assert request.url.path == "/v1beta/models/gemini-4-argon:streamGenerateContent"
+    assert request.url.params["alt"] == "sse"
+    assert result.content == "391"
+    assert result.reasoning == "Thinking."
+    assert result.finish_reason == "STOP"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 7
+    turn = state.messages[-1]
+    assert [(part.text, part.thought, part.thought_signature) for part in turn.parts or []] == [
+        ("Thinking.", True, None),
+        ("39", None, None),
+        ("1", None, None),
+        ("", None, b"sig"),
+    ]
+
+
+async def test_turn_past_the_per_request_cap_continues_as_one_turn() -> None:
+    """A stream that stops at the per-request cap resumes with its continuation token, and
+    both hops form one model turn."""
+    first_hop: list[dict[str, Any]] = [
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Working it out.", "thought": True}],
+                    }
+                }
+            ]
+        },
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "", "thoughtSignature": "c2lnLTE="}],
+                    },
+                    "finishReason": "CONTINUATION",
+                    "continuationToken": "dG9rZW4tMQ==",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "thoughtsTokenCount": 65526,
+                "totalTokenCount": 65536,
+            },
+        },
+    ]
+    second_hop: list[dict[str, Any]] = [
+        {
+            "candidates": [
+                {"content": {"role": "model", "parts": [{"text": "42"}]}, "finishReason": "STOP"}
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 12,
+            },
+            "modelVersion": "gemini-4-argon",
+        }
+    ]
+    client, requests = _sse_client(first_hop, second_hop)
+    agent = GeminiAgent(GeminiConfig(model="gemini-4-argon", model_client=client))
+    state = _state(agent)
+
+    result = await agent.get_response(state)
+
+    first, second = (json.loads(request.content) for request in requests)
+    assert second == {**first, "continuationToken": "dG9rZW4tMQ=="}
+    assert result.content == "42"
+    assert result.reasoning == "Working it out."
+    assert result.done is True
+    assert result.finish_reason == "STOP"
+    assert result.usage is not None
+    assert result.usage.prompt_tokens == 20
+    turns = [content for content in state.messages if content.role == "model"]
+    assert len(turns) == 1
+    assert [(part.text, part.thought_signature) for part in turns[0].parts or []] == [
+        ("Working it out.", None),
+        ("", b"sig-1"),
+        ("42", None),
+    ]
+
+
 async def test_malformed_function_call_is_a_normalized_error() -> None:
     response = _api_response(
         SimpleNamespace(
@@ -172,12 +386,12 @@ class ConfigRecordingModels:
         self._response = response
         self.configs: list[Any] = []
 
-    async def generate_content(self, **kwargs: Any) -> Any:
+    async def generate_content_stream(self, **kwargs: Any) -> AsyncIterator[Any]:
         self.configs.append(kwargs["config"])
-        return self._response
+        return _chunks(self._response)
 
 
-async def _sent_output_cap(**config: Any) -> int | None:
+async def _sent_config(**config: Any) -> Any:
     resp_content = SimpleNamespace(
         role="model",
         parts=[SimpleNamespace(function_call=None, text="answer", thought=None)],
@@ -196,15 +410,25 @@ async def _sent_output_cap(**config: Any) -> int | None:
         )
     )
     await agent.get_response(_state(agent))
-    return models.configs[0].max_output_tokens
+    return models.configs[0]
 
 
 async def test_output_cap_defaults_to_the_model_limit() -> None:
-    assert await _sent_output_cap() is None
+    assert (await _sent_config()).max_output_tokens is None
 
 
 async def test_configured_output_cap_is_sent() -> None:
-    assert await _sent_output_cap(max_output_tokens=4096) == 4096
+    assert (await _sent_config(max_output_tokens=4096)).max_output_tokens == 4096
+
+
+async def test_sampling_defaults_to_the_model() -> None:
+    sent = await _sent_config()
+    assert (sent.temperature, sent.top_p, sent.top_k) == (None, None, None)
+
+
+async def test_configured_sampling_is_sent() -> None:
+    sent = await _sent_config(temperature=0.5, top_p=0.9, top_k=20)
+    assert (sent.temperature, sent.top_p, sent.top_k) == (0.5, 0.9, 20)
 
 
 class RecordingModels:
@@ -214,10 +438,10 @@ class RecordingModels:
         self._responses = list(responses)
         self.requests: list[Any] = []
 
-    async def generate_content(self, **kwargs: Any) -> Any:
+    async def generate_content_stream(self, **kwargs: Any) -> AsyncIterator[Any]:
         # Snapshot: the agent goes on mutating the list it passed.
         self.requests.append(list(kwargs["contents"]))
-        return self._responses.pop(0)
+        return _chunks(self._responses.pop(0))
 
 
 class RecordingGenai:

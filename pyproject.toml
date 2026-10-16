@@ -129,6 +129,8 @@ bedrock = [
 dev = [
     "hud[agents]",  # Include agents for dev
     "hud[robot]",  # the robot end-to-end gates (hud/tests/test_robot.py) run the real wire
+    # GeminiAgent's long-decode tests need the SDK's automatic continuation.
+    "google-genai>=2.30.1",
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff==0.16.1",
@@ -173,6 +175,9 @@ train = [
 
 [tool.uv]
 required-version = "==0.12.2"
+# Every browser-use release pins google-genai below 2.0, so the browseruse extra
+# resolves apart from dev, which needs google-genai 2.30.1 or later.
+conflicts = [[{ extra = "browseruse" }, { extra = "dev" }]]
 
 [tool.ruff]
 target-version = "py311"
