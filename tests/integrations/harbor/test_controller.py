@@ -14,7 +14,9 @@ at the top level or per ``[[case]]`` (a case adds to the top level):
 - ``capability_probe``: ``{name, tools}`` an MCP capability opened host-side lists;
 - ``runtime.env_vars`` and ``runtime.bind_mounts`` (``source`` relative to the
   fixture): what ``DockerRuntime`` gives the container;
-- ``startup_error``: the controller must refuse to serve, with this message.
+- ``startup_error``: the controller must refuse to serve, with this message;
+- ``base``: another fixture this one starts from. Its files are copied first and
+  this fixture's files replace them, so a variant holds only what it changes.
 """
 
 from __future__ import annotations
@@ -60,6 +62,7 @@ class Case:
     probe: dict[str, Any] | None
     env_vars: dict[str, str]
     bind_mounts: tuple[DockerBindMount, ...]
+    base: str | None = None
     startup_error: str | None = field(default=None)
 
     @property
@@ -69,9 +72,11 @@ class Case:
 
 def load_cases() -> list[Case]:
     cases = []
-    for root in sorted(path for path in TASKS.iterdir() if (path / "task.toml").is_file()):
+    fixtures = (path for path in TASKS.iterdir() if path.is_dir() and path.name != "__pycache__")
+    for root in sorted(fixtures):
         spec_path = root / "expected.toml"
         spec = tomllib.loads(spec_path.read_text("utf-8")) if spec_path.is_file() else {}
+        base = spec.pop("base", None)
         for variant in spec.pop("case", None) or [{}]:
             merged = {**spec, **variant}
             runtime = {**spec.get("runtime", {}), **variant.get("runtime", {})}
@@ -90,6 +95,7 @@ def load_cases() -> list[Case]:
                         DockerBindMount(root / mount["source"], mount["target"])
                         for mount in runtime.get("bind_mounts", [])
                     ),
+                    base=base,
                     startup_error=merged.get("startup_error"),
                 )
             )
@@ -130,14 +136,21 @@ class Oracle(Agent):
         run.trace.content = stdout
 
 
+def layers(case: Case) -> list[Path]:
+    """The directories that make up ``case``'s task, the last one winning."""
+    return [TASKS / name for name in (case.base, case.fixture) if name is not None]
+
+
 def adapted(case: Case, sdk_wheel: Path, tmp_path: Path) -> harbor.AdaptResult:
     dataset = tmp_path / "harbor-fixtures"
-    shutil.copytree(
-        TASKS / case.fixture,
-        dataset / case.fixture,
-        symlinks=True,
-        ignore=shutil.ignore_patterns("expected.toml", "managed"),
-    )
+    for layer in layers(case):
+        shutil.copytree(
+            layer,
+            dataset / case.fixture,
+            symlinks=True,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("expected.toml", "managed"),
+        )
     result = harbor.adapt(dataset, hud_requirement=str(sdk_wheel))
     assert result.failures == ()
     return result
@@ -168,7 +181,11 @@ async def test_a_harbor_task_grades_as_its_fixture_expects(
     docker = DockerRuntime(env_vars=case.env_vars, bind_mounts=case.bind_mounts)
     runtime: Provider = Shared(docker, width=case.shared_width) if case.shared_width else docker
     oracle = Oracle(
-        (TASKS / case.fixture / "solution" / "solve.sh").read_text("utf-8"),
+        next(
+            solution
+            for layer in reversed(layers(case))
+            if (solution := layer / "solution" / "solve.sh").is_file()
+        ).read_text("utf-8"),
         repeat=case.repeat,
         probe=None if case.probe is None else case.probe["name"],
     )

@@ -1,2 +1,4 @@
+base = "sidecar-reachability"
+
 reward = 0.0
 error = "artifact /app/linked/tests has a symbolic link in its path"
