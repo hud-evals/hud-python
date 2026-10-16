@@ -570,7 +570,7 @@ wheels = [
 
 [[package]]
 name = "hud"
-version = "0.6.19"
+version = "0.6.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -593,9 +593,9 @@ dependencies = [
     { name = "typer" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e1/b8/0fe598314c8d6f973fa1b28ef77d07f0b447a826da6e626af77468789aee/hud-0.6.19.tar.gz", hash = "sha256:f9c45d614bb2efac228d41f23f215a1ae874bbe87eb73777ac90d994af2519f7", size = 601342, upload-time = "2026-10-06T04:18:21.633Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/15/a18b524a7eb51c1e8bee1289e8ff0b89a547f973677c544fbacc95a9ae6b/hud-0.6.20.tar.gz", hash = "sha256:4ffb877da4e9fd7f0c397fb60874a997824c110d3e6903fae2595f35b81a66f9", size = 623289, upload-time = "2026-10-11T19:10:18.434Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/f9/30eab6fcc1a3da4a882f4bfb917a81c38fc7cfe6bbdb00ed22a07058b638/hud-0.6.19-py3-none-any.whl", hash = "sha256:3288dc887ac4489383bb15ddcc10d3f59440b4af9fbfbed22c44598dffa00c94", size = 706686, upload-time = "2026-10-06T04:18:19.838Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/14/08cad6667f2642adc7d0009969d3022d7326ce17f950248680c4245391e0/hud-0.6.20-py3-none-any.whl", hash = "sha256:7f5d084c12093dfe68b4e845cd428cf29208545d57085b6bb7c8c11437ec6802", size = 730660, upload-time = "2026-10-11T19:10:17.038Z" },
 ]
 
 [[package]]
@@ -1635,7 +1635,7 @@ viewer = [
 
 [package.metadata]
 requires-dist = [
-    { name = "hud", specifier = "==0.6.19" },
+    { name = "hud", specifier = "==0.6.20" },
     { name = "imgui-bundle", marker = "extra == 'viewer'", specifier = ">=1.90" },
     { name = "mujoco", specifier = ">=3.2.0" },
     { name = "mujoco-warp", specifier = ">=3.8.0.1" },

@@ -1,3 +1,3 @@
-hud[agents]==0.6.19
+hud[agents]==0.6.20
 playwright==1.63.0
 uvicorn==0.54.0
