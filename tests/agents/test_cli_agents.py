@@ -2,8 +2,9 @@
 
 A stub ``claude`` or ``codex`` on the workspace's PATH records what the agent
 handed it (argv, the variables it set, stdin, the ``.hud_*`` files beside it),
-prints a canned JSONL stream and exits as told. Rows pin that invocation, the
-steps and trace the stream turned into, and how each exit ends the run.
+prints a canned JSONL stream and exits as told. Rows check which credential and
+endpoint the CLI was given, and how each exit ends the run; the real CLIs run in
+the live lane.
 """
 
 from __future__ import annotations
@@ -90,18 +91,15 @@ def cli_env(root: Path, stub: Stub, **options: Any) -> Environment:
     return workspace_env(root / "ws", env=stub.shell_env(), **options)
 
 
-def launched(capture: dict[str, Any], run: Run, variables: tuple[str, ...]) -> dict[str, Any]:
-    """The argv the agent launched its CLI with and the named variables it set, with
-    the run's trace id as ``<trace>``."""
+def routed(capture: dict[str, Any], run: Run, variables: tuple[str, ...]) -> dict[str, str]:
+    """The named routing variables the agent set for its CLI, with the run's trace id
+    as ``<trace>``."""
     trace = str(run.trace_id)
-
-    def scrub(value: str) -> str:
-        return value.replace(trace, "<trace>").replace(uuid.UUID(trace).hex, "<trace>")
-
     env = capture["env"]
     return {
-        "argv": " ".join(scrub(arg) for arg in capture["argv"]),
-        **{name: scrub(env[name]) for name in variables if name in env},
+        name: env[name].replace(trace, "<trace>").replace(uuid.UUID(trace).hex, "<trace>")
+        for name in variables
+        if name in env
     }
 
 
@@ -112,14 +110,6 @@ def outcome(run: Run) -> tuple[str | None, str | None, str | None]:
 # ─── Claude CLI ─────────────────────────────────────────────────────────
 
 
-CLAUDE_ARGV = (
-    "--verbose --input-format=stream-json --output-format=stream-json --print "
-    "--permission-mode=bypassPermissions "
-    + " ".join(
-        f"--allowedTools {tool}"
-        for tool in ("Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch")
-    )
-)
 CLAUDE_ROUTING = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL",
@@ -127,7 +117,6 @@ CLAUDE_ROUTING = (
     "ANTHROPIC_MODEL",
 )
 CLAUDE_GATEWAY = {
-    "argv": CLAUDE_ARGV,
     "ANTHROPIC_API_KEY": "hud-key",
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:9/gateway",
     "ANTHROPIC_CUSTOM_HEADERS": "Trace-Id: <trace>",
@@ -137,11 +126,7 @@ CLAUDE_INVOCATIONS = {
     "provider-key": (
         {"ANTHROPIC_API_KEY": "anthropic-key"},
         ClaudeCLIConfig(),
-        {
-            "argv": CLAUDE_ARGV,
-            "ANTHROPIC_API_KEY": "anthropic-key",
-            "ANTHROPIC_MODEL": "claude-sonnet-5",
-        },
+        {"ANTHROPIC_API_KEY": "anthropic-key", "ANTHROPIC_MODEL": "claude-sonnet-5"},
     ),
     "gateway-without-a-provider-key": (
         {"HUD_API_KEY": "hud-key"},
@@ -153,24 +138,6 @@ CLAUDE_INVOCATIONS = {
         ClaudeCLIConfig(gateway=True),
         CLAUDE_GATEWAY,
     ),
-    "configured-options": (
-        {"ANTHROPIC_API_KEY": "anthropic-key"},
-        ClaudeCLIConfig(
-            model="claude-opus-4-8",
-            reasoning_effort="max",
-            max_steps=3,
-            system_prompt="Be brief.",
-            allowed_tools=["Read", "Bash"],
-            permission_mode="acceptEdits",
-        ),
-        {
-            "argv": "--verbose --input-format=stream-json --output-format=stream-json --print "
-            "--permission-mode=acceptEdits --max-turns=3 --effort max --system-prompt Be brief. "
-            "--allowedTools Read --allowedTools Bash",
-            "ANTHROPIC_API_KEY": "anthropic-key",
-            "ANTHROPIC_MODEL": "claude-opus-4-8",
-        },
-    ),
 }
 
 
@@ -179,7 +146,7 @@ CLAUDE_INVOCATIONS = {
     CLAUDE_INVOCATIONS.values(),
     ids=CLAUDE_INVOCATIONS.keys(),
 )
-async def test_the_claude_cli_is_launched_with_the_routing_and_options_configured(
+async def test_the_claude_cli_gets_the_credential_its_routing_chose(
     variables: dict[str, str],
     config: ClaudeCLIConfig,
     expected: Any,
@@ -192,7 +159,7 @@ async def test_the_claude_cli_is_launched_with_the_routing_and_options_configure
     run = await run_task(cli_env(tmp_path, stub), ClaudeCLIAgent(config))
 
     (capture,) = stub.captures()
-    assert launched(capture, run, CLAUDE_ROUTING) == expected
+    assert routed(capture, run, CLAUDE_ROUTING) == expected
     assert run.trace.status == "completed"
 
 
@@ -413,32 +380,13 @@ CODEX_DONE = {
 CODEX_STREAM = jsonl(*CODEX_ITEMS, CODEX_DONE)
 
 
-CODEX_ARGV = (
-    "exec --json --ephemeral --skip-git-repo-check --color never --sandbox workspace-write "
-    "--model gpt-5.6-sol"
-)
-CODEX_THROUGH_GATEWAY = {
-    "argv": f"{CODEX_ARGV} "
-    + " ".join(
-        f"-c {option}"
-        for option in (
-            'model_provider="hud"',
-            'model_providers.hud.name="HUD"',
-            'model_providers.hud.base_url="http://127.0.0.1:9/gateway"',
-            'model_providers.hud.env_key="HUD_API_KEY"',
-            'model_providers.hud.wire_api="responses"',
-            'model_providers.hud.http_headers={"Trace-Id"="<trace>"}',
-        )
-    )
-    + " -",
-    "HUD_API_KEY": "hud-key",
-}
+CODEX_THROUGH_GATEWAY = {"HUD_API_KEY": "hud-key"}
 CODEX_ROUTING = ("CODEX_API_KEY", "HUD_API_KEY", "OPENAI_API_KEY")
 CODEX_INVOCATIONS = {
     "provider-key": (
         {"OPENAI_API_KEY": "openai-key"},
         CodexCLIConfig(),
-        {"argv": f"{CODEX_ARGV} -", "CODEX_API_KEY": "openai-key"},
+        {"CODEX_API_KEY": "openai-key"},
     ),
     "gateway-without-a-provider-key": (
         {"HUD_API_KEY": "hud-key"},
@@ -450,16 +398,7 @@ CODEX_INVOCATIONS = {
         CodexCLIConfig(gateway=True),
         CODEX_THROUGH_GATEWAY,
     ),
-    "ambient-login": ({}, CodexCLIConfig(), {"argv": f"{CODEX_ARGV} -"}),
-    "configured-options": (
-        {"OPENAI_API_KEY": "openai-key"},
-        CodexCLIConfig(model="gpt-5.6", sandbox="read-only", reasoning_effort="max"),
-        {
-            "argv": "exec --json --ephemeral --skip-git-repo-check --color never --sandbox "
-            'read-only --model gpt-5.6 -c model_reasoning_effort="max" -',
-            "CODEX_API_KEY": "openai-key",
-        },
-    ),
+    "ambient-login": ({}, CodexCLIConfig(), {}),
 }
 
 
@@ -468,7 +407,7 @@ CODEX_INVOCATIONS = {
     CODEX_INVOCATIONS.values(),
     ids=CODEX_INVOCATIONS.keys(),
 )
-async def test_codex_is_launched_with_the_routing_and_options_configured(
+async def test_codex_gets_the_credential_its_routing_chose(
     variables: dict[str, str],
     config: CodexCLIConfig,
     expected: Any,
@@ -481,7 +420,7 @@ async def test_codex_is_launched_with_the_routing_and_options_configured(
     run = await run_task(cli_env(tmp_path, stub), CodexCLIAgent(config))
 
     (capture,) = stub.captures()
-    assert launched(capture, run, CODEX_ROUTING) == expected
+    assert routed(capture, run, CODEX_ROUTING) == expected
 
 
 CODEX_EXITS = {
