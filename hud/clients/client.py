@@ -153,8 +153,21 @@ class HudClient:
         with contextlib.suppress(Exception):
             await self._writer.wait_closed()
 
-    def abort(self) -> None:
-        """Close the transport immediately without waiting for the peer."""
+    def abort(self, *, cancel_task: bool = False) -> None:
+        """Close the transport immediately without waiting for the peer.
+
+        ``cancel_task`` first queues ``tasks.cancel`` as a notification, so the env tears
+        the task down instead of parking it for a later connection. The env handles a
+        session's frames in order: the cancel runs as soon as any in-flight request
+        returns, and closing the transport flushes it first.
+        """
+        if cancel_task and not self._writer.is_closing():
+            self._writer.write(
+                encode_frame(
+                    {"jsonrpc": "2.0", "method": "tasks.cancel", "params": {}},
+                    max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+                )
+            )
         for forwarder in self._forwarders:
             forwarder.close()
         for tunnel in list(self._tunnels):
@@ -333,8 +346,15 @@ class HudClient:
         task_id: str,
         args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start a task; returns the first yield (``{"prompt": ...}``)."""
-        return await self._call("tasks.start", {"id": task_id, "args": args or {}})
+        """Start a task; returns the first yield (``{"prompt": ...}``).
+
+        A start abandoned mid-call (cancelled, or the transport failed) queues
+        ``tasks.cancel``, delivered if the connection still works: nobody received the
+        prompt, so a parked session would only hold whatever the task's setup acquired.
+        """
+        return await self._call(
+            "tasks.start", {"id": task_id, "args": args or {}}, cancel_task_on_abort=True
+        )
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``)."""
@@ -342,6 +362,21 @@ class HudClient:
 
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
+
+    async def cancel_and_abort(self, *, reply_timeout: float) -> None:
+        """Cancel the task, then close the transport.
+
+        With no request in flight, wait up to ``reply_timeout`` for the env to tear the task
+        down (bounded: a live-but-silent peer would otherwise never answer). A request in
+        flight holds the channel until its reply, so the cancel is queued instead and the
+        env runs it as soon as that request returns.
+        """
+        if self._call_lock.locked():
+            self.abort(cancel_task=True)
+            return
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self.cancel(), reply_timeout)
+        self.abort()
 
     # ─── JSON-RPC plumbing ────────────────────────────────────────────
 
@@ -351,6 +386,7 @@ class HudClient:
         params: dict[str, Any],
         *,
         reply_timeout: float | None = None,
+        cancel_task_on_abort: bool = False,
     ) -> dict[str, Any]:
         async with self._call_lock:
             msg_id = next(self._ids)
@@ -366,7 +402,7 @@ class HudClient:
                     if reply is None:
                         raise EOFError(f"env closed connection during {method!r}")
                     if reply.get("id") != msg_id:
-                        self.abort()
+                        self.abort(cancel_task=cancel_task_on_abort)
                         if reply.get("id") is not None or "error" not in reply:
                             raise HudProtocolError(
                                 -32603,
@@ -385,7 +421,7 @@ class HudClient:
             except HudProtocolError:
                 raise
             except BaseException:
-                self.abort()
+                self.abort(cancel_task=cancel_task_on_abort)
                 raise
 
 
