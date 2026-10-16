@@ -80,7 +80,7 @@ class Project:
         return self.log.read_text().splitlines() if self.log.exists() else []
 
     def forget(self) -> None:
-        for name, module in tuple(sys.modules.items()):
+        for name, module in sys.modules.copy().items():
             file = getattr(module, "__file__", None)
             if file and str(file).startswith(str(self.package)):
                 del sys.modules[name]

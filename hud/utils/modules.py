@@ -30,7 +30,7 @@ def _module_name(file: Path) -> tuple[str, Path]:
         directory = directory.parent
     if file.parent != directory:
         package_root = directory / parts[0]
-        for name, module in tuple(sys.modules.items()):
+        for name, module in sys.modules.copy().items():
             if name != parts[0] and not name.startswith(f"{parts[0]}."):
                 continue
             locations = (*getattr(module, "__path__", ()), getattr(module, "__file__", None))
