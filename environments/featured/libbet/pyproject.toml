@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A HUD environment template that wraps VideoGameBench Game Boy games as scored, turn-based agent evals."
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "hud==0.6.19",
+    "hud==0.6.20",
     "pyboy>=2.7.0",          # Game Boy backend
     "imagehash>=4.3.1",
     "pillow>=10.0.0",
