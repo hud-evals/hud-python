@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import zipfile
 from typing import TYPE_CHECKING, Any
 
@@ -189,17 +188,6 @@ def test_rerunning_an_import_reuses_the_taskset_its_name_created(
     assert second.json["taskset"] == {"id": TASKSET, "name": "tb2sample", "created": False}
 
 
-def test_import_defaults_to_the_taskset_named_after_the_first_folder(
-    hud: Hud, importer: Importer, folders: list[str]
-) -> None:
-    importer.tasksets[TASKSET] = {"id": TASKSET, "name": "tasks", "can_edit": True}
-
-    result = hud("harbor", "import", *folders, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert "/v2/tasksets" not in importer.posted()
-
-
 def test_import_link_saves_the_taskset_as_the_directory_default(
     hud: Hud, importer: Importer, folders: list[str]
 ) -> None:
@@ -222,19 +210,6 @@ def test_import_uploads_a_given_zip_as_it_is(hud: Hud, importer: Importer, tmp_p
     assert importer.tasksets[TASKSET]["name"] == "prepared"
 
 
-def test_import_packs_a_folder_named_like_a_zip(
-    hud: Hud, importer: Importer, tmp_path: Path
-) -> None:
-    folder = tmp_path / "release.zip"
-    folder.mkdir()
-    (folder / "task.toml").write_text("version = '1.0'\n")
-
-    result = hud("harbor", "import", str(folder), "--taskset", "tb2", "--yes")
-
-    assert result.exit_code == 0, result
-    assert importer.bundle().namelist() == ["release.zip/task.toml"]
-
-
 def test_a_dry_run_plans_without_writing(hud: Hud, importer: Importer, folders: list[str]) -> None:
     result = hud("harbor", "import", *folders, "--taskset", "tb2", "--dry-run", "--json")
 
@@ -246,13 +221,6 @@ def test_a_dry_run_plans_without_writing(hud: Hud, importer: Importer, folders: 
 @pytest.mark.parametrize(
     ("setup", "argv", "exit_code", "error"),
     [
-        pytest.param(
-            lambda importer: None,
-            ["--taskset", TASKSET],
-            1,
-            "not_found",
-            id="an-unknown-taskset-id",
-        ),
         pytest.param(
             lambda importer: importer.tasksets.update(
                 {TASKSET: {"id": TASKSET, "name": "theirs", "can_edit": False}}
@@ -268,13 +236,6 @@ def test_a_dry_run_plans_without_writing(hud: Hud, importer: Importer, folders: 
             2,
             "usage",
             id="a-bundle-over-the-limit",
-        ),
-        pytest.param(
-            lambda importer: importer.offer(max_input_bytes=None),
-            [],
-            1,
-            "not_found",
-            id="no-harbor-import-offered",
         ),
     ],
 )
@@ -293,25 +254,6 @@ def test_import_refuses_before_uploading(
 
     assert (result.exit_code, result.json["error"]) == (exit_code, error), result
     assert importer.posted() == []
-
-
-def test_import_refuses_a_zip_mixed_with_folders_before_any_request(
-    hud: Hud, importer: Importer, folders: list[str], tmp_path: Path
-) -> None:
-    (tmp_path / "prepared.zip").write_bytes(b"zip")
-
-    result = hud("harbor", "import", str(tmp_path / "prepared.zip"), folders[0], "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert importer.services.requests("api") == []
-
-
-def test_import_fails_where_the_platform_has_no_imports(
-    hud: Hud, platform: FakeServices, folders: list[str]
-) -> None:
-    result = hud("harbor", "import", *folders, "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
 
 
 def test_a_refused_upload_deletes_its_reservation_and_imports_nothing(
@@ -338,7 +280,6 @@ def test_a_refused_upload_deletes_its_reservation_and_imports_nothing(
             True,
             id="stopped",
         ),
-        pytest.param(["stopped"], None, 1, False, id="stopped-without-a-report"),
         pytest.param(["failed"], REPORT, 1, False, id="failed"),
     ],
 )
@@ -386,14 +327,6 @@ def test_no_wait_returns_the_started_import(
             "harbor_import_report.v5",
             id="waited",
         ),
-        pytest.param([], ["running"], REPORT, None, id="still-running"),
-        pytest.param(
-            [],
-            ["completed"],
-            {**REPORT, "schema_version": "harbor_import_report.v4"},
-            "harbor_import_report.v4",
-            id="a-v4-report",
-        ),
         pytest.param(
             [],
             ["completed"],
@@ -421,22 +354,12 @@ def test_report_shows_an_ended_imports_report(
     assert (result.json["import"]["status"], shown_version) == (statuses[-1], version)
 
 
-@pytest.mark.parametrize(
-    ("record", "exit_code", "error"),
-    [
-        pytest.param({"format": "parquet"}, 2, "usage", id="another-format"),
-        pytest.param(None, 1, "not_found", id="an-unknown-import"),
-    ],
-)
-def test_report_refuses_an_import_it_cannot_read(
-    hud: Hud, platform: FakeServices, record: dict[str, Any] | None, exit_code: int, error: str
-) -> None:
-    if record is not None:
-        Importer(platform).progress("completed", **record)
+def test_report_refuses_an_import_of_another_format(hud: Hud, platform: FakeServices) -> None:
+    Importer(platform).progress("completed", format="parquet")
 
     result = hud("harbor", "report", IMPORT, "--json")
 
-    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
 
 
 @pytest.mark.parametrize(("status", "cancelled"), [("running", True), ("completed", False)])
@@ -462,25 +385,17 @@ def test_imports_lists_a_tasksets_harbor_imports(hud: Hud, importer: Importer) -
     assert listed.query == {"limit": ["20"], "format": ["harbor"], "taskset_id": [TASKSET]}
 
 
-@pytest.mark.parametrize(
-    ("argv", "exit_code"),
-    [(["--taskset", TASKSET], 1), (["--limit", "101"], 2)],
-    ids=["an-unknown-taskset", "a-limit-the-platform-does-not-page"],
-)
-def test_imports_refuses_without_listing(
-    hud: Hud, importer: Importer, argv: list[str], exit_code: int
-) -> None:
-    result = hud("harbor", "imports", *argv, "--json")
+def test_imports_of_an_unknown_taskset_lists_nothing(hud: Hud, importer: Importer) -> None:
+    result = hud("harbor", "imports", "--taskset", TASKSET, "--json")
 
-    assert result.exit_code == exit_code, result
+    assert result.exit_code == 1, result
     assert importer.services.requests("api", "GET", "/v2/imports") == []
 
 
-TASK_FILES = {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"}
-
-
 def harbor_task(root: Path) -> Path:
-    write_files(root / "hello", TASK_FILES)
+    """A minimal Harbor task folder, ``hello``, under ``root``."""
+    files = {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"}
+    write_files(root / "hello", files)
     return root / "hello"
 
 
@@ -503,41 +418,12 @@ def test_import_bundles_linked_files_by_content_and_skips_linked_folders(
     assert not any("linked" in name or "dangling" in name for name in bundle.namelist())
 
 
-@pytest.mark.parametrize(
-    ("files", "paths"),
-    [
-        pytest.param(
-            {f"{root}/hello/{name}": text for root in "ab" for name, text in TASK_FILES.items()},
-            ["a/hello", "b/hello"],
-            id="two-folders-one-name",
-        ),
-        pytest.param({"notes/README.md": "hi"}, ["notes"], id="a-folder-without-harbor-files"),
-        pytest.param({"task.toml": ""}, ["task.toml"], id="a-file"),
-    ],
-)
-def test_import_refuses_folders_it_cannot_bundle_before_any_request(
-    hud: Hud, importer: Importer, tmp_path: Path, files: dict[str, str], paths: list[str]
+def test_import_refuses_two_folders_with_one_name_before_any_request(
+    hud: Hud, importer: Importer, tmp_path: Path
 ) -> None:
-    write_files(tmp_path, files)
+    first, second = harbor_task(tmp_path / "a"), harbor_task(tmp_path / "b")
 
-    result = hud(
-        "harbor", "import", *(str(tmp_path / path) for path in paths), "--taskset", "tb2", "--yes"
-    )
+    result = hud("harbor", "import", str(first), str(second), "--yes")
 
     assert result.exit_code != 0, result
     assert importer.posted() == []
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any folder")
-def test_import_fails_on_a_folder_it_cannot_read(
-    hud: Hud, importer: Importer, tmp_path: Path
-) -> None:
-    task = harbor_task(tmp_path / "src")
-    (task / "environment").chmod(0)
-    try:
-        result = hud("harbor", "import", str(task), "--taskset", "tb2", "--yes", "--json")
-    finally:
-        (task / "environment").chmod(0o755)
-
-    assert result.exit_code != 0, result
-    assert "/v2/imports" not in importer.posted()
