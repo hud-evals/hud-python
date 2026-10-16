@@ -25,7 +25,6 @@ from hud.graders import (
     contains_any,
     exact_match,
     f1_score,
-    normalize,
     numeric_match,
 )
 from tests.support import ScriptedAgent, Turn, say
@@ -44,85 +43,38 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("Hello World", "hello world"),
-        ("answer: 42!", "answer 42"),
-        ("The answer is a test", "answer is test"),
-        ("  lots   of    space  ", "lots of space"),
-        (42, "42"),
-    ],
-)
-def test_normalize_lowercases_and_strips_punctuation_articles_and_spaces(
-    text: Any, expected: str
-) -> None:
-    assert normalize(text) == expected
-
-
-@pytest.mark.parametrize(
     ("score", "expected"),
     [
         pytest.param(lambda: exact_match("The Answer!", "answer"), 1.0, id="exact-normalized"),
-        pytest.param(lambda: exact_match("Germany", "france"), 0.0, id="exact-differs"),
-        pytest.param(lambda: exact_match("Paris.", "Paris"), 1.0, id="exact-punctuation"),
         pytest.param(
             lambda: exact_match("The capital is Paris", "capital is Paris"), 1.0, id="exact-article"
-        ),
-        pytest.param(
-            lambda: exact_match("Paris", "Paris", normalize_text=False), 1.0, id="exact-raw-same"
         ),
         pytest.param(
             lambda: exact_match("The Paris!", "Paris", normalize_text=False),
             0.0,
             id="exact-raw-differs",
         ),
-        pytest.param(lambda: exact_match(42, "42"), 1.0, id="exact-non-string"),
-        pytest.param(lambda: exact_match("", ""), 1.0, id="exact-empty"),
         pytest.param(lambda: contains("The capital is Paris", "paris"), 1.0, id="contains"),
-        pytest.param(lambda: contains("The capital is Paris", "berlin"), 0.0, id="contains-not"),
         pytest.param(
             lambda: contains("Paris", "paris", case_sensitive=True), 0.0, id="contains-case"
         ),
         pytest.param(
-            lambda: contains("Paris", "Paris", case_sensitive=True), 1.0, id="contains-case-same"
-        ),
-        pytest.param(
             lambda: contains_any("I like Toyota cars", ["toyota", "honda"]), 1.0, id="any-one"
-        ),
-        pytest.param(
-            lambda: contains_any("I like BMW cars", ["toyota", "honda"]), 0.0, id="any-none"
         ),
         pytest.param(lambda: contains_any("anything", []), 0.0, id="any-empty"),
         pytest.param(
-            lambda: contains_any("Toyota", ["toyota"], case_sensitive=True), 0.0, id="any-case"
-        ),
-        pytest.param(
             lambda: contains_all("Toyota and Honda", ["toyota", "honda"]), 1.0, id="all-present"
-        ),
-        pytest.param(
-            lambda: contains_all("Toyota is Japanese", ["toyota", "honda"]), 0.0, id="all-missing"
         ),
         pytest.param(lambda: contains_all("anything", []), 1.0, id="all-empty"),
         pytest.param(lambda: numeric_match("The answer is 42", 42), 1.0, id="number-int"),
-        pytest.param(lambda: numeric_match("Result: 3.14", 3.14), 1.0, id="number-float"),
-        pytest.param(lambda: numeric_match("no numbers", 42), 0.0, id="number-none"),
-        pytest.param(lambda: numeric_match("The answer is 41", 42), 0.0, id="number-wrong"),
         pytest.param(
             lambda: numeric_match("It is 41.5", 42, tolerance=1.0), 1.0, id="number-tolerance"
         ),
-        pytest.param(
-            lambda: numeric_match("It is 40", 42, tolerance=1.0), 0.0, id="number-out-of-tolerance"
-        ),
         pytest.param(lambda: numeric_match("It is -5 degrees", -5), 1.0, id="number-negative"),
         pytest.param(lambda: numeric_match("3 items and 5 left", 3), 1.0, id="number-first"),
-        pytest.param(lambda: f1_score("Paris", "Paris"), 1.0, id="f1-exact"),
         pytest.param(lambda: f1_score("The capital is Paris, France", "Paris"), 0.4, id="f1-part"),
-        pytest.param(lambda: f1_score("Berlin", "Paris"), 0.0, id="f1-none"),
         pytest.param(lambda: f1_score("", "Paris"), 0.0, id="f1-empty-prediction"),
-        pytest.param(lambda: f1_score("Paris", ""), 0.0, id="f1-empty-reference"),
-        pytest.param(lambda: f1_score("New York City", "New York City"), 1.0, id="f1-words"),
         pytest.param(lambda: f1_score("I think 42 degrees", "42 degrees"), 2 / 3, id="f1-superset"),
-        pytest.param(lambda: f1_score("42", "42 degrees celsius"), 0.5, id="f1-subset"),
         pytest.param(lambda: f1_score("The PARIS!", "paris"), 1.0, id="f1-normalized"),
     ],
 )

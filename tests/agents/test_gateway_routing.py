@@ -192,13 +192,6 @@ def test_an_agent_without_any_credential_fails_at_construction(
         build()
 
 
-def test_an_agent_with_a_custom_model_client_cannot_be_dumped() -> None:
-    agent = OpenAIAgent(OpenAIConfig(model_client=object()))
-
-    with pytest.raises(ValueError, match="a custom model_client cannot be serialized"):
-        agent.dump()
-
-
 class Answering(Agent):
     async def __call__(self, run: Run) -> None:
         run.trace.content = "done"

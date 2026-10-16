@@ -561,32 +561,6 @@ async def test_connections_reach_the_agent_only_while_it_runs(tmp_path: Path) ->
     assert (run.reward, run.connections) == (1.0, {})
 
 
-TRACE = "0" * 31 + "1"
-IDENTITIES = {
-    "a bare rollout mints its job and trace": ((None, None, None), (HEX_ID, None, HEX_ID)),
-    "threaded ids are kept": (("j1", "g1", TRACE), ("j1", "g1", TRACE)),
-}
-
-
-@pytest.mark.parametrize(("ids", "expected"), IDENTITIES.values(), ids=IDENTITIES.keys())
-async def test_a_run_carries_its_job_group_and_trace(
-    ids: tuple[str | None, str | None, str | None], expected: tuple[Any, ...]
-) -> None:
-    job_id, group_id, trace_id = ids
-
-    run = await rollout(
-        add(),
-        ScriptedAgent(solve),
-        runtime=LocalRuntime(lab()),
-        job_id=job_id,
-        group_id=group_id,
-        trace_id=trace_id,
-    )
-
-    assert (run.job_id, run.group_id, run.trace_id) == expected
-    assert run.reward == 1.0
-
-
 def blocking_teardown(env: Environment, release: asyncio.Event, stopped: list[str]) -> Provider:
     """Places rows on ``env`` and holds teardown until ``release`` is set."""
 

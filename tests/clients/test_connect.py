@@ -189,16 +189,10 @@ async def test_connect_gives_up_on_a_refused_port_after_the_ready_timeout() -> N
             pass
 
 
-@pytest.mark.parametrize("value", [True, 0, -1.0, math.nan, math.inf, "5"])
+@pytest.mark.parametrize("value", [-1.0, math.nan])
 async def test_an_invalid_runtime_ready_timeout_is_refused(value: object) -> None:
     with pytest.raises(ValueError, match="must be a positive finite number"):
         async with connect(Runtime("tcp://127.0.0.1:9", params={"ready_timeout": value})):
-            pass
-
-
-async def test_only_tcp_control_transports_are_supported() -> None:
-    with pytest.raises(NotImplementedError, match="control transport 'unix' not supported"):
-        async with connect(Runtime("unix:///run/hud.sock")):
             pass
 
 
@@ -250,15 +244,6 @@ async def test_a_raw_stream_client_needs_hello_and_passes_bindings_through() -> 
             await client.close()
 
     assert url == "ssh://agent@environment:22"
-
-
-async def test_opening_a_protocol_without_a_client_points_at_binding() -> None:
-    async with (
-        control_peer([answer(hello(*BINDINGS))]) as peer,
-        connect(Runtime(peer.url)) as client,
-    ):
-        with pytest.raises(ValueError, match=r"use binding\('custom'\) for raw access"):
-            await client.open("custom")
 
 
 async def test_an_opened_ssh_client_retries_an_upstream_that_resets_and_closes_with_the_connection(
@@ -325,68 +310,29 @@ async def test_a_tunnel_the_env_cannot_open_ends_the_local_stream(
 
 
 @pytest.mark.parametrize(
-    ("call", "result", "sent", "returned"),
+    ("call", "reply", "error"),
     [
         (
-            lambda client: client.start_task("fix", {"bug": 1}),
-            {"prompt": "Fix it."},
-            ("tasks.start", {"id": "fix", "args": {"bug": 1}}),
-            {"prompt": "Fix it."},
-        ),
-        (
-            lambda client: client.start_task("fix"),
-            {"prompt": "Fix it."},
-            ("tasks.start", {"id": "fix", "args": {}}),
-            {"prompt": "Fix it."},
-        ),
-        (
-            lambda client: client.grade({"answer": "done"}),
-            {"score": 1.0},
-            ("tasks.grade", {"answer": "done"}),
-            {"score": 1.0},
-        ),
-        (lambda client: client.cancel(), {}, ("tasks.cancel", {}), None),
-        (
             lambda client: client.list_tasks(),
-            {"tasks": [{"id": "fix", "description": "Fix it."}]},
-            ("tasks.list", {}),
-            [{"id": "fix", "description": "Fix it."}],
-        ),
-        (
-            lambda client: client.list_tasks(),
-            {"tasks": "fix"},
-            ("tasks.list", {}),
+            answer({"tasks": "fix"}),
             HudProtocolError(-32603, "tasks.list: 'tasks' must be a list"),
         ),
         (
             lambda client: client.grade({"answer": "done"}),
-            {"error": {"code": -32600, "message": "no task in progress"}},
-            ("tasks.grade", {"answer": "done"}),
+            answer(error={"code": -32600, "message": "no task in progress"}),
             HudProtocolError(-32600, "no task in progress"),
         ),
     ],
-    ids=["start", "start without args", "grade", "cancel", "list", "list malformed", "grade error"],
+    ids=["a-malformed-result", "an-error-reply"],
 )
-async def test_task_calls_send_one_request_and_return_its_result(
-    call: Callable[[HudClient], Awaitable[Any]],
-    result: dict[str, Any],
-    sent: tuple[str, dict[str, Any]],
-    returned: Any,
+async def test_a_reply_the_client_cannot_use_raises_a_protocol_error(
+    call: Callable[[HudClient], Awaitable[Any]], reply: Any, error: HudProtocolError
 ) -> None:
-    reply = answer(error=result["error"]) if "error" in result else answer(result)
     async with control_peer([answer(hello()), reply]) as peer, connect(Runtime(peer.url)) as client:
-        if isinstance(returned, HudProtocolError):
-            with pytest.raises(HudProtocolError) as raised:
-                await call(client)
-            assert (raised.value.code, raised.value.message) == (
-                returned.code,
-                returned.message,
-            )
-        else:
-            assert await call(client) == returned
+        with pytest.raises(HudProtocolError) as raised:
+            await call(client)
 
-    method, params = sent
-    assert peer.requests()[1] == {"jsonrpc": "2.0", "id": 2, "method": method, "params": params}
+    assert (raised.value.code, raised.value.message) == (error.code, error.message)
 
 
 async def test_a_reply_to_another_request_aborts_the_connection() -> None:

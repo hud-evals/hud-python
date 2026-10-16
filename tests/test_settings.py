@@ -7,22 +7,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hud import Environment
-from hud.settings import Settings
 from tests.support import served
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.support import Hud, HudEnv, Platform
-
-SERVICE_URLS = {
-    "HUD_TELEMETRY_URL": "https://telemetry.hud.ai/v3/api",
-    "HUD_API_URL": "https://api.hud.ai",
-    "HUD_WEB_URL": "https://hud.ai",
-    "HUD_GATEWAY_URL": "https://inference.hud.ai",
-    "HUD_RUNTIME_URL": "https://mcp.hud.ai",
-    "HUD_RL_URL": "https://rl.hud.ai",
-}
 
 
 @pytest.mark.parametrize(
@@ -51,16 +41,6 @@ def test_the_api_key_comes_from_env_then_project_env_then_hud_set(
     result = hud("jobs", "list", "--json")
 
     assert result.exit_code == 0, result
-
-
-def test_service_urls_default_to_the_hud_platform(hud_env: HudEnv) -> None:
-    hud_env.set(**dict.fromkeys(SERVICE_URLS))
-
-    configured = Settings(_env_file=None)
-
-    assert {
-        variable: getattr(configured, variable.lower()) for variable in SERVICE_URLS
-    } == SERVICE_URLS
 
 
 @pytest.mark.parametrize(

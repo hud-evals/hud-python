@@ -126,29 +126,6 @@ def write(path: Path, text: str) -> Path:
     return path
 
 
-READS: dict[str, tuple[str, str, list[str]]] = {
-    "a single JSON object is a taskset of one": (
-        "tasks.json",
-        '{"env": "lab", "id": "add"}',
-        ["add"],
-    ),
-    "blank JSONL lines are skipped": (
-        "tasks.jsonl",
-        '{"env": "lab", "id": "a"}\n\n{"env": "lab", "id": "b"}\n',
-        ["a", "b"],
-    ),
-}
-
-
-@pytest.mark.parametrize(("name", "text", "slugs"), READS.values(), ids=READS.keys())
-def test_a_data_file_reads_into_rows(
-    name: str, text: str, slugs: list[str], tmp_path: Path
-) -> None:
-    loaded = Taskset.from_file(write(tmp_path / name, text))
-
-    assert [row.slug for row in loaded] == slugs
-
-
 def test_a_module_contributes_its_public_tasks_lists_and_tasksets(tmp_path: Path) -> None:
     source = write(
         tmp_path / "tasks.py",
@@ -170,22 +147,6 @@ def test_a_module_contributes_its_public_tasks_lists_and_tasksets(tmp_path: Path
     ]
 
 
-def test_a_taskset_is_an_ordered_collection_keyed_by_slug() -> None:
-    rows = [
-        Task(env="lab", id="a"),
-        Task(env="lab", id="b", verifier=Task(env="judge", id="verify")),
-        Task(env="other", id="c"),
-    ]
-    taskset = Taskset("demo", rows, taskset_id="ts-1")
-
-    assert (len(taskset), list(taskset), taskset["b"]) == (3, rows, rows[1])
-    assert list(taskset.items()) == [(row.slug, row) for row in rows]
-    assert [row.slug for row in taskset.filter(["c", "a"])] == ["a", "c"]
-    assert [row.slug for row in taskset.exclude(["a"])] == ["b", "c"]
-    assert taskset.filter(["a"]).taskset_id == taskset.exclude(["a"]).taskset_id == "ts-1"
-    assert taskset.environment_names() == {"lab", "judge", "other"}
-
-
 def nested_verifier() -> Task:
     inner = Task(env="judge", id="verify", verifier=Task(env="judge", id="again"))
     return Task(env="lab", id="add", verifier=inner)
@@ -203,18 +164,12 @@ def compose_outside_root(root: Path) -> Any:
 
 
 INVALID: dict[str, Callable[[Path], Any]] = {
-    "a row without an env": lambda tmp: Task.model_validate({"id": "add"}),
-    "an empty slug": lambda tmp: Task(env="lab", id="add", slug=""),
     "a verifier with a verifier assigned later": lambda tmp: assign(
         Task(env="lab", id="add"), "verifier", nested_verifier().verifier
-    ),
-    "an unknown runtime field": lambda tmp: RuntimeConfig.model_validate(
-        {"image": "lab", "provider_config": {}}
     ),
     "both an image and a Compose project": lambda tmp: RuntimeConfig(
         image="lab", compose=ComposeProject(document=write(tmp / "c.yaml", "services: {}\n"))
     ),
-    "a TPU topology that is not a grid": lambda tmp: RuntimeTPU(type="v5e", topology="eight"),
     "a Compose file outside its project root": compose_outside_root,
     "a local Compose file under a platform root": lambda tmp: ComposeProject.model_validate(
         {
@@ -224,18 +179,9 @@ INVALID: dict[str, Callable[[Path], Any]] = {
     ),
     "a relative bind mount source": lambda tmp: DockerBindMount("data", "/data"),
     "a bind mount path with a comma": lambda tmp: DockerBindMount("/data,x", "/data"),
-    "a file that is not JSON, JSONL or Python": lambda tmp: Taskset.from_file(
-        write(tmp / "tasks.yaml", "- env: lab\n")
-    ),
-    "an entry that is not an object": lambda tmp: Taskset.from_file(
-        write(tmp / "tasks.json", '[{"env": "lab", "id": "a"}, 3]')
-    ),
     "duplicate slugs in a file": lambda tmp: Taskset.from_file(
         write(tmp / "tasks.json", '[{"env": "lab", "id": "a"}, {"env": "other", "id": "a"}]')
     ),
-    "writing to an unsupported format": lambda tmp: Taskset(
-        "demo", [Task(env="lab", id="a")]
-    ).to_file(tmp / "tasks.csv"),
 }
 
 

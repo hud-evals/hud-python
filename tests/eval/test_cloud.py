@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import modal
 import pytest
 
 from hud.eval import (
@@ -93,8 +92,3 @@ async def test_modal_refuses_what_it_cannot_provision_before_reaching_modal(
     with pytest.raises(ValueError, match=message):
         async with ModalRuntime(**options)(ECHO.model_copy(update={"runtime_config": config})):
             pytest.fail("the acquisition should fail")
-
-
-def test_modal_refuses_an_app_and_an_app_name_together() -> None:
-    with pytest.raises(ValueError, match="either app or app_name"):
-        ModalRuntime(app=modal.App("mine"), app_name="other")

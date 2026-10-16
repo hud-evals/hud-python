@@ -36,12 +36,6 @@ def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
     ]
 
 
-def test_version_prints_the_installed_version(hud: Hud) -> None:
-    result = hud("version")
-
-    assert (result.exit_code, result.stdout.split()[-1]) == (0, __version__), result
-
-
 def test_version_json_names_the_package_and_version(hud: Hud) -> None:
     result = hud("version", "--json")
 

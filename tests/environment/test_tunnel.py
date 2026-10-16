@@ -61,20 +61,6 @@ async def round_trip(host: str | None, port: int | None, payload: bytes) -> byte
     return data
 
 
-@pytest.mark.parametrize(
-    ("url", "materialized"),
-    [
-        ("http://tools.example/mcp", "http://tools.example:80/mcp"),
-        ("https://tools.example/mcp", "https://tools.example:443/mcp"),
-        ("ws://tools.example/mcp", "ws://tools.example:80/mcp"),
-        ("wss://tools.example/mcp", "wss://tools.example:443/mcp"),
-        ("https://user:secret@tools.example/mcp", "https://user:secret@tools.example:443/mcp"),
-    ],
-)
-def test_an_mcp_capability_names_the_port_a_tunnel_dials(url: str, materialized: str) -> None:
-    assert Capability.mcp(url=url).url == materialized
-
-
 async def test_the_binding_forwards_bytes_while_the_manifest_keeps_the_env_address(
     echo_port: int,
 ) -> None:

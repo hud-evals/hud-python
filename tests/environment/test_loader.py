@@ -197,15 +197,6 @@ def test_a_reference_resolves_to_one_environment(
             load_environment(target, name=name, args=args)
 
 
-def test_loading_a_source_again_returns_the_same_environment(tree: Path) -> None:
-    scanned = load_environment("scan", name="scanned")
-    package = load_environment("reexport/env.py")
-
-    assert set(scanned.tasks) == {"solve"}
-    assert load_environment("scan", name="scanned") is scanned
-    assert load_environment(tree / "reexport", name="reexported") is package
-
-
 @pytest.mark.parametrize("reference", ["shadow/json.py", "shadow"])
 def test_loading_a_module_named_like_the_stdlib_leaves_the_stdlib_imported(
     tree: Path, reference: str

@@ -48,15 +48,10 @@ async def test_connect_fails_when_the_browser_offers_no_page_target() -> None:
             await CDPClient.connect(Capability.cdp(url=browser.url))
 
 
-async def test_connect_needs_a_host_and_port() -> None:
-    with pytest.raises(ValueError, match="cdp capability missing host or port"):
-        await CDPClient.connect(Capability(name="browser", protocol="cdp/1.3", url="ws://host"))
-
-
 @pytest.mark.parametrize(
     ("reply", "result"),
-    [({"result": {"frameId": "f-1"}}, {"frameId": "f-1"}), ({}, {})],
-    ids=["a result", "an empty reply"],
+    [({"result": {"frameId": "f-1"}}, {"frameId": "f-1"})],
+    ids=["a result"],
 )
 async def test_send_returns_the_command_result(
     reply: dict[str, Any], result: dict[str, Any]

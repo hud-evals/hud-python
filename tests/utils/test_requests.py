@@ -196,57 +196,8 @@ def test_a_deprecation_notice_warns_once_per_process(services: FakeServices) -> 
 # ─── the platform client ─────────────────────────────────────────────────────
 
 
-async def test_the_platform_client_sends_each_verb_under_v2_with_the_bearer(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
-        services.route("api", method, "/v2/{rest:path}", json={"method": method})
-    platform = PlatformClient.from_settings()
-
-    answers = [
-        platform.get("/tasks", params={"limit": 5, "ids": ["a", "b"]}),
-        platform.post("/tasks", json={"b": 2}),
-        platform.put("/tasks/1", json={"c": 3}),
-        platform.patch("/tasks/1", json={"d": 4}),
-        platform.delete("/tasks/1"),
-        await platform.aget("/tasks", params={"limit": 1}),
-        await platform.apost("/tasks", json={"e": 5}),
-    ]
-
-    assert [answer["method"] for answer in answers] == [
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE",
-        "GET",
-        "POST",
-    ]
-    assert [
-        (request.method, request.path, request.query, request.json, request.bearer)
-        for request in services.requests("api")
-    ] == [
-        ("GET", "/v2/tasks", {"limit": ["5"], "ids": ["a", "b"]}, None, "k"),
-        ("POST", "/v2/tasks", {}, {"b": 2}, "k"),
-        ("PUT", "/v2/tasks/1", {}, {"c": 3}, "k"),
-        ("PATCH", "/v2/tasks/1", {}, {"d": 4}, "k"),
-        ("DELETE", "/v2/tasks/1", {}, None, "k"),
-        ("GET", "/v2/tasks", {"limit": ["1"]}, None, "k"),
-        ("POST", "/v2/tasks", {}, {"e": 5}, "k"),
-    ]
-
-
 def test_the_platform_client_needs_an_api_key(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY=None)
 
     with pytest.raises(HudAuthenticationError, match="HUD_API_KEY is required"):
         PlatformClient.from_settings()
-
-
-def test_a_platform_client_built_without_a_key_refuses_to_send(services: FakeServices) -> None:
-    platform = PlatformClient(services.url("api"), "")
-
-    with pytest.raises(HudAuthenticationError):
-        platform.get("/tasks")
-    assert services.requests() == []

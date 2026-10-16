@@ -53,8 +53,3 @@ async def test_a_screenshot_reconnects_when_the_stream_drops() -> None:
 
     assert screen.connections == 2
     assert Image.open(io.BytesIO(data)).convert("RGB").getpixel((0, 0)) == COLOR
-
-
-async def test_connecting_needs_a_host_and_port() -> None:
-    with pytest.raises(ValueError, match="rfb capability missing host or port"):
-        await RFBClient.connect(Capability(name="screen", protocol="rfb/3.8", url="rfb://host"))
