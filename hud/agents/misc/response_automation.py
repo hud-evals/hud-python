@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from functools import cache
 from typing import TYPE_CHECKING, Literal, cast
 
 import mcp.types as types
@@ -60,13 +59,6 @@ async def auto_respond(
     )
 
 
-@cache
-def _client() -> AsyncOpenAI:
-    from hud.utils.gateway import build_gateway_client
-
-    return cast("AsyncOpenAI", build_gateway_client("openai"))
-
-
 @instrument(name="response_automation")
 async def _determine_response(
     agent_message: str,
@@ -74,18 +66,24 @@ async def _determine_response(
     model: str = "gpt-5",
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ) -> ResponseType:
-    response = await _client().responses.create(
-        model=model,
-        instructions=system_prompt,
-        input=[
-            {
-                "role": "user",
-                "content": f"Agent message: {agent_message}\n\nWhat is the appropriate response?",
-            },
-        ],
-        reasoning={"effort": "low"},
-        max_output_tokens=256,
-    )
+    from hud.utils.gateway import build_gateway_client
+
+    # A client per call: its connection pool belongs to the event loop that opened it.
+    async with cast("AsyncOpenAI", build_gateway_client("openai")) as client:
+        response = await client.responses.create(
+            model=model,
+            instructions=system_prompt,
+            input=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Agent message: {agent_message}\n\nWhat is the appropriate response?"
+                    ),
+                },
+            ],
+            reasoning={"effort": "low"},
+            max_output_tokens=256,
+        )
 
     text_parts: list[str] = []
     for item in response.output:
