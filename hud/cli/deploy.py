@@ -25,6 +25,7 @@ from dotenv import dotenv_values
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from hud.cli import (
+    CLI,
     AuthScope,
     CliError,
     DirectoryLink,
@@ -186,6 +187,12 @@ async def deploy_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Deploy HUD environment to the platform.
 
@@ -200,6 +207,7 @@ async def deploy_command(
     [not dim]Examples:
         hud deploy
         hud deploy --name judge
+        hud deploy --yes --json
         hud deploy --dry-run --json[/not dim]
     """
     platform = PlatformClient.from_settings()
@@ -380,6 +388,7 @@ async def deploy_command(
             )
         )
 
+    CLI.confirm_or_abort(f"Deploy {name}?", yes=yes, default=True)
     hud_console.progress_message("Creating build context tarball...")
     dockerignore = env_dir / ".dockerignore"
     rules: list[tuple[re.Pattern[str], bool, bool]] = []

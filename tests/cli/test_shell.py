@@ -212,7 +212,7 @@ def test_a_stalled_analytics_endpoint_does_not_hold_up_the_command(
 def test_an_interrupted_command_reports_exit_130(hud: Hud, analytics: Platform) -> None:
     check = {"key": "failure_analysis", "subject_type": "trace", "title": "Failure Analysis"}
     analytics.qa_checks = [check]
-    process = hud.start("qa", "run", "failure_analysis", TRACE_ID)
+    process = hud.start("qa", "run", "failure_analysis", TRACE_ID, "--yes")
 
     deadline = time.monotonic() + 30
     while not analytics.qa_results:

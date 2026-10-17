@@ -81,14 +81,11 @@ def test_head_is_the_resolved_models_active_checkpoint(
     assert (head.json["model_id"], head.json["head"]["id"]) == (MINE_ID, "ckpt-0002-step")
 
 
-@pytest.mark.parametrize(("argv", "sent"), [([], {MINE_ID: "ckpt-0001-base"}), (["--dry-run"], {})])
-def test_head_set_asks_the_platform_to_serve_the_checkpoint(
-    hud: Hud, catalog: Platform, argv: list[str], sent: dict[str, str]
-) -> None:
-    result = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", *argv, "--json")
+def test_head_set_asks_the_platform_to_serve_the_checkpoint(hud: Hud, catalog: Platform) -> None:
+    result = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert catalog.heads == sent
+    assert catalog.heads == {MINE_ID: "ckpt-0001-base"}
 
 
 def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: Platform) -> None:
@@ -98,7 +95,7 @@ def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: Platform) ->
 
 
 def test_fork_creates_a_trainable_model_from_its_source(hud: Hud, catalog: Platform) -> None:
-    result = hud("models", "fork", "Claude Sonnet", "--name", "fresh", "--json")
+    result = hud("models", "fork", "Claude Sonnet", "--name", "fresh", "--yes", "--json")
 
     assert result.exit_code == 0, result
     (forked,) = [model for model in catalog.models if model["id"] == result.json["id"]]
@@ -119,21 +116,14 @@ def test_forking_onto_an_existing_name(
         "api", "POST", "/v2/models/fork", Reply(status=409, json={"detail": "Model exists"})
     )
 
-    result = hud("models", "fork", "Claude Sonnet", "--name", "my-sonnet", *argv, "--json")
+    result = hud("models", "fork", "Claude Sonnet", "--name", "my-sonnet", *argv, "--yes", "--json")
 
     assert result.exit_code == exit_code, result
     assert {key: result.json[key] for key in outcome} == outcome
 
 
-def test_a_fork_dry_run_creates_nothing(hud: Hud, catalog: Platform) -> None:
-    result = hud("models", "fork", "claude-sonnet-4-6", "--name", "mine", "--dry-run", "--json")
-
-    assert result.exit_code == 0, result
-    assert len(catalog.models) == len(CATALOG)
-
-
 def test_a_misspelt_model_suggests_the_close_name(hud: Hud, catalog: Platform) -> None:
-    result = hud("models", "fork", "claude-sonet-4-6", "--name", "mine", "--json")
+    result = hud("models", "fork", "claude-sonet-4-6", "--name", "mine", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
     assert "claude-sonnet-4-6" in result.json["message"]

@@ -95,6 +95,12 @@ def fork_model(
         "--if-not-exists",
         help="If a model with this name already exists, print it and exit 0.",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Create a team-owned trainable model derived from an existing one.
 
@@ -104,7 +110,7 @@ def fork_model(
 
     [not dim]Examples:
         hud models fork claude-sonnet-4-6 --name my-sonnet
-        hud models fork claude-sonnet-4-6 --name my-sonnet --json
+        hud models fork claude-sonnet-4-6 --name my-sonnet --yes --json
         hud models fork claude-sonnet-4-6 --name my-sonnet --if-not-exists
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
@@ -118,6 +124,7 @@ def fork_model(
             "if_not_exists": if_not_exists,
         }
 
+    CLI.confirm_or_abort(f"Fork {source} as {name}?", yes=yes, default=True)
     source_id = resolve_gateway_model(source).id
     try:
         model = PlatformClient.from_settings().post(
@@ -213,6 +220,12 @@ def show_head(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Show — or with ``--set``, change — the model's active checkpoint (the
     weights the gateway serves now).
@@ -220,6 +233,7 @@ def show_head(
     [not dim]Examples:
         hud models head <model>
         hud models head <model> --json
+        hud models head <model> --set <checkpoint-id> --yes
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
     model_id = resolve_gateway_model(model).id
@@ -236,6 +250,7 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
+        CLI.confirm_or_abort(f"Serve checkpoint {set_to} as the head of {model}?", yes=yes)
         asyncio.run(client.set_head(set_to))
         hud_console.stdout.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
         hud_console.stdout.print(f"[dim]View: {view}[/dim]")

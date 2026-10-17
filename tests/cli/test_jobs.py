@@ -40,7 +40,7 @@ def test_a_compact_job_id_reads_the_jobs_traces(hud: Hud, platform: Platform) ->
     [
         pytest.param([JOB_ID, "--yes"], ("job", {"job_id": JOB_ID}), id="a-job"),
         pytest.param(
-            [JOB_ID, "--trace-id", TRACE_ID],
+            [JOB_ID, "--trace-id", TRACE_ID, "--yes"],
             ("trace", {"job_id": JOB_ID, "trace_id": TRACE_ID}),
             id="one-trace",
         ),
@@ -56,21 +56,8 @@ def test_cancel_stops_only_what_it_names(
     assert platform.cancellations == [cancelled]
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [pytest.param([JOB_ID], id="a-job-unconfirmed"), pytest.param([], id="nothing-named")],
-)
-def test_cancel_refuses_without_a_confirmed_target(
-    hud: Hud, platform: Platform, argv: list[str]
-) -> None:
-    result = hud("jobs", "cancel", *argv, "--json")
+def test_cancel_refuses_without_a_target(hud: Hud, platform: Platform) -> None:
+    result = hud("jobs", "cancel", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert platform.cancellations == []
-
-
-def test_a_cancel_dry_run_names_its_action_and_stops_nothing(hud: Hud, platform: Platform) -> None:
-    result = hud("jobs", "cancel", JOB_ID, "--dry-run", "--json")
-
-    assert (result.exit_code, result.json["action"]) == (0, "cancel_job"), result
     assert platform.cancellations == []

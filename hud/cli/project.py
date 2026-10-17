@@ -173,6 +173,12 @@ def create_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Create a Project and link this directory unless --no-use is passed."""
     platform = PlatformClient.from_settings()
@@ -191,6 +197,7 @@ def create_command(
     )
     if state is not None:
         state.load()  # a config written under other credentials fails before we create anything
+    CLI.confirm_or_abort(f"Create Project {name}?", yes=yes, default=True)
     created = Project.from_record(platform.post("/projects", json=payload))
     if state is not None:
         state.update(DirectoryLink(project_id=created.id))

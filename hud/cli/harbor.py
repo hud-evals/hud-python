@@ -263,6 +263,9 @@ def cancel_command(
         "-y",
         help="Skip confirmation prompts (required in non-interactive terminals).",
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the planned action without making changes."
+    ),
 ) -> Any:
     """Cancel a Harbor import.
 
@@ -271,13 +274,17 @@ def cancel_command(
 
     Examples:
         hud harbor cancel <import-id>
-        hud harbor cancel <import-id> --yes --json[/not dim]
+        hud harbor cancel <import-id> --yes --json
+        hud harbor cancel <import-id> --dry-run --json[/not dim]
     """
     platform = PlatformClient.from_settings()
     imported = _get_import(platform, import_id)
     if imported.ended:
         hud_console.info(f"The import already ended: {imported.status}")
         return imported.model_dump(mode="json")
+    if dry_run:
+        hud_console.info(f"--dry-run: would cancel import {imported.id}")
+        return {"dry_run": True, "action": "cancel_import", "import_id": imported.id}
     CLI.confirm_or_abort(f"Cancel import {imported.id}?", yes=yes, default=False)
     imported = imports.cancel_import(platform, imported.id)
     hud_console.success("Cancellation requested")

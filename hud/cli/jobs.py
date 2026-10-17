@@ -182,7 +182,7 @@ def cancel_job_command(
 
     [not dim]Examples:
         hud jobs cancel <job-id>
-        hud jobs cancel <job-id> --trace-id <trace-id> --json
+        hud jobs cancel <job-id> --trace-id <trace-id> --yes --json
         hud jobs cancel --all --yes
         hud jobs cancel <job-id> --dry-run --json[/not dim]
     """
@@ -234,6 +234,9 @@ def cancel_job_command(
                 for job in result.get("job_details", []):
                     hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
         elif trace_id:
+            CLI.confirm_or_abort(
+                f"Cancel trace {trace_id} in job {job_id}?", yes=yes, default=False
+            )
             hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
             result = platform.post(
                 "/rollouts/cancel", json={"job_id": job_id, "trace_id": trace_id}

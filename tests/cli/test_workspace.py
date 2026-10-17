@@ -201,7 +201,7 @@ def test_project_list_marks_the_default_and_read_only_projects(
 def test_project_create_makes_the_project_and_links_unless_told_not_to(
     hud: Hud, platform: Platform, flags: list[str], linked: bool
 ) -> None:
-    result = hud("project", "create", "UI Evals", *flags, "--json")
+    result = hud("project", "create", "UI Evals", *flags, "--yes", "--json")
 
     assert result.exit_code == 0, result
     (created,) = [project for project in platform.projects if project["name"] == "UI Evals"]
@@ -215,7 +215,7 @@ def test_a_refused_project_creation_links_nothing(hud: Hud, platform: Platform) 
         "api", "POST", "/v2/projects", Reply(status=403, json={"detail": "Not enabled"})
     )
 
-    result = hud("project", "create", "UI Evals", "--json")
+    result = hud("project", "create", "UI Evals", "--yes", "--json")
 
     assert result.exit_code == 1, result
     assert link(hud) is None

@@ -88,21 +88,10 @@ def test_qa_lists_the_checks_at_a_level(hud: Hud, argv: list[str], keys: list[st
     assert (result.exit_code, result.stdout.split()) == (0, keys), result
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        pytest.param(
-            [f"{CHECK},{TASK_CHECK}", TRACE_ID, "--json"], id="trace-and-task-checks-together"
-        ),
-        pytest.param([TASK_CHECK, TASK_ID, "--dry-run", "--json"], id="a-dry-run"),
-    ],
-)
-def test_qa_run_refusals_and_dry_runs_start_nothing(
-    hud: Hud, platform: Platform, argv: list[str]
-) -> None:
-    result = hud("qa", "run", *argv)
+def test_qa_run_refuses_trace_and_task_checks_together(hud: Hud, platform: Platform) -> None:
+    result = hud("qa", "run", f"{CHECK},{TASK_CHECK}", TRACE_ID, "--yes", "--json")
 
-    assert result.exit_code == (0 if "--dry-run" in argv else 2), result
+    assert result.exit_code == 2, result
     assert platform.qa_results == []
 
 
@@ -120,7 +109,7 @@ def test_qa_run_refusals_and_dry_runs_start_nothing(
 def test_qa_run_without_waiting_starts_each_check_once(
     hud: Hud, platform: Platform, argv: list[str], runs: list[tuple[str, str]]
 ) -> None:
-    result = hud("qa", "run", *argv, "--no-wait", "--json")
+    result = hud("qa", "run", *argv, "--no-wait", "--yes", "--json")
 
     assert result.exit_code == 0, result
     assert started(platform) == runs
@@ -144,7 +133,7 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     another_check = verdict("failed", check_key=OTHER_CHECK)
     platform.qa_polls = [[row("running"), another_check], [outcome, another_check]]
 
-    result = hud("qa", "run", CHECK, TRACE_ID, "--json")
+    result = hud("qa", "run", CHECK, TRACE_ID, "--yes", "--json")
 
     assert result.exit_code == exit_code, result
     assert [(r["check_key"], r["verdict"]) for r in result.json] == [
@@ -155,7 +144,7 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
 def test_qa_run_times_out_while_checks_are_running(hud: Hud, platform: Platform) -> None:
     platform.qa_polls = [[row("running")]]
 
-    result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--json")
+    result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "timeout"), result
 

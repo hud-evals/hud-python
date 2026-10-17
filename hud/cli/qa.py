@@ -517,6 +517,12 @@ def run_checks(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Run QA checks on completed evaluation traces or on tasks as one run.
 
@@ -527,6 +533,7 @@ def run_checks(
         hud qa run failure_analysis <trace-id>
         hud qa run reward_hacking,false_positive <trace-id> <trace-id> --no-wait --json
         hud qa run task_reward_exploit,task_failure_analysis <task-id>
+        hud qa run failure_analysis <trace-id> --yes --json
         hud qa run failure_analysis <trace-id> --dry-run --json[/not dim]
     """
     check_keys = list(dict.fromkeys(key.strip() for key in checks.split(",") if key.strip()))
@@ -553,6 +560,9 @@ def run_checks(
             "overwrite": overwrite,
             "wait": wait,
         }
+    CLI.confirm_or_abort(
+        f"Run {len(check_keys)} check(s) on {len(subject_ids)} {level}(s)?", yes=yes, default=True
+    )
 
     try:
         response = cast(

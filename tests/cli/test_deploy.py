@@ -64,6 +64,7 @@ def test_deploy_uploads_the_context_triggers_the_build_and_links_the_directory(
         *("--env-file", "env/vars.env", "--build-arg", "PYTHON=3.12"),
         *("--secret", "id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
         *("--secret", "id=FILE_TOKEN,src=token.txt"),
+        "--yes",
         env={"GITHUB_TOKEN": "env-secret"},
     )
 
@@ -105,7 +106,7 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
         },
     )
 
-    result = hud("deploy", "--no-env", "--json")
+    result = hud("deploy", "--no-env", "--yes", "--json")
 
     assert result.exit_code == 0, result
     sent = set(context(built(platform)))
@@ -165,7 +166,7 @@ def test_a_compose_runtime_config_reaches_the_build_as_its_document(
         },
     )
 
-    result = hud("deploy", "--no-env", "--runtime-config", "runtime.json", "--json")
+    result = hud("deploy", "--no-env", "--runtime-config", "runtime.json", "--yes", "--json")
 
     assert result.exit_code == 0, result
     trigger = built(platform).trigger
@@ -179,9 +180,9 @@ def test_a_redeploy_keeps_the_link_and_the_registry_secrets(hud: Hud, platform: 
     environment(hud.cwd)
     (hud.cwd / ".env").write_text("SECRET=dotenv")
 
-    first = hud("deploy", "--env-file", ".env", "--json")
+    first = hud("deploy", "--env-file", ".env", "--yes", "--json")
     linked = (hud.cwd / ".hud" / "config.json").read_bytes()
-    again = hud("deploy", "--json")
+    again = hud("deploy", "--yes", "--json")
 
     assert (first.exit_code, again.exit_code) == (0, 0), again
     assert (hud.cwd / ".hud" / "config.json").read_bytes() == linked
@@ -196,7 +197,7 @@ def test_a_first_deploy_lands_in_the_selected_project(
     environment(hud.cwd)
     hud_env.set(HUD_DEFAULT_PROJECT="browser-evals")
 
-    result = hud("deploy", "--json")
+    result = hud("deploy", "--yes", "--json")
 
     assert result.exit_code == 0, result
     (example,) = platform.environments.values()
@@ -247,7 +248,7 @@ def test_a_rejected_build_request_leaves_nothing_behind(
     )
     environment(hud.cwd)
 
-    result = hud("deploy", "--no-env", "--json")
+    result = hud("deploy", "--no-env", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "conflict"), result
     assert list(tmpdir_.iterdir()) == []
@@ -276,7 +277,7 @@ def test_the_build_status_decides_the_exit_whatever_the_log_stream_does(
     platform.next_build = Build("", status=status, log=log)
     environment(hud.cwd)
 
-    result = hud("deploy", "--no-env", "--json")
+    result = hud("deploy", "--no-env", "--yes", "--json")
 
     assert result.exit_code == exit_code, result
     assert result.json["success"] is (exit_code == 0)
