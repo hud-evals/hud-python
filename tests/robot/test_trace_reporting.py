@@ -1,0 +1,247 @@
+"""What a robot run reports: its traces, their outcomes, and every tick as state and video.
+
+Three producers report robot telemetry: ``wrap`` around a vectorized gym env,
+``JobRecorder`` for a shared job, and direct control streaming each played tick
+of a rollout. Each is run as a user runs it; the cases assert what the platform
+recorded and the trace spans it can replay.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import io
+import itertools
+import logging
+import threading
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
+import av
+import numpy as np
+import pytest
+
+from hud.agents.base import Agent
+from hud.environment.robot import DirectControl, wrap
+from hud.eval import LocalRuntime, Task, rollout
+from hud.telemetry.robot import JobRecorder
+from tests.support import ROBOT_STEP_SCHEMA, steps
+from tests.support.platform import WEB_URL
+
+from .sims import Arm, ScriptedLLM, arm_env, contract, move, reached
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from hud.capabilities import MCPClient
+    from hud.eval.run import Run
+    from tests.support import Platform
+
+
+class TwoArmSim:
+    """Two envs: env 0 finishes on the second step (succeeding with a shaped reward of
+    0.2), env 1 on the third (failing with a shaped reward of 5.0)."""
+
+    num_envs = 2
+    metadata: ClassVar[dict[str, int]] = {"render_fps": 10}
+    DONES = ([False, False], [True, False], [False, True])
+
+    def __init__(self) -> None:
+        self.t = 0
+
+    def observe(self) -> dict[str, Any]:
+        return {
+            "state": np.full((2, 3), self.t, dtype=np.float32),
+            "cam": np.full((2, 16, 16, 3), self.t, dtype=np.uint8),
+        }
+
+    def reset(self, **kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        del kwargs
+        return self.observe(), {}
+
+    def step(self, action: Any) -> tuple[Any, ...]:
+        del action
+        done = np.array(self.DONES[self.t])
+        self.t += 1
+        info = {"success": np.array([True, False])}
+        return self.observe(), np.array([0.2, 5.0]), done, np.array([False, False]), info
+
+    def close(self) -> None:
+        pass
+
+
+def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
+    reporting: Platform,
+) -> None:
+    env = wrap(TwoArmSim(), contract=None)
+    env.reset()
+    for _ in TwoArmSim.DONES:
+        env.step(np.zeros((2, 2)))
+    env.close()
+
+    traces = {f"trace-{n}": trace for n, trace in enumerate(reporting.traces.values())}
+    exits = {label: trace.exit for label, trace in traces.items()}
+    spans = {label: trace.spans for label, trace in traces.items()}
+    ticks = {
+        trace: [
+            (span["name"], span["attributes"]["hud.payload"]["tick"])
+            for span in sorted(recorded, key=lambda span: span["start_time"])
+            if span["name"] != "step.video_segment"
+        ]
+        for trace, recorded in spans.items()
+    }
+    assert exits == {
+        "trace-0": {
+            "status": "completed",
+            "reward": 1.0,
+            "metadata": {"env_index": 0, "episode_index": 0, "seed": None, "success": True},
+        },
+        "trace-1": {
+            "status": "completed",
+            "reward": 0.0,
+            "metadata": {"env_index": 1, "episode_index": 0, "seed": None, "success": False},
+        },
+        "trace-2": {
+            "status": "completed",
+            "reward": 0.2,
+            "metadata": {"env_index": 0, "episode_index": 1, "seed": None},
+        },
+    }
+    assert dict(sorted(ticks.items())) == {
+        "trace-0": [("step.observation", 0), ("step.inference", 0), ("step.inference", 1)],
+        "trace-1": [
+            ("step.observation", 0),
+            ("step.inference", 0),
+            ("step.observation", 1),
+            ("step.inference", 1),
+            ("step.inference", 2),
+        ],
+        "trace-2": [("step.observation", 0), ("step.inference", 0)],
+    }
+
+
+CANONICAL_JOB = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
+
+
+@pytest.mark.parametrize(
+    ("job_id", "trace_id"),
+    [
+        pytest.param(
+            "03dd2a73d3df4d10a54ae3d87c2d530d", "e9266339c6fa58b08102ce7f41c4f372", id="compact"
+        ),
+        pytest.param(CANONICAL_JOB, "7b3269f689b65c5887542a9bc1ffb5c8", id="canonical"),
+    ],
+)
+def test_a_shared_job_is_reported_canonically_and_seeds_traces_by_its_spelling(
+    reporting: Platform, job_id: str, trace_id: str
+) -> None:
+    recorder = JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id)
+    recorder.record(done=np.array([True]))
+
+    assert recorder.job_url == f"{WEB_URL}/jobs/{CANONICAL_JOB}"
+    assert f"/v2/trace/job/{CANONICAL_JOB}/enter" in [
+        request.path for request in reporting.services.requests("api")
+    ]
+    (recorded,) = reporting.traces
+    assert (recorded, reporting.traces[recorded].enter) == (trace_id, {"job_id": CANONICAL_JOB})
+
+
+# ─── direct control streams every played tick ──────────────────────────
+
+
+def frames_in(segments: list[dict[str, Any]]) -> int:
+    """How many frames the recorded MP4 segments decode to."""
+    mp4 = b"".join(base64.b64decode(segment["segment"]["data"]) for segment in segments)
+    with av.open(io.BytesIO(mp4), mode="r") as container:
+        return sum(1 for _ in container.decode(video=0))
+
+
+def recorded(run: Run) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The trace's observation steps and video segments, in order."""
+    payloads = steps(run.trace_id, schema=ROBOT_STEP_SCHEMA)
+    return (
+        [p for p in payloads if p.get("source") == "observation"],
+        [p for p in payloads if p.get("source") == "video_segment"],
+    )
+
+
+@pytest.mark.parametrize(("control_rate", "tick_seconds"), [(10, 0.1), (0.4, 1.0)])
+async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per_camera(
+    control_rate: float, tick_seconds: float
+) -> None:
+    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0], rate=control_rate), done=reached)
+    agent = ScriptedLLM(move("move_to", x=0.3), move("move_to", x=0.5))
+
+    async with arm_env(sim, DirectControl()) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    observations, segments = recorded(run)
+    starts = [datetime.fromisoformat(obs["started_at"]) for obs in observations]
+    assert {segment["camera"] for segment in segments} == {"observation/image"}
+    # The opening scene, then one observation and one frame per tick of both moves:
+    # the recording keeps every frame however far the encoder falls behind.
+    assert frames_in(segments) == 1 + len(sim.actions)
+    assert [obs["tick"] for obs in observations] == list(range(1 + len(sim.actions)))
+    assert observations[-1]["state"]
+    # The viewer's clock is the stamps' span: the video's length, not the calls' latency.
+    assert [(b - a).total_seconds() for a, b in itertools.pairwise(starts)] == pytest.approx(
+        [tick_seconds] * len(sim.actions)
+    )
+
+
+class AbandonsMidMove(Agent):
+    """Starts a long move, then fails once the sim has stepped ``after`` ticks."""
+
+    def __init__(self, moving: threading.Event) -> None:
+        super().__init__()
+        self.moving = moving
+
+    async def __call__(self, run: Run) -> None:
+        client = cast("MCPClient", await run.client.open("control"))
+        targets = {"targets": {"x": 0.5, "grip": None}, "note": "move toward the goal"}
+        playing = asyncio.create_task(client.call_tool("move_to", targets))
+        assert await asyncio.to_thread(self.moving.wait, 30)
+        playing.cancel()
+        raise RuntimeError("the agent gave up")
+
+
+async def test_ending_the_episode_mid_move_ends_the_recording_with_the_ticks_played() -> None:
+    moving = threading.Event()
+
+    def announcing(arm: Arm, target: NDArray[np.float64]) -> NDArray[np.float64]:
+        if len(arm.actions) >= 3:
+            moving.set()
+        return target
+
+    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), follow=announcing)
+
+    async with arm_env(sim, DirectControl(speed=0.001)) as env:
+        run = await rollout(
+            Task(env="arm", id="reach"), AbandonsMidMove(moving), runtime=LocalRuntime(env)
+        )
+
+    observations, segments = recorded(run)
+    ticks = [obs["tick"] for obs in observations]
+    assert run.trace.status == "error"
+    assert ticks == list(range(len(ticks)))
+    assert 3 <= len(ticks) < 1 + len(sim.actions)
+    assert frames_in(segments) == len(ticks)
+
+
+async def test_a_camera_the_encoder_cannot_encode_costs_the_video_not_the_rollout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A 1x1 frame is a valid image for the model but crops to nothing for H.264,
+    # so the encoder dies on the first frame while the move keeps streaming ticks.
+    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), done=reached, side=1)
+    agent = ScriptedLLM(move("move_to", x=0.5), move("move_to", grip=1.0))
+
+    with caplog.at_level(logging.WARNING, logger="hud.telemetry.robot.video"):
+        async with arm_env(sim, DirectControl(max_step={"grip": 2.0})) as env:
+            run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+
+    observations, segments = recorded(run)
+    assert run.reward == 1.0
+    assert [obs["tick"] for obs in observations] == list(range(1 + len(sim.actions)))
+    assert segments == []
+    assert "video encode failed (camera observation/image)" in caplog.text

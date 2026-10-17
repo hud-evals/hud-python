@@ -1,11 +1,11 @@
-"""Spawned sims and gym shapes: what a sim process reports and what its env receives.
+"""Serving a sim: what a sim process reports, and the shapes a gym env receives and returns.
 
 ``RobotEndpoint(bridge)`` and ``env.gym(factory)`` both run the sim in a child
-process. These scenarios spawn the sims in ``robot_sims`` and drive them through
-the public surface: the endpoint's control calls, the served env's ``robot``
-binding, and ``RobotClient``. A gym env reports in its observation the shape of
-the action it was stepped with. The recorder rows check the platform reports a
-shared job id produces.
+process; a ``GymBridge`` can also be served in this one. These scenarios drive
+the sims in ``sims`` through the public surface: the endpoint's control calls,
+the served env's ``robot`` binding, and ``RobotClient`` on the ``openpi/0``
+wire. A gym env reports in its observation the shape of the action it was
+stepped with.
 """
 
 from __future__ import annotations
@@ -19,21 +19,18 @@ import pytest
 import websockets
 from openpi_client import msgpack_numpy
 
+from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
-from hud.telemetry.robot import JobRecorder
 from tests.support import served
-from tests.support.platform import WEB_URL
 
-from .robot_sims import Reach, plain_env, vector_env
+from .sims import Reach, plain_env, vector_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from numpy.typing import NDArray
-
-    from tests.support import Platform
 
 CONTRACT = {"control_rate": 10, "features": {"action": {"role": "action", "names": ["a"]}}}
 
@@ -137,37 +134,6 @@ async def test_a_plain_env_observation_is_sliced_to_one_slot_with_its_frames() -
     assert float(observation["reward"]) == 0.0
 
 
-COMPACT_JOB = "03dd2a73d3df4d10a54ae3d87c2d530d"
-CANONICAL_JOB = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
-
-
-@pytest.mark.parametrize("job_id", [COMPACT_JOB, CANONICAL_JOB])
-def test_a_shared_job_id_is_reported_canonically(reporting: Platform, job_id: str) -> None:
-    recorder = JobRecorder("suite", 1, record_indices=[], job_id=job_id)
-
-    assert recorder.job_url == f"{WEB_URL}/jobs/{CANONICAL_JOB}"
-    assert [request.path for request in reporting.services.requests("api")] == [
-        f"/v2/trace/job/{CANONICAL_JOB}/enter"
-    ]
-
-
-@pytest.mark.parametrize(
-    ("job_id", "trace_id"),
-    [
-        (COMPACT_JOB, "e9266339c6fa58b08102ce7f41c4f372"),
-        (CANONICAL_JOB, "7b3269f689b65c5887542a9bc1ffb5c8"),
-    ],
-)
-def test_a_seeded_recording_keeps_the_trace_id_of_its_job_id_spelling(
-    reporting: Platform, job_id: str, trace_id: str
-) -> None:
-    JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id).record(done=np.array([True]))
-
-    (recorded,) = reporting.traces
-    trace = reporting.traces[recorded]
-    assert (recorded, trace.enter) == (trace_id, {"job_id": CANONICAL_JOB})
-
-
 class VectorAutoReset:
     """Two lockstep envs that reset inside ``step``; env 1 finishes on the first step.
 
@@ -182,36 +148,50 @@ class VectorAutoReset:
         self.per_env = per_env
         self.ticks = np.zeros(2)
 
-    def _observe(self) -> dict[str, NDArray[Any]]:
+    def observe(self) -> dict[str, NDArray[Any]]:
         return {"state": self.ticks[:, None].astype(np.float32)}
 
     def reset(self, seed: int | None = None, options: Any = None) -> tuple[Any, dict[str, Any]]:
         self.ticks[:] = 0
-        return self._observe(), {}
+        return self.observe(), {}
 
     def step(self, action: NDArray[Any]) -> tuple[Any, ...]:
         self.ticks += 1
-        final = self._observe()
+        final = self.observe()
         done = np.array([False, True])
         self.ticks[done] = 0
         if self.per_env:
             final = np.array([None, {"state": final["state"][1]}], dtype=object)
-        return self._observe(), np.zeros(2), np.zeros(2, dtype=bool), done, {"final_obs": final}
+        return self.observe(), np.zeros(2), np.zeros(2, dtype=bool), done, {"final_obs": final}
 
     def close(self) -> None:
         pass
 
 
 @pytest.mark.parametrize("per_env", [False, True], ids=["batched-final-obs", "per-env-final-obs"])
-def test_a_finished_env_is_observed_on_the_frame_it_ended_on(per_env: bool) -> None:
+async def test_a_finished_env_is_observed_on_the_frame_it_ended_on(per_env: bool) -> None:
     bridge = GymBridge(lambda: VectorAutoReset(per_env), contract=None)
-    bridge.reset()
-    bridge.step(np.zeros((2, 1), dtype=np.float32))
+    await bridge.start()
+    control = await bridge.serve_control()
+    endpoint = RobotEndpoint.remote("127.0.0.1", control.sockets[0].getsockname()[1])
+    await endpoint.start()
+    try:
+        robot = Capability.robot(url=bridge.url, contract=bridge.contract)
+        tokens = [(await endpoint.reset())["token"] for _ in range(2)]
+        agents = [await RobotClient.connect(robot, token=token) for token in tokens]
+        try:
+            for agent in agents:
+                await agent.get_observation()
+                await agent.send_action([0.0])
+            observed = [await agent.get_observation() for agent in agents]
+        finally:
+            for agent in agents:
+                await agent.close()
+    finally:
+        await endpoint.stop()
+        control.close()
+        await bridge.stop()
 
-    observation = bridge.get_observation()
-
-    assert observation is not None
-    data, terminated = observation
-    assert terminated.tolist() == [False, True]
+    assert [observation["terminated"] for observation in observed] == [False, True]
     # Env 1 was reset after its first tick; its observation is still that tick.
-    assert data["state"].ravel().tolist() == [1.0, 1.0]
+    assert [observation["data"]["state"].tolist() for observation in observed] == [[1.0], [1.0]]
