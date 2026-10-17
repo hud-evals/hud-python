@@ -3,7 +3,6 @@ polls its trace to a terminal state, and folds the result into a ``Run``."""
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -21,20 +20,18 @@ from hud.eval import (
     Taskset,
 )
 from hud.telemetry.context import set_trace_context
-from tests.support import Reply, ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.agents.base import Agent
-    from tests.support import HudEnv, Platform
+    from tests.support import Platform
     from tests.support.platform import Trace
 
 SUBMIT = "/v2/rollouts/submit"
 TRACE_ID = "1" * 32
 JOB_ID = "2" * 32
 ROW = Task(env="sums", id="add", args={"a": 1, "b": 2})
-RUNNING = [{"status": "running"}]
 
 
 def chat_agent() -> OpenAIChatAgent:
@@ -44,7 +41,7 @@ def chat_agent() -> OpenAIChatAgent:
 
 
 def hosted(platform: Platform) -> Trace:
-    """The one trace the platform was asked to run or to cancel."""
+    """The one trace the platform was asked to run."""
     (trace,) = platform.traces.values()
     return trace
 
@@ -70,6 +67,7 @@ async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completi
         id="add",
         agent_config={"timeout_seconds": 45.0},
         runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
+        verifier=Task(env="judge", id="verify", runtime_config=RuntimeConfig(image="judge:1")),
     )
 
     run = await HostedRuntime(poll_interval=0).run(
@@ -82,6 +80,11 @@ async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completi
     document = body["runtime_config"]["compose"]["document"]
     assert document["services"]["main"]["image"] == "sums:latest"
     assert body["agent"]["config"]["timeout_seconds"] == 45.0
+    # The verifier travels as its own row, so the platform gives it its own sandbox.
+    assert (body["verifier"]["env"], body["verifier"]["runtime_config"]["image"]) == (
+        "judge",
+        "judge:1",
+    )
     assert "secret" not in str(body)
     assert (run.reward, run.trace.status) == (0.5, "completed")
 
@@ -164,66 +167,6 @@ async def test_a_terminal_trace_folds_into_the_run_and_its_job(
     assert (run.reward, run.trace.status, run.trace.error, run.grade.raw, run in job.errors) == (
         folded
     )
-
-
-@pytest.mark.parametrize("submission_stalls", [False, True], ids=["running", "unsubmitted"])
-async def test_a_hosted_rollout_past_its_deadline_is_cancelled_remotely(
-    submission_stalls: bool, platform: Platform
-) -> None:
-    platform.next_rollout = RUNNING
-    if submission_stalls:
-        platform.services.route("api", "POST", SUBMIT, Reply(json={"status": "queued"}, delay=5))
-
-    job = await ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0), rollout_timeout=0.2)
-    await eventually(lambda: platform.traces != {} and hosted(platform).cancelled)
-
-    (run,) = job.runs
-    assert (run.trace.status, run.trace.stop_reason) == ("error", "timeout")
-    assert set(platform.traces) == {run.trace_id}
-
-
-async def test_the_deprecated_constructor_timeout_is_the_default_deadline(
-    platform: Platform,
-) -> None:
-    platform.next_rollout = RUNNING
-    with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
-        runtime = HostedRuntime(poll_interval=0, run_timeout=0.2)
-
-    job = await ROW.run(chat_agent(), runtime=runtime)
-
-    assert job.runs[0].trace.stop_reason == "timeout"
-    await eventually(lambda: hosted(platform).cancelled)
-
-
-async def test_cancelling_a_hosted_rollout_cancels_it_remotely(platform: Platform) -> None:
-    platform.next_rollout = RUNNING
-    pending = asyncio.create_task(ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0)))
-    await eventually(lambda: platform.traces != {})
-
-    pending.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await pending
-
-    await eventually(lambda: hosted(platform).cancelled)
-
-
-REFUSALS: dict[str, tuple[Agent, dict[str, str | None]]] = {
-    "an agent the platform cannot run": (ScriptedAgent("3"), {}),
-    "no API key": (chat_agent(), {"HUD_API_KEY": None}),
-}
-
-
-@pytest.mark.parametrize(("agent", "variables"), REFUSALS.values(), ids=REFUSALS.keys())
-async def test_a_hosted_rollout_that_cannot_be_submitted_is_a_failed_run(
-    agent: Agent, variables: dict[str, str | None], platform: Platform, hud_env: HudEnv
-) -> None:
-    hud_env.set(**variables)
-
-    job = await ROW.run(agent, runtime=HostedRuntime(poll_interval=0))
-
-    (run,) = job.runs
-    assert (run.trace.status, run in job.errors) == ("error", True)
-    assert platform.services.requests() == []
 
 
 async def test_a_rejected_submission_is_a_failed_run(platform: Platform) -> None:

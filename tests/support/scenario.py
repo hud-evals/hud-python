@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +14,7 @@ from hud.eval import LocalRuntime, Task, rollout
 from .envs import PROMPT as WORKSPACE_PROMPT
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from hud.clients import HudClient
     from hud.environment import Environment
@@ -61,17 +62,22 @@ class ScriptedAgent(Agent):
 
 
 class RecordingProvider:
-    """Places each row with ``inner`` and records when placements start and stop."""
+    """Places each row with ``inner`` and records when placements start and stop.
+
+    ``runtimes`` holds every runtime ``inner`` yielded, in order.
+    """
 
     def __init__(self, inner: Provider) -> None:
         self._inner = inner
         self.events: list[tuple[str, str]] = []
+        self.runtimes: list[Runtime] = []
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
         self.events.append(("start", task.slug))
         try:
             async with self._inner(task) as runtime:
+                self.runtimes.append(runtime)
                 yield runtime
         finally:
             self.events.append(("stop", task.slug))
@@ -85,11 +91,17 @@ async def served(env: Environment, *, row: Task | None = None) -> AsyncIterator[
         yield client
 
 
-async def eventually(condition: Callable[[], bool], *, within: float = 10.0) -> None:
-    """Poll until ``condition()`` holds; raise ``TimeoutError`` after ``within`` seconds."""
+async def eventually(
+    condition: Callable[[], bool | Awaitable[bool]], *, within: float = 10.0
+) -> None:
+    """Poll until ``condition()`` holds; raise ``TimeoutError`` after ``within`` seconds.
+
+    ``condition`` may be a coroutine function, for a check that has to await.
+    """
     async with asyncio.timeout(within):
         while True:
-            if condition():
+            held = condition()
+            if await held if inspect.isawaitable(held) else held:
                 return
             await asyncio.sleep(0.01)
 

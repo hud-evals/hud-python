@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.environment import Environment, load_environment
-from hud.eval import LocalRuntime, RuntimeConfig, SubprocessRuntime, Task, Taskset
+from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset
 from tests.support import ScriptedAgent, eventually, lab, solve
 
 if TYPE_CHECKING:
@@ -289,7 +289,6 @@ def write(path: Path, source: str) -> Path:
 
 
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
-IMAGE_ROW = ADD.model_copy(update={"runtime_config": RuntimeConfig(image="lab")})
 
 
 def failing_initialize(events: list[str]) -> Environment:
@@ -329,13 +328,6 @@ ACQUISITION_ERRORS: dict[
         ADD,
         RuntimeError,
         "guard top-level run calls",
-        [],
-    ),
-    "a row with runtime_config in process": (
-        lambda tmp, events: LocalRuntime(lab(events)),
-        IMAGE_ROW,
-        ValueError,
-        None,
         [],
     ),
     "an initialize hook that raises still shuts down": (

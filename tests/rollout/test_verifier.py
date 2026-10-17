@@ -2,13 +2,14 @@
 
 The actor (``solve``) grades 0.25 and hands its answer on; the judge (``verify``)
 pays 1.0 only when that answer was ``secret``. A reward of 1.0 therefore proves
-the actor's result reached the verifier through its grade frame. Session files
-moving between containers are covered with real containers in ``test_docker``.
+the actor's result reached the verifier through its grade frame. A verifier
+with a runtime of its own receives the actor's session files on every runtime
+that can move them.
 """
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -17,19 +18,25 @@ from pydantic import BaseModel
 
 from hud import Environment
 from hud.eval import (
+    HUDRuntime,
     LocalRuntime,
     Runtime,
     RuntimeConfig,
     RuntimeLimits,
     Task,
 )
+from tests.fixtures.envs import source
 from tests.support import RecordingProvider, ScriptedAgent, actor, eventually, judge, steps
+from tests.support.runtime import host_on_runtime
+
+from .placements import PLACEMENTS, World, rows
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
     from hud.eval import Provider
+    from tests.support import FakeServices, HudEnv
 
 OWN_LIMITS = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=20))
 
@@ -77,9 +84,10 @@ def evaluated(run: Any) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    ("own_runtime", "same_env", "placements", "warned"),
+    ("own_runtime", "same_env", "tunneled", "placements", "warned"),
     [
         pytest.param(
+            False,
             False,
             False,
             ["start:solve", "stop:solve", "start:verify", "stop:verify"],
@@ -89,6 +97,7 @@ def evaluated(run: Any) -> list[str]:
         pytest.param(
             False,
             True,
+            False,
             ["start:solve", "stop:solve"],
             False,
             id="on-the-actors-env-sharing-its-substrate",
@@ -96,19 +105,32 @@ def evaluated(run: Any) -> list[str]:
         pytest.param(
             True,
             True,
+            False,
             ["start:solve", "stop:solve"],
             True,
             id="with-its-own-runtime-beside-an-actor-that-cannot-move-its-session",
+        ),
+        pytest.param(
+            True,
+            True,
+            True,
+            ["start:solve", "stop:solve"],
+            True,
+            id="with-its-own-runtime-beside-an-actor-on-the-hud-tunnel",
         ),
     ],
 )
 async def test_the_verifier_grade_is_the_grade_of_record_wherever_it_runs(
     own_runtime: bool,
     same_env: bool,
+    tunneled: bool,
     placements: list[str],
     warned: bool,
     caplog: pytest.LogCaptureFixture,
+    services: FakeServices,
+    hud_env: HudEnv,
 ) -> None:
+    reviewed = LocalRuntime(judge(actor(Environment("reviewed"))))
     if same_env:
         own = OWN_LIMITS if own_runtime else None
         row = Task(
@@ -116,12 +138,18 @@ async def test_the_verifier_grade_is_the_grade_of_record_wherever_it_runs(
             id="solve",
             verifier=Task(env="reviewed", id="verify", runtime_config=own),
         )
-        inner = portable(LocalRuntime(judge(actor(Environment("reviewed")))))
+        inner: Provider = portable(reviewed)
     else:
         row, inner = separate()
-    recording = RecordingProvider(inner)
 
-    job = await row.run(ScriptedAgent("secret"), runtime=recording, rollout_timeout=30)
+    async with contextlib.AsyncExitStack() as stack:
+        if tunneled:
+            hud_env.set(HUD_API_KEY="k")
+            served = await stack.enter_async_context(reviewed(Task(env="reviewed", id="serve")))
+            host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
+            inner = HUDRuntime()
+        recording = RecordingProvider(inner)
+        job = await row.run(ScriptedAgent("secret"), runtime=recording, rollout_timeout=30)
 
     (run,) = job.runs
     assert (run.reward, run.trace.status, run in job.errors) == (1.0, "completed", False)
@@ -230,63 +258,39 @@ async def test_the_verifier_receives_the_actor_grade_as_its_declared_type() -> N
     assert job.reward == 1.0
 
 
-def held_teardown(
-    providers: dict[str, Provider], held: str, release: asyncio.Event, log: list[str]
-) -> Provider:
-    """Places rows by env; teardown of the ``held`` env waits for ``release``."""
-
-    @asynccontextmanager
-    async def place(task: Task) -> AsyncIterator[Runtime]:
-        log.append(f"start:{task.env}")
-        try:
-            async with providers[task.env](task) as runtime:
-                yield runtime
-        finally:
-            if task.env == held:
-                await release.wait()
-            log.append(f"stop:{task.env}")
-
-    return place
-
-
-DEADLINES: dict[str, tuple[str, float, str, list[str]]] = {
-    "a deadline in the actor's teardown never starts the verifier": (
-        "actor",
-        0.0,
-        "rollout timed out after 0.2s during actor cleanup",
-        ["start:actor", "stop:actor"],
-    ),
-    "a deadline in the verifier's teardown keeps the verdict": (
-        "judge",
-        1.0,
-        "rollout timed out after 0.2s during cleanup",
-        ["start:actor", "stop:actor", "start:judge", "stop:judge"],
-    ),
+SESSION_FILES = {
+    "files": (False, 1.0),
+    "a link": (True, 0.0),
 }
 
 
-@pytest.mark.parametrize(
-    ("held", "reward", "error", "placements"), DEADLINES.values(), ids=DEADLINES.keys()
-)
-async def test_a_deadline_during_teardown_returns_and_lets_teardown_finish(
-    held: str, reward: float, error: str, placements: list[str]
+@pytest.mark.parametrize("placement", rows("session-transport"))
+@pytest.mark.parametrize(("link", "reward"), SESSION_FILES.values(), ids=SESSION_FILES.keys())
+async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
+    link: bool,
+    reward: float,
+    placement: str,
+    services: FakeServices,
+    hud_env: HudEnv,
+    request: pytest.FixtureRequest,
 ) -> None:
-    release = asyncio.Event()
-    log: list[str] = []
-    provider = held_teardown(
-        {"actor": LocalRuntime(actor()), "judge": LocalRuntime(judge())}, held, release, log
+    """The verifier's own limits give it its own sandbox, so the actor's files must move;
+    a session holding anything but files and directories does not."""
+    own = RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=600))
+    row = Task(
+        env="sessions",
+        id="solve",
+        args={"link": link},
+        verifier=Task(env="sessions", id="verify", runtime_config=own),
     )
-    row = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
+    world = World(source("sessions"), services, hud_env, request)
 
-    job = await row.run(ScriptedAgent("secret"), runtime=provider, rollout_timeout=0.2)
-    assert log[-1] == f"start:{held}"
-    release.set()
-    await eventually(lambda: log[-1] == f"stop:{held}")
-    await asyncio.sleep(0)
+    async with PLACEMENTS[placement].open(world) as runtime:
+        run = (await row.run(ScriptedAgent("secret"), runtime=runtime)).runs[0]
+        await eventually(lambda: PLACEMENTS[placement].clean(world))
 
-    (run,) = job.runs
-    assert (run.reward, run.trace.stop_reason, run.trace.error) == (reward, "timeout", error)
-    assert log == placements
+    assert run.reward == reward
+    assert ("runtime session contains" in (run.trace.error or "")) is link
 
 
 SESSION_IDS = ["", "..", "a/b", "a\\b"]

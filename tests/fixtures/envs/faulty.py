@@ -29,6 +29,12 @@ async def scoreless():
 
 
 @env.template()
+async def bool_score():
+    yield "go"
+    yield {"score": True}
+
+
+@env.template()
 async def hang_grading():
     yield "go"
     await asyncio.Event().wait()

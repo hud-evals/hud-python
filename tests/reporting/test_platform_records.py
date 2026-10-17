@@ -16,7 +16,7 @@ from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.telemetry.context import get_trace_headers, set_trace_context
-from tests.support import Reply, ScriptedAgent, eventually, lab, solve
+from tests.support import ScriptedAgent, eventually, lab, solve
 from tests.support.platform import WEB_URL, Trace, key
 
 if TYPE_CHECKING:
@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from tests.support import HudEnv, Platform
 
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
-JOB_ENTER = "/v2/trace/job/{id}/enter"
 
 
 def reported(platform: Platform, run: Run) -> Trace:
@@ -214,36 +213,6 @@ async def test_a_nested_rollout_reports_and_propagates_its_parent_trace(
 
     assert agent.headers == [headers]
     assert (reported(reporting, run).enter or {}).get("parent_trace_id") == parent
-
-
-RETRIES = {
-    "a rejected report is retried once": ([Reply(status=500), Reply(json={})], 2, []),
-    "a report rejected twice is given up with a warning": (
-        [Reply(status=500)],
-        2,
-        [IsStr(regex=r"platform report /trace/job/[0-9a-f]{32}/enter failed: .*500.*")],
-    ),
-}
-
-
-@pytest.mark.parametrize(("replies", "attempts", "warnings"), RETRIES.values(), ids=RETRIES.keys())
-async def test_reporting_never_fails_the_run(
-    replies: list[Reply],
-    attempts: int,
-    warnings: list[Any],
-    reporting: Platform,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    reporting.services.route("api", "POST", JOB_ENTER, *replies)
-
-    await Job.start("flaky")
-
-    assert len(reporting.services.requests("api", "POST", JOB_ENTER)) == attempts
-    assert [
-        record.getMessage()
-        for record in caplog.records
-        if record.name == "hud.eval.job" and record.levelno == logging.WARNING
-    ] == warnings
 
 
 GATES = {

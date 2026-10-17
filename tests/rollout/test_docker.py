@@ -2,12 +2,13 @@
 
 The scenarios run real containers from the fixture image (this checkout's SDK
 serving a fixture environment) on the local Docker daemon, and check what the
-daemon reports about them. Requests DockerRuntime refuses never reach the daemon.
+daemon reports about them. What every runtime does (outcomes, deadlines, cancel,
+cleanup, session files for a verifier, refusals) runs on Docker as a row of the
+rollout tables; this module holds what only Docker does.
 """
 
 from __future__ import annotations
 
-import asyncio
 import io
 import json
 import subprocess
@@ -22,7 +23,6 @@ from hud.eval import (
     ComposeProject,
     DockerRuntime,
     RuntimeConfig,
-    RuntimeGPU,
     RuntimeLimits,
     RuntimeResources,
     Task,
@@ -30,7 +30,7 @@ from hud.eval import (
 )
 from hud.eval.runtime import DockerBindMount
 from hud.eval.runtime.docker import DockerEndpoint
-from tests.support import ScriptedAgent
+from tests.support import ScriptedAgent, eventually
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -133,25 +133,6 @@ async def test_a_row_that_names_an_image_runs_there_without_a_runtime(
 
 @pytest.mark.e2e
 @pytest.mark.docker
-@pytest.mark.parametrize("fixture", ["broken", "stalls"], ids=["exits-at-once", "never-answers"])
-async def test_a_container_that_does_not_serve_fails_the_start_and_is_removed(
-    fixture: str, fixture_image: Callable[[str], str]
-) -> None:
-    label, flags = labelled()
-    limited = RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=10))
-    row = ECHO.model_copy(update={"runtime_config": limited})
-
-    run = await rollout(
-        row, ScriptedAgent("x"), runtime=DockerRuntime(fixture_image(fixture), run_args=flags)
-    )
-
-    assert (run.trace.status, run.prompt) == ("error", None)
-    assert (run.trace.error or "").startswith("[starting task]")
-    assert containers(**{"hud-test": label}) == []
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
 async def test_more_disk_than_the_container_has_is_refused_and_the_container_removed(
     fixture_image: Callable[[str], str],
 ) -> None:
@@ -178,32 +159,7 @@ async def test_a_container_past_its_run_limit_is_removed_while_held(
     )
 
     async with DockerRuntime(fixture_image("echo"), run_args=flags)(row):
-        await asyncio.sleep(4)
-        left = containers(**{"hud-test": label})
-
-    assert left == []
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-@pytest.mark.parametrize(("link", "reward"), [(False, 1.0), (True, 0.0)], ids=["files", "a-link"])
-async def test_a_verifier_in_its_own_container_receives_the_actors_session_files(
-    link: bool, reward: float, fixture_image: Callable[[str], str]
-) -> None:
-    image = RuntimeConfig(image=fixture_image("sessions"))
-    row = Task(
-        env="sessions",
-        id="solve",
-        args={"link": link},
-        runtime_config=image,
-        verifier=Task(env="sessions", id="verify", runtime_config=image),
-    )
-
-    run = await rollout(row, ScriptedAgent("secret"), runtime=DockerRuntime())
-
-    assert run.reward == reward
-    if link:
-        assert "runtime session contains a symbolic link" in (run.trace.error or "")
+        await eventually(lambda: containers(**{"hud-test": label}) == [])
 
 
 @pytest.mark.e2e
@@ -295,69 +251,3 @@ async def test_a_compose_project_whose_network_owner_dies_is_taken_down(
 
     working_dir = {"com.docker.compose.project.working_dir": str(tmp_path)}
     assert containers(**working_dir) == []
-
-
-CHAINED = """
-services:
-  main: {image: lab, network_mode: "service:gateway"}
-  gateway: {image: gateway}
-"""
-
-
-@pytest.mark.parametrize(
-    ("document", "config", "options", "error"),
-    [
-        pytest.param(
-            None,
-            RuntimeConfig(image="lab:1", resources=RuntimeResources(gpu=RuntimeGPU(type="H100"))),
-            {},
-            "cannot select GPUs by type",
-            id="a-gpu-type",
-        ),
-        pytest.param(
-            CHAINED,
-            None,
-            {"run_args": ["--privileged"]},
-            "run_args apply only to image environments",
-            id="run-args-for-compose",
-        ),
-        pytest.param(
-            "services:\n  main: {image: lab, network_mode: 'service:relay'}\n"
-            "  relay: {image: relay, network_mode: 'service:main'}\n",
-            None,
-            {},
-            "network_mode service cycle includes 'main'",
-            id="a-network-cycle",
-        ),
-        pytest.param(
-            "include: [other.yaml]\nservices:\n  main: {image: lab}\n",
-            None,
-            {},
-            "does not support Compose include or extends",
-            id="an-include",
-        ),
-        pytest.param(
-            "services:\n  main: {image: $HOST_ONLY}\n",
-            None,
-            {},
-            "variable 'HOST_ONLY' is not set by the project .env",
-            id="a-host-variable",
-        ),
-    ],
-)
-async def test_a_request_docker_cannot_serve_is_refused_before_the_daemon_is_asked(
-    document: str | None,
-    config: RuntimeConfig | None,
-    options: dict[str, Any],
-    error: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("PATH", str(tmp_path / "no-docker"))
-    if document is not None:
-        config = RuntimeConfig(compose=compose_file(tmp_path, document))
-    row = ECHO.model_copy(update={"runtime_config": config})
-
-    with pytest.raises(ValueError, match=error):
-        async with DockerRuntime(**options)(row):
-            pytest.fail("the request should be refused")
