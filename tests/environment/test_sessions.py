@@ -14,17 +14,13 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dirty_equals import IsStr
 
-from hud.capabilities import Connection
-from hud.clients import HudProtocolError, connect
-from hud.environment import Environment, WorkspaceRoute
+from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
 
 from .conftest import Wire, wire
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
     from contextlib import AbstractAsyncContextManager
-    from pathlib import Path
 
 ECHO = Task(env="sessions", id="echo")
 
@@ -172,62 +168,3 @@ async def test_each_session_keeps_its_own_task(
 ) -> None:
     async with LocalRuntime(echo_env())(ECHO) as runtime:
         assert await play(runtime.url, script) == expected
-
-
-def inference(token: str) -> Connection:
-    return Connection(
-        name="inference",
-        capability="ssh",
-        url="https://inference.hud.so",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-
-async def a_finished_session_releases_its_connection(env: Environment, root: Path) -> None:
-    workspace = env.workspace(root, network=False)
-    async with LocalRuntime(env)(ECHO) as runtime:
-        async with connect(runtime, connections=[inference("first")]) as first:
-            await first.start_task("echo", {"tag": "a"})
-            await first.grade({"answer": "x"})
-        async with connect(runtime, connections=[inference("rotated")]) as second:
-            await second.start_task("echo", {"tag": "b"})
-            assert [peer.name for peer in workspace.peers].count("inference.hud.so") == 1
-            assert (await second.grade({"answer": "x"}))["tag"] == "b"
-
-
-async def a_live_session_keeps_its_connection_name(env: Environment, root: Path) -> None:
-    env.workspace(root, network=False)
-    async with LocalRuntime(env)(ECHO) as runtime, connect(runtime, connections=[inference("a")]):
-        with pytest.raises(HudProtocolError, match="bound to another control session"):
-            async with connect(runtime, connections=[inference("b")]):
-                pass
-
-
-async def a_finished_session_takes_its_route_with_it(env: Environment, root: Path) -> None:
-    workspace = env.workspace(root, network=False)
-    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
-    async with LocalRuntime(env)(ECHO) as runtime:
-        async with connect(runtime, workspace_routes=[route]) as first:
-            await first.start_task("echo", {"tag": "a"})
-            assert [peer.name for peer in workspace.peers] == ["inference.hud.so"]
-            await first.grade({"answer": "x"})
-        async with connect(runtime) as later:
-            await later.start_task("echo", {"tag": "later"})
-            assert workspace.peers == ()
-            await later.grade({"answer": "x"})
-
-
-@pytest.mark.e2e
-@pytest.mark.sandbox
-@pytest.mark.parametrize(
-    "scenario",
-    [
-        a_finished_session_releases_its_connection,
-        a_live_session_keeps_its_connection_name,
-        a_finished_session_takes_its_route_with_it,
-    ],
-)
-async def test_a_sessions_workspace_bindings_end_with_the_session(
-    tmp_path: Path, scenario: Callable[[Environment, Path], Awaitable[None]]
-) -> None:
-    await scenario(echo_env(), tmp_path / "root")

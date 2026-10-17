@@ -15,6 +15,7 @@ from .config import HudEnv
 from .control import ControlPeer, answer, control_peer, hang_up, hold
 from .envs import actor, judge, lab, minted, solve, workspace_env
 from .files import assemble_case, image, read_expected, write_files
+from .internet import internet
 from .models import (
     ModelRequest,
     Models,
@@ -76,6 +77,7 @@ __all__ = [
     "hang_up",
     "hold",
     "image",
+    "internet",
     "judge",
     "lab",
     "mcp_server",
