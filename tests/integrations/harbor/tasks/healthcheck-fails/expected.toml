@@ -1,2 +1,3 @@
+base = "agent-answer"
 reward = 0.0
 error = "Harbor environment healthcheck failed after 3 attempts: not ready"

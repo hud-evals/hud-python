@@ -1,4 +1,6 @@
 # A CLI bundle the runtime mounts at /usr/local/lib/agents runs in agent sessions.
+base = "agent-answer"
+
 [[runtime.bind_mounts]]
 source = "managed/codex"
 target = "/usr/local/lib/agents/codex"

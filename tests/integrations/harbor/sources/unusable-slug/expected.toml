@@ -1,0 +1,4 @@
+# A slug without a usable directory name.
+base = "demo"
+export = "tasks.json"
+refusal = { type = "ValueError", message = "task slug '..' does not form a usable directory name", started = true }

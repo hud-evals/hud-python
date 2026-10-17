@@ -1,0 +1,13 @@
+# Source builds, volumes and env files are rebased into the project.
+[task.task-a]
+"compose.services.main.volumes" = [
+  "./compose-project/environment/main-data:/mounts/0",
+  { type = "bind", source = "./compose-project/environment/readonly", target = "/mounts/1", read_only = true },
+  "outputs:/mounts/2",
+  "./compose-project/tests:/controller/tests:ro",
+]
+"compose.services.main.env_file" = "./compose-project/environment/main.env"
+"compose.services.database.build" = { context = "./compose-project/environment/database" }
+"compose.services.database.env_file" = "./compose-project/environment/database/db.env"
+"compose.services.database.volumes" = ["./compose-project/environment/database/data:/var/lib/postgresql/data"]
+"compose.volumes" = { outputs = {} }

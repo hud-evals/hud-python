@@ -1,4 +1,9 @@
-"""Graders as task authors use them: text helpers, and graded templates in real rollouts."""
+"""Graders as task authors use them: text helpers, and graded templates in real rollouts.
+
+Each grader family is one table: text comparisons, the bash grader, the LLM judge,
+and combined grades. Authoring mistakes are a table of the refusals that fail the
+grade.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,6 @@ import warnings
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from dirty_equals import IsStr
 
 from hud import Environment
 from hud.eval import LocalRuntime, Task, rollout
@@ -39,7 +43,7 @@ if TYPE_CHECKING:
     from hud.eval import Run
     from tests.support import HudEnv, ModelRequest, Models
 
-# ─── text helpers ────────────────────────────────────────────────────────────
+# ─── text comparisons ────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -100,7 +104,7 @@ class Measured(Grader):
         return 0.75
 
 
-def _graders_env(root: Path) -> Environment:
+def graders_env(root: Path) -> Environment:
     env = Environment("graders")
 
     def graded(name: str) -> Callable[[Grade], Grade]:
@@ -113,6 +117,8 @@ def _graders_env(root: Path) -> Environment:
             return grade
 
         return register
+
+    # Combined grades.
 
     @graded("bash_pair")
     async def bash_pair(answer: str) -> EvaluationResult:
@@ -191,6 +197,27 @@ def _graders_env(root: Path) -> Environment:
             ),
         )
 
+    @graded("misweighted")
+    async def misweighted(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(
+            SubScore(name="a", value=1.0, weight=0.5),
+            SubScore(name="b", value=1.0, weight=0.3),
+            SubScore(name="c", value=0.0, weight=0.3),
+        )
+
+    @graded("mismatched")
+    async def mismatched(answer: str) -> EvaluationResult:
+        del answer
+        return EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
+
+    # The bash grader.
+
+    @graded("failing_command")
+    async def failing_command(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(BashGrader.grade(weight=1.0, command="echo oops >&2; false"))
+
     @graded("in_cwd")
     async def in_cwd(answer: str) -> EvaluationResult:
         del answer
@@ -222,6 +249,8 @@ def _graders_env(root: Path) -> Environment:
             BashGrader.grade(weight=1.0, command="yes hud | head -c 500000"),
         )
 
+    # The LLM judge.
+
     @graded("judged")
     async def judged(answer: str) -> EvaluationResult:
         return await combine(
@@ -243,17 +272,35 @@ def _graders_env(root: Path) -> Environment:
     async def judged_without_criteria(answer: str) -> EvaluationResult:
         return await combine(LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[]))
 
+    # Authoring mistakes.
+
+    @graded("no_positive_weight")
+    async def no_positive_weight(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(SubScore(name="p", value=1.0, weight=-1.0))
+
+    @graded("not_a_subscore")
+    async def not_a_subscore(answer: str) -> EvaluationResult:
+        del answer
+        mixed: list[Any] = [SubScore(name="a", value=1.0), 0.5]
+        return await combine(*mixed)
+
+    @graded("empty_all")
+    async def empty_all(answer: str) -> EvaluationResult:
+        del answer
+        return await combine(combine_all(weight=1.0, subscores=[]))
+
     return env
 
 
-async def _grade(template: str, tmp_path: Path, answer: str = ANSWER) -> Run:
+async def grade(template: str, tmp_path: Path) -> Run:
     root = tmp_path / "grader"
     root.mkdir(exist_ok=True)
     task = Task(env="graders", id=template)
-    return await rollout(task, ScriptedAgent(answer), runtime=LocalRuntime(_graders_env(root)))
+    return await rollout(task, ScriptedAgent(ANSWER), runtime=LocalRuntime(graders_env(root)))
 
 
-def _evaluated(run: Run) -> dict[str, Any]:
+def evaluated(run: Run) -> dict[str, Any]:
     """The evaluation the platform receives: the evaluate step's full grade."""
     step = run.trace.steps[-1]
     assert step.task_call is not None
@@ -263,16 +310,25 @@ def _evaluated(run: Run) -> dict[str, Any]:
     return result
 
 
+# ─── combined grades ─────────────────────────────────────────────────────────
+
+
+MISWEIGHTED = 0.5 + 0.3 + 0.3
+
+
+def leaf(name: str, weight: float, value: float) -> dict[str, Any]:
+    return {"name": name, "weight": weight, "value": value, "children": None}
+
+
 @pytest.mark.parametrize(
-    ("template", "reward", "summary"),
+    ("template", "reward", "summary", "warns", "info"),
     [
         pytest.param(
             "bash_pair",
             0.5,
-            [
-                {"name": "BashGrader-1", "weight": 0.5, "value": 1.0, "children": None},
-                {"name": "BashGrader-2", "weight": 0.5, "value": 0.0, "children": None},
-            ],
+            [leaf("BashGrader-1", 0.5, 1.0), leaf("BashGrader-2", 0.5, 0.0)],
+            False,
+            None,
             id="bash-pair",
         ),
         pytest.param(
@@ -283,97 +339,126 @@ def _evaluated(run: Run) -> dict[str, Any]:
                     "name": "any",
                     "weight": 0.5,
                     "value": 1.0,
-                    "children": [
-                        {"name": "BashGrader-1", "weight": 0.5, "value": 0.0, "children": None},
-                        {"name": "BashGrader-2", "weight": 0.5, "value": 1.0, "children": None},
-                    ],
+                    "children": [leaf("BashGrader-1", 0.5, 0.0), leaf("BashGrader-2", 0.5, 1.0)],
                 },
                 {
                     "name": "checks",
                     "weight": 0.25,
                     "value": 0.0,
-                    "children": [
-                        {"name": "lint", "weight": 1.0, "value": 1.0, "children": None},
-                        {"name": "types", "weight": 1.0, "value": 0.0, "children": None},
-                    ],
+                    "children": [leaf("lint", 1.0, 1.0), leaf("types", 1.0, 0.0)],
                 },
-                {"name": "format", "weight": 0.25, "value": 1.0, "children": None},
+                leaf("format", 0.25, 1.0),
             ],
+            False,
+            None,
             id="any-all-tree",
         ),
         pytest.param(
             "weighted",
             0.4,
-            [
-                {"name": "mentions", "weight": 0.6, "value": 1.0, "children": None},
-                {"name": "numbers", "weight": 0.4, "value": 0.0, "children": None},
-                {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
-            ],
+            [leaf("mentions", 0.6, 1.0), leaf("numbers", 0.4, 0.0), leaf("penalty", -0.2, 1.0)],
+            False,
+            None,
             id="penalty",
         ),
         pytest.param(
             "penalty_only_fails",
             -0.2,
-            [
-                {"name": "correct", "weight": 1.0, "value": 0.0, "children": None},
-                {"name": "penalty", "weight": -0.2, "value": 1.0, "children": None},
-            ],
+            [leaf("correct", 1.0, 0.0), leaf("penalty", -0.2, 1.0)],
+            False,
+            None,
             id="negative-reward",
         ),
         pytest.param(
             "suffixed",
             0.6,
-            [
-                {"name": "x-1", "weight": 0.3, "value": 1.0, "children": None},
-                {"name": "x-2", "weight": 0.3, "value": 1.0, "children": None},
-                {"name": "x-3", "weight": 0.4, "value": 0.0, "children": None},
-            ],
+            [leaf("x-1", 0.3, 1.0), leaf("x-2", 0.3, 1.0), leaf("x-3", 0.4, 0.0)],
+            False,
+            None,
             id="name-collisions",
         ),
         pytest.param(
             "custom",
             0.875,
             [
-                {"name": "measured-1", "weight": 0.25, "value": 0.75, "children": None},
-                {"name": "measured-2", "weight": 0.25, "value": 0.75, "children": None},
-                {"name": "renamed", "weight": 0.25, "value": 1.0, "children": None},
-                {"name": "legacy", "weight": 0.25, "value": 1.0, "children": None},
+                leaf("measured-1", 0.25, 0.75),
+                leaf("measured-2", 0.25, 0.75),
+                leaf("renamed", 0.25, 1.0),
+                leaf("legacy", 0.25, 1.0),
             ],
+            False,
+            {
+                "measured-1": {
+                    "_parameters": {"kind": "float", "payload": "<object: not serializable>"}
+                },
+                "measured-2": {"source": "tuple", "_parameters": {"kind": "tuple"}},
+                "renamed": {"reason": "did it", "_parameters": {"kind": "subscore"}},
+                "legacy": {"from": "metadata"},
+            },
             id="custom-grader-shapes",
+        ),
+        pytest.param(
+            "concurrent",
+            1.0,
+            [leaf("BashGrader-1", 0.5, 1.0), leaf("BashGrader-2", 0.5, 1.0)],
+            False,
+            None,
+            id="graders-run-concurrently",
+        ),
+        pytest.param(
+            "misweighted",
+            0.8 / MISWEIGHTED,
+            [
+                leaf("a", 0.5 / MISWEIGHTED, 1.0),
+                leaf("b", 0.3 / MISWEIGHTED, 1.0),
+                leaf("c", 0.3 / MISWEIGHTED, 0.0),
+            ],
+            True,
+            None,
+            id="weights-not-summing-to-one",
+        ),
+        pytest.param(
+            "mismatched",
+            1.0,
+            [leaf("a", 1.0, 0.5)],
+            True,
+            None,
+            id="subscores-not-matching-the-reward",
         ),
     ],
 )
 async def test_a_combined_grade_reaches_the_run_as_a_named_weighted_tree(
-    tmp_path: Path, template: str, reward: float, summary: list[dict[str, Any]]
+    tmp_path: Path,
+    template: str,
+    reward: float,
+    summary: list[dict[str, Any]],
+    warns: bool,
+    info: dict[str, dict[str, Any]] | None,
 ) -> None:
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        run = await _grade(template, tmp_path)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        run = await grade(template, tmp_path)
 
     assert run.reward == pytest.approx(reward)
     assert run.evaluation["subscores"] == summary
+    assert any(issubclass(warning.category, UserWarning) for warning in caught) is warns
+    if info is not None:
+        assert {s["name"]: s["info"] for s in evaluated(run)["subscores"]} == info
 
 
-async def test_custom_graders_record_their_parameters_and_info(tmp_path: Path) -> None:
-    run = await _grade("custom", tmp_path)
-
-    assert {s["name"]: s["info"] for s in _evaluated(run)["subscores"]} == {
-        "measured-1": {"_parameters": {"kind": "float", "payload": "<object: not serializable>"}},
-        "measured-2": {"source": "tuple", "_parameters": {"kind": "tuple"}},
-        "renamed": {"reason": "did it", "_parameters": {"kind": "subscore"}},
-        "legacy": {"from": "metadata"},
-    }
+# ─── the bash grader ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
     ("template", "value", "info"),
     [
         pytest.param(
-            "in_cwd",
-            1.0,
-            {"exit_code": 0, "stdout": "here", "stderr": ""},
-            id="cwd",
+            "failing_command",
+            0.0,
+            {"exit_code": 1, "stdout": "", "stderr": "oops\n"},
+            id="nonzero-exit",
         ),
+        pytest.param("in_cwd", 1.0, {"exit_code": 0, "stdout": "here", "stderr": ""}, id="cwd"),
         pytest.param(
             "detached_child",
             1.0,
@@ -392,6 +477,12 @@ async def test_custom_graders_record_their_parameters_and_info(tmp_path: Path) -
             },
             id="overrun-keeps-its-output",
         ),
+        pytest.param(
+            "chatty",
+            1.0,
+            {"exit_code": 0, "stdout": "hud\n" * 125_000},
+            id="large-output-does-not-block",
+        ),
     ],
 )
 async def test_bash_grader_scores_by_exit_code_and_reports_what_ran(
@@ -399,94 +490,12 @@ async def test_bash_grader_scores_by_exit_code_and_reports_what_ran(
 ) -> None:
     started = time.monotonic()
 
-    run = await _grade(template, tmp_path)
+    run = await grade(template, tmp_path)
 
-    (subscore,) = _evaluated(run)["subscores"]
+    (subscore,) = evaluated(run)["subscores"]
     assert run.reward == value
     assert {key: subscore["info"][key] for key in info} == info
     assert time.monotonic() - started < 15
-
-
-async def test_bash_grader_reads_a_large_output_without_blocking(tmp_path: Path) -> None:
-    run = await _grade("chatty", tmp_path)
-
-    (subscore,) = _evaluated(run)["subscores"]
-    assert run.reward == 1.0
-    assert len(subscore["info"]["stdout"]) == 500_000
-
-
-async def test_combined_graders_run_concurrently(tmp_path: Path) -> None:
-    run = await _grade("concurrent", tmp_path)
-
-    assert run.reward == 1.0
-
-
-# ─── authoring mistakes ──────────────────────────────────────────────────────
-
-
-NOT_SUBSCORES: list[Any] = [SubScore(name="a", value=1.0), 0.5]
-
-
-def _mistakes_env() -> Environment:
-    env = Environment("mistakes")
-    cases: dict[str, Callable[[], Any]] = {
-        "no_positive_weight": lambda: combine(SubScore(name="p", value=1.0, weight=-1.0)),
-        "not_a_subscore": lambda: combine(*NOT_SUBSCORES),
-        "empty_all": lambda: combine(combine_all(weight=1.0, subscores=[])),
-    }
-    for name, grade in cases.items():
-
-        def register(grade: Callable[[], Any] = grade, name: str = name) -> None:
-            @env.template(id=name)
-            async def template():
-                yield "go"
-                yield await grade()
-
-        register()
-    return env
-
-
-@pytest.mark.parametrize(
-    "template",
-    ["no_positive_weight", "not_a_subscore", "empty_all"],
-)
-async def test_an_authoring_mistake_fails_the_grade(template: str) -> None:
-    task = Task(env="mistakes", id=template)
-
-    run = await rollout(task, ScriptedAgent("x"), runtime=LocalRuntime(_mistakes_env()))
-
-    assert run.trace.status == "error"
-    assert str(run.trace.error).startswith("[grading]")
-
-
-def _warning_env() -> Environment:
-    env = Environment("warnings")
-
-    @env.template()
-    async def misweighted():
-        yield "go"
-        yield await combine(
-            SubScore(name="a", value=1.0, weight=0.5),
-            SubScore(name="b", value=1.0, weight=0.3),
-            SubScore(name="c", value=0.0, weight=0.3),
-        )
-
-    @env.template()
-    async def mismatched():
-        yield "go"
-        yield EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
-
-    return env
-
-
-@pytest.mark.parametrize(("template", "reward"), [("misweighted", 0.8 / 1.1), ("mismatched", 1.0)])
-async def test_inconsistent_weights_warn_the_author(template: str, reward: float) -> None:
-    task = Task(env="warnings", id=template)
-
-    with pytest.warns(UserWarning):
-        run = await rollout(task, ScriptedAgent("x"), runtime=LocalRuntime(_warning_env()))
-
-    assert run.reward == pytest.approx(reward)
 
 
 # ─── the LLM judge ───────────────────────────────────────────────────────────
@@ -499,137 +508,112 @@ VERDICTS = {
 }
 
 
-def _judge(verdicts: dict[str, str]) -> Callable[[ModelRequest], Turn]:
-    def reply(request: ModelRequest) -> Turn:
-        prompt = request.body["messages"][1]["content"]
-        criterion = prompt.split("<criterion>\n", 1)[1].split("\n", 1)[0]
-        return say(VERDICTS[verdicts[criterion]])
-
-    return reply
-
-
-@pytest.mark.parametrize(
-    ("template", "verdicts", "reward", "children"),
-    [
-        pytest.param(
-            "judged",
-            {"names Paris": "json", "cites a source": "fenced", "invents facts": "prose"},
-            1 / 3,
-            [
-                {
-                    "name": "names Paris",
-                    "weight": 1.0,
-                    "value": 1.0,
-                    "children": None,
-                    "info": {"reason": "plainly stated"},
-                },
-                {
-                    "name": "cites a source",
-                    "weight": 2.0,
-                    "value": 0.0,
-                    "children": None,
-                    "info": {"reason": "no source"},
-                },
-                {
-                    "name": "invents facts",
-                    "weight": -1.0,
-                    "value": 0.0,
-                    "children": None,
-                    "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
-                },
-            ],
-            id="json-fenced-prose",
-        ),
-        pytest.param(
-            "judged_negative_only",
-            {"invents facts": "prose-met"},
-            0.0,
-            [
-                {
-                    "name": "invents facts",
-                    "weight": -1.0,
-                    "value": 1.0,
-                    "children": None,
-                    "info": {"reason": "The criterion is MET."},
-                }
-            ],
-            id="negative-only-met",
-        ),
-        pytest.param(
-            "judged_negative_only",
-            {"invents facts": "prose"},
-            1.0,
-            [
-                {
-                    "name": "invents facts",
-                    "weight": -1.0,
-                    "value": 0.0,
-                    "children": None,
-                    "info": {"reason": "Verdict: UNMET, although the word MET appears here."},
-                }
-            ],
-            id="negative-only-unmet",
-        ),
-    ],
-)
-async def test_the_judge_scores_each_criterion_by_weight(
-    models: Models,
-    hud_env: HudEnv,
-    tmp_path: Path,
-    template: str,
-    verdicts: dict[str, str],
-    reward: float,
-    children: list[dict[str, Any]],
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    models.respond(_judge(verdicts))
-
-    run = await _grade(template, tmp_path)
-
-    (judge,) = _evaluated(run)["subscores"]
-    assert run.reward == pytest.approx(reward)
-    assert judge["children"] == children
-
-
-async def test_the_judge_sends_one_request_per_criterion(
-    models: Models, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    models.respond(
-        _judge({"names Paris": "json", "cites a source": "json", "invents facts": "prose"})
-    )
-
-    await _grade("judged", tmp_path)
-
-    requests = models.requests()
-    assert [request.headers["authorization"] for request in requests] == ["Bearer k"] * 3
-    assert sorted(
-        section(request.body["messages"][1]["content"], "criterion") for request in requests
-    ) == [
-        "cites a source",
-        "invents facts",
-        "names Paris",
-    ]
-
-
 def section(prompt: str, tag: str) -> str:
     """The text between ``<tag>`` and ``</tag>`` in a judge prompt."""
     return prompt.split(f"<{tag}>\n", 1)[1].split(f"\n</{tag}>", 1)[0]
 
 
-async def test_the_judge_without_criteria_scores_zero_without_calling_a_model(
-    models: Models, hud_env: HudEnv, tmp_path: Path
+def criterion(name: str, weight: float, value: float, reason: str) -> dict[str, Any]:
+    return {**leaf(name, weight, value), "info": {"reason": reason}}
+
+
+@pytest.mark.parametrize(
+    ("template", "api_key", "verdicts", "reward", "children"),
+    [
+        pytest.param(
+            "judged",
+            "k",
+            {"names Paris": "json", "cites a source": "fenced", "invents facts": "prose"},
+            1 / 3,
+            [
+                criterion("names Paris", 1.0, 1.0, "plainly stated"),
+                criterion("cites a source", 2.0, 0.0, "no source"),
+                criterion("invents facts", -1.0, 0.0, VERDICTS["prose"]),
+            ],
+            id="json-fenced-prose",
+        ),
+        pytest.param(
+            "judged_negative_only",
+            "k",
+            {"invents facts": "prose-met"},
+            0.0,
+            [criterion("invents facts", -1.0, 1.0, "The criterion is MET.")],
+            id="negative-only-met",
+        ),
+        pytest.param(
+            "judged_negative_only",
+            "k",
+            {"invents facts": "prose"},
+            1.0,
+            [criterion("invents facts", -1.0, 0.0, VERDICTS["prose"])],
+            id="negative-only-unmet",
+        ),
+        pytest.param(
+            "judged_without_criteria", "k", {}, 0.0, None, id="no-criteria-calls-no-model"
+        ),
+        pytest.param(
+            "judged",
+            None,
+            {},
+            None,
+            None,
+            id="no-hud-api-key-fails-the-grade",
+        ),
+    ],
+)
+async def test_the_judge_asks_once_per_criterion_and_scores_each_by_weight(
+    models: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+    template: str,
+    api_key: str | None,
+    verdicts: dict[str, str],
+    reward: float | None,
+    children: list[dict[str, Any]] | None,
 ) -> None:
-    hud_env.set(HUD_API_KEY="k")
+    if api_key is not None:
+        hud_env.set(HUD_API_KEY=api_key)
 
-    run = await _grade("judged_without_criteria", tmp_path)
+    def reply(request: ModelRequest) -> Turn:
+        return say(VERDICTS[verdicts[section(request.body["messages"][1]["content"], "criterion")]])
 
-    assert run.reward == 0.0
-    assert models.requests() == []
+    models.respond(reply)
+
+    run = await grade(template, tmp_path)
+
+    requests = models.requests()
+    assert [request.headers["authorization"] for request in requests] == [
+        f"Bearer {api_key}"
+    ] * len(verdicts)
+    assert sorted(
+        section(request.body["messages"][1]["content"], "criterion") for request in requests
+    ) == sorted(verdicts)
+    if reward is None:
+        assert run.trace.status == "error"
+        assert "HUD_API_KEY is required for HUD gateway clients" in str(run.trace.error)
+        return
+    (judge,) = evaluated(run)["subscores"]
+    assert run.reward == pytest.approx(reward)
+    assert judge["children"] == children
 
 
-async def test_the_judge_without_a_hud_api_key_fails_the_grade(tmp_path: Path) -> None:
-    run = await _grade("judged", tmp_path)
+# ─── authoring mistakes ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("template", "refusal"),
+    [
+        ("no_positive_weight", "subscores must include at least one positive weight"),
+        ("not_a_subscore", "Expected SubScore or Awaitable[SubScore], got float"),
+        ("empty_all", "subscores must not be empty"),
+    ],
+)
+async def test_an_authoring_mistake_fails_the_grade_with_its_refusal(
+    template: str, refusal: str, tmp_path: Path
+) -> None:
+    run = await grade(template, tmp_path)
 
     assert run.trace.status == "error"
-    assert run.trace.error == IsStr(regex=r".*HUD_API_KEY is required for HUD gateway clients")
+    error = str(run.trace.error)
+    assert error.startswith("[grading]")
+    assert error.endswith(refusal)

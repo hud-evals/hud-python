@@ -1,0 +1,13 @@
+# Sidecars keep their settings and their order around main.
+[task.implicit-main]
+services = ["cache", "hud-base", "main", "redis", "seed", "worker"]
+"compose.services.redis.depends_on" = { main = { condition = "service_started", restart = true }, seed = { condition = "service_completed_successfully" } }
+"compose.services.redis.command" = ["redis-server", "--save", ""]
+"compose.services.redis.environment" = { SIDE = "car" }
+"compose.services.redis.healthcheck" = { interval = "2s", test = ["CMD", "redis-cli", "ping"] }
+"compose.services.cache.build" = "./compose-project/environment/cache"
+"compose.services.seed.build" = "./compose-project/environment/seed"
+
+[task.main-process]
+"compose.services.main.environment" = { FROM_COMPOSE = "yes" }
+"compose.services.main.expose" = ["8080"]

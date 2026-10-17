@@ -1,0 +1,5 @@
+# A prebuilt image is the base of main and of the verifier, without a build of its own.
+[task.task-a]
+services = ["main"]
+"compose.services.main.build.args.BASE_IMAGE" = "golang:1.23-alpine"
+"compose.services.main.build.args.VERIFIER_IMAGE" = "golang:1.23-alpine"

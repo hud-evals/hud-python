@@ -14,7 +14,7 @@ from .cli import Hud, Result, scrub, words
 from .config import HudEnv
 from .control import ControlPeer, answer, control_peer, hang_up, hold
 from .envs import actor, judge, lab, minted, solve, workspace_env
-from .files import image, write_files
+from .files import assemble_case, image, read_expected, write_files
 from .models import (
     ModelRequest,
     Models,
@@ -64,6 +64,7 @@ __all__ = [
     "Wire",
     "actor",
     "answer",
+    "assemble_case",
     "call",
     "calls",
     "control_peer",
@@ -79,6 +80,7 @@ __all__ = [
     "lab",
     "mcp_server",
     "minted",
+    "read_expected",
     "relay",
     "run_task",
     "say",

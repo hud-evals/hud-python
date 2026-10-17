@@ -1,0 +1,20 @@
+# A python source exports its one task, which grades its answer in the built image.
+[folders.solve-4080368a]
+task = "solve"
+args = { n = 2, prompt = "what's next?" }
+prompt = "solve 2: what's next?"
+
+[[folders.solve-4080368a.grade]]
+answer = "2"
+exit = 0
+reward = "1.0"
+
+[[folders.solve-4080368a.grade]]
+answer = "wrong"
+exit = 0
+reward = "0.25"
+
+# A grader that raises fails test.sh and leaves no reward.
+[[folders.solve-4080368a.grade]]
+answer = "crash"
+exit = 1

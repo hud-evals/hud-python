@@ -1,2 +1,3 @@
 # The controller refuses to serve.
+base = "agent-answer"
 startup_error = "HARBOR_MISSING_KEY"

@@ -1,0 +1,8 @@
+# An authored Compose main build becomes the base image main builds on.
+[task.containerfile]
+"compose.services.hud-base.build" = { context = "./compose-project/environment", dockerfile = "Containerfile", args = { FLAVOR = "compose" } }
+"compose.services.main.build.additional_contexts" = { hud-base = "service:hud-base" }
+
+[task.image-and-dockerfile]
+"compose.services.hud-base.build" = { context = "./compose-project/environment" }
+"compose.services.main.build.additional_contexts" = { hud-base = "service:hud-base" }

@@ -1,0 +1,4 @@
+# A row naming a task the environment does not define.
+base = "demo"
+export = "tasks.json"
+refusal = { type = "TypeError", message = "needs a local env defining task 'missing'", started = true }

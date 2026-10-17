@@ -1,1 +1,0 @@
-Solve the task.

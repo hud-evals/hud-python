@@ -1,4 +1,5 @@
 # A verifier credential is resolved only when grading needs it.
+base = "verifier-credentials-shared"
 [[case]]
 name = "missing"
 reward = 0.0

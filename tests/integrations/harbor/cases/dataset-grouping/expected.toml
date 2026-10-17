@@ -1,0 +1,14 @@
+# Tasks with the same environment share one project; a task keeps its artifacts and timeouts.
+projects = [
+  ["build-pmars", "chess-best-move"],
+  ["caffe-cifar-10", "sam-cell-seg"],
+  ["cancel-async-tasks"],
+]
+
+[task.build-pmars]
+"task.artifacts" = [
+  { service = "main", source = "/tmp/result" },
+  { service = "main", source = "/app/outputs", destination = "results/outputs", exclude = ["*.tmp", "cache"] },
+]
+"task.verifier_timeout" = 30.0
+agent_config = { timeout_seconds = 45.0 }

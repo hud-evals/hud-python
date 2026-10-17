@@ -1,0 +1,7 @@
+# A restrictive .dockerignore still admits the entrypoint; other source files are copied.
+base = "demo"
+
+[folders.solve-4080368a]
+task = "solve"
+args = { n = 2, prompt = "what's next?" }
+prompt = "solve 2: what's next?"

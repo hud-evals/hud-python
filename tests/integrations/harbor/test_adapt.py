@@ -1,19 +1,27 @@
 """``harbor.adapt`` over case directories of Harbor tasks.
 
 Each directory under ``cases/`` is a Harbor dataset; adaptation runs against the
-local Docker daemon. Every case is held to what holds for any dataset (findings
-by task, rows that match the written ``tasks.json``, environments copied whole,
-Compose projects that resolve, no host secret written out); each case then has a
-scenario for the rule it exists to exercise. Adapted tasks run end to end in
-``test_controller``.
+local Docker daemon. Every case is held to what holds for any dataset (rows that
+match the written ``tasks.json``, environments copied whole, Compose projects
+that resolve, no host secret written out) and to its ``expected.toml``, whose
+keys are all optional:
+
+- ``findings``: ``[task, code]`` for each finding adaptation reports;
+- ``mentions`` and ``mentions_off_amd64``: per task, text its finding messages
+  contain (the second exactly when the Docker daemon is not amd64);
+- ``projects``: the tasks that share one project, by environment;
+- ``task.<slug>``: dotted paths into the row's observed fields (``placement``,
+  ``agent_config``, ``task``, ``service_access``, ``services``, ``compose``,
+  ``verifier.runtime_config``, ``links``), each equal to its value;
+- ``base``: another case this one starts from (``assemble_case``).
+
+Adapted tasks run end to end in ``test_controller``.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.integrations import harbor
+from tests.support import assemble_case, read_expected
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,75 +40,13 @@ if TYPE_CHECKING:
 CASES = Path(__file__).parent / "cases"
 SECRET = "sk-live-secret"
 
-# The findings each case reports, as (task, code), one entry per finding.
-FINDINGS: dict[str, list[tuple[str, str]]] = {
-    "findings": [
-        ("artifact-absolute-destination", "harbor.invalid.task_config"),
-        ("artifact-backslash-destination", "harbor.invalid.task_config"),
-        ("artifact-dotdot", "harbor.invalid.task_config"),
-        ("artifact-dotdot-destination", "harbor.invalid.task_config"),
-        ("artifact-double-slash", "harbor.invalid.task_config"),
-        ("artifact-manifest-destination", "harbor.invalid.task_config"),
-        ("artifact-root", "harbor.invalid.task_config"),
-        ("bad-config", "harbor.invalid.task_config"),
-        ("bad-config", "harbor.invalid.task_config"),
-        ("bad-toml", "harbor.invalid.task_config_toml"),
-        ("compose-extends", "harbor.unsupported.compose_include_extends"),
-        ("compose-include", "harbor.unsupported.compose_include_extends"),
-        ("compose-not-mapping", "harbor.invalid.compose"),
-        ("compose-path-escape", "harbor.invalid.compose_project_path"),
-        ("healthcheck-duration", "harbor.invalid.healthcheck"),
-        ("healthcheck-test", "harbor.invalid.healthcheck"),
-        ("host-variable", "harbor.unsupported.host_compose_variable"),
-        ("main-build-escape", "harbor.invalid.compose_project_path"),
-        ("main-build-escape", "harbor.invalid.compose_main_build_escape"),
-        ("main-build-escape", "harbor.invalid.missing_compose_main_dockerfile"),
-        ("main-build-path-type", "harbor.invalid.compose_main_build_path"),
-        ("mcp-servers", "harbor.invalid.duplicate_mcp_name"),
-        ("mcp-servers", "harbor.invalid.reserved_mcp_name"),
-        ("mcp-servers", "harbor.invalid.reserved_mcp_name"),
-        ("mcp-servers", "harbor.invalid.mcp_url"),
-        ("missing-instruction", "harbor.invalid.missing_instruction"),
-        ("missing-main-dockerfile", "harbor.invalid.missing_compose_main_dockerfile"),
-        ("missing-tests", "harbor.invalid.missing_tests"),
-        ("missing-verifier-dockerfile", "harbor.invalid.missing_verifier_dockerfile"),
-        ("multi-step", "harbor.unsupported.multi_step"),
-        ("no-recipe", "harbor.invalid.environment_recipe"),
-        ("non-utf8-toml", "harbor.invalid.task_config_toml"),
-        ("reserved-ports", "harbor.invalid.reserved_main_port"),
-        ("reserved-ports", "harbor.invalid.reserved_main_port"),
-        ("reserved-ports", "harbor.invalid.reserved_main_port"),
-        ("reserved-services", "harbor.invalid.reserved_compose_service"),
-        ("sidecar-without-recipe", "harbor.invalid.sidecar_recipe"),
-    ],
-    "image-failures": [
-        ("broken", "harbor.invalid.image"),
-        ("missing-sidecar-image", "harbor.invalid.image"),
-        ("verifier-on-arm", "harbor.invalid.image"),
-    ],
-}
-
 
 def load_case(case: str, tmp_path: Path, hud_env: HudEnv) -> Path:
-    """Copy ``case`` into ``tmp_path``, with a host secret its templates must never leak."""
+    """Assemble ``case`` in ``tmp_path``, with a host secret its templates must never leak."""
     dataset = tmp_path / case
-    shutil.copytree(CASES / case, dataset, symlinks=True)
+    assemble_case(CASES / case, dataset)
     hud_env.set(HARBOR_JUDGE_KEY=SECRET)
     return dataset
-
-
-def adapted(case: str, tmp_path: Path, hud_env: HudEnv) -> dict[str, Task]:
-    """The rows ``case`` adapts to, by slug."""
-    result = harbor.adapt(load_case(case, tmp_path, hud_env), hud_requirement="hud")
-    return {row.slug or "": row for row in result.taskset}
-
-
-def compose(row: Task) -> dict[str, Any]:
-    """The Compose document a row runs in."""
-    assert row.runtime_config is not None and row.runtime_config.compose is not None
-    document = row.runtime_config.compose.document
-    assert isinstance(document, Path)
-    return json.loads(document.read_text("utf-8"))
 
 
 def placement(config: RuntimeConfig | None) -> dict[str, Any]:
@@ -116,6 +63,34 @@ def file_tree(root: Path) -> dict[str, bytes | str]:
         )
         for entry in sorted(root.rglob("*"))
         if entry.is_symlink() or entry.is_file()
+    }
+
+
+def observed(row: Task) -> dict[str, Any]:
+    """The fields of an adapted row that ``expected.toml`` paths point into."""
+    config = row.runtime_config
+    assert config is not None and config.compose is not None
+    root, document = config.compose.root, config.compose.document
+    assert isinstance(root, Path) and isinstance(document, Path)
+    compose = json.loads(document.read_text("utf-8"))
+    verifier = row.verifier
+    return {
+        "placement": placement(config),
+        "agent_config": row.agent_config,
+        "task": row.args["task"],
+        "service_access": config.compose.service_access,
+        "services": sorted(compose["services"]),
+        "compose": compose,
+        "verifier": verifier is not None
+        and {
+            "runtime_config": verifier.runtime_config is not None
+            and placement(verifier.runtime_config)
+        },
+        "links": {
+            entry.relative_to(root).as_posix(): os.readlink(entry)
+            for entry in root.rglob("*")
+            if entry.is_symlink()
+        },
     }
 
 
@@ -147,9 +122,10 @@ def assert_stock_compose_complete(compose_path: Path) -> None:
 @pytest.mark.e2e
 @pytest.mark.docker
 @pytest.mark.parametrize("case", sorted(path.name for path in CASES.iterdir()))
-def test_adapting_a_dataset_reports_its_findings_and_writes_runnable_projects(
+def test_adapting_a_dataset_writes_the_projects_and_findings_its_case_expects(
     case: str, tmp_path: Path, hud_env: HudEnv
 ) -> None:
+    spec = read_expected(CASES / case)
     dataset = load_case(case, tmp_path, hud_env)
 
     result = harbor.adapt(dataset, hud_requirement="hud")
@@ -157,23 +133,39 @@ def test_adapting_a_dataset_reports_its_findings_and_writes_runnable_projects(
     found = [
         (failure.task, finding.code) for failure in result.failures for finding in failure.findings
     ]
-    assert sorted(found) == sorted(FINDINGS.get(case, []))
+    assert sorted(found) == sorted(map(tuple, spec.get("findings", [])))
+    messages = {
+        failure.task: " ".join(finding.message for finding in failure.findings)
+        for failure in result.failures
+    }
+    for task, words in spec.get("mentions", {}).items():
+        assert all(word in messages[task] for word in words), (task, messages[task])
+    if off_amd64 := spec.get("mentions_off_amd64"):
+        arch = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Arch}}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        for task, words in off_amd64.items():
+            assert all(word in messages[task] for word in words) is (arch != "amd64"), task
+
     projects = sorted((dataset / ".hud-adapt").iterdir())
     written = sorted(
         row["slug"]
         for project in projects
         for row in json.loads((project / "tasks.json").read_text("utf-8"))
     )
-    rows = list(result.taskset)
-    assert sorted(row.slug or "" for row in rows) == written
+    rows = {row.slug or "": row for row in result.taskset}
+    assert sorted(rows) == written
     for project in projects:
         assert_stock_compose_complete(project / "compose.yaml")
-    for row in rows:
+    for slug, row in rows.items():
         assert row.runtime_config is not None and row.runtime_config.compose is not None
         root = row.runtime_config.compose.root
         assert isinstance(root, Path)
         assert file_tree(root / "compose-project" / "environment") == file_tree(
-            dataset / (row.slug or "") / "environment"
+            dataset / slug / "environment"
         )
     leaked = [
         path
@@ -182,255 +174,18 @@ def test_adapting_a_dataset_reports_its_findings_and_writes_runnable_projects(
     ]
     assert leaked == []
 
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_tasks_with_the_same_environment_share_one_project(tmp_path: Path, hud_env: HudEnv) -> None:
-    rows = adapted("dataset-grouping", tmp_path, hud_env)
-
-    groups: dict[str, set[str]] = {}
-    for slug, row in rows.items():
-        groups.setdefault(row.env, set()).add(slug)
-    assert sorted(map(sorted, groups.values())) == [
-        ["build-pmars", "chess-best-move"],
-        ["caffe-cifar-10", "sam-cell-seg"],
-        ["cancel-async-tasks"],
-    ]
-    pmars = rows["build-pmars"]
-    assert pmars.args["task"]["artifacts"] == [
-        {"service": "main", "source": "/tmp/result"},
-        {
-            "service": "main",
-            "source": "/app/outputs",
-            "destination": "results/outputs",
-            "exclude": ["*.tmp", "cache"],
-        },
-    ]
-    assert (pmars.args["task"]["verifier_timeout"], pmars.agent_config) == (
-        30.0,
-        {"timeout_seconds": 45.0},
-    )
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_each_task_carries_its_resources_limits_and_agent_budget(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    rows = adapted("resources-and-budgets", tmp_path, hud_env)
-
-    assert {slug: placement(row.runtime_config) for slug, row in rows.items()} == {
-        "gpu": {
-            "resources": {
-                "cpu": 4.0,
-                "memory_mb": 8192,
-                "storage_mb": 32768,
-                "gpu": {"count": 2, "type": ["H100"]},
-            }
-        },
-        "windows-tpu": {"resources": {"os": "windows", "tpu": {"type": "v5", "topology": "2x2"}}},
-        "budget": {"limits": {"startup_timeout_s": 901}},
-        "cpu-only": {},
-    }
-    assert rows["budget"].agent_config == {"timeout_seconds": 28800.0}
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_a_separate_verifier_runs_as_its_own_row_with_its_own_placement(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    rows = adapted("separate-verifier", tmp_path, hud_env)
-
-    verifiers = {slug: row.verifier for slug, row in rows.items()}
-    assert {slug for slug, verifier in verifiers.items() if verifier} == {
-        "placement",
-        "plain",
-        "same-placement",
-    }
-    actor, verifier = rows["placement"], verifiers["placement"]
-    assert verifier is not None
-    assert placement(actor.runtime_config) == {
-        "resources": {"cpu": 2.0, "memory_mb": 2048},
-        "limits": {"startup_timeout_s": 600},
-    }
-    assert placement(verifier.runtime_config) == {
-        "resources": {"cpu": 4.0, "memory_mb": 1024, "gpu": {"count": 1, "type": ["T4"]}},
-        "limits": {"startup_timeout_s": 1200},
-    }
-    assert actor.runtime_config is not None and actor.runtime_config.compose is not None
-    assert actor.runtime_config.compose.service_access is True
-    assert actor.args["task"]["collect"] == [
-        {"service": "redis", "command": "redis-cli save", "timeout_sec": 10.0}
-    ]
-    # A verifier placed like its actor, or not placed at all, carries no placement of its own.
-    for slug in ("plain", "same-placement"):
-        unplaced = verifiers[slug]
-        assert unplaced is not None and unplaced.runtime_config is None, slug
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_an_authored_compose_main_build_becomes_the_base_image(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    rows = adapted("compose-main-build", tmp_path, hud_env)
-
-    bases = {slug: compose(row)["services"]["hud-base"]["build"] for slug, row in rows.items()}
-    assert bases == {
-        "containerfile": {
-            "context": "./compose-project/environment",
-            "dockerfile": "Containerfile",
-            "args": {"FLAVOR": "compose"},
-        },
-        "image-and-dockerfile": {"context": "./compose-project/environment"},
-    }
-    for row in rows.values():
-        assert compose(row)["services"]["main"]["build"]["additional_contexts"] == {
-            "hud-base": "service:hud-base"
-        }
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_a_prebuilt_image_is_the_base_without_a_build(tmp_path: Path, hud_env: HudEnv) -> None:
-    (row,) = adapted("prebuilt-image", tmp_path, hud_env).values()
-
-    services = compose(row)["services"]
-    assert sorted(services) == ["main"]
-    args = services["main"]["build"]["args"]
-    assert (args["BASE_IMAGE"], args["VERIFIER_IMAGE"]) == ("golang:1.23-alpine",) * 2
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_compose_variables_and_limits_reach_the_main_service_and_the_row(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    (row,) = adapted("compose-variables", tmp_path, hud_env).values()
-
-    main = compose(row)["services"]["main"]
-    assert main["environment"] == {"FROM_DOTENV": "dotenv", "FROM_ENV": "from-task"}
-    assert main["deploy"] == {"resources": {"limits": {"cpus": "2", "memory": "4096M"}}}
-    assert placement(row.runtime_config) == {"resources": {"cpu": 2.0, "memory_mb": 4096}}
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_sidecars_keep_their_settings_and_their_order_around_main(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    rows = adapted("sidecars", tmp_path, hud_env)
-
-    services = compose(rows["implicit-main"])["services"]
-    assert sorted(services) == ["cache", "hud-base", "main", "redis", "seed", "worker"]
-    redis = services["redis"]
-    assert redis["depends_on"] == {
-        "main": {"condition": "service_started", "restart": True},
-        "seed": {"condition": "service_completed_successfully"},
-    }
-    assert (redis["command"], redis["environment"], redis["healthcheck"]) == (
-        ["redis-server", "--save", ""],
-        {"SIDE": "car"},
-        {"interval": "2s", "test": ["CMD", "redis-cli", "ping"]},
-    )
-    assert [services[name]["build"] for name in ("cache", "seed")] == [
-        "./compose-project/environment/cache",
-        "./compose-project/environment/seed",
-    ]
-    main = compose(rows["main-process"])["services"]["main"]
-    assert (main["environment"], main["expose"]) == ({"FROM_COMPOSE": "yes"}, ["8080"])
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_a_task_that_collects_from_a_sidecar_gets_service_access(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    (row,) = adapted("shared-collect-sidecar", tmp_path, hud_env).values()
-
-    assert row.runtime_config is not None and row.runtime_config.compose is not None
-    assert row.runtime_config.compose.service_access is True
-    assert compose(row)["services"]["main"]["build"]["target"] == "service-access"
-    assert (row.args["task"]["collect"], row.args["task"]["artifacts"]) == (
-        [{"service": "redis", "command": "redis-cli save", "timeout_sec": 600.0}],
-        [{"service": "redis", "source": "/data/dump.rdb"}],
-    )
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_source_builds_volumes_and_env_files_are_rebased_into_the_project(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    (row,) = adapted("source-builds-and-volumes", tmp_path, hud_env).values()
-
-    document = compose(row)
-    main, database = document["services"]["main"], document["services"]["database"]
-    assert main["volumes"] == [
-        "./compose-project/environment/main-data:/mounts/0",
-        {
-            "type": "bind",
-            "source": "./compose-project/environment/readonly",
-            "target": "/mounts/1",
-            "read_only": True,
-        },
-        "outputs:/mounts/2",
-        "./compose-project/tests:/controller/tests:ro",
-    ]
-    assert main["env_file"] == "./compose-project/environment/main.env"
-    assert (database["build"], database["env_file"], database["volumes"]) == (
-        {"context": "./compose-project/environment/database"},
-        "./compose-project/environment/database/db.env",
-        ["./compose-project/environment/database/data:/var/lib/postgresql/data"],
-    )
-    assert document["volumes"] == {"outputs": {}}
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_symlinks_in_a_task_stay_links_in_its_project(tmp_path: Path, hud_env: HudEnv) -> None:
-    (row,) = adapted("symlinks", tmp_path, hud_env).values()
-
-    assert row.runtime_config is not None and row.runtime_config.compose is not None
-    root = row.runtime_config.compose.root
-    assert isinstance(root, Path)
-    tests = root / "compose-project" / "tests" / "task-a"
-    assert os.readlink(tests / "host-file") == "/etc/hostname"
-    assert os.readlink(root / "compose-project" / "environment" / "Dockerfile.link") == (
-        "Dockerfile"
-    )
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_an_image_docker_cannot_resolve_is_reported_on_its_task(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    """A verifier that cannot build on a non-amd64 daemon says how to adapt for one platform."""
-    dataset = load_case("image-failures", tmp_path, hud_env)
-    host = subprocess.run(
-        ["docker", "version", "--format", "{{.Server.Arch}}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-    result = harbor.adapt(dataset, hud_requirement="hud")
-
-    messages = {
-        failure.task: " ".join(finding.message for finding in failure.findings)
-        for failure in result.failures
-    }
-    assert "registry.invalid/missing" in messages["broken"]
-    # Linux daemons name only the registry they could not reach; the finding names the service.
-    assert {"cache", "registry.invalid"} <= set(
-        re.findall(r"[\w.]+", messages["missing-sidecar-image"])
-    )
-    assert "--platform linux/amd64" in messages["verifier-on-arm"]
-    assert ("DOCKER_DEFAULT_PLATFORM=linux/amd64" in messages["verifier-on-arm"]) is (
-        host != "amd64"
-    )
+    if "projects" in spec:
+        groups: dict[str, list[str]] = {}
+        for slug, row in sorted(rows.items()):
+            groups.setdefault(row.env, []).append(slug)
+        assert sorted(groups.values()) == sorted(spec["projects"])
+    for slug, fields in spec.get("task", {}).items():
+        view = observed(rows[slug])
+        for path, value in fields.items():
+            actual: Any = view
+            for key in path.split("."):
+                actual = actual[key]
+            assert actual == value, (slug, path)
 
 
 def test_adapt_raises_when_the_source_holds_no_harbor_tasks(tmp_path: Path) -> None:
