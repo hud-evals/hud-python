@@ -1,4 +1,4 @@
-"""Capability factories, manifest round trips, and ``Connection`` validation."""
+"""How capabilities and connections cross the wire: manifest defaults and ``Connection`` checks."""
 
 from __future__ import annotations
 

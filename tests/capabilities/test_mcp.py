@@ -1,8 +1,17 @@
-"""``MCPClient`` against a FastMCP server over each HTTP transport."""
+"""What only ``MCPClient`` does: its transports, auth, gateway faults, and off-schema output.
+
+Tool calls go to a FastMCP server over each HTTP transport, or to a scripted
+streamable-HTTP server on the fake services, whose ``tools/call`` answers come
+from a script: a transient gateway status, a body that is not JSON, a dropped
+connection, a result outside the tool's output schema. Every call resolves:
+with a result once a transient error clears, or with a transport error. The
+contract every client keeps is in ``test_clients.py``.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+import asyncio
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
 from fastmcp import FastMCP
@@ -10,10 +19,14 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.support import serve_asgi
+from tests.support import Reply, mcp_server, serve_asgi
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from tests.support import FakeServices, HudEnv, Request
 
 
 def tools() -> FastMCP:
@@ -28,6 +41,17 @@ def tools() -> FastMCP:
     def refuse() -> str:
         """Always fail."""
         raise ToolError("not today")
+
+    @server.tool
+    def numbers() -> list[int]:
+        """A plain list, wrapped as structured content."""
+        return [1, 2]
+
+    @server.tool
+    def mistyped() -> int:
+        """Returns something other than its annotation."""
+        wrong: Any = "not an int"
+        return wrong
 
     return server
 
@@ -90,3 +114,154 @@ async def test_an_auth_token_rides_every_request_and_is_needed_where_the_server_
 
     assert added.structuredContent == {"result": 5}
     assert authorized == {"Bearer s3cret"}
+
+
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"n": {"type": "integer"}},
+    "required": ["n"],
+}
+
+
+def result(request: Request, body: dict[str, Any]) -> Reply:
+    return Reply(json={"jsonrpc": "2.0", "id": request.json["id"], "result": body})
+
+
+class ScriptedMCPServer:
+    """A streamable-HTTP MCP server whose ``tools/call`` answers come from a script."""
+
+    def __init__(self, services: FakeServices, calls: list[Callable[[Request], Reply]]) -> None:
+        self.calls = calls
+        self.url = f"{services.url('runtime')}/mcp"
+        services.route("runtime", "POST", "/mcp", handler=self.post)
+        services.route("runtime", "GET", "/mcp", Reply(status=405))
+        services.route("runtime", "DELETE", "/mcp", Reply(json={}))
+        self.services = services
+
+    def post(self, request: Request) -> Reply:
+        method = request.json.get("method")
+        if method == "initialize":
+            reply = result(
+                request,
+                {
+                    "protocolVersion": request.json["params"]["protocolVersion"],
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "fake", "version": "1"},
+                },
+            )
+            reply.headers["mcp-session-id"] = "session-1"
+            return reply
+        if "id" not in request.json:
+            return Reply(status=202, body=b"")
+        if method == "tools/list":
+            tool = {"name": "count", "inputSchema": {"type": "object"}}
+            return result(request, {"tools": [{**tool, "outputSchema": OUTPUT_SCHEMA}]})
+        answer = self.calls.pop(0) if len(self.calls) > 1 else self.calls[0]
+        return answer(request)
+
+    def attempts(self) -> int:
+        return sum(
+            request.json.get("method") == "tools/call"
+            for request in self.services.requests("runtime", "POST", "/mcp")
+        )
+
+    async def call(self) -> Any:
+        client = await MCPClient.connect(Capability.mcp(url=self.url, transport="streamable-http"))
+        try:
+            return await asyncio.wait_for(client.call_tool("count", {}), timeout=30)
+        finally:
+            await client.close()
+
+
+def counted(request: Request) -> Reply:
+    return result(
+        request, {"content": [{"type": "text", "text": "3"}], "structuredContent": {"n": 3}}
+    )
+
+
+def status(code: int) -> Callable[[Request], Reply]:
+    return lambda request: Reply(status=code, json={})
+
+
+def off_schema(request: Request) -> Reply:
+    return result(
+        request, {"content": [{"type": "text", "text": "x"}], "structuredContent": {"n": "x"}}
+    )
+
+
+def unparseable(request: Request) -> Reply:
+    del request
+    return Reply(body=b"{not json", content_type="application/json")
+
+
+def dropped(request: Request) -> Reply:
+    del request
+
+    def chunks() -> Iterator[bytes]:
+        yield b'{"jsonrpc": "2.0", '
+        raise ConnectionResetError("server went away")
+
+    return Reply(stream=chunks(), content_type="application/json")
+
+
+async def test_a_tool_call_succeeds_after_a_transient_503(services: FakeServices) -> None:
+    server = ScriptedMCPServer(services, [status(503), counted])
+
+    called = await server.call()
+
+    assert (called.isError, called.structuredContent) == (False, {"n": 3})
+    assert server.attempts() == 2
+
+
+@pytest.mark.parametrize(
+    ("calls", "error_type", "attempts"),
+    [
+        pytest.param([status(503)], "HTTPStatusError", 3, id="503-until-the-deadline"),
+        pytest.param([unparseable], "ValidationError", 1, id="unparseable-json"),
+        pytest.param([dropped], "RemoteProtocolError", 1, id="connection-dropped"),
+    ],
+)
+async def test_a_failing_tool_call_resolves_with_a_transport_error(
+    services: FakeServices,
+    hud_env: HudEnv,
+    calls: list[Callable[[Request], Reply]],
+    error_type: str,
+    attempts: int,
+) -> None:
+    hud_env.set(HUD_CLIENT_TIMEOUT="1")
+    server = ScriptedMCPServer(services, calls)
+
+    with pytest.raises(McpError) as raised:
+        await server.call()
+
+    assert raised.value.error.code == -32000
+    assert raised.value.error.message == f"Transport error: {error_type}"
+    assert server.attempts() == attempts
+
+
+async def test_a_result_outside_its_output_schema_reaches_the_caller(
+    services: FakeServices,
+) -> None:
+    called = await ScriptedMCPServer(services, [off_schema]).call()
+
+    assert (called.isError, called.structuredContent) == (False, {"n": "x"})
+
+
+@pytest.mark.parametrize(
+    ("tool", "structured"),
+    [
+        pytest.param("numbers", {"result": [1, 2]}, id="plain-result-wrapped"),
+        pytest.param("mistyped", {"result": "not an int"}, id="mistyped-result-not-validated"),
+    ],
+)
+async def test_a_served_fastmcp_tool_wraps_plain_results_and_skips_output_validation(
+    tool: str, structured: dict[str, Any]
+) -> None:
+    async with mcp_server(tools()) as served:
+        client = await MCPClient.connect(served)
+        try:
+            called = await client.call_tool(tool, {})
+        finally:
+            await client.close()
+
+    assert (called.isError, called.structuredContent) == (False, structured)

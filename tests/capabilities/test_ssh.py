@@ -1,8 +1,10 @@
-"""``SSHClient`` against a served workspace, through a relay that fails on demand.
+"""What only ``SSHClient`` does: file transfer, Windows shells, its reconnect policy.
 
 Every test serves a real ``env.workspace`` on loopback and connects to its
 ``ssh`` binding through :func:`tests.support.relay`, which can sever the
-connection mid-command, refuse reconnects, or stall a handshake.
+connection mid-command, refuse reconnects, or stall a handshake. The contract
+every client keeps (connecting, a drop, a cancelled or timed-out command) is in
+``test_clients.py``.
 """
 
 from __future__ import annotations
@@ -12,7 +14,6 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -20,10 +21,13 @@ import pytest
 
 from hud import Environment
 from hud.capabilities import Connection, SSHClient
-from tests.support import FlakyRelay, eventually, relay, served
+from hud.clients import connect
+from hud.eval.runtime import Runtime
+from tests.support import FlakyRelay, answer, control_peer, eventually, relay, served
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the workspace shell is POSIX")
 
@@ -74,21 +78,6 @@ def written(path: Path) -> bool:
     return path.is_file() and bool(path.read_text().strip())
 
 
-def running(pid: int) -> bool:
-    """Whether ``pid`` is a live process (an unreaped zombie counts as gone)."""
-    stat = Path(f"/proc/{pid}/stat")
-    try:
-        return stat.read_text().split(") ", 1)[1][0] != "Z"
-    except FileNotFoundError:
-        return False
-
-
-async def remote_pid(root: Path) -> int:
-    """The pid a command wrote to ``pid`` in the workspace."""
-    await eventually(lambda: written(root / "pid"))
-    return int((root / "pid").read_text())
-
-
 async def drop(client: SSHClient, flaky: FlakyRelay) -> None:
     """Sever the relayed connection and wait until the client has seen it close."""
     flaky.sever()
@@ -134,30 +123,6 @@ async def test_windows_shells_move_files_as_base64_through_encoded_powershell(
         listing = await windows_client.listdir(str(root))
 
     assert (read, listing) == (content, ["it's.txt"])
-
-
-async def test_a_timed_out_command_is_killed_and_the_next_one_runs(tmp_path: Path) -> None:
-    async with shell(tmp_path) as (client, _, root):
-        with pytest.raises(TimeoutError):
-            await client.run("echo $$ > pid; exec sleep 30", timeout=0.5)
-        pid = await remote_pid(root)
-        await eventually(lambda: not running(pid))
-
-        result = await client.run("echo next", timeout=10)
-
-    assert result.stdout == "next\n"
-
-
-async def test_a_cancelled_command_kills_its_remote_process(tmp_path: Path) -> None:
-    async with shell(tmp_path) as (client, _, root):
-        command = asyncio.create_task(client.run("echo $$ > pid; exec sleep 30"))
-        pid = await remote_pid(root)
-
-        command.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await command
-
-        await eventually(lambda: not running(pid))
 
 
 async def test_a_command_lost_in_flight_is_not_replayed_and_the_next_one_reconnects(
@@ -221,14 +186,6 @@ async def test_closing_during_a_reconnect_discards_the_new_connection(tmp_path: 
         await eventually(lambda: flaky.open == 0)
 
 
-async def test_a_handshake_the_server_drops_is_a_connection_error(tmp_path: Path) -> None:
-    async with shell(tmp_path) as (client, flaky, _):
-        flaky.refuse(1)
-
-        with pytest.raises(ConnectionError, match="SSH connection failed during handshake"):
-            await SSHClient.connect(client.capability)
-
-
 @pytest.mark.parametrize(
     ("advertised", "connection_capability", "message"),
     [
@@ -256,3 +213,36 @@ async def test_process_bound_connections_must_be_advertised_and_belong_to_the_sh
 
         with pytest.raises(ValueError, match=message):
             await bound.create_process("true", connections=(connection,))
+
+
+async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with_the_connection(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    env = Environment("tunneled")
+    env.workspace(root, track_files=False)
+    async with served(env) as workspace:
+        shell_binding = workspace.binding("shell")
+        address = urlsplit(shell_binding.url)
+        assert address.hostname is not None and address.port is not None
+        async with relay(address.hostname, address.port) as flaky:
+            flaky.refuse(2)
+            binding = {**shell_binding.to_manifest(), "url": "ssh://agent@environment:22"}
+            hello = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}}
+            async with control_peer(
+                [answer({**hello, "bindings": [binding]})],
+                upstreams={"shell": ("127.0.0.1", flaky.port)},
+            ) as peer:
+                async with connect(Runtime(peer.url)) as client:
+                    opened = await client.open("shell")
+                    assert isinstance(opened, SSHClient)
+                    result = await opened.run("echo through the tunnel", timeout=10)
+                    again = await client.open("ssh")
+
+                assert again is opened
+                assert opened.conn.is_closed()
+                await eventually(lambda: flaky.open == 0)
+
+    assert result.stdout == "through the tunnel\n"
+    assert (flaky.accepted, peer.tunnels) == (3, 3)

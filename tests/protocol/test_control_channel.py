@@ -2,14 +2,15 @@
 
 One environment carries a template per grading and argument shape. Each scenario
 serves it on loopback, speaks raw JSON-RPC to it, and checks the fields of each
-reply frame it is about. A ``guarded`` template appends to a log when it starts
-and when its generator closes, so a scenario sees whether a template ran and
-whether it was torn down.
+reply frame it is about: the handshake, the task catalog, a task's start and
+grade, how a session ends, and the frame limit. A ``guarded`` template appends to
+a log when it starts and when its generator closes, so a scenario sees whether a
+template ran and whether it was torn down. Bad requests are in
+``test_error_replies.py``, with every other JSON-RPC server's.
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
@@ -27,12 +28,9 @@ from hud.environment import (
 )
 from hud.eval import LocalRuntime, Task
 from hud.graders import EvaluationResult, SubScore
-from tests.support import served
-
-from .conftest import FRAME_LIMIT, SESSION_ID, encode, wire
+from tests.support import FRAME_LIMIT, SESSION_ID, encode, wire
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
 Mode = Literal["upper", "lower"]
@@ -150,11 +148,6 @@ def protocol_env(log: Path) -> Environment:
             with log.open("a") as out:
                 out.write(f"closed {name}\n")
 
-    @env.template()
-    async def lookup():
-        settings: dict[str, str] = {}
-        yield settings["missing"]
-
     return env
 
 
@@ -217,7 +210,7 @@ async def test_hello_names_the_session_and_publishes_hook_capabilities(tmp_path:
     ]
 
 
-INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
+BAD_STATE, FAILED = -32600, -32000
 TEMPLATES: dict[str, tuple[str, dict[str, Any], str, str, Any]] = {
     "number-right": ("plain", {}, "42", "What is six times seven?", {"score": 1.0}),
     "evaluation-result-keeps-content-info-and-nested-subscores": (
@@ -309,68 +302,6 @@ async def test_a_template_starts_and_grades_over_the_wire(
     )
 
     assert [answer(frame) for frame in replies] == [{"prompt": prompt}, grade]
-
-
-ROUTE = {"capability": "ssh", "host": "h", "port": 443}
-CONNECTION = {
-    "name": "inference",
-    "capability": "ssh",
-    "url": "https://inference.example",
-    "headers": {"Authorization": "Bearer t"},
-}
-BAD_REQUESTS: dict[str, tuple[list[tuple[str, dict[str, Any] | None]], list[Any]]] = {
-    "start-unknown-template": (
-        [("tasks.start", {"id": "missing"})],
-        [INVALID],
-    ),
-    "start-list-args": (
-        [("tasks.start", {"id": "guarded", "args": ["x"]})],
-        [INVALID],
-    ),
-    "start-signature-mismatch": (
-        [("tasks.start", {"id": "guarded", "args": {"nmae": "x"}})],
-        [FAILED],
-    ),
-    "start-template-raises-keyerror": (
-        [("tasks.start", {"id": "lookup"})],
-        [FAILED],
-    ),
-    "grade-without-start": (
-        [("tasks.grade", {"answer": "x"})],
-        [BAD_STATE],
-    ),
-    "unknown-method": ([("tasks.stop", {})], [NOT_FOUND]),
-    "tunnel-open-mid-session": (
-        [("tasks.cancel", None), ("tunnel.open", {"capability": "browser"})],
-        [{"cancelled": True}, NOT_FOUND],
-    ),
-    "hello-unknown-session": (
-        [("hello", {"session_id": "sess-00000000"})],
-        [BAD_STATE],
-    ),
-    "hello-route-port-not-an-int": (
-        [("hello", {"workspace_routes": [{**ROUTE, "port": "443"}]})],
-        [INVALID],
-    ),
-    "hello-connection-without-a-workspace": (
-        [("hello", {"connections": [CONNECTION]})],
-        [FAILED],
-    ),
-}
-
-
-@pytest.mark.parametrize(("frames", "expected"), BAD_REQUESTS.values(), ids=BAD_REQUESTS.keys())
-async def test_a_bad_request_gets_an_error_reply_and_the_session_keeps_serving(
-    tmp_path: Path, frames: list[tuple[str, dict[str, Any] | None]], expected: Any
-) -> None:
-    log = tmp_path / "log"
-
-    replies = await converse(protocol_env(log), [*frames, ("tasks.list", None)])
-
-    *errors, listed = replies
-    assert [answer(frame) for frame in errors] == expected
-    assert lines(log) == []
-    assert "tasks" in listed["result"]
 
 
 FIRST = ["start first", "closed first"]
@@ -516,59 +447,3 @@ async def test_an_oversized_frame_gets_a_bounded_error_without_an_id(
     assert reply is not None
     assert (reply["id"], reply["error"]["code"]) == (None, FAILED)
     assert (after is not None and after["result"] == {"tasks": []}) is serving
-
-
-def register_a_template_twice(env: Environment) -> None:
-    @env.template(id="twice")
-    async def first():
-        yield "a"
-
-    @env.template(id="twice")
-    async def second():
-        yield "b"
-
-
-@pytest.mark.parametrize(
-    ("declare", "error"),
-    [
-        pytest.param(register_a_template_twice, ValueError, id="a-template-twice"),
-        pytest.param(
-            lambda env: [env.workspace("a"), env.workspace("b")],
-            ValueError,
-            id="two-workspaces-on-one-capability",
-        ),
-    ],
-)
-def test_an_authoring_mistake_raises_at_definition(
-    declare: Callable[[Environment], Any], error: type[Exception]
-) -> None:
-    with pytest.raises(error):
-        declare(Environment("authoring"))
-
-
-async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_reverse() -> None:
-    env = Environment("ordered")
-    log: list[str] = []
-
-    @env.initialize
-    async def first_up() -> None:
-        await asyncio.sleep(0.1)
-        log.append("first up")
-
-    @env.initialize
-    async def second_up() -> None:
-        log.append("second up")
-
-    @env.shutdown
-    async def first_down() -> None:
-        log.append("first down")
-
-    @env.shutdown
-    async def second_down() -> None:
-        log.append("second down")
-
-    async with served(env):
-        seen_at_hello = list(log)
-
-    assert seen_at_hello == ["first up", "second up"]
-    assert log == ["first up", "second up", "second down", "first down"]

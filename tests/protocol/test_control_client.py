@@ -1,9 +1,9 @@
-"""``hud.clients.connect`` and ``HudClient`` against a scripted control-channel peer.
+"""The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a peer.
 
 The peer (:func:`tests.support.control_peer`) is the env side of the wire:
 it answers each connection from a script and records every frame, so the
-frames the client sends are pinned literally. Capability streams it tunnels
-reach real servers: a served workspace's SSH daemon through a flaky relay.
+frames the client sends are pinned literally. Opening a capability client
+through the control port is a table in ``tests/capabilities/test_clients.py``.
 
 Not covered: the 120 s control heartbeat. Its interval is a module constant
 with no public knob, and waiting it out has no place in the default lane.
@@ -19,16 +19,9 @@ from urllib.parse import urlsplit
 
 import pytest
 from dirty_equals import IsStr
-from fastmcp import FastMCP
 
-from hud import Environment
 from hud.capabilities import (
-    Capability,
-    CDPClient,
     Connection,
-    MCPClient,
-    RFBClient,
-    SSHClient,
 )
 from hud.clients import HudClient, HudProtocolError, connect
 from hud.environment import WorkspaceRoute
@@ -36,18 +29,11 @@ from hud.eval.runtime import Runtime
 from tests.support import (
     answer,
     control_peer,
-    eventually,
-    fake_browser,
-    fake_screen,
     hang_up,
-    mcp_server,
-    relay,
-    served,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 def hello(*bindings: dict[str, Any]) -> dict[str, Any]:
@@ -244,38 +230,6 @@ async def test_a_raw_stream_client_passes_bindings_through() -> None:
     assert url == "ssh://agent@environment:22"
 
 
-async def test_an_opened_ssh_client_retries_an_upstream_that_resets_and_closes_with_the_connection(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    env = Environment("tunneled")
-    env.workspace(root, track_files=False)
-    async with served(env) as workspace:
-        assert workspace.manifest is not None
-        (shell,) = (cap for cap in workspace.manifest.bindings if cap.name == "shell")
-        address = urlsplit(shell.url)
-        assert address.hostname is not None and address.port is not None
-        async with relay(address.hostname, address.port) as flaky:
-            flaky.refuse(2)
-            binding = {**shell.to_manifest(), "url": "ssh://agent@environment:22"}
-            async with control_peer(
-                [answer(hello(binding))], upstreams={"shell": ("127.0.0.1", flaky.port)}
-            ) as peer:
-                async with connect(Runtime(peer.url)) as client:
-                    ssh = await client.open("shell")
-                    assert isinstance(ssh, SSHClient)
-                    result = await ssh.run("echo through the tunnel", timeout=10)
-                    again = await client.open("ssh")
-
-                assert again is ssh
-                assert ssh.conn.is_closed()
-                await eventually(lambda: flaky.open == 0)
-
-    assert result.stdout == "through the tunnel\n"
-    assert (flaky.accepted, peer.tunnels) == (3, 3)
-
-
 @pytest.mark.parametrize(
     ("break_tunnel", "warning"),
     [
@@ -332,38 +286,3 @@ async def test_a_reply_to_another_request_aborts_the_connection() -> None:
             await client.cancel()
 
     assert [request["method"] for request in peer.requests()] == ["hello", "tasks.grade"]
-
-
-async def test_each_protocol_opens_as_its_own_client_through_the_env_port() -> None:
-    tools = FastMCP("tools")
-
-    @tools.tool
-    def ping() -> str:
-        """Answer pong."""
-        return "pong"
-
-    async with (
-        fake_screen(width=4, height=2) as screen,
-        fake_browser(replies={"Page.navigate": {"result": {"frameId": "f-1"}}}) as browser,
-        mcp_server(tools) as mcp,
-    ):
-        env = Environment(
-            "multi",
-            capabilities=[
-                Capability.rfb(name="screen", url=screen.url),
-                Capability.cdp(name="browser", url=browser.url),
-                mcp,
-            ],
-        )
-        async with served(env) as client:
-            rfb = await client.open("screen")
-            cdp = await client.open("browser")
-            tools_client = await client.open("tools")
-            assert isinstance(rfb, RFBClient)
-            assert isinstance(cdp, CDPClient)
-            assert isinstance(tools_client, MCPClient)
-            _, mime = await rfb.screenshot_png()
-            navigated = await cdp.send("Page.navigate", {"url": "https://example.com"})
-            listed = [tool.name for tool in await tools_client.list_tools()]
-
-    assert (mime, navigated, listed) == ("image/png", {"frameId": "f-1"}, ["ping"])

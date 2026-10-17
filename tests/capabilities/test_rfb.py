@@ -1,4 +1,8 @@
-"""``RFBClient`` against the fake VNC server."""
+"""What only ``RFBClient`` does: encoding the framebuffer as the caller asks.
+
+The contract every client keeps, reconnecting after a drop among it, is in
+``test_clients.py``.
+"""
 
 from __future__ import annotations
 
@@ -40,16 +44,3 @@ async def test_a_screenshot_encodes_the_framebuffer_as_requested(
     assert isinstance(pixel, tuple)
     assert count == 48
     assert max(abs(channel - expected) for channel, expected in zip(pixel, COLOR, strict=True)) <= 4
-
-
-async def test_a_screenshot_reconnects_when_the_stream_drops() -> None:
-    # The first update is the warm-up on connect; the second is dropped.
-    async with fake_screen(width=4, height=4, color=COLOR, drop_on_update=2) as screen:
-        client = await RFBClient.connect(Capability.rfb(url=screen.url))
-        try:
-            data, _ = await client.screenshot_png()
-        finally:
-            await client.close()
-
-    assert screen.connections == 2
-    assert Image.open(io.BytesIO(data)).convert("RGB").getpixel((0, 0)) == COLOR

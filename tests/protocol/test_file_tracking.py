@@ -4,6 +4,7 @@ A workspace with ``track_files=True`` publishes a ``filetracking`` capability.
 These scenarios serve one over a fixture tree holding build output, VCS
 metadata, ignored files and credentials, edit the tree the way an agent would,
 and check what each reply reports: which files changed and how, and what never leaves.
+A bad request is a case in ``test_error_replies.py``.
 """
 
 from __future__ import annotations
@@ -13,9 +14,7 @@ import hashlib
 from typing import TYPE_CHECKING, Any
 
 from hud.environment import Environment
-from tests.support import served
-
-from .conftest import wire
+from tests.support import served, wire
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -157,20 +156,3 @@ async def test_file_tracking_reports_setup_agent_edits_and_deliverables(tmp_path
     assert capture["files"][0]["content_type"] == XLSX
     assert (capture["files_skipped"], capture["truncated"]) == (1, True)
     assert "API_KEY=after" not in str(flushed)
-
-
-async def test_a_bad_request_gets_an_error_and_the_connection_keeps_serving(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "root"
-    write(root, {"a.txt": "one\n"})
-    env = Environment("tracked")
-    env.workspace(root, track_files=True)
-
-    async with served(env) as client, wire(client.binding("filetracking").url) as tracking:
-        refused = await tracking.call("rewind")
-        write(root, {"a.txt": "one\ntwo\n"})
-        diff = await tracking.call("diff")
-
-    assert refused["error"]["code"] == -32000
-    assert [patch["path"] for patch in diff["result"]["patches"]] == ["a.txt"]

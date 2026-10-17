@@ -1,4 +1,7 @@
-"""``CDPClient`` against the fake DevTools endpoint."""
+"""What only ``CDPClient`` does: page-target discovery, error replies, and a closed socket.
+
+The contract every client keeps is in ``test_clients.py``.
+"""
 
 from __future__ import annotations
 
@@ -39,12 +42,6 @@ async def test_connect_attaches_to_a_page_target_and_enables_its_domains(
     assert [(command.target, command.method) for command in browser.commands] == [
         (connected_to, method) for method in ENABLED
     ]
-
-
-async def test_connect_fails_when_the_browser_offers_no_page_target() -> None:
-    async with fake_browser(pages=[], can_create=False) as browser:
-        with pytest.raises(ValueError, match=r"no CDP page target available at 127\.0\.0\.1:"):
-            await CDPClient.connect(Capability.cdp(url=browser.url))
 
 
 async def test_an_error_reply_raises_cdp_error_naming_the_failed_command() -> None:

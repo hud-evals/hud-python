@@ -34,9 +34,12 @@ from .scenario import RecordingProvider, ScriptedAgent, eventually, run_task, se
 from .services import FakeServices, Reply, Request
 from .spans import ROBOT_STEP_SCHEMA, spans, steps
 from .uv import Uv
+from .wire import FRAME_LIMIT, SESSION_ID, Wire, encode, wire
 
 __all__ = [
+    "FRAME_LIMIT",
     "ROBOT_STEP_SCHEMA",
+    "SESSION_ID",
     "Command",
     "ControlPeer",
     "FakeBrowser",
@@ -58,11 +61,13 @@ __all__ = [
     "ToolCall",
     "Turn",
     "Uv",
+    "Wire",
     "actor",
     "answer",
     "call",
     "calls",
     "control_peer",
+    "encode",
     "eventually",
     "fail",
     "fake_browser",
@@ -85,6 +90,7 @@ __all__ = [
     "spans",
     "steps",
     "stream_error",
+    "wire",
     "words",
     "workspace_env",
     "write_files",

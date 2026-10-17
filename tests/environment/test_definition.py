@@ -1,44 +1,32 @@
-"""Environment references: what ``load_environment`` and the serving process resolve.
+"""Defining an environment: what a reference resolves to, and what is refused at definition.
 
 A fixture tree holds every shape of source a project has: an ``env.py``, a
 directory of modules, a package with a factory beside its ``env.py``, packages
 with relative imports and re-exports, a module shadowing a stdlib name, and task
-modules that export rows. Each row resolves one reference to an environment name
-or to the error a user sees. The serving rows run the real serving process on
-the same tree: it announces its port, answers ``hello``, and runs the
-environment's shutdown hook on SIGTERM.
+modules that export rows. Each row resolves one reference with
+``load_environment`` to an environment name or to the error a user sees. The
+serving processes resolve references the same way; ``tests/protocol/test_serving.py``
+runs them.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
-import signal
 import sys
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.environment import load_environment
-
-from .conftest import wire
+from hud.environment import Environment, load_environment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
 def declare(name: str, variable: str = "env") -> str:
-    """Source declaring Environment ``name``, whose shutdown hook leaves a marker in cwd."""
-    return (
-        "from pathlib import Path\n"
-        "from hud import Environment\n"
-        f"{variable} = Environment({name!r})\n"
-        f"@{variable}.shutdown\n"
-        f"async def _stopped_{variable}():\n"
-        f"    Path('stopped-{name}').write_text('stopped')\n"
-    )
+    """Source declaring Environment ``name`` as ``variable``."""
+    return f"from hud import Environment\n{variable} = Environment({name!r})\n"
 
 
 TEMPLATE = '@env.template(id="solve")\nasync def solve():\n    yield "ok"\n    yield 1.0\n'
@@ -47,21 +35,12 @@ TREE = {
     "env.py": declare("from-env-py"),
     "envs/one.py": declare("from-tree", "foo"),
     "pkg/__init__.py": (
-        "from pathlib import Path\n"
         "from hud.environment import Environment\n"
         "def make_env(name='from-factory'):\n"
-        "    env = Environment(name)\n"
-        "    @env.shutdown\n"
-        "    async def _stopped():\n"
-        "        Path(f'stopped-{name}').write_text('stopped')\n"
-        "    return env\n"
+        "    return Environment(name)\n"
     ),
     "pkg/env.py": declare("from-pkg-source"),
     "multi.py": declare("env-one", "first") + declare("env-two", "second"),
-    "stalls.py": declare("stalls")
-    + "import asyncio\n"
-    + '@env.template(id="stall")\nasync def stall():\n    yield "go"\n'
-    + "    await asyncio.Event().wait()\n    yield 1.0\n",
     "alias.py": declare("shared") + "alias = env\n",
     "twins.py": declare("shared", "one") + declare("shared", "two"),
     "relpkg/__init__.py": "",
@@ -231,104 +210,28 @@ def test_a_package_source_wins_over_other_import_roots(
     assert load_environment(second / "env.py").name == "second"
 
 
-SERVER = [sys.executable, "-m", "hud.environment.server"]
-HUD_SERVE = [sys.executable, "-m", "hud.cli", "serve", "--port", "0"]
+def register_a_template_twice(env: Environment) -> None:
+    @env.template(id="twice")
+    async def first():
+        yield "a"
+
+    @env.template(id="twice")
+    async def second():
+        yield "b"
 
 
 @pytest.mark.parametrize(
-    ("command", "served", "stop"),
+    "declare_mistake",
     [
-        pytest.param([*SERVER, "env.py"], "from-env-py", signal.SIGTERM, id="server-sigterm"),
-        pytest.param([*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, id="hud-serve-ctrl-c"),
+        pytest.param(register_a_template_twice, id="a-template-twice"),
         pytest.param(
-            [*HUD_SERVE, "pkg:make_env", "--arg", "name=demo"],
-            "demo",
-            signal.SIGTERM,
-            id="hud-serve-factory",
+            lambda env: [env.workspace("a"), env.workspace("b")],
+            id="two-workspaces-on-one-capability",
         ),
     ],
 )
-async def test_the_serving_process_announces_its_port_and_runs_shutdown_hooks(
-    tree: Path, command: list[str], served: str, stop: signal.Signals
+def test_an_authoring_mistake_raises_at_definition(
+    declare_mistake: Callable[[Environment], Any],
 ) -> None:
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=tree,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, "NO_COLOR": "1"},
-    )
-    try:
-        port = await announced_port(process)
-        async with wire(f"tcp://127.0.0.1:{port}") as control:
-            hello = await control.call("hello", {})
-        process.send_signal(stop)
-        code = await asyncio.wait_for(process.wait(), timeout=60)
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
-
-    assert hello["result"]["env"]["name"] == served
-    assert code == 0
-    assert [name for name in os.listdir(tree) if name.startswith("stopped-")] == [
-        f"stopped-{served}"
-    ]
-
-
-async def test_sigterm_stops_a_server_whose_session_is_still_grading(tree: Path) -> None:
-    process = await asyncio.create_subprocess_exec(
-        *SERVER,
-        "stalls.py",
-        cwd=tree,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        port = await announced_port(process)
-        async with wire(f"tcp://127.0.0.1:{port}") as control:
-            await control.call("hello", {})
-            await control.call("tasks.start", {"id": "stall", "args": {}})
-            await control.send("tasks.grade", {"answer": "x"})
-            process.send_signal(signal.SIGTERM)
-            code = await asyncio.wait_for(process.wait(), timeout=5)
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
-
-    assert code == 0
-    assert (tree / "stopped-stalls").exists()
-
-
-async def announced_port(process: asyncio.subprocess.Process) -> int:
-    assert process.stdout is not None
-    async with asyncio.timeout(60):
-        while line := await process.stdout.readline():
-            text = line.decode().strip()
-            if text.startswith("HUD_SERVE_PORT="):
-                return int(text.removeprefix("HUD_SERVE_PORT="))
-    assert process.stderr is not None
-    raise AssertionError(f"exited without a port:\n{(await process.stderr.read()).decode()}")
-
-
-@pytest.mark.parametrize(
-    ("command", "code", "error"),
-    [
-        pytest.param([*SERVER, "multi.py"], 1, "multiple Environments in multi.py", id="ambiguous"),
-        pytest.param(
-            [*HUD_SERVE, "pkg:make_env", "--arg", "name"], 2, "--arg", id="a-malformed-factory-arg"
-        ),
-    ],
-)
-async def test_the_serving_process_exits_with_the_load_error(
-    tree: Path, command: list[str], code: int, error: str
-) -> None:
-    process = await asyncio.create_subprocess_exec(
-        *command, cwd=tree, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
-
-    assert process.returncode == code
-    assert b"HUD_SERVE_PORT=" not in stdout
-    assert error in stderr.decode()
+    with pytest.raises(ValueError):
+        declare_mistake(Environment("authoring"))
