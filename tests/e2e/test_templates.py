@@ -107,7 +107,7 @@ async def test_a_template_runs_from_init_to_a_graded_rollout(
         hud_env.set(VNC_PORT=str(screen.port))
         run = evaluated(await asyncio.to_thread(project.hud, *EVAL, timeout=600))
 
-    assert_lifecycle(run, steps(run["trace_id"]), data_file)
+    assert_lifecycle(steps(run["trace_id"]), data_file)
 
 
 @pytest.mark.e2e
@@ -137,7 +137,7 @@ async def test_a_template_completes_a_rollout_with_a_real_model(
         )
 
     run = evaluated(result)
-    assert_lifecycle(run, steps(run["trace_id"]), data_file)
+    assert_lifecycle(steps(run["trace_id"]), data_file)
 
 
 @pytest.mark.e2e
@@ -165,7 +165,7 @@ def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
         project.hud(*EVAL, *REAL_MODEL, "--model", HOSTED_MODEL, "--runtime", "hud", timeout=900)
     )
 
-    assert_lifecycle(run, steps(run["trace_id"], traces), data_file)
+    assert_lifecycle(steps(run["trace_id"], traces), data_file)
     # Without a local span directory, `hud trace get` reads the trace from the platform.
     live.set(HUD_TELEMETRY_LOCAL_DIR=None)
     events = read_back(project.hud, run["trace_id"])

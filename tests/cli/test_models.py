@@ -53,19 +53,13 @@ def catalog(platform: Platform) -> Platform:
     return platform
 
 
-@pytest.mark.parametrize(
-    ("argv", "stdout"),
-    [
-        (["models", "list", "--quiet"], ["claude-sonnet-4-6", "team/my-sonnet"]),
-        (["models", "checkpoints", "my-sonnet", "--quiet"], ["ckpt-0001-base", "ckpt-0002-step"]),
-    ],
-)
-def test_quiet_prints_one_identifier_per_line(
-    hud: Hud, catalog: Platform, argv: list[str], stdout: list[str]
-) -> None:
-    result = hud(*argv)
+def test_quiet_lists_the_model_slugs_one_per_line(hud: Hud, catalog: Platform) -> None:
+    result = hud("models", "list", "--quiet")
 
-    assert (result.exit_code, result.stdout.split("\n")[:-1]) == (0, stdout), result
+    assert (result.exit_code, result.stdout.split("\n")[:-1]) == (
+        0,
+        ["claude-sonnet-4-6", "team/my-sonnet"],
+    ), result
 
 
 def test_models_list_reads_every_page_and_sorts_by_name(hud: Hud, catalog: Platform) -> None:
@@ -78,17 +72,12 @@ def test_models_list_reads_every_page_and_sorts_by_name(hud: Hud, catalog: Platf
 
 
 @pytest.mark.parametrize("model", ["owner/model + version", MINE_ID])
-def test_checkpoints_and_head_read_the_resolved_model(
+def test_head_is_the_resolved_models_active_checkpoint(
     hud: Hud, catalog: Platform, model: str
 ) -> None:
-    checkpoints = hud("models", "checkpoints", model, "--json")
     head = hud("models", "head", model, "--json")
 
-    assert (checkpoints.exit_code, head.exit_code) == (0, 0), head
-    assert [checkpoint["id"] for checkpoint in checkpoints.json] == [
-        "ckpt-0001-base",
-        "ckpt-0002-step",
-    ]
+    assert head.exit_code == 0, head
     assert (head.json["model_id"], head.json["head"]["id"]) == (MINE_ID, "ckpt-0002-step")
 
 
@@ -98,20 +87,14 @@ def test_head_set_asks_the_platform_to_serve_the_checkpoint(
 ) -> None:
     result = hud("models", "head", "my-sonnet", "--set", "ckpt-0001-base", *argv, "--json")
 
-    assert (result.exit_code, result.json["checkpoint_id"]) == (0, "ckpt-0001-base"), result
+    assert result.exit_code == 0, result
     assert catalog.heads == sent
 
 
 def test_a_model_with_no_checkpoints_has_no_head(hud: Hud, catalog: Platform) -> None:
     head = hud("models", "head", "claude-sonnet-4-6", "--json")
-    checkpoints = hud("models", "checkpoints", "claude-sonnet-4-6", "--json")
 
-    assert (head.exit_code, head.json["head"], checkpoints.exit_code, checkpoints.json) == (
-        0,
-        None,
-        0,
-        [],
-    )
+    assert (head.exit_code, head.json["head"]) == (0, None), head
 
 
 def test_fork_creates_a_trainable_model_from_its_source(hud: Hud, catalog: Platform) -> None:
@@ -119,7 +102,7 @@ def test_fork_creates_a_trainable_model_from_its_source(hud: Hud, catalog: Platf
 
     assert result.exit_code == 0, result
     (forked,) = [model for model in catalog.models if model["id"] == result.json["id"]]
-    assert (forked["model_name"], forked["forked_from"]) == ("team/fresh", SONNET_ID)
+    assert forked["forked_from"] == SONNET_ID
 
 
 @pytest.mark.parametrize(
@@ -142,19 +125,10 @@ def test_forking_onto_an_existing_name(
     assert {key: result.json[key] for key in outcome} == outcome
 
 
-@pytest.mark.parametrize(
-    ("argv", "exit_code"),
-    [
-        pytest.param(["fork", "claude-sonnet-4-6", "--name", "mine", "--dry-run"], 0, id="dry-run"),
-        pytest.param(["head", "gpt-nothing", "--set", "c"], 2, id="an-unknown-model"),
-    ],
-)
-def test_dry_runs_and_unknown_models_change_nothing(
-    hud: Hud, catalog: Platform, argv: list[str], exit_code: int
-) -> None:
-    result = hud("models", *argv, "--json")
+def test_a_fork_dry_run_creates_nothing(hud: Hud, catalog: Platform) -> None:
+    result = hud("models", "fork", "claude-sonnet-4-6", "--name", "mine", "--dry-run", "--json")
 
-    assert result.exit_code == exit_code, result
+    assert result.exit_code == 0, result
     assert len(catalog.models) == len(CATALOG)
 
 

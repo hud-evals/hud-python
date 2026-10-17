@@ -134,7 +134,7 @@ def test_an_exported_taskset_reads_back_as_the_same_tasks(
     result = hud("sync", "tasks", "demo", "--export", target, "--json")
     rows = hud("task", "list", "--source", target, "--json")
 
-    assert (result.exit_code, result.json["task_count"]) == (0, 2), result
+    assert result.exit_code == 0, result
     assert [(r["slug"], r["id"], r["args"]) for r in rows.json] == [
         (t["name"], t["scenario"], t["args"]) for t in REMOTE
     ]

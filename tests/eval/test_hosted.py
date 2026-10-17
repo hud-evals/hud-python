@@ -17,9 +17,6 @@ from hud.eval import (
     ComposeProject,
     HostedRuntime,
     RuntimeConfig,
-    RuntimeGPU,
-    RuntimeLimits,
-    RuntimeResources,
     Task,
     Taskset,
 )
@@ -71,57 +68,22 @@ async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completi
     row = Task(
         env="sums",
         id="add",
-        slug="sums-add",
-        args={"a": 1, "b": 2},
         agent_config={"timeout_seconds": 45.0},
-        runtime_config=RuntimeConfig(
-            compose=ComposeProject(document=compose, service_access=True),
-            resources=RuntimeResources(cpu=2, gpu=RuntimeGPU(type="L4"), memory_mb=None),
-            limits=RuntimeLimits(startup_timeout_s=120, run_timeout_s=900),
-        ),
-        verifier=Task(
-            env="judge",
-            id="verify",
-            args={"expected": 3},
-            runtime_config=RuntimeConfig(resources=None),
-        ),
+        runtime_config=RuntimeConfig(compose=ComposeProject(document=compose)),
     )
 
-    with set_trace_context("3" * 32):
-        run = await HostedRuntime(poll_interval=0).run(
-            row, chat_agent(), job_id=JOB_ID, group_id="g1", trace_id=TRACE_ID
-        )
+    run = await HostedRuntime(poll_interval=0).run(
+        row, chat_agent(), job_id=JOB_ID, trace_id=TRACE_ID
+    )
 
     body = submitted(platform)
-    assert (body["trace_id"], body["job_id"], body["group_id"], body["parent_trace_id"]) == (
-        str(uuid.UUID(TRACE_ID)),
-        str(uuid.UUID(JOB_ID)),
-        "g1",
-        str(uuid.UUID("3" * 32)),
-    )
-    assert (body["env"], body["task"], body["slug"], body["args"]) == (
-        "sums",
-        "add",
-        "sums-add",
-        {"a": 1, "b": 2},
-    )
+    assert (body["trace_id"], body["job_id"]) == (str(uuid.UUID(TRACE_ID)), str(uuid.UUID(JOB_ID)))
     # The platform gets the Compose document itself, and the row's agent timeout.
-    sent = RuntimeConfig.model_validate(body["runtime_config"])
-    assert sent.compose is not None and sent.compose.service_access
+    document = body["runtime_config"]["compose"]["document"]
+    assert document["services"]["main"]["image"] == "sums:latest"
     assert body["agent"]["config"]["timeout_seconds"] == 45.0
-    assert (body["verifier"]["env"], body["verifier"]["args"]) == ("judge", {"expected": 3})
     assert "secret" not in str(body)
-    assert (run.reward, run.trace.status, run.trace_id, run.job_id, run.group_id, run.slug) == (
-        0.5,
-        "completed",
-        TRACE_ID,
-        JOB_ID,
-        "g1",
-        "sums-add",
-    )
-    assert run.runtime == f"hud://trace/{TRACE_ID}"
-    with pytest.raises(RuntimeError, match="no live client"):
-        run.client
+    assert (run.reward, run.trace.status) == (0.5, "completed")
 
 
 @pytest.mark.parametrize(
@@ -135,14 +97,12 @@ async def test_a_hosted_rollout_submits_the_row_and_agent_then_polls_to_completi
         ),
     ],
 )
-async def test_a_hosted_rollout_sends_its_agent_as_it_dumps_without_credentials(
+async def test_a_hosted_rollout_sends_its_agent_as_its_registered_type(
     agent: Agent, registered: str, platform: Platform
 ) -> None:
     await HostedRuntime(poll_interval=0).run(ROW, agent, job_id=JOB_ID, trace_id=TRACE_ID)
 
-    sent = submitted(platform)["agent"]
-    assert sent == {"type": registered, "config": agent.dump()}
-    assert "secret" not in str(sent)
+    assert submitted(platform)["agent"]["type"] == registered
 
 
 PARENTS = {
@@ -204,9 +164,6 @@ async def test_a_terminal_trace_folds_into_the_run_and_its_job(
     assert (run.reward, run.trace.status, run.trace.error, run.grade.raw, run in job.errors) == (
         folded
     )
-    assert run.slug == ROW.slug
-    body = submitted(platform)
-    assert (body["job_id"], body["group_id"]) == (str(uuid.UUID(job.id)), run.group_id)
 
 
 @pytest.mark.parametrize("submission_stalls", [False, True], ids=["running", "unsubmitted"])

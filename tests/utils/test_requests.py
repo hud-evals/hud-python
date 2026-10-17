@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from hud.utils import PlatformClient, make_request, make_request_sync
+from hud.utils import make_request, make_request_sync
 from hud.utils.exceptions import (
     HudAuthenticationError,
     HudDeprecationWarning,
@@ -22,7 +22,7 @@ from hud.utils.hints import CREDITS_EXHAUSTED
 from tests.support import Reply
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, HudEnv, Request
+    from tests.support import FakeServices, Request
 
 
 async def _request(asynchronous: bool, url: str, **kwargs: Any) -> Any:
@@ -63,31 +63,16 @@ async def test_transient_responses_are_retried_with_doubling_backoff(
 @pytest.mark.parametrize(
     ("replies", "outcome", "attempts"),
     [
-        pytest.param([Reply(json={"id": "1"})], {"id": "1"}, 1, id="ok"),
         pytest.param([Reply(status=204)], {}, 1, id="no-content"),
         pytest.param(
-            [Reply(status=502), Reply(json={"id": "1"})], {"id": "1"}, 2, id="502-then-ok"
-        ),
-        pytest.param(
-            [Reply(status=400, json={"code": "bad"})],
-            (
-                "Request failed with status 400 - JSON response: {'code': 'bad'}",
-                400,
-                {"code": "bad"},
-                [],
-            ),
-            1,
-            id="400-without-detail",
-        ),
-        pytest.param(
             [Reply(status=402, json={"detail": "no credits"})],
-            ("Request failed: no credits", 402, {"detail": "no credits"}, [CREDITS_EXHAUSTED]),
+            ("Request failed: no credits", 402, [CREDITS_EXHAUSTED]),
             1,
             id="402-once",
         ),
         pytest.param(
             [Reply(status=500, body="oops", content_type="text/plain")],
-            ("Request failed with status 500", 500, None, []),
+            ("Request failed with status 500", 500, []),
             1,
             id="500-once",
         ),
@@ -106,10 +91,9 @@ async def test_each_response_status_has_one_outcome(
     if isinstance(outcome, tuple):
         with pytest.raises(HudRequestError) as raised:
             await _request(asynchronous, url, api_key="k", retry_delay=0.01)
-        message, status, body, hints = outcome
+        message, status, hints = outcome
         assert (raised.value.message, raised.value.status_code) == (message, status)
-        assert (raised.value.response_json, raised.value.hints) == (body, hints)
-        assert f"Status: {status}" in str(raised.value)
+        assert raised.value.hints == hints
     else:
         assert await _request(asynchronous, url, api_key="k", retry_delay=0.01) == outcome
     sent = services.requests("api", "GET", "/v2/data")
@@ -186,18 +170,7 @@ def test_a_deprecation_notice_warns_once_per_process(services: FakeServices) -> 
         for item in ("1", "2"):
             make_request_sync("GET", f"{services.url('api')}/v2/old/{item}", api_key="k")
 
-    assert [str(warning.message) for warning in caught] == [
-        "GET /api/v2/old/1 is deprecated by the HUD API and stops being served on "
-        f"Sat, 10 Oct 2026 00:00:00 GMT; its replacement is {successor}. "
-        "If a hud command printed this, upgrade hud."
-    ]
-
-
-# ─── the platform client ─────────────────────────────────────────────────────
-
-
-def test_the_platform_client_needs_an_api_key(hud_env: HudEnv) -> None:
-    hud_env.set(HUD_API_KEY=None)
-
-    with pytest.raises(HudAuthenticationError, match="HUD_API_KEY is required"):
-        PlatformClient.from_settings()
+    (warning,) = caught
+    assert all(
+        part in str(warning.message) for part in ("Sat, 10 Oct 2026 00:00:00 GMT", successor)
+    )

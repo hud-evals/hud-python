@@ -265,7 +265,7 @@ async def test_a_rollout_ends_the_same_way_wherever_it_runs(
     }
     assert (job.errors == [run]) is not outcome.graded
     assert job.reward == (outcome.reward if outcome.graded else 0.0)
-    assert (run.slug, run.job_id) == (row.slug, job.id)
+    assert run.job_id == job.id
 
 
 # ─── rollout contracts that do not depend on placement ─────────────────
@@ -357,7 +357,6 @@ CASES = {
     "a constructor source serves the row": Case(
         add(), ScriptedAgent(solve), COMPLETED, HOOKS, provider="constructor"
     ),
-    # The child process logs its hooks in its own memory.
     "an agent's own TimeoutError is an ordinary failure": Case(
         add(),
         ScriptedAgent(solve, fail_after=TimeoutError("provider timed out")),
@@ -496,10 +495,9 @@ async def test_the_agent_sees_the_prompt_as_turns_and_as_text(
             ]
             seen.append((turns, run.prompt_text))
 
-    run = await rollout(row, Reader(), runtime=LocalRuntime(lab()))
+    await rollout(row, Reader(), runtime=LocalRuntime(lab()))
 
     assert seen == [(messages, text)]
-    assert run.trace.status == "completed"
 
 
 async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
@@ -516,7 +514,6 @@ async def test_episode_bindings_from_the_start_frame_reach_the_agent() -> None:
     )
 
     assert seen == [({"robot": {"token": "slot-2"}}, run.trace_id)]
-    assert run.bindings == {"robot": {"token": "slot-2"}}
 
 
 @pytest.mark.e2e

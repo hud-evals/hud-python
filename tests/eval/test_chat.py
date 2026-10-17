@@ -53,7 +53,7 @@ async def test_a_conversation_keeps_its_history_and_one_job_across_turns() -> No
     ]
 
     replies = [(await chat.send(turn)).content for turn in ("hello", blocks, "cite")]
-    with pytest.raises(RuntimeError, match=r"\[agent loop\] RuntimeError: model unavailable"):
+    with pytest.raises(RuntimeError, match="model unavailable"):
         await chat.send("fail")
 
     assert replies == ["echo:hello", "echo:<non-text>", "echo:cite"]

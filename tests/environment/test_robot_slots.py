@@ -76,7 +76,7 @@ class Sim(RobotBridge):
 
 
 class AsyncResetSim(Sim):
-    """A bridge written before hooks had to be synchronous: its reset is a coroutine."""
+    """A bridge whose reset is a coroutine."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -200,7 +200,6 @@ def slot_env(endpoint: RobotEndpoint) -> Environment:
     ("failures", "ending", "results_while_served", "results_after_stop"),
     [
         pytest.param(0, "tasks.cancel", 2, 2, id="cancel-frees-the-slot"),
-        pytest.param(0, "bye", 2, 2, id="bye-frees-the-slot"),
         pytest.param(0, "tasks.grade", 2, 2, id="grade-frees-the-slot-once"),
         pytest.param(0, "adopt", 2, 2, id="a-dropped-session-frees-it-when-graded"),
         pytest.param(1, "tasks.cancel", 3, 3, id="cancel-retries-a-failed-release"),

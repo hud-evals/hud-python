@@ -1,14 +1,12 @@
-"""Regression test for importing the package where unix sockets do not exist.
+"""Importing the package where unix sockets and ptys do not exist.
 
-Both routes out of a workspace are served on unix sockets and a session runs on a pty,
-and each reached for its platform at module scope: a
+Both routes out of a workspace are served on unix sockets, through a
 ``socketserver.ThreadingUnixStreamServer`` subclass in :mod:`hud.environment.egress`,
-and a top-level ``import pty`` in :mod:`hud.environment.namespace`. Neither exists on
-Windows, so ``import hud`` raised there before any of it was used, taking down the
-commands that never go near a workspace with it. Both now sit behind the platform
-guard the rest of the package already applies.
+and a session runs on a pty from :mod:`hud.environment.namespace`. Neither exists on
+Windows, so both sit behind the package's platform guard and ``import hud`` works
+there for the commands that never go near a workspace.
 
-The breakage is at import time, so the check runs in a fresh interpreter. That
+The breakage would be at import time, so the check runs in a fresh interpreter. That
 interpreter imports the package once as the platform it really is, because the
 standard library and the dependencies settle their own platform at their first import
 and will not be told otherwise afterwards, and then imports it again with only the

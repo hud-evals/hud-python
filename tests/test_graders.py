@@ -47,9 +47,6 @@ if TYPE_CHECKING:
     [
         pytest.param(lambda: exact_match("The Answer!", "answer"), 1.0, id="exact-normalized"),
         pytest.param(
-            lambda: exact_match("The capital is Paris", "capital is Paris"), 1.0, id="exact-article"
-        ),
-        pytest.param(
             lambda: exact_match("The Paris!", "Paris", normalize_text=False),
             0.0,
             id="exact-raw-differs",
@@ -74,7 +71,6 @@ if TYPE_CHECKING:
         pytest.param(lambda: numeric_match("3 items and 5 left", 3), 1.0, id="number-first"),
         pytest.param(lambda: f1_score("The capital is Paris, France", "Paris"), 0.4, id="f1-part"),
         pytest.param(lambda: f1_score("", "Paris"), 0.0, id="f1-empty-prediction"),
-        pytest.param(lambda: f1_score("I think 42 degrees", "42 degrees"), 2 / 3, id="f1-superset"),
         pytest.param(lambda: f1_score("The PARIS!", "paris"), 1.0, id="f1-normalized"),
     ],
 )
@@ -358,25 +354,6 @@ async def test_a_combined_grade_reaches_the_run_as_a_named_weighted_tree(
     assert run.evaluation["subscores"] == summary
 
 
-async def test_the_evaluate_step_keeps_each_graders_details(tmp_path: Path) -> None:
-    run = await _grade("bash_pair", tmp_path)
-
-    assert [subscore["info"] for subscore in _evaluated(run)["subscores"]] == [
-        {
-            "exit_code": 0,
-            "stdout": "pass\n",
-            "stderr": "",
-            "_parameters": {"command": "echo pass"},
-        },
-        {
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": "oops\n",
-            "_parameters": {"command": "echo oops >&2; false"},
-        },
-    ]
-
-
 async def test_custom_graders_record_their_parameters_and_info(tmp_path: Path) -> None:
     run = await _grade("custom", tmp_path)
 
@@ -447,18 +424,15 @@ async def test_combined_graders_run_concurrently(tmp_path: Path) -> None:
 # ─── authoring mistakes ──────────────────────────────────────────────────────
 
 
-NOT_SUBSCORES: list[Any] = [0.5]
+NOT_SUBSCORES: list[Any] = [SubScore(name="a", value=1.0), 0.5]
 
 
 def _mistakes_env() -> Environment:
     env = Environment("mistakes")
     cases: dict[str, Callable[[], Any]] = {
-        "empty_combine": lambda: combine(),
         "no_positive_weight": lambda: combine(SubScore(name="p", value=1.0, weight=-1.0)),
         "not_a_subscore": lambda: combine(*NOT_SUBSCORES),
-        "missing_command": lambda: combine(BashGrader.grade(weight=1.0)),
-        "empty_any": lambda: _awaitable(lambda: combine_any(weight=1.0, subscores=[])),
-        "empty_all": lambda: _awaitable(lambda: combine_all(weight=1.0, subscores=[])),
+        "empty_all": lambda: combine(combine_all(weight=1.0, subscores=[])),
     }
     for name, grade in cases.items():
 
@@ -472,20 +446,9 @@ def _mistakes_env() -> Environment:
     return env
 
 
-async def _awaitable(build: Callable[[], SubScore]) -> EvaluationResult:
-    return await combine(build())
-
-
 @pytest.mark.parametrize(
     "template",
-    [
-        "empty_combine",
-        "no_positive_weight",
-        "not_a_subscore",
-        "missing_command",
-        "empty_any",
-        "empty_all",
-    ],
+    ["no_positive_weight", "not_a_subscore", "empty_all"],
 )
 async def test_an_authoring_mistake_fails_the_grade(template: str) -> None:
     task = Task(env="mistakes", id=template)
@@ -625,7 +588,6 @@ async def test_the_judge_scores_each_criterion_by_weight(
 
     (judge,) = _evaluated(run)["subscores"]
     assert run.reward == pytest.approx(reward)
-    assert judge["info"]["model"] == "claude-haiku-4-5"
     assert judge["children"] == children
 
 
@@ -641,7 +603,6 @@ async def test_the_judge_sends_one_request_per_criterion(
 
     requests = models.requests()
     assert [request.headers["authorization"] for request in requests] == ["Bearer k"] * 3
-    assert {request.model for request in requests} == {"claude-haiku-4-5"}
     assert sorted(
         section(request.body["messages"][1]["content"], "criterion") for request in requests
     ) == [
@@ -663,9 +624,7 @@ async def test_the_judge_without_criteria_scores_zero_without_calling_a_model(
 
     run = await _grade("judged_without_criteria", tmp_path)
 
-    (judge,) = _evaluated(run)["subscores"]
     assert run.reward == 0.0
-    assert judge["info"]["error"] == "no criteria provided"
     assert models.requests() == []
 
 

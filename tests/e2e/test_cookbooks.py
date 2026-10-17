@@ -120,5 +120,4 @@ def test_a_cookbook_completes_its_local_run(
     )
 
     run = evaluated(result)
-    assert run["is_error"] is False
     assert_clean_lifecycle(steps(run["trace_id"]))

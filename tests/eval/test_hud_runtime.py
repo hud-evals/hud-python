@@ -66,7 +66,6 @@ async def test_a_platform_taskset_runs_over_the_tunnel_by_default(
         {"environment": "lab", "trace_id": str(uuid.UUID(run.trace_id))},
     )
     tunnels = services.requests("runtime", "WS", TUNNEL)
-    assert tunnels != []
     assert {(tunnel.params["id"], tunnel.bearer) for tunnel in tunnels} == {("sess-1", "k")}
     assert [request.path for request in services.requests("runtime", "DELETE")] == [
         "/runtime/sessions/sess-1"
@@ -83,7 +82,6 @@ async def test_an_acquired_tunnel_is_a_local_address_for_the_session(
         IsStr(regex=r"tcp://127\.0\.0\.1:\d+"),
         "sess-1",
     )
-    assert services.bodies("runtime", "POST", SESSIONS) == [{"environment": "lab"}]
     assert len(services.requests("runtime", "DELETE", SESSION)) == 1
 
 

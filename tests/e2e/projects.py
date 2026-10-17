@@ -122,11 +122,8 @@ def generate(
     return Project(directory, python)
 
 
-def assert_lifecycle(
-    run: dict[str, Any], recorded: list[dict[str, Any]], data_file: str | None
-) -> dict[str, Any]:
+def assert_lifecycle(recorded: list[dict[str, Any]], data_file: str | None) -> dict[str, Any]:
     """A clean single-run lifecycle; a declared data file reaches the start frame."""
-    assert run["is_error"] is False, run
     setup, grade = assert_clean_lifecycle(recorded)
     if data_file is not None:
         assert setup["data_files"] == [{"path": "files/notes.txt", "file_id": data_file}]

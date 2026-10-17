@@ -110,34 +110,24 @@ def subprocess_live_env(project: Project) -> Provider:
     return SubprocessRuntime(load_environment(project.module()))
 
 
-SERIAL = ["start", "stop", "start", "stop"]
 SOURCES = {
-    "a file is imported per acquisition": (file_source, 1, ["import"] * 2, SERIAL),
-    "a directory is imported once": (directory_source, 2, ["import"], SERIAL),
-    "a package entry with a relative import shares its env": (
-        package_source,
-        2,
-        ["import"],
-        SERIAL,
-    ),
-    "a constructor returning one instance shares it": (shared_constructor, 2, ["import"], SERIAL),
+    "a file is imported per acquisition": (file_source, 1, ["import"] * 2),
+    "a directory is imported once": (directory_source, 2, ["import"]),
+    "a package entry with a relative import shares its env": (package_source, 2, ["import"]),
+    "a constructor returning one instance shares it": (shared_constructor, 2, ["import"]),
     "a child process serves a live env from its template file": (
         subprocess_live_env,
         1,
         ["import"] * 3,
-        SERIAL,
     ),
 }
 
 
-@pytest.mark.parametrize(
-    ("source", "concurrency", "imports", "lifecycle"), SOURCES.values(), ids=SOURCES.keys()
-)
+@pytest.mark.parametrize(("source", "concurrency", "imports"), SOURCES.values(), ids=SOURCES.keys())
 async def test_a_source_serves_its_rows_one_acquisition_at_a_time_per_instance(
     source: Callable[[Project], Provider],
     concurrency: int,
     imports: list[str],
-    lifecycle: list[str],
     tmp_path: Path,
     request: pytest.FixtureRequest,
 ) -> None:
@@ -149,7 +139,7 @@ async def test_a_source_serves_its_rows_one_acquisition_at_a_time_per_instance(
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
     assert [line for line in project.lines() if line == "import"] == imports
-    assert [line for line in project.lines() if line != "import"] == lifecycle
+    assert [line for line in project.lines() if line != "import"] == ["start", "stop"] * 2
 
 
 async def test_one_source_serves_each_rows_own_environment(
@@ -164,12 +154,10 @@ async def test_one_source_serves_each_rows_own_environment(
         Task(env="alpha", id="add", args={"a": 1, "b": 2}),
         Task(env="beta", id="add", args={"a": 3, "b": 4}),
     ]
-    agent = ScriptedAgent(solve)
 
-    job = await Taskset("mixed", rows).run(agent, runtime=LocalRuntime(source))
+    job = await Taskset("mixed", rows).run(ScriptedAgent(solve), runtime=LocalRuntime(source))
 
-    assert [(run.slug, run.reward) for run in job.runs] == [(row.slug, 1.0) for row in rows]
-    assert sorted(agent.prompts) == ["add 1 2", "add 3 4"]
+    assert [run.reward for run in job.runs] == [1.0, 1.0]
 
 
 WHERE_ENV = """

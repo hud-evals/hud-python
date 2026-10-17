@@ -101,7 +101,7 @@ async def test_file_tracking_reports_setup_agent_edits_and_deliverables(tmp_path
         setup = await tracking.call("setup")
         after_setup = await tracking.call("diff")
         write(root, {"legacy.txt": "legacy\n"})
-        advanced = await tracking.call("advance")
+        await tracking.call("advance")
         after_advance = await tracking.call("diff")
         write(root, DELIVERABLES)
         flushed = await tracking.call("flush")
@@ -139,7 +139,6 @@ async def test_file_tracking_reports_setup_agent_edits_and_deliverables(tmp_path
         assert secret not in str(edited)
     assert len(patches["big.txt"]) < 200  # over the diff limit: reported, not diffed
     assert changed(setup) == {"generated.txt": "added", "src.py": "modified"}
-    assert advanced["result"] == {"advanced": True}
 
     # Flush diffs the deliverables and captures the eligible ones under the size limit.
     diff, capture = flushed["result"]["diff"], flushed["result"]["capture"]

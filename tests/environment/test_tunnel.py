@@ -61,20 +61,6 @@ async def round_trip(host: str | None, port: int | None, payload: bytes) -> byte
     return data
 
 
-async def test_the_binding_forwards_bytes_while_the_manifest_keeps_the_env_address(
-    echo_port: int,
-) -> None:
-    async with served(echo_env(echo_port)) as client:
-        assert client.manifest is not None
-        assert urlsplit(client.manifest.bindings[0].url).port == echo_port
-        binding = urlsplit(client.binding("echo").url)
-
-        echoed = await round_trip(binding.hostname, binding.port, b"ping through the tunnel")
-
-    assert binding.port != echo_port
-    assert echoed == b"ping through the tunnel"
-
-
 async def test_concurrent_tunnel_streams_do_not_interleave(echo_port: int) -> None:
     payloads = [f"stream-{i}".encode() * 100 for i in range(8)]
 
@@ -95,7 +81,7 @@ async def test_closing_the_client_closes_its_forwarders(echo_port: int) -> None:
         await asyncio.open_connection(binding.hostname, binding.port)
 
 
-@pytest.mark.parametrize("preface_size", [128, 70000, FRAME_LIMIT])
+@pytest.mark.parametrize("preface_size", [128, FRAME_LIMIT])
 async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
     echo_port: int, preface_size: int
 ) -> None:

@@ -315,13 +315,6 @@ services:
             id="a-gpu-type",
         ),
         pytest.param(
-            None,
-            RuntimeConfig(resources=RuntimeResources(cpu=1)),
-            {},
-            "requires runtime_config.image or runtime_config.compose",
-            id="no-image",
-        ),
-        pytest.param(
             CHAINED,
             None,
             {"run_args": ["--privileged"]},

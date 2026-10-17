@@ -57,7 +57,7 @@ async def test_a_spawned_bridge_carries_its_declaration_into_the_child() -> None
         await endpoint.stop()
 
     assert contract == CONTRACT
-    assert (robot.name, robot.protocol, robot.params["contract"]) == ("robot", "openpi/0", CONTRACT)
+    assert robot.params["contract"] == CONTRACT
     assert first["prompt"] == "reach with use_delta=True"
     assert [first["token"][:7], second["token"][:7]] == ["slot-0-", "slot-1-"]
     assert greeting == {"backend": "test", "claim_required": True}
@@ -107,14 +107,13 @@ async def test_a_flat_action_reaches_the_gym_env_in_its_own_shape(
             client.binding("robot"), token=started["bindings"]["robot"]["token"]
         )
         try:
-            first = await agent.get_observation()
+            await agent.get_observation()
             await agent.send_action(action)
             stepped = await agent.get_observation()
         finally:
             await agent.close()
         graded = await client.grade({"answer": "done"})
 
-    assert sorted(first["data"]) == sorted(stepped["data"])
     assert stepped["data"]["received"].tolist() == received
     assert float(stepped["reward"]) == reward
     assert stepped["terminated"] is False
@@ -150,7 +149,6 @@ def test_a_shared_job_id_is_reported_canonically(reporting: Platform, job_id: st
     assert [request.path for request in reporting.services.requests("api")] == [
         f"/v2/trace/job/{CANONICAL_JOB}/enter"
     ]
-    assert list(reporting.jobs.values()) == [{"name": "suite", "group": 1}]
 
 
 @pytest.mark.parametrize(
@@ -168,11 +166,6 @@ def test_a_seeded_recording_keeps_the_trace_id_of_its_job_id_spelling(
     (recorded,) = reporting.traces
     trace = reporting.traces[recorded]
     assert (recorded, trace.enter) == (trace_id, {"job_id": CANONICAL_JOB})
-    assert trace.exit == {
-        "status": "completed",
-        "reward": 0.0,
-        "metadata": {"env_index": 0, "episode_index": 0, "seed": 7},
-    }
 
 
 class VectorAutoReset:

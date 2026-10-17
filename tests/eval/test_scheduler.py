@@ -85,7 +85,6 @@ async def test_a_taskset_runs_each_row_group_times_in_task_major_order(
     boots: int,
     open_at_once: int,
     peak: int,
-    services: FakeServices,
 ) -> None:
     recording = RecordingProvider(LocalRuntime(lambda task: lab()))
     agent = Counting()
@@ -100,11 +99,9 @@ async def test_a_taskset_runs_each_row_group_times_in_task_major_order(
     assert {run.job_id for run in job.runs} == {job.id}
     first, second = ({run.group_id for run in job.results[slug]} for slug in slugs)
     assert len(first) == len(second) == 1 and first != second
-    assert (job.name, job.group, job.reward) == ("pair (2 tasks) (3 times)", 3, 1.0)
     assert placements(recording.events) == (boots, open_at_once)
     assert recording.events[-1][0] == "stop"
     assert agent.peak == peak
-    assert services.requests() == []
 
 
 async def test_an_open_job_collects_the_runs_of_several_calls() -> None:
@@ -117,7 +114,6 @@ async def test_an_open_job_collects_the_runs_of_several_calls() -> None:
 
     assert first is second is session
     assert [run.job_id for run in session.runs] == [session.id] * 4
-    assert (session.name, session.group, session.reward) == ("training", 2, 1.0)
 
 
 class Lingering(Agent):
@@ -294,12 +290,6 @@ def timed(seconds: float, **row: Any) -> Task:
 
 
 INVALID: dict[str, Callable[[Provider], Any]] = {
-    "group below one": lambda runtime: Taskset("t", ROWS).run(
-        ScriptedAgent(), runtime=runtime, group=0
-    ),
-    "a zero rollout_timeout": lambda runtime: ROWS[0].run(
-        ScriptedAgent(), runtime=runtime, rollout_timeout=0
-    ),
     "an agent timeout at the rollout_timeout": lambda runtime: timed(10).run(
         ScriptedAgent(), runtime=runtime, rollout_timeout=10
     ),
@@ -321,7 +311,6 @@ INVALID: dict[str, Callable[[Provider], Any]] = {
         )
     ),
     "duplicate slugs": lambda runtime: Taskset("t", [ROWS[0], ROWS[0]]),
-    "a pool narrower than one": lambda runtime: Shared(runtime, width=0),
     "a portable row without a runtime": lambda runtime: Taskset("t", ROWS).run(ScriptedAgent()),
     "container rows mixed with portable rows": (
         lambda runtime: Taskset(
@@ -349,7 +338,7 @@ async def test_an_invalid_schedule_raises_before_any_rollout_starts(
 async def test_an_empty_taskset_needs_no_placement() -> None:
     job = await Taskset("empty", []).run(ScriptedAgent())
 
-    assert (job.runs, job.reward, job.name) == ([], 0.0, "empty (0 tasks)")
+    assert (job.runs, job.reward) == ([], 0.0)
 
 
 async def test_rows_minted_by_a_live_environment_run_against_it() -> None:

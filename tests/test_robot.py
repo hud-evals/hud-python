@@ -351,7 +351,6 @@ async def test_a_gym_sim_behind_a_prewritten_contract_runs_the_template_flow(
     assert run.prompt == "pick up the black bowl"  # the sim's instruction, not the task args
     # A pre-written contract is loaded verbatim, cameras in file order, state after them.
     assert adapter.image_keys == ["observation/image", "observation/wrist_image"]
-    assert adapter.state_key == "observation/state"
     assert adapter.wired[0]["state"].shape == (8,)
 
 

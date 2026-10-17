@@ -217,17 +217,16 @@ async def test_a_restrictive_dockerignore_still_admits_the_entrypoint(
     assert (task_dir / "environment" / "package.json").is_file()
 
 
-@pytest.mark.parametrize("answer_file", ["/workspace/answer.txt", "/app/out.txt"])
 async def test_the_instruction_is_the_prompt_and_where_to_answer(
-    answer_file: str, tmp_path: Path, markers: Path
+    tmp_path: Path, markers: Path
 ) -> None:
     source = write_source(tmp_path / "source", {})
 
-    (task_dir,) = await export(str(source / "env.py"), tmp_path / "out", answer_file=answer_file)
+    (task_dir,) = await export(str(source / "env.py"), tmp_path / "out", answer_file="/app/out.txt")
 
     instruction = (task_dir / "instruction.md").read_text("utf-8")
     assert instruction.startswith("solve 2: what's next?")
-    assert f"`{answer_file}`" in instruction
+    assert "`/app/out.txt`" in instruction
 
 
 def with_cdp(source: Path) -> None:

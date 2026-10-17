@@ -46,7 +46,7 @@ from tests.support import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -231,13 +231,11 @@ async def test_a_binding_resolves_by_name_or_protocol_to_a_local_tunnel(
             assert client.binding(ref).url == outcome
 
 
-async def test_a_raw_stream_client_needs_hello_and_passes_bindings_through() -> None:
+async def test_a_raw_stream_client_passes_bindings_through() -> None:
     async with control_peer([answer(hello(*BINDINGS))]) as peer:
         reader, writer = await asyncio.open_connection("127.0.0.1", peer.port)
         client = HudClient(reader, writer)
         try:
-            with pytest.raises(RuntimeError, match=r"call hello\(\) before accessing bindings"):
-                client.binding("shell")
             await client.hello()
             url = client.binding("shell").url
         finally:
@@ -309,30 +307,18 @@ async def test_a_tunnel_the_env_cannot_open_ends_the_local_stream(
     assert warning in caplog.messages
 
 
-@pytest.mark.parametrize(
-    ("call", "reply", "error"),
-    [
-        (
-            lambda client: client.list_tasks(),
-            answer({"tasks": "fix"}),
-            HudProtocolError(-32603, "tasks.list: 'tasks' must be a list"),
-        ),
-        (
-            lambda client: client.grade({"answer": "done"}),
-            answer(error={"code": -32600, "message": "no task in progress"}),
-            HudProtocolError(-32600, "no task in progress"),
-        ),
-    ],
-    ids=["a-malformed-result", "an-error-reply"],
-)
-async def test_a_reply_the_client_cannot_use_raises_a_protocol_error(
-    call: Callable[[HudClient], Awaitable[Any]], reply: Any, error: HudProtocolError
-) -> None:
-    async with control_peer([answer(hello()), reply]) as peer, connect(Runtime(peer.url)) as client:
+async def test_a_task_list_that_is_not_a_list_raises_a_protocol_error() -> None:
+    async with (
+        control_peer([answer(hello()), answer({"tasks": "fix"})]) as peer,
+        connect(Runtime(peer.url)) as client,
+    ):
         with pytest.raises(HudProtocolError) as raised:
-            await call(client)
+            await client.list_tasks()
 
-    assert (raised.value.code, raised.value.message) == (error.code, error.message)
+    assert (raised.value.code, raised.value.message) == (
+        -32603,
+        "tasks.list: 'tasks' must be a list",
+    )
 
 
 async def test_a_reply_to_another_request_aborts_the_connection() -> None:

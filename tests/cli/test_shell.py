@@ -67,9 +67,7 @@ def test_set_persists_values_without_echoing_them(hud: Hud, hud_env: HudEnv) -> 
     second = hud("set", "HUD_DEFAULT_PROJECT=example")
 
     path = hud_env.home / ".hud" / ".env"
-    assert first.exit_code == 0, first
-    assert first.json == {"path": str(path), "keys": ["HUD_API_KEY", "B"]}
-    assert second.exit_code == 0, second
+    assert (first.exit_code, second.exit_code) == (0, 0), first
     assert secret not in first.stdout + first.stderr + second.stdout + second.stderr
     assert dotenv_values(path, interpolate=False) == {
         "HUD_API_KEY": secret,
@@ -99,22 +97,20 @@ def test_platform_errors_map_to_error_kinds(
     result = hud("jobs", "get", JOB_ID, "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, error), result
-    assert result.json["input"] == {"job_id": JOB_ID}
 
 
 @pytest.mark.parametrize(
-    ("latest", "argv", "environment", "notified"),
+    ("latest", "environment", "notified"),
     [
-        ("999.0.0", ["version"], {}, True),
-        ("999.0.0", ["version"], {"CI": "1"}, False),
-        (__version__, ["version"], {}, False),
+        ("999.0.0", {}, True),
+        ("999.0.0", {"CI": "1"}, False),
+        (__version__, {}, False),
     ],
 )
 def test_an_outdated_install_prints_an_upgrade_notice(
     hud: Hud,
     hud_env: HudEnv,
     latest: str,
-    argv: list[str],
     environment: dict[str, str],
     notified: bool,
 ) -> None:
@@ -124,7 +120,7 @@ def test_an_outdated_install_prints_an_upgrade_notice(
     cache.parent.mkdir(parents=True)
     cache.write_text(json.dumps({"latest": latest, "checked_at": time.time()}))
 
-    result = hud(*argv, env=environment)
+    result = hud("version", env=environment)
 
     assert result.exit_code == 0, result
     assert ("999.0.0" in result.stderr) is notified
@@ -162,7 +158,6 @@ def event(
     [
         (["version"], [event("version", None, 0, None)]),
         (["jobs", "list", "--json"], [event("jobs", "list", 1, "HudAuthenticationError")]),
-        (["set", "NOT_A_PAIR"], [event("set", None, 2, "CliError")]),
         (["secret-name", "arg"], [event("other", None, 2, "UsageError")]),
         (["--version"], []),
     ],

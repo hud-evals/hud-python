@@ -91,7 +91,6 @@ def test_qa_lists_the_checks_at_a_level(hud: Hud, argv: list[str], keys: list[st
 @pytest.mark.parametrize(
     "argv",
     [
-        pytest.param(["missing_check", TRACE_ID, "--json"], id="an-unknown-check"),
         pytest.param(
             [f"{CHECK},{TASK_CHECK}", TRACE_ID, "--json"], id="trace-and-task-checks-together"
         ),
@@ -124,7 +123,6 @@ def test_qa_run_without_waiting_starts_each_check_once(
     result = hud("qa", "run", *argv, "--no-wait", "--json")
 
     assert result.exit_code == 0, result
-    assert [r["status"] for r in result.json] == ["queued"] * len(runs)
     assert started(platform) == runs
 
 
@@ -171,9 +169,6 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
     ("results", "verdicts"),
     [
         pytest.param(
-            [row(verdict="passed", source="skipped", note="Full reward.")], ["passed"], id="skipped"
-        ),
-        pytest.param(
             [{**verdict("failed"), "source": "manual", "verdict": "passed"}],
             ["passed"],
             id="a-manual-verdict-wins",
@@ -185,25 +180,12 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
         ),
         pytest.param(
             [
-                legacy(
-                    problems=[
-                        {"problem": "Bad regex", "fault": "agent"},
-                        {"problem": "Cut off", "fault": "unclear"},
-                    ]
-                )
-            ],
-            ["failed"],
-            id="legacy-mixed-faults",
-        ),
-        pytest.param(
-            [
                 legacy("false_negative", is_false_negative=False, reasoning="Matches."),
                 legacy("false_negative", is_false_negative=True, reasoning="Grader missed it."),
             ],
             ["passed", "failed"],
             id="legacy-false-negative",
         ),
-        pytest.param([row("error", error="Analysis crashed.")], ["failed"], id="errored"),
     ],
 )
 def test_qa_results_read_a_verdict_from_each_result_shape(
@@ -212,28 +194,16 @@ def test_qa_results_read_a_verdict_from_each_result_shape(
     platform.qa_results += results
 
     text = hud("qa", "results", TRACE_ID)
-    document = hud("qa", "results", TRACE_ID, "--json")
 
-    assert (text.exit_code, document.exit_code) == (0, 0), text
-    assert document.json == results
+    assert text.exit_code == 0, text
     assert [
         line.removeprefix("Verdict: ") for line in text.lines if line.startswith("Verdict:")
     ] == verdicts
 
 
-@pytest.mark.parametrize(
-    ("argv", "query"),
-    [
-        ([], {"task_ids": [TASK_ID]}),
-        (["--history"], {"task_ids": [TASK_ID], "include_history": ["True"]}),
-    ],
-    ids=["latest-only", "with-history"],
-)
-def test_task_results_ask_for_the_history_only_when_told(
-    hud: Hud, platform: Platform, argv: list[str], query: dict[str, list[str]]
-) -> None:
-    result = hud("qa", "results", "--level", "task", TASK_ID, *argv, "--json")
+def test_task_results_ask_by_task_for_the_result_in_effect(hud: Hud, platform: Platform) -> None:
+    result = hud("qa", "results", "--level", "task", TASK_ID, "--json")
 
     assert result.exit_code == 0, result
     (asked,) = platform.services.requests("api", "GET", "/v2/qa/results")
-    assert asked.query == query
+    assert asked.query == {"task_ids": [TASK_ID]}

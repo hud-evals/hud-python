@@ -11,22 +11,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
-from hud.agents.base import Agent
-from hud.agents.types import (
-    ClaudeConfig,
-    GeminiConfig,
-    OpenAIChatConfig,
-    OpenAIConfig,
-    SubagentStep,
-)
-from hud.types import Trace
+from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
 from tests.support import Turn, run_task, steps, workspace_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from hud.eval import Run
+    from hud.agents.base import Agent
     from tests.support import HudEnv, Models
 
 WEB = "https://example.com/sky"
@@ -208,11 +200,3 @@ async def test_a_chat_completion_with_token_ids_exports_its_training_sample(
         "output_token_ids": [3, 4],
         "output_logprobs": [-0.5, -0.25],
     }
-
-
-class Delegating(Agent):
-    """Records a nested rollout the way a delegating agent reports one."""
-
-    async def __call__(self, run: Run) -> None:
-        run.record(SubagentStep(subagent=Trace(content="inner answer", status="completed")))
-        run.trace.content = "outer answer"

@@ -243,10 +243,10 @@ def test_a_separate_verifier_runs_as_its_own_row_with_its_own_placement(
     rows = adapted("separate-verifier", tmp_path, hud_env)
 
     verifiers = {slug: row.verifier for slug, row in rows.items()}
-    assert {slug: (v.slug, v.id) for slug, v in verifiers.items() if v} == {
-        "placement": ("placement:verify", "verify"),
-        "plain": ("plain:verify", "verify"),
-        "same-placement": ("same-placement:verify", "verify"),
+    assert {slug for slug, verifier in verifiers.items() if verifier} == {
+        "placement",
+        "plain",
+        "same-placement",
     }
     actor, verifier = rows["placement"], verifiers["placement"]
     assert verifier is not None

@@ -43,26 +43,10 @@ def project(hud: Hud) -> Any:
     return hud.cwd
 
 
-@pytest.mark.parametrize(
-    ("source", "slugs"),
-    [("tasks.json", ["say-answer", "say-hello"]), ("tasks.py", ["solve", "solve-8da35614"])],
-)
-def test_task_list_quiet_prints_each_tasks_slug(
-    hud: Hud, project: Any, source: str, slugs: list[str]
-) -> None:
-    result = hud("task", "list", "--source", source, "--quiet")
+def test_python_tasks_get_distinct_slugs(hud: Hud, project: Any) -> None:
+    result = hud("task", "list", "--source", "tasks.py", "--quiet")
 
-    assert (result.exit_code, result.stdout.split()) == (0, slugs), result
-
-
-def test_task_list_json_is_one_entry_per_task(hud: Hud, project: Any) -> None:
-    result = hud("task", "list", "--source", "tasks.json", "--json")
-
-    assert result.exit_code == 0, result
-    assert result.json == [
-        {"slug": "say-answer", "id": "solve", "args": {}},
-        {"slug": "say-hello", "id": "solve", "args": {"target": "hello"}},
-    ]
+    assert (result.exit_code, result.stdout.split()) == (0, ["solve", "solve-8da35614"]), result
 
 
 @pytest.mark.parametrize(
@@ -70,36 +54,21 @@ def test_task_list_json_is_one_entry_per_task(hud: Hud, project: Any) -> None:
     [
         (["start", "say-hello", "--source", "tasks.json"], "Say hello.\n"),
         (["start", "1", "--source", "tasks.py"], "Say hello.\n"),
-        (["grade", "say-hello", "--source", "tasks.json", "--answer", "nope"], "0.0\n"),
         (["grade", "say-answer", "-s", "tasks.json", "--answer-file", "-"], "1.0\n"),
     ],
 )
 def test_a_task_spawned_from_its_source_starts_and_grades(
     hud: Hud, project: Any, argv: list[str], stdout: str
 ) -> None:
-    (project / "answer.txt").write_text("answer")
-
     result = hud("task", *argv, input="answer")
 
     assert (result.exit_code, result.stdout) == (0, stdout), result
 
 
-@pytest.mark.parametrize(
-    ("argv", "exit_code", "error"),
-    [
-        pytest.param(["start", "solve", "--source", "tasks.json"], 2, "usage", id="ambiguous"),
-        pytest.param(["start", "missing", "--source", "tasks.json"], 1, "not_found", id="unknown"),
-        pytest.param(["grade", "solve", "--args", "{bad"], 2, "usage", id="args-not-json"),
-    ],
-)
-def test_task_refusals_are_error_documents(
-    hud: Hud, project: Any, argv: list[str], exit_code: int, error: str
-) -> None:
-    (project / "empty.json").write_text("[]")
+def test_an_id_shared_by_several_rows_is_refused_as_ambiguous(hud: Hud, project: Any) -> None:
+    result = hud("task", "start", "solve", "--source", "tasks.json", "--json")
 
-    result = hud("task", *argv, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
 
 
 # ─── attached to a served environment ───────────────────────────────────

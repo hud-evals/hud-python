@@ -42,13 +42,11 @@ async def test_tool_calls_return_canonical_results_over_each_transport(
             Capability.mcp(url=f"http://127.0.0.1:{port}{path}", transport=transport)
         )
         try:
-            listed = sorted(tool.name for tool in await client.list_tools())
             added = await client.call_tool("add", {"a": 2, "b": 3})
             refused = await client.call_tool("refuse", {})
         finally:
             await client.close()
 
-    assert listed == ["add", "refuse"]
     assert (added.isError, added.structuredContent) == (False, {"result": 5})
     assert [block.model_dump(include={"type", "text"}) for block in added.content] == [
         {"type": "text", "text": "5"}

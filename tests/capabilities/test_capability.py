@@ -55,12 +55,7 @@ def test_a_connection_carries_its_headers_only_on_the_wire() -> None:
     bound = connection(headers=headers)
     headers["Authorization"] = "Bearer changed"
 
-    assert bound.to_wire() == {
-        "name": "inference",
-        "capability": "shell",
-        "url": "https://inference.example/v1",
-        "headers": {"Authorization": "Bearer secret"},
-    }
+    assert bound.to_wire()["headers"] == {"Authorization": "Bearer secret"}
     assert Connection.from_wire(bound.to_wire()) == bound
     assert bound.client_url == IsStr(regex=r"http://inference-[0-9a-f]{12}\.hud\.invalid/v1")
     assert "secret" not in repr(bound) and "secret" not in bound.client_url

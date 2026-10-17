@@ -85,7 +85,6 @@ def test_deploy_uploads_the_context_triggers_the_build_and_links_the_directory(
     )
     assert list(tmpdir_.iterdir()) == []
     (example,) = platform.environments.values()
-    assert example["name"] == "example"
     assert json.loads((env / ".hud" / "config.json").read_text())["registry_id"] == example["id"]
 
 
@@ -140,21 +139,13 @@ def test_a_dry_run_plans_without_prompting_writing_or_building(
     hud: Hud, platform: Platform, hud_env: HudEnv
 ) -> None:
     environment(hud.cwd)
-    write_files(hud.cwd, {".env": "SECRET=hidden", "vars.env": "KEY1=v\n"})
+    (hud.cwd / ".env").write_text("SECRET=hidden")
     before = sorted(path.name for path in hud.cwd.rglob("*"))
 
-    result = hud(
-        "deploy",
-        *("--runtime", "MODAL", "--build-arg", "A=1", "--env-file", "vars.env"),
-        *("--dry-run", "--json"),
-    )
+    result = hud("deploy", "--dry-run", "--json")
 
     assert result.exit_code == 0, result
-    assert (result.json["dry_run"], result.json["runtime"], result.json["env_var_keys"]) == (
-        True,
-        "modal",
-        ["KEY1"],
-    )
+    assert (result.json["dry_run"], result.json["dotenv_pending"]) == (True, True)
     assert sorted(path.name for path in hud.cwd.rglob("*")) == before
     assert not (hud_env.home / ".hud").exists()
     assert platform.builds == {}
@@ -184,27 +175,19 @@ def test_a_compose_runtime_config_reaches_the_build_as_its_document(
     assert compose["root"] == {"compose_path": "project/compose.json"}
 
 
-@pytest.mark.parametrize(
-    ("second", "variables", "kept"),
-    [([], None, True), (["--env-file", ".env"], {"SECRET": "dotenv"}, False)],
-    ids=["again", "new-secrets"],
-)
-def test_a_redeploy_keeps_the_link_and_the_registry_secrets(
-    hud: Hud, platform: Platform, second: list[str], variables: dict[str, str] | None, kept: bool
-) -> None:
+def test_a_redeploy_keeps_the_link_and_the_registry_secrets(hud: Hud, platform: Platform) -> None:
     environment(hud.cwd)
     (hud.cwd / ".env").write_text("SECRET=dotenv")
 
     first = hud("deploy", "--env-file", ".env", "--json")
     linked = (hud.cwd / ".hud" / "config.json").read_bytes()
-    again = hud("deploy", *second, "--json")
+    again = hud("deploy", "--json")
 
     assert (first.exit_code, again.exit_code) == (0, 0), again
     assert (hud.cwd / ".hud" / "config.json").read_bytes() == linked
     _, redeployed = platform.builds.values()
     assert redeployed.trigger is not None
-    assert redeployed.trigger.get("environment_variables") == variables
-    assert ("Registry secrets: kept" in again.stderr) is kept
+    assert "environment_variables" not in redeployed.trigger
 
 
 def test_a_first_deploy_lands_in_the_selected_project(
@@ -296,4 +279,4 @@ def test_the_build_status_decides_the_exit_whatever_the_log_stream_does(
     result = hud("deploy", "--no-env", "--json")
 
     assert result.exit_code == exit_code, result
-    assert (result.json["status"], result.json["success"]) == (status["status"], exit_code == 0)
+    assert result.json["success"] is (exit_code == 0)

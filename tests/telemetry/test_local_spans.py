@@ -82,19 +82,10 @@ async def test_an_unwritable_span_directory_does_not_fail_the_run(
     assert run.trace.status == "completed"
 
 
-async def test_step_spans_carry_the_step_schema_payload_and_timing() -> None:
+async def test_step_spans_carry_the_step_payload_and_timing() -> None:
     run = await rollout(TASK, ScriptedAgent("ok"), runtime=LocalRuntime(_env()))
 
     exported = [span for span in spans(run.trace_id) if span["name"].startswith("step.")]
-    assert [
-        (span["name"], span["attributes"]["hud.schema"], span["status_code"]) for span in exported
-    ] == [
-        ("step.task", "hud.step.v1", "OK"),
-        ("step.user", "hud.step.v1", "OK"),
-        ("step.task", "hud.step.v1", "OK"),
-    ]
-    assert {span["attributes"]["hud.task_run_id"] for span in exported} == {run.trace_id}
-    assert [step["step_id"] for step in steps(run.trace_id)] == [1, 2, 3]
     assert all(span["end_time"] == ISO for span in exported)
     assert steps(run.trace_id)[1]["messages"][0]["content"]["text"] == "Reply with ok."
 

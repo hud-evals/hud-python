@@ -106,38 +106,33 @@ STREAMED = {
     "captured": ["report.pdf"],
     "skipped": 0,
 }
-CASES: dict[str, tuple[Callable[[Path], Environment], dict[str, bytes], str, dict[str, Any]]] = {
+CASES: dict[str, tuple[Callable[[Path], Environment], dict[str, bytes], dict[str, Any]]] = {
     "a tracked workspace streams setup, a snapshot, diffs and its deliverables": (
         tracked,
         NOTES,
-        "1",
         STREAMED,
     ),
     "a server without setup diffs starts from a snapshot": (
         legacy,
         NOTES,
-        "1",
         {key: value for key, value in STREAMED.items() if key != "setup"},
     ),
     "a deliverable too large to capture is still reported": (
         tracked,
         {"huge.pdf": b"%PDF" + b"0" * (6 * 1024 * 1024)},
-        "1",
         STREAMED | {"changed": ["huge.pdf"], "captured": [], "skipped": 1},
     ),
     "a large workspace snapshot arrives whole": (
         lambda root: tracked(root, seed=1500),
         {},
-        "1",
         {"setup": 1501, "snapshot": 1501},
     ),
     "an untracked workspace exports nothing": (
         lambda root: tracked(root, track_files=False),
         NOTES,
-        "1",
         {},
     ),
-    "a tracker that cannot be reached exports nothing": (unreachable, NOTES, "1", {}),
+    "a tracker that cannot be reached exports nothing": (unreachable, NOTES, {}),
 }
 ORDER = ["setup", "snapshot", "changed", "captured"]
 SPAN_NAMES = {
@@ -148,20 +143,17 @@ SPAN_NAMES = {
 }
 
 
-@pytest.mark.parametrize(
-    ("build", "files", "telemetry", "summary"), CASES.values(), ids=CASES.keys()
-)
+@pytest.mark.parametrize(("build", "files", "summary"), CASES.values(), ids=CASES.keys())
 async def test_a_tracked_rollout_exports_what_changed_in_its_workspace(
     build: Callable[[Path], Environment],
     files: dict[str, bytes],
-    telemetry: str,
     summary: dict[str, Any],
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "ws"
     hud_env.set(
-        HUD_TELEMETRY_ENABLED=telemetry,
+        HUD_TELEMETRY_ENABLED="1",
         HUD_TELEMETRY_LOCAL_DIR=str(tmp_path / "spans"),
         HUD_FILE_TRACKING_INTERVAL="0.05",
     )

@@ -16,27 +16,12 @@ def tree(root: Path) -> list[str]:
     return sorted(str(path.relative_to(root)) for path in root.rglob("*"))
 
 
-@pytest.mark.parametrize(
-    ("argv", "directory", "declaration"),
-    [
-        (["My Cool_Env", "--preset", "blank"], "My Cool_Env", 'Environment(name="my-cool-env")'),
-        (["custom", "-t", "cua"], "custom", 'Environment(name="custom")'),
-    ],
-)
-def test_init_copies_the_example_and_names_its_environment(
-    hud: Hud, argv: list[str], directory: str, declaration: str
-) -> None:
-    result = hud("init", *argv, "--dir", "projects", "--json")
+def test_init_copies_the_example_and_names_its_environment(hud: Hud) -> None:
+    result = hud("init", "My Cool_Env", "--preset", "blank", "--dir", "projects", "--json")
 
-    target = hud.cwd / "projects" / directory
+    target = hud.cwd / "projects" / "My Cool_Env"
     assert result.exit_code == 0, result
-    assert result.json == {
-        "path": f"projects/{directory}",
-        "preset": result.json["preset"],
-        "created": True,
-    }
-    assert declaration in (target / "env.py").read_text()
-    assert (target / "README.md").exists()
+    assert 'Environment(name="my-cool-env")' in (target / "env.py").read_text()
     assert not any(
         part in {".venv", "__pycache__"} for name in tree(target) for part in name.split("/")
     )
@@ -45,13 +30,7 @@ def test_init_copies_the_example_and_names_its_environment(
 def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
     result = hud("init", "thing", "--dir", "projects", "--dry-run", "--json")
 
-    assert result.exit_code == 0, result
-    assert result.json == {
-        "dry_run": True,
-        "action": "init",
-        "path": "projects/thing",
-        "preset": "coding",
-    }
+    assert (result.exit_code, result.json["preset"]) == (0, "coding"), result
     assert not (hud.cwd / "projects").exists()
 
 

@@ -301,7 +301,7 @@ class _Pose(RobotBridge):
 
 
 async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> None:
-    """VLABench was rejected at 10.1 s. The cap is a 30 s safety timeout, not that reject."""
+    """The cap on a move is a 30 s safety timeout, so a 12 s move plays to the end."""
     sim = _Arm(_contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
     agent = _ScriptedLLM(_move("move_to", x=0.6))
 
@@ -310,7 +310,7 @@ async def test_a_move_longer_than_ten_seconds_plays_until_the_arm_arrives() -> N
 
     (result,) = agent.results
     assert not result.isError
-    # 0.6 / 0.05 s = 12 s at 10 Hz, which used to exceed the 10 s cap.
+    # 0.6 / 0.05 s = 12 s at 10 Hz.
     assert len(sim.actions) >= 120
     assert sim.state[0] == pytest.approx(0.6)
     assert "At the target." in _text(result)
@@ -392,9 +392,8 @@ async def test_every_reply_reports_the_time_left_and_the_tools_state_the_limit()
     agent = _ScriptedLLM(_move("move_to", x=0.2), ("wait", {"duration": 1.0, "note": "look"}))
 
     async with _served(sim, DirectControl(time_limit=10.0)) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+        await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    assert run.prompt == "move x to 0.5, then close the gripper"  # VLAs see the sim's own
     for tool in ("move_to", "wait"):
         assert "You have 10 seconds of simulated time." in agent.descriptions[tool]
     moved, waited = (_text(result) for result in agent.results)

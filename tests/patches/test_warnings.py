@@ -1,12 +1,12 @@
-"""Regression tests for the ``authlib.jose`` deprecation-warning suppression.
+"""The ``authlib.jose`` deprecation-warning suppression.
 
 ``authlib.deprecate`` runs ``warnings.simplefilter("always", AuthlibDeprecationWarning)``
 at import time, prepending an "always" filter to ``warnings.filters``. If
 ``suppress_known_import_warnings`` installs its "ignore" filter before authlib's
 module is imported, authlib's filter lands ahead of ours and wins (the machinery
 applies the first matching filter), so ``authlib.jose module is deprecated`` leaks
-on every CLI launch. The fix imports ``authlib.deprecate`` first so our filter stays
-ahead, and scopes the filter narrowly so nothing else is silenced.
+on every CLI launch. The suppression imports ``authlib.deprecate`` first so our filter
+stays ahead, and scopes the filter narrowly so nothing else is silenced.
 
 Filters are process-global and the breakage is purely about import order, so the
 checks run in a fresh subprocess. The suppression module is loaded in isolation to

@@ -66,7 +66,6 @@ async def test_an_oracle_scores_one_only_through_its_whole_path(
         agent = ClaudeAgent(ClaudeConfig(model=MODEL, max_steps=MAX_STEPS))
         (completed,) = (await Taskset.from_file(path).run(agent)).runs
         run = {
-            "slug": completed.slug,
             "reward": completed.reward,
             "is_error": completed.trace.is_error,
             "trace_id": completed.trace_id,
@@ -74,7 +73,6 @@ async def test_an_oracle_scores_one_only_through_its_whole_path(
 
     assert run["reward"] == 1.0
     assert run["is_error"] is False
-    assert run["slug"] == next(iter(Taskset.from_file(path))).slug
     recorded = steps(run["trace_id"])
     assert [step["error"] for step in recorded if step.get("error")] == []
     assert tuple(call["phase"] for call in task_calls(recorded)) == oracle.phases

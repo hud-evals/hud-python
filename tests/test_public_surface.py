@@ -1,4 +1,4 @@
-"""The names each package exports, and the CLI's identity."""
+"""The names each package exports."""
 
 from __future__ import annotations
 

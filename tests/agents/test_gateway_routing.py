@@ -74,23 +74,23 @@ def serve_catalog(platform: Platform) -> None:
 
 ROUTES = {
     "create-agent-shortcut": (
-        lambda _url: create_agent("openai"),
+        lambda: create_agent("openai"),
         ("responses", "gpt-5.6", f"Bearer {API_KEY}"),
     ),
     "create-agent-claude": (
-        lambda _url: create_agent("claude"),
+        lambda: create_agent("claude"),
         ("anthropic", "claude-sonnet-4-6", API_KEY),
     ),
     "create-agent-catalog-id": (
-        lambda _url: create_agent("ft:custom-123"),
+        lambda: create_agent("ft:custom-123"),
         ("chat", "gpt-5.5", f"Bearer {API_KEY}"),
     ),
     "create-agent-catalog-name-any-case": (
-        lambda _url: create_agent("minimax-m3"),
+        lambda: create_agent("minimax-m3"),
         ("chat", "MiniMax-M3", f"Bearer {API_KEY}"),
     ),
     "reloaded-gateway-agent": (
-        lambda _url: OpenAIAgent.load(create_agent("openai").dump()),
+        lambda: OpenAIAgent.load(create_agent("openai").dump()),
         ("responses", "gpt-5.6", f"Bearer {API_KEY}"),
     ),
 }
@@ -98,7 +98,7 @@ ROUTES = {
 
 @pytest.mark.parametrize(("build", "expected"), ROUTES.values(), ids=ROUTES.keys())
 async def test_an_agent_reaches_its_model_with_the_credential_its_routing_chose(
-    build: Callable[[str], Agent],
+    build: Callable[[], Agent],
     expected: tuple[str, str, str],
     platform: Platform,
     models: Models,
@@ -114,7 +114,7 @@ async def test_an_agent_reaches_its_model_with_the_credential_its_routing_chose(
     serve_catalog(platform)
     models.script([say("done")])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), build(models.url))
+    run = await run_task(workspace_env(tmp_path / "ws"), build())
 
     (request,) = models.requests()
     credential = (
@@ -146,16 +146,11 @@ def test_create_agent_needs_a_hud_api_key() -> None:
         create_agent("openai")
 
 
-@pytest.mark.parametrize(
-    "credentials", [{"api_key": "provider-key"}, {"base_url": "https://provider.example"}]
-)
-def test_create_agent_refuses_provider_credentials(
-    credentials: dict[str, Any], hud_env: HudEnv
-) -> None:
+def test_create_agent_refuses_provider_credentials(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="hud-key")
 
     with pytest.raises(ValueError, match="instantiate the provider agent directly"):
-        create_agent("openai_compatible", **credentials)
+        create_agent("openai_compatible", base_url="https://provider.example")
 
 
 def test_create_agent_names_close_matches_for_an_unknown_model(platform: Platform) -> None:

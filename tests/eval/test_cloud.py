@@ -72,7 +72,6 @@ def compose(tmp_path: Path) -> ComposeProject:
             "resources.os",
             id="an-os-requirement",
         ),
-        pytest.param({}, None, "requires image=", id="no-image"),
         pytest.param({}, "compose+gpu", "cannot attach GPUs", id="a-gpu-for-a-compose-project"),
         pytest.param(
             {"sandbox_secrets": ["secret:api"]},

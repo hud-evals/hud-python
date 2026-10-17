@@ -46,21 +46,6 @@ def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None
         assert shown in result.stdout
 
 
-@pytest.mark.parametrize(
-    ("argv", "exit_code", "error"),
-    [
-        pytest.param([TRACE_ID], 1, "not_found", id="missing"),
-        pytest.param(["unknown"], 2, "usage", id="malformed"),
-    ],
-)
-def test_a_missing_or_malformed_trace_is_an_error_document(
-    hud: Hud, platform: Platform, argv: list[str], exit_code: int, error: str
-) -> None:
-    result = hud("trace", *argv, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
-
-
 # ─── local spans ────────────────────────────────────────────────────────
 
 

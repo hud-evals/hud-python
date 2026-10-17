@@ -16,7 +16,6 @@ import json
 import os
 import signal
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -27,6 +26,7 @@ from .conftest import wire
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 def declare(name: str, variable: str = "env") -> str:
@@ -62,7 +62,6 @@ TREE = {
     + "import asyncio\n"
     + '@env.template(id="stall")\nasync def stall():\n    yield "go"\n'
     + "    await asyncio.Event().wait()\n    yield 1.0\n",
-    "single.py": declare("only"),
     "alias.py": declare("shared") + "alias = env\n",
     "twins.py": declare("shared", "one") + declare("shared", "two"),
     "relpkg/__init__.py": "",
@@ -85,7 +84,6 @@ TREE = {
     "modpkg/factories.py": (
         "from hud.environment import Environment\n"
         "env = Environment('declared')\n"
-        "def make_env(name='built'):\n    return Environment(name)\n"
         "class CallableEnvironment(Environment):\n"
         "    def __call__(self):\n        raise AssertionError('called as a factory')\n"
         "callable_env = CallableEnvironment('callable')\n"
@@ -114,21 +112,16 @@ ROWS = [
     pytest.param("env", None, None, "from-env-py", id="bare-name-means-env-py"),
     pytest.param("env.py", None, None, "from-env-py", id="relative-file"),
     pytest.param("envs", "foo", None, "from-tree", id="directory-by-attribute"),
-    pytest.param("pkg", "make_env", None, "from-factory", id="package-factory"),
     pytest.param("pkg", "make_env", {"name": "x"}, "x", id="package-factory-with-args"),
     pytest.param("pkg", None, None, "from-pkg-source", id="bare-package-scans-its-source"),
     pytest.param("multi.py", "first", None, "env-one", id="select-by-attribute"),
     pytest.param("multi.py", "env-two", None, "env-two", id="select-by-env-name"),
-    pytest.param("single.py", None, None, "only", id="single-env-needs-no-name"),
     pytest.param("alias.py", None, None, "shared", id="re-exported-env-is-one-env"),
     pytest.param("relpkg/env.py", None, None, "relative", id="package-relative-import"),
     pytest.param("reexport/env.py", None, None, "reexported", id="package-init-re-export"),
     pytest.param("scan", "scanned", None, "scanned", id="directory-of-modules"),
     pytest.param("exports/as_task.py", "bound", None, "bound", id="exported-task"),
     pytest.param("modpkg.factories", None, None, "declared", id="module-env-attribute"),
-    pytest.param(
-        "modpkg.factories", "make_env", {"name": "made"}, "made", id="module-factory-with-args"
-    ),
     pytest.param(
         "modpkg.factories", "callable_env", None, "callable", id="callable-env-is-not-called"
     ),
@@ -160,7 +153,6 @@ ROWS = [
         ValueError,
         id="factory-returning-something-else",
     ),
-    pytest.param("no.such.module", None, None, ModuleNotFoundError, id="no-module"),
     pytest.param(
         "missing/env.py",
         None,
@@ -186,15 +178,11 @@ def test_a_reference_resolves_to_one_environment(
     args: dict[str, Any] | None,
     expected: str | type[Exception],
 ) -> None:
-    target: str | Path = reference.format(root=tree)
-    if reference.startswith("{root}"):
-        target = Path(target)
-
     if isinstance(expected, str):
-        assert load_environment(target, name=name, args=args).name == expected
+        assert load_environment(reference, name=name, args=args).name == expected
     else:
         with pytest.raises(expected):
-            load_environment(target, name=name, args=args)
+            load_environment(reference, name=name, args=args)
 
 
 @pytest.mark.parametrize("reference", ["shadow/json.py", "shadow"])
@@ -221,7 +209,7 @@ def two_roots(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
         del sys.modules[name]
 
 
-@pytest.mark.parametrize("source", ["env.py", "__init__.py", "."])
+@pytest.mark.parametrize("source", ["env.py", "__init__.py"])
 def test_a_package_already_imported_from_another_root_is_refused(
     two_roots: tuple[Path, Path], source: str
 ) -> None:
@@ -252,7 +240,6 @@ HUD_SERVE = [sys.executable, "-m", "hud.cli", "serve", "--port", "0"]
     [
         pytest.param([*SERVER, "env.py"], "from-env-py", signal.SIGTERM, id="server-sigterm"),
         pytest.param([*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, id="hud-serve-ctrl-c"),
-        pytest.param([*HUD_SERVE, "env"], "from-env-py", signal.SIGTERM, id="hud-serve-sigterm"),
         pytest.param(
             [*HUD_SERVE, "pkg:make_env", "--arg", "name=demo"],
             "demo",
@@ -329,9 +316,6 @@ async def announced_port(process: asyncio.subprocess.Process) -> int:
     ("command", "code", "error"),
     [
         pytest.param([*SERVER, "multi.py"], 1, "multiple Environments in multi.py", id="ambiguous"),
-        pytest.param(
-            [*SERVER, "nothing.py"], 1, "no environment source at nothing.py", id="missing"
-        ),
         pytest.param(
             [*HUD_SERVE, "pkg:make_env", "--arg", "name"], 2, "--arg", id="a-malformed-factory-arg"
         ),

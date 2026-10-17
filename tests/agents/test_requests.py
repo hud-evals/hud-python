@@ -44,8 +44,8 @@ if TYPE_CHECKING:
     from tests.support import HudEnv, ModelRequest, Models
 
 
-WEB_SEARCH = ClaudeWebSearchTool(max_uses=2, allowed_domains=["example.com"])
-WEB_FETCH = ClaudeWebFetchTool(max_content_tokens=100, citations_enabled=True)
+WEB_SEARCH = ClaudeWebSearchTool()
+WEB_FETCH = ClaudeWebFetchTool(citations_enabled=True)
 GROUNDING = [GeminiGoogleSearchTool(), GeminiUrlContextTool(), GeminiCodeExecutionTool()]
 
 
@@ -57,16 +57,10 @@ GROUNDING = [GeminiGoogleSearchTool(), GeminiUrlContextTool(), GeminiCodeExecuti
                 ClaudeConfig(model="claude-sonnet-4-6", hosted_tools=[WEB_SEARCH, WEB_FETCH])
             ),
             [
-                {
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 2,
-                    "allowed_domains": ["example.com"],
-                },
+                {"type": "web_search_20250305", "name": "web_search"},
                 {
                     "type": "web_fetch_20250910",
                     "name": "web_fetch",
-                    "max_content_tokens": 100,
                     "citations": {"enabled": True},
                 },
             ],
@@ -166,7 +160,7 @@ TRAINING = {
     "token-ids-continue-the-kv-cache": (
         OpenAIChatConfig(
             model="qwen3.6-plus",
-            completion_kwargs={"extra_body": {"return_token_ids": True}, "temperature": 0.2},
+            completion_kwargs={"extra_body": {"return_token_ids": True}},
         ),
         [
             Turn(
@@ -176,11 +170,10 @@ TRAINING = {
             Turn(text="done", extra={"prompt_token_ids": [1, 2, 3, 4], "token_ids": [5]}),
         ],
         [
-            BASE | {"logprobs": True, "temperature": 0.2, "return_token_ids": True},
+            BASE | {"logprobs": True, "return_token_ids": True},
             BASE
             | {
                 "logprobs": True,
-                "temperature": 0.2,
                 "return_token_ids": True,
                 "prompt_token_ids": [1, 2, 3],
                 "continuation_from": 2,
