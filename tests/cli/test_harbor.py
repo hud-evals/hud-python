@@ -97,7 +97,6 @@ def test_import_uploads_the_folders_and_imports_them_into_a_new_taskset(
         "tasks/hello/task.toml",
         "tasks/hello/tests/test.sh",
     ]
-    assert "signature" not in str(result)
 
 
 def test_rerunning_an_import_reuses_the_taskset_its_name_created(
@@ -172,7 +171,6 @@ def test_a_refused_upload_deletes_its_reservation_and_imports_nothing(
 
     assert result.exit_code == 1, result
     assert importer.imports == {}
-    assert "signature" not in str(result)
 
 
 @pytest.mark.parametrize(
@@ -288,12 +286,6 @@ def test_imports_asks_for_a_tasksets_harbor_imports(hud: Hud, platform: Platform
     assert result.exit_code == 0, result
     (listed,) = platform.services.requests("api", "GET", "/v2/imports")
     assert (listed.query["taskset_id"], listed.query["format"]) == ([tb2], ["harbor"])
-
-
-def test_imports_of_an_unknown_taskset_is_not_found(hud: Hud, platform: Platform) -> None:
-    result = hud("harbor", "imports", "--taskset", "nope", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
 
 
 def harbor_task(root: Path) -> Path:

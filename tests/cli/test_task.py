@@ -1,9 +1,12 @@
-"""``hud task``: list a source's tasks, start one for its prompt, grade an answer."""
+"""``hud task``: start a source's task for its prompt and grade an answer, locally or on an
+environment ``hud serve`` or a runtime serves."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import signal
+import socket
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -41,12 +44,6 @@ def project(hud: Hud) -> Any:
     )
     (hud.cwd / "tasks.json").write_text(json.dumps(ROWS))
     return hud.cwd
-
-
-def test_python_tasks_get_distinct_slugs(hud: Hud, project: Any) -> None:
-    result = hud("task", "list", "--source", "tasks.py", "--quiet")
-
-    assert (result.exit_code, result.stdout.split()) == (0, ["solve", "solve-8da35614"]), result
 
 
 @pytest.mark.parametrize(
@@ -114,6 +111,24 @@ async def test_grade_resumes_a_started_task_on_a_served_env(
     assert result.exit_code == ("error" in outcome), result
     assert len(started) == starts
     assert {key: result.json[key] for key in outcome} == outcome
+
+
+def test_a_task_starts_on_the_env_hud_serve_serves_until_interrupted(
+    hud: Hud, project: Any
+) -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = hud.start("serve", "env.py", "--port", str(port))
+    try:
+        url = f"tcp://127.0.0.1:{port}"
+        result = hud("task", "start", "say-hello", "--source", "tasks.json", "--url", url)
+    finally:
+        server.send_signal(signal.SIGINT)
+        server.communicate(timeout=30)
+
+    assert (result.exit_code, result.stdout) == (0, "Say hello.\n"), result
+    assert server.returncode == 0
 
 
 @pytest.mark.parametrize(

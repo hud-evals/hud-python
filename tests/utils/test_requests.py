@@ -1,4 +1,8 @@
-"""How the SDK talks to the HUD API: the platform client and the shared request policy."""
+"""The shared request policy where the CLI cannot see it: retry timing, the attempts a
+failure gets, timeouts, and deprecation notices.
+
+How each platform answer reaches a user as an error kind is ``tests/cli/test_every_command``.
+"""
 
 from __future__ import annotations
 
@@ -12,13 +16,11 @@ import pytest
 
 from hud.utils import make_request, make_request_sync
 from hud.utils.exceptions import (
-    HudAuthenticationError,
     HudDeprecationWarning,
     HudNetworkError,
     HudRequestError,
     HudTimeoutError,
 )
-from hud.utils.hints import CREDITS_EXHAUSTED
 from tests.support import Reply
 
 if TYPE_CHECKING:
@@ -65,14 +67,8 @@ async def test_transient_responses_are_retried_with_doubling_backoff(
     [
         pytest.param([Reply(status=204)], {}, 1, id="no-content"),
         pytest.param(
-            [Reply(status=402, json={"detail": "no credits"})],
-            ("Request failed: no credits", 402, [CREDITS_EXHAUSTED]),
-            1,
-            id="402-once",
-        ),
-        pytest.param(
             [Reply(status=500, body="oops", content_type="text/plain")],
-            ("Request failed with status 500", 500, []),
+            ("Request failed with status 500", 500),
             1,
             id="500-once",
         ),
@@ -91,9 +87,7 @@ async def test_each_response_status_has_one_outcome(
     if isinstance(outcome, tuple):
         with pytest.raises(HudRequestError) as raised:
             await _request(asynchronous, url, api_key="k", retry_delay=0.01)
-        message, status, hints = outcome
-        assert (raised.value.message, raised.value.status_code) == (message, status)
-        assert raised.value.hints == hints
+        assert (raised.value.message, raised.value.status_code) == outcome
     else:
         assert await _request(asynchronous, url, api_key="k", retry_delay=0.01) == outcome
     sent = services.requests("api", "GET", "/v2/data")
@@ -105,13 +99,6 @@ async def test_each_response_status_has_one_outcome(
 @pytest.mark.parametrize(
     ("url", "kwargs", "error", "message"),
     [
-        pytest.param(
-            "{api}/v2/data",
-            {"api_key": None},
-            HudAuthenticationError,
-            "API key is required",
-            id="no-key",
-        ),
         pytest.param(
             "http://127.0.0.1:9/v2/data",
             {"api_key": "k", "max_retries": 2, "retry_delay": 0.01},
@@ -126,13 +113,6 @@ async def test_each_response_status_has_one_outcome(
             "Request timed out",
             id="timeout",
         ),
-        pytest.param(
-            "{api}/v2/not-json",
-            {"api_key": "k"},
-            HudRequestError,
-            "Unexpected error",
-            id="unparseable-body",
-        ),
     ],
 )
 async def test_requests_that_never_get_an_answer_raise_typed_errors(
@@ -144,7 +124,6 @@ async def test_requests_that_never_get_an_answer_raise_typed_errors(
     message: str,
 ) -> None:
     services.route("api", "GET", "/v2/slow", Reply(json={}, delay=2.0))
-    services.route("api", "GET", "/v2/not-json", Reply(body="<html>", content_type="text/html"))
     target = url.format(api=services.url("api"))
     timeout = httpx.Timeout(0.3)
 

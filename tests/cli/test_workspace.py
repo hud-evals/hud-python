@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply, write_files
+from tests.support import write_files
 from tests.support.platform import BROWSER_PROJECT_ID, DEFAULT_PROJECT_ID, TEAM_ID, USER_ID
 
 if TYPE_CHECKING:
@@ -170,18 +170,6 @@ def test_a_default_project_that_does_not_exist_is_not_found(
     assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
 
 
-def test_project_list_reads_every_page(hud: Hud, platform: Platform) -> None:
-    platform.page_size = 2
-    platform.projects += [
-        {"id": f"dddddddd-0000-4000-8000-{n:012d}", "name": f"p{n}"} for n in range(3)
-    ]
-
-    quiet = hud("project", "list", "--quiet")
-
-    assert quiet.exit_code == 0, quiet
-    assert quiet.stdout.split() == [project["id"] for project in platform.projects]
-
-
 def test_project_list_marks_the_default_and_read_only_projects(
     hud: Hud, platform: Platform
 ) -> None:
@@ -208,24 +196,6 @@ def test_project_create_makes_the_project_and_links_unless_told_not_to(
     assert result.json["id"] == created["id"]
     assert created.get("description") == ("UI tasks" if linked else None)
     assert (link(hud) or {}).get("project_id") == (created["id"] if linked else None)
-
-
-def test_a_refused_project_creation_links_nothing(hud: Hud, platform: Platform) -> None:
-    platform.services.route(
-        "api", "POST", "/v2/projects", Reply(status=403, json={"detail": "Not enabled"})
-    )
-
-    result = hud("project", "create", "UI Evals", "--yes", "--json")
-
-    assert result.exit_code == 1, result
-    assert link(hud) is None
-
-
-def test_using_a_read_only_project_links_nothing(hud: Hud, platform: Platform) -> None:
-    result = hud("project", "use", "locked-down", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "permission_denied"), result
-    assert link(hud) is None
 
 
 def test_the_directory_option_after_the_verb_wins(hud: Hud, platform: Platform) -> None:

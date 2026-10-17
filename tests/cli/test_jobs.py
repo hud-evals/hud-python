@@ -14,14 +14,6 @@ COMPACT_JOB_ID = "03dd2a73d3df4d10a54ae3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 
 
-def test_jobs_without_a_verb_lists_the_jobs(hud: Hud, platform: Platform) -> None:
-    ids = [platform.add_job(name=f"job-{n}", status="completed") for n in range(3)]
-
-    result = hud("jobs", "--quiet")
-
-    assert (result.exit_code, result.stdout.split()) == (0, ids), result
-
-
 def test_a_compact_job_id_reads_the_jobs_traces(hud: Hud, platform: Platform) -> None:
     platform.add_job([{"id": TRACE_ID, "status": "running"}], id=JOB_ID)
 

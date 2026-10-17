@@ -75,19 +75,6 @@ def started(platform: Platform) -> list[tuple[str, str]]:
     ]
 
 
-@pytest.mark.parametrize(
-    ("argv", "keys"),
-    [
-        (["qa", "--quiet"], [CHECK, OTHER_CHECK, TASK_CHECK]),
-        (["qa", "list", "--level", "task", "--quiet"], [TASK_CHECK]),
-    ],
-)
-def test_qa_lists_the_checks_at_a_level(hud: Hud, argv: list[str], keys: list[str]) -> None:
-    result = hud(*argv)
-
-    assert (result.exit_code, result.stdout.split()) == (0, keys), result
-
-
 def test_qa_run_refuses_trace_and_task_checks_together(hud: Hud, platform: Platform) -> None:
     result = hud("qa", "run", f"{CHECK},{TASK_CHECK}", TRACE_ID, "--yes", "--json")
 

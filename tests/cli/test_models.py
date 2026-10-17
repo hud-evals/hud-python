@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -53,24 +53,6 @@ def catalog(platform: Platform) -> Platform:
     return platform
 
 
-def test_quiet_lists_the_model_slugs_one_per_line(hud: Hud, catalog: Platform) -> None:
-    result = hud("models", "list", "--quiet")
-
-    assert (result.exit_code, result.stdout.split("\n")[:-1]) == (
-        0,
-        ["claude-sonnet-4-6", "team/my-sonnet"],
-    ), result
-
-
-def test_models_list_reads_every_page_and_sorts_by_name(hud: Hud, catalog: Platform) -> None:
-    catalog.page_size = 1
-
-    result = hud("models", "list", "--json")
-
-    assert result.exit_code == 0, result
-    assert [model["id"] for model in result.json] == [SONNET_ID, MINE_ID]
-
-
 @pytest.mark.parametrize("model", ["owner/model + version", MINE_ID])
 def test_head_is_the_resolved_models_active_checkpoint(
     hud: Hud, catalog: Platform, model: str
@@ -102,24 +84,19 @@ def test_fork_creates_a_trainable_model_from_its_source(hud: Hud, catalog: Platf
     assert forked["forked_from"] == SONNET_ID
 
 
-@pytest.mark.parametrize(
-    ("argv", "exit_code", "outcome"),
-    [
-        pytest.param(["--if-not-exists"], 0, {"id": MINE_ID, "existed": True}, id="allowed"),
-        pytest.param([], 1, {"error": "conflict"}, id="refused"),
-    ],
-)
-def test_forking_onto_an_existing_name(
-    hud: Hud, catalog: Platform, argv: list[str], exit_code: int, outcome: dict[str, Any]
+def test_forking_onto_an_existing_name_if_not_exists_returns_that_model(
+    hud: Hud, catalog: Platform
 ) -> None:
     catalog.services.route(
         "api", "POST", "/v2/models/fork", Reply(status=409, json={"detail": "Model exists"})
     )
 
-    result = hud("models", "fork", "Claude Sonnet", "--name", "my-sonnet", *argv, "--yes", "--json")
+    argv = ["Claude Sonnet", "--name", "my-sonnet", "--if-not-exists", "--yes", "--json"]
 
-    assert result.exit_code == exit_code, result
-    assert {key: result.json[key] for key in outcome} == outcome
+    result = hud("models", "fork", *argv)
+
+    assert result.exit_code == 0, result
+    assert (result.json["id"], result.json["existed"]) == (MINE_ID, True)
 
 
 def test_a_misspelt_model_suggests_the_close_name(hud: Hud, catalog: Platform) -> None:

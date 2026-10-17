@@ -11,12 +11,17 @@ from hud.utils.exceptions import (
     HudRequestError,
 )
 from hud.utils.hints import (
+    CREDITS_EXHAUSTED,
     PRO_PLAN_REQUIRED,
     RATE_LIMIT_HIT,
     Hint,
 )
 
 STATUS_HINTS = {
+    "a 402 asks for credits": (
+        {"status_code": 402, "response_json": {"detail": "no credits"}},
+        [CREDITS_EXHAUSTED],
+    ),
     "a 403 whose detail names Pro asks for the plan": (
         {"status_code": 403, "response_json": {"detail": "Requires Pro plan"}},
         [PRO_PLAN_REQUIRED],

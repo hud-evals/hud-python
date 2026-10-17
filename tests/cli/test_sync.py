@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply
 from tests.support.platform import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
 
 if TYPE_CHECKING:
@@ -156,7 +155,6 @@ def test_a_csv_export_has_a_column_per_argument(hud: Hud, platform: Platform) ->
 @pytest.mark.parametrize(
     ("argv", "exit_code", "error"),
     [
-        pytest.param(["tasks", "demo", "tasks.py"], 2, "usage", id="unconfirmed"),
         pytest.param([], 2, "usage", id="nothing-linked"),
         pytest.param(["tasks", "demo", "missing.json"], 1, "not_found", id="a-missing-source"),
     ],
@@ -168,19 +166,6 @@ def test_sync_refusals_upload_nothing(
 
     assert (result.exit_code, result.json["error"]) == (exit_code, error), result
     assert (platform.uploads, link(hud)) == ([], None)
-
-
-def test_a_rejected_upload_fails_and_links_nothing(
-    hud: Hud, platform: Platform, source: Path
-) -> None:
-    platform.services.route(
-        "api", "POST", "/v2/tasks/upload", Reply(status=400, json={"detail": "No"})
-    )
-
-    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
-
-    assert result.exit_code == 1, result
-    assert link(hud) is None
 
 
 @pytest.mark.parametrize(
@@ -233,10 +218,3 @@ def test_sync_env_links_an_environment_by_name_or_id(
 
     assert result.exit_code == 0, result
     assert link(hud, "registry_id") == ids[linked]
-
-
-def test_sync_env_refuses_an_environment_it_cannot_see(hud: Hud, platform: Platform) -> None:
-    result = hud("sync", "env", "bbbbbbbb-0000-4000-8000-999999999999", "--json")
-
-    assert result.exit_code == 1, result
-    assert link(hud, "registry_id") is None
