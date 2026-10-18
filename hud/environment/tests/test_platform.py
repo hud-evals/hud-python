@@ -1,19 +1,7 @@
-"""Regression test for importing the package where unix sockets do not exist.
+"""Import HUD without initializing Unix-only workspace machinery.
 
-Both routes out of a workspace are served on unix sockets and a session runs on a pty,
-and each reached for its platform at module scope: a
-``socketserver.ThreadingUnixStreamServer`` subclass in :mod:`hud.environment.egress`,
-and a top-level ``import pty`` in :mod:`hud.environment.namespace`. Neither exists on
-Windows, so ``import hud`` raised there before any of it was used, taking down the
-commands that never go near a workspace with it. Both now sit behind the platform
-guard the rest of the package already applies.
-
-The breakage is at import time, so the check runs in a fresh interpreter. That
-interpreter imports the package once as the platform it really is, because the
-standard library and the dependencies settle their own platform at their first import
-and will not be told otherwise afterwards, and then imports it again with only the
-package's own modules dropped, the platform reported as Windows, and the unix pieces
-taken away.
+Preload dependencies on the real platform, then reimport HUD in a fresh
+interpreter with Windows' missing Unix facilities and unavailable libc.
 """
 
 from __future__ import annotations
@@ -21,7 +9,10 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
 _IMPORT_AS_WINDOWS = """
+import ctypes
 import socketserver
 import sys
 
@@ -34,15 +25,26 @@ sys.platform = "win32"
 sys.modules["pty"] = None  # a Windows interpreter has no pty module to import
 socketserver.__dict__.pop("ThreadingUnixStreamServer", None)  # nor this server
 
-import hud
+if sys.argv[1] == "fcntl":
+    sys.modules["fcntl"] = None
+else:
+    def unavailable_libc(*args, **kwargs):
+        raise OSError("libc is unavailable on this platform")
 
+    ctypes.CDLL = unavailable_libc
+
+import hud
+from hud.environment.process_guard import process_connections_supported
+
+assert process_connections_supported() is False
 print("IMPORTED")
 """
 
 
-def test_the_package_imports_where_unix_sockets_do_not_exist() -> None:
+@pytest.mark.parametrize("unavailable", ["fcntl", "libc"])
+def test_the_package_imports_without_unix_dependencies(unavailable: str) -> None:
     result = subprocess.run(
-        [sys.executable, "-c", _IMPORT_AS_WINDOWS],
+        [sys.executable, "-c", _IMPORT_AS_WINDOWS, unavailable],
         capture_output=True,
         text=True,
         timeout=120,
