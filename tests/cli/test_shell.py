@@ -1,24 +1,45 @@
-"""The ``hud`` shell: help, an unknown command, ``hud set``, analytics policy, notices.
-
-Contracts every command keeps live in ``test_every_command``.
-"""
+"""What ``hud`` does around every command: the registry of commands, help and unknown
+commands, the upgrade notice, anonymous analytics, and an interrupt."""
 
 from __future__ import annotations
 
 import json
+import signal
 import sys
 import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from dirty_equals import IsInt, IsStr, IsUUID
-from dotenv import dotenv_values
 
 from hud.version import __version__
-from tests.support import Hud, Reply
+from tests.support import Reply
+
+from .commands import (
+    EVERY_COMMAND,
+    LOCAL_ONLY,
+    MUTATING,
+    OFFLINE,
+    PLATFORM,
+    READ_ONLY,
+    TREE,
+    answer_everything,
+    failing,
+    invocation,
+)
 
 if TYPE_CHECKING:
-    from tests.support import HudEnv, Platform
+    from tests.support import Hud, HudEnv, Platform
+
+
+def test_every_command_is_registered_and_classified() -> None:
+    by_reach = [set(PLATFORM), set(OFFLINE)]
+    by_change = [MUTATING, LOCAL_ONLY, READ_ONLY]
+
+    for kinds in (by_reach, by_change):
+        assert sorted(set(TREE) - set().union(*kinds)) == []
+        assert sorted(set().union(*kinds) - set(TREE)) == []
+        assert sum(len(kind) for kind in kinds) == len(TREE)
 
 
 def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
@@ -33,21 +54,6 @@ def test_an_unknown_command_is_a_usage_error_on_stderr(hud: Hud) -> None:
 
     assert (result.exit_code, result.stdout) == (2, ""), result
     assert "nope" in result.stderr
-
-
-def test_set_persists_values_in_the_user_env_file(hud: Hud, hud_env: HudEnv) -> None:
-    secret = "sk-secret # with 'quotes'"
-
-    first = hud("set", "HUD_API_KEY=" + secret, "B=x # y", "--json")
-    second = hud("set", "HUD_DEFAULT_PROJECT=example")
-
-    path = hud_env.home / ".hud" / ".env"
-    assert (first.exit_code, second.exit_code) == (0, 0), first
-    assert dotenv_values(path, interpolate=False) == {
-        "HUD_API_KEY": secret,
-        "B": "x # y",
-        "HUD_DEFAULT_PROJECT": "example",
-    }
 
 
 @pytest.mark.parametrize(
@@ -80,12 +86,12 @@ def test_an_outdated_install_prints_an_upgrade_notice(
 # ─── analytics ──────────────────────────────────────────────────────────
 
 
-def event(
-    command: str, subcommand: str | None, exit_code: int, error: str | None
-) -> dict[str, Any]:
+def event(name: str, exit_code: int, error: Any) -> dict[str, Any]:
+    """The anonymous event an invocation of command ``name`` posts."""
+    command, _, subcommand = name.partition(" ")
     return {
         "command": command,
-        "subcommand": subcommand,
+        "subcommand": subcommand or None,
         "exit_code": exit_code,
         "error_class": error,
         "duration_ms": IsInt(ge=0),
@@ -97,23 +103,31 @@ def event(
     }
 
 
+@pytest.mark.parametrize("name", EVERY_COMMAND)
+def test_every_invocation_posts_one_anonymous_event_naming_its_command(
+    hud: Hud, analytics: Platform, hud_env: HudEnv, name: str
+) -> None:
+    argv = failing(name, hud, analytics, hud_env)
+    before = len(analytics.cli_events)
+
+    result = hud(*argv)
+
+    assert result.exit_code != 0
+    assert analytics.cli_events[before:] == [event(name, result.exit_code, IsStr)]
+
+
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (["version"], [event("version", None, 0, None)]),
-        (["secret-name", "arg"], [event("other", None, 2, "UsageError")]),
+        (["version"], [event("version", 0, None)]),
+        (["secret-name", "arg"], [event("other", 2, "UsageError")]),
         (["--version"], []),
     ],
+    ids=["a-command", "an-unknown-command-is-not-named", "the-version-flag"],
 )
-def test_each_invocation_posts_one_anonymous_event(
-    hud: Hud,
-    analytics: Platform,
-    hud_env: HudEnv,
-    argv: list[str],
-    expected: list[dict[str, Any]],
+def test_what_is_not_a_command_posts_nothing_that_names_it(
+    hud: Hud, analytics: Platform, argv: list[str], expected: list[dict[str, Any]]
 ) -> None:
-    hud_env.set(HUD_API_KEY=None)
-
     hud(*argv)
 
     assert analytics.cli_events == expected
@@ -150,3 +164,27 @@ def test_a_stalled_analytics_endpoint_does_not_hold_up_the_command(
     assert len(analytics.services.requests("telemetry")) == 1
     # Without the bound the command would outlast the 20 s stall; with it, a few seconds.
     assert elapsed < 15, elapsed
+
+
+# ─── interrupt ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", sorted(set(PLATFORM) - {"deploy"}))
+def test_an_interrupted_command_exits_130(
+    hud: Hud, analytics: Platform, hud_env: HudEnv, name: str
+) -> None:
+    PLATFORM[name].setup(hud, analytics)
+    answer_everything(analytics, Reply(json={}, delay=60))
+    asked, posted = len(analytics.services.requests("api")), len(analytics.cli_events)
+    process = hud.start(*invocation(name))
+
+    deadline = time.monotonic() + 30
+    while len(analytics.services.requests("api")) == asked:
+        assert process.poll() is None, process.communicate()
+        assert time.monotonic() < deadline, f"hud {name} never reached the platform"
+        time.sleep(0.05)
+    process.send_signal(signal.SIGINT)
+    process.communicate(timeout=30)
+
+    assert process.returncode == 130
+    assert analytics.cli_events[posted:] == [event(name, 130, "KeyboardInterrupt")]

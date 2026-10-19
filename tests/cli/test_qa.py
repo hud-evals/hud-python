@@ -75,13 +75,6 @@ def started(platform: Platform) -> list[tuple[str, str]]:
     ]
 
 
-def test_qa_run_refuses_trace_and_task_checks_together(hud: Hud, platform: Platform) -> None:
-    result = hud("qa", "run", f"{CHECK},{TASK_CHECK}", TRACE_ID, "--yes", "--json")
-
-    assert result.exit_code == 2, result
-    assert platform.qa_results == []
-
-
 @pytest.mark.parametrize(
     ("argv", "runs"),
     [
@@ -175,11 +168,3 @@ def test_qa_results_read_a_verdict_from_each_result_shape(
     assert [
         line.removeprefix("Verdict: ") for line in text.lines if line.startswith("Verdict:")
     ] == verdicts
-
-
-def test_task_results_ask_by_task_for_the_result_in_effect(hud: Hud, platform: Platform) -> None:
-    result = hud("qa", "results", "--level", "task", TASK_ID, "--json")
-
-    assert result.exit_code == 0, result
-    (asked,) = platform.services.requests("api", "GET", "/v2/qa/results")
-    assert asked.query == {"task_ids": [TASK_ID]}

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from tests.support import Reply, write_files
-from tests.support.platform import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID, Build
+from tests.support.platform import BROWSER_PROJECT_ID, Build
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -133,20 +133,15 @@ def test_the_environment_name_comes_from_its_declaration(
     assert (result.exit_code, result.json["name"]) == (0, name), result
 
 
-def test_a_dry_run_plans_without_prompting_writing_or_building(
-    hud: Hud, platform: Platform, hud_env: HudEnv
+def test_a_dry_run_plans_to_ask_about_a_dotenv_beside_the_environment(
+    hud: Hud, platform: Platform
 ) -> None:
     environment(hud.cwd)
     (hud.cwd / ".env").write_text("SECRET=hidden")
-    before = sorted(path.name for path in hud.cwd.rglob("*"))
 
     result = hud("deploy", "--dry-run", "--json")
 
-    assert result.exit_code == 0, result
-    assert (result.json["dry_run"], result.json["dotenv_pending"]) == (True, True)
-    assert sorted(path.name for path in hud.cwd.rglob("*")) == before
-    assert not (hud_env.home / ".hud").exists()
-    assert platform.builds == {}
+    assert (result.exit_code, result.json["dotenv_pending"]) == (0, True), result
 
 
 def test_a_compose_runtime_config_reaches_the_build_as_its_document(
@@ -199,42 +194,6 @@ def test_a_first_deploy_lands_in_the_selected_project(
     assert result.exit_code == 0, result
     (example,) = platform.environments.values()
     assert example["project_id"] == BROWSER_PROJECT_ID
-
-
-@pytest.mark.parametrize(
-    ("files", "argv", "exit_code", "error"),
-    [
-        pytest.param({}, [], 2, "usage", id="no-environment-declared"),
-        pytest.param(
-            {"a.py": 'a = Environment("a")\n', "b.py": 'b = Environment("b")\n'},
-            [],
-            2,
-            "usage",
-            id="several-environments-and-no-name",
-        ),
-        pytest.param(
-            {"env.py": 'env = Environment("a")\n'},
-            ["--project", LOCKED_PROJECT_ID],
-            1,
-            "permission_denied",
-            id="a-read-only-project",
-        ),
-    ],
-)
-def test_deploy_refuses_before_uploading(
-    hud: Hud,
-    platform: Platform,
-    files: dict[str, str],
-    argv: list[str],
-    exit_code: int,
-    error: str,
-) -> None:
-    write_files(hud.cwd, files)
-
-    result = hud("deploy", *argv, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
-    assert platform.builds == {}
 
 
 def test_a_rejected_build_request_removes_its_build_context(

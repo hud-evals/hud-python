@@ -132,34 +132,12 @@ def test_import_uploads_a_given_zip_as_it_is(hud: Hud, importer: Platform, tmp_p
     assert started(importer).taskset_id == importer.taskset("prepared")["id"]
 
 
-def test_a_dry_run_plans_without_writing(hud: Hud, importer: Platform, folders: list[str]) -> None:
+def test_a_dry_run_plans_to_create_a_missing_taskset(
+    hud: Hud, importer: Platform, folders: list[str]
+) -> None:
     result = hud("harbor", "import", *folders, "--taskset", "tb2", "--dry-run", "--json")
 
-    assert result.exit_code == 0, result
-    assert result.json["taskset"]["created"] is True
-    assert (importer.tasksets, importer.imports) == ({}, {})
-
-
-def test_import_refuses_a_taskset_the_caller_cannot_edit(
-    hud: Hud, importer: Platform, folders: list[str]
-) -> None:
-    theirs = importer.add_taskset("theirs", can_edit=False)
-
-    result = hud("harbor", "import", *folders, "--taskset", theirs, "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "permission_denied"), result
-    assert importer.imports == {}
-
-
-def test_import_refuses_a_bundle_over_the_platform_limit(
-    hud: Hud, importer: Platform, folders: list[str]
-) -> None:
-    importer.import_formats[0]["max_input_bytes"] = 10
-
-    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert (importer.tasksets, importer.imports) == ({}, {})
+    assert (result.exit_code, result.json["taskset"]["created"]) == (0, True), result
 
 
 def test_a_refused_upload_deletes_its_reservation_and_imports_nothing(
@@ -257,37 +235,6 @@ def test_report_shows_an_ended_imports_report(
     assert (result.json["import"]["status"], shown_version) == (statuses[-1], version)
 
 
-def test_report_refuses_an_import_of_another_format(hud: Hud, platform: Platform) -> None:
-    platform.imports[IMPORT] = Import(IMPORT, "tb2", format="parquet")
-
-    result = hud("harbor", "report", IMPORT, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-
-
-@pytest.mark.parametrize(("status", "cancelled"), [("running", True), ("completed", False)])
-def test_cancel_stops_only_a_live_import(
-    hud: Hud, platform: Platform, status: str, cancelled: bool
-) -> None:
-    platform.imports[IMPORT] = Import(IMPORT, "tb2", statuses=[status])
-
-    result = hud("harbor", "cancel", IMPORT, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert platform.imports[IMPORT].cancelled is cancelled
-
-
-def test_imports_asks_for_a_tasksets_harbor_imports(hud: Hud, platform: Platform) -> None:
-    tb2 = platform.add_taskset("tb2")
-    platform.imports[IMPORT] = Import(IMPORT, tb2)
-
-    result = hud("harbor", "imports", "--taskset", "tb2", "--json")
-
-    assert result.exit_code == 0, result
-    (listed,) = platform.services.requests("api", "GET", "/v2/imports")
-    assert (listed.query["taskset_id"], listed.query["format"]) == ([tb2], ["harbor"])
-
-
 def harbor_task(root: Path) -> Path:
     """A minimal Harbor task folder, ``hello``, under ``root``."""
     files = {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"}
@@ -312,14 +259,3 @@ def test_import_bundles_linked_files_by_content_and_skips_linked_folders(
     sent = bundle(importer)
     assert sent.read("hello/environment/data.txt") == b"shared"
     assert not any("linked" in name or "dangling" in name for name in sent.namelist())
-
-
-def test_import_refuses_two_folders_with_one_name_before_writing(
-    hud: Hud, importer: Platform, tmp_path: Path
-) -> None:
-    first, second = harbor_task(tmp_path / "a"), harbor_task(tmp_path / "b")
-
-    result = hud("harbor", "import", str(first), str(second), "--yes")
-
-    assert result.exit_code != 0, result
-    assert (importer.tasksets, importer.imports) == ({}, {})

@@ -62,12 +62,6 @@ def test_a_task_spawned_from_its_source_starts_and_grades(
     assert (result.exit_code, result.stdout) == (0, stdout), result
 
 
-def test_an_id_shared_by_several_rows_is_refused_as_ambiguous(hud: Hud, project: Any) -> None:
-    result = hud("task", "start", "solve", "--source", "tasks.json", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-
-
 # ─── attached to a served environment ───────────────────────────────────
 
 

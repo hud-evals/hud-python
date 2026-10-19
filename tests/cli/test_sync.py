@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support.platform import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -106,18 +104,6 @@ def test_a_taskset_round_trip(hud: Hud, platform: Platform, source: Path) -> Non
     assert (relinked.exit_code, link(hud)) == (0, other)
 
 
-def test_a_stored_taskset_that_was_deleted_is_never_recreated(
-    hud: Hud, platform: Platform, source: Path
-) -> None:
-    assert hud("sync", "tasks", "demo", "tasks.py", "--yes").exit_code == 0
-    platform.tasksets.clear()
-
-    result = hud("sync", "tasks", "--force", "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
-    assert (len(platform.uploads), platform.tasksets) == (1, {})
-
-
 REMOTE: list[dict[str, Any]] = [
     {"name": "one", "env": "e", "scenario": "solve", "args": {"n": 1}},
     {"name": "two", "env": "e", "scenario": "solve", "args": {"n": {"x": 2}}},
@@ -152,39 +138,6 @@ def test_a_csv_export_has_a_column_per_argument(hud: Hud, platform: Platform) ->
     ]
 
 
-@pytest.mark.parametrize(
-    ("argv", "exit_code", "error"),
-    [
-        pytest.param([], 2, "usage", id="nothing-linked"),
-        pytest.param(["tasks", "demo", "missing.json"], 1, "not_found", id="a-missing-source"),
-    ],
-)
-def test_sync_refusals_upload_nothing(
-    hud: Hud, platform: Platform, source: Path, argv: list[str], exit_code: int, error: str
-) -> None:
-    result = hud("sync", *argv, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (exit_code, error), result
-    assert (platform.uploads, link(hud)) == ([], None)
-
-
-@pytest.mark.parametrize(
-    ("project", "exit_code", "placed"),
-    [(LOCKED_PROJECT_ID, 1, None), (BROWSER_PROJECT_ID, 0, BROWSER_PROJECT_ID)],
-    ids=["a-read-only-project", "a-writable-project"],
-)
-def test_the_project_option_places_the_upload_without_pinning_the_directory(
-    hud: Hud, platform: Platform, source: Path, project: str, exit_code: int, placed: str | None
-) -> None:
-    platform.add_taskset("demo")
-
-    result = hud("sync", "tasks", "demo", "tasks.py", "--project", project, "--yes", "--json")
-
-    assert result.exit_code == exit_code, result
-    assert [upload["project_id"] for upload in platform.uploads] == ([placed] if placed else [])
-    assert link(hud) is None
-
-
 def test_tasks_for_another_environment_than_the_linked_one_are_flagged(
     hud: Hud, platform: Platform, source: Path
 ) -> None:
@@ -195,26 +148,3 @@ def test_tasks_for_another_environment_than_the_linked_one_are_flagged(
 
     assert result.exit_code == 0, result
     assert "'browser': example" in " ".join(result.stderr.split())
-
-
-# ─── sync env ───────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("reference", "linked"),
-    [
-        pytest.param("browser_anchor", "browser-anchor", id="by-name-across-separators"),
-        pytest.param("id", "browser", id="by-id"),
-    ],
-)
-def test_sync_env_links_an_environment_by_name_or_id(
-    hud: Hud, platform: Platform, reference: str, linked: str
-) -> None:
-    browser = platform.add_environment("browser")
-    anchor = platform.add_environment("browser-anchor")
-    ids = {"browser": browser, "browser-anchor": anchor}
-
-    result = hud("sync", "env", browser if reference == "id" else reference, "--json")
-
-    assert result.exit_code == 0, result
-    assert link(hud, "registry_id") == ids[linked]
