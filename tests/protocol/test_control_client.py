@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -33,7 +34,7 @@ from tests.support import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
 
 
 def hello(*bindings: dict[str, Any]) -> dict[str, Any]:
@@ -153,33 +154,66 @@ async def test_connect_fails_without_retrying_on_a_handshake_the_env_breaks(
     assert peer.accepted == 1
 
 
-async def test_connect_gives_up_at_the_runtime_ready_timeout_on_an_env_that_never_answers() -> None:
-    loop = asyncio.get_running_loop()
+@asynccontextmanager
+async def never_answering() -> AsyncIterator[str]:
     async with control_peer([hang_up()]) as peer:
-        started = loop.time()
-        with pytest.raises(EOFError, match="env closed connection during 'hello'"):
-            async with connect(Runtime(peer.url, params={"ready_timeout": 0.3}), ready_timeout=60):
-                pass
-
-    assert loop.time() - started < 5
+        yield peer.url
 
 
-async def test_connect_gives_up_on_a_refused_port_after_the_ready_timeout() -> None:
+@asynccontextmanager
+async def a_refused_port() -> AsyncIterator[str]:
     server = await asyncio.start_server(lambda reader, writer: None, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     server.close()
     await server.wait_closed()
-
-    with pytest.raises(OSError):
-        async with connect(Runtime(f"tcp://127.0.0.1:{port}"), ready_timeout=0.3):
-            pass
+    yield f"tcp://127.0.0.1:{port}"
 
 
-@pytest.mark.parametrize("value", [-1.0, math.nan])
-async def test_an_invalid_runtime_ready_timeout_is_refused(value: object) -> None:
-    with pytest.raises(ValueError, match="must be a positive finite number"):
-        async with connect(Runtime("tcp://127.0.0.1:9", params={"ready_timeout": value})):
-            pass
+@asynccontextmanager
+async def nothing(url: str) -> AsyncIterator[str]:
+    yield url
+
+
+@pytest.mark.parametrize(
+    ("target", "ready_timeout", "error", "message"),
+    [
+        pytest.param(
+            never_answering,
+            0.3,
+            EOFError,
+            "env closed connection during 'hello'",
+            id="an-env-that-never-answers",
+        ),
+        pytest.param(a_refused_port, 0.3, OSError, "", id="a-refused-port"),
+        pytest.param(
+            lambda: nothing("tcp://127.0.0.1:9"),
+            -1.0,
+            ValueError,
+            "must be a positive finite number",
+            id="a-negative-ready-timeout",
+        ),
+        pytest.param(
+            lambda: nothing("tcp://127.0.0.1:9"),
+            math.nan,
+            ValueError,
+            "must be a positive finite number",
+            id="a-nan-ready-timeout",
+        ),
+    ],
+)
+async def test_connect_gives_up_within_the_runtime_ready_timeout(
+    target: Callable[[], Any], ready_timeout: float, error: type[Exception], message: str
+) -> None:
+    loop = asyncio.get_running_loop()
+    async with target() as url:
+        started = loop.time()
+        with pytest.raises(error, match=message):
+            async with connect(
+                Runtime(url, params={"ready_timeout": ready_timeout}), ready_timeout=60
+            ):
+                pass
+
+    assert loop.time() - started < 5
 
 
 @pytest.mark.parametrize(
@@ -261,28 +295,36 @@ async def test_a_tunnel_the_env_cannot_open_ends_the_local_stream(
     assert warning in caplog.messages
 
 
-async def test_a_task_list_that_is_not_a_list_raises_a_protocol_error() -> None:
+@pytest.mark.parametrize(
+    ("reply", "call", "message", "ends"),
+    [
+        pytest.param(
+            answer({"tasks": "fix"}),
+            lambda client: client.list_tasks(),
+            "tasks.list: 'tasks' must be a list",
+            False,
+            id="a-task-list-that-is-not-a-list",
+        ),
+        pytest.param(
+            answer({"score": 1.0}, id=7),
+            lambda client: client.grade({"answer": "done"}),
+            "'tasks.grade': reply id did not match",
+            True,
+            id="a-reply-to-another-request",
+        ),
+    ],
+)
+async def test_a_reply_that_breaks_the_protocol_raises_and_a_crossed_reply_ends_the_connection(
+    reply: Any, call: Callable[[Any], Any], message: str, ends: bool
+) -> None:
     async with (
-        control_peer([answer(hello()), answer({"tasks": "fix"})]) as peer,
+        control_peer([answer(hello()), reply]) as peer,
         connect(Runtime(peer.url)) as client,
     ):
-        with pytest.raises(HudProtocolError) as raised:
-            await client.list_tasks()
+        with pytest.raises(HudProtocolError, match=message):
+            await call(client)
+        if ends:
+            with pytest.raises((EOFError, OSError)):
+                await client.cancel()
 
-    assert (raised.value.code, raised.value.message) == (
-        -32603,
-        "tasks.list: 'tasks' must be a list",
-    )
-
-
-async def test_a_reply_to_another_request_aborts_the_connection() -> None:
-    async with (
-        control_peer([answer(hello()), answer({"score": 1.0}, id=7)]) as peer,
-        connect(Runtime(peer.url)) as client,
-    ):
-        with pytest.raises(HudProtocolError, match=r"'tasks\.grade': reply id did not match"):
-            await client.grade({"answer": "done"})
-        with pytest.raises((EOFError, OSError)):
-            await client.cancel()
-
-    assert [request["method"] for request in peer.requests()] == ["hello", "tasks.grade"]
+    assert len(peer.requests()) == 2

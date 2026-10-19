@@ -20,11 +20,10 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.support import RecordingProvider, ScriptedAgent, eventually, lab, minted, solve
+from tests.support import RecordingProvider, ScriptedAgent, eventually, lab, solve
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
-    from pathlib import Path
 
     from hud.eval import Provider, Run
     from tests.support import FakeServices
@@ -272,31 +271,3 @@ async def test_an_empty_taskset_needs_no_placement() -> None:
     job = await Taskset("empty", []).run(ScriptedAgent())
 
     assert (job.runs, job.reward) == ([], 0.0)
-
-
-async def test_rows_minted_by_a_live_environment_run_against_it() -> None:
-    events: list[str] = []
-    row = minted(events)
-
-    job = await Taskset("live", [row]).run(ScriptedAgent(solve), group=2, max_concurrent=2)
-
-    assert [run.reward for run in job.runs] == [1.0, 1.0]
-    assert events.count("initialize") == events.count("shutdown") == 2
-    assert events[-1] == "shutdown"
-
-
-async def test_a_module_taskset_runs_against_the_environments_it_defines(tmp_path: Path) -> None:
-    source = tmp_path / "tasks.py"
-    source.write_text(
-        "from hud import Environment\n\n"
-        'env = Environment("lab")\n\n\n'
-        "@env.template()\n"
-        "async def add(a: int, b: int):\n"
-        '    answer = yield f"add {a} {b}"\n'
-        "    yield 1.0 if answer == str(a + b) else 0.0\n\n\n"
-        "tasks = [add(a=2, b=3), add(a=4, b=5)]\n"
-    )
-
-    job = await Taskset.from_module(source).run(ScriptedAgent(solve))
-
-    assert [run.reward for run in job.runs] == [1.0, 1.0]

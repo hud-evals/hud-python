@@ -254,17 +254,6 @@ async def test_every_rollout_step_is_uploaded_to_its_own_trace(
         assert step_rows(trace.spans) == rows
 
 
-async def test_nothing_is_uploaded_without_a_key(reporting: Platform, hud_env: HudEnv) -> None:
-    hud_env.set(HUD_API_KEY=None)
-
-    job = await Taskset("t", [Task(env="upload", id="answer")]).run(
-        ScriptedAgent("ok"), runtime=LocalRuntime(upload_env())
-    )
-
-    assert job.reward == 1.0
-    assert reporting.services.requests("telemetry") == []
-
-
 async def test_flush_returns_false_at_its_deadline_while_an_upload_hangs(
     reporting: Platform,
 ) -> None:

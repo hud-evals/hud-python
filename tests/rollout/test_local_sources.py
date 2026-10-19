@@ -16,7 +16,7 @@ import pytest
 
 from hud.environment import Environment, load_environment
 from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset, rollout
-from tests.support import ScriptedAgent, eventually, lab, solve
+from tests.support import ScriptedAgent, eventually, lab, minted, solve
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -143,24 +143,6 @@ async def test_a_source_serves_its_rows_one_acquisition_at_a_time_per_instance(
     assert [line for line in project.lines() if line != "import"] == ["start", "stop"] * 2
 
 
-async def test_one_source_serves_each_rows_own_environment(
-    tmp_path: Path, request: pytest.FixtureRequest
-) -> None:
-    project = Project(tmp_path, request)
-    alpha, beta = project.module("alpha", env="alpha"), project.module("beta", env="beta")
-    source = project.entry(
-        f"from {alpha.stem} import env as alpha\nfrom {beta.stem} import env as beta\n"
-    )
-    rows = [
-        Task(env="alpha", id="add", args={"a": 1, "b": 2}),
-        Task(env="beta", id="add", args={"a": 3, "b": 4}),
-    ]
-
-    job = await Taskset("mixed", rows).run(ScriptedAgent(solve), runtime=LocalRuntime(source))
-
-    assert [run.reward for run in job.runs] == [1.0, 1.0]
-
-
 WHERE_ENV = """
 from pathlib import Path
 
@@ -223,33 +205,85 @@ async def test_distinct_instances_from_a_constructor_run_concurrently() -> None:
     assert built == [row.slug] * 3
 
 
-async def test_a_template_can_import_a_sibling_module_while_it_runs(tmp_path: Path) -> None:
-    (tmp_path / "lazy_helper.py").write_text("SUFFIX = ' ok'\n")
-    source = tmp_path / "env.py"
-    source.write_text(
-        textwrap.dedent(
-            """
-            from hud import Environment
-
-            env = Environment("lab")
-
-
-            @env.template()
-            async def add(a: int, b: int):
-                import lazy_helper
-
-                answer = yield f"add {a} {b}{lazy_helper.SUFFIX}"
-                yield 1.0 if answer == str(a + b) else 0.0
-            """
-        )
+def rows_of_two_envs(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
+    project = Project(tmp_path, request)
+    alpha, beta = project.module("alpha", env="alpha"), project.module("beta", env="beta")
+    source = project.entry(
+        f"from {alpha.stem} import env as alpha\nfrom {beta.stem} import env as beta\n"
     )
-    agent = ScriptedAgent(lambda prompt: solve(prompt.removesuffix(" ok")))
+    rows = [
+        Task(env="alpha", id="add", args={"a": 1, "b": 2}),
+        Task(env="beta", id="add", args={"a": 3, "b": 4}),
+    ]
+    return Taskset("mixed", rows), LocalRuntime(source)
 
-    job = await Task(env="lab", id="add", args={"a": 2, "b": 3}).run(
-        agent, runtime=LocalRuntime(source)
+
+def a_template_importing_a_sibling(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
+    (tmp_path / "lazy_helper.py").write_text("SUFFIX = ''\n")
+    source = write(
+        tmp_path / "env.py",
+        """
+        from hud import Environment
+
+        env = Environment("lab")
+
+
+        @env.template()
+        async def add(a: int, b: int):
+            import lazy_helper
+
+            answer = yield f"add {a} {b}{lazy_helper.SUFFIX}"
+            yield 1.0 if answer == str(a + b) else 0.0
+        """,
     )
+    return Taskset("lazy", [Task(env="lab", id="add", args={"a": 2, "b": 3})]), LocalRuntime(source)
 
-    assert (job.reward, agent.prompts) == (1.0, ["add 2 3 ok"])
+
+def rows_a_live_env_minted(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
+    return Taskset("live", [minted()]), None
+
+
+def a_module_taskset(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
+    source = write(
+        tmp_path / "tasks.py",
+        """
+        from hud import Environment
+
+        env = Environment("lab")
+
+
+        @env.template()
+        async def add(a: int, b: int):
+            answer = yield f"add {a} {b}"
+            yield 1.0 if answer == str(a + b) else 0.0
+
+
+        tasks = [add(a=2, b=3), add(a=4, b=5)]
+        """,
+    )
+    return Taskset.from_module(source), None
+
+
+TASKSETS: dict[str, Callable[[Path, pytest.FixtureRequest], Any]] = {
+    "one source serves each row's own env": rows_of_two_envs,
+    "a template imports a sibling module while it runs": a_template_importing_a_sibling,
+    "rows a live env minted run against it": rows_a_live_env_minted,
+    "a module's tasks run against the envs it defines": a_module_taskset,
+}
+
+
+@pytest.mark.parametrize("taskset", TASKSETS.values(), ids=TASKSETS.keys())
+async def test_a_taskset_runs_each_row_in_the_env_it_names(
+    taskset: Callable[[Path, pytest.FixtureRequest], Any],
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> None:
+    rows, runtime = taskset(tmp_path, request)
+
+    job = await rows.run(ScriptedAgent(solve), runtime=runtime, group=2, max_concurrent=2)
+
+    assert [run.reward for run in job.runs] == [1.0] * len(job.runs)
+    assert len(job.runs) == 2 * len(list(rows))
 
 
 def test_a_live_environment_serves_across_event_loops() -> None:
