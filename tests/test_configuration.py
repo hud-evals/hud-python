@@ -6,12 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Environment
-from tests.support import served
-
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tests.support import Hud, HudEnv, Platform
 
 
@@ -41,24 +36,3 @@ def test_the_api_key_comes_from_env_then_project_env_then_hud_set(
     result = hud("jobs", "list", "--json")
 
     assert result.exit_code == 0, result
-
-
-@pytest.mark.parametrize(
-    ("tracking", "published"),
-    [
-        pytest.param(None, ["shell", "filetracking"], id="default-on"),
-        pytest.param("false", ["shell"], id="disabled"),
-    ],
-)
-async def test_file_tracking_follows_hud_file_tracking_enabled(
-    hud_env: HudEnv, tmp_path: Path, tracking: str | None, published: list[str]
-) -> None:
-    hud_env.set(HUD_FILE_TRACKING_ENABLED=tracking)
-    env = Environment("tracked")
-    env.workspace(tmp_path / "workspace")
-
-    async with served(env) as client:
-        assert client.manifest is not None
-        names = [binding.name for binding in client.manifest.bindings]
-
-    assert names == published

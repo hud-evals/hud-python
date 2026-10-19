@@ -129,3 +129,18 @@ async def test_a_refused_tunnel_gets_one_error_frame_and_is_closed(
 
     assert (refused["id"], refused["error"]["code"]) == (1, code)
     assert after is None
+
+
+async def test_manifest_keeps_environment_addresses_and_client_bindings_are_forwarded() -> None:
+    local = Capability.cdp(name="browser", url="ws://127.0.0.1:9222")
+    remote = Capability.ssh(name="box", url="ssh://box.example.com:22", host_pubkey="ssh-ed25519 x")
+    env = Environment("mixed-env", capabilities=[local, remote])
+
+    async with served(env) as client:
+        assert client.manifest is not None
+        assert client.manifest.bindings == [local, remote]
+        for declared in (local, remote):
+            forwarded = client.binding(declared.name)
+            assert forwarded.url != declared.url
+            assert urlsplit(forwarded.url).hostname == "127.0.0.1"
+            assert (forwarded.name, forwarded.protocol) == (declared.name, declared.protocol)

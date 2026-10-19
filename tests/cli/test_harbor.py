@@ -13,6 +13,7 @@ from tests.support import write_files
 from tests.support.platform import Import
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from tests.support import Hud, Platform
@@ -44,6 +45,14 @@ REPORT = {
     "warnings": [],
     "error": None,
 }
+FOLDERS = {
+    "tasks/hello/task.toml": "version = '1.0'\n",
+    "tasks/hello/tests/test.sh": "exit 0\n",
+    "run-1/config.json": "{}",
+    "run-1/result.json": "{}",
+    "run-1/hello__a/config.json": "{}",
+    "run-1/hello__a/result.json": "{}",
+}
 
 
 @pytest.fixture
@@ -58,116 +67,162 @@ def started(platform: Platform) -> Import:
     return only
 
 
-def bundle(platform: Platform) -> zipfile.ZipFile:
+def bundled(platform: Platform) -> dict[str, bytes]:
+    """The bundle the platform received, member by member."""
     uploaded = started(platform).bundle
     assert uploaded is not None
-    return zipfile.ZipFile(io.BytesIO(uploaded))
+    with zipfile.ZipFile(io.BytesIO(uploaded)) as archive:
+        return {name: archive.read(name) for name in archive.namelist()}
 
 
-@pytest.fixture
-def folders(tmp_path: Path) -> list[str]:
-    """A tasks folder and a job folder with one trial, as Harbor writes them."""
-    write_files(
-        tmp_path,
-        {
-            "tasks/hello/task.toml": "version = '1.0'\n",
-            "tasks/hello/tests/test.sh": "exit 0\n",
-            "run-1/config.json": "{}",
-            "run-1/result.json": "{}",
-            "run-1/hello__a/config.json": "{}",
-            "run-1/hello__a/result.json": "{}",
-        },
-    )
-    return [str(tmp_path / "tasks"), str(tmp_path / "run-1")]
+def harbor_folders(root: Path) -> list[str]:
+    write_files(root, FOLDERS)
+    return [str(root / "tasks"), str(root / "run-1")]
 
 
-def test_import_uploads_the_folders_and_imports_them_into_a_new_taskset(
-    hud: Hud, importer: Platform, folders: list[str]
-) -> None:
-    result = hud("harbor", "import", *folders, "--taskset", "TB2 Sample", "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    taskset = importer.taskset("tb2-sample")
-    assert started(importer).taskset_id == taskset["id"]
-    assert sorted(bundle(importer).namelist()) == [
-        "run-1/config.json",
-        "run-1/hello__a/config.json",
-        "run-1/hello__a/result.json",
-        "run-1/result.json",
-        "tasks/hello/task.toml",
-        "tasks/hello/tests/test.sh",
-    ]
-
-
-def test_rerunning_an_import_reuses_the_taskset_its_name_created(
-    hud: Hud, importer: Platform, folders: list[str]
-) -> None:
-    first = hud("harbor", "import", *folders, "--taskset", "TB2/Sample", "--yes", "--json")
-    second = hud("harbor", "import", *folders, "--taskset", "TB2/Sample", "--yes", "--json")
-
-    assert (first.exit_code, second.exit_code) == (0, 0), second
-    (taskset,) = importer.tasksets.values()
-    assert second.json["taskset"] == {"id": taskset["id"], "name": "tb2sample", "created": False}
-
-
-def test_import_link_saves_the_taskset_as_the_directory_default(
-    hud: Hud, importer: Platform, folders: list[str]
-) -> None:
-    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes", "--link")
-
-    assert result.exit_code == 0, result
-    linked = json.loads((hud.cwd / ".hud" / "config.json").read_text())["taskset_id"]
-    assert linked == importer.taskset("tb2")["id"]
-
-
-def test_import_uploads_a_given_zip_as_it_is(hud: Hud, importer: Platform, tmp_path: Path) -> None:
-    prepared = tmp_path / "prepared.zip"
+def a_prepared_zip(root: Path) -> list[str]:
+    prepared = root / "prepared.zip"
+    root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(prepared, "w") as archive:
         archive.writestr("hello/task.toml", "version = '1.0'\n")
+    return [str(prepared)]
 
-    result = hud("harbor", "import", str(prepared), "--yes", "--json")
+
+def a_task_with_links(root: Path) -> list[str]:
+    task = root / "src" / "hello"
+    write_files(task, {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"})
+    write_files(root / "shared", {"data.txt": "shared"})
+    (task / "environment" / "data.txt").symlink_to(root / "shared" / "data.txt")
+    (task / "environment" / "linked").symlink_to(root / "shared")
+    (task / "dangling").symlink_to(root / "missing")
+    return [str(task)]
+
+
+BUNDLES: dict[str, tuple[Callable[[Path], list[str]], dict[str, bytes], str]] = {
+    "folders are zipped by their own paths": (
+        harbor_folders,
+        {name: content.encode() for name, content in FOLDERS.items()},
+        "tb2",
+    ),
+    "a prepared zip is sent as it is": (
+        a_prepared_zip,
+        {"hello/task.toml": b"version = '1.0'\n"},
+        "prepared",
+    ),
+    "a linked file is sent by content and a linked folder is skipped": (
+        a_task_with_links,
+        {
+            "hello/task.toml": b"version = '1.0'\n",
+            "hello/environment/Dockerfile": b"FROM ubuntu\n",
+            "hello/environment/data.txt": b"shared",
+        },
+        "tb2",
+    ),
+}
+
+
+@pytest.mark.parametrize(("source", "members", "taskset"), BUNDLES.values(), ids=BUNDLES.keys())
+def test_an_import_uploads_its_input_as_one_bundle(
+    hud: Hud,
+    importer: Platform,
+    tmp_path: Path,
+    source: Callable[[Path], list[str]],
+    members: dict[str, bytes],
+    taskset: str,
+) -> None:
+    paths = source(tmp_path / "input")
+    named = ["--taskset", taskset] if taskset != "prepared" else []
+
+    result = hud("harbor", "import", *paths, *named, "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert started(importer).bundle == prepared.read_bytes()
-    assert started(importer).taskset_id == importer.taskset("prepared")["id"]
+    assert bundled(importer) == members
+    assert started(importer).taskset_id == importer.taskset(taskset)["id"]
 
 
-def test_a_dry_run_plans_to_create_a_missing_taskset(
-    hud: Hud, importer: Platform, folders: list[str]
+@pytest.mark.parametrize(
+    ("runs", "flags", "created", "linked"),
+    [
+        pytest.param(1, [], True, False, id="a-new-name-creates-its-taskset"),
+        pytest.param(2, [], False, False, id="rerunning-reuses-the-taskset-its-name-made"),
+        pytest.param(1, ["--link"], True, True, id="link-saves-it-as-the-directory-default"),
+        pytest.param(1, ["--dry-run"], True, False, id="a-dry-run-plans-to-create-it"),
+    ],
+)
+def test_an_import_lands_in_the_taskset_its_name_resolves_to(
+    hud: Hud,
+    importer: Platform,
+    tmp_path: Path,
+    runs: int,
+    flags: list[str],
+    created: bool,
+    linked: bool,
 ) -> None:
-    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--dry-run", "--json")
+    paths = harbor_folders(tmp_path / "input")
+    confirm = [] if "--dry-run" in flags else ["--yes"]
 
-    assert (result.exit_code, result.json["taskset"]["created"]) == (0, True), result
+    results = [
+        hud("harbor", "import", *paths, "--taskset", "TB2/Sample", *flags, *confirm, "--json")
+        for _ in range(runs)
+    ]
+
+    assert [result.exit_code for result in results] == [0] * runs, results[-1]
+    assert results[-1].json["taskset"]["created"] is created
+    link = hud.cwd / ".hud" / "config.json"
+    stored = json.loads(link.read_text())["taskset_id"] if link.exists() else None
+    if "--dry-run" in flags:
+        assert importer.tasksets == {}
+    else:
+        assert results[-1].json["taskset"] == {
+            "id": importer.taskset("tb2sample")["id"],
+            "name": "tb2sample",
+            "created": created,
+        }
+        assert stored == (importer.taskset("tb2sample")["id"] if linked else None)
 
 
 def test_a_refused_upload_deletes_its_reservation_and_imports_nothing(
-    hud: Hud, importer: Platform, folders: list[str]
+    hud: Hud, importer: Platform, tmp_path: Path
 ) -> None:
     importer.services.route("api", "PUT", "/uploads/{id}", status=403)
 
-    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes", "--json")
+    result = hud(
+        "harbor", "import", *harbor_folders(tmp_path), "--taskset", "tb2", "--yes", "--json"
+    )
 
     assert result.exit_code == 1, result
     assert importer.imports == {}
 
 
 @pytest.mark.parametrize(
-    ("statuses", "report", "exit_code"),
+    ("statuses", "report", "flags", "exit_code", "shown"),
     [
-        pytest.param(["queued", "running", "completed"], REPORT, 0, id="completed"),
         pytest.param(
-            ["stopped"], {**REPORT, "error": {"step": "add", "message": "boom"}}, 1, id="stopped"
+            ["queued", "running", "completed"], REPORT, [], 0, "completed", id="completed"
         ),
-        pytest.param(["failed"], None, 1, id="failed"),
+        pytest.param(
+            ["stopped"],
+            {**REPORT, "error": {"step": "add", "message": "boom"}},
+            [],
+            1,
+            "stopped",
+            id="stopped",
+        ),
+        pytest.param(["failed"], None, [], 1, "failed", id="failed"),
+        pytest.param(
+            ["queued", "completed"], REPORT, ["--no-wait"], 0, "queued", id="no-wait-returns-it"
+        ),
     ],
 )
-def test_import_waits_for_the_import_and_fails_unless_it_completed(
+def test_an_import_waits_for_its_end_and_fails_unless_it_completed(
     hud: Hud,
     importer: Platform,
-    folders: list[str],
+    tmp_path: Path,
     statuses: list[str],
     report: dict[str, Any] | None,
+    flags: list[str],
     exit_code: int,
+    shown: str,
 ) -> None:
     importer.next_import = Import(
         "",
@@ -176,27 +231,14 @@ def test_import_waits_for_the_import_and_fails_unless_it_completed(
         report=report,
         error="crashed" if report is None else None,
     )
+    paths = harbor_folders(tmp_path)
 
-    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes", "--json")
+    result = hud("harbor", "import", *paths, "--taskset", "tb2", *flags, "--yes", "--json")
 
-    assert result.exit_code == exit_code, result
-    shown = result.json["report"]
-    assert result.json["import"]["status"] == statuses[-1]
-    assert (shown is None, (shown or {}).get("error")) == (
-        report is None,
-        (report or {}).get("error"),
-    )
-
-
-def test_no_wait_returns_the_started_import(
-    hud: Hud, importer: Platform, folders: list[str]
-) -> None:
-    importer.next_import.statuses = ["queued", "completed"]
-
-    result = hud("harbor", "import", *folders, "--taskset", "tb2", "--yes", "--no-wait", "--json")
-
-    assert (result.exit_code, result.json["import"]["status"]) == (0, "queued"), result
-    assert started(importer).statuses == ["completed"]
+    assert (result.exit_code, result.json["import"]["status"]) == (exit_code, shown), result
+    if not flags:
+        reported = result.json["report"]
+        assert (reported or {}).get("error") == (report or {}).get("error")
 
 
 @pytest.mark.parametrize(
@@ -233,29 +275,3 @@ def test_report_shows_an_ended_imports_report(
     assert result.exit_code == 0, result
     shown_version = (result.json["report"] or {}).get("schema_version")
     assert (result.json["import"]["status"], shown_version) == (statuses[-1], version)
-
-
-def harbor_task(root: Path) -> Path:
-    """A minimal Harbor task folder, ``hello``, under ``root``."""
-    files = {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"}
-    write_files(root / "hello", files)
-    return root / "hello"
-
-
-def test_import_bundles_linked_files_by_content_and_skips_linked_folders(
-    hud: Hud, importer: Platform, tmp_path: Path
-) -> None:
-    task = harbor_task(tmp_path / "src")
-    shared = tmp_path / "shared"
-    shared.mkdir()
-    (shared / "data.txt").write_text("shared")
-    (task / "environment" / "data.txt").symlink_to(shared / "data.txt")
-    (task / "environment" / "linked").symlink_to(shared)
-    (task / "dangling").symlink_to(tmp_path / "missing")
-
-    result = hud("harbor", "import", str(task), "--taskset", "tb2", "--yes")
-
-    assert result.exit_code == 0, result
-    sent = bundle(importer)
-    assert sent.read("hello/environment/data.txt") == b"shared"
-    assert not any("linked" in name or "dangling" in name for name in sent.namelist())

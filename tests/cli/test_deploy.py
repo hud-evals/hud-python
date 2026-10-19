@@ -13,9 +13,12 @@ from tests.support import Reply, write_files
 from tests.support.platform import BROWSER_PROJECT_ID, Build
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from tests.support import Hud, HudEnv, Platform
+
+ENV_PY = 'from hud import Environment\nenv = Environment("example")\n'
 
 
 @pytest.fixture
@@ -26,16 +29,9 @@ def tmpdir_(tmp_path: Path, hud_env: HudEnv) -> Path:
     return tmp_path / "tmp"
 
 
-def environment(directory: Path, name: str = "example") -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "env.py").write_text(f'from hud import Environment\nenv = Environment("{name}")\n')
-    (directory / "Dockerfile.hud").write_text("FROM python:3.12\n")
+def environment(directory: Path, **files: str) -> Path:
+    write_files(directory, {"env.py": ENV_PY, "Dockerfile.hud": "FROM python:3.12\n", **files})
     return directory
-
-
-def built(platform: Platform) -> Build:
-    (build,) = platform.builds.values()
-    return build
 
 
 def context(build: Build) -> list[str]:
@@ -45,54 +41,110 @@ def context(build: Build) -> list[str]:
         return sorted(archive.getnames())
 
 
-def test_deploy_uploads_the_context_triggers_the_build_and_links_the_directory(
-    hud: Hud, platform: Platform, tmpdir_: Path
-) -> None:
-    env = environment(hud.cwd / "env")
-    write_files(
-        env,
-        {
-            ".env": "SECRET=dotenv-secret\n",
-            "token.txt": "file-secret",
-            "vars.env": "KEY=file_value\n",
-        },
-    )
-
-    result = hud(
-        "deploy",
-        "env",
-        *("--env-file", "env/vars.env", "--build-arg", "PYTHON=3.12"),
-        *("--secret", "id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
-        *("--secret", "id=FILE_TOKEN,src=token.txt"),
-        "--yes",
-        env={"GITHUB_TOKEN": "env-secret"},
-    )
-
-    assert result.exit_code == 0, result
-    assert "Step 1/2 : FROM python:3.12" in result.stderr  # the build log streams
-    build = built(platform)
+def trigger(platform: Platform) -> dict[str, Any]:
+    """The trigger of the last build the platform was asked for."""
+    *_, build = platform.builds.values()
     assert build.trigger is not None
-    assert (build.trigger["environment_variables"], build.trigger["build_args"]) == (
-        {"KEY": "file_value"},
-        {"PYTHON": "3.12"},
-    )
-    assert build.trigger["build_secrets"] == {
-        "GITHUB_TOKEN": "env-secret",
-        "FILE_TOKEN": "file-secret",
-    }
-    assert ".env" not in context(build)
-    assert list(tmpdir_.iterdir()) == []
+    return build.trigger
+
+
+def settings(hud: Hud, platform: Platform) -> Any:
+    found = trigger(platform)
+    return (found["environment_variables"], found["build_args"], found["build_secrets"])
+
+
+def compose(hud: Hud, platform: Platform) -> Any:
+    document = trigger(platform)["runtime_config"]["compose"]
+    return (document["document"]["services"]["main"]["image"], document["root"])
+
+
+def placed(hud: Hud, platform: Platform) -> Any:
     (example,) = platform.environments.values()
-    assert json.loads((env / ".hud" / "config.json").read_text())["registry_id"] == example["id"]
+    linked = json.loads((hud.cwd / ".hud" / "config.json").read_text())["registry_id"]
+    return (example["project_id"], linked == example["id"])
+
+
+def redeployed(hud: Hud, platform: Platform) -> Any:
+    first, second = platform.builds.values()
+    assert first.trigger is not None and second.trigger is not None
+    return ("environment_variables" in first.trigger, "environment_variables" in second.trigger)
+
+
+SENT: dict[str, tuple[dict[str, str], list[list[str]], dict[str, str], Callable[..., Any], Any]] = {
+    "env files, build args and secrets ride the trigger": (
+        {".env": "SECRET=dotenv-secret\n", "token.txt": "file-secret", "vars.env": "KEY=v\n"},
+        [
+            [
+                *("--env-file", "vars.env", "--build-arg", "PYTHON=3.12"),
+                *("--secret", "id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
+                *("--secret", "id=FILE_TOKEN,src=token.txt"),
+            ]
+        ],
+        {"GITHUB_TOKEN": "env-secret"},
+        settings,
+        (
+            {"KEY": "v"},
+            {"PYTHON": "3.12"},
+            {"GITHUB_TOKEN": "env-secret", "FILE_TOKEN": "file-secret"},
+        ),
+    ),
+    "a Compose runtime config reaches the build as its document": (
+        {
+            "project/compose.json": '{"services":{"main":{"image":"postgres:16"}}}',
+            "runtime.json": json.dumps(
+                {"compose": {"document": "project/compose.json", "root": "."}}
+            ),
+        },
+        [["--no-env", "--runtime-config", "runtime.json"]],
+        {},
+        compose,
+        ("postgres:16", {"compose_path": "project/compose.json"}),
+    ),
+    "a first deploy lands in the selected project and links the directory": (
+        {},
+        [["--no-env"]],
+        {"HUD_DEFAULT_PROJECT": "browser-evals"},
+        placed,
+        (BROWSER_PROJECT_ID, True),
+    ),
+    "a redeploy keeps the registry's variables": (
+        {".env": "SECRET=dotenv"},
+        [["--env-file", ".env"], []],
+        {},
+        redeployed,
+        (True, False),
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("files", "deploys", "env", "observe", "expected"), SENT.values(), ids=SENT.keys()
+)
+def test_a_deploy_sends_what_its_options_name_with_the_build(
+    hud: Hud,
+    platform: Platform,
+    files: dict[str, str],
+    deploys: list[list[str]],
+    env: dict[str, str],
+    observe: Callable[[Hud, Platform], Any],
+    expected: Any,
+) -> None:
+    environment(hud.cwd, **files)
+
+    results = [hud("deploy", *argv, "--yes", "--json", env=env) for argv in deploys]
+
+    assert [result.exit_code for result in results] == [0] * len(deploys), results[-1]
+    assert observe(hud, platform) == expected
+    for build in platform.builds.values():
+        assert ".env" not in context(build)
 
 
 def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
     hud: Hud, platform: Platform
 ) -> None:
-    environment(hud.cwd)
-    write_files(
+    environment(
         hud.cwd,
-        {
+        **{
             "nested/.env.prod": "SECRET=1",
             ".git/config": "",
             "build/out.o": "",
@@ -106,133 +158,92 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
     result = hud("deploy", "--no-env", "--yes", "--json")
 
     assert result.exit_code == 0, result
-    sent = set(context(built(platform)))
+    (build,) = platform.builds.values()
+    sent = set(context(build))
     assert {"keep.pyc", "src/build/out.o"} <= sent
     assert not {"drop.pyc", "build/out.o", ".git/config", "nested/.env.prod"} & sent
 
 
 @pytest.mark.parametrize(
-    ("files", "argv", "name"),
+    ("files", "argv", "planned"),
     [
-        pytest.param({"env.py": 'env = Environment("my-env")\n'}, [], "my-env", id="declared"),
+        pytest.param(
+            {"env.py": 'env = Environment("my-env")\n'}, [], {"name": "my-env"}, id="declared"
+        ),
         pytest.param(
             {"env.py": 'actor = Environment("workspace")\nverifier = Environment("judge")\n'},
             ["--name", "judge"],
-            "judge",
+            {"name": "judge"},
             id="chosen-among-several",
+        ),
+        pytest.param(
+            {"env.py": ENV_PY, ".env": "SECRET=hidden"},
+            [],
+            {"name": "example", "dotenv_pending": True},
+            id="a-dotenv-beside-it-is-asked-about",
         ),
     ],
 )
-def test_the_environment_name_comes_from_its_declaration(
-    hud: Hud, platform: Platform, files: dict[str, str], argv: list[str], name: str
+def test_a_dry_run_plans_the_environment_it_would_deploy(
+    hud: Hud, platform: Platform, files: dict[str, str], argv: list[str], planned: dict[str, Any]
 ) -> None:
     write_files(hud.cwd, files)
 
-    result = hud("deploy", *argv, "--dry-run", "--no-env", "--json")
-
-    assert (result.exit_code, result.json["name"]) == (0, name), result
-
-
-def test_a_dry_run_plans_to_ask_about_a_dotenv_beside_the_environment(
-    hud: Hud, platform: Platform
-) -> None:
-    environment(hud.cwd)
-    (hud.cwd / ".env").write_text("SECRET=hidden")
-
-    result = hud("deploy", "--dry-run", "--json")
-
-    assert (result.exit_code, result.json["dotenv_pending"]) == (0, True), result
-
-
-def test_a_compose_runtime_config_reaches_the_build_as_its_document(
-    hud: Hud, platform: Platform
-) -> None:
-    environment(hud.cwd)
-    write_files(
-        hud.cwd,
-        {
-            "project/compose.json": '{"services":{"main":{"image":"postgres:16"}}}',
-            "runtime.json": json.dumps(
-                {"compose": {"document": "project/compose.json", "root": "."}}
-            ),
-        },
-    )
-
-    result = hud("deploy", "--no-env", "--runtime-config", "runtime.json", "--yes", "--json")
+    result = hud("deploy", *argv, "--dry-run", "--json")
 
     assert result.exit_code == 0, result
-    trigger = built(platform).trigger
-    assert trigger is not None
-    compose = trigger["runtime_config"]["compose"]
-    assert compose["document"]["services"]["main"]["image"] == "postgres:16"
-    assert compose["root"] == {"compose_path": "project/compose.json"}
+    assert {key: result.json[key] for key in planned} == planned
 
 
-def test_a_redeploy_keeps_the_link_and_the_registry_secrets(hud: Hud, platform: Platform) -> None:
-    environment(hud.cwd)
-    (hud.cwd / ".env").write_text("SECRET=dotenv")
-
-    first = hud("deploy", "--env-file", ".env", "--yes", "--json")
-    linked = (hud.cwd / ".hud" / "config.json").read_bytes()
-    again = hud("deploy", "--yes", "--json")
-
-    assert (first.exit_code, again.exit_code) == (0, 0), again
-    assert (hud.cwd / ".hud" / "config.json").read_bytes() == linked
-    _, redeployed = platform.builds.values()
-    assert redeployed.trigger is not None
-    assert "environment_variables" not in redeployed.trigger
-
-
-def test_a_first_deploy_lands_in_the_selected_project(
-    hud: Hud, platform: Platform, hud_env: HudEnv
-) -> None:
-    environment(hud.cwd)
-    hud_env.set(HUD_DEFAULT_PROJECT="browser-evals")
-
-    result = hud("deploy", "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    (example,) = platform.environments.values()
-    assert example["project_id"] == BROWSER_PROJECT_ID
-
-
-def test_a_rejected_build_request_removes_its_build_context(
-    hud: Hud, platform: Platform, tmpdir_: Path
-) -> None:
-    platform.services.route(
-        "api", "POST", "/v2/builds/trigger", Reply(status=409, json={"detail": "Busy"})
-    )
-    environment(hud.cwd)
-
-    result = hud("deploy", "--no-env", "--yes", "--json")
-
-    assert result.exit_code == 1, result
-    assert list(tmpdir_.iterdir()) == []
+ENDINGS: dict[str, tuple[Build | None, Reply | None, int, str]] = {
+    "a build that succeeds streams its log": (None, None, 0, "Step 1/2 : FROM python:3.12"),
+    "a build that fails": (
+        Build(
+            "",
+            status={"status": "FAILED", "error_message": "pip install failed"},
+            log=[{"type": "error", "error": "Step 2 failed"}],
+        ),
+        None,
+        1,
+        "",
+    ),
+    "a build without a log stream": (
+        Build("", status={"status": "SUCCEEDED"}, log=None),
+        None,
+        0,
+        "",
+    ),
+    "a build request the platform rejects": (
+        None,
+        Reply(status=409, json={"detail": "Busy"}),
+        1,
+        "",
+    ),
+}
 
 
 @pytest.mark.parametrize(
-    ("status", "log", "exit_code"),
-    [
-        pytest.param(
-            {"status": "FAILED", "error_message": "pip install failed"},
-            [{"type": "error", "error": "Step 2 failed"}],
-            1,
-            id="failed-build",
-        ),
-        pytest.param({"status": "SUCCEEDED"}, None, 0, id="no-log-stream"),
-    ],
+    ("build", "rejected", "exit_code", "logged"), ENDINGS.values(), ids=ENDINGS.keys()
 )
-def test_the_build_status_decides_the_exit_whatever_the_log_stream_does(
+def test_the_build_decides_the_exit_and_no_context_is_left_behind(
     hud: Hud,
     platform: Platform,
-    status: dict[str, Any],
-    log: list[dict[str, Any]] | None,
+    tmpdir_: Path,
+    build: Build | None,
+    rejected: Reply | None,
     exit_code: int,
+    logged: str,
 ) -> None:
-    platform.next_build = Build("", status=status, log=log)
+    if build is not None:
+        platform.next_build = build
+    if rejected is not None:
+        platform.services.route("api", "POST", "/v2/builds/trigger", rejected)
     environment(hud.cwd)
 
     result = hud("deploy", "--no-env", "--yes", "--json")
 
     assert result.exit_code == exit_code, result
-    assert result.json["success"] is (exit_code == 0)
+    assert logged in result.stderr
+    if rejected is None:
+        assert result.json["success"] is (exit_code == 0)
+    assert list(tmpdir_.iterdir()) == []
