@@ -201,22 +201,40 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
             thinking_config=thinking_config,
         )
 
-        api_response = await self.gemini_client.aio.models.generate_content(
+        stream = await self.gemini_client.aio.models.generate_content_stream(
             model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )
-        if not api_response.candidates:
+        # The turn keeps every streamed part as received: thought signatures belong to the
+        # parts they arrive on, including empty text parts.
+        parts: list[genai_types.Part] = []
+        candidate_seen = False
+        model_version: str | None = None
+        usage_meta: genai_types.GenerateContentResponseUsageMetadata | None = None
+        grounding_meta: genai_types.GroundingMetadata | None = None
+        finish_reason: genai_types.FinishReason | None = None
+        async for chunk in stream:
+            model_version = chunk.model_version or model_version
+            if chunk.usage_metadata is not None:
+                usage_meta = chunk.usage_metadata
+            if not chunk.candidates:
+                continue
+            candidate_seen = True
+            candidate = chunk.candidates[0]
+            if candidate.content is not None and candidate.content.parts:
+                parts.extend(candidate.content.parts)
+            if candidate.grounding_metadata is not None:
+                grounding_meta = candidate.grounding_metadata
+            if candidate.finish_reason is not None:
+                finish_reason = candidate.finish_reason
+        if not candidate_seen:
             raise RuntimeError(f"Gemini returned no candidates for model {self.config.model}")
-
-        candidate = api_response.candidates[0]
-        content = candidate.content
-        if content is not None:
-            messages.append(content)
+        if parts:
+            messages.append(genai_types.Content(role="model", parts=parts))
 
         result = AgentStep(content="", done=True)
-        result.model = api_response.model_version or self.config.model
-        usage_meta = api_response.usage_metadata
+        result.model = model_version or self.config.model
         if usage_meta is not None:
             result.usage = Usage(
                 prompt_tokens=usage_meta.prompt_token_count,
@@ -226,7 +244,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         text_parts: list[str] = []
         thought_parts: list[str] = []
 
-        for part in (content.parts or []) if content else []:
+        for part in parts:
             function_call = part.function_call
             if function_call is not None:
                 tc = self._make_tool_call(function_call, computer_tool)
@@ -241,14 +259,13 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
         result.content = "".join(text_parts)
         if thought_parts:
-            result.reasoning = "\n".join(thought_parts)
+            result.reasoning = "".join(thought_parts)
 
-        grounding_meta = candidate.grounding_metadata
         if grounding_meta is not None:
             result.citations = _grounding_citations(grounding_meta)
 
-        if candidate.finish_reason is not None:
-            result.finish_reason = candidate.finish_reason.name
+        if finish_reason is not None:
+            result.finish_reason = finish_reason.name
             if result.finish_reason == "MALFORMED_FUNCTION_CALL":
                 result.error = "Provider returned a malformed function call"
                 result.stop_reason = "malformed_tool_call"
