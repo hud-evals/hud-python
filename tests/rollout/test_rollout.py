@@ -1,9 +1,9 @@
-"""How a rollout ends a run: what the agent, the grader or a deadline did decides the
-run's reward, status and error, and whether the job counts it as graded.
+"""What ``rollout`` does with a task: what it hands the agent, and how what the agent,
+the grader or a deadline did decides the run's reward, status and error.
 
-``rollout`` makes these decisions the same way on every runtime, so each case runs
-in this process against a fixture environment; what a runtime adds (placing the
-env, carrying its frames, tearing it down) is ``test_runtimes``.
+``rollout`` does this the same way on every runtime, so each case runs in this
+process; what a runtime adds (placing the env, carrying its frames, tearing it
+down) is ``test_runtimes``, and a verifier's part is ``test_verifier``.
 """
 
 from __future__ import annotations
@@ -15,18 +15,151 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import pytest
 from dirty_equals import IsStr
 
-from hud.eval import LocalRuntime, Runtime, Task, rollout
+from hud.agents.base import Agent
+from hud.capabilities import Connection
+from hud.eval import LocalRuntime, Run, Runtime, Task, rollout
+from hud.telemetry.context import get_current_trace_id
 from tests.fixtures.envs import source
-from tests.support import ScriptedAgent, actor, eventually, judge, steps
+from tests.support import ScriptedAgent, actor, eventually, judge, lab, steps
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
+    from pathlib import Path
 
-    from hud.agents.base import Agent
     from hud.eval import Provider
 
 ECHO = Task(env="echo", id="echo", args={"word": "tangerine"})
 EXPLODED = RuntimeError("agent exploded")
+
+
+# ─── what the agent is handed ──────────────────────────────────────────
+
+
+def chat(messages: list[Any]) -> Task:
+    return Task(env="lab", id="chat", args={"messages": messages})
+
+
+PROMPTS = {
+    "text is one user turn": (
+        Task(env="lab", id="add", args={"a": 2, "b": 3}),
+        [("user", "add 2 3")],
+        "add 2 3",
+    ),
+    "no prompt is one empty user turn": (Task(env="lab", id="silent"), [("user", "")], ""),
+    "chat turns keep their roles and system becomes user": (
+        chat(
+            [
+                {"role": "system", "content": "be brief"},
+                {"role": "assistant", "content": {"type": "text", "text": "hi"}},
+                {"role": "user", "content": "add 2 3"},
+            ]
+        ),
+        [("user", "be brief"), ("assistant", "hi"), ("user", "add 2 3")],
+        "be brief\n\nhi\n\nadd 2 3",
+    ),
+    "non-text turns are dropped from the text": (
+        chat(
+            [
+                {"role": "user", "content": "first"},
+                {"role": "user", "content": {"type": "image", "data": "aW1n", "mimeType": "x"}},
+                "second",
+            ]
+        ),
+        [("user", "first"), ("user", None), ("user", "second")],
+        "first\n\nsecond",
+    ),
+    "a turn of several blocks is one message per block": (
+        chat(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is this?"},
+                        {"type": "image", "data": "aW1n", "mimeType": "image/png"},
+                    ],
+                }
+            ]
+        ),
+        [("user", "what is this?"), ("user", None)],
+        "what is this?",
+    ),
+}
+
+
+class Observer(Agent):
+    """Keeps what each run hands it while it runs, then answers ``5``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.while_running: list[dict[str, Any]] = []
+
+    async def __call__(self, run: Run) -> None:
+        self.while_running.append(
+            {
+                "turns": [
+                    (message.role, getattr(message.content, "text", None))
+                    for message in run.prompt_messages
+                ],
+                "text": run.prompt_text,
+                "bindings": run.bindings,
+                "trace_id": get_current_trace_id(),
+                "connections": sorted(run.connections),
+            }
+        )
+        run.trace.content = "5"
+
+
+@pytest.mark.parametrize(("row", "turns", "text"), PROMPTS.values(), ids=PROMPTS.keys())
+async def test_the_agent_is_handed_the_prompt_as_turns_and_as_text(
+    row: Task, turns: list[tuple[str, str | None]], text: str
+) -> None:
+    agent = Observer()
+
+    await rollout(row, agent, runtime=LocalRuntime(lab()))
+
+    (handed,) = agent.while_running
+    assert (handed["turns"], handed["text"]) == (turns, text)
+
+
+async def test_the_agent_is_handed_the_bindings_its_task_published_inside_its_trace() -> None:
+    agent = Observer()
+    row = Task(env="lab", id="claim", args={"published": {"robot": {"token": "slot-2"}}})
+
+    run = await rollout(row, agent, runtime=LocalRuntime(lab()))
+
+    (handed,) = agent.while_running
+    assert (handed["bindings"], handed["trace_id"]) == (
+        {"robot": {"token": "slot-2"}},
+        run.trace_id,
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path) -> None:
+    env = lab()
+    env.workspace(tmp_path / "ws")
+    search = Connection(
+        name="search",
+        capability="shell",
+        url="https://search.example/v1",
+        headers={"Authorization": "Bearer secret"},
+    )
+    agent = Observer()
+
+    run = await rollout(
+        Task(env="lab", id="add", args={"a": 2, "b": 3}),
+        agent,
+        runtime=LocalRuntime(env),
+        connections=[search],
+    )
+
+    (handed,) = agent.while_running
+    assert handed["connections"] == ["search"]
+    assert (run.reward, run.connections) == (1.0, {})
+
+
+# ─── how a run ends ────────────────────────────────────────────────────
 
 
 class Ending(NamedTuple):

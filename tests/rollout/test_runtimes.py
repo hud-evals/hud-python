@@ -3,7 +3,7 @@ channel's frames to it, and tears it down, whether the rollout ends, fails to st
 or is cancelled; it fails an environment that cannot serve; it moves a session's files
 to a verifier with a sandbox of its own; and it refuses what it cannot provision.
 
-``rollout`` itself decides how a run ends (``test_outcomes``), the same on every
+``rollout`` itself decides how a run ends (``test_rollout``), the same on every
 runtime, so these contracts hold only what a runtime adds. Each runtime opens below
 around a fixture environment from ``tests.fixtures.envs`` and says how to tell,
 afterwards, that it left nothing behind. Rows on a real daemon or account carry the
