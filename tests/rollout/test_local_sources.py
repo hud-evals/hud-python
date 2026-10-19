@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -326,14 +325,23 @@ def slow_initialize(events: list[str]) -> Environment:
     return env
 
 
+CLOSES_STDOUT = """
+import os
+import sys
+import time
+
+print("stdout closed", file=sys.stderr, flush=True)
+os.close(1)
+time.sleep(60)
+"""
 ACQUISITION_ERRORS: dict[
-    str, tuple[Callable[[Path, list[str]], Provider], Task, Any, str | None, list[str]]
+    str, tuple[Callable[[Path, list[str]], Provider], Task, Any, tuple[str, ...], list[str]]
 ] = {
     "a source without the row's env": (
         lambda tmp, events: LocalRuntime(write(tmp / "env.py", "from hud import Environment\n")),
         Task(env="other", id="add"),
         ValueError,
-        None,
+        (),
         [],
     ),
     "a source running an event loop at import": (
@@ -342,29 +350,36 @@ ACQUISITION_ERRORS: dict[
         ),
         ADD,
         RuntimeError,
-        "guard top-level run calls",
+        ("guard top-level run calls",),
         [],
     ),
     "an initialize hook that raises still shuts down": (
         lambda tmp, events: LocalRuntime(failing_initialize(events)),
         ADD,
         RuntimeError,
-        None,
+        (),
         ["initialize", "shutdown"],
     ),
     "an initialize hook slower than ready_timeout still shuts down": (
         lambda tmp, events: LocalRuntime(slow_initialize(events), ready_timeout=0.1),
         ADD,
         TimeoutError,
-        None,
+        (),
         ["initialize", "shutdown"],
+    ),
+    "a child that closes stdout before serving": (
+        lambda tmp, events: SubprocessRuntime(write(tmp / "env.py", CLOSES_STDOUT)),
+        ADD,
+        RuntimeError,
+        ("spawned env closed stdout before serving", "stdout closed"),
+        [],
     ),
 }
 
 
 @pytest.mark.filterwarnings("ignore:coroutine 'sleep' was never awaited:RuntimeWarning")
 @pytest.mark.parametrize(
-    ("provider", "row", "error", "message", "lifecycle"),
+    ("provider", "row", "error", "messages", "lifecycle"),
     ACQUISITION_ERRORS.values(),
     ids=ACQUISITION_ERRORS.keys(),
 )
@@ -372,7 +387,7 @@ async def test_a_source_that_cannot_serve_fails_the_run_naming_the_mistake(
     provider: Callable[[Path, list[str]], Provider],
     row: Task,
     error: type[Exception],
-    message: str | None,
+    messages: tuple[str, ...],
     lifecycle: list[str],
     tmp_path: Path,
 ) -> None:
@@ -382,7 +397,7 @@ async def test_a_source_that_cannot_serve_fails_the_run_naming_the_mistake(
 
     assert (run.trace.status, run.prompt) == ("error", None)
     assert f"{error.__name__}" in (run.trace.error or "")
-    assert (message or "") in (run.trace.error or "")
+    assert [message for message in messages if message not in (run.trace.error or "")] == []
     assert events == lifecycle
 
 
@@ -435,28 +450,6 @@ async def test_a_child_that_dies_before_serving_reports_its_output_and_takes_its
     finally:
         if not process_is_gone(pid):
             os.kill(pid, signal.SIGKILL)
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file descriptors")
-async def test_a_child_that_closes_stdout_before_serving_is_reported(tmp_path: Path) -> None:
-    source = write(
-        tmp_path / "env.py",
-        """
-        import os
-        import sys
-        import time
-
-        print("stdout closed", file=sys.stderr, flush=True)
-        os.close(1)
-        time.sleep(60)
-        """,
-    )
-
-    run = await rollout(ADD, ScriptedAgent("x"), runtime=SubprocessRuntime(source))
-
-    assert re.search(
-        r"(?s)spawned env closed stdout before serving.*stdout closed", run.trace.error or ""
-    )
 
 
 async def test_a_child_streams_its_output_to_the_terminal(

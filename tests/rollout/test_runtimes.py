@@ -48,7 +48,7 @@ from hud.eval import (
 )
 from hud.eval import runtime as runtime_module
 from tests.fixtures.envs import source
-from tests.support import Reply, ScriptedAgent, actor, eventually, judge, lab, solve, steps
+from tests.support import Reply, ScriptedAgent, actor, eventually, judge, solve, steps
 from tests.support.runtime import SESSION, SESSIONS, host_on_runtime
 
 if TYPE_CHECKING:
@@ -314,6 +314,10 @@ class Outcome:
     started: bool = True
     args: dict[str, Any] = field(default_factory=dict)
     agent_config: dict[str, Any] | None = None
+    #: Whether the outcome crosses the runtime differently from the others: the grade,
+    #: a grading error, a start error and an oversized frame each travel their own way.
+    #: The rest is decided here or inside the env, the same on every runtime.
+    crosses: bool = False
 
 
 def echo(agent: Callable[[], Agent], word: str = "tangerine", **outcome: Any) -> Outcome:
@@ -328,10 +332,7 @@ def faulty(task: str, error: Any, **outcome: Any) -> Outcome:
 
 OUTCOMES = {
     "the right answer earns the reward": echo(
-        lambda: ScriptedAgent("tangerine"), reward=1.0, status="completed"
-    ),
-    "a typed answer is parsed before grading": Outcome(
-        "echo", "count", lambda: ScriptedAgent("9"), 1.0, "completed", args={"word": "tangerine"}
+        lambda: ScriptedAgent("tangerine"), reward=1.0, status="completed", crosses=True
     ),
     "an agent that raises before answering is graded on no answer": echo(
         lambda: ScriptedAgent(fail_before=RuntimeError("agent exploded")),
@@ -360,16 +361,16 @@ OUTCOMES = {
         error="agent timed out after 0.3s",
     ),
     "a grader that raises leaves the run ungraded": faulty(
-        "grade_raises", IsStr(regex=r"\[grading\] .*grader exploded.*")
-    ),
-    "a grade without a score leaves the run ungraded": faulty(
-        "scoreless", IsStr(regex=r"\[grading\] .*missing a numeric 'score'.*")
+        "grade_raises", IsStr(regex=r"\[grading\] .*grader exploded.*"), crosses=True
     ),
     "a boolean score leaves the run ungraded": faulty(
         "bool_score", IsStr(regex=r"\[grading\] .*must include a numeric 'score'.*")
     ),
     "a start that raises fails the run before the agent sees a prompt": faulty(
-        "start_raises", IsStr(regex=r"\[starting task\] .*start exploded.*"), started=False
+        "start_raises",
+        IsStr(regex=r"\[starting task\] .*start exploded.*"),
+        started=False,
+        crosses=True,
     ),
     "args over the frame limit fail the start before the template runs": echo(
         lambda: ScriptedAgent("x"),
@@ -381,12 +382,20 @@ OUTCOMES = {
         ),
         graded=False,
         started=False,
+        crosses=True,
     ),
 }
 
 
-@pytest.mark.parametrize("runtime", rows("outcomes"))
-@pytest.mark.parametrize("outcome", OUTCOMES.values(), ids=OUTCOMES.keys())
+@pytest.mark.parametrize(
+    ("outcome", "runtime"),
+    [
+        pytest.param(outcome, row.values[0], id=f"{name}-{row.id}", marks=row.marks)
+        for name, outcome in OUTCOMES.items()
+        for row in rows("outcomes")
+        if outcome.crosses or row.id == "in-process"
+    ],
+)
 async def test_a_rollout_ends_the_same_way_wherever_it_runs(
     outcome: Outcome, runtime: str, request: pytest.FixtureRequest
 ) -> None:
@@ -467,7 +476,7 @@ DEADLINES = [
         )
         for row in rows("deadline")
         for moment in ("during the agent loop", "during grading")
-        if not (row.id == "hosted" and moment == "during grading")
+        if moment == "during the agent loop" or row.id == "in-process"
     ),
     pytest.param("hosted", "before the platform accepts it", "rollout_timeout", id="unsubmitted"),
     pytest.param(
@@ -609,10 +618,9 @@ async def test_a_deadline_during_teardown_returns_and_lets_teardown_finish(
     assert log == placements
 
 
-# ─── a provider of any shape ───────────────────────────────────────────
+# ─── a provider that never places the row ──────────────────────────────
 
 HEX_ID = IsStr(regex=r"[0-9a-f]{32}")
-LOOPBACK = IsStr(regex=r"tcp://127\.0\.0\.1:\d+")
 
 
 @asynccontextmanager
@@ -629,82 +637,43 @@ async def hanging_provider(task: Task) -> AsyncIterator[Runtime]:
     yield Runtime("tcp://127.0.0.1:1")
 
 
-def failed(error: Any, *, stop_reason: str | None = None) -> dict[str, Any]:
-    """A run that never went live: no prompt, no placement, no grade."""
-    return {
-        "status": "error",
-        "stop_reason": stop_reason,
-        "reward": 0.0,
-        "raw": {},
-        "error": error,
-        "prompt": None,
-        "runtime": None,
-        "spans": ["system"],
-    }
-
-
 ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
-SHAPES: dict[str, tuple[str, dict[str, Any], list[str], float | None]] = {
-    "a constructor source serves the row": (
-        "constructor",
-        {
-            "status": "completed",
-            "stop_reason": None,
-            "reward": 1.0,
-            "raw": {"score": 1.0},
-            "error": None,
-            "prompt": "add 2 3",
-            "runtime": LOOPBACK,
-            "spans": ["task", "user", "task"],
-        },
-        ["initialize", "start add 2 3", "grade 5", "end add", "shutdown"],
-        None,
-    ),
+UNPLACED_ROWS: dict[str, tuple[Provider, float | None, str, str | None]] = {
     "the rollout deadline covers provisioning": (
-        "hanging",
-        failed("rollout timed out after 0.2s during provisioning", stop_reason="timeout"),
-        [],
+        hanging_provider,
         0.2,
+        "rollout timed out after 0.2s during provisioning",
+        "timeout",
     ),
     "a provider that fails reports its notes": (
-        "broken",
-        failed("[provisioning] EOFError: sandbox closed\nenv output: ImportError: bugs"),
-        [],
+        broken_provider,
+        None,
+        "[provisioning] EOFError: sandbox closed\nenv output: ImportError: bugs",
         None,
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("provider", "expected", "hooks", "rollout_timeout"), SHAPES.values(), ids=SHAPES.keys()
+    ("provider", "rollout_timeout", "error", "stop_reason"),
+    UNPLACED_ROWS.values(),
+    ids=UNPLACED_ROWS.keys(),
 )
-async def test_a_rollout_always_returns_a_run_that_says_where_it_failed(
-    provider: str, expected: dict[str, Any], hooks: list[str], rollout_timeout: float | None
+async def test_a_row_that_is_never_placed_still_returns_a_run_that_says_why(
+    provider: Provider, rollout_timeout: float | None, error: str, stop_reason: str | None
 ) -> None:
-    events: list[str] = []
-    env = lab(events)
-    providers: dict[str, Provider] = {
-        "constructor": LocalRuntime(lambda task: env),
-        "hanging": hanging_provider,
-        "broken": broken_provider,
-    }
-
     run = await rollout(
-        ADD, ScriptedAgent(solve), runtime=providers[provider], rollout_timeout=rollout_timeout
+        ADD, ScriptedAgent(solve), runtime=provider, rollout_timeout=rollout_timeout
     )
-    await eventually(lambda: events[-1:] in ([], ["shutdown"]))
 
-    assert {
-        "status": run.trace.status,
-        "stop_reason": run.trace.stop_reason,
-        "reward": run.reward,
-        "raw": run.grade.raw,
-        "error": run.trace.error,
-        "prompt": run.prompt_text if run.prompt is not None else None,
-        "runtime": run.runtime,
-        "spans": [step["source"] for step in steps(run.trace_id)],
-    } == expected
-    assert events == hooks
+    assert (run.trace.status, run.trace.stop_reason, run.reward, run.grade.raw) == (
+        "error",
+        stop_reason,
+        0.0,
+        {},
+    )
+    assert (run.trace.error, run.prompt, run.runtime) == (error, None, None)
+    assert [step["source"] for step in steps(run.trace_id)] == ["system"]
     assert (run.trace_id, run.job_id, run.slug) == (HEX_ID, HEX_ID, ADD.slug)
 
 

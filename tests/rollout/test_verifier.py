@@ -172,82 +172,102 @@ async def test_the_verifier_grade_is_the_grade_of_record_wherever_it_runs(
     assert ("verifier runtime_config ignored" in caplog.text) is warned
 
 
+EXPLODED = RuntimeError("agent exploded")
+
+
 @pytest.mark.parametrize(
-    ("agent", "grade", "phase", "graded"),
+    ("agent", "grade", "verdict", "judged", "outcome", "phase", "graded"),
     [
         pytest.param(
-            ScriptedAgent("secret", fail_after=RuntimeError("agent exploded")),
+            ScriptedAgent("secret", fail_after=EXPLODED),
             "score",
+            "check",
+            None,
+            (1.0, {"score": 1.0}, False),
             "[agent loop]",
             ["solve", "verify"],
-            id="the-agent-raised-after-answering",
+            id="the-agent-raised-after-answering-and-the-verdict-stands",
         ),
         pytest.param(
-            ScriptedAgent("secret"), "raise", "[grading]", ["verify"], id="actor-grading-raised"
+            ScriptedAgent("secret", fail_after=EXPLODED),
+            "score",
+            "zero",
+            None,
+            (0.0, {"score": 0.0}, False),
+            "[agent loop]",
+            ["solve", "verify"],
+            id="a-zero-verdict-on-an-errored-run-still-counts",
+        ),
+        pytest.param(
+            ScriptedAgent("secret"),
+            "raise",
+            "check",
+            None,
+            (1.0, {"score": 1.0}, False),
+            "[grading]",
+            ["verify"],
+            id="actor-grading-raised",
         ),
         pytest.param(
             ScriptedAgent("secret"),
             "scoreless",
+            "check",
+            None,
+            (1.0, {"score": 1.0}, False),
             "[grading]",
             ["verify"],
             id="a-scoreless-actor-grade",
         ),
-    ],
-)
-async def test_the_verifier_stays_authoritative_when_the_actor_side_fails(
-    agent: ScriptedAgent, grade: str, phase: str, graded: list[str]
-) -> None:
-    row, provider = separate(grade=grade)
-
-    job = await row.run(agent, runtime=provider, rollout_timeout=30)
-
-    (run,) = job.runs
-    assert (run.reward, run.trace.status, run in job.errors) == (1.0, "error", False)
-    assert str(run.trace.error).startswith(phase)
-    assert evaluated(run) == graded
-
-
-@pytest.mark.parametrize(
-    ("verdict", "judged", "phase"),
-    [
-        pytest.param("raise", None, "[verifying]", id="the-verifier-raised"),
-        pytest.param("scoreless", None, "[verifying]", id="a-scoreless-verdict"),
         pytest.param(
-            "check", unavailable, "[provisioning verifier]", id="the-verifier-could-not-be-placed"
+            ScriptedAgent("secret"),
+            "score",
+            "raise",
+            None,
+            (0.0, {}, True),
+            "[verifying]",
+            ["solve"],
+            id="the-verifier-raised",
+        ),
+        pytest.param(
+            ScriptedAgent("secret"),
+            "score",
+            "scoreless",
+            None,
+            (0.0, {}, True),
+            "[verifying]",
+            ["solve"],
+            id="a-scoreless-verdict",
+        ),
+        pytest.param(
+            ScriptedAgent("secret"),
+            "score",
+            "check",
+            unavailable,
+            (0.0, {}, True),
+            "[provisioning verifier]",
+            ["solve"],
+            id="the-verifier-could-not-be-placed",
         ),
     ],
 )
-async def test_a_failed_verifier_leaves_the_run_ungraded(
-    verdict: str, judged: Provider | None, phase: str
+async def test_the_verifier_decides_the_grade_of_record_when_either_side_fails(
+    agent: ScriptedAgent,
+    grade: str,
+    verdict: str,
+    judged: Provider | None,
+    outcome: tuple[float, dict[str, Any], bool],
+    phase: str,
+    graded: list[str],
 ) -> None:
-    row, provider = separate(verdict=verdict, judged=judged)
-
-    job = await row.run(ScriptedAgent("secret"), runtime=provider, rollout_timeout=30)
-
-    (run,) = job.runs
-    assert (run.reward, run.grade.raw, run.trace.status, run in job.errors) == (
-        0.0,
-        {},
-        "error",
-        True,
-    )
-    assert str(run.trace.error).startswith(phase)
-    assert evaluated(run) == ["solve"]
-
-
-async def test_a_zero_verdict_on_an_errored_run_still_counts_toward_the_job() -> None:
-    row, provider = separate(verdict="zero")
-    agent = ScriptedAgent("secret", fail_after=RuntimeError("agent exploded"))
+    row, provider = separate(grade=grade, verdict=verdict, judged=judged)
 
     job = await row.run(agent, runtime=provider, rollout_timeout=30)
 
     (run,) = job.runs
-    assert (run.reward, run.grade.raw, run.trace.status, run in job.errors) == (
-        0.0,
-        {"score": 0.0},
-        "error",
-        False,
-    )
+    assert (run.reward, run.grade.raw, run in job.errors) == outcome
+    assert run.trace.status == "error"
+    assert str(run.trace.error).startswith(phase)
+    assert evaluated(run) == graded
 
 
 class ActorResult(BaseModel):
