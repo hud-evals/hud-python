@@ -32,8 +32,8 @@ inventory of current incidents.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
 - `tests/` is organized by contract, not by module: `tests/rollout/` holds what
-  every runtime owes a rollout, `tests/cli/test_every_command.py` what every
-  command owes its caller, and each file is named for the contract it holds.
+  every runtime owes a rollout, `tests/cli/test_changes.py` what every command
+  may change, and each file is named for the contract it holds.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style

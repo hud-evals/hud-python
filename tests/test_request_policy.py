@@ -1,7 +1,7 @@
 """The shared request policy where the CLI cannot see it: retry timing, the attempts a
 failure gets, timeouts, and deprecation notices.
 
-How each platform answer reaches a user as an error kind is ``tests/cli/test_every_command``.
+How each platform answer reaches a user as an error kind is ``tests/cli/test_output.py``.
 """
 
 from __future__ import annotations

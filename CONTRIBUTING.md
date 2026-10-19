@@ -86,18 +86,30 @@ user or a peer, such as "a rollout that runs past its deadline is cancelled and
 leaves its placement clean" or "a failed command prints one JSON error document".
 Each contract has one scenario, written as a table, in a file named for it:
 
+- `tests/environment/`: defining an environment: what a reference resolves to,
+  what is refused at definition, and the graders a task author uses.
+- `tests/protocol/`: the control channel and the other wire protocols an
+  environment serves, frame by frame: its server, its client, sessions, error
+  replies, tunnels and file tracking.
 - `tests/rollout/`: what every runtime owes a rollout (outcomes, deadlines and
   cancellation, refusals, the verifier, what the agent sees). The runtimes are
-  the rows, listed in `tests/rollout/placements.py`.
-- `tests/cli/test_every_command.py`: what every `hud` command owes its caller
-  (confirmation and `--dry-run`, error documents, refusals, analytics, SIGINT).
-  The other files in `tests/cli/` hold what one command does that no other does.
-- `tests/agents/`, `tests/capabilities/`, `tests/protocol/`: agent families,
-  capability clients, and the control channel and other wire protocols.
-- `tests/reporting/`, `tests/workspace/`, `tests/robot/`, `tests/environment/`,
-  `tests/integrations/`: telemetry, the agent's workspace, the robot stack,
-  environment definitions and sessions, and external task formats.
-- `tests/e2e/`: the `hud init` templates, the cookbooks and the oracle tasks.
+  the rows, listed in `tests/rollout/placements.py`; the other files hold the
+  scheduler, task sources, taskset files, and what only one runtime does.
+- `tests/agents/`: what every agent family owes its run (prompt and tools, the
+  tool loop, limits, provider faults, credentials, a fixture taken to its
+  reward), with the families listed in `tests/agents/families.py`, and one wire
+  file per family for what only that family sends.
+- `tests/cli/`: what every `hud` command owes its caller (`test_changes`,
+  `test_output`, `test_platform_effects`, `test_shell`), with the command tree
+  listed in `tests/cli/commands.py`, and one file per command for what only that
+  command does.
+- `tests/capabilities/`, `tests/reporting/`, `tests/workspace/`, `tests/robot/`,
+  `tests/integrations/`, `tests/train/`: capability clients, what the platform
+  and the trace record, the agent's workspace, the robot stack, external task
+  formats, and training batches.
+- `tests/` itself: what the whole SDK owes: importing it, its exported names,
+  its configuration, and how it talks to HUD services.
+- `tests/e2e/`: the `hud init` templates and the cookbooks.
 
 When a contract has several implementations, they are rows in its table, drawn
 from the product's own registry: the runtimes `hud.eval` exports, the Typer

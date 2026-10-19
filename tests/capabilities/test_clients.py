@@ -163,9 +163,7 @@ BACKENDS: dict[str, Callable[[Path], AbstractAsyncContextManager[Backend]]] = {
     "MCPClient": mcp,
 }
 #: Clients held to the contract by another area.
-ELSEWHERE = {
-    "RobotClient": "needs the robot extra; tests/environment/test_robot_slots.py holds its contract"
-}
+ELSEWHERE = {"RobotClient": "needs the robot extra; tests/robot/test_slots.py holds its contract"}
 
 
 def client_class(name: str) -> type[CapabilityClient]:
