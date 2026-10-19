@@ -195,6 +195,19 @@ class OpenAIChatConfig(ToolAgentConfig):
     api_key: str | None = Field(default=None, exclude=True)
     base_url: str | None = Field(default=None, exclude=True)
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+    stream: bool = Field(
+        default=False,
+        description="Stream each completion and assemble the full response client-side, so "
+        "long generations are not cut off by the client's read timeout. The upstream must "
+        "support streaming. Incompatible with token capture (extra_body.return_token_ids).",
+    )
+
+    @model_validator(mode="after")
+    def validate_stream(self) -> Self:
+        extra_body = self.completion_kwargs.get("extra_body")
+        if self.stream and isinstance(extra_body, dict) and extra_body.get("return_token_ids"):
+            raise ValueError("stream is incompatible with extra_body.return_token_ids")
+        return self
 
 
 # -----------------------------------------------------------------------------

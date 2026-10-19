@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionMessageParam,
+    ChatCompletionStreamOptionsParam,
+)
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, OpenAIChatConfig, Sample, Usage
@@ -16,6 +20,7 @@ from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
+from .streaming import ChatCompletionAccumulator
 from .tools import (
     BashTool,
     EditTool,
@@ -151,16 +156,21 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         if return_token_ids:
             request_kwargs.setdefault("logprobs", True)
 
-        response: ChatCompletion = await self.oai.chat.completions.create(
-            model=self.config.model,
-            messages=(
-                [{"role": "system", "content": system_prompt}, *messages]
-                if system_prompt is not None
-                else messages
-            ),
-            stream=False,
-            **request_kwargs,
+        request_messages: list[ChatCompletionMessageParam] = (
+            [{"role": "system", "content": system_prompt}, *messages]
+            if system_prompt is not None
+            else messages
         )
+        response: ChatCompletion
+        if self.config.stream:
+            response = await self._stream_completion(request_messages, request_kwargs)
+        else:
+            response = await self.oai.chat.completions.create(
+                model=self.config.model,
+                messages=request_messages,
+                stream=False,
+                **request_kwargs,
+            )
 
         choice = response.choices[0]
         message = choice.message
@@ -241,6 +251,28 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             model=response.model,
             usage=usage,
         )
+
+    async def _stream_completion(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        request_kwargs: dict[str, Any],
+    ) -> ChatCompletion:
+        """Stream a chat completion and accumulate the chunks into the full completion."""
+        stream_options = cast(
+            "ChatCompletionStreamOptionsParam",
+            {**(request_kwargs.pop("stream_options", None) or {}), "include_usage": True},
+        )
+        accumulator = ChatCompletionAccumulator()
+        async with await self.oai.chat.completions.create(
+            model=self.config.model,
+            messages=messages,
+            stream=True,
+            stream_options=stream_options,
+            **request_kwargs,
+        ) as stream:
+            async for chunk in stream:
+                accumulator.add(chunk)
+        return accumulator.completion()
 
 
 __all__ = ["OpenAIChatAgent"]

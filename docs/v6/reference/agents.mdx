@@ -72,6 +72,8 @@ config; `__call__(run)` takes only the run.
 
 `OpenAIConfig.max_output_tokens` and `GeminiConfig.max_output_tokens` are unset by default, so each request gets the model's own output limit. Set them to cap output per turn. Gemini counts thinking tokens toward the cap, so a low cap can truncate a thinking model before it answers.
 
+`OpenAIChatConfig.stream` is off by default. Set it to `True` when single turns can run past the client's 10-minute read timeout (long-reasoning models such as Kimi or GLM): each completion is then streamed and assembled into the same response a non-streaming call returns. The server behind `base_url` (or the gateway's upstream for `model`) must support streaming; gateway models on the `tinker` provider (HUD-trained checkpoints and Tinker base models) do not. It cannot be combined with token capture (`completion_kwargs={"extra_body": {"return_token_ids": True}}`).
+
 `OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
 request. Pass your own key when multiple agent instances should share the same cached prompt prefix.
 
