@@ -12,7 +12,8 @@ import pytest
 
 from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, GeminiConfig, OpenAIChatConfig, OpenAIConfig
-from tests.support import Turn, run_task, steps, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
+from tests.support import Turn, steps
 
 if TYPE_CHECKING:
     from collections.abc import Callable

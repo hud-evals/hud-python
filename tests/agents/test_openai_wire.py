@@ -9,7 +9,8 @@ import pytest
 
 from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
 from tests.agents.families import OPENAI, Wire, carried, two_servers
-from tests.support import run_task, say, shell_call, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
+from tests.support import say, shell_call
 
 if TYPE_CHECKING:
     from pathlib import Path

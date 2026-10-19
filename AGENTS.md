@@ -31,9 +31,8 @@ inventory of current incidents.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
-- `tests/` is organized by contract, not by module: `tests/rollout/` holds what
-  every runtime owes a rollout, `tests/cli/test_changes.py` what every command
-  may change, and each file is named for the contract it holds.
+- `tests/` follows the SDK's subsystems; `tests/support` holds stand-ins for the
+  outside world and `tests/fixtures` the SDK code tests run.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
@@ -126,9 +125,8 @@ Python `>=3.11, <3.13`.
 ## Testing
 
 Tests are black-box: they drive the SDK through a public boundary and fake only
-what lies outside it. `tests/support` holds those fakes: the HUD
-services, scripted model providers, a `docker` executable, a VNC screen, and the
-real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
+what lies outside it, using the stand-ins in `tests/support`. `CONTRIBUTING.md`
+shows how.
 
 - Enter through a public boundary: the `hud` CLI, an exported name, the control
   channel or another wire protocol, a file format, or a process effect.
@@ -141,25 +139,20 @@ real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
 - Assert what a user or a peer observes: the reward, run and trace fields,
   output and exit codes, files, what the platform recorded, wire frames. Prefer
   fixture environments whose reward proves the path ran.
-- Write a scenario once per contract, as a table; a new case is a new row.
-  Implementations of a contract (runtimes, agent families, commands, capability
-  clients, task formats) are rows in its table, never their own copy of the
-  scenario. Draw the rows from the product's own registry and keep the test that
-  fails when an implementation has no row.
-- Test each contract once, at the outermost boundary where it is observable.
-  Per-implementation tests hold only what is unique to that implementation.
-- No unit tests: a test never calls a function and checks what it returns. It
-  drives a scenario (a command, a rollout, a served environment, a wire peer)
-  and checks what that scenario left behind.
+- Write each contract once, as a table, at the outermost boundary where it is
+  observable. A contract's implementations (runtimes, agent families, commands)
+  are rows, drawn from the product's own list, and a completeness test fails when
+  one has no row.
+- No unit tests: drive a scenario and check what it left behind, never what a
+  function returns.
 - Assert the fields the case is about, never a recorded copy of a whole output:
   no snapshots of argv, request bodies or rendered text.
 - Do not add tests to check your own change. Check it with a temporary script,
   and extend a scenario only when the change adds or fixes a contract; a bug fix
   lands with the scenario row that failed before it.
-- The backing is a parameter, not a separate test: a scenario runs on the
-  in-process fake by default, and its Docker, Modal, sandbox or live rows are
-  marked `e2e` plus `docker`, `modal`, `sandbox`, `live` (a real HUD account) or
-  `hosted`, and run only when selected.
+- Rows needing something outside the process are marked `e2e` plus `docker`,
+  `modal`, `sandbox`, `live` (a real HUD account) or `hosted`, and run only when
+  selected.
 - Test names describe the observable behavior, not the mechanism.
 
 ## Operational Debugging

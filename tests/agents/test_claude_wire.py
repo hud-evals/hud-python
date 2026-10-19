@@ -25,13 +25,29 @@ from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWe
 from hud.agents.types import ClaudeConfig
 from hud.capabilities import Capability
 from tests.agents.families import CLAUDE, Wire, carried, two_servers
-from tests.support import call, fake_screen, image, mcp_server, run_task, say, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
+from tests.support import call, fake_screen, mcp_server, say
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
     from tests.support import FakeServices, HudEnv, ModelRequest, Models
+
+
+def image(
+    size: tuple[int, int],
+    *,
+    format: str = "PNG",
+    mode: str = "RGB",
+    color: tuple[int, ...] | str = "white",
+    exif: Image.Exif | None = None,
+) -> bytes:
+    """An image of ``size`` encoded as ``format``."""
+    buffer = io.BytesIO()
+    options: dict[str, Any] = {} if exif is None else {"exif": exif}
+    Image.new(mode, size, color).save(buffer, format=format, **options)
+    return buffer.getvalue()
 
 
 def screenshots() -> FastMCP:

@@ -13,7 +13,8 @@ import pytest
 from fastmcp import FastMCP
 
 from tests.agents.families import CLAUDE_CLI, FAMILIES, TOOL_FAMILIES, NotApplicable, over_families
-from tests.support import mcp_server, run_task
+from tests.fixtures.environments import run_task
+from tests.support import mcp_server
 
 if TYPE_CHECKING:
     from tests.agents.families import Driver

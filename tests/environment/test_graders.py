@@ -28,7 +28,8 @@ from hud.graders import (
     exact_match,
     numeric_match,
 )
-from tests.support import ScriptedAgent, Turn, say
+from tests.fixtures.agents import ScriptedAgent
+from tests.support import Turn, say
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

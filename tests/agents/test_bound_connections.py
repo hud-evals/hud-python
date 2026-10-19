@@ -16,7 +16,7 @@ from hud.capabilities import Connection
 from hud.environment.egress import ANY_HOST
 from tests.agents.cli_stub import Stub
 from tests.agents.families import claude_answer, codex_answer
-from tests.support import run_task, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
 
 if TYPE_CHECKING:
     from pathlib import Path

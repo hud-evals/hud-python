@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.integrations.harbor import export
-from tests.support import assemble_case, read_expected
+from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
     from tests.support import HudEnv

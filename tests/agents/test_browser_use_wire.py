@@ -1,7 +1,7 @@
 """What only ``BrowserUseAgent`` does: hand browser-use the run's task and its browser, and
 fold the history browser-use returns into the trace.
 
-browser-use is the outside world here: the stand-in SDK (``tests/support/sdks``)
+browser-use is the outside world here: the stand-in SDK (``tests/support/browser_use.py``)
 lists the browser's pages over the DevTools HTTP endpoint it is handed and asks
 the scripted model until it replies ``done: <answer>``.
 """

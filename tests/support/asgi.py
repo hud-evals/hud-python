@@ -10,7 +10,7 @@ import uvicorn
 
 from hud.capabilities import Capability
 
-from .scenario import eventually
+from .waiting import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

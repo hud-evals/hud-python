@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from tests.support import FakeServices, Hud, HudEnv, Uv
-    from tests.support.cli import Result
+    from tests.support.machine import Result
 
 SANDBOXED = {"coding"}
 TAKES_DATA_FILES = {"argument-hints"}

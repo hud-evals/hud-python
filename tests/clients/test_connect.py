@@ -1,0 +1,326 @@
+"""The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a peer.
+
+The peer (:func:`tests.support.control_peer`) is the env side of the wire:
+it answers each connection from a script and records every frame, so the
+frames the client sends are pinned literally. Opening a capability client
+through the control port is a table in ``tests/clients/test_capability_clients.py``.
+
+Not covered: the 120 s control heartbeat. Its interval is a module constant
+with no public knob, and waiting it out has no place in the default lane.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import math
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
+
+import pytest
+from dirty_equals import IsStr
+
+from hud.capabilities import (
+    Connection,
+)
+from hud.clients import HudClient, HudProtocolError, connect
+from hud.environment import WorkspaceRoute
+from hud.eval.runtime import Runtime
+from tests.support import answer, control_peer, hang_up
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+
+def hello(*bindings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "session_id": "s-1",
+        "env": {"name": "stub", "version": "1.0"},
+        "bindings": list(bindings),
+    }
+
+
+BINDINGS = (
+    {"name": "shell", "protocol": "ssh/2", "url": "ssh://agent@environment:22"},
+    {"name": "screen-0", "protocol": "rfb/3.8", "url": "rfb://environment:5900"},
+    {"name": "screen-1", "protocol": "rfb/3.8", "url": "rfb://environment:5901"},
+    {"name": "custom", "protocol": "custom/1", "url": "tcp://environment:7000"},
+)
+
+
+@pytest.mark.parametrize(
+    ("routes", "connections", "params"),
+    [
+        ((), (), {}),
+        (
+            (
+                WorkspaceRoute.from_url("ssh", "https://inference.hud.so/v1"),
+                WorkspaceRoute.from_url("shell", "http://gateway.test:8080"),
+            ),
+            (),
+            {
+                "workspace_routes": [
+                    {"capability": "ssh", "host": "inference.hud.so", "port": 443},
+                    {"capability": "shell", "host": "gateway.test", "port": 8080},
+                ]
+            },
+        ),
+        (
+            (),
+            (
+                Connection(
+                    name="inference",
+                    capability="ssh",
+                    url="https://inference.hud.so",
+                    headers={"Authorization": "Bearer secret"},
+                ),
+            ),
+            {
+                "connections": [
+                    {
+                        "name": "inference",
+                        "capability": "ssh",
+                        "url": "https://inference.hud.so",
+                        "headers": {"Authorization": "Bearer secret"},
+                    }
+                ]
+            },
+        ),
+    ],
+    ids=["bare", "workspace routes", "controller connections"],
+)
+async def test_hello_carries_the_workspace_routes_and_connections(
+    routes: tuple[WorkspaceRoute, ...], connections: tuple[Connection, ...], params: dict[str, Any]
+) -> None:
+    async with (
+        control_peer([answer(hello())]) as peer,
+        connect(Runtime(peer.url), workspace_routes=routes, connections=connections) as client,
+    ):
+        manifest = client.manifest
+
+    assert peer.requests() == [{"jsonrpc": "2.0", "id": 1, "method": "hello", "params": params}]
+    assert manifest is not None
+    assert (manifest.session_id, manifest.server_info.name, manifest.server_info.version) == (
+        "s-1",
+        "stub",
+        "1.0",
+    )
+
+
+@pytest.mark.parametrize(
+    "not_ready",
+    [hang_up(immediately=True), hang_up()],
+    ids=["accept then close", "close during hello"],
+)
+async def test_connect_retries_until_the_env_answers_hello(not_ready: Any) -> None:
+    async with (
+        control_peer([not_ready], [not_ready], [answer(hello())]) as peer,
+        connect(Runtime(peer.url), ready_timeout=10) as client,
+    ):
+        assert client.manifest is not None
+
+    assert peer.accepted == 3
+
+
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        (
+            [answer(error={"code": -32000, "message": "frame exceeds size limit"}, id=None)],
+            "hud rpc error -32000: frame exceeds size limit",
+        ),
+        (
+            [answer(error={"code": -32601, "message": "unknown method"})],
+            "hud rpc error -32601: unknown method",
+        ),
+        ([answer(hello(), id=99)], "'hello': reply id did not match request"),
+        ([answer(["not", "an", "object"])], "'hello': result was not an object"),
+    ],
+    ids=["an error frame", "an error reply", "a mismatched id", "a non-object"],
+)
+async def test_connect_fails_without_retrying_on_a_handshake_the_env_breaks(
+    script: list[Any], message: str
+) -> None:
+    async with control_peer(script) as peer:
+        with pytest.raises(HudProtocolError, match=message):
+            async with connect(Runtime(peer.url), ready_timeout=10):
+                pass
+
+    assert peer.accepted == 1
+
+
+@asynccontextmanager
+async def never_answering() -> AsyncIterator[str]:
+    async with control_peer([hang_up()]) as peer:
+        yield peer.url
+
+
+@asynccontextmanager
+async def a_refused_port() -> AsyncIterator[str]:
+    server = await asyncio.start_server(lambda reader, writer: None, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()
+    yield f"tcp://127.0.0.1:{port}"
+
+
+@asynccontextmanager
+async def nothing(url: str) -> AsyncIterator[str]:
+    yield url
+
+
+@pytest.mark.parametrize(
+    ("target", "ready_timeout", "error", "message"),
+    [
+        pytest.param(
+            never_answering,
+            0.3,
+            EOFError,
+            "env closed connection during 'hello'",
+            id="an-env-that-never-answers",
+        ),
+        pytest.param(a_refused_port, 0.3, OSError, "", id="a-refused-port"),
+        pytest.param(
+            lambda: nothing("tcp://127.0.0.1:9"),
+            -1.0,
+            ValueError,
+            "must be a positive finite number",
+            id="a-negative-ready-timeout",
+        ),
+        pytest.param(
+            lambda: nothing("tcp://127.0.0.1:9"),
+            math.nan,
+            ValueError,
+            "must be a positive finite number",
+            id="a-nan-ready-timeout",
+        ),
+    ],
+)
+async def test_connect_gives_up_within_the_runtime_ready_timeout(
+    target: Callable[[], Any], ready_timeout: float, error: type[Exception], message: str
+) -> None:
+    loop = asyncio.get_running_loop()
+    async with target() as url:
+        started = loop.time()
+        with pytest.raises(error, match=message):
+            async with connect(
+                Runtime(url, params={"ready_timeout": ready_timeout}), ready_timeout=60
+            ):
+                pass
+
+    assert loop.time() - started < 5
+
+
+@pytest.mark.parametrize(
+    ("ref", "outcome"),
+    [
+        ("shell", IsStr(regex=r"ssh://agent@127\.0\.0\.1:\d+")),
+        ("ssh", IsStr(regex=r"ssh://agent@127\.0\.0\.1:\d+")),
+        ("ssh/2", IsStr(regex=r"ssh://agent@127\.0\.0\.1:\d+")),
+        ("screen-1", IsStr(regex=r"rfb://127\.0\.0\.1:\d+")),
+        (
+            "rfb",
+            KeyError("ambiguous capability 'rfb'; matches: screen-0 (rfb/3.8), screen-1 (rfb/3.8)"),
+        ),
+        (
+            "browser",
+            KeyError(
+                "no capability 'browser' (available: shell (ssh/2), screen-0 (rfb/3.8), "
+                "screen-1 (rfb/3.8), custom (custom/1))"
+            ),
+        ),
+    ],
+)
+async def test_a_binding_resolves_by_name_or_protocol_to_a_local_tunnel(
+    ref: str, outcome: Any
+) -> None:
+    async with (
+        control_peer([answer(hello(*BINDINGS))]) as peer,
+        connect(Runtime(peer.url)) as client,
+    ):
+        if isinstance(outcome, KeyError):
+            with pytest.raises(KeyError) as raised:
+                client.binding(ref)
+            assert raised.value.args == outcome.args
+        else:
+            assert client.binding(ref).url == outcome
+
+
+async def test_a_raw_stream_client_passes_bindings_through() -> None:
+    async with control_peer([answer(hello(*BINDINGS))]) as peer:
+        reader, writer = await asyncio.open_connection("127.0.0.1", peer.port)
+        client = HudClient(reader, writer)
+        try:
+            await client.hello()
+            url = client.binding("shell").url
+        finally:
+            await client.close()
+
+    assert url == "ssh://agent@environment:22"
+
+
+@pytest.mark.parametrize(
+    ("break_tunnel", "warning"),
+    [
+        (
+            lambda peer: peer.stop_accepting(),
+            IsStr(regex=r"tunnel peer 127\.0\.0\.1:\d+ connection failed: .*"),
+        ),
+        (lambda peer: None, IsStr(regex=r"tunnel\.open 'shell' refused: .*unknown capability.*")),
+    ],
+    ids=["the env stops accepting", "the env refuses the stream"],
+)
+async def test_a_tunnel_the_env_cannot_open_ends_the_local_stream(
+    break_tunnel: Callable[[Any], None], warning: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING, logger="hud.clients")
+    async with (
+        control_peer([answer(hello(BINDINGS[0]))]) as peer,
+        connect(Runtime(peer.url)) as client,
+    ):
+        local = urlsplit(client.binding("shell").url)
+        break_tunnel(peer)
+        reader, writer = await asyncio.open_connection(local.hostname, local.port)
+        try:
+            received = await asyncio.wait_for(reader.read(), 10)
+        finally:
+            writer.close()
+
+    assert received == b""
+    assert warning in caplog.messages
+
+
+@pytest.mark.parametrize(
+    ("reply", "call", "message", "ends"),
+    [
+        pytest.param(
+            answer({"tasks": "fix"}),
+            lambda client: client.list_tasks(),
+            "tasks.list: 'tasks' must be a list",
+            False,
+            id="a-task-list-that-is-not-a-list",
+        ),
+        pytest.param(
+            answer({"score": 1.0}, id=7),
+            lambda client: client.grade({"answer": "done"}),
+            "'tasks.grade': reply id did not match",
+            True,
+            id="a-reply-to-another-request",
+        ),
+    ],
+)
+async def test_a_reply_that_breaks_the_protocol_raises_and_a_crossed_reply_ends_the_connection(
+    reply: Any, call: Callable[[Any], Any], message: str, ends: bool
+) -> None:
+    async with (
+        control_peer([answer(hello()), reply]) as peer,
+        connect(Runtime(peer.url)) as client,
+    ):
+        with pytest.raises(HudProtocolError, match=message):
+            await call(client)
+        if ends:
+            with pytest.raises((EOFError, OSError)):
+                await client.cancel()
+
+    assert len(peer.requests()) == 2

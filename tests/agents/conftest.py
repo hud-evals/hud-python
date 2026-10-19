@@ -3,9 +3,7 @@ stand-in, and the ``driver`` for the ``family`` a test is parametrized with."""
 
 from __future__ import annotations
 
-import importlib
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -18,16 +16,15 @@ from tests.agents.families import (
     ToolDriver,
     ToolFamily,
 )
-from tests.support import FakeServices, Models, fake_browser
+from tests.support import FakeServices, Models, browser_use, fake_browser
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
+    from pathlib import Path
     from types import ModuleType
 
     from tests.agents.families import Driver
     from tests.support import HudEnv
-
-SDKS = Path(__file__).resolve().parents[1] / "support" / "sdks"
 
 
 @pytest.fixture(scope="session")
@@ -47,13 +44,11 @@ def provider(provider_server: FakeServices) -> Models:
 
 @pytest.fixture
 def browser_use_sdk(monkeypatch: pytest.MonkeyPatch) -> Iterator[ModuleType]:
-    """The browser-use SDK stand-in (``tests/support/sdks``), installed as ``browser_use``."""
-    monkeypatch.syspath_prepend(str(SDKS))
-    sdk = importlib.import_module("browser_use")
-    assert Path(sdk.__file__ or "").is_relative_to(SDKS), sdk.__file__
-    yield sdk
-    sdk.stopped.clear()
-    del sys.modules["browser_use"]
+    """The browser-use SDK stand-in (``tests/support/browser_use.py``), imported by the
+    agent as ``browser_use`` in place of any real install."""
+    monkeypatch.setitem(sys.modules, "browser_use", browser_use)
+    yield browser_use
+    browser_use.stopped.clear()
 
 
 @pytest.fixture

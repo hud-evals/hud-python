@@ -20,7 +20,8 @@ from tests.agents.families import (
     over_families,
     over_family_cases,
 )
-from tests.support import Turn, call, mcp_server, run_task, say, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
+from tests.support import Turn, call, mcp_server, say
 
 if TYPE_CHECKING:
     from collections.abc import Callable

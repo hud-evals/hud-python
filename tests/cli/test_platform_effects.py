@@ -38,7 +38,7 @@ from .commands import (
 
 if TYPE_CHECKING:
     from tests.support import Hud, Platform
-    from tests.support.cli import Result
+    from tests.support.machine import Result
 
 TASK_ID = "00000000-0000-4000-a000-000000000005"
 

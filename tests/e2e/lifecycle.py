@@ -9,7 +9,7 @@ from tests.support import say
 
 if TYPE_CHECKING:
     from tests.support import ModelRequest, Turn
-    from tests.support.cli import Result
+    from tests.support.machine import Result
 
 # Tool steps may fail without failing the run: a real model can call a tool badly.
 LIFECYCLE_SOURCES = {"task", "agent", "system"}

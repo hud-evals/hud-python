@@ -13,13 +13,7 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 
-from tests.support.platform import (
-    BROWSER_PROJECT_ID,
-    LOCKED_PROJECT_ID,
-    TEAM_ID,
-    USER_ID,
-    Import,
-)
+from tests.support.platform import BROWSER_PROJECT_ID, LOCKED_PROJECT_ID, TEAM_ID, USER_ID, Import
 
 from .commands import (
     MUTATING,

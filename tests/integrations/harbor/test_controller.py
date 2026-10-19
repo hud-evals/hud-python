@@ -34,7 +34,7 @@ from hud.capabilities import MCPClient, SSHClient
 from hud.eval import DockerRuntime, Shared
 from hud.eval.runtime import DockerBindMount
 from hud.integrations import harbor
-from tests.support import assemble_case, read_expected
+from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
     from hud.eval import Provider

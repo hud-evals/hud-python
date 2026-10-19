@@ -30,7 +30,8 @@ from tests.agents.families import (
     over_families,
     over_family_cases,
 )
-from tests.support import Turn, call, fail, mcp_server, relay, run_task, say, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
+from tests.support import Turn, call, fail, mcp_server, relay, say
 
 if TYPE_CHECKING:
     from pathlib import Path

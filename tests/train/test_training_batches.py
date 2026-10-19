@@ -15,7 +15,8 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Run, Task, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
-from tests.support import Reply, ScriptedAgent, Turn
+from tests.fixtures.agents import ScriptedAgent
+from tests.support import Reply, Turn
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent

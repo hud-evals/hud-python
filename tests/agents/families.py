@@ -41,17 +41,8 @@ from hud.agents.types import (
 )
 from hud.capabilities import Capability
 from tests.agents.cli_stub import Stub, jsonl
-from tests.support import (
-    Reply,
-    Turn,
-    call,
-    mcp_server,
-    run_task,
-    say,
-    shell_call,
-    workspace_env,
-)
-from tests.support.envs import PROMPT
+from tests.fixtures.environments import PROMPT, run_task, workspace_env
+from tests.support import Reply, Turn, call, mcp_server, say, shell_call
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping

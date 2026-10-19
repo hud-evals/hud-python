@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.integrations import harbor
-from tests.support import assemble_case, read_expected
+from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
     from collections.abc import Callable

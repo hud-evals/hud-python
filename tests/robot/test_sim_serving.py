@@ -23,7 +23,7 @@ from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
-from tests.support import served
+from tests.fixtures.environments import served
 
 from .sims import Reach, plain_env, vector_env
 

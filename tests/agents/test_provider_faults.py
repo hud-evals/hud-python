@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.agents.families import TOOL_FAMILIES, NotApplicable, over_families, over_family_cases
-from tests.support import Reply, Turn, run_task, say, stream_error, workspace_env
+from tests.fixtures.environments import run_task, workspace_env
+from tests.support import Reply, Turn, say, stream_error
 
 if TYPE_CHECKING:
     from pathlib import Path

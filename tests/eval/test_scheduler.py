@@ -1,0 +1,292 @@
+"""The scheduler: ``Task.run`` and ``Taskset.run`` expand rows into rollouts, place them,
+bound their concurrency and collect the runs into a ``Job``."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+from hud.agents.base import Agent
+from hud.eval import (
+    Job,
+    LocalRuntime,
+    Runtime,
+    RuntimeConfig,
+    RuntimeLimits,
+    Shared,
+    Task,
+    Taskset,
+)
+from tests.fixtures.agents import ScriptedAgent
+from tests.fixtures.environments import lab, solve
+from tests.support import eventually
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from hud.eval import Provider, Run
+    from tests.support import FakeServices
+
+
+class Recorded:
+    """Places each row with ``inner`` and records when placements start and stop."""
+
+    def __init__(self, inner: Provider) -> None:
+        self.inner = inner
+        self.events: list[tuple[str, str]] = []
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        self.events.append(("start", task.slug))
+        try:
+            async with self.inner(task) as runtime:
+                yield runtime
+        finally:
+            self.events.append(("stop", task.slug))
+
+
+class Counting(Agent):
+    """Solves ``add`` rows after a pause, recording how many run at once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.live = 0
+        self.peak = 0
+
+    async def __call__(self, run: Run) -> None:
+        self.live += 1
+        self.peak = max(self.peak, self.live)
+        await asyncio.sleep(0.05)
+        run.trace.content = solve(run.prompt_text)
+        self.live -= 1
+
+
+ROWS = [
+    Task(env="lab", id="add", args={"a": 1, "b": 2}),
+    Task(env="lab", id="add", args={"a": 3, "b": 4}),
+]
+
+
+def placements(events: list[tuple[str, str]]) -> tuple[int, int]:
+    """How many placements started, and the most open at once."""
+    open_now = peak = 0
+    for event, _slug in events:
+        open_now += 1 if event == "start" else -1
+        peak = max(peak, open_now)
+    return sum(event == "start" for event, _ in events), peak
+
+
+SCHEDULES: dict[str, tuple[Callable[[Recorded], Provider], int | None, int, int, int]] = {
+    "every rollout gets its own placement": (lambda inner: inner, None, 6, 6, 6),
+    "max_concurrent bounds the rollouts in flight": (lambda inner: inner, 2, 6, 2, 2),
+    "a pool boots once and bounds occupancy by its width": (
+        lambda inner: Shared(inner, width=2),
+        None,
+        1,
+        1,
+        2,
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("wrap", "max_concurrent", "boots", "open_at_once", "peak"),
+    SCHEDULES.values(),
+    ids=SCHEDULES.keys(),
+)
+async def test_a_taskset_runs_each_row_group_times_in_task_major_order(
+    wrap: Callable[[Recorded], Provider],
+    max_concurrent: int | None,
+    boots: int,
+    open_at_once: int,
+    peak: int,
+) -> None:
+    recording = Recorded(LocalRuntime(lambda task: lab()))
+    agent = Counting()
+
+    job = await Taskset("pair", ROWS).run(
+        agent, runtime=wrap(recording), group=3, max_concurrent=max_concurrent
+    )
+
+    slugs = [row.slug for row in ROWS]
+    assert [run.slug for run in job.runs] == [slugs[0]] * 3 + [slugs[1]] * 3
+    assert [run.reward for run in job.runs] == [1.0] * 6
+    assert {run.job_id for run in job.runs} == {job.id}
+    first, second = ({run.group_id for run in job.results[slug]} for slug in slugs)
+    assert len(first) == len(second) == 1 and first != second
+    assert placements(recording.events) == (boots, open_at_once)
+    assert recording.events[-1][0] == "stop"
+    assert agent.peak == peak
+
+
+async def test_an_open_job_collects_the_runs_of_several_calls() -> None:
+    session = await Job.start("training", group=2)
+    row = ROWS[0]
+    runtime = LocalRuntime(lab())
+
+    first = await row.run(ScriptedAgent(solve), runtime=runtime, job=session)
+    second = await row.run(ScriptedAgent(solve), runtime=runtime, job=session)
+
+    assert first is second is session
+    assert [run.job_id for run in session.runs] == [session.id] * 4
+
+
+class Lingering(Agent):
+    """Answers ``add`` rows (``add 1 2`` wrongly), then keeps running on ``add 3 4``."""
+
+    async def __call__(self, run: Run) -> None:
+        run.trace.content = "wrong" if run.prompt_text == "add 1 2" else solve(run.prompt_text)
+        if run.prompt_text == "add 3 4":
+            await asyncio.sleep(30)
+
+
+async def test_a_jobs_reward_averages_graded_runs_and_its_errors_are_the_ungraded_ones() -> None:
+    rows = [
+        Task(env="lab", id="add", args={"a": 1, "b": 2}, slug="graded-wrong"),
+        Task(
+            env="lab",
+            id="add",
+            args={"a": 3, "b": 4},
+            slug="timed-out-after-answering",
+            agent_config={"timeout_seconds": 0.2},
+        ),
+        Task(env="lab", id="grade_raises", slug="grader-raised"),
+    ]
+
+    job = await Taskset("mixed", rows).run(Lingering(), runtime=LocalRuntime(lambda task: lab()))
+
+    outcomes = {run.slug: (run.reward, run.trace.status, run.trace.stop_reason) for run in job.runs}
+    assert outcomes == {
+        "graded-wrong": (0.0, "completed", None),
+        "timed-out-after-answering": (1.0, "error", "timeout"),
+        "grader-raised": (0.0, "error", None),
+    }
+    assert [run.slug for run in job.errors] == ["grader-raised"]
+    assert job.reward == 0.5
+
+
+async def test_cancelling_a_taskset_run_cancels_every_rollout_and_shuts_their_envs_down() -> None:
+    events: list[str] = []
+    agent = ScriptedAgent(solve, delay=30)
+    pending = asyncio.create_task(
+        Taskset("pair", ROWS).run(agent, runtime=LocalRuntime(lambda task: lab(events)), group=2)
+    )
+    await eventually(lambda: len(agent.prompts) == 4)
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    await eventually(lambda: events.count("shutdown") == 4)
+    assert events.count("initialize") == 4
+    assert not any(event.startswith("grade") for event in events)
+
+
+async def test_an_open_pool_stays_warm_across_calls_and_closes_with_its_scope() -> None:
+    recording = Recorded(LocalRuntime(lab()))
+
+    async with Shared(recording, width=2) as pool:
+        await Taskset("one", ROWS[:1]).run(ScriptedAgent(solve), runtime=pool)
+        await Taskset("two", ROWS[1:]).run(ScriptedAgent(solve), runtime=pool)
+        assert recording.events == [("start", ROWS[0].slug)]
+
+    assert recording.events == [("start", ROWS[0].slug), ("stop", ROWS[0].slug)]
+
+
+def flaky(inner: Provider) -> tuple[Provider, list[int]]:
+    """A provider whose first boot fails."""
+    attempts: list[int] = []
+
+    @asynccontextmanager
+    async def place(task: Task) -> AsyncIterator[Runtime]:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise RuntimeError("boot failed")
+        async with inner(task) as runtime:
+            yield runtime
+
+    return place, attempts
+
+
+async def test_a_failed_boot_fails_one_lease_and_the_next_lease_retries() -> None:
+    provider, attempts = flaky(LocalRuntime(lab()))
+
+    job = await ROWS[0].run(
+        ScriptedAgent(solve), runtime=Shared(provider, width=1), group=2, max_concurrent=1
+    )
+
+    assert [(run.reward, run.trace.error) for run in job.runs] == [
+        (0.0, "[provisioning] RuntimeError: boot failed"),
+        (1.0, None),
+    ]
+    assert attempts == [1, 2]
+    assert (job.reward, job.errors) == (1.0, [job.runs[0]])
+
+
+def limited(**limits: int) -> RuntimeConfig:
+    return RuntimeConfig(limits=RuntimeLimits(**limits))
+
+
+def with_verifier(config: RuntimeConfig) -> Task:
+    return ROWS[0].model_copy(
+        update={"verifier": Task(env="judge", id="verify", runtime_config=config)}
+    )
+
+
+def timed(seconds: float, **row: Any) -> Task:
+    return ROWS[0].model_copy(update={"agent_config": {"timeout_seconds": seconds}, **row})
+
+
+INVALID: dict[str, Callable[[Provider], Any]] = {
+    "an agent timeout at the rollout_timeout": lambda runtime: timed(10).run(
+        ScriptedAgent(), runtime=runtime, rollout_timeout=10
+    ),
+    "an agent timeout past the row's run limit": (
+        lambda runtime: timed(5000, runtime_config=limited(run_timeout_s=3600)).run(
+            ScriptedAgent(), runtime=runtime
+        )
+    ),
+    "an actor run limit at the rollout_timeout": (
+        lambda runtime: (
+            ROWS[0]
+            .model_copy(update={"runtime_config": limited(run_timeout_s=3600)})
+            .run(ScriptedAgent(), runtime=runtime, rollout_timeout=3600)
+        )
+    ),
+    "a verifier startup limit at the rollout_timeout": (
+        lambda runtime: with_verifier(limited(startup_timeout_s=90)).run(
+            ScriptedAgent(), runtime=runtime, rollout_timeout=90
+        )
+    ),
+    "duplicate slugs": lambda runtime: Taskset("t", [ROWS[0], ROWS[0]]),
+    "a portable row without a runtime": lambda runtime: Taskset("t", ROWS).run(ScriptedAgent()),
+    "container rows mixed with portable rows": (
+        lambda runtime: Taskset(
+            "t", [ROWS[0], ROWS[1].model_copy(update={"runtime_config": RuntimeConfig(image="x")})]
+        ).run(ScriptedAgent())
+    ),
+}
+
+
+@pytest.mark.parametrize("start", INVALID.values(), ids=INVALID.keys())
+async def test_an_invalid_schedule_raises_before_any_rollout_starts(
+    start: Callable[[Provider], Any], services: FakeServices
+) -> None:
+    recording = Recorded(LocalRuntime(lab()))
+
+    with pytest.raises(ValueError):
+        outcome = start(recording)
+        if asyncio.iscoroutine(outcome):
+            await outcome
+
+    assert recording.events == []
+    assert services.requests() == []
+
+
+async def test_an_empty_taskset_needs_no_placement() -> None:
+    job = await Taskset("empty", []).run(ScriptedAgent())
+
+    assert (job.runs, job.reward) == ([], 0.0)
