@@ -1,8 +1,7 @@
-"""What TrainingClient sends to the HUD training service, and what it refuses to send."""
+"""What a training batch sends to the HUD training service, and what it refuses to send."""
 
 from __future__ import annotations
 
-import itertools
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -16,11 +15,11 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Run, Task, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
-from tests.support import Reply, ScriptedAgent
+from tests.support import Reply, ScriptedAgent, Turn
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from tests.support import FakeServices, Platform, Request
+    from tests.support import Models, Platform
 
 MODEL_ID = "00000000-0000-4000-8000-000000000001"
 TRAIN = f"/v1/models/{MODEL_ID}/train"
@@ -45,37 +44,13 @@ def trainable(platform: Platform) -> Platform:
     return platform
 
 
-def _sampling_gateway(services: FakeServices) -> None:
-    """A trainable model behind the gateway: every reply carries token ids and logprobs."""
-    turns = itertools.count()
-
-    def complete(request: Request) -> Reply:
-        assert request.json["return_token_ids"] is True
-        content = "ok" if next(turns) % 2 == 0 else "no"
-        return Reply(
-            json={
-                "id": "c",
-                "object": "chat.completion",
-                "created": 0,
-                "model": "owner/model",
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "stop",
-                        "message": {"role": "assistant", "content": content},
-                        "logprobs": {
-                            "content": [
-                                {"token": content, "logprob": -0.5, "bytes": [], "top_logprobs": []}
-                            ]
-                        },
-                        "prompt_token_ids": [1, 2, 3],
-                        "token_ids": [7],
-                    }
-                ],
-            }
-        )
-
-    services.route("gateway", "POST", "/chat/completions", handler=complete)
+def sampled(text: str) -> Turn:
+    """A reply from a trainable model: it carries its token ids and logprobs."""
+    logprob = {"token": text, "logprob": -0.5, "bytes": [], "top_logprobs": []}
+    return Turn(
+        text=text,
+        extra={"prompt_token_ids": [1, 2, 3], "token_ids": [7], "logprobs": {"content": [logprob]}},
+    )
 
 
 async def _runs(agent: Agent, *, tasks: list[Task] | None = None, group: int = 2) -> list[Run]:
@@ -85,21 +60,18 @@ async def _runs(agent: Agent, *, tasks: list[Task] | None = None, group: int = 2
     return job.runs
 
 
-def _trainable_agent() -> OpenAIChatAgent:
-    return OpenAIChatAgent(
+async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
+    trainable: Platform, models: Models
+) -> None:
+    models.queue([sampled("ok"), sampled("no")])
+    agent = OpenAIChatAgent(
         OpenAIChatConfig(
             model="owner/model",
             max_steps=1,
             completion_kwargs={"extra_body": {"return_token_ids": True}},
         )
     )
-
-
-async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
-    trainable: Platform,
-) -> None:
-    _sampling_gateway(trainable.services)
-    runs = await _runs(_trainable_agent())
+    runs = await _runs(agent)
 
     await TrainingClient("owner/model").step(runs, learning_rate=1e-5, group_size=2)
 

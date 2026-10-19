@@ -129,6 +129,8 @@ class FakeServices:
 
     def stop(self) -> None:
         self._server.should_exit = True
+        # A delayed reply a test walked away from must not hold up the end of the session.
+        self._server.force_exit = True
         self._thread.join(timeout=10)
 
     def reset(self) -> None:

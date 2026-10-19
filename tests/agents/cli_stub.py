@@ -3,19 +3,23 @@
 A stub is a Python script placed on the workspace's ``PATH``. Each invocation
 records what the agent handed it (argv, the environment variables the agent
 set, stdin, its working directory and the ``.hud_*`` files there) to a capture
-file, optionally drives a computer-use MCP server named in its MCP config,
-then prints a canned JSONL stream, writes stderr and exits as told.
+file, runs the shell commands it is given in its working directory, as a real CLI's
+own tools would, optionally drives a computer-use MCP server named in its MCP
+config, then prints a canned JSONL stream, writes stderr and exits as told.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Variables the CLI agents set for the process they launch.
 AGENT_VARIABLES = ("ANTHROPIC_", "CLAUDE_", "CODEX_", "DISABLE_", "HUD_", "IS_SANDBOX")
@@ -76,6 +80,9 @@ def drive_computer(server, actions):
     return results
 
 
+for command in behavior["commands"]:
+    subprocess.run(command, shell=True, check=True)
+
 if behavior.get("computer"):
     servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
     record["computer"] = drive_computer(servers["computer-use"], behavior["computer"])
@@ -103,6 +110,7 @@ class Stub:
     stderr: str = ""
     exit: int = 0
     hang: bool = False
+    commands: list[str] = field(default_factory=list[str])
     computer: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
     @property
@@ -114,8 +122,11 @@ class Stub:
         return self.root / "captures"
 
     def install(self) -> None:
+        """Write the stub and its behavior, discarding what earlier invocations recorded."""
         self.bin.mkdir(parents=True, exist_ok=True)
         self.captures_dir.mkdir(parents=True, exist_ok=True)
+        for capture in self.captures_dir.glob("*.json"):
+            capture.unlink()
         behavior = self.root / "behavior.json"
         behavior.write_text(
             json.dumps(
@@ -124,6 +135,7 @@ class Stub:
                     "stderr": self.stderr,
                     "exit": self.exit,
                     "hang": self.hang,
+                    "commands": self.commands,
                     "computer": self.computer,
                 }
             )
@@ -158,18 +170,14 @@ class Stub:
         return {**blanked, "HOME": str(home)}
 
 
-def process_exited(pid: int, *, within: float = 5.0) -> bool:
+def process_exited(pid: int, *, within: float = 10.0) -> bool:
     """Whether ``pid`` has exited (gone or a zombie), polling for up to ``within`` seconds."""
-    status = Path(f"/proc/{pid}/status")
     deadline = time.monotonic() + within
     while time.monotonic() < deadline:
-        try:
-            state = next(
-                line for line in status.read_text().splitlines() if line.startswith("State:")
-            )
-        except FileNotFoundError:
-            return True
-        if "Z" in state.split()[1]:
+        state = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+        ).stdout.strip()
+        if not state or state.startswith("Z"):
             return True
         time.sleep(0.05)
     return False
