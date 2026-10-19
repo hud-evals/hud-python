@@ -1,12 +1,6 @@
-"""Stub ``claude`` and ``codex`` executables for the CLI agent scenarios.
-
-A stub is a Python script placed on the workspace's ``PATH``. Each invocation
-records what the agent handed it (argv, the environment variables the agent
-set, stdin, its working directory and the ``.hud_*`` files there) to a capture
-file, runs the shell commands it is given in its working directory, as a real CLI's
-own tools would, optionally drives a computer-use MCP server named in its MCP
-config, then prints a canned JSONL stream, writes stderr and exits as told.
-"""
+"""Stub ``claude`` and ``codex`` executables: each records what the agent handed it (argv,
+the variables it set, stdin, ``.hud_*`` files), runs the commands it is told to, prints the
+JSONL stream the real CLI would, and exits as told."""
 
 from __future__ import annotations
 
@@ -185,3 +179,116 @@ def process_exited(pid: int, *, within: float = 10.0) -> bool:
 
 def jsonl(*events: dict[str, Any]) -> str:
     return "".join(json.dumps(event) + "\n" for event in events)
+
+
+# ─── what the real CLIs print ──────────────────────────────────────────
+
+
+def claude_assistant(*content: dict[str, Any], stop: str = "end_turn") -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "message": {
+            "id": "msg",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": list(content),
+            "stop_reason": stop,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 3, "output_tokens": 2},
+        },
+    }
+
+
+def claude_result(text: str = "done", *, is_error: bool = False) -> dict[str, Any]:
+    return {
+        "type": "result",
+        "subtype": "success",
+        "is_error": is_error,
+        "result": text,
+        "session_id": "session-1",
+        "duration_ms": 5,
+        "num_turns": 2,
+        "total_cost_usd": 0.01,
+    }
+
+
+def claude_answer(text: str) -> str:
+    return jsonl(claude_assistant({"type": "text", "text": text}), claude_result(text))
+
+
+def claude_shell(command: str, then: str) -> str:
+    return jsonl(
+        claude_assistant(
+            {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {"command": command}},
+            stop="tool_use",
+        ),
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "ran"}],
+            },
+        },
+        claude_assistant({"type": "text", "text": then}),
+        claude_result(then),
+    )
+
+
+def claude_fault(message: str) -> str:
+    return jsonl(claude_result(message, is_error=True))
+
+
+def codex_item(kind: str, item_id: str, **fields: Any) -> dict[str, Any]:
+    return {"type": "item.completed", "item": {"id": item_id, "type": kind, **fields}}
+
+
+CODEX_STARTED = {"type": "thread.started", "thread_id": "thread-1"}
+CODEX_COMPLETED = {
+    "type": "turn.completed",
+    "usage": {"input_tokens": 20, "cached_input_tokens": 5, "output_tokens": 8},
+}
+
+
+def codex_answer(text: str) -> str:
+    return jsonl(
+        CODEX_STARTED, codex_item("agent_message", "message-1", text=text), CODEX_COMPLETED
+    )
+
+
+def codex_shell(command: str, then: str) -> str:
+    return jsonl(
+        CODEX_STARTED,
+        codex_item(
+            "command_execution",
+            "command-1",
+            command=command,
+            aggregated_output="ran",
+            exit_code=0,
+            status="completed",
+        ),
+        codex_item("agent_message", "message-1", text=then),
+        CODEX_COMPLETED,
+    )
+
+
+def codex_fault(message: str) -> str:
+    return jsonl({"type": "turn.started"}, {"type": "turn.failed", "error": {"message": message}})
+
+
+# ─── the command line a CLI was launched with ──────────────────────────
+
+
+def flag(argv: list[str], name: str) -> str | None:
+    """The value of ``name value`` or ``name=value`` in a command line."""
+    for index, arg in enumerate(argv):
+        if arg == name:
+            return argv[index + 1]
+        if arg.startswith(f"{name}="):
+            return arg.removeprefix(f"{name}=")
+    return None
+
+
+def overrides(argv: list[str]) -> dict[str, str]:
+    """Codex's ``-c key=value`` overrides, values as written (TOML)."""
+    return dict(argv[index + 1].split("=", 1) for index, arg in enumerate(argv) if arg == "-c")

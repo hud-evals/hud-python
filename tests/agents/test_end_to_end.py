@@ -1,28 +1,23 @@
-"""An agent takes each fixture environment to its reward, on a scripted model or on the
-family's real model.
-
-A reward of 1 proves the whole path worked: the prompt reached the model, the
-model's tool calls reached the environment, its state survived between calls, and
-the grade of record came from the right task. On the scripted model (the default
-lane) each fixture is answered by its policy in ``tests.fixtures.envs``, through
-``hud eval`` and through ``Taskset.run``, and the trace also shows the tool steps
-the policy took and the prompt it was given. On the real model (the ``live`` lane)
-every family runs each fixture it can: an agent without a capability earns nothing
-from it and still finishes cleanly. The live rows come from the agent families
-(``tests/agents/families.py``).
-"""
+"""An agent takes each fixture environment to its reward, on a scripted model or on its
+real model (the ``live`` lane). A reward of 1 proves the prompt reached the model, its
+tool calls reached the environment, and the grade came from the right task. Every agent
+in ``hud.agents`` has a live row, or the reason it has none."""
 
 from __future__ import annotations
 
+import importlib
+import inspect
+import pkgutil
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
+import hud.agents
 from hud.agents import ClaudeAgent, ClaudeCLIAgent, CodexCLIAgent, create_agent
+from hud.agents.base import Agent
 from hud.agents.types import ClaudeCLIConfig, ClaudeConfig, CodexCLIConfig
 from hud.eval import LocalRuntime, Task, Taskset
-from tests.agents.families import NotApplicable, over_families
 from tests.e2e.lifecycle import task_calls
 from tests.fixtures.envs import collect_digits, read_token, repeat_word, source
 from tests.support import steps
@@ -30,7 +25,6 @@ from tests.support import steps
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.agents.base import Agent
     from tests.support import Hud, HudEnv, ModelRequest, Models, Turn
 
 MODEL = "claude-sonnet-4-6"
@@ -57,30 +51,46 @@ SCRIPTED: dict[str, tuple[Callable[[], Callable[[ModelRequest], Turn]], int, tup
 }
 
 EVERY_FIXTURE = dict.fromkeys(FIXTURES, 1.0)
-Live = tuple["Callable[[], Agent]", dict[str, float]]
-# The cheapest model of each family the gateway serves (Gemini's must support computer
-# use), and the reward each fixture pays it.
-LIVE: dict[str, Live | NotApplicable] = {
-    "claude": (lambda: create_agent("claude-haiku-4-5"), EVERY_FIXTURE),
-    "openai": (lambda: create_agent("gpt-5.4-mini"), EVERY_FIXTURE),
-    "gemini": (lambda: create_agent("gemini-3.8-flash"), EVERY_FIXTURE),
+# The cheapest model of each agent the gateway serves (Gemini's must support computer use),
+# and the reward each fixture pays it.
+LIVE: dict[str, tuple[Callable[[], Agent], dict[str, float]]] = {
+    "ClaudeAgent": (lambda: create_agent("claude-haiku-4-5"), EVERY_FIXTURE),
+    "OpenAIAgent": (lambda: create_agent("gpt-5.4-mini"), EVERY_FIXTURE),
+    "GeminiAgent": (lambda: create_agent("gemini-3.8-flash"), EVERY_FIXTURE),
     # Chat Completions agents have no computer use: offered a screen, they leave it alone.
-    "openai_compatible": (
+    "OpenAIChatAgent": (
         lambda: create_agent("deepseek/deepseek-v4-flash"),
         EVERY_FIXTURE | {"screen": 0.0},
     ),
-    "claude_cli": (
+    "ClaudeCLIAgent": (
         lambda: ClaudeCLIAgent(ClaudeCLIConfig(model="claude-haiku-4-5")),
         {"workspace": 1.0},
     ),
-    "codex_cli": (
+    "CodexCLIAgent": (
         lambda: CodexCLIAgent(CodexCLIConfig(model="gpt-5.4-mini")),
         {"workspace": 1.0},
     ),
-    "browser_use": NotApplicable(
-        "browser-use needs an Anthropic key of its own; the live lane signs in to HUD"
-    ),
 }
+NOT_LIVE = {
+    "RobotAgent": "drives a robot capability with a policy model; tests/robot holds it",
+    "BatchedAgent": "a RobotAgent that batches policy forwards; tests/robot holds it",
+}
+
+
+def test_every_agent_in_hud_agents_has_a_live_row_or_a_reason() -> None:
+    agents: set[str] = set()
+    for info in pkgutil.walk_packages(hud.agents.__path__, "hud.agents."):
+        module = importlib.import_module(info.name)
+        agents |= {
+            value.__name__
+            for value in vars(module).values()
+            if inspect.isclass(value)
+            and issubclass(value, Agent)
+            and value.__module__ == module.__name__
+            and not inspect.isabstract(value)
+        }
+
+    assert agents == LIVE.keys() | NOT_LIVE.keys()
 
 
 @dataclass(frozen=True)
@@ -109,11 +119,10 @@ ROWS = [
         pytest.param(
             fixture,
             Backing("Taskset.run", reward, agent=build),
-            id=f"live-{param.id}-{fixture}",
+            id=f"live-{name}-{fixture}",
             marks=[pytest.mark.e2e, pytest.mark.live],
         )
-        for param in over_families(LIVE)
-        for build, rewards in [cast("Live", param.values[1])]
+        for name, (build, rewards) in LIVE.items()
         for fixture, reward in rewards.items()
     ),
 ]

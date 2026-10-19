@@ -1,72 +1,45 @@
-"""How an agent's tool calls run, and what the model is told when one goes wrong.
+"""What the provider agents' shared tool loop decides: what the model is told when a call
+cannot run, when a run stops, how long a tool may take, and how MCP tools are named.
 
-Every family's calls must act on the workspace and land on the trace as tool
-steps. The provider tool-call agents share hud's own tool loop, so its rules run
-over each of them: an unknown or failing call is told to the model and the run
-goes on, a malformed call is explained, ``stop_on`` ends the run at the call it
-names, and a workspace that drops away ends the run after three failures in a row.
-"""
+The loop is one implementation every provider agent runs, so each rule is checked once,
+on the chat completions agent; what each provider does differently is
+``test_provider_agents``."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import pytest
 from fastmcp import FastMCP
 
-from hud.agents.types import ToolStep
-from tests.agents.families import (
-    CLAUDE,
-    GEMINI,
-    OPENAI,
-    TOOL_FAMILIES,
-    NotApplicable,
-    ToolFamily,
-    over_families,
-    over_family_cases,
-)
+from hud.agents import ClaudeAgent, OpenAIChatAgent
+from hud.agents.types import ClaudeConfig, OpenAIChatConfig
 from tests.fixtures.environments import run_task, workspace_env
 from tests.support import Turn, call, fail, mcp_server, relay, say
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.agents.families import Driver
     from tests.support import FlakyRelay, HudEnv, ModelRequest, Models
 
-OWN_LOOP = NotApplicable("runs its own tool loop inside its CLI or SDK")
 
-# The name each family's shell call is recorded under.
-SHELL_STEPS: dict[str, str | NotApplicable] = {
-    "claude": "bash",
-    "openai": "shell",
-    "gemini": "run_shell_command",
-    "openai_compatible": "bash",
-    "claude_cli": "Bash",
-    "codex_cli": "shell",
-    "browser_use": NotApplicable(
-        "browser-use acts on the browser and records one coarse step; "
-        "test_browser_use_wire.py checks it"
-    ),
-}
+def chat(**config: Any) -> OpenAIChatAgent:
+    return OpenAIChatAgent(OpenAIChatConfig.model_validate({"model": "qwen3.6-plus", **config}))
 
 
-@pytest.mark.parametrize(("family", "step"), over_families(SHELL_STEPS))
-async def test_a_shell_call_acts_on_the_workspace_and_lands_on_the_trace(
-    family: str, step: str, driver: Driver
-) -> None:
-    driver.shell("touch made", then="done")
+def bash(command: str) -> Turn:
+    return call("bash", command=command)
 
-    run = await driver.run(driver.agent())
 
-    calls = [s.call.name for s in run.trace.steps if isinstance(s, ToolStep) and s.call]
-    assert (run.trace.status, run.trace.content) == ("completed", "done")
-    assert ((driver.workspace / "made").exists(), calls) == (True, [step])
+@pytest.fixture(autouse=True)
+def signed_in(hud_env: HudEnv) -> None:
+    hud_env.set(HUD_API_KEY="k")
 
 
 def failing_tools() -> FastMCP:
@@ -80,52 +53,29 @@ def failing_tools() -> FastMCP:
     return server
 
 
-def tool_cases(failing: Turn, told: str) -> dict[str, tuple[Turn, str]]:
-    return {
-        "unknown-tool": (call("ghost"), "unknown tool: 'ghost'"),
-        "own-tool-fails": (failing, told),
-        "mcp-tool-fails": (call("explode"), "Error calling tool 'explode': kaboom"),
-    }
-
-
-FAILED_CALLS: dict[str, dict[str, tuple[Turn, str]] | NotApplicable] = {
-    "claude": tool_cases(
-        call("str_replace_based_edit_tool", command="bogus", path="/x"),
-        "unknown editor command: 'bogus'",
-    ),
-    "openai": tool_cases(
-        Turn(native=({**OPENAI.shell("true").native[0], "action": {"commands": 5}},)),
-        "commands must be a list of strings",
-    ),
-    "gemini": tool_cases(call("run_shell_command", command=""), "tool error: command is required"),
-    "openai_compatible": tool_cases(
-        call("bash", command=""),
-        "tool error: command is required",
-    ),
-    "claude_cli": OWN_LOOP,
-    "codex_cli": OWN_LOOP,
-    "browser_use": OWN_LOOP,
-}
-
-
-@pytest.mark.parametrize(("family", "case"), over_family_cases(FAILED_CALLS))
+@pytest.mark.parametrize(
+    ("turn", "told"),
+    [
+        pytest.param(call("ghost"), "unknown tool: 'ghost'", id="an-unknown-tool"),
+        pytest.param(
+            call("explode"), "Error calling tool 'explode': kaboom", id="an-mcp-tool-that-fails"
+        ),
+    ],
+)
 async def test_a_call_that_cannot_run_is_told_to_the_model_and_the_run_goes_on(
-    family: str, case: tuple[Turn, str], models: Models, hud_env: HudEnv, tmp_path: Path
+    turn: Turn, told: str, models: Models, tmp_path: Path
 ) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    turn, told = case
     models.script([turn, say("done")])
-    tools = TOOL_FAMILIES[family]
 
     async with mcp_server(failing_tools()) as server:
         env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        run = await run_task(env, tools.agent_cls(tools.config()))
+        run = await run_task(env, chat())
 
     assert (run.trace.status, run.trace.content) == ("completed", "done")
     assert told in json.dumps(models.requests()[-1].body)
 
 
-CUT_OFF_CHAT = Turn(
+CUT_OFF = Turn(
     native=(
         {
             "id": "call_cut",
@@ -134,114 +84,53 @@ CUT_OFF_CHAT = Turn(
         },
     )
 )
-CUT_OFF_RESPONSES = Turn(
-    native=(
-        {
-            "type": "function_call",
-            "id": "fc_cut",
-            "call_id": "call_cut",
-            "name": "bash",
-            "arguments": '{"command": "ec',
-            "status": "completed",
-        },
-    )
+
+
+@pytest.mark.parametrize(
+    ("reason", "turn"),
+    [
+        pytest.param("length", replace(bash("true"), truncated=True), id="a-capped-reply"),
+        pytest.param("malformed_tool_call", CUT_OFF, id="a-malformed-call"),
+    ],
 )
-BAD_JSON = Turn(
-    native=({"type": "tool_use", "id": "toolu_bad", "name": "bash", "input": '{"command": ls}'},)
-)
-INCOMPLETE = "the arguments for this 'bash' call arrived incomplete"
-
-# A call whose arguments are not valid JSON: the turns, and what the model is told.
-MALFORMED: dict[str, tuple[list[Turn], str] | NotApplicable] = {
-    "claude": (
-        [BAD_JSON, BAD_JSON, say("done")],
-        "Your previous tool-call arguments were invalid JSON.",
-    ),
-    "openai": ([CUT_OFF_RESPONSES, say("done")], INCOMPLETE),
-    "gemini": NotApplicable(
-        "Gemini reports a malformed call as its finish reason; test_provider_faults.py has it"
-    ),
-    "openai_compatible": ([CUT_OFF_CHAT, say("done")], INCOMPLETE),
-    "claude_cli": OWN_LOOP,
-    "codex_cli": OWN_LOOP,
-    "browser_use": OWN_LOOP,
-}
-
-
-@pytest.mark.parametrize(("family", "case"), over_families(MALFORMED))
-async def test_a_malformed_call_is_explained_to_the_model_and_the_run_goes_on(
-    family: str, case: tuple[list[Turn], str], models: Models, hud_env: HudEnv, tmp_path: Path
+async def test_stop_on_ends_the_run_at_the_call_it_names(
+    reason: str, turn: Turn, models: Models, tmp_path: Path
 ) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    turns, told = case
-    models.queue(turns)
-    tools = TOOL_FAMILIES[family]
-
-    run = await run_task(workspace_env(tmp_path / "ws"), tools.agent_cls(tools.config()))
-
-    assert (run.trace.status, run.trace.content) == ("completed", "done")
-    assert told in json.dumps(models.requests()[-1].body)
-
-
-def capped(family: ToolFamily) -> Turn:
-    return replace(family.shell("true"), truncated=True)
-
-
-STOP_ON: dict[str, dict[str, tuple[str, Turn]] | NotApplicable] = {
-    "claude": {"token-capped": ("length", capped(CLAUDE))},
-    "openai": {
-        "token-capped": ("length", capped(OPENAI)),
-        "malformed": ("malformed_tool_call", CUT_OFF_RESPONSES),
-    },
-    "gemini": {"token-capped": ("length", capped(GEMINI))},
-    "openai_compatible": {
-        "token-capped": ("length", capped(TOOL_FAMILIES["openai_compatible"])),
-        "malformed": ("malformed_tool_call", CUT_OFF_CHAT),
-    },
-    "claude_cli": OWN_LOOP,
-    "codex_cli": OWN_LOOP,
-    "browser_use": OWN_LOOP,
-}
-
-
-@pytest.mark.parametrize(("family", "case"), over_family_cases(STOP_ON))
-async def test_stop_on_ends_the_run_at_a_call_it_names(
-    family: str, case: tuple[str, Turn], models: Models, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    reason, turn = case
     models.script([turn])
-    tools = TOOL_FAMILIES[family]
-    agent = tools.agent_cls(tools.config(stop_on={reason}))
 
-    run = await run_task(workspace_env(tmp_path / "ws"), agent)
+    run = await run_task(workspace_env(tmp_path / "ws"), chat(stop_on={reason}))
 
     assert (run.trace.status, run.trace.stop_reason) == ("completed", reason)
     assert len(models.requests()) == 1
 
 
-LOST = {
-    "three-lost-calls-in-a-row": (["shell", "shell", "shell"], "error"),
-    "another-result-resets-the-count": (["shell", "ghost", "shell", "shell"], "completed"),
-}
-LOST_WORKSPACE: dict[str, dict[str, tuple[list[str], str]] | NotApplicable] = {
-    **dict.fromkeys(TOOL_FAMILIES, LOST),
-    "claude_cli": OWN_LOOP,
-    "codex_cli": OWN_LOOP,
-    "browser_use": OWN_LOOP,
-}
-
-
-@pytest.mark.parametrize(("family", "case"), over_family_cases(LOST_WORKSPACE))
-async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
-    family: str, case: tuple[list[str], str], models: Models, hud_env: HudEnv, tmp_path: Path
+async def test_the_step_budget_ends_a_model_that_never_finishes(
+    models: Models, tmp_path: Path
 ) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    calls, status = case
-    tools = TOOL_FAMILIES[family]
-    turns = [tools.shell("true")] + [
-        tools.shell("true") if name == "shell" else call(name) for name in calls
-    ]
+    models.respond(lambda request: bash("true"))
+
+    run = await run_task(workspace_env(tmp_path / "ws"), chat(max_steps=2))
+
+    assert (run.trace.status, run.trace.stop_reason, len(models.requests())) == (
+        "completed",
+        "max_steps",
+        2,
+    )
+
+
+@pytest.mark.parametrize(
+    ("calls", "status"),
+    [
+        pytest.param(["shell", "shell", "shell"], "error", id="three-lost-calls-in-a-row"),
+        pytest.param(
+            ["shell", "ghost", "shell", "shell"], "completed", id="another-result-resets-the-count"
+        ),
+    ],
+)
+async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
+    calls: list[str], status: str, models: Models, tmp_path: Path
+) -> None:
+    turns = [bash("true")] + [bash("true") if name == "shell" else call(name) for name in calls]
     env = workspace_env(tmp_path / "ws")
     relays: list[FlakyRelay] = []
 
@@ -264,7 +153,7 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
             return turns[request.turn] if request.turn < len(turns) else say("done")
 
         models.respond(answer)
-        run = await run_task(env, tools.agent_cls(tools.config(max_steps=10)))
+        run = await run_task(env, chat(max_steps=10))
 
     assert run.trace.status == status
     if status == "error":
@@ -272,30 +161,20 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
 
 
 RESPONDER = "You are an assistant that helps determine"
-AUTO_RESPOND = {
-    "continue": (say("CONTINUE"), "finished"),
-    "stop": (say("STOP"), "Shall I go on?"),
-    "responder-fails": (fail(400), "Shall I go on?"),
-}
 
 
 @pytest.mark.parametrize(
-    ("family", "case"),
-    over_family_cases(
-        {
-            **dict.fromkeys(TOOL_FAMILIES, AUTO_RESPOND),
-            "claude_cli": OWN_LOOP,
-            "codex_cli": OWN_LOOP,
-            "browser_use": OWN_LOOP,
-        }
-    ),
+    ("decision", "content"),
+    [
+        pytest.param(say("CONTINUE"), "finished", id="continue"),
+        pytest.param(say("STOP"), "Shall I go on?", id="stop"),
+        pytest.param(fail(400), "Shall I go on?", id="the-responder-fails"),
+    ],
 )
 async def test_auto_respond_answers_a_question_or_lets_the_run_end(
-    family: str, case: tuple[Turn, str], models: Models, hud_env: HudEnv, tmp_path: Path
+    decision: Turn, content: str, models: Models, tmp_path: Path
 ) -> None:
     """The auto-responder is its own Responses call beside the agent's own requests."""
-    hud_env.set(HUD_API_KEY="k")
-    decision, content = case
     decisions = iter([decision, say("STOP")])
     replies = [say("Shall I go on?"), say("finished")]
     models.respond(
@@ -305,10 +184,118 @@ async def test_auto_respond_answers_a_question_or_lets_the_run_end(
             else replies[request.turn]
         )
     )
-    tools = TOOL_FAMILIES[family]
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws"), tools.agent_cls(tools.config(auto_respond=True))
-    )
+    run = await run_task(workspace_env(tmp_path / "ws"), chat(auto_respond=True))
 
     assert run.trace.content == content
+
+
+# ─── the tool timeout ──────────────────────────────────────────────────
+
+
+def slow_tools() -> FastMCP:
+    server = FastMCP("slow")
+
+    @server.tool()
+    async def wait() -> str:
+        """Answer after two seconds."""
+        await asyncio.sleep(2.0)
+        return "waited"
+
+    return server
+
+
+async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on(
+    models: Models, tmp_path: Path
+) -> None:
+    root = tmp_path / "ws"
+    models.script([bash("sleep 3; touch late"), bash("touch quick"), say("done")])
+
+    run = await run_task(workspace_env(root), chat(tool_timeout_seconds=1))
+    await asyncio.sleep(3)
+
+    assert run.trace.status == "completed"
+    assert "timed out after 1s" in json.dumps(models.requests()[1].body)
+    assert ((root / "late").exists(), (root / "quick").exists()) == (False, True)
+
+
+async def test_an_mcp_tool_is_left_to_its_own_time(models: Models, tmp_path: Path) -> None:
+    models.script([call("wait"), say("done")])
+
+    async with mcp_server(slow_tools()) as server:
+        env = workspace_env(tmp_path / "ws", capabilities=(server,))
+        run = await run_task(env, chat(tool_timeout_seconds=1))
+
+    assert run.trace.status == "completed"
+    assert "waited" in json.dumps(models.requests()[-1].body)
+
+
+async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeout(
+    models: Models, tmp_path: Path
+) -> None:
+    """Claude's editor reads the file itself, so a fifo blocks it rather than the shell."""
+    root = tmp_path / "ws"
+    edit = call(
+        "str_replace_based_edit_tool",
+        command="str_replace",
+        path=f"{root}/pipe",
+        old_str="a",
+        new_str="b",
+    )
+    models.script([call("bash", command="mkfifo pipe"), edit, say("done")])
+
+    run = await run_task(
+        workspace_env(root),
+        ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", tool_timeout_seconds=1)),
+    )
+
+    assert run.trace.status == "completed"
+    assert "str_replace_based_edit_tool timed out after 1s" in json.dumps(
+        models.requests()[-1].body
+    )
+
+
+# ─── MCP tool names ────────────────────────────────────────────────────
+
+
+def named(name: str, *tools: str) -> FastMCP:
+    server = FastMCP(name)
+    for tool in tools:
+        server.tool(name=tool, description=f"Run {tool}.")(lambda: tool)
+    return server
+
+
+async def test_mcp_tools_from_several_servers_are_qualified_within_64_characters(
+    models: Models, tmp_path: Path
+) -> None:
+    models.script([say("done")])
+    long = "lookup_" * 10
+
+    async with (
+        mcp_server(named("company.tools", long + "a"), name="company.tools") as dotted,
+        mcp_server(named("company-tools", long + "b"), name="company-tools") as dashed,
+    ):
+        env = workspace_env(tmp_path / "ws", capabilities=(dotted, dashed))
+        await run_task(env, chat())
+
+    (request,) = models.requests()
+    qualified = [name for name in request.tools if long[:20] in name]
+    assert len(qualified) == 2 and all(len(name) <= 64 for name in qualified)
+
+
+async def test_two_mcp_tools_qualified_to_one_name_fail_the_run(
+    models: Models, tmp_path: Path
+) -> None:
+    models.script([say("done")])
+
+    async with (
+        mcp_server(named("a", "b__c"), name="a") as first,
+        mcp_server(named("a__b", "c"), name="a__b") as second,
+    ):
+        env = workspace_env(tmp_path / "ws", capabilities=(first, second))
+        run = await run_task(env, chat())
+
+    assert run.trace.error == (
+        "[agent loop] ValueError: MCP tool name collision after qualification: 'a__b__c'"
+    )
+    assert models.requests() == []

@@ -12,9 +12,22 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dirty_equals import IsStr
 
-from hud.agents.claude import ClaudeCLIAgent, ClaudeCLIConfig
-from hud.agents.openai_compatible import OpenAIChatAgent
-from hud.agents.types import OpenAIChatConfig
+from hud.agents import (
+    ClaudeAgent,
+    ClaudeCLIAgent,
+    CodexCLIAgent,
+    GeminiAgent,
+    OpenAIAgent,
+    OpenAIChatAgent,
+)
+from hud.agents.types import (
+    ClaudeCLIConfig,
+    ClaudeConfig,
+    CodexCLIConfig,
+    GeminiConfig,
+    OpenAIChatConfig,
+    OpenAIConfig,
+)
 from hud.eval import (
     ComposeProject,
     HostedRuntime,
@@ -22,6 +35,7 @@ from hud.eval import (
     Task,
     Taskset,
 )
+from hud.types import AgentType
 from tests.support import Reply, eventually
 
 if TYPE_CHECKING:
@@ -221,3 +235,52 @@ async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(platform: 
         await pending
 
     await eventually(lambda: cancelled_on_the_platform(platform), within=10)
+
+
+@pytest.mark.parametrize(
+    ("agent", "config"),
+    [
+        pytest.param(
+            ClaudeAgent,
+            ClaudeConfig(
+                model="claude-sonnet-4-6", max_steps=5, tool_timeout_seconds=30, gateway=True
+            ),
+            id="claude",
+        ),
+        pytest.param(
+            OpenAIAgent,
+            OpenAIConfig(model="gpt-5.6", prompt_cache_key="shared", gateway=True),
+            id="openai",
+        ),
+        pytest.param(
+            GeminiAgent,
+            GeminiConfig(model="gemini-m", max_output_tokens=512, gateway=True),
+            id="gemini",
+        ),
+        pytest.param(
+            OpenAIChatAgent,
+            OpenAIChatConfig(model="m", completion_kwargs={"temperature": 0.2}, gateway=True),
+            id="openai_compatible",
+        ),
+        pytest.param(
+            ClaudeCLIAgent,
+            ClaudeCLIConfig(reasoning_effort="max", max_steps=3, gateway=True),
+            id="claude_cli",
+        ),
+        pytest.param(
+            CodexCLIAgent,
+            CodexCLIConfig(sandbox="read-only", reasoning_effort="high", gateway=True),
+            id="codex_cli",
+        ),
+    ],
+)
+async def test_the_platform_rebuilds_the_submitted_agent_from_its_type_and_config(
+    agent: type[Agent], config: Any, platform: Platform
+) -> None:
+    submitted_agent = agent(config)
+
+    await HostedRuntime(poll_interval=0).run(ROW, submitted_agent, job_id=JOB_ID, trace_id=TRACE_ID)
+
+    spec = submitted(platform)["agent"]
+    rebuilt = AgentType(spec["type"]).cls.load(spec["config"])
+    assert (type(rebuilt), rebuilt.dump()) == (agent, submitted_agent.dump())
