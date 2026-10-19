@@ -42,7 +42,7 @@ _CAUSE = {
     "eval": "Evaluation failure",
     "platform": "Platform failure",
 }
-_VERDICT_STYLES = {"passed": "green", "failed": "red", "unknown": "yellow"}
+_VERDICT_STYLES = {"passed": "green", "failed": "red", "unknown": "yellow", "error": "magenta"}
 _SEVERITY_STYLES = {"error": "red", "warning": "yellow"}
 
 
@@ -226,7 +226,7 @@ def presentation_for_result(row: dict[str, Any]) -> QaPresentation:
     if status == "error":
         error = row.get("error")
         return QaPresentation(
-            "unknown", "failed", summary=str(error) if error else "QA run failed."
+            "unknown", "error", summary=str(error) if error else "QA did not judge this subject."
         )
     if status != "completed":
         return QaPresentation("pending", "unknown", label=status)

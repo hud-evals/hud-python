@@ -315,7 +315,8 @@ def test_qa_run_errored_check_fails() -> None:
     result = _invoke(platform, ["qa", "run", _CHECK, _TRACE_ID])
 
     assert result.exit_code == 1
-    assert "The QA check produced an invalid result." in result.output
+    assert _table_row(result.output, _TRACE_ID, _CHECK, "error", "The QA check produced an invalid")
+    assert "failed" not in result.output
 
 
 def test_qa_run_times_out() -> None:
