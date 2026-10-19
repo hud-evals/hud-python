@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from hud.clients import HudClient
     from hud.environment import Environment
-    from hud.eval import Provider, Run, Runtime
+    from hud.eval import Run
 
 
 class ScriptedAgent(Agent):
@@ -59,28 +59,6 @@ class ScriptedAgent(Agent):
             await asyncio.sleep(self._linger)
         if self._fail_after is not None:
             raise self._fail_after
-
-
-class RecordingProvider:
-    """Places each row with ``inner`` and records when placements start and stop.
-
-    ``runtimes`` holds every runtime ``inner`` yielded, in order.
-    """
-
-    def __init__(self, inner: Provider) -> None:
-        self._inner = inner
-        self.events: list[tuple[str, str]] = []
-        self.runtimes: list[Runtime] = []
-
-    @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        self.events.append(("start", task.slug))
-        try:
-            async with self._inner(task) as runtime:
-                self.runtimes.append(runtime)
-                yield runtime
-        finally:
-            self.events.append(("stop", task.slug))
 
 
 @asynccontextmanager

@@ -20,13 +20,30 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from tests.support import RecordingProvider, ScriptedAgent, eventually, lab, solve
+from tests.support import ScriptedAgent, eventually, lab, solve
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     from hud.eval import Provider, Run
     from tests.support import FakeServices
+
+
+class Recorded:
+    """Places each row with ``inner`` and records when placements start and stop."""
+
+    def __init__(self, inner: Provider) -> None:
+        self.inner = inner
+        self.events: list[tuple[str, str]] = []
+
+    @asynccontextmanager
+    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        self.events.append(("start", task.slug))
+        try:
+            async with self.inner(task) as runtime:
+                yield runtime
+        finally:
+            self.events.append(("stop", task.slug))
 
 
 class Counting(Agent):
@@ -60,7 +77,7 @@ def placements(events: list[tuple[str, str]]) -> tuple[int, int]:
     return sum(event == "start" for event, _ in events), peak
 
 
-SCHEDULES: dict[str, tuple[Callable[[RecordingProvider], Provider], int | None, int, int, int]] = {
+SCHEDULES: dict[str, tuple[Callable[[Recorded], Provider], int | None, int, int, int]] = {
     "every rollout gets its own placement": (lambda inner: inner, None, 6, 6, 6),
     "max_concurrent bounds the rollouts in flight": (lambda inner: inner, 2, 6, 2, 2),
     "a pool boots once and bounds occupancy by its width": (
@@ -79,13 +96,13 @@ SCHEDULES: dict[str, tuple[Callable[[RecordingProvider], Provider], int | None, 
     ids=SCHEDULES.keys(),
 )
 async def test_a_taskset_runs_each_row_group_times_in_task_major_order(
-    wrap: Callable[[RecordingProvider], Provider],
+    wrap: Callable[[Recorded], Provider],
     max_concurrent: int | None,
     boots: int,
     open_at_once: int,
     peak: int,
 ) -> None:
-    recording = RecordingProvider(LocalRuntime(lambda task: lab()))
+    recording = Recorded(LocalRuntime(lambda task: lab()))
     agent = Counting()
 
     job = await Taskset("pair", ROWS).run(
@@ -167,7 +184,7 @@ async def test_cancelling_a_taskset_run_cancels_every_rollout_and_shuts_their_en
 
 
 async def test_an_open_pool_stays_warm_across_calls_and_closes_with_its_scope() -> None:
-    recording = RecordingProvider(LocalRuntime(lab()))
+    recording = Recorded(LocalRuntime(lab()))
 
     async with Shared(recording, width=2) as pool:
         await Taskset("one", ROWS[:1]).run(ScriptedAgent(solve), runtime=pool)
@@ -256,7 +273,7 @@ INVALID: dict[str, Callable[[Provider], Any]] = {
 async def test_an_invalid_schedule_raises_before_any_rollout_starts(
     start: Callable[[Provider], Any], services: FakeServices
 ) -> None:
-    recording = RecordingProvider(LocalRuntime(lab()))
+    recording = Recorded(LocalRuntime(lab()))
 
     with pytest.raises(ValueError):
         outcome = start(recording)

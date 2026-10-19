@@ -31,7 +31,7 @@ from .models import (
 from .platform import Platform
 from .relay import FlakyRelay, relay
 from .rfb import FakeScreen, KeyEvent, PointerEvent, fake_screen
-from .scenario import RecordingProvider, ScriptedAgent, eventually, run_task, served
+from .scenario import ScriptedAgent, eventually, run_task, served
 from .services import FakeServices, Reply, Request
 from .spans import ROBOT_STEP_SCHEMA, spans, steps
 from .uv import Uv
@@ -54,7 +54,6 @@ __all__ = [
     "Models",
     "Platform",
     "PointerEvent",
-    "RecordingProvider",
     "Reply",
     "Request",
     "Result",

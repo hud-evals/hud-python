@@ -92,7 +92,8 @@ Each contract has one scenario, written as a table, in a file named for it:
   replies, tunnels and file tracking.
 - `tests/rollout/`: what every runtime owes a rollout (outcomes, deadlines and
   cancellation, refusals, the verifier, what the agent sees). The runtimes are
-  the rows, listed in `tests/rollout/placements.py`; the other files hold the
+  the rows, listed with those contracts in `tests/rollout/test_runtimes.py`; the
+  other files hold the
   scheduler, task sources, taskset files, and what only one runtime does.
 - `tests/agents/`: what every agent family owes its run (prompt and tools, the
   tool loop, limits, provider faults, credentials, a fixture taken to its
