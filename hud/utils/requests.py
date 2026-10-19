@@ -36,9 +36,7 @@ _DEFAULT_LIMITS = httpx.Limits(
 )
 
 
-# Statuses the API answers with a Retry-After header; each is retried after that wait.
 _RETRY_STATUS_CODES = (429, 502, 503, 504)
-# The API never advises more than this; anything larger is a clock or a proxy artefact.
 _MAX_RETRY_AFTER_SECONDS = 30.0
 
 
@@ -66,7 +64,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     try:
         seconds = float(value)
     except ValueError:
-        return None  # HTTP-date form: the API does not send it
+        return None
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, _MAX_RETRY_AFTER_SECONDS)

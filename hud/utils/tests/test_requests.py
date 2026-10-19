@@ -79,7 +79,6 @@ async def test_requests_preserve_status_hints_once_retries_are_spent(asynchronou
 async def test_requests_wait_out_the_advised_retry_after(asynchronous, status):
     """A refusal with Retry-After is retried after exactly that wait, capped at 30 s."""
     calls = 0
-    # A plain wait, one past the cap, and two the API never sends (a date, a non-finite number).
     advised = ["3", "120", "oops", "NaN"]
 
     def handle(request):
