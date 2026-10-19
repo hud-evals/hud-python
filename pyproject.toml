@@ -126,7 +126,7 @@ bedrock = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud[agents]",  # Include agents for dev
-    "hud[robot]",  # the robot end-to-end gates (tests/test_robot.py) run the real wire
+    "hud[robot]",  # the robot scenarios in tests/robot run the real wire
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff==0.16.1",

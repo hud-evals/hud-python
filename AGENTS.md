@@ -31,8 +31,9 @@ inventory of current incidents.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
-- `tests/` mirrors the `hud` package layout: tests for `hud/cli/` live in
-  `tests/cli/`, tests for top-level modules in `tests/` itself.
+- `tests/` is organized by contract, not by module: `tests/rollout/` holds what
+  every runtime owes a rollout, `tests/cli/test_every_command.py` what every
+  command owes its caller, and each file is named for the contract it holds.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
@@ -141,13 +142,22 @@ real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
   output and exit codes, files, what the platform recorded, wire frames. Prefer
   fixture environments whose reward proves the path ran.
 - Write a scenario once per contract, as a table; a new case is a new row.
-  Assert the fields the case is about, never a recorded copy of a whole output:
+  Implementations of a contract (runtimes, agent families, commands, capability
+  clients, task formats) are rows in its table, never their own copy of the
+  scenario. Draw the rows from the product's own registry and keep the test that
+  fails when an implementation has no row.
+- Test each contract once, at the outermost boundary where it is observable.
+  Per-implementation tests hold only what is unique to that implementation, and
+  unit tables only pure logic with a rich input space.
+- Assert the fields the case is about, never a recorded copy of a whole output:
   no snapshots of argv, request bodies or rendered text.
 - Do not add tests to check your own change. Check it with a temporary script,
   and extend a scenario only when the change adds or fixes a contract; a bug fix
   lands with the scenario row that failed before it.
-- Tests needing something outside the process are marked `e2e` plus `docker`,
-  `sandbox`, `live` (a real HUD account) or `hosted`, and run only when selected.
+- The backing is a parameter, not a separate test: a scenario runs on the
+  in-process fake by default, and its Docker, Modal, sandbox or live rows are
+  marked `e2e` plus `docker`, `modal`, `sandbox`, `live` (a real HUD account) or
+  `hosted`, and run only when selected.
 - Test names describe the observable behavior, not the mechanism.
 
 ## Operational Debugging

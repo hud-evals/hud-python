@@ -81,11 +81,43 @@ async def test_a_graded_rollout_reports_its_reward(reporting):
     assert (job.reward, trace.exit["reward"]) == (1.0, 1.0)
 ```
 
+The suite is organized by contract. A contract is something the SDK owes a
+user or a peer, such as "a rollout that runs past its deadline is cancelled and
+leaves its placement clean" or "a failed command prints one JSON error document".
+Each contract has one scenario, written as a table, in a file named for it:
+
+- `tests/rollout/`: what every runtime owes a rollout (outcomes, deadlines and
+  cancellation, refusals, the verifier, what the agent sees). The runtimes are
+  the rows, listed in `tests/rollout/placements.py`.
+- `tests/cli/test_every_command.py`: what every `hud` command owes its caller
+  (confirmation and `--dry-run`, error documents, refusals, analytics, SIGINT).
+  The other files in `tests/cli/` hold what one command does that no other does.
+- `tests/agents/`, `tests/capabilities/`, `tests/protocol/`: agent families,
+  capability clients, and the control channel and other wire protocols.
+- `tests/reporting/`, `tests/workspace/`, `tests/robot/`, `tests/environment/`,
+  `tests/integrations/`: telemetry, the agent's workspace, the robot stack,
+  environment definitions and sessions, and external task formats.
+- `tests/e2e/`: the `hud init` templates, the cookbooks and the oracle tasks.
+
+When a contract has several implementations, they are rows in its table, drawn
+from the product's own registry: the runtimes `hud.eval` exports, the Typer
+command tree, `hud.capabilities.__all__`, the agent families. A completeness
+test holds each table to its registry, so a new implementation fails the suite
+until it has a row, or an entry in the table's not-applicable list with the
+reason. The backing is a row's parameter too: the same scenario runs on the
+in-process fake by default, and its rows on Docker, Modal or a real account
+carry the lane's marks.
+
 Rules, enforced by `scripts/check_tests.py` and in review:
 
 - Never patch a `hud` name, import a private one, or touch a private attribute.
 - Never hand-build what a producer emits; run the producer.
-- Write one scenario per contract as a table, and add a row for a new case.
+- Write one scenario per contract as a table, and add a row for a new case or a
+  new implementation. Test the contract once, at the outermost boundary where it
+  is observable.
+- Keep a test for one implementation only for behavior no other implementation
+  has, such as a provider's wire translation, and keep unit tables for pure
+  logic with a rich input space.
 - Assert the fields a case is about, not a recorded copy of a whole output: no
   snapshots of argv, request bodies or rendered text.
 - Do not commit a test to check your own change; use a temporary script.

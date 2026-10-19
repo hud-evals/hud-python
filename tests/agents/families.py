@@ -656,8 +656,8 @@ FAMILIES: dict[str, Family] = {**TOOL_FAMILIES, **CLI_FAMILIES, BROWSER_USE.name
 #: Agents in ``hud.agents`` outside these contracts.
 NOT_FAMILIES = {
     "RobotAgent": "drives a robot capability with a policy model and no model provider; "
-    "tests/robot/test_policy_rollout.py holds its contract",
-    "BatchedAgent": "a RobotAgent that batches policy forwards; tests/robot/test_policy_rollout.py",
+    "tests/robot holds its contracts",
+    "BatchedAgent": "a RobotAgent that batches policy forwards; tests/robot",
 }
 
 
