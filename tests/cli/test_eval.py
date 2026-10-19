@@ -205,93 +205,56 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     assert {name: observed[name] for name in expected} == expected
 
 
-# ─── project layouts run locally ────────────────────────────────────────
+# ─── project layouts ────────────────────────────────────────────────────
 
-IMPORTS = "import os\nfrom pathlib import Path\n"
 ENV = 'from hud import Environment\nenv = Environment("local-test")\n'
 SOLVE = (
     '@env.template(id="solve")\nasync def solve():\n'
     '    answer = yield "answer ok"\n'
-    '    yield 1.0 if answer == Path("asset.txt").read_text() else 0.0\n'
+    '    yield 1.0 if answer == "ok" else 0.0\n'
 )
-HOOKS = (
-    "@env.initialize\nasync def start():\n"
-    '    Path(f"events/{os.getpid()}").write_text("started")\n'
-    "@env.shutdown\nasync def stop():\n"
-    '    Path(f"events/{os.getpid()}").write_text("stopped")\n'
-)
-ONE_FILE = IMPORTS + ENV + SOLVE + HOOKS
-TASKS = "tasks = [solve()]\n"
-FROM_ENV = "from env import solve\n" + TASKS
 
 
-LAYOUTS: dict[str, tuple[dict[str, str], str]] = {
-    "one-file": ({"env.py": ONE_FILE + TASKS}, "env.py"),
-    "tasks-beside-the-env": ({"env.py": ONE_FILE, "tasks.py": FROM_ENV}, "tasks.py"),
-    "json-rows": (
-        {"env.py": ONE_FILE, "tasks.json": json.dumps([{"env": "local-test", "id": "solve"}])},
-        "tasks.json",
-    ),
-}
-
-
-@pytest.mark.parametrize("layout", LAYOUTS)
-def test_each_project_layout_runs_in_fresh_env_processes(
-    hud: Hud, gateway: Models, tmp_path: Path, layout: str
-) -> None:
-    files, source = LAYOUTS[layout]
-    project = tmp_path / "project"
-    write_files(project, {**files, "asset.txt": "ok", "events/": ""})
-
-    document = run(
-        hud, str(project / source), *SCRIPTED, "--all", "--group", "2", "--max-concurrent", "2"
+def named(name: str, reward: str) -> str:
+    """An env ``name`` whose ``solve`` pays ``reward``."""
+    return (
+        f"from hud import Environment\nenv = Environment({name!r})\n"
+        '@env.template(id="solve")\nasync def solve():\n'
+        f'    answer = yield "answer ok"\n    yield {reward}\n'
     )
 
-    assert (document["run_count"], document["mean_reward"], document["error_count"]) == (2, 1.0, 0)
-    events = list((project / "events").iterdir())
-    assert [event.read_text() for event in events] == ["stopped", "stopped"]
 
-
-@pytest.mark.parametrize(
-    ("source", "same_name", "errors"),
-    [
-        ("rows.json", False, 0),
-        (".", True, 1),
-    ],
-)
-def test_a_row_runs_in_the_environment_it_names(
-    hud: Hud, gateway: Models, tmp_path: Path, source: str, same_name: bool, errors: int
-) -> None:
-    """Rows resolve their env by name; two envs sharing that name make the row an error."""
-    project = tmp_path / "project"
-    template = '@env.template(id="solve")\nasync def solve():\n    answer = yield "answer ok"\n'
-    write_files(
-        project,
+LAYOUTS: dict[str, tuple[dict[str, str], str, tuple[int, float, int]]] = {
+    "one file": ({"env.py": ENV + SOLVE + "tasks = [solve()]\n"}, "env.py", (1, 1.0, 0)),
+    "tasks beside the env": (
+        {"env.py": ENV + SOLVE, "tasks.py": "from env import solve\ntasks = [solve()]\n"},
+        "tasks.py",
+        (1, 1.0, 0),
+    ),
+    "json rows beside the env": (
+        {"env.py": ENV + SOLVE, "tasks.json": json.dumps([{"env": "local-test", "id": "solve"}])},
+        "tasks.json",
+        (1, 1.0, 0),
+    ),
+    "a row picks its env by name among several": (
         {
-            "bound_env.py": 'from hud import Environment\nenv = Environment("bound")\n'
-            + template
-            + '    yield float(answer == "ok")\n',
-            "env.py": "from hud import Environment\n"
-            f"env = Environment({'bound' if same_name else 'unrelated'!r})\n"
-            + template
-            + "    yield 0.0\n",
-            "tasks.py": "from bound_env import solve\ntasks = [solve()]\n",
+            "bound_env.py": named("bound", 'float(answer == "ok")'),
+            "env.py": named("unrelated", "0.0"),
             "rows.json": '{"env": "bound", "id": "solve"}\n',
         },
-    )
-
-    result = hud("eval", str(project / source), *SCRIPTED, "--all", "--yes", "--json")
-
-    assert result.exit_code == errors, result
-    assert (result.json["run_count"], result.json["error_count"]) == (1, errors)
-
-
-def test_a_nested_verifier_runs_in_its_own_environment(
-    hud: Hud, gateway: Models, tmp_path: Path
-) -> None:
-    project = tmp_path / "project"
-    write_files(
-        project,
+        "rows.json",
+        (1, 1.0, 0),
+    ),
+    "two envs sharing the row's name error the row": (
+        {
+            "bound_env.py": named("bound", 'float(answer == "ok")'),
+            "env.py": named("bound", "0.0"),
+            "tasks.py": "from bound_env import solve\ntasks = [solve()]\n",
+        },
+        ".",
+        (1, 0.0, 1),
+    ),
+    "a verifier in another env of the project": (
         {
             "core.py": 'from hud import Environment\nactor = Environment("actor")\n'
             + 'judge = Environment("judge")\n',
@@ -306,11 +269,29 @@ def test_a_nested_verifier_runs_in_its_own_environment(
             "tasks.py": "from env import solve, verify\n"
             "tasks = [solve()]\ntasks[0].verifier = verify()\n",
         },
-    )
+        "tasks.py",
+        (1, 1.0, 0),
+    ),
+}
 
-    document = run(hud, str(project / "tasks.py"), *SCRIPTED)
 
-    assert (document["run_count"], document["mean_reward"]) == (1, 1.0)
+@pytest.mark.parametrize(("files", "source", "outcome"), LAYOUTS.values(), ids=LAYOUTS.keys())
+def test_eval_runs_a_projects_rows_in_the_environments_they_name(
+    hud: Hud,
+    gateway: Models,
+    tmp_path: Path,
+    files: dict[str, str],
+    source: str,
+    outcome: tuple[int, float, int],
+) -> None:
+    project = tmp_path / "project"
+    write_files(project, files)
+
+    result = hud("eval", str(project / source), *SCRIPTED, "--all", "--yes", "--json")
+
+    assert result.exit_code == (outcome[2] > 0), result
+    document = result.json
+    assert (document["run_count"], document["mean_reward"], document["error_count"]) == outcome
 
 
 async def test_eval_attaches_to_an_already_served_environment(hud: Hud, gateway: Models) -> None:

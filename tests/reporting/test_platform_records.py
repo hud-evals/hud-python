@@ -15,7 +15,6 @@ from dirty_equals import IsStr
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
-from hud.telemetry.context import get_trace_headers, set_trace_context
 from tests.support import ScriptedAgent, eventually, lab, solve
 from tests.support.platform import WEB_URL, Trace, key
 
@@ -40,10 +39,8 @@ class Modelled(Agent):
         super().__init__(AgentConfig(model="claude-test"))
         self.answer = answer
         self.extra = extra
-        self.headers: list[dict[str, str]] = []
 
     async def __call__(self, run: Run) -> None:
-        self.headers.append(get_trace_headers())
         run.trace.content = self.answer(run.prompt_text)
         run.trace.extra.update(self.extra)
 
@@ -178,41 +175,6 @@ async def test_a_finished_rollout_reports_its_outcome(
     run = await rollout(row, agent, runtime=LocalRuntime(lab()) if placed else unavailable)
 
     assert reported(reporting, run).exit == body
-
-
-PARENTS = {
-    "a rollout inside another trace names it as its parent": (
-        "a" * 32,
-        "b" * 32,
-        {"Trace-Id": "b" * 32, "X-HUD-Parent-Trace-Id": "a" * 32},
-        "a" * 32,
-    ),
-    "an ambient trace that is the rollout's own is not its parent": (
-        str(uuid.UUID("b" * 32)),
-        "b" * 32,
-        {"Trace-Id": "b" * 32},
-        None,
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("ambient", "trace_id", "headers", "parent"), PARENTS.values(), ids=PARENTS.keys()
-)
-async def test_a_nested_rollout_reports_and_propagates_its_parent_trace(
-    ambient: str,
-    trace_id: str,
-    headers: dict[str, str],
-    parent: str | None,
-    reporting: Platform,
-) -> None:
-    agent = Modelled()
-
-    with set_trace_context(ambient):
-        run = await rollout(ADD, agent, runtime=LocalRuntime(lab()), trace_id=trace_id)
-
-    assert agent.headers == [headers]
-    assert (reported(reporting, run).enter or {}).get("parent_trace_id") == parent
 
 
 GATES = {

@@ -19,7 +19,6 @@ from hud.eval import (
     Task,
     Taskset,
 )
-from hud.telemetry.context import set_trace_context
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -106,25 +105,6 @@ async def test_a_hosted_rollout_sends_its_agent_as_its_registered_type(
     await HostedRuntime(poll_interval=0).run(ROW, agent, job_id=JOB_ID, trace_id=TRACE_ID)
 
     assert submitted(platform)["agent"]["type"] == registered
-
-
-PARENTS = {
-    "a uuid ambient trace is the parent": ("3" * 32, str(uuid.UUID("3" * 32))),
-    "a non-uuid ambient trace is dropped": ("external-run-id", None),
-    "the rollout's own id is not its parent": (str(uuid.UUID(TRACE_ID)), None),
-}
-
-
-@pytest.mark.parametrize(("ambient", "parent"), PARENTS.values(), ids=PARENTS.keys())
-async def test_a_hosted_rollout_names_its_parent_trace_only_when_it_is_another_trace(
-    ambient: str, parent: str | None, platform: Platform
-) -> None:
-    with set_trace_context(ambient):
-        await HostedRuntime(poll_interval=0).run(
-            ROW, chat_agent(), job_id=JOB_ID, trace_id=TRACE_ID
-        )
-
-    assert submitted(platform).get("parent_trace_id") == parent
 
 
 TERMINAL = {

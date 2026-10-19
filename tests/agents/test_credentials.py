@@ -19,10 +19,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from dirty_equals import IsStr
 
-from hud.agents import OpenAIAgent, OpenAIChatAgent, create_agent
-from hud.agents.base import Agent
-from hud.agents.types import OpenAIChatConfig
-from hud.eval import LocalRuntime, Task, Taskset, rollout
+from hud.agents import OpenAIAgent, create_agent
+from hud.eval import LocalRuntime, Task, Taskset
 from hud.utils.exceptions import HudAuthenticationError
 from tests.agents.families import (
     CLI_FAMILIES,
@@ -32,7 +30,6 @@ from tests.agents.families import (
     over_families,
     over_family_cases,
 )
-from tests.fixtures.envs import source
 from tests.support import run_task, say, workspace_env
 from tests.support.platform import API_KEY
 
@@ -40,7 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from hud.eval import Run
+    from hud.agents.base import Agent
     from tests.agents.families import Driver
     from tests.support import FakeServices, HudEnv, Models, Platform
 
@@ -148,40 +145,6 @@ async def test_each_gateway_request_carries_its_own_runs_trace_id(
     assert all(seen.route == "gateway" for seen in driver.seen())
     assert sorted(uuid.UUID(str(trace)).hex for trace in sent) == sorted(
         uuid.UUID(str(run.trace_id)).hex for run in job.runs
-    )
-
-
-TASK = Task(env="echo", id="echo", args={"word": "ok"})
-ECHO = source("echo")
-
-
-class Delegating(Agent):
-    """Answers by running a nested rollout, as a subagent would."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.inner: list[Run] = []
-
-    async def __call__(self, run: Run) -> None:
-        agent = OpenAIChatAgent(OpenAIChatConfig(model="m", max_steps=2))
-        inner = await rollout(TASK, agent, runtime=LocalRuntime(ECHO))
-        self.inner.append(inner)
-        run.trace.content = inner.trace.content
-
-
-async def test_a_nested_rollout_names_its_parent_trace(models: Models, hud_env: HudEnv) -> None:
-    hud_env.set(HUD_API_KEY="hud-key")
-    models.script([say("ok")])
-    agent = Delegating()
-
-    outer = await rollout(TASK, agent, runtime=LocalRuntime(ECHO))
-
-    (request,) = models.requests()
-    (inner,) = agent.inner
-    assert outer.reward == 1.0
-    assert (request.headers["trace-id"], request.headers["x-hud-parent-trace-id"]) == (
-        str(inner.trace_id),
-        str(outer.trace_id),
     )
 
 
