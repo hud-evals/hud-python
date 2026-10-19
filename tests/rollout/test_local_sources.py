@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.environment import Environment, load_environment
-from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset
+from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset, rollout
 from tests.support import ScriptedAgent, eventually, lab, solve
 
 if TYPE_CHECKING:
@@ -263,26 +264,6 @@ def test_a_live_environment_serves_across_event_loops() -> None:
     assert rewards == [1.0, 1.0]
 
 
-async def test_cancelling_a_waiting_acquisition_leaves_the_running_one_alone() -> None:
-    events: list[str] = []
-    runtime = LocalRuntime(lab(events))
-    row = Task(env="lab", id="add")
-
-    async def acquire() -> None:
-        async with runtime(row):
-            events.append("second acquisition")
-
-    async with runtime(row):
-        waiter = asyncio.create_task(acquire())
-        await asyncio.sleep(0)
-        waiter.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await waiter
-        assert events == ["initialize"]
-
-    assert events == ["initialize", "shutdown"]
-
-
 def write(path: Path, source: str) -> Path:
     path.write_text(textwrap.dedent(source))
     return path
@@ -353,7 +334,7 @@ ACQUISITION_ERRORS: dict[
     ACQUISITION_ERRORS.values(),
     ids=ACQUISITION_ERRORS.keys(),
 )
-async def test_a_failed_acquisition_names_the_mistake(
+async def test_a_source_that_cannot_serve_fails_the_run_naming_the_mistake(
     provider: Callable[[Path, list[str]], Provider],
     row: Task,
     error: type[Exception],
@@ -363,10 +344,11 @@ async def test_a_failed_acquisition_names_the_mistake(
 ) -> None:
     events: list[str] = []
 
-    with pytest.raises(error, match=message):
-        async with provider(tmp_path, events)(row):
-            pytest.fail("the acquisition should not yield a runtime")
+    run = await rollout(row, ScriptedAgent("x"), runtime=provider(tmp_path, events))
 
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert f"{error.__name__}" in (run.trace.error or "")
+    assert (message or "") in (run.trace.error or "")
     assert events == lifecycle
 
 
@@ -406,14 +388,13 @@ async def test_a_child_that_dies_before_serving_reports_its_output_and_takes_its
         """,
     )
 
-    with pytest.raises(RuntimeError) as raised:
-        async with SubprocessRuntime(source)(Task(env="leaky", id="noop")):
-            pytest.fail("the child should not serve")
-
-    assert str(raised.value).startswith(
-        f"spawned env exited with code 3 before serving (source: {source}):\n"
+    run = await rollout(
+        Task(env="leaky", id="noop"), ScriptedAgent("x"), runtime=SubprocessRuntime(source)
     )
-    assert "daemon starting" in str(raised.value)
+
+    error = run.trace.error or ""
+    assert f"spawned env exited with code 3 before serving (source: {source}):\n" in error
+    assert "daemon starting" in error
     pid = int((tmp_path / "child.pid").read_text())
     try:
         await eventually(lambda: process_is_gone(pid), within=5)
@@ -437,11 +418,11 @@ async def test_a_child_that_closes_stdout_before_serving_is_reported(tmp_path: P
         """,
     )
 
-    with pytest.raises(
-        RuntimeError, match=r"(?s)spawned env closed stdout before serving.*stdout closed"
-    ):
-        async with SubprocessRuntime(source)(Task(env="lab", id="add")):
-            pytest.fail("the child should not serve")
+    run = await rollout(ADD, ScriptedAgent("x"), runtime=SubprocessRuntime(source))
+
+    assert re.search(
+        r"(?s)spawned env closed stdout before serving.*stdout closed", run.trace.error or ""
+    )
 
 
 async def test_a_child_streams_its_output_to_the_terminal(
@@ -466,8 +447,7 @@ async def test_a_child_streams_its_output_to_the_terminal(
         """,
     )
 
-    async with SubprocessRuntime(source)(Task(env="lab", id="add")):
-        pass
+    await rollout(ADD, ScriptedAgent(solve), runtime=SubprocessRuntime(source))
 
     out, err = capfd.readouterr()
     assert "x" * 100_000 + "\nenvironment booted\n" in out

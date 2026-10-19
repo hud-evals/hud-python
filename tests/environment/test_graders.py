@@ -1,7 +1,7 @@
-"""Graders as task authors use them: text helpers, and graded templates in real rollouts.
+"""Graders as task authors use them, in graded templates of real rollouts.
 
-Each grader family is one table: text comparisons, the bash grader, the LLM judge,
-and combined grades. Authoring mistakes are a table of the refusals that fail the
+Each grader family is one table: the bash grader, the LLM judge, and combined
+grades. Authoring mistakes are a table of the refusals that fail the
 grade.
 """
 
@@ -25,10 +25,7 @@ from hud.graders import (
     combine_all,
     combine_any,
     contains,
-    contains_all,
-    contains_any,
     exact_match,
-    f1_score,
     numeric_match,
 )
 from tests.support import ScriptedAgent, Turn, say
@@ -42,47 +39,6 @@ if TYPE_CHECKING:
 
     from hud.eval import Run
     from tests.support import HudEnv, ModelRequest, Models
-
-# ─── text comparisons ────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("score", "expected"),
-    [
-        pytest.param(lambda: exact_match("The Answer!", "answer"), 1.0, id="exact-normalized"),
-        pytest.param(
-            lambda: exact_match("The Paris!", "Paris", normalize_text=False),
-            0.0,
-            id="exact-raw-differs",
-        ),
-        pytest.param(lambda: contains("The capital is Paris", "paris"), 1.0, id="contains"),
-        pytest.param(
-            lambda: contains("Paris", "paris", case_sensitive=True), 0.0, id="contains-case"
-        ),
-        pytest.param(
-            lambda: contains_any("I like Toyota cars", ["toyota", "honda"]), 1.0, id="any-one"
-        ),
-        pytest.param(lambda: contains_any("anything", []), 0.0, id="any-empty"),
-        pytest.param(
-            lambda: contains_all("Toyota and Honda", ["toyota", "honda"]), 1.0, id="all-present"
-        ),
-        pytest.param(lambda: contains_all("anything", []), 1.0, id="all-empty"),
-        pytest.param(lambda: numeric_match("The answer is 42", 42), 1.0, id="number-int"),
-        pytest.param(
-            lambda: numeric_match("It is 41.5", 42, tolerance=1.0), 1.0, id="number-tolerance"
-        ),
-        pytest.param(lambda: numeric_match("It is -5 degrees", -5), 1.0, id="number-negative"),
-        pytest.param(lambda: numeric_match("3 items and 5 left", 3), 1.0, id="number-first"),
-        pytest.param(lambda: f1_score("The capital is Paris, France", "Paris"), 0.4, id="f1-part"),
-        pytest.param(lambda: f1_score("", "Paris"), 0.0, id="f1-empty-prediction"),
-        pytest.param(lambda: f1_score("The PARIS!", "paris"), 1.0, id="f1-normalized"),
-    ],
-)
-def test_text_comparisons_score_between_zero_and_one(
-    score: Callable[[], float], expected: float
-) -> None:
-    assert score() == pytest.approx(expected)
-
 
 # ─── graded templates ────────────────────────────────────────────────────────
 

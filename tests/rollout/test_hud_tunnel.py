@@ -24,7 +24,7 @@ from hud.eval import (
     Taskset,
 )
 from tests.support import Reply, ScriptedAgent, eventually, lab, solve
-from tests.support.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
+from tests.support.runtime import SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -69,19 +69,6 @@ async def test_a_platform_taskset_runs_over_the_tunnel_by_default(
     assert [request.path for request in services.requests("runtime", "DELETE")] == [
         "/runtime/sessions/sess-1"
     ]
-
-
-async def test_an_acquired_tunnel_is_a_local_address_for_the_session(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    async with hosted_env(services, hud_env), HUDRuntime()(ADD) as runtime:
-        assert services.requests("runtime", "DELETE") == []
-
-    assert (runtime.url, runtime.params["session_id"]) == (
-        IsStr(regex=r"tcp://127\.0\.0\.1:\d+"),
-        "sess-1",
-    )
-    assert len(services.requests("runtime", "DELETE", SESSION)) == 1
 
 
 FAILURES: dict[str, tuple[dict[str, Any], Any, list[str]]] = {

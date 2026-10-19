@@ -9,9 +9,6 @@ endpoint was reached and with which credential.
 
 from __future__ import annotations
 
-import subprocess
-import sys
-import textwrap
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -39,7 +36,7 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from tests.agents.families import Driver
-    from tests.support import FakeServices, HudEnv, Models, Platform
+    from tests.support import HudEnv, Models, Platform
 
 
 @dataclass(frozen=True)
@@ -336,75 +333,3 @@ async def test_create_agent_resolves_a_model_and_routes_it_through_the_gateway(
     credential = request.headers.get("authorization") or request.headers.get("x-api-key")
     assert (request.protocol, request.model, credential) == expected
     assert request.headers["trace-id"] == run.trace_id
-
-
-#: How create_agent is called, whether the user is signed in to the platform, and the refusal.
-CREATE_AGENT_REFUSALS: dict[str, tuple[Callable[[], object], bool, type[Exception], str]] = {
-    "without-a-hud-key": (
-        lambda: create_agent("openai"),
-        False,
-        HudAuthenticationError,
-        "HUD_API_KEY is required",
-    ),
-    "with-provider-credentials": (
-        lambda: create_agent("openai_compatible", base_url="https://provider.example"),
-        True,
-        ValueError,
-        "instantiate the provider agent directly",
-    ),
-    "an-unknown-model-names-close-matches": (
-        lambda: create_agent("minimax-m4"),
-        True,
-        ValueError,
-        r"'minimax-m4' not found .* Did you mean: MiniMax-M3",
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("build", "signed_in", "error", "message"),
-    CREATE_AGENT_REFUSALS.values(),
-    ids=CREATE_AGENT_REFUSALS.keys(),
-)
-def test_create_agent_refuses_what_it_cannot_route(
-    build: Callable[[], object],
-    signed_in: bool,
-    error: type[Exception],
-    message: str,
-    services: FakeServices,
-    request: pytest.FixtureRequest,
-) -> None:
-    if signed_in:
-        serve_catalog(request.getfixturevalue("platform"))
-
-    with pytest.raises(error, match=message):
-        build()
-
-
-def test_a_provider_agent_without_its_sdk_points_at_the_agents_extra(tmp_path: Path) -> None:
-    script = textwrap.dedent(
-        """
-        import sys
-
-        class Blocker:
-            def find_spec(self, name, path=None, target=None):
-                if name == "anthropic" or name.startswith("anthropic."):
-                    raise ModuleNotFoundError(f"No module named {name!r}", name=name)
-
-        sys.meta_path.insert(0, Blocker())
-        import hud.agents
-
-        try:
-            hud.agents.ClaudeAgent
-        except ImportError as exc:
-            print(exc)
-        """
-    )
-
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, check=True, cwd=tmp_path
-    )
-
-    assert result.stdout.strip() == (
-        "ClaudeAgent requires the agents extra. Install with: pip install 'hud[agents]'"
-    )

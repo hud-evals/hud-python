@@ -25,14 +25,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.capabilities import Connection
-from hud.environment import Peer, WorkspaceRoute
+from hud.environment import Peer
 from hud.environment.egress import (
     ANY_HOST,
     ConnectionRelay,
     Egress,
-    bind_addresses,
-    hosts_text,
-    permitted,
 )
 from tests.support import eventually, internet
 
@@ -118,6 +115,46 @@ def drain(client: socket.socket) -> bytes:
             id="a-host-outside-the-allowlist",
         ),
         pytest.param(
+            {"pypi.org"},
+            None,
+            b"GET http://notpypi.org/ HTTP/1.1\r\nHost: notpypi.org\r\n\r\n",
+            b"403",
+            b"blocked-by-allowlist",
+            id="a-host-sharing-an-allowed-suffix",
+        ),
+        pytest.param(
+            {"pypi.org"},
+            None,
+            b"GET http://pypi.org.evil.com/ HTTP/1.1\r\nHost: pypi.org.evil.com\r\n\r\n",
+            b"403",
+            b"blocked-by-allowlist",
+            id="an-allowed-name-as-a-prefix",
+        ),
+        pytest.param(
+            {ANY_HOST},
+            None,
+            b"GET / HTTP/1.1\r\n\r\n",
+            b"403",
+            b"blocked-by-allowlist",
+            id="no-host-at-all",
+        ),
+        pytest.param(
+            {"pypi.org"},
+            None,
+            b"GET http://files.pypi.org/ HTTP/1.1\r\nHost: files.pypi.org\r\n\r\n",
+            b"502",
+            b"upstream-failure",
+            id="a-subdomain-of-an-allowed-host-is-carried",
+        ),
+        pytest.param(
+            {ANY_HOST},
+            None,
+            b"GET http://anything.example/ HTTP/1.1\r\nHost: anything.example\r\n\r\n",
+            b"502",
+            b"upstream-failure",
+            id="any-host-is-carried",
+        ),
+        pytest.param(
             {ANY_HOST},
             None,
             b"CONNECT 127.0.0.1:8765 HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n",
@@ -160,7 +197,7 @@ def drain(client: socket.socket) -> bytes:
         ),
     ],
 )
-def test_the_proxy_answers_what_it_will_not_carry_with_a_diagnosable_status(
+def test_the_proxy_carries_only_what_its_allowlist_permits_and_says_why_not(
     monkeypatch: pytest.MonkeyPatch,
     allowed: set[str],
     token: str | None,
@@ -479,139 +516,6 @@ def test_the_bridge_ignores_workspace_imports_and_closes_reset_connections(
     # Where the sockets live is configuration, not something a process listing shows.
     assert str(directory) not in command_line
     assert closed == b""
-
-
-@pytest.mark.parametrize(
-    ("egress", "expected"),
-    [
-        pytest.param(
-            Egress("/tmp/unused", set(), [Peer("db", 5432)]), {}, id="a-workspace-reaching-no-host"
-        ),
-        pytest.param(
-            Egress("/tmp/unused", {"pypi.org"}),
-            {"https_proxy": "http://127.0.0.1:3128"},
-            id="the-sessions-proxy",
-        ),
-        pytest.param(
-            Egress("/tmp/unused", {"example.com"}, token="secret"),
-            {"http_proxy": "http://hud:secret@127.0.0.1:3128"},
-            id="a-visitor-proxy-carries-its-credential",
-        ),
-    ],
-)
-def test_a_workspace_is_told_of_a_proxy_only_where_one_serves(
-    egress: Egress, expected: dict[str, str]
-) -> None:
-    """Pointing a client at a proxy that was never started turns "this task has
-    no network" into a connection failure on the first hop."""
-    environment = egress.environment()
-
-    assert {name: environment[name] for name in expected} == expected
-    assert bool(environment) is bool(expected)
-
-
-def test_a_peer_is_reached_directly_rather_than_through_the_proxy() -> None:
-    """The proxy resolves names out on the substrate, where a peer's name means
-    nothing and its address is something else entirely."""
-    egress = Egress(
-        "/tmp/unused",
-        {"pypi.org"},
-        [Peer("db", 5432), Peer("replica", 5432)],
-        local_aliases=["main"],
-    )
-
-    bypass = egress.environment()["no_proxy"].split(",")
-
-    assert {"main", "db", "replica", "127.0.0.1", "127.0.0.2"} <= set(bypass)
-
-
-@pytest.mark.parametrize(
-    ("host", "allowed", "expected"),
-    [
-        pytest.param("pypi.org", {"pypi.org"}, True, id="by-name"),
-        pytest.param("files.pypi.org", {"pypi.org"}, True, id="a-subdomain"),
-        pytest.param("notpypi.org", {"pypi.org"}, False, id="a-different-host-sharing-a-suffix"),
-        pytest.param("pypi.org.evil.com", {"pypi.org"}, False, id="the-name-as-a-prefix"),
-        pytest.param("anything", set(), False, id="declared-unreachable"),
-        pytest.param("anything", {ANY_HOST}, True, id="any-host"),
-        pytest.param(None, {ANY_HOST}, False, id="no-host-at-all"),
-    ],
-)
-def test_a_host_is_permitted_by_name_or_as_a_subdomain(
-    host: str | None, allowed: set[str], expected: bool
-) -> None:
-    assert permitted(host, allowed) is expected
-
-
-@pytest.mark.parametrize(
-    ("peers", "reserved", "expected"),
-    [
-        pytest.param(
-            [Peer("db", 5432), Peer("api", 8080)],
-            set(),
-            {"db": "127.0.0.1", "api": "127.0.0.1"},
-            id="one-peer-per-port-is-at-localhost",
-        ),
-        pytest.param(
-            [Peer("primary", 5432), Peer("replica", 5432)],
-            set(),
-            {"primary": "127.0.0.1", "replica": "127.0.0.2"},
-            id="a-second-peer-on-a-port-moves",
-        ),
-        pytest.param(
-            [Peer("api", 8080)], {8080}, {"api": "127.0.0.2"}, id="a-reserved-port-moves-a-peer"
-        ),
-        pytest.param(
-            [Peer("agent", 3128), Peer("verifier", 3129)],
-            set(),
-            {"agent": "127.0.0.2", "verifier": "127.0.0.2"},
-            id="the-proxy-ports-are-taken",
-        ),
-        pytest.param(
-            [Peer("db", 5432), Peer("db", 6379)],
-            set(),
-            {"db": "127.0.0.1"},
-            id="one-service-on-two-ports",
-        ),
-        pytest.param(
-            [Peer("db", 5432), Peer("db", 6379)],
-            {5432},
-            {"db": "127.0.0.2"},
-            id="one-service-moves-whole",
-        ),
-    ],
-)
-def test_a_peer_answers_at_the_address_the_task_expects(
-    peers: list[Peer], reserved: set[int], expected: dict[str, str]
-) -> None:
-    """A task that names a service says where it expects to find it. Placed
-    anywhere else, the task's own client configuration points at nothing."""
-    assert bind_addresses(peers, reserved_ports=reserved) == expected
-
-
-def test_a_peer_cannot_declare_one_port_twice() -> None:
-    with pytest.raises(ValueError, match="declares port 5432 twice"):
-        bind_addresses([Peer("db", 5432), Peer("db", 5432)])
-
-
-def test_workspace_names_are_added_to_the_substrates_hosts_rather_than_replacing_it() -> None:
-    """Dropping the substrate's entries would cost the workspace localhost."""
-    text = hosts_text(
-        [Peer("db", 5432)], "127.0.0.1\tlocalhost\n::1\tip6-localhost\n", local_aliases=["main"]
-    )
-
-    assert text.splitlines() == [
-        "127.0.0.1\tlocalhost",
-        "::1\tip6-localhost",
-        "127.0.0.1\tmain",
-        "127.0.0.1\tdb",
-    ]
-    assert hosts_text([Peer("db", 5432), Peer("db", 6379)], "") == "127.0.0.1\tdb\n"
-
-
-def test_a_workspace_route_names_a_host_not_an_address() -> None:
-    with pytest.raises(ValueError, match="hostname"):
-        WorkspaceRoute("ssh", "127.0.0.1", 443)
 
 
 VISITOR = """

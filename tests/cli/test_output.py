@@ -79,6 +79,19 @@ def test_a_platform_refusal_is_the_same_error_kind_for_every_command(
     assert (result.exit_code, result.json["error"]) == (1, error), result
 
 
+def test_a_transient_platform_failure_is_retried_and_the_command_succeeds(
+    hud: Hud, platform: Platform
+) -> None:
+    job = platform.add_job(name="job-0", status="completed")
+    listed = Reply(json={"items": list(platform.jobs.values())})
+    platform.services.route("api", "GET", "/v2/jobs", Reply(status=503), Reply(status=502), listed)
+
+    result = hud("jobs", "list", "--quiet")
+
+    assert (result.exit_code, result.stdout) == (0, f"{job}\n"), result
+    assert len(platform.services.requests("api", "GET", "/v2/jobs")) == 3
+
+
 # ─── lists ──────────────────────────────────────────────────────────────
 
 

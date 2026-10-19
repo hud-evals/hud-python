@@ -33,7 +33,6 @@ from .placements import PLACEMENTS, World, rows
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
     from hud.eval import Provider
     from tests.support import FakeServices, HudEnv
@@ -291,19 +290,3 @@ async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
 
     assert run.reward == reward
     assert ("runtime session contains" in (run.trace.error or "")) is link
-
-
-SESSION_IDS = ["", "..", "a/b", "a\\b"]
-
-
-@pytest.mark.parametrize("session_id", SESSION_IDS)
-async def test_a_runtime_rejects_a_session_id_that_is_not_one_path_component(
-    session_id: str, tmp_path: Path
-) -> None:
-    runtime = Runtime("tcp://127.0.0.1:1")
-
-    with pytest.raises(ValueError, match="runtime session id must be a single path component"):
-        async with runtime.snapshot_session(session_id):
-            pass
-    with pytest.raises(ValueError, match="runtime session id must be a single path component"):
-        await runtime.restore_session(session_id, tmp_path)

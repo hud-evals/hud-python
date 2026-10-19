@@ -147,8 +147,10 @@ real `hud` CLI run in a subprocess. `CONTRIBUTING.md` shows how to use it.
   scenario. Draw the rows from the product's own registry and keep the test that
   fails when an implementation has no row.
 - Test each contract once, at the outermost boundary where it is observable.
-  Per-implementation tests hold only what is unique to that implementation, and
-  unit tables only pure logic with a rich input space.
+  Per-implementation tests hold only what is unique to that implementation.
+- No unit tests: a test never calls a function and checks what it returns. It
+  drives a scenario (a command, a rollout, a served environment, a wire peer)
+  and checks what that scenario left behind.
 - Assert the fields the case is about, never a recorded copy of a whole output:
   no snapshots of argv, request bodies or rendered text.
 - Do not add tests to check your own change. Check it with a temporary script,

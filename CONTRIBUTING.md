@@ -86,8 +86,7 @@ user or a peer, such as "a rollout that runs past its deadline is cancelled and
 leaves its placement clean" or "a failed command prints one JSON error document".
 Each contract has one scenario, written as a table, in a file named for it:
 
-- `tests/environment/`: defining an environment: what a reference resolves to,
-  what is refused at definition, and the graders a task author uses.
+- `tests/environment/`: the graders a task author uses, in graded rollouts.
 - `tests/protocol/`: the control channel and the other wire protocols an
   environment serves, frame by frame: its server, its client, sessions, error
   replies, tunnels and file tracking.
@@ -108,7 +107,7 @@ Each contract has one scenario, written as a table, in a file named for it:
   and the trace record, the agent's workspace, the robot stack, external task
   formats, and training batches.
 - `tests/` itself: what the whole SDK owes: importing it, its exported names,
-  its configuration, and how it talks to HUD services.
+  and where its configuration comes from.
 - `tests/e2e/`: the `hud init` templates and the cookbooks.
 
 When a contract has several implementations, they are rows in its table, drawn
@@ -128,8 +127,10 @@ Rules, enforced by `scripts/check_tests.py` and in review:
   new implementation. Test the contract once, at the outermost boundary where it
   is observable.
 - Keep a test for one implementation only for behavior no other implementation
-  has, such as a provider's wire translation, and keep unit tables for pure
-  logic with a rich input space.
+  has, such as a provider's wire translation.
+- Write no unit tests. A test drives a scenario (a command, a rollout, a served
+  environment, a wire peer) and checks what it left behind, never what a
+  function returns.
 - Assert the fields a case is about, not a recorded copy of a whole output: no
   snapshots of argv, request bodies or rendered text.
 - Do not commit a test to check your own change; use a temporary script.
