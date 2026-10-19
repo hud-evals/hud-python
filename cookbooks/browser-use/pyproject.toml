@@ -1,0 +1,17 @@
+[project]
+name = "browser-use-agent"
+version = "0.1.0"
+description = "Run browser-use as a HUD agent over an environment's cdp capability (cookbook)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud",
+    "browser-use>=0.11.13",
+]
+
+[tool.uv]
+package = false
+
+# Track the SDK from this repo. If you copied this folder out, delete this
+# block to use the released hud from PyPI.
+[tool.uv.sources]
+hud = { path = "../..", editable = true }

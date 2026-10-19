@@ -142,10 +142,6 @@ dev = [
 
 # Alias for backwards compatibility
 agent = ["hud[agents]"]
-browseruse = [
-    "browser-use>=0.11.13",
-]
-
 # Robot capability (openpi/0 protocol wire codec + bridges + agent harness)
 robot = [
     "numpy>=1.24",

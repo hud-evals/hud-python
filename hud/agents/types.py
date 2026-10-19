@@ -253,25 +253,6 @@ class CodexCLIConfig(AgentConfig):
 
 
 # -----------------------------------------------------------------------------
-# Browser Use
-# -----------------------------------------------------------------------------
-
-
-class BrowserUseConfig(AgentConfig):
-    """Configuration for BrowserUseAgent.
-
-    Lives here (not in the agent module) so it can be imported and serialized
-    without the optional ``browser-use`` dependency installed.
-    """
-
-    model_name: str = "Browser Use"
-    model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
-    api_key: str | None = Field(default=None, exclude=True)
-    base_url: str | None = Field(default=None, exclude=True)
-    max_steps: int = 25
-
-
-# -----------------------------------------------------------------------------
 # Trajectory (tool-agent family step payloads)
 # -----------------------------------------------------------------------------
 
