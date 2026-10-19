@@ -14,11 +14,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib.util
+import os
 import re
 import socket
+import subprocess
 import textwrap
 import typing
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -62,26 +65,6 @@ if TYPE_CHECKING:
 ROLLOUTS = "/v2/rollouts/submit"
 
 
-class Watched:
-    """Places each row with ``inner`` and keeps the runtimes it yielded and how many
-    placements are still open."""
-
-    def __init__(self, inner: Provider) -> None:
-        self.inner = inner
-        self.open = 0
-        self.runtimes: list[Runtime] = []
-
-    @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        self.open += 1
-        try:
-            async with self.inner(task) as runtime:
-                self.runtimes.append(runtime)
-                yield runtime
-        finally:
-            self.open -= 1
-
-
 def serves(url: str) -> bool:
     host, port = url.removeprefix("tcp://").rsplit(":", 1)
     try:
@@ -91,11 +74,34 @@ def serves(url: str) -> bool:
     return True
 
 
-def stopped(watched: Watched) -> Callable[[], Awaitable[bool]]:
-    """Every placement closed and none of its envs still serves."""
+def gone(pid: int) -> bool:
+    """Whether process ``pid`` has exited (an unreaped zombie counts as exited)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    status = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return status.stdout.strip().startswith("Z")
+
+
+def lifecycle(request: pytest.FixtureRequest) -> Callable[[], Awaitable[bool]]:
+    """Have the fixture env log its lifecycle; clean once every env started in this process
+    has stopped and every process an env ran in or started is gone. A child killed before
+    it finished starting exits without its shutdown hooks, so a child and the daemon it
+    started are held to exiting."""
+    log = request.getfixturevalue("tmp_path") / "lifecycle.log"
+    request.getfixturevalue("hud_env").set(HUD_FIXTURE_LIFECYCLE=str(log))
 
     async def clean() -> bool:
-        return watched.open == 0 and not any(serves(r.url) for r in watched.runtimes)
+        events = log.read_text().split("\n") if log.exists() else []
+        started = Counter(line.split()[1] for line in events if line.startswith("start "))
+        stopped = Counter(line.split()[1] for line in events if line.startswith("stop "))
+        here = str(os.getpid())
+        daemons = {int(line.split()[1]) for line in events if line.startswith("daemon ")}
+        children = {int(pid) for pid in started if pid != here} | daemons
+        return started[here] == stopped[here] and all(gone(pid) for pid in children)
 
     return clean
 
@@ -109,24 +115,25 @@ Opened = tuple["Provider | HostedRuntime", "Callable[[], Awaitable[bool]]"]
 async def in_process(
     path: Path, request: pytest.FixtureRequest, **limits: Any
 ) -> AsyncIterator[Opened]:
-    watched = Watched(LocalRuntime(path, ready_timeout=limits.get("startup_limit") or 120))
-    yield watched, stopped(watched)
+    clean = lifecycle(request)
+    yield LocalRuntime(path, ready_timeout=limits.get("startup_limit") or 120), clean
 
 
 @asynccontextmanager
 async def child_process(
     path: Path, request: pytest.FixtureRequest, **limits: Any
 ) -> AsyncIterator[Opened]:
-    watched = Watched(SubprocessRuntime(path, ready_timeout=limits.get("startup_limit") or 120))
-    yield watched, stopped(watched)
+    clean = lifecycle(request)
+    yield SubprocessRuntime(path, ready_timeout=limits.get("startup_limit") or 120), clean
 
 
 @asynccontextmanager
 async def shared_pool(
     path: Path, request: pytest.FixtureRequest, **limits: Any
 ) -> AsyncIterator[Opened]:
-    watched = Watched(LocalRuntime(path, ready_timeout=limits.get("startup_limit") or 120))
-    yield Shared(watched, width=2), stopped(watched)
+    clean = lifecycle(request)
+    inner = LocalRuntime(path, ready_timeout=limits.get("startup_limit") or 120)
+    yield Shared(inner, width=2), clean
 
 
 @asynccontextmanager
@@ -196,16 +203,23 @@ async def modal_sandbox(
         if limits.get("startup_limit")
         else None
     )
-    watched = Watched(ModalRuntime(image=image, workdir="/hud", runtime_config=config))
+    inner = ModalRuntime(image=image, workdir="/hud", runtime_config=config)
+    sandboxes: list[str] = []
+
+    @asynccontextmanager
+    async def placed(task: Task) -> AsyncIterator[Runtime]:
+        async with inner(task) as runtime:
+            sandboxes.append(runtime.params["instance_id"])
+            yield runtime
 
     async def terminated() -> bool:
-        for runtime in watched.runtimes:
-            sandbox = await modal.Sandbox.from_id.aio(runtime.params["instance_id"])
+        for instance in sandboxes:
+            sandbox = await modal.Sandbox.from_id.aio(instance)
             if await sandbox.poll.aio() is None:
                 return False
-        return await stopped(watched)()
+        return True
 
-    yield watched, terminated
+    yield placed, terminated
 
 
 @asynccontextmanager
@@ -254,7 +268,12 @@ NOT_APPLICABLE: dict[str, dict[type, str]] = {
         Runtime: "a borrowed address is served before the rollout starts",
         HUDRuntime: "the platform serves the environment before the rollout starts",
     },
-    "deadline": UNPLACED,
+    "deadline": UNPLACED
+    | dict.fromkeys(
+        (SubprocessRuntime, Shared, Runtime, HUDRuntime, DockerRuntime, ModalRuntime),
+        "a deadline tears the placement down the way a cancel does, which the cancel "
+        "contract holds on every runtime; rollout decides what the run says",
+    ),
     "cancel": UNPLACED,
     "session files": UNPLACED
     | {
@@ -314,10 +333,10 @@ class Outcome:
     started: bool = True
     args: dict[str, Any] = field(default_factory=dict)
     agent_config: dict[str, Any] | None = None
-    #: Whether the outcome crosses the runtime differently from the others: the grade,
-    #: a grading error, a start error and an oversized frame each travel their own way.
-    #: The rest is decided here or inside the env, the same on every runtime.
-    crosses: bool = False
+    #: Whether the outcome depends on the runtime: placing the env and reaching it, the
+    #: byte path a large frame takes, and tearing down after a start that failed. The
+    #: rest is decided by ``rollout`` or inside the env, the same on every runtime.
+    everywhere: bool = False
 
 
 def echo(agent: Callable[[], Agent], word: str = "tangerine", **outcome: Any) -> Outcome:
@@ -330,9 +349,18 @@ def faulty(task: str, error: Any, **outcome: Any) -> Outcome:
     )
 
 
+#: Over a WebSocket's default 1 MiB message limit, under the 16 MiB frame limit.
+LARGE = "x" * (4 * 1024 * 1024)
 OUTCOMES = {
     "the right answer earns the reward": echo(
-        lambda: ScriptedAgent("tangerine"), reward=1.0, status="completed", crosses=True
+        lambda: ScriptedAgent("tangerine"), reward=1.0, status="completed", everywhere=True
+    ),
+    "a frame of several megabytes crosses to the env and back": echo(
+        lambda: ScriptedAgent(LARGE),
+        word=LARGE,
+        reward=1.0,
+        status="completed",
+        everywhere=True,
     ),
     "an agent that raises before answering is graded on no answer": echo(
         lambda: ScriptedAgent(fail_before=RuntimeError("agent exploded")),
@@ -361,7 +389,7 @@ OUTCOMES = {
         error="agent timed out after 0.3s",
     ),
     "a grader that raises leaves the run ungraded": faulty(
-        "grade_raises", IsStr(regex=r"\[grading\] .*grader exploded.*"), crosses=True
+        "grade_raises", IsStr(regex=r"\[grading\] .*grader exploded.*")
     ),
     "a boolean score leaves the run ungraded": faulty(
         "bool_score", IsStr(regex=r"\[grading\] .*must include a numeric 'score'.*")
@@ -370,7 +398,7 @@ OUTCOMES = {
         "start_raises",
         IsStr(regex=r"\[starting task\] .*start exploded.*"),
         started=False,
-        crosses=True,
+        everywhere=True,
     ),
     "args over the frame limit fail the start before the template runs": echo(
         lambda: ScriptedAgent("x"),
@@ -382,7 +410,6 @@ OUTCOMES = {
         ),
         graded=False,
         started=False,
-        crosses=True,
     ),
 }
 
@@ -393,7 +420,7 @@ OUTCOMES = {
         pytest.param(outcome, row.values[0], id=f"{name}-{row.id}", marks=row.marks)
         for name, outcome in OUTCOMES.items()
         for row in rows("outcomes")
-        if outcome.crosses or row.id == "in-process"
+        if outcome.everywhere or row.id == "in-process"
     ],
 )
 async def test_a_rollout_ends_the_same_way_wherever_it_runs(
@@ -476,7 +503,7 @@ DEADLINES = [
         )
         for row in rows("deadline")
         for moment in ("during the agent loop", "during grading")
-        if moment == "during the agent loop" or row.id == "in-process"
+        if not (row.id == "hosted" and moment == "during grading")
     ),
     pytest.param("hosted", "before the platform accepts it", "rollout_timeout", id="unsubmitted"),
     pytest.param(

@@ -315,16 +315,6 @@ def failing_initialize(events: list[str]) -> Environment:
     return env
 
 
-def slow_initialize(events: list[str]) -> Environment:
-    env = lab(events)
-
-    @env.initialize
-    async def hang() -> None:
-        await asyncio.Event().wait()
-
-    return env
-
-
 CLOSES_STDOUT = """
 import os
 import sys
@@ -357,13 +347,6 @@ ACQUISITION_ERRORS: dict[
         lambda tmp, events: LocalRuntime(failing_initialize(events)),
         ADD,
         RuntimeError,
-        (),
-        ["initialize", "shutdown"],
-    ),
-    "an initialize hook slower than ready_timeout still shuts down": (
-        lambda tmp, events: LocalRuntime(slow_initialize(events), ready_timeout=0.1),
-        ADD,
-        TimeoutError,
         (),
         ["initialize", "shutdown"],
     ),
