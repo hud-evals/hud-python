@@ -16,8 +16,7 @@ from dirty_equals import IsStr
 
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-
-from .conftest import Wire, wire
+from tests.support import Wire, wire
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
