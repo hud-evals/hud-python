@@ -24,7 +24,7 @@ from hud.eval import (
     Taskset,
 )
 from tests.support import Reply, ScriptedAgent, eventually, lab, solve
-from tests.support.runtime import SESSIONS, TUNNEL, host_on_runtime
+from tests.support.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -135,3 +135,19 @@ async def test_resources_the_deployed_env_ignores_are_warned_about_once(
         "HUDRuntime cannot honor task runtime_config ['resources'] on an already-deployed env; "
         "rollouts proceed on the platform's defaults"
     ]
+
+
+async def test_the_deprecated_constructor_deadline_still_ends_a_tunneled_run(
+    services: FakeServices, hud_env: HudEnv
+) -> None:
+    async with hosted_env(services, hud_env):
+        with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
+            job = await ADD.run(ScriptedAgent(solve, linger=30), runtime=HUDRuntime(run_timeout=1))
+        await eventually(lambda: len(services.requests("runtime", "DELETE", SESSION)) == 1)
+
+    (run,) = job.runs
+    assert (run.trace.status, run.trace.stop_reason, run.trace.error) == (
+        "error",
+        "timeout",
+        "rollout timed out after 1s during agent loop",
+    )

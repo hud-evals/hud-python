@@ -1,8 +1,11 @@
 """Hosted execution: the platform runs the whole rollout; this process submits it,
-polls its trace to a terminal state, and folds the result into a ``Run``."""
+polls its trace to a terminal state, and folds the result into a ``Run``. A deadline
+or a cancel here cancels the rollout on the platform."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +22,7 @@ from hud.eval import (
     Task,
     Taskset,
 )
+from tests.support import Reply, eventually
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -160,3 +164,60 @@ async def test_a_rejected_submission_is_a_failed_run(platform: Platform) -> None
     assert run.trace.status == "error"
     assert "unknown env 'sums'" in str(run.trace.error)
     assert platform.services.requests("api", "GET") == []
+
+
+# ─── stopping a hosted rollout ─────────────────────────────────────────
+
+DID_NOT_FINISH = IsStr(regex=r"hosted rollout [0-9a-f]{32} did not finish within 1s")
+
+
+def cancelled_on_the_platform(platform: Platform) -> bool:
+    return platform.traces != {} and all(trace.cancelled for trace in platform.traces.values())
+
+
+@pytest.mark.parametrize(
+    ("accepted", "deprecated"),
+    [
+        pytest.param(True, False, id="while-the-platform-runs-it"),
+        pytest.param(False, False, id="before-the-platform-accepts-it"),
+        pytest.param(True, True, id="set-by-the-deprecated-run_timeout"),
+    ],
+)
+async def test_a_hosted_rollout_past_its_deadline_is_cancelled_on_the_platform(
+    accepted: bool, deprecated: bool, platform: Platform
+) -> None:
+    platform.next_rollout = [{"status": "running"}]
+    if not accepted:
+        platform.services.route("api", "POST", SUBMIT, Reply(json={}, delay=5))
+    warned = (
+        pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run")
+        if deprecated
+        else contextlib.nullcontext()
+    )
+
+    with warned:
+        runtime = HostedRuntime(poll_interval=0, run_timeout=1.0 if deprecated else None)
+        job = await ROW.run(
+            chat_agent(), runtime=runtime, rollout_timeout=None if deprecated else 1.0
+        )
+
+    (run,) = job.runs
+    assert (run.reward, run.trace.status, run.trace.stop_reason, run.trace.error) == (
+        0.0,
+        "error",
+        "timeout",
+        DID_NOT_FINISH,
+    )
+    await eventually(lambda: cancelled_on_the_platform(platform), within=10)
+
+
+async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(platform: Platform) -> None:
+    platform.next_rollout = [{"status": "running"}]
+
+    pending = asyncio.create_task(ROW.run(chat_agent(), runtime=HostedRuntime(poll_interval=0)))
+    await eventually(lambda: platform.services.requests("api", "POST", SUBMIT) != [])
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    await eventually(lambda: cancelled_on_the_platform(platform), within=10)
