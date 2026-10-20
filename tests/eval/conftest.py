@@ -1,15 +1,20 @@
-"""The HUD runtime service's tunnel: each WebSocket is spliced to a local control channel."""
+"""The HUD runtime service, hosting an environment this process serves, and a check that a
+process has exited."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import subprocess
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from starlette.websockets import WebSocket
+
+    from tests.fixtures.services import FakeServices
 
 SESSIONS = "/runtime/sessions"
 SESSION = "/runtime/sessions/{id}"
@@ -43,3 +48,23 @@ def tunnel(port: int) -> Callable[[WebSocket, dict[str, str]], Awaitable[None]]:
             await websocket.close()
 
     return handler
+
+
+def host_on_runtime(services: FakeServices, url: str) -> None:
+    """Let the fake runtime service lease ``sess-1`` and tunnel it to the env served at
+    ``url``."""
+    services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
+    services.route("runtime", "DELETE", SESSION, json={})
+    services.websocket("runtime", TUNNEL, tunnel(int(url.rsplit(":", 1)[1])))
+
+
+def gone(pid: int) -> bool:
+    """Whether process ``pid`` has exited (an unreaped zombie counts as exited)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    status = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return status.stdout.strip().startswith("Z")

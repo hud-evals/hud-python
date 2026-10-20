@@ -26,6 +26,24 @@ if TYPE_CHECKING:
     from hud.eval import Run
 
 
+def verified(actor: Environment, judge: Environment) -> Task:
+    """``actor``'s ``solve`` task, with ``judge``'s ``verify`` as its verifier."""
+
+    @actor.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
+
+    @judge.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
+
+    task = solve()
+    task.verifier = verify()
+    return task
+
+
 async def test_a_verifier_on_its_own_env_runs_after_the_actors_env_is_torn_down() -> None:
     events = []
     actor = Environment("actor")
@@ -47,19 +65,7 @@ async def test_a_verifier_on_its_own_env_runs_after_the_actors_env_is_torn_down(
     async def judge_down() -> None:
         events.append("judge down")
 
-    @actor.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @judge.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    task = solve()
-    task.verifier = verify()
-    job = await task.run(ScriptedAgent("secret"))
+    job = await verified(actor, judge).run(ScriptedAgent("secret"))
 
     (run,) = job.runs
     assert (run.reward, run.trace.status) == (1.0, "completed")
@@ -206,27 +212,12 @@ async def test_the_verdict_is_the_grade_whichever_side_fails(
 
 
 async def test_an_agent_that_fails_after_answering_is_still_judged() -> None:
-    actor = Environment("actor")
-    judge = Environment("judge")
-
-    @actor.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @judge.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
     class RaisesAfter(Agent):
         async def __call__(self, run: Run) -> None:
             run.trace.content = "secret"
             raise RuntimeError("agent exploded")
 
-    task = solve()
-    task.verifier = verify()
-    job = await task.run(RaisesAfter())
+    job = await verified(Environment("actor"), Environment("judge")).run(RaisesAfter())
 
     (run,) = job.runs
     assert (run.reward, run.trace.status, run.trace.error, job.errors) == (
@@ -333,19 +324,7 @@ async def test_a_rollout_timeout_in_teardown_returns_and_lets_teardown_finish(
             await release.wait()
         seen.append("judge down")
 
-    @actor.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @judge.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    task = solve()
-    task.verifier = verify()
-    job = await task.run(ScriptedAgent("secret"), rollout_timeout=0.3)
+    job = await verified(actor, judge).run(ScriptedAgent("secret"), rollout_timeout=0.3)
     release.set()
 
     (run,) = job.runs

@@ -1,10 +1,8 @@
-"""What only ``SSHClient`` does: file transfer and its reconnect policy.
+"""``SSHClient`` against a real ``env.workspace`` served on loopback.
 
-Every test serves a real ``env.workspace`` on loopback and connects to its
-``ssh`` binding through :func:`tests.fixtures.relay.relay`, which can sever the
-connection mid-command, refuse reconnects, or stall a handshake. The contract
-every client keeps (connecting, a drop, a cancelled or timed-out command) is in
-``test_capability_clients.py``.
+Most tests connect to the workspace's ``ssh`` binding through
+:func:`tests.clients.conftest.relayed`, which can sever the connection
+mid-command, refuse reconnects, or stall a handshake.
 """
 
 from __future__ import annotations
@@ -13,23 +11,25 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import pytest
 
 from hud import Environment
-from hud.capabilities import Connection, SSHClient
+from hud.capabilities import Capability, Connection, SSHClient
 from hud.clients import connect
 from hud.eval import LocalRuntime, Task
 from hud.eval.runtime import Runtime
-from tests.clients.conftest import Action, control_peer
+from tests.clients.conftest import Action, control_peer, relayed, unused_port
 from tests.conftest import eventually
 from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
+
+    from tests.conftest import HudEnv
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the workspace shell is POSIX")
 
@@ -42,17 +42,16 @@ async def shell(tmp_path: Path) -> AsyncIterator[tuple[SSHClient, FlakyRelay, Pa
     environment = Environment("ssh-faults")
     environment.workspace(root, track_files=False)
     task = Task(env=environment.name, id="scenario")
-    async with LocalRuntime(environment)(task) as runtime, connect(runtime) as control:
-        binding = control.binding("shell")
-        parts = urlsplit(binding.url)
-        assert parts.hostname is not None and parts.port is not None
-        async with relay(parts.hostname, parts.port) as flaky:
-            capability = replace(binding, url=f"ssh://{parts.username}@127.0.0.1:{flaky.port}")
-            client = await SSHClient.connect(capability)
-            try:
-                yield client, flaky, root
-            finally:
-                await client.close()
+    async with (
+        LocalRuntime(environment)(task) as runtime,
+        connect(runtime) as control,
+        relayed(control.binding("shell")) as (capability, flaky),
+    ):
+        client = await SSHClient.connect(capability)
+        try:
+            yield client, flaky, root
+        finally:
+            await client.close()
 
 
 def written(path: Path) -> bool:
@@ -200,3 +199,77 @@ async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with
 
     assert result.stdout == "through the tunnel\n"
     assert (flaky.accepted, peer.tunnels) == (3, 3)
+
+
+async def test_a_workspace_published_at_serve_time_opens_through_the_control_port(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    env = Environment("ssh")
+    env.workspace(root, track_files=False)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as control,
+    ):
+        opened = await control.open("shell")
+        assert isinstance(opened, SSHClient)
+        result = await opened.run("echo ok", timeout=10)
+        again = await control.open("shell")
+
+    assert again is opened
+    assert result.stdout == "ok\n"
+
+
+async def test_connecting_where_nothing_listens_fails_during_the_handshake(
+    hud_env: HudEnv,
+) -> None:
+    hud_env.set(HUD_CLIENT_TIMEOUT="1")
+    url = f"ssh://127.0.0.1:{unused_port()}"
+
+    with pytest.raises(ConnectionError, match="SSH connection failed during handshake"):
+        await SSHClient.connect(
+            Capability.from_manifest({"name": "absent", "protocol": "ssh/2", "url": url})
+        )
+
+
+async def test_a_server_that_hangs_up_at_once_fails_the_handshake(hud_env: HudEnv) -> None:
+    hud_env.set(HUD_CLIENT_TIMEOUT="1")
+    server = await asyncio.start_server(lambda reader, writer: writer.close(), "127.0.0.1", 0)
+    url = f"ssh://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+
+    async with server:
+        with pytest.raises(ConnectionError, match="SSH connection failed during handshake"):
+            await SSHClient.connect(
+                Capability.from_manifest({"name": "absent", "protocol": "ssh/2", "url": url})
+            )
+
+
+def running(pid_file: Path) -> bool:
+    """Whether the process whose pid ``pid_file`` holds is live (a zombie counts as gone)."""
+    stat = Path(f"/proc/{pid_file.read_text().strip()}/stat")
+    try:
+        return stat.read_text().split(") ", 1)[1][0] != "Z"
+    except FileNotFoundError:
+        return False
+
+
+async def test_a_cancelled_and_a_timed_out_command_end_and_the_next_one_runs(
+    tmp_path: Path,
+) -> None:
+    async with shell(tmp_path) as (client, _, root):
+        command = asyncio.create_task(client.run("echo $$ > cancelled; exec sleep 30"))
+        await eventually(lambda: written(root / "cancelled"))
+        command.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await command
+        await eventually(lambda: not running(root / "cancelled"))
+
+        with pytest.raises(TimeoutError):
+            await client.run("echo $$ > timed_out; exec sleep 30", timeout=0.5)
+        await eventually(lambda: written(root / "timed_out"))
+        await eventually(lambda: not running(root / "timed_out"))
+
+        result = await client.run("echo ok", timeout=10)
+
+    assert result.stdout == "ok\n"

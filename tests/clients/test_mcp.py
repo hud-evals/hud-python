@@ -1,11 +1,10 @@
-"""What only ``MCPClient`` does: its transports, auth, gateway faults, and off-schema output.
+"""``MCPClient`` against FastMCP servers and scripted gateway faults.
 
 Tool calls go to a FastMCP server over each HTTP transport, or to a scripted
 streamable-HTTP server on the fake services, whose ``tools/call`` answers come
 from a script: a transient gateway status, a body that is not JSON, a dropped
 connection, a result outside the tool's output schema. Every call resolves:
-with a result once a transient error clears, or with a transport error. The
-contract every client keeps is in ``test_capability_clients.py``.
+with a result once a transient error clears, or with a transport error.
 """
 
 from __future__ import annotations
@@ -19,7 +18,12 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.fixtures.asgi import serve_asgi
+from hud.clients import connect
+from hud.environment import Environment
+from hud.eval import LocalRuntime, Task
+from tests.clients.conftest import relayed, unused_port
+from tests.conftest import eventually
+from tests.fixtures.asgi import mcp_server, serve_asgi
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -235,3 +239,75 @@ async def test_a_result_outside_its_output_schema_reaches_the_caller(
     called = await ScriptedMCPServer(services, [off_schema]).call()
 
     assert (called.isError, called.structuredContent) == (False, {"n": "x"})
+
+
+async def test_tools_published_at_serve_time_open_through_the_control_port() -> None:
+    async with mcp_server(tools()) as capability:
+        env = Environment("mcp", capabilities=[capability])
+        async with (
+            LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+            connect(runtime) as control,
+        ):
+            opened = await control.open("tools")
+            assert isinstance(opened, MCPClient)
+            added = await opened.call_tool("add", {"a": 2, "b": 3})
+            again = await control.open("tools")
+
+    assert again is opened
+    assert added.structuredContent == {"result": 5}
+
+
+async def test_connecting_where_nothing_listens_raises_a_transport_error(hud_env: HudEnv) -> None:
+    hud_env.set(HUD_CLIENT_TIMEOUT="1")
+
+    with pytest.raises(McpError, match="Transport error"):
+        await MCPClient.connect(Capability.mcp(url=f"http://127.0.0.1:{unused_port()}/mcp"))
+
+
+async def test_a_tool_call_after_the_connection_drops_reconnects() -> None:
+    async with (
+        mcp_server(tools()) as served,
+        relayed(served) as (capability, flaky),
+    ):
+        client = await MCPClient.connect(capability)
+        try:
+            await client.call_tool("add", {"a": 2, "b": 3})
+            accepted = flaky.accepted
+            flaky.sever()
+            added = await client.call_tool("add", {"a": 2, "b": 3})
+        finally:
+            await client.close()
+
+    assert added.structuredContent == {"result": 5}
+    assert flaky.accepted > accepted
+
+
+async def test_a_cancelled_and_a_timed_out_tool_call_end_and_the_next_one_runs() -> None:
+    started: list[str] = []
+    server = tools()
+
+    @server.tool
+    async def wait() -> str:
+        """Never answer."""
+        started.append("wait")
+        await asyncio.Event().wait()
+        return "unreachable"
+
+    async with mcp_server(server) as capability:
+        client = await MCPClient.connect(capability)
+        try:
+            call = asyncio.create_task(client.call_tool("wait", {}))
+            await eventually(lambda: started == ["wait"])
+            call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await call
+
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(client.call_tool("wait", {}), 0.5)
+            await eventually(lambda: started == ["wait", "wait"])
+
+            added = await client.call_tool("add", {"a": 2, "b": 3})
+        finally:
+            await client.close()
+
+    assert added.structuredContent == {"result": 5}

@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hud.agents import create_agent
-from hud.eval import LocalRuntime, Task, rollout
-from tests.fixtures.environments import workspace_env
+from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn
 from tests.fixtures.services import Reply
 
@@ -62,8 +61,8 @@ async def test_a_created_agent_speaks_its_models_protocol_through_the_gateway(
     )
     models.script([Turn(text="done")])
 
-    env = workspace_env(tmp_path / "ws")
-    await rollout(Task(env=env.name, id="task"), create_agent(name), runtime=LocalRuntime(env))
+    task = workspace_task(tmp_path / "ws")
+    await task().run(create_agent(name))
 
     (request,) = models.requests()
     assert (request.protocol, request.model, request.credential) == (protocol, model, "hud-key")

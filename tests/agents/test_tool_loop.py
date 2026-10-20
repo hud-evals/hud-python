@@ -16,13 +16,12 @@ from urllib.parse import urlsplit
 
 import pytest
 from fastmcp import FastMCP
-from mcp.types import TextContent
 
 from hud.agents import ClaudeAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, OpenAIChatConfig, ToolStep
-from hud.eval import LocalRuntime, Task, rollout
+from hud.agents.types import ClaudeConfig, OpenAIChatConfig
+from tests.agents.conftest import tool_results
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import workspace_env
+from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call, shell
 from tests.fixtures.relay import relay
 from tests.fixtures.services import Reply
@@ -67,17 +66,11 @@ async def test_a_call_that_cannot_run_fails_its_tool_step_and_the_run_goes_on(
     models.script([turn, Turn(text="done")])
 
     async with mcp_server(failing_tools()) as server:
-        env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        run = await rollout(
-            Task(env=env.name, id="task"),
-            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(server,))
+        (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))).runs
 
-    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
-    assert step.result is not None
-    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
-    assert (run.trace.status, run.trace.content, step.result.isError) == ("completed", "done", True)
+    ((failed, text),) = tool_results(run)
+    assert (run.trace.status, run.trace.content, failed) == ("completed", "done", True)
     assert told in text
 
 
@@ -104,12 +97,10 @@ async def test_stop_on_ends_the_run_at_the_call_it_names(
 ) -> None:
     models.script([turn])
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", stop_on={reason})),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (
+        await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", stop_on={reason})))
+    ).runs
 
     assert (run.trace.status, run.trace.stop_reason) == ("completed", reason)
     assert len(models.requests()) == 1
@@ -120,12 +111,10 @@ async def test_the_step_budget_ends_a_model_that_never_finishes(
 ) -> None:
     models.respond(lambda request: shell("true"))
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=2)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (
+        await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=2)))
+    ).runs
 
     assert (run.trace.status, run.trace.stop_reason, len(models.requests())) == (
         "completed",
@@ -147,19 +136,19 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
     calls: list[str], status: str, models: Models, tmp_path: Path
 ) -> None:
     turns = [shell("true")] + [shell("true") if name == "shell" else call(name) for name in calls]
-    env = workspace_env(tmp_path / "ws")
+    task = workspace_task(tmp_path / "ws")
     relays: list[FlakyRelay] = []
 
     async with AsyncExitStack() as stack:
 
-        @env.initialize
+        @task.env.initialize
         async def reach_the_workspace_through_a_relay() -> None:
-            shell = env.capability("shell")
+            shell = task.env.capability("shell")
             address = urlsplit(shell.url)
             assert address.hostname is not None and address.port is not None
             workspace = await stack.enter_async_context(relay(address.hostname, address.port))
             relays.append(workspace)
-            env.add_capability(replace(shell, url=f"ssh://127.0.0.1:{workspace.port}"))
+            task.env.add_capability(replace(shell, url=f"ssh://127.0.0.1:{workspace.port}"))
 
         def answer(request: ModelRequest) -> Turn:
             if request.turn == 1:
@@ -169,11 +158,9 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
             return turns[request.turn] if request.turn < len(turns) else Turn(text="done")
 
         models.respond(answer)
-        run = await rollout(
-            Task(env=env.name, id="task"),
-            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=10)),
-            runtime=LocalRuntime(env),
-        )
+        (run,) = (
+            await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=10)))
+        ).runs
 
     assert run.trace.status == status
     if status == "error":
@@ -214,12 +201,10 @@ async def test_auto_respond_answers_a_question_or_lets_the_run_end(
         )
     )
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", auto_respond=True)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (
+        await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", auto_respond=True)))
+    ).runs
 
     asked = [
         request
@@ -251,18 +236,16 @@ async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on
     root = tmp_path / "ws"
     models.script([shell("sleep 3; touch late"), shell("touch quick"), Turn(text="done")])
 
-    env = workspace_env(root)
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(root)
+    (run,) = (
+        await task().run(
+            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1))
+        )
+    ).runs
     await asyncio.sleep(3)
 
-    cut, quick = [step.result for step in run.trace.steps if isinstance(step, ToolStep)]
-    assert cut is not None and quick is not None
-    (text,) = [block.text for block in cut.content if isinstance(block, TextContent)]
-    assert (run.trace.status, cut.isError, quick.isError) == ("completed", True, False)
+    (cut_failed, text), (quick_failed, _) = tool_results(run)
+    assert (run.trace.status, cut_failed, quick_failed) == ("completed", True, False)
     assert "timed out after 1s" in text
     assert ((root / "late").exists(), (root / "quick").exists()) == (False, True)
 
@@ -271,17 +254,15 @@ async def test_an_mcp_tool_is_left_to_its_own_time(models: Models, tmp_path: Pat
     models.script([call("wait"), Turn(text="done")])
 
     async with mcp_server(slow_tools()) as server:
-        env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        run = await rollout(
-            Task(env=env.name, id="task"),
-            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1)),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(server,))
+        (run,) = (
+            await task().run(
+                OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1))
+            )
+        ).runs
 
-    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
-    assert step.result is not None
-    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
-    assert (run.trace.status, step.result.isError, text) == ("completed", False, "waited")
+    ((failed, text),) = tool_results(run)
+    assert (run.trace.status, failed, text) == ("completed", False, "waited")
 
 
 async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeout(
@@ -298,17 +279,15 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
     )
     models.script([call("bash", command="mkfifo pipe"), edit, Turn(text="done")])
 
-    env = workspace_env(root)
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", tool_timeout_seconds=1)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(root)
+    (run,) = (
+        await task().run(
+            ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", tool_timeout_seconds=1))
+        )
+    ).runs
 
-    *_, edited = [step.result for step in run.trace.steps if isinstance(step, ToolStep)]
-    assert edited is not None
-    (text,) = [block.text for block in edited.content if isinstance(block, TextContent)]
-    assert (run.trace.status, edited.isError) == ("completed", True)
+    *_, (failed, text) = tool_results(run)
+    assert (run.trace.status, failed) == ("completed", True)
     assert "str_replace_based_edit_tool timed out after 1s" in text
 
 
@@ -332,12 +311,8 @@ async def test_mcp_tools_from_several_servers_are_qualified_within_64_characters
         mcp_server(named("company.tools", long + "a"), name="company.tools") as dotted,
         mcp_server(named("company-tools", long + "b"), name="company-tools") as dashed,
     ):
-        env = workspace_env(tmp_path / "ws", capabilities=(dotted, dashed))
-        await rollout(
-            Task(env=env.name, id="task"),
-            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(dotted, dashed))
+        await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))
 
     (request,) = models.requests()
     qualified = [name for name in request.tools if long[:20] in name]
@@ -353,12 +328,8 @@ async def test_two_mcp_tools_qualified_to_one_name_fail_the_run(
         mcp_server(named("a", "b__c"), name="a") as first,
         mcp_server(named("a__b", "c"), name="a__b") as second,
     ):
-        env = workspace_env(tmp_path / "ws", capabilities=(first, second))
-        run = await rollout(
-            Task(env=env.name, id="task"),
-            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(first, second))
+        (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))).runs
 
     assert run.trace.error == (
         "[agent loop] ValueError: MCP tool name collision after qualification: 'a__b__c'"

@@ -201,95 +201,64 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
 
 
 @pytest.mark.parametrize(
-    (
-        "agent_timeout",
-        "row_config",
-        "provider_limits",
-        "verifier_limits",
-        "rollout_timeout",
-        "message",
-    ),
+    ("settings", "message"),
     [
         pytest.param(
-            None, None, None, None, 0, "rollout_timeout must be greater than 0", id="no-time-at-all"
+            {"rollout_timeout": 0}, "rollout_timeout must be greater than 0", id="no-time-at-all"
         ),
         pytest.param(
-            10,
-            None,
-            None,
-            None,
-            10,
+            {"agent_timeout": 10, "rollout_timeout": 10},
             r"agent timeout \(10s\) must be less than rollout_timeout",
             id="an-agent-timeout-at-the-rollout-timeout",
         ),
         pytest.param(
-            3600,
-            {"limits": {"run_timeout_s": 3600}},
-            None,
-            None,
-            None,
+            {"agent_timeout": 3600, "row_config": {"limits": {"run_timeout_s": 3600}}},
             r"agent timeout \(3600s\) must be less than runtime_config\.limits\.run_timeout_s",
             id="an-agent-timeout-at-the-run-limit",
         ),
         pytest.param(
-            None,
-            {"limits": {"run_timeout_s": 3600}},
-            None,
-            None,
-            3600,
+            {"row_config": {"limits": {"run_timeout_s": 3600}}, "rollout_timeout": 3600},
             r"actor runtime_config\.limits\.run_timeout_s \(3600s\) must be less than",
             id="a-run-limit-at-the-rollout-timeout",
         ),
         pytest.param(
-            None,
-            None,
-            {"startup_timeout_s": 90},
-            None,
-            60,
+            {"provider_limits": {"startup_timeout_s": 90}, "rollout_timeout": 60},
             r"actor runtime_config\.limits\.startup_timeout_s \(90s\) must be less than",
             id="a-providers-limit-past-the-rollout-timeout",
         ),
         pytest.param(
-            None,
-            None,
-            None,
-            {"startup_timeout_s": 90},
-            90,
+            {"verifier_limits": {"startup_timeout_s": 90}, "rollout_timeout": 90},
             r"verifier runtime_config\.limits\.startup_timeout_s \(90s\) must be less than",
             id="a-verifiers-limit-at-the-rollout-timeout",
         ),
     ],
 )
 async def test_timeouts_that_contradict_each_other_raise_before_any_rollout(
-    agent_timeout: float | None,
-    row_config: dict[str, Any] | None,
-    provider_limits: dict[str, int] | None,
-    verifier_limits: dict[str, int] | None,
-    rollout_timeout: float | None,
-    message: str,
-    services: FakeServices,
-    hud_env: HudEnv,
+    settings: dict[str, Any], message: str, services: FakeServices, hud_env: HudEnv
 ) -> None:
     hud_env.set(PATH="/nonexistent")
     task = Task.model_validate(
         {
             "env": "lab",
             "id": "solve",
-            "agent_config": {"timeout_seconds": agent_timeout},
-            "runtime_config": row_config,
+            "agent_config": {"timeout_seconds": settings.get("agent_timeout")},
+            "runtime_config": settings.get("row_config"),
             "verifier": {
                 "env": "judge",
                 "id": "verify",
-                "runtime_config": {"limits": verifier_limits},
+                "runtime_config": {"limits": settings.get("verifier_limits")},
             },
         }
     )
     provider = DockerRuntime(
-        "lab", runtime_config=RuntimeConfig.model_validate({"limits": provider_limits})
+        "lab",
+        runtime_config=RuntimeConfig.model_validate({"limits": settings.get("provider_limits")}),
     )
 
     with pytest.raises(ValueError, match=message):
-        await task.run(ScriptedAgent("x"), runtime=provider, rollout_timeout=rollout_timeout)
+        await task.run(
+            ScriptedAgent("x"), runtime=provider, rollout_timeout=settings.get("rollout_timeout")
+        )
 
     assert services.requests() == []
 

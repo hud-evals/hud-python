@@ -3,9 +3,8 @@ anonymous analytics, an interrupt, asking before it changes anything, the error 
 failure prints, the error kind a platform refusal maps to, one id per line under
 ``--quiet``, and never echoing a secret it was given.
 
-Each command is a row of ``COMMANDS``: an invocation, the files it needs in the working
-directory, and the platform replies it reads before it would change anything
-(``"METHOD /path": body``, or ``(status, body)``).
+The CLI owns these contracts once, so each table holds one row per distinct way a command
+reaches them, not one row per command.
 """
 
 from __future__ import annotations
@@ -34,10 +33,7 @@ if TYPE_CHECKING:
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
-IMPORT_ID = "66666666-6666-4666-8666-666666666666"
 TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
-PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000002"
-MODEL_ID = "cccccccc-0000-4000-8000-000000000102"
 TASKS_PY = (
     'from hud import Environment\nenv = Environment("example")\n'
     '@env.template(id="solve")\nasync def solve(n: int = 0):\n'
@@ -48,40 +44,26 @@ ENVIRONMENT = {
     "env.py": 'from hud import Environment\nenv = Environment("example")\n',
     "Dockerfile.hud": "FROM python:3.12\n",
 }
-HARBOR = {"tasks/hello/task.toml": "version = '1.0'\n", "run-1/config.json": "{}"}
-IMPORT = {
-    "id": IMPORT_ID,
-    "format": "harbor",
-    "taskset_id": TASKSET_ID,
-    "file": {"id": IMPORT_ID, "filename": "bundle.zip", "size_bytes": 1},
-    "status": "running",
-    "created_at": "2026-10-07T12:00:00Z",
-}
 MODEL = {
-    "id": MODEL_ID,
+    "id": "cccccccc-0000-4000-8000-000000000102",
     "name": "My Sonnet",
     "model_name": "team/my-sonnet",
     "sdk_agent_type": "claude",
     "is_trainable": True,
     "provider": {"name": "anthropic"},
 }
-CHECKS = [{"key": "failure_analysis", "subject_type": "trace", "title": "Failure Analysis"}]
-FORMATS = [{"format": "harbor", "title": "Harbor", "max_input_bytes": 1024**3}]
-NOT_FOUND = (404, {"detail": "Not found"})
 
+#: name -> (an invocation that fails when signed out, the files it needs)
+FAILING: dict[str, tuple[list[str], dict[str, str]]] = {
+    "version": (["version", "--no-such-option"], {}),  # rejected while parsing
+    "set": (["set", "NOT_A_PAIR"], {}),  # the command raises a usage error
+    "task list": (["task", "list", "--source", "missing.json"], {}),  # a missing file
+    "jobs": (["jobs"], {}),  # a group run without a subcommand
+    "jobs list": (["jobs", "list"], {}),  # a platform read
+    "deploy": (["deploy", "--no-env", "--yes"], ENVIRONMENT),  # an async command
+}
 #: name -> (invocation, files, platform replies read before any change)
-COMMANDS: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
-    "init": (["init", "thing", "--preset", "blank"], {}, {}),
-    "serve": (["serve", "missing.py"], {}, {}),
-    "set": (["set", "HUD_EXAMPLE=1"], {}, {}),
-    "version": (["version"], {}, {}),
-    "task list": (["task", "list", "--source", "tasks.py"], {"tasks.py": TASKS_PY}, {}),
-    "task start": (["task", "start", "0", "--source", "tasks.py"], {"tasks.py": TASKS_PY}, {}),
-    "task grade": (
-        ["task", "grade", "0", "--source", "tasks.py", "--answer", "x"],
-        {"tasks.py": TASKS_PY},
-        {},
-    ),
+MUTATING: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
     "deploy": (["deploy", "--no-env"], ENVIRONMENT, {}),
     "eval": (
         ["eval", "Demo", "openai_compatible", "-m", "scripted"],
@@ -94,10 +76,7 @@ COMMANDS: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
             },
         },
     ),
-    "project": (["project"], {}, {}),
-    "project list": (["project", "list"], {}, {}),
-    "project create": (["project", "create", "UI Evals"], {}, {}),
-    "project use": (["project", "use", PROJECT_ID], {}, {}),
+    # The group forwards --yes and --dry-run to ``sync tasks``.
     "sync": (
         ["sync"],
         {"tasks.py": TASKS_PY, ".hud/config.json": json.dumps({"taskset_id": TASKSET_ID})},
@@ -106,75 +85,27 @@ COMMANDS: dict[str, tuple[list[str], dict[str, str], dict[str, Any]]] = {
             f"GET /v2/tasksets/{TASKSET_ID}/export": {"name": "demo", "tasks": []},
         },
     ),
-    "sync tasks": (
-        ["sync", "tasks", "demo", "tasks.py"],
-        {"tasks.py": TASKS_PY},
-        {"GET /v2/tasksets/by-name/demo": NOT_FOUND},
-    ),
-    "sync env": (["sync", "env", "example"], {}, {}),
+    # Packs the bundle before it asks.
     "harbor import": (
         ["harbor", "import", "tasks", "run-1", "--taskset", "tb2"],
-        HARBOR,
+        {"tasks/hello/task.toml": "version = '1.0'\n", "run-1/config.json": "{}"},
         {
-            "GET /v2/imports/formats": {"formats": FORMATS},
-            "GET /v2/tasksets/by-name/tb2": NOT_FOUND,
+            "GET /v2/imports/formats": {
+                "formats": [{"format": "harbor", "title": "Harbor", "max_input_bytes": 1024**3}]
+            },
+            "GET /v2/tasksets/by-name/tb2": (404, {"detail": "Not found"}),
         },
     ),
-    "harbor imports": (["harbor", "imports"], {}, {}),
-    "harbor report": (["harbor", "report", IMPORT_ID], {}, {}),
-    "harbor cancel": (
-        ["harbor", "cancel", IMPORT_ID],
-        {},
-        {f"GET /v2/imports/{IMPORT_ID}": IMPORT},
-    ),
-    "qa": (["qa"], {}, {}),
-    "qa list": (["qa", "list"], {}, {}),
-    "qa run": (
-        ["qa", "run", "failure_analysis", TRACE_ID],
-        {},
-        {"GET /v2/qa/checks": {"checks": CHECKS}},
-    ),
-    "qa results": (["qa", "results", TRACE_ID], {}, {}),
-    "jobs": (["jobs"], {}, {}),
-    "jobs list": (["jobs", "list"], {}, {}),
-    "jobs get": (["jobs", "get", JOB_ID], {}, {}),
+    # Answers --dry-run before it reaches the platform.
     "jobs cancel": (["jobs", "cancel", JOB_ID], {}, {}),
-    "cancel": (["cancel", JOB_ID], {}, {}),
-    "trace get": (["trace", "get", TRACE_ID], {}, {}),
-    "models list": (["models", "list"], {}, {}),
-    "models fork": (["models", "fork", "claude-sonnet-4-6", "--name", "mine"], {}, {}),
-    "models checkpoints": (["models", "checkpoints", "team/my-sonnet"], {}, {}),
+    # Asks only when --set changes the head.
     "models head": (
         ["models", "head", "team/my-sonnet", "--set", "ckpt-1"],
         {},
         {"GET /v2/models": {"items": [MODEL], "total": 1}},
     ),
 }
-#: Commands that never call the platform; each fails with its own invocation.
-OFFLINE = {
-    "init": ["init", "thing", "--preset", "no-such-preset"],
-    "serve": ["serve", "missing.py"],
-    "set": ["set", "NOT_A_PAIR"],
-    "version": ["version", "--no-such-option"],
-    "task list": ["task", "list", "--source", "missing.json"],
-    "task start": ["task", "start", "solve", "--source", "missing.json"],
-    "task grade": ["task", "grade", "solve", "--source", "missing.json", "--answer", "x"],
-}
-MUTATING = {
-    "deploy",
-    "eval",
-    "project create",
-    "sync",
-    "sync tasks",
-    "harbor import",
-    "harbor cancel",
-    "qa run",
-    "jobs cancel",
-    "cancel",
-    "models fork",
-    "models head",
-}
-#: Commands with ``--quiet``: (invocation, files, platform replies, the ids it prints)
+#: name -> (invocation, files, platform replies, the ids it prints under ``--quiet``)
 LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = {
     "task list": (
         ["task", "list", "--source", "tasks.py"],
@@ -182,57 +113,13 @@ LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = 
         {},
         [Task(env="example", id="solve", args={"n": n}).slug for n in (1, 2)],
     ),
-    "project list": (
-        ["project", "list"],
-        {},
-        {"GET /v2/projects": {"items": [{"id": PROJECT_ID, "name": "p"}], "total": 1}},
-        [PROJECT_ID],
-    ),
-    "models list": (
-        ["models", "list"],
-        {},
-        {"GET /v2/models": {"items": [MODEL], "total": 1}},
-        ["team/my-sonnet"],
-    ),
-    "models checkpoints": (
-        ["models", "checkpoints", "team/my-sonnet"],
-        {},
-        {
-            "GET /v2/models": {"items": [MODEL], "total": 1},
-            f"GET /v2/models/{MODEL_ID}/checkpoints": [{"id": "ckpt-1"}, {"id": "ckpt-2"}],
-        },
-        ["ckpt-1", "ckpt-2"],
-    ),
     "jobs": (
         ["jobs"],
         {},
         {"GET /v2/jobs": {"items": [{"id": "job-1"}, {"id": "job-2"}]}},
         ["job-1", "job-2"],
     ),
-    "jobs list": (["jobs", "list"], {}, {"GET /v2/jobs": {"items": [{"id": "job-1"}]}}, ["job-1"]),
-    "jobs get": (
-        ["jobs", "get", JOB_ID],
-        {},
-        {f"GET /v2/jobs/{JOB_ID}/traces": {"items": [{"id": TRACE_ID}]}},
-        [TRACE_ID],
-    ),
-    "qa": (["qa"], {}, {"GET /v2/qa/checks": {"checks": CHECKS}}, ["failure_analysis"]),
-    "qa list": (
-        ["qa", "list"],
-        {},
-        {"GET /v2/qa/checks": {"checks": CHECKS}},
-        ["failure_analysis"],
-    ),
-    "harbor imports": (
-        ["harbor", "imports"],
-        {},
-        {"GET /v2/imports": {"imports": [IMPORT], "total": 1}},
-        [IMPORT_ID],
-    ),
 }
-
-
-PLATFORM = sorted(set(COMMANDS) - set(OFFLINE))
 
 
 def serve(services: FakeServices, replies: dict[str, Any]) -> None:
@@ -249,13 +136,11 @@ def answer_everything(services: FakeServices, reply: Reply) -> None:
 
 
 def failing(name: str, hud: Hud, hud_env: HudEnv) -> list[str]:
-    """An invocation of ``name`` that fails: offline, its own; otherwise signed out."""
-    if name in OFFLINE:
-        return OFFLINE[name]
-    argv, files, _ = COMMANDS[name]
+    """The invocation of ``name`` that fails, run signed out."""
+    argv, files = FAILING[name]
     write_files(hud.cwd, files)
     hud_env.set(HUD_API_KEY=None)
-    return [*argv, *(["--yes"] if name in MUTATING else [])]
+    return argv
 
 
 def state(hud: Hud, hud_env: HudEnv) -> dict[Path, bytes]:
@@ -267,10 +152,6 @@ def state(hud: Hud, hud_env: HudEnv) -> dict[Path, bytes]:
         for path in root.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     }
-
-
-def writes(services: FakeServices) -> list[str]:
-    return [f"{r.method} {r.path}" for r in services.requests("api") if r.method != "GET"]
 
 
 def test_bare_hud_exits_2_with_nothing_on_stderr(hud: Hud) -> None:
@@ -342,7 +223,7 @@ def event(name: str, exit_code: int, error: Any) -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("name", sorted(COMMANDS))
+@pytest.mark.parametrize("name", sorted(FAILING))
 def test_every_invocation_posts_one_anonymous_event_naming_its_command(
     name: str, analytics: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
@@ -408,26 +289,23 @@ def test_a_stalled_analytics_endpoint_does_not_hold_up_the_command(
     assert stalled - answered < 3
 
 
-@pytest.mark.parametrize("name", [name for name in PLATFORM if name != "deploy"])
 def test_an_interrupted_command_exits_130(
-    name: str, analytics: FakeServices, hud_env: HudEnv, hud: Hud
+    analytics: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
     hud_env.set(HUD_API_KEY=API_KEY)
-    argv, files, _ = COMMANDS[name]
-    write_files(hud.cwd, files)
     answer_everything(analytics, Reply(json={}, delay=60))
-    process = hud.start(*argv, *(["--yes"] if name in MUTATING else []))
+    process = hud.start("jobs", "list")
 
     deadline = time.monotonic() + 30
     while not analytics.requests("api"):
         assert process.poll() is None, process.communicate()
-        assert time.monotonic() < deadline, f"hud {name} never reached the platform"
+        assert time.monotonic() < deadline, "hud jobs list never reached the platform"
         time.sleep(0.05)
     process.send_signal(signal.SIGINT)
     process.communicate(timeout=30)
 
     assert process.returncode == 130
-    assert events(analytics) == [event(name, 130, "KeyboardInterrupt")]
+    assert events(analytics) == [event("jobs list", 130, "KeyboardInterrupt")]
 
 
 # ─── changes ────────────────────────────────────────────────────────────
@@ -438,7 +316,7 @@ def test_an_interrupted_command_exits_130(
 def test_a_mutating_command_changes_nothing_unless_confirmed(
     name: str, flag: str, signed_in: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
-    argv, files, replies = COMMANDS[name]
+    argv, files, replies = MUTATING[name]
     write_files(hud.cwd, files)
     serve(signed_in, replies)
     before = state(hud, hud_env)
@@ -450,14 +328,14 @@ def test_a_mutating_command_changes_nothing_unless_confirmed(
     else:
         assert (result.exit_code, result.json["error"]) == (2, "usage"), result
         assert "--yes" in result.json["suggestion"]
-    assert writes(signed_in) == []
+    assert [f"{r.method} {r.path}" for r in signed_in.requests("api") if r.method != "GET"] == []
     assert state(hud, hud_env) == before
 
 
 # ─── output ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", sorted(COMMANDS))
+@pytest.mark.parametrize("name", sorted(FAILING))
 def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text(
     name: str, services: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
@@ -473,16 +351,16 @@ def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text
     assert error["message"] in as_text.stderr, as_text
 
 
-@pytest.mark.parametrize("name", PLATFORM)
-def test_a_refusal_from_the_platform_is_permission_denied_for_every_command(
+@pytest.mark.parametrize("name", ["jobs list", "deploy"])
+def test_a_refusal_from_the_platform_is_permission_denied(
     name: str, services: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
     hud_env.set(HUD_API_KEY=API_KEY)
-    argv, files, _ = COMMANDS[name]
+    argv, files = FAILING[name]
     write_files(hud.cwd, files)
     answer_everything(services, Reply(status=403, json={"detail": "Refused"}))
 
-    result = hud(*argv, *(["--yes"] if name in MUTATING else []), "--json")
+    result = hud(*argv, "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "permission_denied"), result
 

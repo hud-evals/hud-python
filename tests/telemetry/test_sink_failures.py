@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud import Environment
 from hud.eval import LocalRuntime, Task
 from hud.telemetry import flush
 from tests.fixtures.agents import ScriptedAgent
+from tests.fixtures.environments import checked
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -20,17 +20,6 @@ if TYPE_CHECKING:
 
     from tests.conftest import HudEnv
     from tests.fixtures.services import FakeServices
-
-
-def checked() -> Environment:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
-    return env
 
 
 async def test_a_span_directory_that_cannot_be_created_does_not_fail_the_run(

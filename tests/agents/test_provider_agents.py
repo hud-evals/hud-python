@@ -16,9 +16,8 @@ from PIL import Image
 
 from hud.agents.types import ToolStep
 from hud.capabilities import Capability
-from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.types import AgentType
-from tests.fixtures.environments import workspace_env
+from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, click, shell
 from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
@@ -52,22 +51,11 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_conversati
 ) -> None:
     models.script([Turn(text="done")])
     kind = AgentType(agent_type).cls
-    env, agent = workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model))
+    task, agent = workspace_task(tmp_path / "ws"), kind(kind.config_cls(model=model))
 
-    runs = await asyncio.gather(
-        rollout(
-            Task(env=env.name, id="task", args={"prompt": "first"}),
-            agent,
-            runtime=LocalRuntime(env),
-        ),
-        rollout(
-            Task(env=env.name, id="task", args={"prompt": "second"}),
-            agent,
-            runtime=LocalRuntime(env),
-        ),
-    )
+    jobs = await asyncio.gather(task(prompt="first").run(agent), task(prompt="second").run(agent))
 
-    assert [run.trace.status for run in runs] == ["completed", "completed"]
+    assert [run.trace.status for job in jobs for run in job.runs] == ["completed", "completed"]
     assert sorted(request.prompt for request in models.requests()) == ["first", "second"]
 
 
@@ -78,10 +66,8 @@ async def test_a_shell_call_acts_on_the_workspace_and_its_result_reaches_the_mod
     models.script([shell("touch made && echo made-it"), Turn(text="done")])
     kind = AgentType(agent_type).cls
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
 
     assert (run.trace.status, run.trace.content) == ("completed", "done")
     assert (tmp_path / "ws" / "made").exists()
@@ -107,12 +93,8 @@ async def test_a_click_lands_where_the_model_pointed_and_the_screen_is_sent_back
     kind = AgentType(agent_type).cls
 
     async with fake_screen(width=200, height=100) as screen:
-        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        run = await rollout(
-            Task(env=env.name, id="task"),
-            kind(kind.config_cls(model=model)),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
 
     pressed = {(event.x, event.y) for event in screen.pointer_events() if event.buttons & 1}
     assert (run.trace.status, pressed) == ("completed", {(150, 25)})
@@ -138,10 +120,8 @@ async def test_a_reply_cut_at_the_token_cap_ends_the_run_as_truncated(
     models.script([Turn(text="part", truncated=True)])
     kind = AgentType(agent_type).cls
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
 
     assert (run.trace.status, run.trace.stop_reason, run.trace.content) == (
         "completed",
@@ -157,10 +137,8 @@ async def test_a_provider_fault_ends_the_run_with_its_error(
     models.script([Turn(fail=Reply(status=400, json={"error": {"message": "model unavailable"}}))])
     kind = AgentType(agent_type).cls
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
 
     assert run.trace.status == "error"
     assert "model unavailable" in (run.trace.error or "")
@@ -174,10 +152,8 @@ async def test_an_overloaded_provider_is_asked_again(
     models.queue([Turn(fail=busy), Turn(text="done")])
     kind = AgentType(agent_type).cls
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
 
     assert (run.trace.status, run.trace.content, len(models.requests())) == (
         "completed",
@@ -223,12 +199,8 @@ async def test_requests_go_to_the_provider_with_its_own_key_and_otherwise_to_the
     provider.script([Turn(text="done")])
     kind = AgentType(agent_type).cls
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        kind(kind.config_cls(model=model, gateway=gateway)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(kind(kind.config_cls(model=model, gateway=gateway)))).runs
 
     (request,) = {"gateway": models, "provider": provider}[route].requests()
     assert (run.trace.status, request.credential) == ("completed", credential)
@@ -240,12 +212,10 @@ async def test_each_gateway_request_carries_its_own_runs_trace_id(
     agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
 ) -> None:
     models.script([Turn(text="done")])
-    env = workspace_env(tmp_path / "ws")
+    task = workspace_task(tmp_path / "ws")
     kind = AgentType(agent_type).cls
 
-    job = await Taskset("t", [Task(env=env.name, id="task")]).run(
-        kind(kind.config_cls(model=model)), runtime=LocalRuntime(env), group=3
-    )
+    job = await task().run(kind(kind.config_cls(model=model)), group=3)
 
     sent = sorted(uuid.UUID(request.headers["trace-id"]).hex for request in models.requests())
     assert sent == sorted(uuid.UUID(str(run.trace_id)).hex for run in job.runs)

@@ -332,11 +332,11 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
 
-    def judge(request: ModelRequest) -> Turn:
+    def verdict_for(request: ModelRequest) -> Turn:
         (criterion,) = [c for c in verdicts if c in json.dumps(request.body)]
         return Turn(text=VERDICTS[verdicts[criterion]])
 
-    models.respond(judge)
+    models.respond(verdict_for)
     env = Environment("graders")
 
     @env.template()

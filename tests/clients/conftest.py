@@ -1,16 +1,24 @@
-"""A control-channel peer on the environment's side, answering an SDK client from a script."""
+"""What several client tests share: a scripted control-channel peer, a port with nothing
+listening, and a binding reached through a relay that can drop it."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
+import socket
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlsplit, urlunsplit
+
+from tests.fixtures.relay import relay
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
+
+    from hud.capabilities import Capability
+    from tests.fixtures.relay import FlakyRelay
 
 
 _DEFAULT_ID = object()
@@ -171,3 +179,22 @@ async def control_peer(
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(*peer.handlers, return_exceptions=True)
         await server.wait_closed()
+
+
+def unused_port() -> int:
+    """A loopback port nothing listens on."""
+    with socket.socket() as released:
+        released.bind(("127.0.0.1", 0))
+        return released.getsockname()[1]
+
+
+@asynccontextmanager
+async def relayed(binding: Capability) -> AsyncIterator[tuple[Capability, FlakyRelay]]:
+    """``binding``, reached through a relay that can sever, refuse, and stall its connections."""
+    parts = urlsplit(binding.url)
+    assert parts.hostname is not None and parts.port is not None
+    async with relay(parts.hostname, parts.port) as flaky:
+        user = f"{parts.username}@" if parts.username else ""
+        netloc = f"{user}127.0.0.1:{flaky.port}"
+        url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
+        yield replace(binding, url=url), flaky

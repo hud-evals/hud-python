@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
 from hud.agents.base import Agent
 from hud.eval import HUDRuntime, LocalRuntime, Task, Taskset
 from tests.conftest import eventually
-from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, tunnel
+from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
+from tests.fixtures.environments import checked
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -30,17 +30,6 @@ if TYPE_CHECKING:
     from tests.fixtures.services import FakeServices
 
 
-def checked() -> Environment:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
-    return env
-
-
 async def test_a_platform_taskset_runs_over_the_tunnel_and_releases_its_session(
     services: FakeServices, hud_env: HudEnv
 ) -> None:
@@ -48,9 +37,7 @@ async def test_a_platform_taskset_runs_over_the_tunnel_and_releases_its_session(
     row = Task(env="checked", id="check")
 
     async with LocalRuntime(checked())(row) as served:
-        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
-        services.route("runtime", "DELETE", SESSION, json={})
-        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
+        host_on_runtime(services, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
     (run,) = job.runs
@@ -73,9 +60,7 @@ async def test_runtime_url_points_the_tunnel_at_another_runtime_service(
     row = Task(env="checked", id="check")
 
     async with LocalRuntime(checked())(row) as served:
-        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
-        services.route("runtime", "DELETE", SESSION, json={})
-        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
+        host_on_runtime(services, served.url)
         job = await row.run(
             ScriptedAgent("yes"), runtime=HUDRuntime(runtime_url=services.url("runtime") + "/")
         )
@@ -142,9 +127,7 @@ async def test_resources_the_deployed_env_cannot_change_are_warned_about_once(
     rows = [Task(env="checked", id="check", slug=slug, runtime_config=sized) for slug in "ab"]
 
     async with LocalRuntime(checked())(Task(env="checked", id="check")) as served:
-        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
-        services.route("runtime", "DELETE", SESSION, json={})
-        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
+        host_on_runtime(services, served.url)
         job = await Taskset("sized", rows).run(ScriptedAgent("yes"), runtime=HUDRuntime())
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
@@ -196,9 +179,7 @@ async def test_the_deprecated_run_timeout_still_ends_a_tunneled_run(
             await asyncio.sleep(30)
 
     async with LocalRuntime(checked())(row) as served:
-        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
-        services.route("runtime", "DELETE", SESSION, json={})
-        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
+        host_on_runtime(services, served.url)
         with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
             runtime = HUDRuntime(run_timeout=0.5)
         job = await row.run(Waits(), runtime=runtime)

@@ -11,9 +11,8 @@ import pytest
 
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
-from tests.fixtures.environments import workspace_env
+from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
@@ -55,12 +54,8 @@ async def test_requests_go_to_an_explicit_endpoint_and_otherwise_to_the_gateway(
     provider.script([Turn(text="done")])
     endpoint = {"api_key": "explicit", "base_url": provider.url} if explicit else {}
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, **endpoint)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model=MODEL, **endpoint)))).runs
 
     (request,) = {"gateway": models, "provider": provider}[route].requests()
     assert (run.trace.status, request.credential) == ("completed", credential)
@@ -95,12 +90,8 @@ async def test_token_ids_continue_the_conversation_from_what_was_sampled(
         [Turn(shell="true", extra=extra) for extra in calls] + [Turn(text="done", extra=last)]
     )
 
-    env = workspace_env(tmp_path / "ws")
-    await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=TOKEN_IDS)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    await task().run(OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=TOKEN_IDS)))
 
     keys = {"prompt_token_ids", "continuation_from"}
     sent = [{k: v for k, v in r.body.items() if k in keys} for r in models.requests()]
@@ -112,12 +103,8 @@ async def test_the_models_reasoning_is_replayed_in_the_conversation(
 ) -> None:
     models.script([Turn(shell="true", reasoning="check first"), Turn(text="done")])
 
-    env = workspace_env(tmp_path / "ws")
-    await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model=MODEL)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    await task().run(OpenAIChatAgent(OpenAIChatConfig(model=MODEL)))
 
     replayed = models.requests()[-1].body["messages"][1]
     assert (replayed["role"], replayed["reasoning_content"]) == ("assistant", "check first")
@@ -129,12 +116,8 @@ async def test_completion_kwargs_cannot_override_what_the_agent_sends_itself(
     reserved = {"model": "other", "stream": True, "tools": [], "messages": []}
     models.script([Turn(text="done")])
 
-    env = workspace_env(tmp_path / "ws")
-    await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=reserved)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    await task().run(OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=reserved)))
 
     (request,) = models.requests()
     assert (request.body["model"], request.body["stream"]) == (MODEL, False)
@@ -155,12 +138,8 @@ async def test_an_incomplete_call_is_explained_and_replayed_with_empty_arguments
     )
     models.script([cut_off, Turn(text="done")])
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model=MODEL)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model=MODEL)))).runs
 
     last = models.requests()[-1].body
     assert run.trace.status == "completed"
@@ -178,12 +157,12 @@ async def test_a_completion_with_token_ids_records_its_training_sample(
     sample = {"prompt_token_ids": [1, 2], "token_ids": [3, 4], "logprobs": {"content": logprobs}}
     models.script([Turn(text="Blue.", extra=sample)])
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=TOKEN_IDS)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (
+        await task().run(
+            OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=TOKEN_IDS))
+        )
+    ).runs
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert step["sample"] == {

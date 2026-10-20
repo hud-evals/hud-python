@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
-import subprocess
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -36,7 +35,7 @@ from hud.eval import (
     Task,
 )
 from tests.conftest import CLOSED_PORT, eventually
-from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, tunnel
+from tests.eval.conftest import SESSION, SESSIONS, gone, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
 
@@ -59,18 +58,6 @@ EVERY_RUNTIME = [
     CONTAINER,
     MODAL,
 ]
-
-
-def gone(pid: int) -> bool:
-    """Whether process ``pid`` has exited (an unreaped zombie counts as exited)."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return True
-    status = subprocess.run(
-        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
-    )
-    return status.stdout.strip().startswith("Z")
 
 
 def serves(url: str) -> bool:
@@ -119,9 +106,7 @@ async def placed(
             services: FakeServices = request.getfixturevalue("services")
             request.getfixturevalue("hud_env").set(HUD_API_KEY="k")
             async with SubprocessRuntime(path)(Task(env=fixture, id="serve")) as served:
-                services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
-                services.route("runtime", "DELETE", SESSION, json={})
-                services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
+                host_on_runtime(services, served.url)
 
                 async def released() -> bool:
                     created = len(services.requests("runtime", "POST", SESSIONS))

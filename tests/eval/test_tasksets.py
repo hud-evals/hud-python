@@ -1,5 +1,5 @@
-"""Tasksets as collections: the rows a source, a data file or the platform holds, how
-each row is keyed, and what a sync would change."""
+"""Tasksets as collections: the rows a source, a data file or the platform holds, and how
+each row is keyed."""
 
 from __future__ import annotations
 

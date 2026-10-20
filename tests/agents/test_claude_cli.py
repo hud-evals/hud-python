@@ -15,10 +15,10 @@ from hud.agents import ClaudeCLIAgent
 from hud.agents.types import ClaudeCLIConfig
 from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval import LocalRuntime, rollout
 from tests.fixtures import clis
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import workspace_env
+from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn
 from tests.fixtures.screen import fake_screen
 
@@ -43,11 +43,9 @@ async def test_the_cli_is_given_the_prompt_its_allowed_tools_and_the_environment
     stub.install()
 
     async with mcp_server(lookups) as server:
-        env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=(server,))
-        await rollout(
-            Task(env=env.name, id="task", args={"prompt": "Fix the bug."}),
-            ClaudeCLIAgent(ClaudeCLIConfig(allowed_tools=["Read", "Bash(git:*)"])),
-            runtime=LocalRuntime(env),
+        task = workspace_task(tmp_path / "ws", env=stub.shell_env(), capabilities=(server,))
+        await task(prompt="Fix the bug.").run(
+            ClaudeCLIAgent(ClaudeCLIConfig(allowed_tools=["Read", "Bash(git:*)"]))
         )
 
     ((argv, stdin, files),) = [(c["argv"], c["stdin"], c["files"]) for c in stub.captures()]
@@ -84,12 +82,8 @@ async def test_the_cli_calls_the_provider_with_its_own_key_or_else_the_gateway(
     )
     stub.install()
 
-    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        ClaudeCLIAgent(ClaudeCLIConfig(gateway=gateway)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (run,) = (await task().run(ClaudeCLIAgent(ClaudeCLIConfig(gateway=gateway)))).runs
 
     (request,) = {"gateway": models, "provider": provider}[route].requests()
     assert (run.trace.status, request.credential) == ("completed", credential)
@@ -100,12 +94,8 @@ async def test_every_model_tier_and_subagents_use_the_configured_model(tmp_path:
     stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
 
-    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
-    await rollout(
-        Task(env=env.name, id="task"),
-        ClaudeCLIAgent(ClaudeCLIConfig(model="claude-opus-5", gateway=True)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    await task().run(ClaudeCLIAgent(ClaudeCLIConfig(model="claude-opus-5", gateway=True)))
 
     (variables,) = [capture["env"] for capture in stub.captures()]
     tiers = (
@@ -171,8 +161,8 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
     stub = clis.Stub(tmp_path / "stub", "claude", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
-    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
-    run = await rollout(Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env))
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    (run,) = (await task().run(ClaudeCLIAgent())).runs
 
     assert (run.trace.status, run.trace.content) == (status, content)
     assert run.trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
@@ -188,8 +178,8 @@ async def test_mcp_servers_reach_the_cli_in_a_config_removed_after_the_run(
         Capability.mcp(name="search", url="http://search.internal:8000/sse", transport="sse"),
     )
 
-    env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=servers)
-    await rollout(Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env))
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env(), capabilities=servers)
+    await task().run(ClaudeCLIAgent())
 
     (capture,) = stub.captures()
     argv = capture["argv"]
@@ -214,12 +204,10 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: P
     stub.install()
 
     async with fake_screen() as screen:
-        env = workspace_env(
+        task = workspace_task(
             tmp_path / "ws", env=stub.shell_env(), capabilities=(Capability.rfb(url=screen.url),)
         )
-        run = await rollout(
-            Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env)
-        )
+        (run,) = (await task().run(ClaudeCLIAgent())).runs
 
     (capture,) = stub.captures()
     assert run.trace.status == "completed"
@@ -243,10 +231,8 @@ async def test_an_mcp_server_named_like_the_computer_bridge_is_refused(tmp_path:
             Capability.rfb(url=screen.url),
             Capability.mcp(name="computer-use", url="http://tools.internal:8000/mcp"),
         )
-        env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=clash)
-        run = await rollout(
-            Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env)
-        )
+        task = workspace_task(tmp_path / "ws", env=stub.shell_env(), capabilities=clash)
+        (run,) = (await task().run(ClaudeCLIAgent())).runs
 
     assert (run.trace.error, stub.captures()) == (
         "[agent loop] RuntimeError: duplicate MCP server name 'computer-use'",
@@ -267,7 +253,7 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
     )
     stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
-    env = workspace_env(
+    task = workspace_task(
         tmp_path / "ws",
         env=stub.shell_env(),
         allowed_hosts={ANY_HOST},
@@ -276,10 +262,7 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
     )
 
     run = await rollout(
-        Task(env=env.name, id="task"),
-        ClaudeCLIAgent(),
-        runtime=LocalRuntime(env),
-        connections=(connection,),
+        task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env), connections=(connection,)
     )
 
     (capture,) = stub.captures()

@@ -17,6 +17,7 @@ from hud.eval import LocalRuntime, Runtime, Task, rollout
 from hud.telemetry.context import get_current_trace_id
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
+from tests.fixtures.environments import checked
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -238,18 +239,11 @@ async def test_a_grade_breakdown_reaches_the_evaluation_without_its_grader_detai
 
 
 async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() -> None:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
     class Raises(Agent):
         async def __call__(self, run: Run) -> None:
             raise RuntimeError("agent exploded")
 
-    job = await check().run(Raises())
+    job = await Task(env="checked", id="check").run(Raises(), runtime=LocalRuntime(checked()))
 
     (run,) = job.runs
     assert (run.reward, run.trace.status, job.errors) == (0.0, "error", [])
@@ -258,19 +252,12 @@ async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() ->
 
 
 async def test_an_agent_that_raises_after_answering_keeps_its_grade() -> None:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
     class RaisesAfter(Agent):
         async def __call__(self, run: Run) -> None:
             run.trace.content = "yes"
             raise RuntimeError("agent exploded")
 
-    job = await check().run(RaisesAfter())
+    job = await Task(env="checked", id="check").run(RaisesAfter(), runtime=LocalRuntime(checked()))
 
     (run,) = job.runs
     assert (run.reward, run.trace.status, job.reward) == (1.0, "error", 1.0)
@@ -286,22 +273,16 @@ async def test_an_agent_that_raises_after_answering_keeps_its_grade() -> None:
 async def test_the_agent_timeout_stops_the_agent_and_still_grades(
     agent_timeout: float, task_timeout: float | None
 ) -> None:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
     class AnswersThenWaits(Agent):
         async def __call__(self, run: Run) -> None:
             run.trace.content = "yes"
             await asyncio.sleep(30)
 
-    task = check()
+    task = Task(env="checked", id="check")
     if task_timeout is not None:
         task.agent_config = {"timeout_seconds": task_timeout}
-    job = await task.run(AnswersThenWaits(AgentConfig(timeout_seconds=agent_timeout)))
+    agent = AnswersThenWaits(AgentConfig(timeout_seconds=agent_timeout))
+    job = await task.run(agent, runtime=LocalRuntime(checked()))
 
     (run,) = job.runs
     assert (run.reward, run.trace.status, run.trace.stop_reason) == (1.0, "error", "timeout")
@@ -309,19 +290,14 @@ async def test_the_agent_timeout_stops_the_agent_and_still_grades(
 
 
 async def test_a_timeout_the_agent_raises_itself_is_an_ordinary_failure() -> None:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
     class ProviderTimesOut(Agent):
         async def __call__(self, run: Run) -> None:
             run.trace.content = "yes"
             raise TimeoutError("provider timed out")
 
-    job = await check().run(ProviderTimesOut(AgentConfig(timeout_seconds=30)))
+    job = await Task(env="checked", id="check").run(
+        ProviderTimesOut(AgentConfig(timeout_seconds=30)), runtime=LocalRuntime(checked())
+    )
 
     (run,) = job.runs
     assert (run.reward, run.trace.stop_reason) == (1.0, None)
@@ -513,24 +489,19 @@ async def test_the_rollout_timeout_ends_a_run_still_being_provisioned() -> None:
 
 
 async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_finish() -> None:
-    env = Environment("checked")
-
-    @env.template()
-    async def check():
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
     release = asyncio.Event()
     events = []
 
     @asynccontextmanager
     async def slow_to_stop(task: Task) -> AsyncIterator[Runtime]:
-        async with LocalRuntime(env)(task) as runtime:
+        async with LocalRuntime(checked())(task) as runtime:
             yield runtime
         await release.wait()
         events.append("torn down")
 
-    job = await check().run(ScriptedAgent("yes"), runtime=slow_to_stop, rollout_timeout=0.3)
+    job = await Task(env="checked", id="check").run(
+        ScriptedAgent("yes"), runtime=slow_to_stop, rollout_timeout=0.3
+    )
     release.set()
 
     (run,) = job.runs

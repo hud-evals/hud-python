@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import subprocess
 import textwrap
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +16,7 @@ from hud.agents.base import Agent
 from hud.environment import load_environment
 from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset, rollout
 from tests.conftest import eventually
+from tests.eval.conftest import gone
 from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
@@ -31,6 +31,19 @@ def write(path: Path, source: str) -> Path:
     return path
 
 
+LAB = """
+from hud import Environment
+
+env = Environment("lab")
+
+
+@env.template()
+async def solve():
+    yield "go"
+    yield 1.0
+"""
+
+
 @pytest.mark.parametrize(
     ("source", "imports"),
     [("counted/sums.py", 2), ("counted", 1)],
@@ -42,22 +55,7 @@ async def test_a_source_path_is_imported_to_serve_rollouts(
     log = tmp_path / "imports.log"
     write(
         tmp_path / "counted" / "sums.py",
-        f"""
-        from pathlib import Path
-
-        from hud import Environment
-
-        with Path({str(log)!r}).open("a") as log:
-            log.write("import\\n")
-
-        env = Environment("lab")
-
-
-        @env.template()
-        async def solve():
-            yield "go"
-            yield 1.0
-        """,
+        f"with open({str(log)!r}, 'a') as log:\n    log.write('import\\n')\n" + LAB,
     )
 
     job = await Task(env="lab", id="solve").run(
@@ -73,20 +71,7 @@ async def test_a_package_entry_serves_the_env_its_relative_import_brings_in(
 ) -> None:
     package = tmp_path / f"envs_{abs(hash(tmp_path)):x}"
     write(package / "__init__.py", "")
-    write(
-        package / "sums.py",
-        """
-        from hud import Environment
-
-        env = Environment("lab")
-
-
-        @env.template()
-        async def solve():
-            yield "go"
-            yield 1.0
-        """,
-    )
+    write(package / "sums.py", LAB)
     entry = write(package / "env.py", "from .sums import env\n")
 
     job = await Task(env="lab", id="solve").run(ScriptedAgent("x"), runtime=LocalRuntime(entry))
@@ -100,20 +85,7 @@ async def test_a_second_copy_of_a_package_from_another_directory_is_refused(
     name = f"envs_{abs(hash(tmp_path)):x}"
     for copy in ("first", "second"):
         write(tmp_path / copy / name / "__init__.py", "")
-        write(
-            tmp_path / copy / name / "env.py",
-            """
-            from hud import Environment
-
-            env = Environment("lab")
-
-
-            @env.template()
-            async def solve():
-                yield "go"
-                yield 1.0
-            """,
-        )
+        write(tmp_path / copy / name / "env.py", LAB)
     row = Task(env="lab", id="solve")
 
     first = await row.run(
@@ -358,17 +330,6 @@ async def test_a_missing_source_fails_the_run(tmp_path: Path) -> None:
     assert (run.trace.status, run.prompt) == ("error", None)
     assert (run.trace.error or "").startswith("[provisioning] ")
     assert "source not found" in (run.trace.error or "")
-
-
-def gone(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return True
-    status = subprocess.run(
-        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
-    )
-    return status.stdout.strip().startswith("Z")
 
 
 async def test_a_child_that_exits_before_serving_reports_its_output_and_takes_its_children(

@@ -13,10 +13,9 @@ from fastmcp import FastMCP
 from hud.agents import GeminiAgent
 from hud.agents.types import GeminiConfig
 from hud.capabilities import Capability
-from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import workspace_env
+from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call, click
 from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
@@ -39,12 +38,8 @@ def signed_in(hud_env: HudEnv) -> None:
 async def test_citations_add_google_search_to_the_tools(models: Models, tmp_path: Path) -> None:
     models.script([Turn(text="done")])
 
-    env = workspace_env(tmp_path / "ws")
-    await rollout(
-        Task(env=env.name, id="task"),
-        GeminiAgent(GeminiConfig(model=MODEL, citations_enabled=True)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    await task().run(GeminiAgent(GeminiConfig(model=MODEL, citations_enabled=True)))
 
     (request,) = models.requests()
     assert [t for t in request.body["tools"] if "functionDeclarations" not in t] == [
@@ -62,12 +57,8 @@ async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
     models.script([call("long_output"), Turn(text="done")])
 
     async with mcp_server(server) as long_output:
-        env = workspace_env(tmp_path / "ws", capabilities=(long_output,))
-        await rollout(
-            Task(env=env.name, id="task"),
-            GeminiAgent(GeminiConfig(model=MODEL, max_tool_result_chars=100)),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(long_output,))
+        await task().run(GeminiAgent(GeminiConfig(model=MODEL, max_tool_result_chars=100)))
 
     (result,) = models.requests()[-1].tool_results
     output = json.loads(result)["output"]
@@ -81,12 +72,8 @@ async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models.script([click(10, 10, screen=(64, 48))] * 4 + [Turn(text="done")])
 
     async with fake_screen() as screen:
-        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await rollout(
-            Task(env=env.name, id="task"),
-            GeminiAgent(GeminiConfig(model=MODEL)),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        await task().run(GeminiAgent(GeminiConfig(model=MODEL)))
 
     responses = [
         part["functionResponse"]
@@ -103,12 +90,8 @@ async def test_a_field_is_cleared_with_ctrl_a_whatever_system_the_agent_runs_on(
     models.script([call("type_text_at", x=500, y=500, text="hi"), Turn(text="done")])
 
     async with fake_screen() as screen:
-        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await rollout(
-            Task(env=env.name, id="task"),
-            GeminiAgent(GeminiConfig(model=MODEL)),
-            runtime=LocalRuntime(env),
-        )
+        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        await task().run(GeminiAgent(GeminiConfig(model=MODEL)))
 
     pressed = [event.key for event in screen.key_events() if event.down]
     assert pressed[:2] == [CONTROL_L, ord("a")]
@@ -127,12 +110,8 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
 ) -> None:
     models.queue([turn])
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        GeminiAgent(GeminiConfig(model=MODEL)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(GeminiAgent(GeminiConfig(model=MODEL)))).runs
 
     assert (run.trace.status, len(models.requests())) == ("error", 1)
     assert error in (run.trace.error or "")
@@ -158,12 +137,8 @@ async def test_grounding_and_thoughts_land_on_the_agent_step(
         [Turn(text="Blue.", reasoning="look it up", extra={"groundingMetadata": grounding})]
     )
 
-    env = workspace_env(tmp_path / "ws")
-    run = await rollout(
-        Task(env=env.name, id="task"),
-        GeminiAgent(GeminiConfig(model=MODEL)),
-        runtime=LocalRuntime(env),
-    )
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(GeminiAgent(GeminiConfig(model=MODEL)))).runs
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert (step["content"], step["reasoning"]) == ("Blue.", "look it up")

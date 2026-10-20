@@ -19,6 +19,7 @@ from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.types import Step
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
+from tests.fixtures.environments import checked
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -30,17 +31,6 @@ if TYPE_CHECKING:
 JOB_ENTER = "/v2/trace/job/{id}/enter"
 TRACE_ENTER = "/v2/trace/{id}/enter"
 TRACE_EXIT = "/v2/trace/{id}/exit"
-
-
-def checked() -> Environment:
-    env = Environment("checked")
-
-    @env.template()
-    async def check(n: int = 0):
-        answer = yield "say yes"
-        yield 1.0 if answer == "yes" else 0.0
-
-    return env
 
 
 async def test_a_taskset_reports_one_job_and_enters_each_rollout_under_it(
