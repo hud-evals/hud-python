@@ -1,6 +1,6 @@
 """What the platform records about an execution: one job for it, a trace entered for each
-rollout under that job, and each rollout's outcome when it exits, sent only while
-telemetry is on with an API key."""
+rollout under that job with its parent trace, and each rollout's outcome when it exits,
+sent only while telemetry is on with an API key."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from hud import Environment
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
+from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
 
@@ -170,3 +171,28 @@ async def test_nothing_is_reported_unless_telemetry_is_on_with_a_key(
     )
 
     assert (job.reward, reporting.requests()) == (1.0, [])
+
+
+TRACE_ID = "b" * 32
+
+
+AMBIENTS = [("a" * 32, "a" * 32), (str(uuid.UUID(TRACE_ID)), None)]
+
+
+AMBIENT_IDS = ["another-trace-is-the-parent", "its-own-trace-is-not-its-parent"]
+
+
+@pytest.mark.parametrize(("ambient", "parent"), AMBIENTS, ids=AMBIENT_IDS)
+async def test_the_trace_record_names_the_parent_trace(
+    ambient: str, parent: str | None, reporting: FakeServices
+) -> None:
+    with set_trace_context(ambient):
+        await rollout(
+            Task(env="checked", id="check"),
+            ScriptedAgent("yes"),
+            runtime=LocalRuntime(checked()),
+            trace_id=TRACE_ID,
+        )
+
+    (entered,) = reporting.bodies("api", "POST", "/v2/trace/{id}/enter")
+    assert entered.get("parent_trace_id") == parent

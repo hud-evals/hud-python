@@ -1,18 +1,26 @@
 """The control channel as a peer speaks it: a task's typed start and answer, how a
-session's template is torn down, and a request at the frame limit."""
+session's template is torn down, a request at the frame limit, sessions that drop and
+resume, and capability streams tunneled through its port."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import asyncio
+from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlsplit
 
 import pytest
 from pydantic import BaseModel
 
+from hud.capabilities import Capability
+from hud.clients import connect
 from hud.environment import (
     Environment,
 )
 from hud.eval import LocalRuntime, Task
 from tests.environment.conftest import FRAME_LIMIT, encode, wire
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
 
@@ -143,3 +151,144 @@ async def test_a_request_at_the_frame_limit_round_trips_its_payload() -> None:
     data = frame["params"]["args"]["data"]
     assert started is not None
     assert (started["result"]["prompt"], graded["result"]["detail"]) == (data, data)
+
+
+def tagged() -> Environment:
+    env = Environment("sessions")
+
+    @env.template()
+    async def echo(tag: str):
+        yield f"go {tag}"
+        yield {"score": 1.0, "tag": tag}
+
+    return env
+
+
+async def test_concurrent_sessions_each_grade_their_own_task() -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
+        await b.call("tasks.start", {"id": "echo", "args": {"tag": "b"}})
+        graded = [
+            (await peer.call("tasks.grade", {"answer": "x"}))["result"]["tag"] for peer in (a, b)
+        ]
+
+    assert graded == ["a", "b"]
+
+
+async def test_a_session_dropped_before_its_prompt_is_resumed_by_its_id_and_graded() -> None:
+    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
+        async with wire(runtime.url) as a:
+            session = (await a.call("hello", {}))["result"]["session_id"]
+            await a.send("tasks.start", {"id": "echo", "args": {"tag": "parked"}})
+            await a.hang_up()
+        async with wire(runtime.url) as b:
+            resumed = (await b.call("hello", {"session_id": session}))["result"]["session_id"]
+            graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert (resumed, graded["result"]["tag"]) == (session, "parked")
+
+
+async def test_a_plain_grade_adopts_the_only_parked_session() -> None:
+    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
+        async with wire(runtime.url) as a:
+            await a.call("tasks.start", {"id": "echo", "args": {"tag": "parked"}})
+        async with wire(runtime.url) as b:
+            graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert graded["result"]["tag"] == "parked"
+
+
+async def test_a_session_with_a_live_connection_cannot_be_resumed() -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        session = (await a.call("hello", {}))["result"]["session_id"]
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
+        refused = await b.call("hello", {"session_id": session})
+        graded = await a.call("tasks.grade", {"answer": "x"})
+
+    assert refused["error"]["code"] == -32600
+    assert graded["result"]["tag"] == "a"
+
+
+@pytest.fixture
+async def echo_port() -> AsyncIterator[int]:
+    """A daemon on the environment's network that echoes every byte back."""
+
+    async def echo(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            while data := await reader.read(65536):
+                writer.write(data)
+                await writer.drain()
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(echo, "127.0.0.1", 0)
+    yield server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()
+
+
+def echo_env(port: int) -> Environment:
+    return Environment(
+        "echo-env",
+        capabilities=[Capability(name="echo", protocol="rfb/3.8", url=f"rfb://127.0.0.1:{port}")],
+    )
+
+
+async def round_trip(host: str | None, port: int | None, payload: bytes) -> bytes:
+    reader, writer = await asyncio.open_connection(host, port)
+    writer.write(payload)
+    await writer.drain()
+    data = await reader.readexactly(len(payload))
+    writer.close()
+    await writer.wait_closed()
+    return data
+
+
+async def test_concurrent_tunnel_streams_do_not_interleave(echo_port: int) -> None:
+    payloads = [f"stream-{i}".encode() * 100 for i in range(8)]
+
+    env = echo_env(echo_port)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+    ):
+        binding = urlsplit(client.binding("echo").url)
+        echoed = await asyncio.gather(
+            *(round_trip(binding.hostname, binding.port, payload) for payload in payloads)
+        )
+
+    assert echoed == payloads
+
+
+@pytest.mark.parametrize("preface_size", [128, FRAME_LIMIT])
+async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
+    echo_port: int, preface_size: int
+) -> None:
+    preface: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tunnel.open",
+        "params": {"capability": "echo"},
+        "padding": "",
+    }
+    preface["padding"] = "x" * (preface_size - (len(encode(preface)) - 1))
+    env = echo_env(echo_port)
+
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="tunnel")) as runtime,
+        wire(runtime.url) as stream,
+    ):
+        await stream.write(encode(preface) + b"raw bytes")
+        opened = await stream.read()
+        echoed = await asyncio.wait_for(stream.reader.readexactly(9), timeout=30)
+
+    assert opened == {"jsonrpc": "2.0", "id": 1, "result": {"capability": "echo"}}
+    assert echoed == b"raw bytes"

@@ -16,10 +16,10 @@ from urllib.parse import urlsplit
 
 import pytest
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 from hud.agents import ClaudeAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, OpenAIChatConfig
-from tests.agents.conftest import tool_results
+from hud.agents.types import ClaudeConfig, OpenAIChatConfig, ToolStep
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call
@@ -28,9 +28,21 @@ from tests.fixtures.relay import relay
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from hud.eval import Run
     from tests.conftest import HudEnv
     from tests.fixtures.models import ModelRequest, Models
     from tests.fixtures.relay import FlakyRelay
+
+
+def tool_results(run: Run) -> list[tuple[bool, str]]:
+    """Each tool step on ``run``'s trace, in order, as (whether it failed, its text)."""
+    results = []
+    for step in run.trace.steps:
+        if isinstance(step, ToolStep):
+            assert step.result is not None
+            text = "".join(b.text for b in step.result.content if isinstance(b, TextContent))
+            results.append((step.result.isError, text))
+    return results
 
 
 @pytest.fixture(autouse=True)

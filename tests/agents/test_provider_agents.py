@@ -1,6 +1,6 @@
-"""What every provider agent does when its provider misbehaves or it runs alongside
-itself: a fault ends or retries the run, a capped reply ends it as truncated, and one
-agent drives concurrent rollouts."""
+"""What the provider agents do when their provider misbehaves or they run alongside
+themselves: a fault ends or retries the run, a capped reply ends it as truncated, one
+agent drives concurrent rollouts, and what Claude retries and Gemini refuses or prunes."""
 
 from __future__ import annotations
 
@@ -9,9 +9,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from hud.agents import ClaudeAgent, GeminiAgent
+from hud.agents.types import ClaudeConfig, GeminiConfig
+from hud.capabilities import Capability
 from hud.types import AgentType
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn
+from tests.fixtures.models import Turn, call, stream_error
+from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -97,3 +101,69 @@ async def test_an_overloaded_provider_is_asked_again(
         "done",
         2,
     )
+
+
+CLAUDE_MODEL = "claude-sonnet-4-6"
+
+
+@pytest.mark.parametrize(
+    ("errors", "kind", "status", "requests"),
+    [
+        (1, "overloaded_error", "completed", 2),
+        (3, "gateway_timeout", "error", 3),
+        (1, "invalid_request_error", "error", 1),
+    ],
+    ids=["a-transient-error-is-retried", "three-transient-errors-fail", "a-request-error-fails"],
+)
+async def test_an_error_inside_the_stream_is_retried_only_when_transient(
+    errors: int, kind: str, status: str, requests: int, models: Models, tmp_path: Path
+) -> None:
+    models.queue(
+        [stream_error(kind, headers={"retry-after-ms": "0"})] * errors + [Turn(text="done")]
+    )
+
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model=CLAUDE_MODEL)))).runs
+
+    assert (run.trace.status, len(models.requests())) == (status, requests)
+
+
+GEMINI_MODEL = "gemini-3.1-pro-preview"
+
+
+async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
+    models: Models, tmp_path: Path
+) -> None:
+    models.script([call("click_at", x=156, y=208)] * 4 + [Turn(text="done")])
+
+    async with fake_screen() as screen:
+        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        await task().run(GeminiAgent(GeminiConfig(model=GEMINI_MODEL)))
+
+    responses = [
+        part["functionResponse"]
+        for content in models.requests()[-1].body["contents"]
+        for part in content["parts"]
+        if "functionResponse" in part
+    ]
+    assert [bool(response.get("parts")) for response in responses] == [False, True, True, True]
+
+
+@pytest.mark.parametrize(
+    ("turn", "error"),
+    [
+        (Turn(fail=Reply(json={"candidates": []})), "Gemini returned no candidates"),
+        (Turn(finish="MALFORMED_FUNCTION_CALL"), "Provider returned a malformed function call"),
+    ],
+    ids=["no-candidates", "a-malformed-function-call"],
+)
+async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
+    turn: Turn, error: str, models: Models, tmp_path: Path
+) -> None:
+    models.queue([turn])
+
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(GeminiAgent(GeminiConfig(model=GEMINI_MODEL)))).runs
+
+    assert (run.trace.status, len(models.requests())) == ("error", 1)
+    assert error in (run.trace.error or "")
