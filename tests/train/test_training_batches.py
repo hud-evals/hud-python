@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 import torch
@@ -12,7 +12,7 @@ from dirty_equals import IsStr
 from hud import Environment
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import LocalRuntime, Run, Task, Taskset
+from hud.eval import Run, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
 from tests.fixtures.agents import ScriptedAgent
@@ -20,29 +20,49 @@ from tests.support import Reply, Turn
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from tests.support import Models, Platform
+    from tests.support import FakeServices, HudEnv, Models
 
 MODEL_ID = "00000000-0000-4000-8000-000000000001"
 TRAIN = f"/v1/models/{MODEL_ID}/train"
 TRACE_ID = IsStr(regex=r"[0-9a-f]{32}")
 
 
-def _env() -> Environment:
-    env = Environment("train")
-
-    @env.template()
-    async def answer(target: str = "ok"):
-        reply = yield "Reply with ok."
-        yield 1.0 if reply == target else 0.0
-
-    return env
-
-
 @pytest.fixture
-def trainable(platform: Platform) -> Platform:
-    """The platform, with ``owner/model`` in its catalog."""
-    platform.add_model(id=MODEL_ID, model_name="owner/model")
-    return platform
+def trainer(services: FakeServices, hud_env: HudEnv) -> FakeServices:
+    """The training service for ``owner/model``, signed in with a HUD key."""
+    hud_env.set(HUD_API_KEY="k")
+    catalog = {"items": [{"id": MODEL_ID, "model_name": "owner/model"}], "total": 1}
+    services.route("api", "GET", "/v2/models", json=catalog)
+    for path in ("forward-backward", "backward"):
+        services.route("rl", "POST", f"{TRAIN}/{path}", json={"metrics": {}, "num_datums": 2})
+    services.route(
+        "rl",
+        "POST",
+        f"{TRAIN}/optim-step",
+        json={
+            "step": 1,
+            "checkpoint_id": "ckpt",
+            "sampler_path": "s",
+            "state_path": "t",
+            "model": "owner/model",
+        },
+    )
+    return services
+
+
+env = Environment("train")
+
+
+@env.template()
+async def answer(target: str = "ok"):
+    reply = yield "Reply with ok."
+    yield 1.0 if reply == target else 0.0
+
+
+async def answered(agent: Agent, *targets: str) -> list[Run]:
+    """Two runs per target of ``agent`` answering "Reply with ok.", graded 1 on the target."""
+    tasks = [answer(target=target) for target in targets or ("ok",)]
+    return (await Taskset("t", tasks).run(agent, group=2, max_concurrent=1)).runs
 
 
 def sampled(text: str) -> Turn:
@@ -54,15 +74,8 @@ def sampled(text: str) -> Turn:
     )
 
 
-async def _runs(agent: Agent, *, tasks: list[Task] | None = None, group: int = 2) -> list[Run]:
-    job = await Taskset("t", tasks or [Task(env="train", id="answer")]).run(
-        agent, runtime=LocalRuntime(_env()), group=group, max_concurrent=1
-    )
-    return job.runs
-
-
 async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
-    trainable: Platform, models: Models
+    trainer: FakeServices, models: Models
 ) -> None:
     models.queue([sampled("ok"), sampled("no")])
     agent = OpenAIChatAgent(
@@ -72,57 +85,56 @@ async def test_a_step_sends_the_sampled_runs_then_one_optimizer_step(
             completion_kwargs={"extra_body": {"return_token_ids": True}},
         )
     )
-    runs = await _runs(agent)
+    runs = await answered(agent)
 
     await TrainingClient("owner/model").step(runs, learning_rate=1e-5, group_size=2)
 
-    training = trainable.training[MODEL_ID]
-    (sent,) = training.batches
+    (sent,) = trainer.bodies("rl", "POST", f"{TRAIN}/forward-backward")
     sample = {"prompt_token_ids": [1, 2, 3], "output_token_ids": [7], "output_logprobs": [-0.5]}
     assert [(i["samples"], i["reward"], i["trace_id"]) for i in sent["inputs"]] == [
         ([sample], 1.0, TRACE_ID),
         ([sample], 0.0, TRACE_ID),
     ]
-    assert [step["learning_rate"] for step in training.steps] == [1e-5]
+    assert [s["learning_rate"] for s in trainer.bodies("rl", "POST", f"{TRAIN}/optim-step")] == [
+        1e-5
+    ]
 
 
-async def test_runs_without_token_samples_train_by_trace_id(trainable: Platform) -> None:
-    runs = await _runs(ScriptedAgent("ok"))
+async def test_runs_without_token_samples_train_by_trace_id(trainer: FakeServices) -> None:
+    runs = await answered(ScriptedAgent("ok"))
 
     await TrainingClient("owner/model").forward_backward(runs, group_size=2)
 
-    (batch,) = trainable.training[MODEL_ID].batches
+    (batch,) = trainer.bodies("rl", "POST", f"{TRAIN}/forward-backward")
     assert batch["inputs"] == [str(run.trace_id) for run in runs]
 
 
-async def test_the_model_slug_resolves_once_with_the_clients_own_key(
-    trainable: Platform,
+async def test_the_model_slug_resolves_once_and_every_call_carries_the_clients_own_key(
+    trainer: FakeServices,
 ) -> None:
-    runs = await _runs(ScriptedAgent("ok"))
-    trainable.keys = {"team-key"}
+    runs = await answered(ScriptedAgent("ok"))
     client = TrainingClient("owner/model", api_key="team-key")
 
     await client.forward_backward(runs, group_size=2)
     await client.optim_step(learning_rate=1e-5)
 
-    training = trainable.training[MODEL_ID]
-    assert (len(training.batches), len(training.steps)) == (1, 1)
-    assert len(trainable.services.requests("api", "GET", "/v2/models")) == 1
+    assert len(trainer.requests("api", "GET", "/v2/models")) == 1
+    assert {request.bearer for request in trainer.requests("rl")} == {"team-key"}
 
 
-async def test_an_optimizer_step_is_never_retried(trainable: Platform) -> None:
-    trainable.services.route("rl", "POST", f"{TRAIN}/optim-step", Reply(status=503))
+async def test_an_optimizer_step_is_never_retried(trainer: FakeServices) -> None:
+    trainer.route("rl", "POST", f"{TRAIN}/optim-step", Reply(status=503))
 
     with pytest.raises(HudRequestError) as raised:
         await TrainingClient(MODEL_ID).optim_step(learning_rate=1e-5)
 
     assert raised.value.status_code == 503
-    assert len(trainable.services.requests("rl", "POST", f"{TRAIN}/optim-step")) == 1
+    assert len(trainer.requests("rl", "POST", f"{TRAIN}/optim-step")) == 1
 
 
-async def test_a_custom_loss_sends_its_gradients_to_backward(trainable: Platform) -> None:
-    runs = await _runs(ScriptedAgent("ok"))
-    trainable.services.route(
+async def test_a_custom_loss_sends_its_gradients_to_backward(trainer: FakeServices) -> None:
+    runs = await answered(ScriptedAgent("ok"))
+    trainer.route(
         "rl",
         "POST",
         f"{TRAIN}/forward",
@@ -150,8 +162,8 @@ async def test_a_custom_loss_sends_its_gradients_to_backward(trainable: Platform
 
     await TrainingClient(MODEL_ID).forward_backward_custom(runs, loss, group_size=2)
 
-    (forward,) = trainable.services.bodies("rl", "POST", f"{TRAIN}/forward")
-    (backward,) = trainable.training[MODEL_ID].batches
+    (forward,) = trainer.bodies("rl", "POST", f"{TRAIN}/forward")
+    (backward,) = trainer.bodies("rl", "POST", f"{TRAIN}/backward")
     assert forward["inputs"] == [str(run.trace_id) for run in runs]
     assert backward == {
         "forward_id": "fwd-1",
@@ -160,87 +172,61 @@ async def test_a_custom_loss_sends_its_gradients_to_backward(trainable: Platform
     }
 
 
-async def _timed_out() -> list[Run]:
-    job = await Taskset("t", [Task(env="train", id="answer")]).run(
-        ScriptedAgent("ok", delay=5), runtime=LocalRuntime(_env()), rollout_timeout=0.2
-    )
-    return job.runs
-
-
-@pytest.mark.parametrize(
-    ("runs", "group_size", "message"),
-    [
-        pytest.param(
-            _timed_out, None, "timed-out runs require an explicit training reward", id="timeout"
-        ),
-        pytest.param(
-            lambda: _first(3, _runs(ScriptedAgent("ok"), group=2, tasks=_two_tasks())),
-            2,
-            "3 trajectories do not divide evenly into groups of 2",
-            id="uneven",
-        ),
-        pytest.param(
-            lambda: _split_two_groups(_runs(ScriptedAgent("ok"), group=2, tasks=_three_tasks())),
-            2,
-            "incomplete GRPO groups",
-            id="incomplete-group",
-        ),
-        pytest.param(
-            lambda: _single(Run.failed("never launched")),
-            None,
-            "run carries neither token-level samples nor a trace_id",
-            id="no-trace",
-        ),
-    ],
-)
-async def test_an_untrainable_batch_is_refused_before_anything_is_sent(
-    trainable: Platform, runs: Any, group_size: int | None, message: str
+async def test_timed_out_runs_need_an_explicit_reward_and_nothing_is_sent(
+    trainer: FakeServices,
 ) -> None:
-    batch = await runs()
+    runs = (await answer().run(ScriptedAgent("ok", delay=5), rollout_timeout=0.2)).runs
 
-    with pytest.raises(ValueError, match=message):
-        await TrainingClient("owner/model").forward_backward(batch, group_size=group_size)
-    assert trainable.services.requests() == []
-
-
-def _two_tasks() -> list[Task]:
-    return [Task(env="train", id="answer", args={"target": target}) for target in ("ok", "no")]
+    with pytest.raises(ValueError, match="timed-out runs require an explicit training reward"):
+        await TrainingClient("owner/model").forward_backward(runs)
+    assert trainer.requests("rl") == []
 
 
-def _three_tasks() -> list[Task]:
-    return [Task(env="train", id="answer", args={"target": t}) for t in ("ok", "no", "maybe")]
+async def test_trajectories_that_do_not_divide_into_groups_are_refused(
+    trainer: FakeServices,
+) -> None:
+    runs = await answered(ScriptedAgent("ok"), "ok", "no")
+
+    with pytest.raises(ValueError, match="3 trajectories do not divide evenly into groups of 2"):
+        await TrainingClient("owner/model").forward_backward(runs[:3], group_size=2)
+    assert trainer.requests("rl") == []
 
 
-async def _first(count: int, runs: Any) -> list[Run]:
-    return (await runs)[:count]
+async def test_groups_split_across_tasks_are_refused(trainer: FakeServices) -> None:
+    runs = await answered(ScriptedAgent("ok"), "ok", "no", "maybe")
+
+    with pytest.raises(ValueError, match="incomplete GRPO groups"):
+        await TrainingClient("owner/model").forward_backward(
+            [runs[0], runs[2], runs[4], runs[5]], group_size=2
+        )
+    assert trainer.requests("rl") == []
 
 
-async def _split_two_groups(runs: Any) -> list[Run]:
-    batch = await runs
-    return [batch[0], batch[2], batch[4], batch[5]]
-
-
-async def _single(run: Run) -> list[Run]:
-    return [run]
+async def test_a_run_with_neither_samples_nor_a_trace_is_refused(trainer: FakeServices) -> None:
+    with pytest.raises(ValueError, match="run carries neither token-level samples nor a trace_id"):
+        await TrainingClient("owner/model").forward_backward([Run.failed("never launched")])
+    assert trainer.requests("rl") == []
 
 
 @pytest.mark.parametrize(
     ("answers", "order", "warns"),
     [
-        pytest.param(["ok", "ok", "ok", "ok"], [0, 1, 2, 3], True, id="no-spread"),
-        pytest.param(["ok", "no", "ok", "no"], [0, 1, 2, 3], False, id="spread"),
-        pytest.param(["ok", "ok", "ok", "ok"], [0, 2, 1, 3], True, id="interleaved-groups"),
+        (["ok", "ok", "ok", "ok"], [0, 1, 2, 3], True),
+        (["ok", "no", "ok", "no"], [0, 1, 2, 3], False),
+        (["ok", "ok", "ok", "no"], [0, 1, 2, 3], False),
+        (["ok", "ok", "ok", "ok"], [0, 2, 1, 3], True),
     ],
+    ids=["no-spread", "spread", "spread-in-one-group", "interleaved-groups"],
 )
 async def test_a_batch_with_no_reward_spread_warns_that_it_trains_nothing(
-    trainable: Platform,
-    caplog: pytest.LogCaptureFixture,
     answers: list[str],
     order: list[int],
     warns: bool,
+    trainer: FakeServices,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     replies = iter(answers)
-    runs = await _runs(ScriptedAgent(lambda _: next(replies)), tasks=_two_tasks())
+    runs = await answered(ScriptedAgent(lambda _: next(replies)), "ok", "no")
 
     with caplog.at_level(logging.WARNING, logger="hud.train.client"):
         await TrainingClient("owner/model").forward_backward(
@@ -248,4 +234,4 @@ async def test_a_batch_with_no_reward_spread_warns_that_it_trains_nothing(
         )
 
     assert ("accumulates no gradient" in caplog.text) is warns
-    assert len(trainable.training[MODEL_ID].batches) == 1
+    assert len(trainer.requests("rl", "POST", f"{TRAIN}/forward-backward")) == 1

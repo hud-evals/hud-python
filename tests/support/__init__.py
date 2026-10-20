@@ -45,7 +45,6 @@ from .peers import (
     hold,
     wire,
 )
-from .platform import Platform
 from .relay import FlakyRelay, relay
 from .screen import FakeScreen, KeyEvent, PointerEvent, fake_screen
 from .services import FakeServices, Reply, Request
@@ -66,7 +65,6 @@ __all__ = [
     "KeyEvent",
     "ModelRequest",
     "Models",
-    "Platform",
     "PointerEvent",
     "Reply",
     "Request",

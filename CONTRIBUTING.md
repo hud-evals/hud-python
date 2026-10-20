@@ -50,17 +50,25 @@ what lies outside it.
 - `tests/fixtures`: SDK code the tests run: fixture environments and an agent with
   fixed answers.
 - `tests/conftest.py`: the fixtures that wire them in: `hud_env` (configuration),
-  `platform` and `services` (HUD services), `models` (scripted providers) and
-  `hud` (the CLI in a subprocess).
+  `services` (the HUD services: a test routes the replies it needs and reads back
+  the requests it got), `reporting` (services that accept job and trace reports),
+  `models` (scripted providers) and `hud` (the CLI in a subprocess).
 
 ```python
-async def test_a_graded_rollout_reports_its_reward(reporting):
-    job = await Task(env="echo", id="echo", args={"word": "hi"}).run(
-        ScriptedAgent("hi"), runtime=LocalRuntime(source("echo"))
-    )
+env = Environment("echo")
 
-    (trace,) = reporting.traces.values()
-    assert (job.reward, trace.exit["reward"]) == (1.0, 1.0)
+
+@env.template()
+async def echo(word: str):
+    answer = yield f"Say {word}."
+    yield 1.0 if answer == word else 0.0
+
+
+async def test_a_graded_rollout_reports_its_reward(reporting):
+    job = await echo(word="hi").run(ScriptedAgent("hi"))
+
+    (exited,) = reporting.bodies("api", "POST", "/v2/trace/{id}/exit")
+    assert (job.reward, exited["reward"]) == (1.0, 1.0)
 ```
 
 Test directories follow the SDK's subsystems (`environment`, `clients`, `eval`,

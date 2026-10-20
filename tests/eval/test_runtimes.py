@@ -39,7 +39,7 @@ from hud.eval import runtime as runtime_module
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
 from tests.support import eventually
-from tests.support.platform import SESSION, SESSIONS, host_on_runtime
+from tests.support.runtime import SESSION, SESSIONS, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable

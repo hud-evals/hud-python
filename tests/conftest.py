@@ -24,8 +24,7 @@ import pytest
 from dotenv import dotenv_values
 
 from hud.telemetry import flush
-from tests.support import FakeServices, Hud, HudEnv, Models, Platform, Uv
-from tests.support import platform as platform_module
+from tests.support import FakeServices, Hud, HudEnv, Models, Uv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -79,13 +78,6 @@ def services(services_server: FakeServices, hud_env: HudEnv) -> FakeServices:
     services_server.reset()
     hud_env.set(**services_server.env())
     return services_server
-
-
-@pytest.fixture
-def platform(services: FakeServices, hud_env: HudEnv) -> Platform:
-    """The fake HUD platform, signed in with a HUD key."""
-    hud_env.set(HUD_API_KEY=platform_module.API_KEY, HUD_WEB_URL=platform_module.WEB_URL)
-    return Platform(services)
 
 
 @pytest.fixture

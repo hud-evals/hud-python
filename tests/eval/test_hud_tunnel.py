@@ -19,7 +19,7 @@ from hud.agents.base import Agent
 from hud.eval import HUDRuntime, LocalRuntime, Task, Taskset
 from tests.fixtures.agents import ScriptedAgent
 from tests.support import Reply, eventually
-from tests.support.platform import SESSION, SESSIONS, TUNNEL, host_on_runtime
+from tests.support.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
 
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket
