@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from hud.settings import settings
+from hud.telemetry.context import set_trace_context
 from hud.telemetry.exporter import _do_upload, flush, queue_span
+from hud.telemetry.instrument import instrument
 
 
 @pytest.fixture(autouse=True)
@@ -119,6 +122,52 @@ class TestQueueSpan:
 
 
 class TestLocalExport:
+    @pytest.mark.parametrize("enabled", [True, False])
+    @pytest.mark.parametrize(
+        "secret", ["demo-runtime-credential", 'demo-"snowman-\u2603\\key', "api"]
+    )
+    def test_instrumented_credentials_are_redacted_before_every_export(
+        self, monkeypatch, tmp_path, enabled, secret
+    ):
+        _configure(monkeypatch, enabled=enabled)
+        monkeypatch.setattr(settings, "telemetry_local_dir", str(tmp_path))
+        inputs = {
+            "prompt": "reconcile invoices",
+            "hud_api_key": secret,
+            "legacy": json.dumps({"HUD_API_KEY": secret, "count": 7}),
+            "schema": json.dumps({"hud_api_key_schema": True, "api": 7}),
+            "unrelated": "preserve\u0000this",
+        }
+        before = deepcopy(inputs)
+
+        @instrument
+        def setup(arguments):
+            assert arguments == before
+            return {"message": f"echo {secret}", "json": json.dumps({"echo": secret})}
+
+        upload = _RecordingUpload()
+        with patch("hud.telemetry.exporter._do_upload", side_effect=upload):
+            with set_trace_context("runtime-credential-test"):
+                setup(inputs)
+            assert flush(timeout=1.0)
+
+        assert inputs == before
+        local = json.loads(next(tmp_path.glob("*.jsonl")).read_text())
+        request = local["events"][0]["attributes"]["hud.payload"]["arguments"]
+        assert request["hud_api_key"] == "[REDACTED]"
+        assert json.loads(request["legacy"]) == {"HUD_API_KEY": "[REDACTED]", "count": 7}
+        assert request["schema"] == before["schema"]
+        assert request["prompt"] == "reconcile invoices"
+        assert request["unrelated"] == "preserve\u0000this"
+        result = local["events"][1]["attributes"]["hud.payload"]
+        assert result["message"] == "echo [REDACTED]"
+        assert json.loads(result["json"]) == {"echo": "[REDACTED]"}
+        if enabled:
+            assert upload.calls[0][1] == [local]
+            assert upload.calls[0][2] == "test-key"
+        else:
+            assert upload.calls == []
+
     def test_span_written_to_local_dir(self, monkeypatch, tmp_path):
         _configure(monkeypatch, api_key=None, enabled=False)
         monkeypatch.setattr(settings, "telemetry_local_dir", str(tmp_path))
