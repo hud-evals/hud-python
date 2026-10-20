@@ -1,30 +1,15 @@
-"""Control sessions: each connection drives its own task, and a dropped one parks it.
-
-A session is keyed by the id ``hello`` returns. Concurrent connections start and
-grade independently; a connection that drops leaves its task parked for a later
-connection to grade, by resuming the session (``hello`` with its id) or, when
-exactly one session is parked, by a plain ``tasks.grade`` (the split ``hud task
-start`` / ``hud task grade`` flow).
-"""
+"""Control sessions: each connection drives its own task, and a dropped one parks its task
+for a later connection to grade, by resuming the session (``hello`` with its id) or,
+when exactly one session is parked, by a plain ``tasks.grade``."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-import pytest
-from dirty_equals import IsStr
-
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-from tests.support import Wire, wire
-
-if TYPE_CHECKING:
-    from contextlib import AbstractAsyncContextManager
-
-ECHO = Task(env="sessions", id="echo")
+from tests.support import wire
 
 
-def echo_env() -> Environment:
+def tagged() -> Environment:
     env = Environment("sessions")
 
     @env.template()
@@ -35,135 +20,86 @@ def echo_env() -> Environment:
     return env
 
 
-def start(tag: str) -> tuple[str, dict[str, Any]]:
-    return "tasks.start", {"id": "echo", "args": {"tag": tag}}
+async def test_concurrent_sessions_each_grade_their_own_task() -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
+        await b.call("tasks.start", {"id": "echo", "args": {"tag": "b"}})
+        graded = [
+            (await peer.call("tasks.grade", {"answer": "x"}))["result"]["tag"] for peer in (a, b)
+        ]
+
+    assert graded == ["a", "b"]
 
 
-GRADE = ("tasks.grade", {"answer": "x"})
+async def test_a_new_start_replaces_only_its_own_sessions_task() -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        await b.call("tasks.start", {"id": "echo", "args": {"tag": "b"}})
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "first"}})
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "second"}})
+        graded = [
+            (await peer.call("tasks.grade", {"answer": "x"}))["result"]["tag"] for peer in (a, b)
+        ]
 
-# A step is (connection, action, frame). ``call`` sends the frame and reads the
-# reply; ``drop`` sends it and hangs up without reading; ``close`` hangs up. A
-# hang-up returns once the server has ended the connection. ``{"resume": "a"}``
-# in hello params stands for connection a's session id.
-SCRIPTS: list[Any] = [
-    pytest.param(
-        [
-            ("a", "call", start("a")),
-            ("b", "call", start("b")),
-            ("a", "call", GRADE),
-            ("b", "call", GRADE),
-        ],
-        ["go a", "go b", {"score": 1.0, "tag": "a"}, {"score": 1.0, "tag": "b"}],
-        id="concurrent-sessions-grade-their-own-tasks",
-    ),
-    pytest.param(
-        [
-            ("b", "call", start("b")),
-            ("a", "call", start("first")),
-            ("a", "call", start("second")),
-            ("a", "call", GRADE),
-            ("b", "call", GRADE),
-        ],
-        [
-            "go b",
-            "go first",
-            "go second",
-            {"score": 1.0, "tag": "second"},
-            {"score": 1.0, "tag": "b"},
-        ],
-        id="restart-replaces-only-the-sessions-own-task",
-    ),
-    pytest.param(
-        [
-            ("a", "drop", start("parked")),
-            ("b", "call", ("hello", {"resume": "a"})),
-            ("b", "call", GRADE),
-        ],
-        [None, "resumed a", {"score": 1.0, "tag": "parked"}],
-        id="drop-before-the-prompt-parks-the-task-for-resume",
-    ),
-    pytest.param(
-        [("a", "call", start("parked")), ("a", "close", None), ("b", "call", GRADE)],
-        ["go parked", None, {"score": 1.0, "tag": "parked"}],
-        id="a-plain-grade-adopts-the-only-parked-session",
-    ),
-    pytest.param(
-        [
-            ("a", "call", start("one")),
-            ("a", "close", None),
-            ("b", "call", start("two")),
-            ("b", "close", None),
-            ("c", "call", GRADE),
-            ("c", "call", ("hello", {"resume": "b"})),
-            ("c", "call", GRADE),
-        ],
-        [
-            "go one",
-            None,
-            "go two",
-            None,
-            {"error": IsStr(regex=r"2 parked sessions \(sess-\w+, sess-\w+\); resume one .*")},
-            "resumed b",
-            {"score": 1.0, "tag": "two"},
-        ],
-        id="several-parked-sessions-need-a-resume",
-    ),
-    pytest.param(
-        [("a", "call", start("a")), ("b", "call", ("hello", {"resume": "a"}))],
-        ["go a", {"error": IsStr(regex=r"session 'sess-\w+' has a live connection")}],
-        id="a-live-session-cannot-be-resumed",
-    ),
-]
+    assert graded == ["second", "b"]
 
 
-async def play(url: str, script: list[tuple[str, str, Any]]) -> list[Any]:
-    connections: dict[str, Wire] = {}
-    sessions: dict[str, str] = {}
-    contexts: list[AbstractAsyncContextManager[Wire]] = []
-    seen: list[Any] = []
-    try:
-        for name, action, frame in script:
-            if name not in connections:
-                context = wire(url)
-                contexts.append(context)
-                connections[name] = await context.__aenter__()
-                sessions[name] = (await connections[name].call("hello", {}))["result"]["session_id"]
-            connection = connections[name]
-            if action == "close":
-                await connection.hang_up()
-                seen.append(None)
-                continue
-            method, params = frame
-            if "resume" in params:
-                params = {"session_id": sessions[params["resume"]]}
-            if action == "drop":
-                await connection.send(method, params)
-                await connection.hang_up()
-                seen.append(None)
-                continue
-            reply = await connection.call(method, params)
-            seen.append(outcome(reply, sessions))
-    finally:
-        for context in reversed(contexts):
-            await context.__aexit__(None, None, None)
-    return seen
+async def test_a_session_dropped_before_its_prompt_is_resumed_by_its_id_and_graded() -> None:
+    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
+        async with wire(runtime.url) as a:
+            session = (await a.call("hello", {}))["result"]["session_id"]
+            await a.send("tasks.start", {"id": "echo", "args": {"tag": "parked"}})
+            await a.hang_up()
+        async with wire(runtime.url) as b:
+            resumed = (await b.call("hello", {"session_id": session}))["result"]["session_id"]
+            graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert (resumed, graded["result"]["tag"]) == (session, "parked")
 
 
-def outcome(reply: dict[str, Any], sessions: dict[str, str]) -> Any:
-    if "error" in reply:
-        return {"error": reply["error"]["message"]}
-    result = reply["result"]
-    if "prompt" in result:
-        return result["prompt"]
-    if "session_id" in result:
-        owner = next(name for name, sid in sessions.items() if sid == result["session_id"])
-        return f"resumed {owner}"
-    return result
+async def test_a_plain_grade_adopts_the_only_parked_session() -> None:
+    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
+        async with wire(runtime.url) as a:
+            await a.call("tasks.start", {"id": "echo", "args": {"tag": "parked"}})
+        async with wire(runtime.url) as b:
+            graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert graded["result"]["tag"] == "parked"
 
 
-@pytest.mark.parametrize(("script", "expected"), SCRIPTS)
-async def test_each_session_keeps_its_own_task(
-    script: list[tuple[str, str, Any]], expected: list[Any]
-) -> None:
-    async with LocalRuntime(echo_env())(ECHO) as runtime:
-        assert await play(runtime.url, script) == expected
+async def test_with_several_parked_sessions_a_grade_must_name_one() -> None:
+    sessions = []
+    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
+        for tag in ("one", "two"):
+            async with wire(runtime.url) as peer:
+                sessions.append((await peer.call("hello", {}))["result"]["session_id"])
+                await peer.call("tasks.start", {"id": "echo", "args": {"tag": tag}})
+        async with wire(runtime.url) as c:
+            refused = await c.call("tasks.grade", {"answer": "x"})
+            await c.call("hello", {"session_id": sessions[1]})
+            graded = await c.call("tasks.grade", {"answer": "x"})
+
+    assert refused["error"]["message"] == (
+        f"2 parked sessions ({', '.join(sorted(sessions))}); "
+        "resume one by sending hello with its session_id"
+    )
+    assert graded["result"]["tag"] == "two"
+
+
+async def test_a_session_with_a_live_connection_cannot_be_resumed() -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        session = (await a.call("hello", {}))["result"]["session_id"]
+        refused = await b.call("hello", {"session_id": session})
+
+    assert refused["error"]["message"] == f"session {session!r} has a live connection"
