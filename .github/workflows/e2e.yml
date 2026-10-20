@@ -85,6 +85,10 @@ jobs:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
       HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
     steps:
+      # The scenarios skip themselves without a key; here that would pass with nothing run.
+      - name: Require a HUD key
+        run: test -n "$HUD_API_KEY" || { echo "::error::HUD_API_KEY is not set"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - name: Install uv
