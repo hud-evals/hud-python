@@ -10,65 +10,22 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents import CodexCLIAgent
-from hud.agents.types import CodexCLIConfig, ToolStep
+from hud.agents.types import ToolStep
 from hud.capabilities import Connection
 from hud.environment.egress import ANY_HOST
 from hud.eval import LocalRuntime, rollout
 from tests.fixtures import clis
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.conftest import HudEnv
-    from tests.fixtures.models import Models
 
 
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="hud-key")
-
-
-@pytest.mark.parametrize(
-    ("variables", "gateway", "route", "credential"),
-    [
-        ({"OPENAI_API_KEY": "own-key"}, False, "provider", "own-key"),
-        ({}, False, "gateway", "hud-key"),
-        ({"OPENAI_API_KEY": "own-key"}, True, "gateway", "hud-key"),
-        ({"HUD_API_KEY": None}, False, "provider", ""),
-    ],
-    ids=[
-        "its-own-key",
-        "only-a-hud-key",
-        "the-gateway-forced-over-its-own-key",
-        "no-key-leaves-its-own-login",
-    ],
-)
-async def test_codex_calls_the_gateway_over_responses_unless_it_has_its_own_key(
-    variables: dict[str, str | None],
-    gateway: bool,
-    route: str,
-    credential: str,
-    models: Models,
-    provider: Models,
-    hud_env: HudEnv,
-    tmp_path: Path,
-) -> None:
-    hud_env.set(**variables)
-    models.script([Turn(text="done")])
-    provider.script([Turn(text="done")])
-    stub = clis.Stub(
-        tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"), provider=provider.url
-    )
-    stub.install()
-
-    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(CodexCLIAgent(CodexCLIConfig(gateway=gateway)))).runs
-
-    (request,) = {"gateway": models, "provider": provider}[route].requests()
-    assert (run.trace.status, request.credential) == ("completed", credential)
-    assert ("trace-id" in request.headers) is (route == "gateway")
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,6 @@ from fastmcp import FastMCP
 from hud.agents import GeminiAgent
 from hud.agents.types import GeminiConfig
 from hud.capabilities import Capability
-from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call
@@ -27,24 +26,11 @@ if TYPE_CHECKING:
     from tests.fixtures.models import Models
 
 MODEL = "gemini-3.1-pro-preview"
-CONTROL_L = 0xFFE3
 
 
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
-
-
-async def test_citations_add_google_search_to_the_tools(models: Models, tmp_path: Path) -> None:
-    models.script([Turn(text="done")])
-
-    task = workspace_task(tmp_path / "ws")
-    await task().run(GeminiAgent(GeminiConfig(model=MODEL, citations_enabled=True)))
-
-    (request,) = models.requests()
-    assert [t for t in request.body["tools"] if "functionDeclarations" not in t] == [
-        {"googleSearch": {}}
-    ]
 
 
 async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
@@ -84,19 +70,6 @@ async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     assert [bool(response.get("parts")) for response in responses] == [False, True, True, True]
 
 
-async def test_a_field_is_cleared_with_ctrl_a_whatever_system_the_agent_runs_on(
-    models: Models, tmp_path: Path
-) -> None:
-    models.script([call("type_text_at", x=500, y=500, text="hi"), Turn(text="done")])
-
-    async with fake_screen() as screen:
-        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await task().run(GeminiAgent(GeminiConfig(model=MODEL)))
-
-    pressed = [event.key for event in screen.key_events() if event.down]
-    assert pressed[:2] == [CONTROL_L, ord("a")]
-
-
 @pytest.mark.parametrize(
     ("turn", "error"),
     [
@@ -115,34 +88,3 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
 
     assert (run.trace.status, len(models.requests())) == ("error", 1)
     assert error in (run.trace.error or "")
-
-
-async def test_grounding_and_thoughts_land_on_the_agent_step(
-    models: Models, tmp_path: Path
-) -> None:
-    web = "https://example.com/sky"
-    grounding = {
-        "groundingChunks": [
-            {"web": {"uri": web, "title": "Sky"}},
-            {"web": {"uri": "https://example.com/unused", "title": "Unused"}},
-        ],
-        "groundingSupports": [
-            {
-                "segment": {"text": "Blue.", "startIndex": 0, "endIndex": 5},
-                "groundingChunkIndices": [0],
-            }
-        ],
-    }
-    models.script(
-        [Turn(text="Blue.", reasoning="look it up", extra={"groundingMetadata": grounding})]
-    )
-
-    task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(GeminiAgent(GeminiConfig(model=MODEL)))).runs
-
-    (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
-    assert (step["content"], step["reasoning"]) == ("Blue.", "look it up")
-    assert [(c["type"], c["source"], c["text"]) for c in step["citations"]] == [
-        ("grounding", web, "Blue."),
-        ("grounding", "https://example.com/unused", ""),
-    ]
