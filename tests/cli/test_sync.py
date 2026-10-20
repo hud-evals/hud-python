@@ -12,7 +12,8 @@ import pytest
 from hud.eval import Task
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud
+    from tests.conftest import Hud
+    from tests.fixtures.services import FakeServices
 
 TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
 OTHER_ID = "eeeeeeee-0000-4000-8000-000000000002"

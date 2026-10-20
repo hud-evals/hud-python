@@ -4,7 +4,7 @@ Each client is a row, keyed by its exported name, with a backend: a served
 workspace's SSH daemon, the fake DevTools endpoint, the fake VNC screen, or a
 FastMCP server. An Environment publishes the backend, it is served on loopback,
 and the client reaches it the way an agent does: at the binding the control
-channel hands out, here through a relay (:func:`tests.support.relay`) that can
+channel hands out, here through a relay (:func:`tests.fixtures.relay.relay`) that can
 drop the connection. A client that cannot take part in a scenario is listed with
 the reason beside that scenario's table, and a client the package exports with
 neither fails :func:`test_every_exported_client_is_a_row_of_every_table`.
@@ -30,14 +30,19 @@ from PIL import Image
 import hud.capabilities
 from hud.capabilities import Capability, CapabilityClient
 from hud.environment import Environment
+from tests.conftest import eventually
+from tests.fixtures.asgi import mcp_server
+from tests.fixtures.browser import fake_browser
 from tests.fixtures.environments import served
-from tests.support import eventually, fake_browser, fake_screen, mcp_server, relay
+from tests.fixtures.relay import relay
+from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
     from contextlib import AbstractAsyncContextManager
 
-    from tests.support import FlakyRelay, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.relay import FlakyRelay
 
 COLOR = (10, 200, 30)
 

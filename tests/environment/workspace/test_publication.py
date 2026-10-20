@@ -26,7 +26,7 @@ from tests.fixtures.environments import served
 from .conftest import SANDBOX, shell
 
 if TYPE_CHECKING:
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 TEMP = Path(tempfile.gettempdir()).resolve()
 

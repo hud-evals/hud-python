@@ -36,17 +36,18 @@ from hud.eval import (
     Task,
 )
 from hud.eval import runtime as runtime_module
+from tests.conftest import eventually
+from tests.eval.conftest import SESSION, SESSIONS, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
-from tests.support import eventually
-from tests.support.runtime import SESSION, SESSIONS, host_on_runtime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
     from hud.eval import Provider, Run
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 CONTAINER = pytest.param("DockerRuntime", marks=[pytest.mark.e2e, pytest.mark.docker])
 MODAL = pytest.param("ModalRuntime", marks=[pytest.mark.e2e, pytest.mark.modal])

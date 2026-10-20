@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 from hud import Environment
 from hud.agents.base import Agent
 from hud.eval import LocalRuntime, Runtime, Shared, Task, Taskset, rollout
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

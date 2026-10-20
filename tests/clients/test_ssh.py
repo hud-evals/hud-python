@@ -1,7 +1,7 @@
 """What only ``SSHClient`` does: file transfer, Windows shells, its reconnect policy.
 
 Every test serves a real ``env.workspace`` on loopback and connects to its
-``ssh`` binding through :func:`tests.support.relay`, which can sever the
+``ssh`` binding through :func:`tests.fixtures.relay.relay`, which can sever the
 connection mid-command, refuse reconnects, or stall a handshake. The contract
 every client keeps (connecting, a drop, a cancelled or timed-out command) is in
 ``test_clients.py``.
@@ -23,8 +23,10 @@ from hud import Environment
 from hud.capabilities import Connection, SSHClient
 from hud.clients import connect
 from hud.eval.runtime import Runtime
+from tests.clients.conftest import answer, control_peer
+from tests.conftest import eventually
 from tests.fixtures.environments import served
-from tests.support import FlakyRelay, answer, control_peer, eventually, relay
+from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -15,13 +15,15 @@ from hud.agents.base import Agent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import HostedRuntime, Task, Taskset
 from hud.types import AgentType
-from tests.support import Reply, eventually
+from tests.conftest import eventually
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 SUBMIT = "/v2/rollouts/submit"
 POLL = "/v2/trace/{id}"

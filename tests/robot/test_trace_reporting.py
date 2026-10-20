@@ -25,7 +25,7 @@ from hud.agents.base import Agent
 from hud.environment.robot import DirectControl, wrap
 from hud.eval import LocalRuntime, Task, rollout
 from hud.telemetry.robot import JobRecorder
-from tests.support import ROBOT_STEP_SCHEMA, steps
+from tests.conftest import ROBOT_STEP_SCHEMA, steps
 
 from .sims import Arm, ScriptedLLM, arm_env, contract, move, reached
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from hud.capabilities import MCPClient
     from hud.eval.run import Run
-    from tests.support import FakeServices
+    from tests.fixtures.services import FakeServices
 
 
 class TwoArmSim:

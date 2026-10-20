@@ -11,7 +11,7 @@ import pytest
 
 from hud.capabilities import Capability, CDPClient
 from hud.capabilities.cdp import CDPError
-from tests.support import fake_browser
+from tests.fixtures.browser import fake_browser
 
 ENABLED = ["Page.enable", "Runtime.enable", "DOM.enable"]
 

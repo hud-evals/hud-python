@@ -18,13 +18,18 @@ from hud.agents.gemini.tools import (
 )
 from hud.agents.types import GeminiConfig
 from hud.capabilities import Capability
+from tests.conftest import steps
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Reply, Turn, call, click, fake_screen, mcp_server, say, steps
+from tests.fixtures.models import Turn, call, click, say
+from tests.fixtures.screen import fake_screen
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
 
 MODEL = "gemini-3.1-pro-preview"
 CONTROL_L = 0xFFE3

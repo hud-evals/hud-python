@@ -19,7 +19,7 @@ from hud.environment import (
 )
 from hud.eval import LocalRuntime, Task
 from hud.graders import EvaluationResult, SubScore
-from tests.support import FRAME_LIMIT, SESSION_ID, encode, wire
+from tests.environment.conftest import FRAME_LIMIT, SESSION_ID, encode, wire
 
 INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
 

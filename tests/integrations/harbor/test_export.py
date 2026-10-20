@@ -39,7 +39,7 @@ from hud.integrations.harbor import export
 from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 SOURCES = Path(__file__).parent / "sources"
 ENTRYPOINT = ['ENTRYPOINT ["/hud_entrypoint.sh"]', 'CMD ["sh", "-c", "sleep infinity"]']

@@ -26,8 +26,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.conftest import REAL_ENVIRONMENT
-from tests.support import Reply, fake_screen, steps
+from tests.conftest import REAL_ENVIRONMENT, steps
+from tests.fixtures.screen import fake_screen
+from tests.fixtures.services import Reply
 
 from .lifecycle import evaluated, scripted
 from .projects import ROWS, TEMPLATES, assert_lifecycle, generate
@@ -35,8 +36,9 @@ from .projects import ROWS, TEMPLATES, assert_lifecycle, generate
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from tests.support import FakeServices, Hud, HudEnv, Models, Uv
-    from tests.support.machine import Result
+    from tests.conftest import Hud, HudEnv, Result, Uv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 SANDBOXED = {"coding"}
 TAKES_DATA_FILES = {"argument-hints"}

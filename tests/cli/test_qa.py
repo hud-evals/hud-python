@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud
+    from tests.conftest import Hud
+    from tests.fixtures.services import FakeServices
 
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 TASK_ID = "00000000-0000-4000-a000-000000000005"

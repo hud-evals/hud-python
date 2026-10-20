@@ -17,8 +17,8 @@ from pydantic import BaseModel
 from hud import Environment
 from hud.agents.base import Agent
 from hud.eval import LocalRuntime, Runtime, RuntimeConfig, RuntimeLimits, Task
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

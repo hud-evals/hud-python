@@ -10,12 +10,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply, write_files
+from tests.conftest import write_files
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, Hud
+    from tests.conftest import Hud
+    from tests.fixtures.services import FakeServices
 
 IMPORT_ID = "66666666-6666-4666-8666-666666666666"
 FILE_ID = "ffffffff-0000-4000-8000-000000000001"

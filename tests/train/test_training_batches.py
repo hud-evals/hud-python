@@ -16,11 +16,14 @@ from hud.eval import Run, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import Reply, Turn
+from tests.fixtures.models import Turn
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
-    from tests.support import FakeServices, HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 MODEL_ID = "00000000-0000-4000-8000-000000000001"
 TRAIN = f"/v1/models/{MODEL_ID}/train"

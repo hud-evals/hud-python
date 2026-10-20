@@ -20,7 +20,7 @@ from hud.capabilities import Connection
 from hud.clients import HudClient, HudProtocolError, connect
 from hud.environment import WorkspaceRoute
 from hud.eval.runtime import Runtime
-from tests.support import answer, control_peer, hang_up
+from tests.clients.conftest import answer, control_peer, hang_up
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 BINDINGS = [

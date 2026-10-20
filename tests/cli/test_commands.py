@@ -25,14 +25,16 @@ from typer.core import TyperGroup
 from hud.cli.__main__ import app
 from hud.eval import Task
 from hud.version import __version__
-from tests.support import Reply, write_files
+from tests.conftest import write_files
+from tests.fixtures.services import Reply
 
 from .conftest import API_KEY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, Hud, HudEnv
+    from tests.conftest import Hud, HudEnv
+    from tests.fixtures.services import FakeServices
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"

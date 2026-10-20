@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     from starlette.websockets import WebSocket
 
-    from .services import FakeServices
+    from tests.fixtures.services import FakeServices
 
 SESSIONS = "/runtime/sessions"
 SESSION = "/runtime/sessions/{id}"

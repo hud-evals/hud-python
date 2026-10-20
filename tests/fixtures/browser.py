@@ -60,12 +60,12 @@ class FakeBrowser:
             "webSocketDebuggerUrl": f"{self.url}/devtools/page/{page}",
         }
 
-    async def _list(self, request: Request) -> JSONResponse:
+    async def list_pages(self, request: Request) -> JSONResponse:
         self.http.append(f"{request.method} {request.url.path}")
         worker = {"id": "worker", "type": "service_worker", "webSocketDebuggerUrl": "ws://x"}
         return JSONResponse([worker, *(self.target(page) for page in self.pages)])
 
-    async def _new(self, request: Request) -> JSONResponse:
+    async def new_page(self, request: Request) -> JSONResponse:
         self.http.append(f"{request.method} {request.url.path}?{request.url.query}")
         if not self.can_create:
             return JSONResponse({})
@@ -73,7 +73,7 @@ class FakeBrowser:
         self.pages.append(page)
         return JSONResponse(self.target(page))
 
-    async def _session(self, websocket: WebSocket) -> None:
+    async def session(self, websocket: WebSocket) -> None:
         page = websocket.path_params["page"]
         await websocket.accept()
         while True:
@@ -105,9 +105,9 @@ async def fake_browser(
     )
     app = Starlette(
         routes=[
-            Route("/json", browser._list, methods=["GET"]),
-            Route("/json/new", browser._new, methods=["PUT"]),
-            WebSocketRoute("/devtools/page/{page}", browser._session),
+            Route("/json", browser.list_pages, methods=["GET"]),
+            Route("/json/new", browser.new_page, methods=["PUT"]),
+            WebSocketRoute("/devtools/page/{page}", browser.session),
         ]
     )
     async with serve_asgi(app) as port:

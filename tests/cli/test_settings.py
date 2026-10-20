@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud, HudEnv
+    from tests.conftest import Hud, HudEnv
+    from tests.fixtures.services import FakeServices
 
 
 @pytest.mark.parametrize(

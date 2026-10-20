@@ -56,7 +56,7 @@ class FakeScreen:
     def pointer_events(self) -> list[PointerEvent]:
         return [event for event in self.events if isinstance(event, PointerEvent)]
 
-    async def _session(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def session(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.connections += 1
         session = asyncio.current_task()
         assert session is not None
@@ -118,7 +118,7 @@ async def fake_screen(
 ) -> AsyncIterator[FakeScreen]:
     """Serve a :class:`FakeScreen` on loopback for the duration of the block."""
     screen = FakeScreen(width, height, color, drop_on_update=drop_on_update)
-    server = await asyncio.start_server(screen._session, "127.0.0.1", 0)
+    server = await asyncio.start_server(screen.session, "127.0.0.1", 0)
     screen.port = server.sockets[0].getsockname()[1]
     async with server:
         yield screen

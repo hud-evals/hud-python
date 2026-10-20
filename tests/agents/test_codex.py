@@ -14,13 +14,14 @@ from hud.agents import CodexCLIAgent
 from hud.agents.types import CodexCLIConfig, ToolStep
 from hud.capabilities import Connection
 from hud.environment.egress import ANY_HOST
+from tests.fixtures import clis
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import clis
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
 
 
 @pytest.fixture(autouse=True)

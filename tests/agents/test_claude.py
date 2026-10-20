@@ -20,13 +20,18 @@ from hud.agents import ClaudeAgent
 from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 from hud.agents.types import ClaudeConfig
 from hud.capabilities import Capability
+from tests.conftest import steps
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Turn, call, fake_screen, mcp_server, say, steps, stream_error
+from tests.fixtures.models import Turn, call, say, stream_error
+from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 MODEL = "claude-sonnet-4-6"
 

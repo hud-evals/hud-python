@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-from tests.support import wire
+from tests.environment.conftest import wire
 
 
 def tagged() -> Environment:

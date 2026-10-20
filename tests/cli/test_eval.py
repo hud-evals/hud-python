@@ -10,14 +10,17 @@ import pytest
 
 from hud import Environment
 from hud.eval import LocalRuntime, Task
-from tests.support import say, write_files
+from tests.conftest import write_files
+from tests.fixtures.models import say
 
 from .conftest import API_KEY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, Hud, HudEnv, Models
+    from tests.conftest import Hud, HudEnv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 TASKS_PY = """\
 from hud import Environment

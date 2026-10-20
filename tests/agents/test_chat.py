@@ -11,13 +11,15 @@ import pytest
 
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
+from tests.conftest import steps
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Turn, say, steps
+from tests.fixtures.models import Turn, say
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
 
 MODEL = "qwen3.6-plus"
 TOKEN_IDS = {"extra_body": {"return_token_ids": True}}

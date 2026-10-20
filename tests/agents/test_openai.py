@@ -13,13 +13,16 @@ from fastmcp import FastMCP
 from hud.agents import OpenAIAgent
 from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
 from hud.agents.types import OpenAIConfig
+from tests.conftest import steps
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Turn, mcp_server, say, shell, shell_call, steps
+from tests.fixtures.models import Turn, say, shell, shell_call
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
 
 MODEL = "gpt-5.6"
 

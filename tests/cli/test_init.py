@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import Hud
+    from tests.conftest import Hud
 
 
 def tree(root: Path) -> list[str]:

@@ -18,8 +18,8 @@ import pytest
 from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
+from tests.environment.conftest import FRAME_LIMIT, encode, wire
 from tests.fixtures.environments import served
-from tests.support import FRAME_LIMIT, encode, wire
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -23,12 +23,13 @@ from hud.graders import (
     exact_match,
 )
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import say
+from tests.fixtures.models import say
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, ModelRequest, Models, Turn
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import ModelRequest, Models, Turn
 
 ANSWER = "Paris is the capital."
 

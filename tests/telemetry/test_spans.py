@@ -18,12 +18,16 @@ from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.telemetry import flush
+from tests.conftest import spans, steps
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import Reply, call, say, spans, steps
+from tests.fixtures.models import call, say
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 ISO = IsStr(regex=r"\d{4}-\d\d-\d\dT.*")
 UPLOAD = "/trace/{id}/telemetry-upload"

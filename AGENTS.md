@@ -31,8 +31,9 @@ inventory of current incidents.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
-- `tests/` follows the SDK's subsystems; `tests/support` holds stand-ins for the
-  outside world and `tests/fixtures` the SDK code tests run.
+- `tests/` follows the SDK's subsystems; `tests/fixtures` holds what tests run and
+  run against (fixture environments and agents, and stand-ins for services CI cannot
+  reach), and `tests/conftest.py` the user's machine (configuration, the `hud` CLI).
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
@@ -125,7 +126,7 @@ Python `>=3.11, <3.13`.
 ## Testing
 
 Tests are black-box: they drive the SDK through a public boundary and fake only
-what lies outside it, using the stand-ins in `tests/support`. `CONTRIBUTING.md`
+what lies outside it, using the stand-ins in `tests/fixtures`. `CONTRIBUTING.md`
 shows how.
 
 - Enter through a public boundary: the `hud` CLI, an exported name, the control

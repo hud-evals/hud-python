@@ -26,7 +26,7 @@ from hud.environment.workspace import Bubblewrap, usable_bwrap
 from .conftest import SANDBOX, shell
 
 if TYPE_CHECKING:
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 IDENTITY = "echo $(id -u) $(id -g) $(id -G)"
 

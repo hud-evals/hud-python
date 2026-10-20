@@ -32,7 +32,7 @@ class FlakyRelay:
         self._released.set()
         self._changed = asyncio.Condition()
         self._writers: set[asyncio.StreamWriter] = set()
-        self._handlers: set[asyncio.Task[None]] = set()
+        self.handlers: set[asyncio.Task[None]] = set()
         self._stalled = 0
 
     @property
@@ -78,10 +78,10 @@ class FlakyRelay:
         async with self._changed:
             self._changed.notify_all()
 
-    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
         assert task is not None
-        self._handlers.add(task)
+        self.handlers.add(task)
         self._writers.add(writer)
         self.accepted += 1
         try:
@@ -107,7 +107,7 @@ class FlakyRelay:
             pass
         finally:
             self._writers.discard(writer)
-            self._handlers.discard(task)
+            self.handlers.discard(task)
             writer.transport.abort()
             await self._notify()
 
@@ -127,7 +127,7 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 async def relay(host: str, port: int) -> AsyncIterator[FlakyRelay]:
     """Serve a :class:`FlakyRelay` to ``host:port`` on a loopback port for the block."""
     controls = FlakyRelay((host, port))
-    server = await asyncio.start_server(controls._handle, "127.0.0.1", 0)
+    server = await asyncio.start_server(controls.handle, "127.0.0.1", 0)
     controls.port = server.sockets[0].getsockname()[1]
     try:
         yield controls
@@ -135,8 +135,8 @@ async def relay(host: str, port: int) -> AsyncIterator[FlakyRelay]:
         server.close()
         controls.release()
         controls.sever()
-        for handler in list(controls._handlers):
+        for handler in list(controls.handlers):
             handler.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(*controls._handlers, return_exceptions=True)
+            await asyncio.gather(*controls.handlers, return_exceptions=True)
         await server.wait_closed()

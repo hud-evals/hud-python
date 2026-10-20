@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from hud import Environment
 from hud.clients import connect
 from hud.eval import LocalRuntime, Task, rollout
-from tests.support.machine import write_files
+from tests.conftest import write_files
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -22,19 +22,6 @@ if TYPE_CHECKING:
     from hud.capabilities import Capability
     from hud.clients import HudClient
     from hud.eval import Run
-
-
-SUMS_SOURCE = """
-from hud import Environment
-
-env = Environment("lab")
-
-
-@env.template()
-async def add(a: int, b: int):
-    answer = yield f"add {a} {b}"
-    yield 1.0 if answer == str(a + b) else 0.0
-"""
 
 
 def solve(prompt: str) -> str:

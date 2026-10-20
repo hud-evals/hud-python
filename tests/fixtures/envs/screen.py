@@ -10,7 +10,7 @@ from contextlib import AsyncExitStack
 
 from hud import Environment
 from hud.capabilities import Capability
-from tests.support import fake_screen
+from tests.fixtures.screen import fake_screen
 
 WIDTH, HEIGHT = 200, 100
 TARGET = (100, 50)

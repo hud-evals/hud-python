@@ -30,14 +30,14 @@ from hud.eval import (
 )
 from hud.eval.runtime import DockerBindMount
 from hud.eval.runtime.docker import DockerEndpoint
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 ECHO = Task(env="echo", id="echo", args={"word": "tangerine"})
 

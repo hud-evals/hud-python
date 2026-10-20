@@ -13,7 +13,7 @@ from PIL import Image
 
 from hud.capabilities import Capability, RFBClient
 from hud.capabilities.rfb import ScreenshotMimeType, WebPScreenshotEncoding
-from tests.support import fake_screen
+from tests.fixtures.screen import fake_screen
 
 COLOR = (10, 200, 30)
 

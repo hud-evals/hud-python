@@ -20,12 +20,13 @@ from hud.eval import (
     Task,
     Taskset,
 )
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 
 async def test_each_row_runs_group_times_in_task_major_order_under_one_job() -> None:

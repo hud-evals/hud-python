@@ -17,15 +17,17 @@ import pytest
 from hud import Environment
 from hud.agents.base import Agent
 from hud.eval import HUDRuntime, LocalRuntime, Task, Taskset
+from tests.conftest import eventually
+from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import Reply, eventually
-from tests.support.runtime import SESSION, SESSIONS, TUNNEL, host_on_runtime
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket
 
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 
 def checked() -> Environment:

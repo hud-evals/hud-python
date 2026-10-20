@@ -45,11 +45,13 @@ uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks; CI checks th
 Tests are black-box: they drive the SDK through a public boundary and fake only
 what lies outside it.
 
-- `tests/support`: stand-ins for the outside world (HUD services, model
-  providers, a browser, a VNC screen, the network, the user's machine).
-- `tests/fixtures`: SDK code the tests run: fixture environments and an agent with
-  fixed answers.
-- `tests/conftest.py`: the fixtures that wire them in: `hud_env` (configuration),
+- `tests/fixtures`: what tests run and run against: fixture environments, an agent
+  with fixed answers, and stand-ins for services CI cannot reach (HUD services, model
+  providers and the `claude` and `codex` CLIs, a browser, a VNC screen, a flaky
+  network relay).
+- A helper only one subsystem uses lives in that subsystem's `conftest.py`.
+- `tests/conftest.py`: the user's machine and the fixtures that wire everything in:
+  `hud_env` (configuration),
   `services` (the HUD services: a test routes the replies it needs and reads back
   the requests it got), `reporting` (services that accept job and trace reports),
   `models` (scripted providers) and `hud` (the CLI in a subprocess).

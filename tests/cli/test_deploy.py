@@ -10,14 +10,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import write_files
+from tests.conftest import write_files
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from starlette.websockets import WebSocket
 
-    from tests.support import FakeServices, Hud, HudEnv
+    from tests.conftest import Hud, HudEnv
+    from tests.fixtures.services import FakeServices
 
 ENV_PY = 'from hud import Environment\nenv = Environment("example")\n'
 BUILD_ID = "build-1"

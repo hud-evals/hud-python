@@ -15,8 +15,8 @@ from hud.agents.types import AgentConfig
 from hud.capabilities import Connection
 from hud.eval import LocalRuntime, Runtime, Task, rollout
 from hud.telemetry.context import get_current_trace_id
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

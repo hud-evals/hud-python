@@ -16,8 +16,8 @@ from hud import Environment
 from hud.agents.base import Agent
 from hud.environment import load_environment
 from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset, rollout
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from pathlib import Path

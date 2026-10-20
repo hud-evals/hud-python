@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import uvicorn
 
 from hud.capabilities import Capability
-
-from .waiting import eventually
+from tests.conftest import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

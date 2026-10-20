@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.support import Hud
+from tests.conftest import Hud
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 API_KEY = "sk-hud-test"
 USER_ID = "11111111-1111-4111-8111-111111111111"

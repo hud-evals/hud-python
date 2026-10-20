@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import Reply
+from tests.fixtures.services import Reply
 
 from .conftest import TEAM_ID, USER_ID
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud, HudEnv, Request
+    from tests.conftest import Hud, HudEnv
+    from tests.fixtures.services import FakeServices, Request
 
 DEFAULT = "aaaaaaaa-0000-4000-8000-000000000001"
 BROWSER = "aaaaaaaa-0000-4000-8000-000000000002"

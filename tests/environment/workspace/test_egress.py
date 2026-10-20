@@ -2,7 +2,7 @@
 
 The proxy and each peer forward serve on a unix socket, and the bridge offers
 them as ports inside the workspace's network. Scenarios speak to them over real
-sockets; the internet behind the proxy is :func:`tests.support.internet`.
+sockets; the internet behind the proxy is :func:`internet`.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import http.client
+import ipaddress
 import json
 import shutil
 import socket
@@ -31,12 +32,12 @@ from hud.environment.egress import (
     ConnectionRelay,
     Egress,
 )
-from tests.support import eventually, internet
+from tests.conftest import eventually
 
 from .conftest import shell
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
 REQUEST = (
     b"POST /v1/echo HTTP/1.1\r\nHost: upstream\r\nContent-Length: 12\r\n"
@@ -47,6 +48,46 @@ RESPONSE = b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%
     len(BODY),
     BODY,
 )
+
+
+def internet(
+    monkeypatch: pytest.MonkeyPatch,
+    servers: Mapping[str, int] | None = None,
+    resolve: Mapping[str, str] | None = None,
+) -> None:
+    """Stand in for the internet, as a process in the test reaches it by name, until the
+    test ends.
+
+    Each name in ``servers`` resolves to a public address of its own, and a connection
+    to that address reaches the local port the test serves the host on, so code that
+    refuses anything but the public internet still reaches a test server. A name in
+    ``resolve`` resolves to the address given. Every other name fails to resolve, as it
+    would offline; IP literals and ``localhost`` resolve as usual.
+    """
+    public = {name: f"6.0.0.{index}" for index, name in enumerate(servers or {}, start=1)}
+    ports = {public[name]: port for name, port in (servers or {}).items()}
+    addresses = {**public, **(resolve or {})}
+    getaddrinfo = socket.getaddrinfo
+    connect = socket.socket.connect
+
+    def lookup(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+        name = host.decode() if isinstance(host, bytes) else host
+        if name in addresses:
+            return getaddrinfo(addresses[name], port, *args, **kwargs)
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            if name not in (None, "localhost"):
+                raise socket.gaierror(socket.EAI_NONAME, f"{name} does not resolve") from None
+        return getaddrinfo(host, port, *args, **kwargs)
+
+    def dial(self: socket.socket, address: Any) -> None:
+        if isinstance(address, tuple) and address[0] in ports:
+            address = ("127.0.0.1", ports[address[0]])
+        connect(self, address)
+
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)
+    monkeypatch.setattr(socket.socket, "connect", dial)
 
 
 @contextmanager

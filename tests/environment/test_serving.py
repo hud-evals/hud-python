@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hud.environment import Environment
+from tests.environment.conftest import wire
 from tests.fixtures.environments import served
-from tests.support import wire
 
 if TYPE_CHECKING:
     from pathlib import Path

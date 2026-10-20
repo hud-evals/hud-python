@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 TASK_ENV = {"WORKSPACE_ENV": "present", "HUD_TASK_DECLARED": "mine"}
 

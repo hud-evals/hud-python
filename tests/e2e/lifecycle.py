@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from tests.support import say
+from tests.fixtures.models import say
 
 if TYPE_CHECKING:
-    from tests.support import ModelRequest, Turn
-    from tests.support.machine import Result
+    from tests.conftest import Result
+    from tests.fixtures.models import ModelRequest, Turn
 
 # Tool steps may fail without failing the run: a real model can call a tool badly.
 LIFECYCLE_SOURCES = {"task", "agent", "system"}

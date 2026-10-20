@@ -17,13 +17,17 @@ from hud.agents.types import ToolStep
 from hud.capabilities import Capability, RFBClient
 from hud.eval import LocalRuntime, Task, Taskset
 from hud.types import AgentType
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Reply, Turn, click, fake_screen, mcp_server, say, shell
+from tests.fixtures.models import Turn, click, say, shell
+from tests.fixtures.screen import fake_screen
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
 
 #: (agent type, model, the variable holding the provider's own key)
 PROVIDERS = [

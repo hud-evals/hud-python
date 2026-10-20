@@ -25,7 +25,7 @@ import pytest
 
 from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
 from hud.environment.workspace import usable_bwrap
-from tests.support import eventually
+from tests.conftest import eventually
 
 from .conftest import SANDBOX, shell
 

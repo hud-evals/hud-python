@@ -15,10 +15,12 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval import HostedRuntime, LocalRuntime, Task, rollout
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import say
+from tests.fixtures.models import say
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 TRACE_ID = "b" * 32
 AMBIENTS = [("a" * 32, "a" * 32), (str(uuid.UUID(TRACE_ID)), None)]

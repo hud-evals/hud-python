@@ -16,7 +16,7 @@ from hud.clients import connect
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from tests.support import Hud
+    from tests.conftest import Hud
 
 ENV_PY = """\
 from hud import Environment

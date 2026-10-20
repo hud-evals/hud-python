@@ -14,13 +14,13 @@ import pytest
 from hud.agents.types import ToolStep
 from hud.eval import LocalRuntime, Shared, Task, rollout
 from hud.types import AgentType
+from tests.fixtures import clis
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import clis
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 #: (agent type, the executable it launches)
 CLIS = [("claude_cli", "claude"), ("codex_cli", "codex")]

@@ -10,7 +10,7 @@ from fastmcp import FastMCP
 
 from hud import Environment
 from hud.capabilities import Capability
-from tests.support import serve_asgi
+from tests.fixtures.asgi import serve_asgi
 
 server = FastMCP(name="digits")
 code: list[str] = []

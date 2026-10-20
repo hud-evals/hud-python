@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud
+    from tests.conftest import Hud
+    from tests.fixtures.services import FakeServices
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"

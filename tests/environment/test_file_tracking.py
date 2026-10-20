@@ -9,8 +9,9 @@ import hashlib
 from typing import TYPE_CHECKING
 
 from hud.environment import Environment
+from tests.conftest import write_files
+from tests.environment.conftest import wire
 from tests.fixtures.environments import served
-from tests.support import wire, write_files
 
 if TYPE_CHECKING:
     from pathlib import Path

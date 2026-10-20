@@ -1,9 +1,4 @@
-"""Raw control-channel peers, for the side of the wire a test does not run through the SDK.
-
-The control channel, like ``filetracking/1``, is newline-delimited JSON-RPC over TCP.
-:func:`wire` speaks it to a served environment byte for byte, as a client would;
-:func:`control_peer` is the environment side, answering an SDK client from a script.
-"""
+"""A control-channel peer on the environment's side, answering an SDK client from a script."""
 
 from __future__ import annotations
 
@@ -13,81 +8,9 @@ import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
-
-from dirty_equals import IsStr
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
-
-
-#: A control session id as the server mints it.
-SESSION_ID = IsStr(regex=r"sess-[0-9a-f]{8}")
-
-#: The control channel's frame limit, in bytes, excluding the newline.
-FRAME_LIMIT = 16 * 1024 * 1024
-
-
-def encode(frame: dict[str, Any]) -> bytes:
-    """One frame as the control channel carries it."""
-    return json.dumps(frame, separators=(",", ":")).encode() + b"\n"
-
-
-class Wire:
-    """One TCP connection to a served control channel."""
-
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        self.reader = reader
-        self.writer = writer
-        self._ids = 0
-
-    async def send(self, method: str, params: dict[str, Any] | None = None) -> None:
-        self._ids += 1
-        frame: dict[str, Any] = {"jsonrpc": "2.0", "id": self._ids, "method": method}
-        if params is not None:
-            frame["params"] = params
-        await self.write(encode(frame))
-
-    async def write(self, data: bytes) -> None:
-        self.writer.write(data)
-        await self.writer.drain()
-
-    async def read(self) -> dict[str, Any] | None:
-        """The next reply frame, or ``None`` when the server hung up."""
-        line = await asyncio.wait_for(self.reader.readline(), timeout=30)
-        return json.loads(line) if line else None
-
-    async def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        await self.send(method, params)
-        reply = await self.read()
-        assert reply is not None, f"the server hung up on {method}"
-        return reply
-
-    async def hang_up(self) -> None:
-        """Close the sending side and wait until the server has ended the connection."""
-        self.writer.write_eof()
-        while await asyncio.wait_for(self.reader.read(65536), timeout=30):
-            pass
-        await self.close()
-
-    async def close(self) -> None:
-        self.writer.close()
-        with contextlib.suppress(ConnectionError):
-            await self.writer.wait_closed()
-
-
-@asynccontextmanager
-async def wire(url: str) -> AsyncIterator[Wire]:
-    """Open a raw connection to the JSON-RPC port at ``tcp://host:port``."""
-    address = urlsplit(url)
-    reader, writer = await asyncio.open_connection(
-        address.hostname, address.port, limit=2 * FRAME_LIMIT
-    )
-    connection = Wire(reader, writer)
-    try:
-        yield connection
-    finally:
-        await connection.close()
 
 
 _DEFAULT_ID = object()
@@ -133,8 +56,8 @@ class ControlPeer:
     accepted: int = 0
     tunnels: int = 0
     frames: list[Frame] = field(default_factory=list)
-    _server: asyncio.Server | None = None
-    _handlers: set[asyncio.Task[None]] = field(default_factory=set)
+    server: asyncio.Server | None = None
+    handlers: set[asyncio.Task[None]] = field(default_factory=set)
 
     @property
     def url(self) -> str:
@@ -150,19 +73,19 @@ class ControlPeer:
 
     def stop_accepting(self) -> None:
         """Close the listening socket; open connections stay up."""
-        assert self._server is not None
-        self._server.close()
+        assert self.server is not None
+        self.server.close()
 
-    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
         assert task is not None
-        self._handlers.add(task)
+        self.handlers.add(task)
         try:
             await self._converse(reader, writer)
         except (OSError, asyncio.IncompleteReadError):
             pass
         finally:
-            self._handlers.discard(task)
+            self.handlers.discard(task)
             writer.close()
 
     async def _converse(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -243,15 +166,15 @@ async def control_peer(
 ) -> AsyncIterator[ControlPeer]:
     """Serve a :class:`ControlPeer` answering connections from ``scripts`` for the block."""
     peer = ControlPeer(scripts=scripts or ([],), upstreams=upstreams or {})
-    server = await asyncio.start_server(peer._handle, "127.0.0.1", 0)
-    peer._server = server
+    server = await asyncio.start_server(peer.handle, "127.0.0.1", 0)
+    peer.server = server
     peer.port = server.sockets[0].getsockname()[1]
     try:
         yield peer
     finally:
         server.close()
-        for handler in list(peer._handlers):
+        for handler in list(peer.handlers):
             handler.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(*peer._handlers, return_exceptions=True)
+            await asyncio.gather(*peer.handlers, return_exceptions=True)
         await server.wait_closed()

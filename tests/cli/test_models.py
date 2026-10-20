@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.support import Reply
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
-    from tests.support import FakeServices, Hud, Request
+    from tests.conftest import Hud
+    from tests.fixtures.services import FakeServices, Request
 
 BASE_ID = "cccccccc-0000-4000-8000-000000000101"
 MODEL_ID = "cccccccc-0000-4000-8000-000000000102"

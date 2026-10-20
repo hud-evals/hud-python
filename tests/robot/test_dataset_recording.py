@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 #: lerobot's video encoder hangs on frames under 32 px.
 RECORD_SIDE = 64

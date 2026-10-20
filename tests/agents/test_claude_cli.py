@@ -15,13 +15,16 @@ from hud.agents import ClaudeCLIAgent
 from hud.agents.types import ClaudeCLIConfig
 from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
+from tests.fixtures import clis
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import clis, fake_screen, mcp_server
+from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
 
 
 @pytest.fixture(autouse=True)
@@ -177,16 +180,12 @@ async def test_mcp_servers_reach_the_cli_in_a_config_removed_after_the_run(
 
     (capture,) = stub.captures()
     assert capture["argv"][-2:] == ["--mcp-config", ".hud_mcp_config.json"]
-    assert json.loads(capture["files"][".hud_mcp_config.json"]) == {
-        "mcpServers": {
-            "database": {
-                "type": "http",
-                "url": "http://db.internal:8000/mcp",
-                "headers": {"Authorization": "Bearer secret"},
-            },
-            "search": {"type": "sse", "url": "http://search.internal:8000/sse"},
-        }
+    configured = json.loads(capture["files"][".hud_mcp_config.json"])["mcpServers"]
+    assert {name: (server["type"], server["url"]) for name, server in configured.items()} == {
+        "database": ("http", "http://db.internal:8000/mcp"),
+        "search": ("sse", "http://search.internal:8000/sse"),
     }
+    assert configured["database"]["headers"]["Authorization"] == "Bearer secret"
     assert list((tmp_path / "ws").iterdir()) == []
 
 

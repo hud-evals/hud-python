@@ -13,12 +13,13 @@ from hud import Environment
 from hud.eval import LocalRuntime, Task
 from hud.telemetry import flush
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import Reply
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 
 def checked() -> Environment:

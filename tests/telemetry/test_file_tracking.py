@@ -14,13 +14,13 @@ from hud.agents.base import Agent
 from hud.capabilities import Capability
 from hud.environment.file_tracker import FileTracker, serve_file_tracking
 from hud.eval import LocalRuntime, Task, rollout
-from tests.support import spans
+from tests.conftest import spans
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
-    from tests.support import HudEnv
+    from tests.conftest import HudEnv
 
 SCHEMA = "hud.filetracking.v1"
 

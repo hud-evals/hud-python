@@ -17,14 +17,15 @@ from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.types import Step
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
-from tests.support import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from hud.eval import Run
-    from tests.support import FakeServices, HudEnv
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices
 
 JOB_ENTER = "/v2/trace/job/{id}/enter"
 TRACE_ENTER = "/v2/trace/{id}/enter"

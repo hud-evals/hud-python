@@ -9,12 +9,15 @@ import pytest
 
 from hud.agents import create_agent
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Reply, say
+from tests.fixtures.models import say
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import FakeServices, HudEnv, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import Models
+    from tests.fixtures.services import FakeServices
 
 CATALOG = [
     {

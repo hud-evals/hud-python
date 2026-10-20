@@ -19,14 +19,16 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.support import Reply, mcp_server, serve_asgi
+from tests.fixtures.asgi import mcp_server, serve_asgi
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from tests.support import FakeServices, HudEnv, Request
+    from tests.conftest import HudEnv
+    from tests.fixtures.services import FakeServices, Request
 
 
 def tools() -> FastMCP:

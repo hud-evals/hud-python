@@ -20,14 +20,18 @@ from fastmcp import FastMCP
 
 from hud.agents import ClaudeAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, OpenAIChatConfig
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Turn, call, fail, mcp_server, relay, say, shell
+from tests.fixtures.models import Turn, call, fail, say, shell
+from tests.fixtures.relay import relay
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.types import StopCondition
-    from tests.support import FlakyRelay, HudEnv, ModelRequest, Models
+    from tests.conftest import HudEnv
+    from tests.fixtures.models import ModelRequest, Models
+    from tests.fixtures.relay import FlakyRelay
 
 
 @pytest.fixture(autouse=True)

@@ -13,11 +13,12 @@ from hud.agents import ClaudeAgent
 from hud.agents.types import ClaudeConfig
 from hud.eval import LocalRuntime, Task, Taskset
 from hud.types import AgentType
+from tests.conftest import steps
 from tests.fixtures.envs import capable_model, source
-from tests.support import steps
 
 if TYPE_CHECKING:
-    from tests.support import Hud, HudEnv, Models
+    from tests.conftest import Hud, HudEnv
+    from tests.fixtures.models import Models
 
 #: (fixture, tool steps its scripted model takes, task phases the trace records)
 SCRIPTED = [
