@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tests.support import Reply
+
 if TYPE_CHECKING:
-    from tests.support import Hud, Platform
+    from tests.support import FakeServices, Hud
 
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 TASK_ID = "00000000-0000-4000-a000-000000000005"
@@ -38,9 +40,11 @@ CHECKS = [
 
 
 @pytest.fixture(autouse=True)
-def catalog(platform: Platform) -> None:
+def catalog(signed_in: FakeServices) -> FakeServices:
     """The platform's QA check catalog, which ``hud qa`` reads to place checks by level."""
-    platform.qa_checks = CHECKS
+    signed_in.route("api", "GET", "/v2/qa/checks", json={"checks": CHECKS})
+    signed_in.route("api", "POST", "/v2/qa/runs", json={"results": []})
+    return signed_in
 
 
 def row(status: str = "completed", **fields: Any) -> dict[str, Any]:
@@ -67,32 +71,27 @@ def verdict(tag: str, *, check_key: str = CHECK) -> dict[str, Any]:
     return row(check_key=check_key, verdict=tag, result=result)
 
 
-def started(platform: Platform) -> list[tuple[str, str]]:
-    """The (check, subject) pairs QA runs were started for."""
-    return [
-        (r["check_key"], r.get("subject_trace_id") or r["subject_task_id"])
-        for r in platform.qa_results
-    ]
-
-
 @pytest.mark.parametrize(
-    ("argv", "runs"),
+    ("argv", "started"),
     [
         (
             [f"{CHECK}, {OTHER_CHECK},{CHECK}", TRACE_ID.upper()],
-            [(CHECK, TRACE_ID), (OTHER_CHECK, TRACE_ID)],
+            {"check_keys": [CHECK, OTHER_CHECK], "trace_ids": [TRACE_ID], "overwrite": False},
         ),
-        ([TASK_CHECK, TASK_ID], [(TASK_CHECK, TASK_ID)]),
+        (
+            [TASK_CHECK, TASK_ID],
+            {"check_keys": [TASK_CHECK], "task_ids": [TASK_ID], "overwrite": False},
+        ),
     ],
     ids=["deduplicated-and-normalised", "task-level"],
 )
 def test_qa_run_without_waiting_starts_each_check_once(
-    hud: Hud, platform: Platform, argv: list[str], runs: list[tuple[str, str]]
+    hud: Hud, catalog: FakeServices, argv: list[str], started: dict[str, Any]
 ) -> None:
     result = hud("qa", "run", *argv, "--no-wait", "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert started(platform) == runs
+    assert catalog.bodies("api", "POST", "/v2/qa/runs") == [started]
 
 
 @pytest.mark.parametrize(
@@ -105,13 +104,19 @@ def test_qa_run_without_waiting_starts_each_check_once(
 )
 def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     hud: Hud,
-    platform: Platform,
+    catalog: FakeServices,
     outcome: dict[str, Any],
     exit_code: int,
     verdicts: list[str | None],
 ) -> None:
     another_check = verdict("failed", check_key=OTHER_CHECK)
-    platform.qa_polls = [[row("running"), another_check], [outcome, another_check]]
+    catalog.route(
+        "api",
+        "GET",
+        "/v2/qa/results",
+        Reply(json={"results": [row("running"), another_check]}),
+        Reply(json={"results": [outcome, another_check]}),
+    )
 
     result = hud("qa", "run", CHECK, TRACE_ID, "--yes", "--json")
 
@@ -121,8 +126,8 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     ]
 
 
-def test_qa_run_times_out_while_checks_are_running(hud: Hud, platform: Platform) -> None:
-    platform.qa_polls = [[row("running")]]
+def test_qa_run_times_out_while_checks_are_running(hud: Hud, catalog: FakeServices) -> None:
+    catalog.route("api", "GET", "/v2/qa/results", json={"results": [row("running")]})
 
     result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--yes", "--json")
 
@@ -158,9 +163,9 @@ def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
     ],
 )
 def test_qa_results_read_a_verdict_from_each_result_shape(
-    hud: Hud, platform: Platform, results: list[dict[str, Any]], verdicts: list[str]
+    hud: Hud, catalog: FakeServices, results: list[dict[str, Any]], verdicts: list[str]
 ) -> None:
-    platform.qa_results += results
+    catalog.route("api", "GET", "/v2/qa/results", json={"results": results})
 
     text = hud("qa", "results", TRACE_ID)
 

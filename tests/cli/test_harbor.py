@@ -1,4 +1,5 @@
-"""``hud harbor``: import Harbor folders or bundles into a taskset, and follow imports."""
+"""``hud harbor``: import Harbor folders or a bundle into a taskset, follow the import, and
+read what it did."""
 
 from __future__ import annotations
 
@@ -9,18 +10,19 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support import write_files
-from tests.support.platform import Import
+from tests.support import Reply, write_files
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support import Hud, Platform
+    from tests.support import FakeServices, Hud
 
-IMPORT = "66666666-6666-4666-8666-666666666666"
+IMPORT_ID = "66666666-6666-4666-8666-666666666666"
+FILE_ID = "ffffffff-0000-4000-8000-000000000001"
+TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
 REPORT = {
     "schema_version": "harbor_import_report.v5",
+    "taskset_id": TASKSET_ID,
     "tasks": [
         {
             "name": "hello",
@@ -30,18 +32,7 @@ REPORT = {
             "status": "imported",
         }
     ],
-    "jobs": [
-        {
-            "path": "run-1",
-            "name": "run-1",
-            "job_id": "job-hud-1",
-            "status": "imported",
-            "trials": [
-                {"path": "run-1/hello__a", "status": "imported"},
-                {"path": "run-1/gone__b", "status": "skipped", "reason": "unknown task"},
-            ],
-        }
-    ],
+    "jobs": [],
     "warnings": [],
     "error": None,
 }
@@ -50,228 +41,283 @@ FOLDERS = {
     "tasks/hello/tests/test.sh": "exit 0\n",
     "run-1/config.json": "{}",
     "run-1/result.json": "{}",
-    "run-1/hello__a/config.json": "{}",
-    "run-1/hello__a/result.json": "{}",
 }
+
+
+def record(status: str, *, error: str | None = None, format: str = "harbor") -> dict[str, Any]:
+    """An import as the platform reports it at ``status``."""
+    ended = status not in {"queued", "starting", "running", "cancelling"}
+    return {
+        "id": IMPORT_ID,
+        "format": format,
+        "taskset_id": TASKSET_ID,
+        "file": {"id": FILE_ID, "filename": "bundle.zip", "size_bytes": 1},
+        "status": status,
+        "summary": "Imported 1 task(s)" if status in {"completed", "stopped"} else None,
+        "metrics": None,
+        "error": error,
+        "created_at": "2026-10-07T12:00:00Z",
+        "completed_at": "2026-10-07T12:01:00Z" if ended else None,
+    }
 
 
 @pytest.fixture
-def importer(platform: Platform) -> Platform:
-    """The platform, with each import it starts completing and leaving ``REPORT``."""
-    platform.next_import.report = REPORT
-    return platform
+def importer(signed_in: FakeServices, hud: Hud) -> FakeServices:
+    """Harbor folders in the directory, and a platform that stores a bundle, creates the
+    ``tb2`` taskset it is not holding yet, and completes each import with ``REPORT``."""
+    write_files(hud.cwd, FOLDERS)
+    formats = [{"format": "harbor", "title": "Harbor", "max_input_bytes": 1024**3}]
+    signed_in.route("api", "GET", "/v2/imports/formats", json={"formats": formats})
+    signed_in.route(
+        "api",
+        "POST",
+        "/v2/imports/uploads",
+        json={
+            "file": {"id": FILE_ID, "filename": "bundle.zip"},
+            "upload_url": f"{signed_in.url('api')}/uploads/{FILE_ID}?signature=secret",
+        },
+    )
+    signed_in.route("api", "PUT", "/uploads/{id}", json={})
+    signed_in.route("api", "POST", "/v2/data/{id}/complete", json={"id": FILE_ID})
+    signed_in.route("api", "DELETE", "/v2/data/{id}", status=204)
+    signed_in.route("api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={"detail": "No"})
+    signed_in.route(
+        "api", "POST", "/v2/tasksets", json={"id": TASKSET_ID, "name": "tb2", "can_edit": True}
+    )
+    signed_in.route("api", "POST", "/v2/imports", json=record("completed"))
+    signed_in.route("api", "GET", f"/v2/imports/{IMPORT_ID}/report", json=REPORT)
+    return signed_in
 
 
-def started(platform: Platform) -> Import:
-    (only,) = platform.imports.values()
-    return only
-
-
-def bundled(platform: Platform) -> dict[str, bytes]:
+def bundle(services: FakeServices) -> dict[str, bytes]:
     """The bundle the platform received, member by member."""
-    uploaded = started(platform).bundle
-    assert uploaded is not None
-    with zipfile.ZipFile(io.BytesIO(uploaded)) as archive:
+    (upload,) = services.requests("api", "PUT", "/uploads/{id}")
+    with zipfile.ZipFile(io.BytesIO(upload.body)) as archive:
         return {name: archive.read(name) for name in archive.namelist()}
 
 
-def harbor_folders(root: Path) -> list[str]:
-    write_files(root, FOLDERS)
-    return [str(root / "tasks"), str(root / "run-1")]
-
-
-def a_prepared_zip(root: Path) -> list[str]:
-    prepared = root / "prepared.zip"
-    root.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(prepared, "w") as archive:
-        archive.writestr("hello/task.toml", "version = '1.0'\n")
-    return [str(prepared)]
-
-
-def a_task_with_links(root: Path) -> list[str]:
-    task = root / "src" / "hello"
-    write_files(task, {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"})
-    write_files(root / "shared", {"data.txt": "shared"})
-    (task / "environment" / "data.txt").symlink_to(root / "shared" / "data.txt")
-    (task / "environment" / "linked").symlink_to(root / "shared")
-    (task / "dangling").symlink_to(root / "missing")
-    return [str(task)]
-
-
-BUNDLES: dict[str, tuple[Callable[[Path], list[str]], dict[str, bytes], str]] = {
-    "folders are zipped by their own paths": (
-        harbor_folders,
-        {name: content.encode() for name, content in FOLDERS.items()},
-        "tb2",
-    ),
-    "a prepared zip is sent as it is": (
-        a_prepared_zip,
-        {"hello/task.toml": b"version = '1.0'\n"},
-        "prepared",
-    ),
-    "a linked file is sent by content and a linked folder is skipped": (
-        a_task_with_links,
-        {
-            "hello/task.toml": b"version = '1.0'\n",
-            "hello/environment/Dockerfile": b"FROM ubuntu\n",
-            "hello/environment/data.txt": b"shared",
-        },
-        "tb2",
-    ),
-}
-
-
-@pytest.mark.parametrize(("source", "members", "taskset"), BUNDLES.values(), ids=BUNDLES.keys())
-def test_an_import_uploads_its_input_as_one_bundle(
-    hud: Hud,
-    importer: Platform,
-    tmp_path: Path,
-    source: Callable[[Path], list[str]],
-    members: dict[str, bytes],
-    taskset: str,
+def test_folders_are_zipped_by_their_own_paths_and_imported_into_the_new_taskset(
+    importer: FakeServices, hud: Hud
 ) -> None:
-    paths = source(tmp_path / "input")
-    named = ["--taskset", taskset] if taskset != "prepared" else []
-
-    result = hud("harbor", "import", *paths, *named, "--yes", "--json")
+    result = hud("harbor", "import", "tasks", "run-1", "--taskset", "TB2", "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert bundled(importer) == members
-    assert started(importer).taskset_id == importer.taskset(taskset)["id"]
+    assert bundle(importer) == {name: text.encode() for name, text in FOLDERS.items()}
+    assert importer.bodies("api", "POST", "/v2/tasksets") == [{"name": "tb2", "project_id": None}]
+    assert importer.bodies("api", "POST", "/v2/imports") == [
+        {"format": "harbor", "file_id": FILE_ID, "taskset_id": TASKSET_ID}
+    ]
+    assert result.json["taskset"] == {"id": TASKSET_ID, "name": "tb2", "created": True}
+
+
+def test_a_prepared_zip_is_sent_as_it_is_into_a_taskset_named_after_it(
+    importer: FakeServices, hud: Hud
+) -> None:
+    with zipfile.ZipFile(hud.cwd / "prepared.zip", "w") as archive:
+        archive.writestr("hello/task.toml", "version = '1.0'\n")
+
+    result = hud("harbor", "import", "prepared.zip", "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    assert bundle(importer) == {"hello/task.toml": b"version = '1.0'\n"}
+    assert importer.bodies("api", "POST", "/v2/tasksets")[0]["name"] == "prepared"
+
+
+def test_a_linked_file_is_sent_by_content_and_a_linked_folder_is_skipped(
+    importer: FakeServices, hud: Hud, tmp_path: Path
+) -> None:
+    task = tmp_path / "src" / "hello"
+    write_files(task, {"task.toml": "version = '1.0'\n", "environment/Dockerfile": "FROM ubuntu\n"})
+    write_files(tmp_path / "shared", {"data.txt": "shared"})
+    (task / "environment" / "data.txt").symlink_to(tmp_path / "shared" / "data.txt")
+    (task / "environment" / "linked").symlink_to(tmp_path / "shared")
+    (task / "dangling").symlink_to(tmp_path / "missing")
+
+    result = hud("harbor", "import", str(task), "--taskset", "tb2", "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    assert bundle(importer) == {
+        "hello/task.toml": b"version = '1.0'\n",
+        "hello/environment/Dockerfile": b"FROM ubuntu\n",
+        "hello/environment/data.txt": b"shared",
+    }
 
 
 @pytest.mark.parametrize(
-    ("runs", "flags", "created", "linked"),
-    [
-        pytest.param(1, [], True, False, id="a-new-name-creates-its-taskset"),
-        pytest.param(2, [], False, False, id="rerunning-reuses-the-taskset-its-name-made"),
-        pytest.param(1, ["--link"], True, True, id="link-saves-it-as-the-directory-default"),
-        pytest.param(1, ["--dry-run"], True, False, id="a-dry-run-plans-to-create-it"),
-    ],
+    ("flags", "linked"), [([], False), (["--link"], True)], ids=["kept", "linked"]
 )
-def test_an_import_lands_in_the_taskset_its_name_resolves_to(
-    hud: Hud,
-    importer: Platform,
-    tmp_path: Path,
-    runs: int,
-    flags: list[str],
-    created: bool,
-    linked: bool,
+def test_an_import_into_an_existing_taskset_creates_none_and_links_only_when_asked(
+    flags: list[str], linked: bool, importer: FakeServices, hud: Hud
 ) -> None:
-    paths = harbor_folders(tmp_path / "input")
-    confirm = [] if "--dry-run" in flags else ["--yes"]
-
-    results = [
-        hud("harbor", "import", *paths, "--taskset", "TB2/Sample", *flags, *confirm, "--json")
-        for _ in range(runs)
-    ]
-
-    assert [result.exit_code for result in results] == [0] * runs, results[-1]
-    assert results[-1].json["taskset"]["created"] is created
-    link = hud.cwd / ".hud" / "config.json"
-    stored = json.loads(link.read_text())["taskset_id"] if link.exists() else None
-    if "--dry-run" in flags:
-        assert importer.tasksets == {}
-    else:
-        assert results[-1].json["taskset"] == {
-            "id": importer.taskset("tb2sample")["id"],
-            "name": "tb2sample",
-            "created": created,
-        }
-        assert stored == (importer.taskset("tb2sample")["id"] if linked else None)
-
-
-def test_a_refused_upload_deletes_its_reservation_and_imports_nothing(
-    hud: Hud, importer: Platform, tmp_path: Path
-) -> None:
-    importer.services.route("api", "PUT", "/uploads/{id}", status=403)
-
-    result = hud(
-        "harbor", "import", *harbor_folders(tmp_path), "--taskset", "tb2", "--yes", "--json"
+    importer.route(
+        "api", "GET", "/v2/tasksets/by-name/tb2", json={"taskset_id": TASKSET_ID, "name": "tb2"}
     )
+    importer.route(
+        "api",
+        "GET",
+        f"/v2/tasksets/{TASKSET_ID}",
+        json={"id": TASKSET_ID, "name": "tb2", "can_edit": True},
+    )
+
+    result = hud("harbor", "import", "tasks", "--taskset", "tb2", *flags, "--yes", "--json")
+
+    assert (result.exit_code, result.json["taskset"]["created"]) == (0, False), result
+    assert importer.requests("api", "POST", "/v2/tasksets") == []
+    link = hud.cwd / ".hud" / "config.json"
+    assert (link.exists() and json.loads(link.read_text())["taskset_id"] == TASKSET_ID) is linked
+
+
+def test_a_dry_run_plans_the_import_and_uploads_nothing(importer: FakeServices, hud: Hud) -> None:
+    result = hud("harbor", "import", "tasks", "--taskset", "tb2", "--dry-run", "--json")
+
+    assert (result.exit_code, result.json["dry_run"], result.json["taskset"]["created"]) == (
+        0,
+        True,
+        True,
+    ), result
+    assert importer.requests("api", "POST") == importer.requests("api", "PUT") == []
+
+
+def test_a_taskset_the_caller_cannot_edit_is_refused_before_uploading(
+    importer: FakeServices, hud: Hud
+) -> None:
+    importer.route(
+        "api",
+        "GET",
+        "/v2/tasksets/by-name/theirs",
+        json={"taskset_id": TASKSET_ID, "name": "theirs"},
+    )
+    importer.route(
+        "api",
+        "GET",
+        f"/v2/tasksets/{TASKSET_ID}",
+        json={"id": TASKSET_ID, "name": "theirs", "can_edit": False},
+    )
+
+    result = hud("harbor", "import", "tasks", "--taskset", "theirs", "--yes", "--json")
+
+    assert (result.exit_code, result.json["error"]) == (1, "permission_denied"), result
+    assert importer.requests("api", "PUT") == []
+
+
+def test_a_bundle_over_the_platforms_limit_is_refused_before_uploading(
+    importer: FakeServices, hud: Hud
+) -> None:
+    formats = [{"format": "harbor", "title": "Harbor", "max_input_bytes": 10}]
+    importer.route("api", "GET", "/v2/imports/formats", json={"formats": formats})
+
+    result = hud("harbor", "import", "tasks", "--taskset", "tb2", "--yes", "--json")
+
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
+    assert importer.requests("api", "PUT") == []
+
+
+def test_a_refused_upload_deletes_its_reservation_and_starts_no_import(
+    importer: FakeServices, hud: Hud
+) -> None:
+    importer.route("api", "PUT", "/uploads/{id}", status=403)
+
+    result = hud("harbor", "import", "tasks", "--taskset", "tb2", "--yes", "--json")
 
     assert result.exit_code == 1, result
-    assert importer.imports == {}
+    assert [r.path for r in importer.requests("api", "DELETE")] == [f"/v2/data/{FILE_ID}"]
+    assert importer.requests("api", "POST", "/v2/imports") == []
+    assert "signature" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
-    ("statuses", "report", "flags", "exit_code", "shown"),
+    ("statuses", "error", "exit_code"),
     [
-        pytest.param(
-            ["queued", "running", "completed"], REPORT, [], 0, "completed", id="completed"
-        ),
-        pytest.param(
-            ["stopped"],
-            {**REPORT, "error": {"step": "add", "message": "boom"}},
-            [],
-            1,
-            "stopped",
-            id="stopped",
-        ),
-        pytest.param(["failed"], None, [], 1, "failed", id="failed"),
-        pytest.param(
-            ["queued", "completed"], REPORT, ["--no-wait"], 0, "queued", id="no-wait-returns-it"
-        ),
+        (["queued", "running", "completed"], None, 0),
+        (["stopped"], None, 1),
+        (["failed"], "crashed", 1),
     ],
+    ids=["completed", "stopped", "failed"],
 )
-def test_an_import_waits_for_its_end_and_fails_unless_it_completed(
-    hud: Hud,
-    importer: Platform,
-    tmp_path: Path,
-    statuses: list[str],
-    report: dict[str, Any] | None,
-    flags: list[str],
-    exit_code: int,
-    shown: str,
+def test_an_import_is_followed_to_its_end_and_fails_unless_it_completed(
+    statuses: list[str], error: str | None, exit_code: int, importer: FakeServices, hud: Hud
 ) -> None:
-    importer.next_import = Import(
-        "",
-        taskset_id="",
-        statuses=statuses,
-        report=report,
-        error="crashed" if report is None else None,
+    first, *later = [record(status, error=error) for status in statuses]
+    importer.route("api", "POST", "/v2/imports", json=first)
+    importer.route(
+        "api", "GET", f"/v2/imports/{IMPORT_ID}", *[Reply(json=r) for r in later or [first]]
     )
-    paths = harbor_folders(tmp_path)
 
-    result = hud("harbor", "import", *paths, "--taskset", "tb2", *flags, "--yes", "--json")
+    result = hud("harbor", "import", "tasks", "--taskset", "tb2", "--yes", "--json")
 
-    assert (result.exit_code, result.json["import"]["status"]) == (exit_code, shown), result
-    if not flags:
-        reported = result.json["report"]
-        assert (reported or {}).get("error") == (report or {}).get("error")
+    assert (result.exit_code, result.json["import"]["status"]) == (exit_code, statuses[-1]), result
+
+
+def test_no_wait_returns_the_import_as_it_started(importer: FakeServices, hud: Hud) -> None:
+    importer.route("api", "POST", "/v2/imports", json=record("queued"))
+
+    result = hud("harbor", "import", "tasks", "--taskset", "tb2", "--no-wait", "--yes", "--json")
+
+    assert (result.exit_code, result.json["import"]["status"], result.json["report"]) == (
+        0,
+        "queued",
+        None,
+    ), result
 
 
 @pytest.mark.parametrize(
-    ("argv", "statuses", "report", "version"),
-    [
-        pytest.param(
-            ["--wait"],
-            ["queued", "running", "completed"],
-            REPORT,
-            "harbor_import_report.v5",
-            id="waited",
-        ),
-        pytest.param(
-            [],
-            ["completed"],
-            {"schema_version": "harbor_import_report.v9"},
-            None,
-            id="unknown-schema",
-        ),
-    ],
+    ("report", "version"),
+    [(REPORT, "harbor_import_report.v5"), ({"schema_version": "harbor_import_report.v9"}, None)],
+    ids=["a-report-it-reads", "a-report-of-an-unknown-schema"],
 )
 def test_report_shows_an_ended_imports_report(
-    hud: Hud,
-    platform: Platform,
-    argv: list[str],
-    statuses: list[str],
-    report: dict[str, Any],
-    version: str | None,
+    report: dict[str, Any], version: str | None, signed_in: FakeServices, hud: Hud
 ) -> None:
-    platform.imports[IMPORT] = Import(IMPORT, "tb2", statuses=statuses, report=report)
+    signed_in.route("api", "GET", f"/v2/imports/{IMPORT_ID}", json=record("completed"))
+    signed_in.route("api", "GET", f"/v2/imports/{IMPORT_ID}/report", json=report)
 
-    result = hud("harbor", "report", IMPORT, *argv, "--json")
+    result = hud("harbor", "report", IMPORT_ID, "--json")
 
     assert result.exit_code == 0, result
-    shown_version = (result.json["report"] or {}).get("schema_version")
-    assert (result.json["import"]["status"], shown_version) == (statuses[-1], version)
+    assert (result.json["report"] or {}).get("schema_version") == version
+
+
+def test_report_refuses_an_import_of_another_format(signed_in: FakeServices, hud: Hud) -> None:
+    signed_in.route(
+        "api", "GET", f"/v2/imports/{IMPORT_ID}", json=record("completed", format="parquet")
+    )
+
+    result = hud("harbor", "report", IMPORT_ID, "--json")
+
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
+
+
+@pytest.mark.parametrize(
+    ("status", "cancelled"), [("running", True), ("completed", False)], ids=["live", "ended"]
+)
+def test_cancel_stops_a_live_import_and_leaves_an_ended_one(
+    status: str, cancelled: bool, signed_in: FakeServices, hud: Hud
+) -> None:
+    signed_in.route("api", "GET", f"/v2/imports/{IMPORT_ID}", json=record(status))
+    signed_in.route("api", "POST", f"/v2/imports/{IMPORT_ID}/cancel", json=record("cancelling"))
+
+    result = hud("harbor", "cancel", IMPORT_ID, "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    assert bool(signed_in.requests("api", "POST", f"/v2/imports/{IMPORT_ID}/cancel")) is cancelled
+
+
+def test_imports_lists_a_tasksets_harbor_imports(signed_in: FakeServices, hud: Hud) -> None:
+    signed_in.route(
+        "api", "GET", "/v2/tasksets/by-name/tb2", json={"taskset_id": TASKSET_ID, "name": "tb2"}
+    )
+    signed_in.route(
+        "api", "GET", f"/v2/tasksets/{TASKSET_ID}", json={"id": TASKSET_ID, "name": "tb2"}
+    )
+    signed_in.route("api", "GET", "/v2/imports", json={"imports": [record("running")], "total": 1})
+
+    listed = hud("harbor", "imports", "--taskset", "tb2", "--json")
+    quiet = hud("harbor", "imports", "--taskset", "tb2", "--quiet")
+
+    assert [item["id"] for item in listed.json["imports"]] == [IMPORT_ID]
+    assert signed_in.requests("api", "GET", "/v2/imports")[0].query == {
+        "limit": ["20"],
+        "format": ["harbor"],
+        "taskset_id": [TASKSET_ID],
+    }
+    assert quiet.stdout.split() == [IMPORT_ID]

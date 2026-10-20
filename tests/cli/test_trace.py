@@ -16,7 +16,7 @@ from tests.support import call, say
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import Hud, HudEnv, Models, Platform
+    from tests.support import FakeServices, Hud, HudEnv, Models
 
 TRACE_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 COMPACT_TRACE_ID = "03dd2a73d3df4d10a54ae3d87c2d530d"
@@ -34,8 +34,9 @@ EVENTS: list[dict[str, Any]] = [
 
 
 @pytest.fixture
-def events(platform: Platform) -> None:
-    platform.trace(TRACE_ID).events = EVENTS
+def events(signed_in: FakeServices) -> None:
+    signed_in.route("api", "GET", f"/v2/trace/{COMPACT_TRACE_ID}/events", json={"events": EVENTS})
+    signed_in.route("api", "GET", f"/v2/trace/{TRACE_ID}/events", json={"events": EVENTS})
 
 
 def test_a_platform_trace_prints_the_models_text_verbatim(hud: Hud, events: None) -> None:
@@ -83,7 +84,7 @@ async def write_a_report(
 
 async def test_a_local_trace_lists_tool_calls_with_their_results(
     hud: Hud,
-    platform: Platform,
+    signed_in: FakeServices,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
@@ -106,7 +107,7 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
 
 async def test_a_local_trace_renders_and_skips_a_record_cut_short(
     hud: Hud,
-    platform: Platform,
+    signed_in: FakeServices,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,

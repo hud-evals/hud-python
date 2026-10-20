@@ -11,12 +11,13 @@ import pytest
 from hud import Environment
 from hud.eval import LocalRuntime, Task
 from tests.support import say, write_files
-from tests.support.platform import API_KEY
+
+from .conftest import API_KEY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import Hud, HudEnv, Models, Platform
+    from tests.support import FakeServices, Hud, HudEnv, Models
 
 TASKS_PY = """\
 from hud import Environment
@@ -36,7 +37,7 @@ SCRIPTED = ("openai_compatible", "-m", "scripted")
 
 
 @pytest.fixture
-def gateway(models: Models, platform: Platform) -> Models:
+def gateway(models: Models, signed_in: FakeServices) -> Models:
     """A signed-in user whose agents reach a scripted model that always answers "ok"."""
     models.script([say("ok")])
     return models
@@ -172,7 +173,7 @@ KIMI_TOML = (
 )
 def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     hud: Hud,
-    platform: Platform,
+    signed_in: FakeServices,
     gateway: Models,
     hud_env: HudEnv,
     tasks: Path,
@@ -181,7 +182,7 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     expected: dict[str, Any],
 ) -> None:
     """Provider SDKs read their own ``*_BASE_URL``, which here points at the scripted model."""
-    platform.add_model(**GLM)
+    signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
     (hud.cwd / ".hud_eval.toml").write_text(config)
     hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url)
 
@@ -376,7 +377,7 @@ def test_a_python_source_is_imported_on_the_main_thread(hud: Hud, gateway: Model
 )
 def test_a_dry_run_reports_the_plan_and_runs_nothing(
     hud: Hud,
-    platform: Platform,
+    signed_in: FakeServices,
     hud_env: HudEnv,
     tasks: Path,
     config: str,
@@ -390,4 +391,4 @@ def test_a_dry_run_reports_the_plan_and_runs_nothing(
 
     assert result.exit_code == 0, result
     assert {name: result.json[name] for name in expected} == expected
-    assert platform.services.requests() == []
+    assert signed_in.requests() == []
