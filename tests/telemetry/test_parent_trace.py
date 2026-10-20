@@ -1,86 +1,97 @@
 """A rollout started inside another trace names that trace as its parent to everything it
-reports to: the platform's trace record, the model gateway, and the hosted submission.
-
-Each row runs one rollout with trace id ``TRACE_ID`` under an ambient trace context
-and reads the parent the consumer received.
-"""
+reports to: the platform's trace record, the model gateway, and a hosted submission. Its
+own trace is never its parent."""
 
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
+from hud import Environment
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import HostedRuntime, LocalRuntime, Task, rollout
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.environments import lab, solve
 from tests.support import say
-from tests.support.platform import key
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from tests.support import FakeServices, HudEnv, Models
 
-    from tests.support import Models, Platform
-
-ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
 TRACE_ID = "b" * 32
+AMBIENTS = [("a" * 32, "a" * 32), (str(uuid.UUID(TRACE_ID)), None)]
+AMBIENT_IDS = ["another-trace-is-the-parent", "its-own-trace-is-not-its-parent"]
 
 
-async def trace_record(platform: Platform, models: Models) -> Any:
-    await rollout(ADD, ScriptedAgent(solve), runtime=LocalRuntime(lab()), trace_id=TRACE_ID)
-    return (platform.traces[key(TRACE_ID)].enter or {}).get("parent_trace_id")
+def checked() -> Environment:
+    env = Environment("checked")
+
+    @env.template()
+    async def check():
+        answer = yield "say yes"
+        yield 1.0 if answer == "yes" else 0.0
+
+    return env
 
 
-async def gateway_request(platform: Platform, models: Models) -> Any:
-    models.script([say("5")])
-    agent = OpenAIChatAgent(OpenAIChatConfig(model="m", max_steps=2))
-    await rollout(ADD, agent, runtime=LocalRuntime(lab()), trace_id=TRACE_ID)
+@pytest.mark.parametrize(("ambient", "parent"), AMBIENTS, ids=AMBIENT_IDS)
+async def test_the_trace_record_names_the_parent_trace(
+    ambient: str, parent: str | None, reporting: FakeServices
+) -> None:
+    with set_trace_context(ambient):
+        await rollout(
+            Task(env="checked", id="check"),
+            ScriptedAgent("yes"),
+            runtime=LocalRuntime(checked()),
+            trace_id=TRACE_ID,
+        )
+
+    (entered,) = reporting.bodies("api", "POST", "/v2/trace/{id}/enter")
+    assert entered.get("parent_trace_id") == parent
+
+
+@pytest.mark.parametrize(("ambient", "parent"), AMBIENTS, ids=AMBIENT_IDS)
+async def test_the_model_gateway_is_told_the_parent_trace(
+    ambient: str, parent: str | None, models: Models, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.script([say("yes")])
+
+    with set_trace_context(ambient):
+        await rollout(
+            Task(env="checked", id="check"),
+            OpenAIChatAgent(OpenAIChatConfig(model="m")),
+            runtime=LocalRuntime(checked()),
+            trace_id=TRACE_ID,
+        )
+
     (request,) = models.requests()
-    return request.headers.get("x-hud-parent-trace-id")
-
-
-async def hosted_submission(platform: Platform, models: Models) -> Any:
-    agent = OpenAIChatAgent(
-        OpenAIChatConfig(model="m", api_key="secret", base_url="http://model.test")
-    )
-    await HostedRuntime(poll_interval=0).run(ADD, agent, job_id="c" * 32, trace_id=TRACE_ID)
-    (trace,) = platform.traces.values()
-    return (trace.submitted or {}).get("parent_trace_id")
-
-
-CONSUMERS: dict[str, Callable[[Platform, Models], Awaitable[Any]]] = {
-    "the trace record": trace_record,
-    "the model gateway": gateway_request,
-    "the hosted submission": hosted_submission,
-}
-AMBIENTS = {
-    "another trace is the parent": ("a" * 32, "a" * 32, set(CONSUMERS)),
-    "the rollout's own trace is not its parent": (
-        str(uuid.UUID(TRACE_ID)),
-        None,
-        set(CONSUMERS),
-    ),
-    "an id that is not a trace is no parent": ("external-run-id", None, {"the hosted submission"}),
-}
+    sent = request.headers.get("x-hud-parent-trace-id")
+    assert (uuid.UUID(sent).hex if sent else None) == parent
 
 
 @pytest.mark.parametrize(
-    ("consumer", "ambient", "parent"),
-    [
-        pytest.param(consumer, ambient, parent, id=f"{name}-{consumer}")
-        for name, (ambient, parent, consumers) in AMBIENTS.items()
-        for consumer in CONSUMERS
-        if consumer in consumers
-    ],
+    ("ambient", "parent"),
+    [*AMBIENTS, ("external-run-id", None)],
+    ids=[*AMBIENT_IDS, "an-id-that-is-not-a-trace-is-no-parent"],
 )
-async def test_a_nested_rollout_names_its_parent_trace_to_each_consumer(
-    consumer: str, ambient: str, parent: str | None, reporting: Platform, models: Models
+async def test_a_hosted_submission_names_the_parent_trace(
+    ambient: str, parent: str | None, services: FakeServices, hud_env: HudEnv
 ) -> None:
-    with set_trace_context(ambient):
-        received = await CONSUMERS[consumer](reporting, models)
+    hud_env.set(HUD_API_KEY="k")
+    services.route("api", "POST", "/v2/rollouts/submit", json={})
+    services.route("api", "GET", "/v2/trace/{id}", json={"status": "completed", "reward": 1.0})
+    agent = OpenAIChatAgent(
+        OpenAIChatConfig(model="m", api_key="secret", base_url="http://model.test")
+    )
 
-    assert (uuid.UUID(received).hex if received else None) == parent
+    with set_trace_context(ambient):
+        await HostedRuntime(poll_interval=0).run(
+            Task(env="checked", id="check"), agent, job_id="c" * 32, trace_id=TRACE_ID
+        )
+
+    (submitted,) = services.bodies("api", "POST", "/v2/rollouts/submit")
+    sent = submitted.get("parent_trace_id")
+    assert (uuid.UUID(sent).hex if sent else None) == parent

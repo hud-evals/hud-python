@@ -26,7 +26,6 @@ from hud.environment.robot import DirectControl, wrap
 from hud.eval import LocalRuntime, Task, rollout
 from hud.telemetry.robot import JobRecorder
 from tests.support import ROBOT_STEP_SCHEMA, steps
-from tests.support.platform import WEB_URL
 
 from .sims import Arm, ScriptedLLM, arm_env, contract, move, reached
 
@@ -35,7 +34,7 @@ if TYPE_CHECKING:
 
     from hud.capabilities import MCPClient
     from hud.eval.run import Run
-    from tests.support import Platform
+    from tests.support import FakeServices
 
 
 class TwoArmSim:
@@ -71,7 +70,7 @@ class TwoArmSim:
 
 
 def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
-    reporting: Platform,
+    reporting: FakeServices,
 ) -> None:
     env = wrap(TwoArmSim(), contract=None)
     env.reset()
@@ -79,9 +78,17 @@ def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
         env.step(np.zeros((2, 2)))
     env.close()
 
-    traces = {f"trace-{n}": trace for n, trace in enumerate(reporting.traces.values())}
-    exits = {label: trace.exit for label, trace in traces.items()}
-    spans = {label: trace.spans for label, trace in traces.items()}
+    entered = [
+        r.path.split("/")[3] for r in reporting.requests("api", "POST", "/v2/trace/{id}/enter")
+    ]
+    labels = {trace_id: f"trace-{n}" for n, trace_id in enumerate(entered)}
+    exits = {
+        labels[r.path.split("/")[3]]: r.json
+        for r in reporting.requests("api", "POST", "/v2/trace/{id}/exit")
+    }
+    spans: dict[str, list[dict[str, Any]]] = {label: [] for label in labels.values()}
+    for upload in reporting.requests("telemetry", "POST", "/trace/{id}/telemetry-upload"):
+        spans[labels[upload.path.split("/")[2].replace("-", "")]].extend(upload.json["telemetry"])
     ticks = {
         trace: [
             (span["name"], span["attributes"]["hud.payload"]["tick"])
@@ -133,17 +140,20 @@ CANONICAL_JOB = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
     ],
 )
 def test_a_shared_job_is_reported_canonically_and_seeds_traces_by_its_spelling(
-    reporting: Platform, job_id: str, trace_id: str
+    reporting: FakeServices, job_id: str, trace_id: str
 ) -> None:
     recorder = JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id)
     recorder.record(done=np.array([True]))
 
-    assert recorder.job_url == f"{WEB_URL}/jobs/{CANONICAL_JOB}"
+    assert recorder.job_url == f"{reporting.url('web')}/jobs/{CANONICAL_JOB}"
     assert f"/v2/trace/job/{CANONICAL_JOB}/enter" in [
-        request.path for request in reporting.services.requests("api")
+        request.path for request in reporting.requests("api")
     ]
-    (recorded,) = reporting.traces
-    assert (recorded, reporting.traces[recorded].enter) == (trace_id, {"job_id": CANONICAL_JOB})
+    (entered,) = reporting.requests("api", "POST", "/v2/trace/{id}/enter")
+    assert (entered.path, entered.json) == (
+        f"/v2/trace/{trace_id}/enter",
+        {"job_id": CANONICAL_JOB},
+    )
 
 
 # ─── direct control streams every played tick ──────────────────────────

@@ -23,9 +23,10 @@ from tests.support import Reply, call, say, spans, steps
 
 if TYPE_CHECKING:
     from hud.eval import Run
-    from tests.support import HudEnv, Models, Platform
+    from tests.support import FakeServices, HudEnv, Models
 
 ISO = IsStr(regex=r"\d{4}-\d\d-\d\dT.*")
+UPLOAD = "/trace/{id}/telemetry-upload"
 
 
 def spans_env() -> Environment:
@@ -52,7 +53,7 @@ TASK = Task(env="spans", id="answer")
     ],
 )
 async def test_spans_are_written_where_the_configuration_says(
-    reporting: Platform,
+    reporting: FakeServices,
     hud_env: HudEnv,
     tmp_path: Path,
     uploads: str,
@@ -72,7 +73,7 @@ async def test_spans_are_written_where_the_configuration_says(
     written = {name: spans(run.trace_id, path) != [] for name, path in directories.items()}
     assert written == {name: name == written_to for name in directories}
     assert flush(timeout=10)
-    assert any(trace.spans for trace in reporting.traces.values()) is uploaded
+    assert bool(reporting.requests("telemetry", "POST", UPLOAD)) is uploaded
 
 
 async def test_step_spans_carry_the_step_payload_and_timing() -> None:
@@ -174,7 +175,6 @@ async def test_instrumented_calls_outside_a_run_export_nothing(hud_env: HudEnv) 
 
 # ─── the HUD telemetry service ─────────────────────────────────────────
 
-UPLOAD = "/trace/{id}/telemetry-upload"
 ROOT = Path(__file__).parents[2]
 
 
@@ -231,7 +231,7 @@ def step_rows(spans: list[dict[str, Any]]) -> list[tuple[str, str, int]]:
     ],
 )
 async def test_every_rollout_step_is_uploaded_to_its_own_trace(
-    reporting: Platform,
+    reporting: FakeServices,
     models: Models,
     broken: bool,
     reward: float,
@@ -245,20 +245,23 @@ async def test_every_rollout_step_is_uploaded_to_its_own_trace(
 
     assert [run.reward for run in job.runs] == [reward, reward]
     assert flush(timeout=10)
-    assert sorted(reporting.traces) == sorted(
-        str(run.trace_id).replace("-", "") for run in job.runs
-    )
-    for trace_id, trace in reporting.traces.items():
-        assert {span["attributes"]["hud.task_run_id"].replace("-", "") for span in trace.spans} == {
+    uploaded: dict[str, list[dict[str, Any]]] = {}
+    for request in reporting.requests("telemetry", "POST", UPLOAD):
+        uploaded.setdefault(request.path.split("/")[2].replace("-", ""), []).extend(
+            request.json["telemetry"]
+        )
+    assert sorted(uploaded) == sorted(str(run.trace_id).replace("-", "") for run in job.runs)
+    for trace_id, sent in uploaded.items():
+        assert {span["attributes"]["hud.task_run_id"].replace("-", "") for span in sent} == {
             trace_id
         }
-        assert step_rows(trace.spans) == rows
+        assert step_rows(sent) == rows
 
 
 async def test_flush_returns_false_at_its_deadline_while_an_upload_hangs(
-    reporting: Platform,
+    reporting: FakeServices,
 ) -> None:
-    reporting.services.route("telemetry", "POST", UPLOAD, Reply(json={}, delay=2.0))
+    reporting.route("telemetry", "POST", UPLOAD, Reply(json={}, delay=2.0))
 
     run: Run = await rollout(
         Task(env="upload", id="answer"), ScriptedAgent("ok"), runtime=LocalRuntime(upload_env())
@@ -267,11 +270,11 @@ async def test_flush_returns_false_at_its_deadline_while_an_upload_hangs(
     assert run.reward == 1.0
     assert flush(timeout=0.2) is False
     assert flush(timeout=30) is True
-    assert reporting.services.requests("telemetry", "POST", UPLOAD) != []
+    assert reporting.requests("telemetry", "POST", UPLOAD) != []
 
 
 def test_spans_still_queued_at_interpreter_exit_are_uploaded(
-    reporting: Platform, tmp_path: Path
+    reporting: FakeServices, tmp_path: Path
 ) -> None:
     script = tmp_path / "rollout_then_exit.py"
     script.write_text(
@@ -306,4 +309,5 @@ def test_spans_still_queued_at_interpreter_exit_are_uploaded(
     )
 
     trace_id = completed.stdout.strip().replace("-", "")
-    assert [trace_id for trace_id, trace in reporting.traces.items() if trace.spans] == [trace_id]
+    uploaded = {r.path.split("/")[2].replace("-", "") for r in reporting.requests("telemetry")}
+    assert uploaded == {trace_id}

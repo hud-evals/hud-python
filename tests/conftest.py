@@ -89,13 +89,17 @@ def platform(services: FakeServices, hud_env: HudEnv) -> Platform:
 
 
 @pytest.fixture
-def reporting(platform: Platform, hud_env: HudEnv) -> Iterator[Platform]:
-    """The platform with telemetry uploads on.
+def reporting(services: FakeServices, hud_env: HudEnv) -> Iterator[FakeServices]:
+    """The HUD services accepting job and trace reports and span uploads, with telemetry on
+    and a key.
 
-    Span uploads drain before the test ends, so none reaches a later test's platform.
+    Span uploads drain before the test ends, so none reaches a later test's services.
     """
-    hud_env.set(HUD_TELEMETRY_ENABLED="1")
-    yield platform
+    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
+    for path in ("/v2/trace/job/{id}/enter", "/v2/trace/{id}/enter", "/v2/trace/{id}/exit"):
+        services.route("api", "POST", path, json={})
+    services.route("telemetry", "POST", "/trace/{id}/telemetry-upload", json={})
+    yield services
     assert flush(timeout=10)
 
 
