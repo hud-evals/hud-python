@@ -71,7 +71,6 @@ async def test_a_graded_rollout_reports_its_reward(reporting):
 uv run ruff format . --check   # Formatting
 uv run ruff check .            # Linting
 uv run --extra dev --extra train ty check  # Type checking
-uv run python scripts/check_tests.py       # Tests stay black-box
 ```
 
 ## Code Style

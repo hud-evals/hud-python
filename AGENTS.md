@@ -58,7 +58,6 @@ uv sync --extra dev
 uv run ruff format . --check
 uv run ruff check .
 uv run --extra dev --extra train ty check
-uv run python scripts/check_tests.py
 uv run pytest -n auto
 ```
 
@@ -130,7 +129,7 @@ Write a test only when it would catch a break a user would notice.
   reward, status, errors, files, exit codes. Not prompt text, rendered output,
   argv or request bodies.
 - Fake only what CI cannot run (HUD services, model providers, Docker). Never
-  touch `hud` internals; `scripts/check_tests.py` enforces this.
+  touch `hud` internals; ruff's SLF001 enforces this.
 - A bug fix comes with the test that failed before it.
 
 ## Operational Debugging
