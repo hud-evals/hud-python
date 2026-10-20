@@ -124,9 +124,8 @@ def build_model_client(
     return AsyncOpenAI(api_key=key)
 
 
-# Retries of the OpenAI-compatible and Anthropic gateway clients, each waiting
-# out the gateway's Retry-After; the SDKs' default of two is not enough
-# patience for a pod at capacity.
+# The gateway answers 503 + Retry-After when a pod is at capacity; the OpenAI and
+# Anthropic SDKs wait the header out, but their default of two retries is too few.
 GATEWAY_MAX_RETRIES = 6
 
 
@@ -144,8 +143,6 @@ def build_gateway_client(provider: str) -> GatewayClient:
         from anthropic import AsyncAnthropic
         from anthropic import DefaultAsyncHttpxClient as AnthropicHttpClient
 
-        # The gateway refuses with 503 + Retry-After when a pod is at capacity and
-        # the SDK waits the header out before each retry, like the OpenAI one.
         return AsyncAnthropic(
             api_key=settings.api_key,
             base_url=settings.hud_gateway_url,
@@ -159,10 +156,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
         from google import genai
         from google.genai.types import HttpOptions, HttpRetryOptions
 
-        # The gateway refuses with 503 + Retry-After: 3 when a pod is at
-        # capacity. google-genai retries 5xx on its own backoff and never reads
-        # the header, so the first wait matches the header and the rest stay on
-        # the gateway's scale rather than the 10 s floor used for Google's own API.
+        # google-genai ignores Retry-After, so its backoff is set to the gateway's 3 s.
         return genai.Client(
             api_key=settings.api_key,
             http_options=HttpOptions(
@@ -182,8 +176,6 @@ def build_gateway_client(provider: str) -> GatewayClient:
         )
 
     # OpenAI-compatible (openai, azure, together, groq, fireworks, etc.)
-    # The gateway refuses with 503 + Retry-After when a pod is at capacity and
-    # the SDK waits the header out before each retry.
     return AsyncOpenAI(
         api_key=settings.api_key,
         base_url=settings.hud_gateway_url,
