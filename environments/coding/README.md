@@ -37,12 +37,10 @@ namespaces.
 uv run pytest tests/ -q
 ```
 
-The grader and task-row tests run anywhere. The `sandbox` tests serve the environment with its
-isolated workspace and cover task reset, hidden-test application and tampering, selected JUnit
-scoring, grading as the agent's user, and both bundled reference fixes. They need Linux, root,
-bubblewrap, and the environment's Python installed under `/usr` (the sandbox shows the grader
-nothing else), so they skip elsewhere; run them in the coding container, where the image installs
-it at `/usr/local/venv`.
+The grader and task-row tests run anywhere. The `sandbox` tests cover task reset, hidden tests,
+JUnit scoring, grading as the agent's user, and both reference fixes. They need Linux, root,
+bubblewrap, and the environment's Python under `/usr`, so they skip elsewhere; run them in the
+coding container.
 
 See the [coding-agent cookbook](https://docs.hud.ai/v6/cookbooks/coding-agent) for the grading
 lifecycle and a task-authoring walkthrough.

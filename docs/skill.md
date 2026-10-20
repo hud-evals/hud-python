@@ -162,7 +162,7 @@ resources (ports, file handles) are not released otherwise.
 Once `hud eval env.py model` passes locally, two commands push it to the platform:
 
 ```bash
-hud deploy . --yes               # package and deploy the environment (gives it a platform id)
+hud deploy . --yes                     # package and deploy the environment (gives it a platform id)
 hud sync tasks my-taskset env.py --yes # upload tasks from env.py to the "my-taskset" taskset (name first, source second)
 ```
 
