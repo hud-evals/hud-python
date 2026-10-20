@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import ctypes
 import errno
-import fcntl
 import ipaddress
 import json
 import os
@@ -25,6 +24,9 @@ import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NoReturn, Optional, cast
+
+if sys.platform == "linux":
+    import fcntl
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -66,8 +68,9 @@ _PTRACE_EVENT_SECCOMP = 7
 _WAIT_ALL = getattr(os, "WALL", 0x40000000)
 _MAX_SOCKADDR_BYTES = 128
 
-_LIBC = ctypes.CDLL(None, use_errno=True)
-_LIBC.ptrace.restype = ctypes.c_long
+if sys.platform == "linux":
+    _LIBC = ctypes.CDLL(None, use_errno=True)
+    _LIBC.ptrace.restype = ctypes.c_long
 GuardBackend = Literal["notify", "ptrace"]
 _backend: Optional[GuardBackend] = None
 _backend_probed = False

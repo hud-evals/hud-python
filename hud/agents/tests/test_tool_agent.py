@@ -725,7 +725,13 @@ async def test_loop_marks_length_finish_as_truncated() -> None:
     # A final turn cut off at the provider token cap (e.g. mid-tool-call) ends the
     # rollout normally but is a truncation, not a natural finish — across every
     # provider's finish-reason vocabulary.
-    for finish_reason in ("length", "max_output_tokens", "max_tokens", "MAX_TOKENS"):
+    for finish_reason in (
+        "length",
+        "max_output_tokens",
+        "max_tokens",
+        "MAX_TOKENS",
+        "CONTINUATION",
+    ):
         agent = DictAgent([AgentStep(content="partial", done=True, finish_reason=finish_reason)])
         run = cast("Run", _FakeRun())
 

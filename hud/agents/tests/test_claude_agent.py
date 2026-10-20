@@ -104,10 +104,10 @@ def _state(agent: ClaudeAgent) -> Any:
 
 def _inline_error(type_: str, *, headers: dict[str, str] | None = None) -> APIStatusError:
     body = {"type": "error", "error": {"type": type_, "message": "stream failed"}}
-    response = httpx.Response(
+    response = httpx2.Response(
         200,
         headers=headers,
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
     return APIStatusError(str(body), response=response, body=body)
 
