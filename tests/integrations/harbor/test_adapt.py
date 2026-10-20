@@ -32,8 +32,6 @@ from hud.integrations import harbor
 from tests.integrations.harbor.cases import assemble_case, read_expected
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from hud.eval import RuntimeConfig, Task
     from tests.support import HudEnv
 
@@ -196,85 +194,96 @@ def test_adapt_raises_when_the_source_holds_no_harbor_tasks(tmp_path: Path) -> N
             harbor.adapt(source)
 
 
-@pytest.mark.parametrize(
-    ("docker_state", "message"),
-    [
-        ("daemon unreachable", "requires a reachable Docker daemon: docker version"),
-        ("no docker executable", "requires Docker to resolve authored images"),
-    ],
-)
-def test_adapt_aborts_without_a_docker_daemon_instead_of_failing_tasks(
-    docker_state: str, message: str, tmp_path: Path, hud_env: HudEnv
+def test_adapt_aborts_without_a_reachable_docker_daemon_instead_of_failing_tasks(
+    tmp_path: Path, hud_env: HudEnv
 ) -> None:
     dataset = load_case("plain-image", tmp_path, hud_env)
-    if docker_state == "daemon unreachable":
-        hud_env.set(DOCKER_HOST=f"unix://{tmp_path}/no-daemon.sock")
-    else:
-        (tmp_path / "empty-path").mkdir()
-        hud_env.set(PATH=str(tmp_path / "empty-path"))
+    hud_env.set(DOCKER_HOST=f"unix://{tmp_path}/no-daemon.sock")
 
-    with pytest.raises(RuntimeError, match=message):
+    with pytest.raises(RuntimeError, match="requires a reachable Docker daemon: docker version"):
         harbor.adapt(dataset)
 
 
-def edit(relative: str, content: str) -> Callable[[Path], str]:
-    def apply(task: Path) -> str:
-        (task / relative).write_text(content, encoding="utf-8")
-        return "hud"
+def test_adapt_aborts_without_a_docker_executable(tmp_path: Path, hud_env: HudEnv) -> None:
+    dataset = load_case("plain-image", tmp_path, hud_env)
+    (tmp_path / "empty-path").mkdir()
+    hud_env.set(PATH=str(tmp_path / "empty-path"))
 
-    return apply
+    with pytest.raises(RuntimeError, match="requires Docker to resolve authored images"):
+        harbor.adapt(dataset)
 
 
-def wheel(task: Path) -> str:
-    built = task.parent.parent / "hud-0.0.0-py3-none-any.whl"
-    built.write_bytes(b"wheel")
-    return str(built)
+def main_service(dataset: Path, requirement: str) -> tuple[dict[str, Any], Path]:
+    """The adapted single task's ``main`` Compose service, and its project directory."""
+    (row,) = harbor.adapt(dataset, hud_requirement=requirement).taskset
+    assert row.runtime_config is not None and row.runtime_config.compose is not None
+    assert isinstance(row.runtime_config.compose.document, Path)
+    compose = json.loads(row.runtime_config.compose.document.read_text("utf-8"))
+    return compose["services"]["main"], row.runtime_config.compose.document.parent
 
 
 @pytest.mark.e2e
 @pytest.mark.docker
 @pytest.mark.parametrize(
-    ("change", "apply", "rebuilds"),
+    ("relative", "content", "rebuilds"),
     [
-        ("an edited instruction", edit("instruction.md", "Second instruction\n"), False),
-        ("edited inline tests", edit("tests/test.sh", "#!/bin/sh\nexit 1\n"), False),
-        ("a new verifier timeout", edit("task.toml", "[verifier]\ntimeout_sec = 5\n"), False),
-        ("new content behind an environment symlink", edit("../outside.txt", "changed\n"), False),
-        ("an edited environment file", edit("environment/ignored.txt", "changed\n"), True),
-        ("another hud release", lambda task: "hud==0.0.1", True),
-        ("a hud wheel", wheel, True),
+        ("instruction.md", "Second instruction\n", False),
+        ("tests/test.sh", "#!/bin/sh\nexit 1\n", False),
+        ("task.toml", "[verifier]\ntimeout_sec = 5\n", False),
+        ("../outside.txt", "changed\n", False),
+        ("environment/ignored.txt", "changed\n", True),
+    ],
+    ids=[
+        "an-edited-instruction",
+        "edited-inline-tests",
+        "a-new-verifier-timeout",
+        "new-content-behind-an-environment-symlink",
+        "an-edited-environment-file",
     ],
 )
 def test_the_environment_image_identity_follows_only_what_the_image_contains(
-    change: str,
-    apply: Callable[[Path], str],
-    rebuilds: bool,
-    tmp_path: Path,
-    hud_env: HudEnv,
+    relative: str, content: str, rebuilds: bool, tmp_path: Path, hud_env: HudEnv
 ) -> None:
-    del change
     dataset = load_case("plain-image", tmp_path, hud_env)
     task = dataset / "task-a"
     (dataset / "outside.txt").write_text("first\n", encoding="utf-8")
     (task / "environment" / "outside").symlink_to(dataset / "outside.txt")
+    before, _ = main_service(dataset, "hud")
 
-    def images(requirement: str) -> tuple[dict[str, Any], Path]:
-        (row,) = harbor.adapt(dataset, hud_requirement=requirement).taskset
-        assert row.runtime_config is not None and row.runtime_config.compose is not None
-        assert isinstance(row.runtime_config.compose.document, Path)
-        compose = json.loads(row.runtime_config.compose.document.read_text("utf-8"))
-        return compose["services"]["main"], row.runtime_config.compose.document.parent
-
-    before, _ = images("hud")
-    after, project = images(apply(task))
+    (task / relative).write_text(content, encoding="utf-8")
+    after, _ = main_service(dataset, "hud")
 
     assert (after["image"] != before["image"]) is rebuilds
-    requirement = after["build"]["args"]["HUD_REQUIREMENT"]
-    packages = sorted(path.name for path in (project / "compose-project/main/packages").iterdir())
-    if requirement.endswith(".whl"):
-        assert (requirement, packages) == (
-            "/controller/packages/hud-0.0.0-py3-none-any.whl",
-            ["hud-0.0.0-py3-none-any.whl"],
-        )
-    else:
-        assert packages == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+def test_another_hud_release_rebuilds_the_image_from_the_index(
+    tmp_path: Path, hud_env: HudEnv
+) -> None:
+    dataset = load_case("plain-image", tmp_path, hud_env)
+    before, _ = main_service(dataset, "hud")
+
+    after, project = main_service(dataset, "hud==0.0.1")
+
+    assert after["image"] != before["image"]
+    assert after["build"]["args"]["HUD_REQUIREMENT"] == "hud==0.0.1"
+    assert list((project / "compose-project/main/packages").iterdir()) == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+def test_a_hud_wheel_is_packaged_into_the_image(tmp_path: Path, hud_env: HudEnv) -> None:
+    dataset = load_case("plain-image", tmp_path, hud_env)
+    built = tmp_path / "hud-0.0.0-py3-none-any.whl"
+    built.write_bytes(b"wheel")
+    before, _ = main_service(dataset, "hud")
+
+    after, project = main_service(dataset, str(built))
+
+    assert after["image"] != before["image"]
+    assert after["build"]["args"]["HUD_REQUIREMENT"] == (
+        "/controller/packages/hud-0.0.0-py3-none-any.whl"
+    )
+    packages = [path.name for path in (project / "compose-project/main/packages").iterdir()]
+    assert packages == ["hud-0.0.0-py3-none-any.whl"]
