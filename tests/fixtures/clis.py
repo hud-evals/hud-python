@@ -14,10 +14,8 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any
 
 #: Variables the CLI agents set for the process they launch.
 AGENT_VARIABLES = ("ANTHROPIC_", "CLAUDE_", "CODEX_", "DISABLE_", "HUD_", "IS_SANDBOX")
@@ -137,7 +135,8 @@ class Stub:
         script = self.bin / self.name
         script.write_text(
             STUB.format(
-                python=sys.executable,
+                # The base interpreter: a sandbox shows /usr, not a virtualenv.
+                python=Path(sys.executable).resolve(),
                 behavior=str(behavior),
                 name=self.name,
                 prefixes=AGENT_VARIABLES,

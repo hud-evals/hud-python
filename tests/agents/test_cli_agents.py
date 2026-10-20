@@ -186,7 +186,8 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
         url="https://inference.hud.so/v1",
         headers={"Authorization": "Bearer scoped-runtime-token"},
     )
-    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    # Inside the workspace, the only host path the sandbox shows besides /usr and /etc.
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
     task = workspace_task(
         tmp_path / "ws",
@@ -364,7 +365,7 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
         url="https://inference.hud.so/v1",
         headers={"Authorization": "Bearer scoped-runtime-token"},
     )
-    stub = clis.Stub(tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"))
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "codex", stdout=clis.answer("codex", "done"))
     stub.install()
     task = workspace_task(
         tmp_path / "ws",
