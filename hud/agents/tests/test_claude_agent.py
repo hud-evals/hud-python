@@ -5,6 +5,7 @@ plus the pure ``_citation`` / ``_cache_last_user_block`` helpers.
 from __future__ import annotations
 
 import base64
+import json
 import random
 import struct
 import zlib
@@ -19,7 +20,7 @@ import httpx
 import httpx2
 import mcp.types as mcp_types
 import pytest
-from anthropic import APIStatusError, Omit
+from anthropic import APIStatusError, AsyncAnthropic, Omit
 from fastmcp.tools import ToolResult
 from mcp.types import ImageContent
 from PIL import Image
@@ -104,10 +105,10 @@ def _state(agent: ClaudeAgent) -> Any:
 
 def _inline_error(type_: str, *, headers: dict[str, str] | None = None) -> APIStatusError:
     body = {"type": "error", "error": {"type": type_, "message": "stream failed"}}
-    response = httpx2.Response(
+    response = httpx.Response(
         200,
         headers=headers,
-        request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"),
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
     return APIStatusError(str(body), response=response, body=body)
 
@@ -594,3 +595,250 @@ def test_enabled_thinking_budget_below_max_tokens_is_allowed(max_tokens: int) ->
         max_tokens=max_tokens, thinking={"type": "enabled", "budget_tokens": max_tokens - 1}
     )
     assert config.thinking == {"type": "enabled", "budget_tokens": max_tokens - 1}
+
+
+def _computer_member(id: str, name: str, **arguments: Any) -> Any:
+    return SimpleNamespace(
+        type="tool_use", id=id, name=name, toolset_name="computer", input=arguments
+    )
+
+
+async def test_sonnet55_computer_batch_round_trips_namespaces_and_stops_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telemetry_enabled", False)
+    server = fastmcp.FastMCP("custom")
+    custom_calls: list[str] = []
+
+    @server.tool
+    def key() -> str:
+        """A custom operation that shares a computer member's name."""
+        custom_calls.append("key")
+        return "custom key"
+
+    client = FakeAnthropic(
+        _final(
+            _computer_member("keys", "key", text="ctrl+a", repeat=2),
+            SimpleNamespace(type="tool_use", id="custom", name="key", input={}),
+            _computer_member("failed", "key"),
+            _computer_member("skipped", "left_click", coordinate=[10, 20]),
+            SimpleNamespace(type="tool_use", id="skipped-custom", name="key", input={}),
+            stop_reason="tool_use",
+        ),
+        _final(_computer_member("retry", "key", text="Tab"), stop_reason="tool_use"),
+        _final(SimpleNamespace(type="text", text="done", citations=None), stop_reason="end_turn"),
+    )
+    keyboard = Mock()
+    connection = SimpleNamespace(
+        keyboard=keyboard,
+        mouse=Mock(),
+        video=SimpleNamespace(width=1280, height=720),
+        drain=AsyncMock(),
+    )
+    screen = Capability.rfb(name="screen", url="rfb://screen.invalid:5900")
+    rfb = RFBClient(screen, cast("Any", connection), AsyncExitStack())
+    custom = Capability.mcp(name="custom", url="https://tools.invalid/mcp")
+    async with fastmcp.Client(server) as mcp_client:
+        mcp = MCPClient(custom, mcp_client, AsyncExitStack())
+        trace = Trace()
+        run = cast(
+            "Run",
+            SimpleNamespace(
+                trace=trace,
+                record=trace.record,
+                client=SimpleNamespace(
+                    manifest=SimpleNamespace(bindings=[screen, custom]),
+                    open=AsyncMock(side_effect=lambda name: rfb if name == "screen" else mcp),
+                ),
+                prompt_messages=[
+                    mcp_types.PromptMessage(
+                        role="user", content=mcp_types.TextContent(type="text", text="go")
+                    )
+                ],
+            ),
+        )
+        await ClaudeAgent(
+            ClaudeConfig(model="claude-sonnet-5-5", model_client=client, max_steps=3)
+        )(run)
+
+    assert trace.status == "completed"
+    assert trace.content == "done"
+    assert custom_calls == ["key"]
+    assert keyboard.press.call_args_list == [
+        call("Control_L", "a"),
+        call("Control_L", "a"),
+        call("Tab"),
+    ]
+    connection.mouse.click.assert_not_called()
+    requests = client.beta.messages.requests
+    assert requests[0]["tools"][0] == {"type": "computer_toolset_20260801"}
+    assert isinstance(requests[0]["betas"], Omit)
+    messages = requests[1]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "user"]
+    results = messages[-1]["content"]
+    assert sum("cache_control" in block for block in results) == 1
+    assert "cache_control" in results[-1]
+    assert [block["tool_use_id"] for block in results] == [
+        "keys",
+        "custom",
+        "failed",
+        "skipped",
+        "skipped-custom",
+    ]
+    assert [block.get("toolset_name") for block in results] == [
+        "computer",
+        None,
+        "computer",
+        "computer",
+        None,
+    ]
+    assert [block["is_error"] for block in results] == [False, False, True, True, True]
+    assert results[-2]["content"][0]["text"] == (
+        "Not executed: an earlier computer action in this turn failed."
+    )
+    recorded_calls = [step.call for step in trace.steps if isinstance(step, ToolStep)]
+    assert recorded_calls[0] is not None
+    assert recorded_calls[0].name == "computer"
+    assert recorded_calls[0].provider_name == "key"
+    assert recorded_calls[0].toolset_name == "computer"
+    assert recorded_calls[1] is not None
+    assert recorded_calls[1].name == "key"
+    assert recorded_calls[1].toolset_name is None
+    assert requests[2]["messages"][-1]["content"][0]["is_error"] is False
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_type", "expected_beta"),
+    [
+        ("claude-sonnet-5-5", "computer_toolset_20260801", None),
+        ("claude-sonnet-4-6", "computer_20251124", "computer-use-2025-11-24"),
+        ("claude-sonnet-4-5", "computer_20250124", "computer-use-2025-01-24"),
+        ("qwen/qwen3.8-max", None, None),
+    ],
+)
+async def test_computer_schema_selection_preserves_legacy_and_generic_models(
+    model: str, expected_type: str | None, expected_beta: str | None
+) -> None:
+    agent = ClaudeAgent(ClaudeConfig(model=model, model_client=FakeAnthropic()))
+    screen = Mock(spec=RFBClient)
+    screen.width, screen.height = 1280, 720
+    tools, params = await agent._build_tools({"screen": screen})
+    assert params[0].get("type") == expected_type
+    assert getattr(tools["computer"].spec, "beta", None) == expected_beta
+    if expected_type != "computer_toolset_20260801":
+        assert params[0]["name"] == "computer"
+
+
+async def test_sonnet55_bedrock_uses_its_supported_legacy_computer_protocol() -> None:
+    from anthropic import AsyncAnthropicBedrock
+
+    client = AsyncAnthropicBedrock(
+        aws_access_key="test", aws_secret_key="test", aws_region="us-east-1"
+    )
+    try:
+        agent = ClaudeAgent(
+            ClaudeConfig(model="anthropic.claude-sonnet-5-5-v1:0", model_client=client)
+        )
+        screen = Mock(spec=RFBClient)
+        screen.width, screen.height = 1280, 720
+        tools, params = await agent._build_tools({"screen": screen})
+        assert params[0]["type"] == "computer_20251124"
+        assert getattr(tools["computer"].spec, "beta", None) == "computer-use-2025-11-24"
+    finally:
+        await client.close()
+
+
+async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "telemetry_enabled", False)
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        tool_turn = len(requests) == 1
+        block = (
+            {
+                "type": "tool_use",
+                "id": "native-shot",
+                "name": "screenshot",
+                "toolset_name": "computer",
+                "input": {},
+            }
+            if tool_turn
+            else {"type": "text", "text": "done"}
+        )
+        events = [
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "msg",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-sonnet-5-5",
+                    "content": [],
+                    "usage": {"input_tokens": 1, "output_tokens": 0},
+                },
+            },
+            {"type": "content_block_start", "index": 0, "content_block": block},
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use" if tool_turn else "end_turn"},
+                "usage": {"output_tokens": 1},
+            },
+            {"type": "message_stop"},
+        ]
+        body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=body)
+
+    source = BytesIO()
+    Image.new("RGB", (128, 72), "white").save(source, format="PNG")
+    screen = Capability.rfb(name="screen", url="rfb://screen.invalid:5900")
+    rfb = Mock(spec=RFBClient)
+    rfb.width, rfb.height = 128, 72
+    rfb.screenshot_png = AsyncMock(return_value=(source.getvalue(), "image/png"))
+    trace = Trace()
+    run = cast(
+        "Run",
+        SimpleNamespace(
+            trace=trace,
+            record=trace.record,
+            client=SimpleNamespace(
+                manifest=SimpleNamespace(bindings=[screen]),
+                open=AsyncMock(return_value=rfb),
+            ),
+            prompt_messages=[
+                mcp_types.PromptMessage(
+                    role="user", content=mcp_types.TextContent(type="text", text="go")
+                )
+            ],
+        ),
+    )
+    async with AsyncAnthropic(
+        api_key="test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    ) as client:
+        await ClaudeAgent(
+            ClaudeConfig(model="claude-sonnet-5-5", model_client=client, max_steps=2)
+        )(run)
+    assert trace.status == "completed"
+    assert len(requests) == 2
+    assert "anthropic-beta" not in requests[0].headers
+    assert json.loads(requests[0].content)["tools"] == [{"type": "computer_toolset_20260801"}]
+    result = json.loads(requests[1].content)["messages"][-1]["content"][0]
+    assert result["tool_use_id"] == "native-shot"
+    assert result["toolset_name"] == "computer"
+    assert result["content"][0]["type"] == "image"
+    assert not result["is_error"]
+
+
+async def test_computer_toolset_rejects_reserved_custom_computer_name() -> None:
+    agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-5-5", model_client=FakeAnthropic()))
+    screen = Mock(spec=RFBClient)
+    screen.width, screen.height = 1280, 720
+    custom = Mock(spec=MCPClient)
+    custom.list_tools = AsyncMock(
+        return_value=[mcp_types.Tool(name="computer", inputSchema={"type": "object"})]
+    )
+    with pytest.raises(ValueError, match=r"MCP tool name collision.*computer"):
+        await agent._build_tools({"screen": screen, "custom": custom})

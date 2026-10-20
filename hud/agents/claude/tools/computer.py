@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
@@ -20,9 +21,11 @@ from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import MCPToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
+from .geometry import ComputerGeometry
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
+        BetaComputerToolset20260801Param,
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
         BetaToolUnionParam,
@@ -109,9 +112,14 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
             "*claude-haiku-4-5*",
         ),
     ),
+    ClaudeToolSpec(
+        api_type="computer_toolset_20260801",
+        api_name="computer",
+        supported_models=("*claude-sonnet-5-5*",),
+    ),
 )
 
-# Fallback for unknown Claude models — use the latest version.
+# Preserve the legacy schema for unrecognized Claude models.
 _DEFAULT_COMPUTER_SPEC = CLAUDE_COMPUTER_SPECS[0]
 
 GENERIC_COMPUTER_SPEC = ClaudeToolSpec(
@@ -181,6 +189,8 @@ _COMPUTER_INPUT_SCHEMA: dict[str, Any] = {
         },
         "repeat": {
             "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
             "description": "Times to repeat the key chord for `key`.",
         },
         "region": {
@@ -211,7 +221,14 @@ class ClaudeComputerTool(RFBTool):
 
     def to_params(
         self,
-    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param | BetaToolUnionParam:
+    ) -> (
+        BetaComputerToolset20260801Param
+        | BetaToolComputerUse20250124Param
+        | BetaToolComputerUse20251124Param
+        | BetaToolUnionParam
+    ):
+        if self.spec.api_type == "computer_toolset_20260801":
+            return cast("BetaComputerToolset20260801Param", {"type": "computer_toolset_20260801"})
         if self.spec.api_type == "function":
             return cast(
                 "BetaToolUnionParam",
@@ -248,9 +265,39 @@ class ClaudeComputerTool(RFBTool):
             },
         )
 
+    def _geometry(self) -> ComputerGeometry | None:
+        if self.spec.api_type == "computer_toolset_20260801":
+            return ComputerGeometry(self.display_width, self.display_height)
+        return None
+
+    async def screenshot(self) -> MCPToolResult:
+        geometry = self._geometry()
+        if geometry is None:
+            return await super().screenshot()
+        data, _ = await self.client.screenshot_png("image/png")
+        return MCPToolResult(content=[geometry.screenshot(data, self.screenshot_encoding)])
+
     async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
         action = arguments.get("action")
         try:
+            geometry = self._geometry()
+            if geometry is not None:
+                arguments = dict(arguments)
+                for key in ("coordinate", "start_coordinate"):
+                    if arguments.get(key) is not None:
+                        x, y = _xy(arguments[key])
+                        arguments[key] = geometry.to_screen(
+                            _required(x, f"{key}.x"), _required(y, f"{key}.y")
+                        )
+            if self.spec.api_type == "computer_toolset_20260801" and action in {"wait", "hold_key"}:
+                duration = arguments.get("duration")
+                if (
+                    isinstance(duration, bool)
+                    or not isinstance(duration, (int, float))
+                    or not math.isfinite(duration)
+                    or not 0 <= duration <= 300
+                ):
+                    return tool_err("`duration` must be between 0 and 300 seconds")
             return await self._dispatch(action, arguments)
         except Exception as exc:
             logger.exception("ClaudeComputerTool action %s failed", action)
@@ -329,9 +376,10 @@ class ClaudeComputerTool(RFBTool):
                 )
                 if not chords:
                     return tool_err("`text` (key chord) is required for key")
-                repeat = arguments.get("repeat")
-                count = repeat if isinstance(repeat, int) and repeat > 0 else 1
-                for _ in range(min(count, 100)):
+                repeat = arguments.get("repeat", 1)
+                if type(repeat) is not int or not 1 <= repeat <= 100:
+                    return tool_err("`repeat` must be an integer from 1 to 100")
+                for _ in range(repeat):
                     for chord in chords:
                         await self.press_keys(chord)
 
@@ -340,7 +388,10 @@ class ClaudeComputerTool(RFBTool):
                 if not keys:
                     return tool_err("`text` is required for hold_key")
                 duration = _ms_from_seconds(arguments.get("duration"))
-                await self.hold_key(keys[0], duration_ms=duration)
+                async with self._with_keys(keys):
+                    await self.client.drain()
+                    await self.wait(duration)
+                await self.client.drain()
 
             case "scroll":
                 x, y = _xy(arguments.get("coordinate"))
@@ -364,12 +415,15 @@ class ClaudeComputerTool(RFBTool):
 
             case "cursor_position":
                 mouse = self.client.conn.mouse
-                return tool_ok(f"({mouse.x}, {mouse.y})")
+                geometry = self._geometry()
+                x, y = geometry.from_screen(mouse.x, mouse.y) if geometry else (mouse.x, mouse.y)
+                return tool_ok(f"({x}, {y})")
 
             case _:
                 return tool_err(f"unsupported computer action: {action!r}")
 
-        # Most actions return the post-action screenshot so the model can verify.
+        if self.spec.api_type == "computer_toolset_20260801":
+            return tool_ok("OK")
         return await self.screenshot()
 
     # ─── zoom ────────────────────────────────────────────────────────
@@ -386,6 +440,11 @@ class ClaudeComputerTool(RFBTool):
         except (TypeError, ValueError):
             return tool_err("region must contain 4 integers")
         screenshot, _ = await self.client.screenshot_png("image/png")
+        geometry = self._geometry()
+        if geometry is not None:
+            return MCPToolResult(
+                content=[geometry.zoom(screenshot, (x0, y0, x1, y1), self.screenshot_encoding)]
+            )
         cropped, mime_type = _crop_png(screenshot, (x0, y0, x1, y1), self.screenshot_encoding)
         return MCPToolResult(
             content=[

@@ -155,6 +155,7 @@ class MCPToolCall(CallToolRequestParams):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
     annotation: str | None = None  # Optional explanation of why this action is taken
     provider_name: str | None = None  # Original provider tool name when it differs from MCP name
+    toolset_name: str | None = None  # Provider namespace for native toolset members
     #: Widened to admit the raw provider string when it didn't parse as JSON;
     #: a str is never executed — dispatch answers it with an error result.
     arguments: dict[str, Any] | str | None = None

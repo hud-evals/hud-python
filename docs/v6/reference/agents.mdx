@@ -70,6 +70,15 @@ filesystem. SSH-only runs support POSIX and Windows workspaces; `ClaudeCLIAgent`
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 
+`ClaudeAgent` uses the native `computer_toolset_20260801` protocol for Sonnet 5.5 on the
+Claude API and HUD gateway. It executes namespaced actions in order, stops the remaining batch after
+a computer action fails, and returns all results together. Bedrock retains `computer_20251124`; older Claude
+models retain their existing computer schemas. Toolset screenshots and zoom crops fit the model's
+visual-token limit and a 2000 px edge limit that remains valid for long image histories; pointer and
+cursor coordinates use the resized screenshot's space. See Anthropic's
+[Sonnet 5.5 migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide#computer-use-needs-the-toolset-on-the-claude-api-and-google-cloud)
+and [computer toolset contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool).
+
 `OpenAIConfig.max_output_tokens` and `GeminiConfig.max_output_tokens` are unset by default, so each request gets the model's own output limit. Set them to cap output per turn. Gemini counts thinking tokens toward the cap, so a low cap can truncate a thinking model before it answers.
 
 `GeminiConfig.temperature`, `top_p`, and `top_k` are unset by default, so each request uses the model's own sampling; Gemini 4 models ignore them. `GeminiConfig.thinking_level` accepts `minimal`, `low`, `medium`, or `high`, subject to the model (Gemini 4 Argon rejects `minimal`); unset uses the model's default.
