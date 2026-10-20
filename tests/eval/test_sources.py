@@ -1,5 +1,5 @@
-"""Local providers serve an environment from the source a user has: a file, a directory,
-a package, a live instance, or a constructor, in this process or in a child process."""
+"""``LocalRuntime`` and ``SubprocessRuntime`` serve an environment from the source a user
+has: a file, a directory, a package, a live instance, or a constructor."""
 
 from __future__ import annotations
 
@@ -7,144 +7,129 @@ import asyncio
 import os
 import signal
 import subprocess
-import sys
 import textwrap
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.environment import Environment, load_environment
+from hud import Environment
+from hud.agents.base import Agent
+from hud.environment import load_environment
 from hud.eval import LocalRuntime, SubprocessRuntime, Task, Taskset, rollout
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.environments import lab, minted, solve
 from tests.support import eventually
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    from hud.eval import Provider
-
-LOGGED_ENV = """
-import asyncio
-from pathlib import Path
-
-from hud import Environment
-
-LOG = Path({log!r})
-with LOG.open("a") as log:
-    log.write("import\\n")
-
-env = Environment("{name}")
+    from hud.eval import Run
 
 
-@env.initialize
-async def start():
-    with LOG.open("a") as log:
-        log.write("start\\n")
-    await asyncio.sleep(0)
+def write(path: Path, source: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(source))
+    return path
 
 
-@env.shutdown
-async def stop():
-    with LOG.open("a") as log:
-        log.write("stop\\n")
-
-
-@env.template()
-async def add(a: int, b: int):
-    answer = yield f"add {{a}} {{b}}"
-    yield 1.0 if answer == str(a + b) else 0.0
-"""
-
-
-class Project:
-    """A source tree on disk whose environment logs its imports and lifecycle."""
-
-    def __init__(self, root: Path, request: pytest.FixtureRequest) -> None:
-        self.root = root
-        self.log = root / "lifecycle.log"
-        self.package = root / f"project_{abs(hash(root)):x}"
-        self.package.mkdir()
-        request.addfinalizer(self.forget)
-
-    def module(self, name: str = "sums", *, env: str = "lab") -> Path:
-        path = self.package / f"{self.package.name}_{name}.py"
-        path.write_text(LOGGED_ENV.format(log=str(self.log), name=env))
-        return path
-
-    def entry(self, text: str) -> Path:
-        path = self.package / "env.py"
-        path.write_text(text)
-        return path
-
-    def lines(self) -> list[str]:
-        return self.log.read_text().splitlines() if self.log.exists() else []
-
-    def forget(self) -> None:
-        for name, module in sys.modules.copy().items():
-            file = getattr(module, "__file__", None)
-            if file and str(file).startswith(str(self.package)):
-                del sys.modules[name]
-
-
-def file_source(project: Project) -> Provider:
-    return LocalRuntime(project.module())
-
-
-def directory_source(project: Project) -> Provider:
-    project.module()
-    return LocalRuntime(project.package)
-
-
-def package_source(project: Project) -> Provider:
-    module = project.module().stem
-    (project.package / "__init__.py").write_text("")
-    return LocalRuntime(project.entry(f"from .{module} import env\n"))
-
-
-def shared_constructor(project: Project) -> Provider:
-    env = load_environment(project.module())
-    return LocalRuntime(lambda task: env)
-
-
-def subprocess_live_env(project: Project) -> Provider:
-    return SubprocessRuntime(load_environment(project.module()))
-
-
-SOURCES = {
-    "a file is imported per acquisition": (file_source, 1, ["import"] * 2),
-    "a directory is imported once": (directory_source, 2, ["import"]),
-    "a package entry with a relative import shares its env": (package_source, 2, ["import"]),
-    "a constructor returning one instance shares it": (shared_constructor, 2, ["import"]),
-    "a child process serves a live env from its template file": (
-        subprocess_live_env,
-        1,
-        ["import"] * 3,
-    ),
-}
-
-
-@pytest.mark.parametrize(("source", "concurrency", "imports"), SOURCES.values(), ids=SOURCES.keys())
-async def test_a_source_serves_its_rows_one_acquisition_at_a_time_per_instance(
-    source: Callable[[Project], Provider],
-    concurrency: int,
-    imports: list[str],
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
+@pytest.mark.parametrize(
+    ("source", "imports"),
+    [("counted/sums.py", 2), ("counted", 1)],
+    ids=["a-file-is-imported-for-each-rollout", "a-directory-is-imported-once"],
+)
+async def test_a_source_path_is_imported_to_serve_rollouts(
+    source: str, imports: int, tmp_path: Path
 ) -> None:
-    project = Project(tmp_path, request)
+    log = tmp_path / "imports.log"
+    write(
+        tmp_path / "counted" / "sums.py",
+        f"""
+        from pathlib import Path
 
-    job = await Task(env="lab", id="add", args={"a": 2, "b": 3}).run(
-        ScriptedAgent(solve), runtime=source(project), group=2, max_concurrent=concurrency
+        from hud import Environment
+
+        with Path({str(log)!r}).open("a") as log:
+            log.write("import\\n")
+
+        env = Environment("lab")
+
+
+        @env.template()
+        async def solve():
+            yield "go"
+            yield 1.0
+        """,
+    )
+
+    job = await Task(env="lab", id="solve").run(
+        ScriptedAgent("x"), runtime=LocalRuntime(tmp_path / source), group=2
     )
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
-    assert [line for line in project.lines() if line == "import"] == imports
-    assert [line for line in project.lines() if line != "import"] == ["start", "stop"] * 2
+    assert log.read_text().splitlines() == ["import"] * imports
 
 
-WHERE_ENV = """
+async def test_a_package_entry_serves_the_env_its_relative_import_brings_in(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / f"envs_{abs(hash(tmp_path)):x}"
+    write(package / "__init__.py", "")
+    write(
+        package / "sums.py",
+        """
+        from hud import Environment
+
+        env = Environment("lab")
+
+
+        @env.template()
+        async def solve():
+            yield "go"
+            yield 1.0
+        """,
+    )
+    entry = write(package / "env.py", "from .sums import env\n")
+
+    job = await Task(env="lab", id="solve").run(ScriptedAgent("x"), runtime=LocalRuntime(entry))
+
+    assert job.reward == 1.0
+
+
+async def test_a_second_copy_of_a_package_from_another_directory_is_refused(
+    tmp_path: Path,
+) -> None:
+    name = f"envs_{abs(hash(tmp_path)):x}"
+    for copy in ("first", "second"):
+        write(tmp_path / copy / name / "__init__.py", "")
+        write(
+            tmp_path / copy / name / "env.py",
+            """
+            from hud import Environment
+
+            env = Environment("lab")
+
+
+            @env.template()
+            async def solve():
+                yield "go"
+                yield 1.0
+            """,
+        )
+    row = Task(env="lab", id="solve")
+
+    first = await row.run(
+        ScriptedAgent("x"), runtime=LocalRuntime(tmp_path / "first" / name / "env.py")
+    )
+    second = await row.run(
+        ScriptedAgent("x"), runtime=LocalRuntime(tmp_path / "second" / name / "env.py")
+    )
+
+    assert first.reward == 1.0
+    assert f"package {name!r} is already imported from a different source root" in (
+        second.runs[0].trace.error or ""
+    )
+
+
+WHERE = """
 from pathlib import Path
 
 from hud import Environment
@@ -154,73 +139,49 @@ env = Environment("{name}")
 
 @env.template()
 async def where():
-    answer = yield f"{name} serves from {{Path.cwd()}}"
+    yield f"{name} serves from {{Path.cwd()}}"
     yield 1.0
 """
 
 
-@pytest.mark.parametrize("provider", [LocalRuntime, SubprocessRuntime])
-async def test_env_picks_one_of_several_environments_a_source_defines(
-    provider: Callable[..., Provider], tmp_path: Path
+@pytest.mark.parametrize("serve", [LocalRuntime, SubprocessRuntime])
+async def test_one_source_serves_each_rows_env_unless_env_pins_one(
+    serve: type[LocalRuntime | SubprocessRuntime], tmp_path: Path
 ) -> None:
-    source = tmp_path / "project"
-    source.mkdir()
-    (source / "alpha.py").write_text(WHERE_ENV.format(name="alpha"))
-    (source / "beta.py").write_text(WHERE_ENV.format(name="beta"))
-    (source / "env.py").write_text("from alpha import env as alpha\nfrom beta import env as beta\n")
-    agent = ScriptedAgent("ok")
-
-    job = await Task(env="alpha", id="where").run(
-        agent, runtime=provider(source / "env.py", env="beta")
+    root = tmp_path / "project"
+    write(root / "alpha.py", WHERE.format(name="alpha"))
+    write(root / "beta.py", WHERE.format(name="beta"))
+    source = write(
+        root / "env.py", "from alpha import env as alpha\nfrom beta import env as beta\n"
     )
+    rows = [Task(env=name, id="where", slug=name) for name in ("alpha", "beta")]
+    prompts = []
 
-    assert job.runs[0].reward == 1.0
-    assert agent.prompts == [
-        f"beta serves from {source if provider is SubprocessRuntime else os.getcwd()}"
-    ]
+    class Reader(Agent):
+        async def __call__(self, run: Run) -> None:
+            prompts.append(run.prompt_text.split(" serves")[0])
 
+    await Taskset("mixed", rows).run(Reader(), runtime=serve(source), max_concurrent=1)
+    await Taskset("mixed", rows).run(Reader(), runtime=serve(source, env="beta"), max_concurrent=1)
 
-async def test_distinct_instances_from_a_constructor_run_concurrently() -> None:
-    built: list[str] = []
-    started = 0
-    all_started = asyncio.Event()
-
-    def build(task: Task) -> Environment:
-        built.append(task.slug)
-        env = lab()
-
-        @env.initialize
-        async def barrier() -> None:
-            nonlocal started
-            started += 1
-            if started == 3:
-                all_started.set()
-            await all_started.wait()
-
-        return env
-
-    row = Task(env="lab", id="add", args={"a": 1, "b": 2})
-    job = await row.run(ScriptedAgent(solve), runtime=LocalRuntime(build, ready_timeout=5), group=3)
-
-    assert [run.reward for run in job.runs] == [1.0, 1.0, 1.0]
-    assert built == [row.slug] * 3
+    assert prompts == ["alpha", "beta", "beta", "beta"]
 
 
-def rows_of_two_envs(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
-    project = Project(tmp_path, request)
-    alpha, beta = project.module("alpha", env="alpha"), project.module("beta", env="beta")
-    source = project.entry(
-        f"from {alpha.stem} import env as alpha\nfrom {beta.stem} import env as beta\n"
-    )
-    rows = [
-        Task(env="alpha", id="add", args={"a": 1, "b": 2}),
-        Task(env="beta", id="add", args={"a": 3, "b": 4}),
-    ]
-    return Taskset("mixed", rows), LocalRuntime(source)
+async def test_a_child_process_serves_from_its_sources_directory(tmp_path: Path) -> None:
+    source = write(tmp_path / "project" / "env.py", WHERE.format(name="lab"))
+    prompts = []
+
+    class Reader(Agent):
+        async def __call__(self, run: Run) -> None:
+            prompts.append(run.prompt_text)
+
+    await Task(env="lab", id="where").run(Reader(), runtime=SubprocessRuntime(source))
+
+    assert prompts == [f"lab serves from {tmp_path / 'project'}"]
 
 
-def a_template_importing_a_sibling(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
-    (tmp_path / "lazy_helper.py").write_text("SUFFIX = ''\n")
+async def test_a_template_can_import_a_sibling_module_while_it_runs(tmp_path: Path) -> None:
+    write(tmp_path / "lazy_helper.py", "ANSWER = 'from the sibling'\n")
     source = write(
         tmp_path / "env.py",
         """
@@ -230,163 +191,179 @@ def a_template_importing_a_sibling(tmp_path: Path, request: pytest.FixtureReques
 
 
         @env.template()
-        async def add(a: int, b: int):
+        async def solve():
             import lazy_helper
 
-            answer = yield f"add {a} {b}{lazy_helper.SUFFIX}"
-            yield 1.0 if answer == str(a + b) else 0.0
+            answer = yield "go"
+            yield 1.0 if answer == lazy_helper.ANSWER else 0.0
         """,
     )
-    return Taskset("lazy", [Task(env="lab", id="add", args={"a": 2, "b": 3})]), LocalRuntime(source)
+
+    job = await Task(env="lab", id="solve").run(
+        ScriptedAgent("from the sibling"), runtime=LocalRuntime(source)
+    )
+
+    assert job.reward == 1.0
 
 
-def rows_a_live_env_minted(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
-    return Taskset("live", [minted()]), None
+async def test_a_constructor_builds_an_env_for_each_rollout_and_they_run_at_once() -> None:
+    built = []
+    started = asyncio.Event()
 
-
-def a_module_taskset(tmp_path: Path, request: pytest.FixtureRequest) -> Any:
-    source = write(
-        tmp_path / "tasks.py",
-        """
-        from hud import Environment
-
+    def build(task: Task) -> Environment:
+        built.append(task.slug)
         env = Environment("lab")
 
+        @env.initialize
+        async def wait_for_the_others() -> None:
+            if len(built) == 3:
+                started.set()
+            await started.wait()
 
         @env.template()
-        async def add(a: int, b: int):
-            answer = yield f"add {a} {b}"
-            yield 1.0 if answer == str(a + b) else 0.0
+        async def solve():
+            yield "go"
+            yield 1.0
+
+        return env
+
+    row = Task(env="lab", id="solve")
+    job = await row.run(ScriptedAgent("x"), runtime=LocalRuntime(build, ready_timeout=5), group=3)
+
+    assert ([run.reward for run in job.runs], built) == ([1.0] * 3, [row.slug] * 3)
 
 
-        tasks = [add(a=2, b=3), add(a=4, b=5)]
-        """,
-    )
-    return Taskset.from_module(source), None
+def test_a_live_environment_serves_rollouts_from_one_event_loop_after_another() -> None:
+    env = Environment("lab")
 
+    @env.template()
+    async def solve():
+        yield "go"
+        yield 1.0
 
-TASKSETS: dict[str, Callable[[Path, pytest.FixtureRequest], Any]] = {
-    "one source serves each row's own env": rows_of_two_envs,
-    "a template imports a sibling module while it runs": a_template_importing_a_sibling,
-    "rows a live env minted run against it": rows_a_live_env_minted,
-    "a module's tasks run against the envs it defines": a_module_taskset,
-}
-
-
-@pytest.mark.parametrize("taskset", TASKSETS.values(), ids=TASKSETS.keys())
-async def test_a_taskset_runs_each_row_in_the_env_it_names(
-    taskset: Callable[[Path, pytest.FixtureRequest], Any],
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> None:
-    rows, runtime = taskset(tmp_path, request)
-
-    job = await rows.run(ScriptedAgent(solve), runtime=runtime, group=2, max_concurrent=2)
-
-    assert [run.reward for run in job.runs] == [1.0] * len(job.runs)
-    assert len(job.runs) == 2 * len(list(rows))
-
-
-def test_a_live_environment_serves_across_event_loops() -> None:
-    env = lab()
-    row = Task(env="lab", id="add", args={"a": 2, "b": 3})
-
-    rewards = [
-        asyncio.run(row.run(ScriptedAgent(solve), runtime=LocalRuntime(env), group=2)).reward
-        for _ in range(2)
-    ]
+    rewards = [asyncio.run(solve().run(ScriptedAgent("x"), group=2)).reward for _ in range(2)]
 
     assert rewards == [1.0, 1.0]
 
 
-def write(path: Path, source: str) -> Path:
-    path.write_text(textwrap.dedent(source))
-    return path
+async def test_a_child_process_serves_a_live_env_from_the_file_its_templates_are_in(
+    tmp_path: Path,
+) -> None:
+    source = write(tmp_path / "env.py", WHERE.format(name="lab"))
+
+    job = await Task(env="lab", id="where").run(
+        ScriptedAgent("x"), runtime=SubprocessRuntime(load_environment(source))
+    )
+
+    assert job.reward == 1.0
 
 
-ADD = Task(env="lab", id="add", args={"a": 2, "b": 3})
+@pytest.mark.filterwarnings("ignore:coroutine 'sleep' was never awaited:RuntimeWarning")
+@pytest.mark.parametrize(
+    ("source", "row_env", "error"),
+    [
+        pytest.param(
+            "from hud import Environment\n",
+            "other",
+            "ValueError",
+            id="a-source-without-the-rows-env",
+        ),
+        pytest.param(
+            "import asyncio\n\nasyncio.run(asyncio.sleep(0))\n",
+            "lab",
+            "the env source ran async code while being imported to place a rollout — guard "
+            'top-level run calls with `if __name__ == "__main__":`',
+            id="a-source-that-runs-an-event-loop-at-import",
+        ),
+    ],
+)
+async def test_a_source_that_cannot_serve_the_row_fails_the_run(
+    source: str, row_env: str, error: str, tmp_path: Path
+) -> None:
+    path = write(tmp_path / "env.py", source)
+
+    run = await rollout(
+        Task(env=row_env, id="solve"), ScriptedAgent("x"), runtime=LocalRuntime(path)
+    )
+
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert error in (run.trace.error or "")
 
 
-def failing_initialize(events: list[str]) -> Environment:
-    env = lab(events)
+async def test_a_constructor_that_returns_something_else_fails_the_run() -> None:
+    def build(task: Task) -> Any:
+        return "lab"
+
+    run = await rollout(
+        Task(env="lab", id="solve"), ScriptedAgent("x"), runtime=LocalRuntime(build)
+    )
+
+    assert (
+        run.trace.error
+        == "[provisioning] TypeError: LocalRuntime: constructor returned 'lab', not an Environment"
+    )
+
+
+async def test_an_in_process_env_is_torn_down_while_a_peer_still_holds_a_connection() -> None:
+    env = Environment("lab")
+
+    @env.template()
+    async def solve():
+        yield "go"
+        yield 1.0
+
+    held = []
+
+    class HoldsAConnection(Agent):
+        async def __call__(self, run: Run) -> None:
+            assert run.runtime is not None
+            host, port = run.runtime.removeprefix("tcp://").rsplit(":", 1)
+            held.append(await asyncio.open_connection(host, int(port)))
+
+    job = await asyncio.wait_for(solve().run(HoldsAConnection()), timeout=10)
+
+    assert job.reward == 1.0
+    ((_, writer),) = held
+    writer.close()
+
+
+async def test_an_env_whose_initialize_raises_is_still_shut_down() -> None:
+    events = []
+    env = Environment("lab")
 
     @env.initialize
     async def explode() -> None:
         raise RuntimeError("daemon failed to start")
 
-    return env
+    @env.shutdown
+    async def down() -> None:
+        events.append("shut down")
+
+    @env.template()
+    async def solve():
+        yield "go"
+        yield 1.0
+
+    job = await solve().run(ScriptedAgent("x"))
+
+    assert "daemon failed to start" in (job.runs[0].trace.error or "")
+    assert events == ["shut down"]
 
 
-CLOSES_STDOUT = """
-import os
-import sys
-import time
+async def test_a_missing_source_fails_the_run(tmp_path: Path) -> None:
+    run = await rollout(
+        Task(env="lab", id="solve"),
+        ScriptedAgent("x"),
+        runtime=SubprocessRuntime(tmp_path / "missing.py"),
+    )
 
-print("stdout closed", file=sys.stderr, flush=True)
-os.close(1)
-time.sleep(60)
-"""
-ACQUISITION_ERRORS: dict[
-    str, tuple[Callable[[Path, list[str]], Provider], Task, Any, tuple[str, ...], list[str]]
-] = {
-    "a source without the row's env": (
-        lambda tmp, events: LocalRuntime(write(tmp / "env.py", "from hud import Environment\n")),
-        Task(env="other", id="add"),
-        ValueError,
-        (),
-        [],
-    ),
-    "a source running an event loop at import": (
-        lambda tmp, events: LocalRuntime(
-            write(tmp / "env.py", "import asyncio\n\nasyncio.run(asyncio.sleep(0))\n")
-        ),
-        ADD,
-        RuntimeError,
-        ("guard top-level run calls",),
-        [],
-    ),
-    "an initialize hook that raises still shuts down": (
-        lambda tmp, events: LocalRuntime(failing_initialize(events)),
-        ADD,
-        RuntimeError,
-        (),
-        ["initialize", "shutdown"],
-    ),
-    "a child that closes stdout before serving": (
-        lambda tmp, events: SubprocessRuntime(write(tmp / "env.py", CLOSES_STDOUT)),
-        ADD,
-        RuntimeError,
-        ("spawned env closed stdout before serving", "stdout closed"),
-        [],
-    ),
-}
+    assert run.trace.error == (
+        f"[provisioning] FileNotFoundError: SubprocessRuntime: source not found: "
+        f"{tmp_path / 'missing.py'}"
+    )
 
 
-@pytest.mark.filterwarnings("ignore:coroutine 'sleep' was never awaited:RuntimeWarning")
-@pytest.mark.parametrize(
-    ("provider", "row", "error", "messages", "lifecycle"),
-    ACQUISITION_ERRORS.values(),
-    ids=ACQUISITION_ERRORS.keys(),
-)
-async def test_a_source_that_cannot_serve_fails_the_run_naming_the_mistake(
-    provider: Callable[[Path, list[str]], Provider],
-    row: Task,
-    error: type[Exception],
-    messages: tuple[str, ...],
-    lifecycle: list[str],
-    tmp_path: Path,
-) -> None:
-    events: list[str] = []
-
-    run = await rollout(row, ScriptedAgent("x"), runtime=provider(tmp_path, events))
-
-    assert (run.trace.status, run.prompt) == ("error", None)
-    assert f"{error.__name__}" in (run.trace.error or "")
-    assert [message for message in messages if message not in (run.trace.error or "")] == []
-    assert events == lifecycle
-
-
-def process_is_gone(pid: int) -> bool:
+def gone(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -397,8 +374,7 @@ def process_is_gone(pid: int) -> bool:
     return status.stdout.strip().startswith("Z")
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
-async def test_a_child_that_dies_before_serving_reports_its_output_and_takes_its_children(
+async def test_a_child_that_exits_before_serving_reports_its_output_and_takes_its_children(
     tmp_path: Path,
 ) -> None:
     source = write(
@@ -423,18 +399,43 @@ async def test_a_child_that_dies_before_serving_reports_its_output_and_takes_its
     )
 
     run = await rollout(
-        Task(env="leaky", id="noop"), ScriptedAgent("x"), runtime=SubprocessRuntime(source)
+        Task(env="leaky", id="solve"), ScriptedAgent("x"), runtime=SubprocessRuntime(source)
     )
 
-    error = run.trace.error or ""
-    assert f"spawned env exited with code 3 before serving (source: {source}):\n" in error
-    assert "daemon starting" in error
+    assert f"spawned env exited with code 3 before serving (source: {source}):\n" in (
+        run.trace.error or ""
+    )
+    assert "daemon starting" in (run.trace.error or "")
     pid = int((tmp_path / "child.pid").read_text())
     try:
-        await eventually(lambda: process_is_gone(pid), within=5)
+        await eventually(lambda: gone(pid), within=5)
     finally:
-        if not process_is_gone(pid):
+        if not gone(pid):
             os.kill(pid, signal.SIGKILL)
+
+
+async def test_a_child_that_closes_its_output_before_serving_fails_the_run(
+    tmp_path: Path,
+) -> None:
+    source = write(
+        tmp_path / "env.py",
+        """
+        import os
+        import sys
+        import time
+
+        print("closing stdout", file=sys.stderr, flush=True)
+        os.close(1)
+        time.sleep(60)
+        """,
+    )
+
+    run = await rollout(
+        Task(env="lab", id="solve"), ScriptedAgent("x"), runtime=SubprocessRuntime(source)
+    )
+
+    assert "spawned env closed stdout before serving" in (run.trace.error or "")
+    assert "closing stdout" in (run.trace.error or "")
 
 
 async def test_a_child_streams_its_output_to_the_terminal(
@@ -456,11 +457,22 @@ async def test_a_child_streams_its_output_to_the_terminal(
             print("environment booted", flush=True)
             print("y" * 100_000, file=sys.stderr, flush=True)
             print("environment warning", file=sys.stderr, flush=True)
+
+
+        @env.template()
+        async def solve():
+            print("solving", flush=True)
+            yield "go"
+            yield 1.0
         """,
     )
 
-    await rollout(ADD, ScriptedAgent(solve), runtime=SubprocessRuntime(source))
+    job = await Task(env="lab", id="solve").run(
+        ScriptedAgent("x"), runtime=SubprocessRuntime(source)
+    )
 
     out, err = capfd.readouterr()
+    assert job.reward == 1.0
     assert "x" * 100_000 + "\nenvironment booted\n" in out
+    assert "solving\n" in out
     assert "y" * 100_000 + "\nenvironment warning\n" in err

@@ -1,285 +1,279 @@
-"""Verifier tasks: the grade of record comes from a second, agent-less task.
+"""Verifier tasks: an agent-less second task whose grade is the run's grade of record.
 
-The actor (``solve``) grades 0.25 and hands its answer on; the judge (``verify``)
-pays 1.0 only when that answer was ``secret``. A reward of 1.0 therefore proves
-the actor's result reached the verifier through its grade frame. The session files
-a verifier in its own sandbox receives are a contract of every runtime
-(``test_runtimes``).
+The actor's ``solve`` grades 0.25 and hands its answer on; the judge's ``verify`` pays
+1.0 only when that answer was ``secret``. A reward of 1.0 proves the actor's result
+reached the verifier.
 """
 
 from __future__ import annotations
 
-import contextlib
+import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel
 
 from hud import Environment
-from hud.eval import (
-    HUDRuntime,
-    LocalRuntime,
-    Runtime,
-    RuntimeConfig,
-    RuntimeLimits,
-    Task,
-)
+from hud.agents.base import Agent
+from hud.eval import LocalRuntime, Runtime, RuntimeConfig, RuntimeLimits, Task
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.environments import actor, judge
-from tests.support import steps
-from tests.support.platform import host_on_runtime
+from tests.support import eventually
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from hud.eval import Provider
-    from tests.support import FakeServices, HudEnv
+    from hud.eval import Run
 
 
-class Recorded:
-    """Places each row with ``inner`` and records when placements start and stop."""
+async def test_a_verifier_on_its_own_env_runs_after_the_actors_env_is_torn_down() -> None:
+    events = []
+    actor = Environment("actor")
+    judge = Environment("judge")
 
-    def __init__(self, inner: Provider) -> None:
-        self.inner = inner
-        self.events: list[tuple[str, str]] = []
+    @actor.initialize
+    async def actor_up() -> None:
+        events.append("actor up")
 
-    @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        self.events.append(("start", task.slug))
-        try:
-            async with self.inner(task) as runtime:
-                yield runtime
-        finally:
-            self.events.append(("stop", task.slug))
+    @actor.shutdown
+    async def actor_down() -> None:
+        events.append("actor down")
 
+    @judge.initialize
+    async def judge_up() -> None:
+        events.append("judge up")
 
-OWN_LIMITS = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=20))
+    @judge.shutdown
+    async def judge_down() -> None:
+        events.append("judge down")
 
+    @actor.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
-def by_env(providers: dict[str, Provider]) -> Provider:
-    """Place each row with the provider for its environment."""
+    @judge.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
 
-    def place(task: Task) -> Any:
-        return providers[task.env](task)
-
-    return place
-
-
-def portable(provider: Provider) -> Provider:
-    """Place rows without their runtime_config, as a provider that cannot size them would."""
-
-    def place(task: Task) -> Any:
-        return provider(task.model_copy(update={"runtime_config": None}))
-
-    return place
-
-
-@asynccontextmanager
-async def unavailable(task: Task) -> AsyncIterator[Runtime]:
-    raise RuntimeError("verifier unavailable")
-    yield Runtime("tcp://127.0.0.1:1")
-
-
-def separate(
-    *, grade: str = "score", verdict: str = "check", judged: Provider | None = None
-) -> tuple[Task, Provider]:
-    """An actor row whose verifier runs on its own ``judge`` env."""
-    row = Task(env="actor", id="solve", verifier=Task(env="judge", id="verify"))
-    judging = judged or LocalRuntime(judge(verdict=verdict))
-    return row, by_env({"actor": LocalRuntime(actor(grade=grade)), "judge": judging})
-
-
-def evaluated(run: Any) -> list[str]:
-    """The tasks whose grade the trace records, in order."""
-    return [
-        step["task_call"]["name"]
-        for step in steps(run.trace_id)
-        if step["source"] == "task" and step["task_call"]["phase"] == "evaluate"
-    ]
-
-
-@pytest.mark.parametrize(
-    ("own_runtime", "same_env", "tunneled", "placements", "warned"),
-    [
-        pytest.param(
-            False,
-            False,
-            False,
-            ["start:solve", "stop:solve", "start:verify", "stop:verify"],
-            False,
-            id="on-its-own-env-after-the-actor",
-        ),
-        pytest.param(
-            False,
-            True,
-            False,
-            ["start:solve", "stop:solve"],
-            False,
-            id="on-the-actors-env-sharing-its-substrate",
-        ),
-        pytest.param(
-            True,
-            True,
-            False,
-            ["start:solve", "stop:solve"],
-            True,
-            id="with-its-own-runtime-beside-an-actor-that-cannot-move-its-session",
-        ),
-        pytest.param(
-            True,
-            True,
-            True,
-            ["start:solve", "stop:solve"],
-            True,
-            id="with-its-own-runtime-beside-an-actor-on-the-hud-tunnel",
-        ),
-    ],
-)
-async def test_the_verifier_grade_is_the_grade_of_record_wherever_it_runs(
-    own_runtime: bool,
-    same_env: bool,
-    tunneled: bool,
-    placements: list[str],
-    warned: bool,
-    caplog: pytest.LogCaptureFixture,
-    services: FakeServices,
-    hud_env: HudEnv,
-) -> None:
-    reviewed = LocalRuntime(judge(actor(Environment("reviewed"))))
-    if same_env:
-        own = OWN_LIMITS if own_runtime else None
-        row = Task(
-            env="reviewed",
-            id="solve",
-            verifier=Task(env="reviewed", id="verify", runtime_config=own),
-        )
-        inner: Provider = portable(reviewed)
-    else:
-        row, inner = separate()
-
-    async with contextlib.AsyncExitStack() as stack:
-        if tunneled:
-            hud_env.set(HUD_API_KEY="k")
-            served = await stack.enter_async_context(reviewed(Task(env="reviewed", id="serve")))
-            host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
-            inner = HUDRuntime()
-        recording = Recorded(inner)
-        job = await row.run(ScriptedAgent("secret"), runtime=recording, rollout_timeout=30)
+    task = solve()
+    task.verifier = verify()
+    job = await task.run(ScriptedAgent("secret"))
 
     (run,) = job.runs
-    assert (run.reward, run.trace.status, run in job.errors) == (1.0, "completed", False)
-    assert [f"{event}:{slug}" for event, slug in recording.events] == placements
-    assert evaluated(run) == ["solve", "verify"]
-    assert ("verifier runtime_config ignored" in caplog.text) is warned
+    assert (run.reward, run.trace.status) == (1.0, "completed")
+    assert events == ["actor up", "actor down", "judge up", "judge down"]
 
 
-EXPLODED = RuntimeError("agent exploded")
+async def test_a_verifier_on_the_actors_env_grades_on_the_same_substrate() -> None:
+    events = []
+    env = Environment("reviewed")
+
+    @env.initialize
+    async def up() -> None:
+        events.append("up")
+
+    @env.shutdown
+    async def down() -> None:
+        events.append("down")
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        events.append("actor graded")
+        yield {"score": 0.25, "answer": answer}
+
+    @env.template()
+    async def verify():
+        result = yield ""
+        events.append("verifier graded")
+        yield 1.0 if result["answer"] == "secret" else 0.0
+
+    task = solve()
+    task.verifier = verify()
+    job = await task.run(ScriptedAgent("secret"))
+
+    assert job.runs[0].reward == 1.0
+    assert events == ["up", "actor graded", "verifier graded", "down"]
+
+
+async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_cannot_move(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events = []
+    env = Environment("reviewed")
+
+    @env.initialize
+    async def up() -> None:
+        events.append("up")
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
+
+    @env.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
+
+    task = solve()
+    task.verifier = verify()
+    task.verifier.runtime_config = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=20))
+    async with LocalRuntime(env)(task.model_copy(update={"verifier": None})) as served:
+        job = await task.run(ScriptedAgent("secret"), runtime=Runtime(served.url))
+
+    assert (job.runs[0].reward, events) == (1.0, ["up"])
+    assert "verifier runtime_config ignored: Runtime cannot transport the actor's session" in (
+        caplog.text
+    )
 
 
 @pytest.mark.parametrize(
-    ("agent", "grade", "verdict", "judged", "outcome", "phase", "graded"),
+    ("grading", "verdict", "reward", "error", "graded"),
     [
         pytest.param(
-            ScriptedAgent("secret", fail_after=EXPLODED),
-            "score",
-            "check",
-            None,
-            (1.0, {"score": 1.0}, False),
-            "[agent loop]",
-            ["solve", "verify"],
-            id="the-agent-raised-after-answering-and-the-verdict-stands",
-        ),
-        pytest.param(
-            ScriptedAgent("secret", fail_after=EXPLODED),
-            "score",
-            "zero",
-            None,
-            (0.0, {"score": 0.0}, False),
-            "[agent loop]",
-            ["solve", "verify"],
-            id="a-zero-verdict-on-an-errored-run-still-counts",
-        ),
-        pytest.param(
-            ScriptedAgent("secret"),
             "raise",
             "check",
-            None,
-            (1.0, {"score": 1.0}, False),
-            "[grading]",
-            ["verify"],
-            id="actor-grading-raised",
+            1.0,
+            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: "
+            "actor grade exploded",
+            True,
+            id="the-actors-grader-raised",
         ),
         pytest.param(
-            ScriptedAgent("secret"),
             "scoreless",
             "check",
-            None,
-            (1.0, {"score": 1.0}, False),
-            "[grading]",
-            ["verify"],
+            1.0,
+            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: "
+            "task 'solve' graded with a dict missing a numeric 'score' (keys: ['answer'])",
+            True,
             id="a-scoreless-actor-grade",
         ),
         pytest.param(
-            ScriptedAgent("secret"),
             "score",
             "raise",
-            None,
-            (0.0, {}, True),
-            "[verifying]",
-            ["solve"],
+            0.0,
+            "[verifying] hud.clients.client.HudProtocolError: hud rpc error -32000: "
+            "verifier exploded",
+            False,
             id="the-verifier-raised",
         ),
         pytest.param(
-            ScriptedAgent("secret"),
             "score",
             "scoreless",
-            None,
-            (0.0, {}, True),
-            "[verifying]",
-            ["solve"],
+            0.0,
+            "[verifying] hud.clients.client.HudProtocolError: hud rpc error -32000: "
+            "task 'verify' graded with a dict missing a numeric 'score' (keys: ['verdict'])",
+            False,
             id="a-scoreless-verdict",
         ),
-        pytest.param(
-            ScriptedAgent("secret"),
-            "score",
-            "check",
-            unavailable,
-            (0.0, {}, True),
-            "[provisioning verifier]",
-            ["solve"],
-            id="the-verifier-could-not-be-placed",
-        ),
+        pytest.param("score", "zero", 0.0, None, True, id="a-zero-verdict"),
     ],
 )
-async def test_the_verifier_decides_the_grade_of_record_when_either_side_fails(
-    agent: ScriptedAgent,
-    grade: str,
-    verdict: str,
-    judged: Provider | None,
-    outcome: tuple[float, dict[str, Any], bool],
-    phase: str,
-    graded: list[str],
+async def test_the_verdict_is_the_grade_whichever_side_fails(
+    grading: str, verdict: str, reward: float, error: str | None, graded: bool
 ) -> None:
-    row, provider = separate(grade=grade, verdict=verdict, judged=judged)
+    actor = Environment("actor")
+    judge = Environment("judge")
 
-    job = await row.run(agent, runtime=provider, rollout_timeout=30)
+    @actor.template()
+    async def solve(grading: str):
+        answer = yield "answer secret"
+        if grading == "raise":
+            raise RuntimeError("actor grade exploded")
+        yield {"score": 0.25, "answer": answer} if grading == "score" else {"answer": answer}
+
+    @judge.template()
+    async def verify(verdict: str):
+        result = yield ""
+        if verdict == "raise":
+            raise RuntimeError("verifier exploded")
+        if verdict == "scoreless":
+            yield {"verdict": "pass"}
+        else:
+            yield 1.0 if verdict == "check" and result["answer"] == "secret" else 0.0
+
+    task = solve(grading=grading)
+    task.verifier = verify(verdict=verdict)
+    job = await task.run(ScriptedAgent("secret"))
 
     (run,) = job.runs
-    assert (run.reward, run.grade.raw, run in job.errors) == outcome
-    assert run.trace.status == "error"
-    assert str(run.trace.error).startswith(phase)
-    assert evaluated(run) == graded
+    assert (run.reward, run.trace.error, run in job.errors) == (reward, error, not graded)
 
 
-class ActorResult(BaseModel):
-    score: float
-    answer: str
+async def test_an_agent_that_fails_after_answering_is_still_judged() -> None:
+    actor = Environment("actor")
+    judge = Environment("judge")
+
+    @actor.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
+
+    @judge.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
+
+    class RaisesAfter(Agent):
+        async def __call__(self, run: Run) -> None:
+            run.trace.content = "secret"
+            raise RuntimeError("agent exploded")
+
+    task = solve()
+    task.verifier = verify()
+    job = await task.run(RaisesAfter())
+
+    (run,) = job.runs
+    assert (run.reward, run.trace.status, run.trace.error, job.errors) == (
+        1.0,
+        "error",
+        "[agent loop] RuntimeError: agent exploded",
+        [],
+    )
 
 
-async def test_the_verifier_receives_the_actor_grade_as_its_declared_type() -> None:
-    received: list[Any] = []
-    env = actor(Environment("reviewed"))
+async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> None:
+    actor = Environment("actor")
+
+    @actor.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
+
+    @asynccontextmanager
+    async def actor_only(task: Task) -> AsyncIterator[Runtime]:
+        if task.env != "actor":
+            raise RuntimeError("no judge here")
+        async with LocalRuntime(actor)(task) as runtime:
+            yield runtime
+
+    task = solve()
+    task.verifier = Task(env="judge", id="verify")
+    job = await task.run(ScriptedAgent("secret"), runtime=actor_only)
+
+    (run,) = job.runs
+    assert (run.reward, run.trace.error, job.errors) == (
+        0.0,
+        "[provisioning verifier] RuntimeError: no judge here",
+        [run],
+    )
+
+
+async def test_the_verifier_receives_the_actors_result_as_its_declared_type() -> None:
+    class ActorResult(BaseModel):
+        score: float
+        answer: str
+
+    received = []
+    env = Environment("reviewed")
+
+    @env.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
 
     @env.template(returns=ActorResult)
     async def verify():
@@ -287,8 +281,71 @@ async def test_the_verifier_receives_the_actor_grade_as_its_declared_type() -> N
         received.append(result.content)
         yield 1.0
 
-    row = Task(env="reviewed", id="solve", verifier=Task(env="reviewed", id="verify"))
-    job = await row.run(ScriptedAgent("secret"), runtime=LocalRuntime(env))
+    task = solve()
+    task.verifier = verify()
+    await task.run(ScriptedAgent("secret"))
 
     assert received == [ActorResult(score=0.25, answer="secret")]
-    assert job.reward == 1.0
+
+
+@pytest.mark.parametrize(
+    ("held", "reward", "error", "events"),
+    [
+        pytest.param(
+            "actor",
+            0.0,
+            "rollout timed out after 0.3s during actor cleanup",
+            ["actor down"],
+            id="in-the-actors-teardown-the-verifier-never-starts",
+        ),
+        pytest.param(
+            "judge",
+            1.0,
+            "rollout timed out after 0.3s during cleanup",
+            ["actor down", "judge up", "judge down"],
+            id="in-the-verifiers-teardown-the-verdict-stands",
+        ),
+    ],
+)
+async def test_a_rollout_timeout_in_teardown_returns_and_lets_teardown_finish(
+    held: str, reward: float, error: str, events: list[str]
+) -> None:
+    seen = []
+    release = asyncio.Event()
+    actor = Environment("actor")
+    judge = Environment("judge")
+
+    @actor.shutdown
+    async def actor_down() -> None:
+        if held == "actor":
+            await release.wait()
+        seen.append("actor down")
+
+    @judge.initialize
+    async def judge_up() -> None:
+        seen.append("judge up")
+
+    @judge.shutdown
+    async def judge_down() -> None:
+        if held == "judge":
+            await release.wait()
+        seen.append("judge down")
+
+    @actor.template()
+    async def solve():
+        answer = yield "answer secret"
+        yield {"score": 0.25, "answer": answer}
+
+    @judge.template()
+    async def verify():
+        result = yield ""
+        yield 1.0 if result["answer"] == "secret" else 0.0
+
+    task = solve()
+    task.verifier = verify()
+    job = await task.run(ScriptedAgent("secret"), rollout_timeout=0.3)
+    release.set()
+
+    (run,) = job.runs
+    assert (run.reward, run.trace.stop_reason, run.trace.error) == (reward, "timeout", error)
+    await eventually(lambda: seen == events)

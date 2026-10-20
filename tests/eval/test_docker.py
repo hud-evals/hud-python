@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from tests.support import HudEnv
+
 ECHO = Task(env="echo", id="echo", args={"word": "tangerine"})
 
 
@@ -192,9 +194,9 @@ def compose_file(tmp_path: Path, document: str, env_file: str = "") -> ComposePr
 @pytest.mark.e2e
 @pytest.mark.docker
 async def test_a_compose_project_serves_main_confined_through_its_network_owner(
-    fixture_image: Callable[[str], str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    fixture_image: Callable[[str], str], tmp_path: Path, hud_env: HudEnv
 ) -> None:
-    monkeypatch.setenv("HOST_ONLY", "from-the-host")
+    hud_env.set(HOST_ONLY="from-the-host")
     project = compose_file(
         tmp_path,
         f"""
