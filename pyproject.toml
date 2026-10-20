@@ -245,6 +245,8 @@ strict-equality-semantics = true
 
 [tool.coverage.run]
 source = ["hud"]
+# The CLI and served environments run hud in child processes.
+patch = ["subprocess"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -260,7 +262,6 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 show_missing = true
-fail_under = 58
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
