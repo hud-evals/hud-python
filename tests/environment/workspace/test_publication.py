@@ -21,7 +21,6 @@ from hud.clients import connect
 from hud.environment import Environment, Workspace
 from hud.environment.workspace import usable_bwrap
 from hud.eval import LocalRuntime, Task
-from tests.fixtures.environments import served
 
 from .conftest import SANDBOX, shell
 
@@ -42,7 +41,10 @@ async def test_a_workspace_lives_exactly_while_its_environment_serves(tmp_path: 
         async with connect(runtime) as client:
             again = client.binding("shell").params["host_pubkey"]
         backing_port = urlsplit(env.capability("shell").url).port
-    async with served(env):
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime),
+    ):
         restarted = [capability.name for capability in env.capabilities]
 
     assert declared == ([], False)
@@ -80,7 +82,10 @@ async def test_serving_publishes_the_bindings_its_settings_ask_for(
     env = Environment("ws-env")
     env.workspace(tmp_path / "root", **options)
 
-    async with served(env) as client:
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+    ):
         assert client.manifest is not None
         bindings = {binding.name: binding for binding in client.manifest.bindings}
         shell_binding = client.binding("shell")

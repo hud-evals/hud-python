@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from hud.clients import connect
 from hud.environment import Environment
+from hud.eval import LocalRuntime, Task
 from tests.environment.conftest import wire
-from tests.fixtures.environments import served
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -197,7 +198,10 @@ async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_re
     async def second_down() -> None:
         log.append("second down")
 
-    async with served(env):
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime),
+    ):
         seen_at_hello = list(log)
 
     assert seen_at_hello == ["first up", "second up"]

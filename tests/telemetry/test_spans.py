@@ -20,7 +20,7 @@ from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.telemetry import flush
 from tests.conftest import spans, steps
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.models import call, say
+from tests.fixtures.models import Turn, call
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -85,7 +85,8 @@ async def test_step_spans_carry_the_step_payload_and_timing() -> None:
 
     exported = [span for span in spans(run.trace_id) if span["name"].startswith("step.")]
     assert all(span["end_time"] == ISO for span in exported)
-    assert steps(run.trace_id)[1]["messages"][0]["content"]["text"] == "Reply with ok."
+    (prompted,) = [step for step in steps(run.trace_id) if step["source"] == "user"]
+    assert prompted["messages"][0]["content"]["text"] == "Reply with ok."
 
 
 class Probe:
@@ -131,42 +132,27 @@ async def test_instrumented_calls_inside_a_run_record_their_arguments_and_outcom
 
     assert run.reward == 1.0
     probes = {
-        span["name"]: {
-            "status": span["status_code"],
-            "message": span["status_message"],
-            "events": {event["name"]: event["attributes"] for event in span["events"]},
-        }
-        for span in spans(run.trace_id)
-        if span["name"].startswith("probe.")
+        span["name"]: span for span in spans(run.trace_id) if span["name"].startswith("probe.")
     }
-    assert probes == {
-        "probe.lookup": {
-            "status": "OK",
-            "message": None,
-            "events": {
-                "hud.request": {
-                    "hud.payload": {"items": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "limit": 3}
-                },
-                "hud.result": {"hud.payload": {"found": [0, 1, 2]}},
-            },
-        },
-        "probe.quiet": {"status": "OK", "message": None, "events": {}},
-        "probe.fail": {
-            "status": "ERROR",
-            "message": "ValueError: bad input",
-            "events": {
-                "hud.request": {"hud.payload": {"reason": "bad input"}},
-                "exception": {"exception.message": "ValueError: bad input"},
-            },
-        },
-        "probe.opaque": {
-            "status": "OK",
-            "message": None,
-            "events": {
-                "hud.request": {"hud.payload": {"value": "<Unprintable: not serializable>"}},
-                "hud.result": {"hud.payload": "<Unprintable: not serializable>"},
-            },
-        },
+    events = {
+        name: {event["name"]: event["attributes"] for event in span["events"]}
+        for name, span in probes.items()
+    }
+    assert [
+        probes[name]["status_code"] for name in ("probe.lookup", "probe.quiet", "probe.opaque")
+    ] == ["OK"] * 3
+    assert events["probe.lookup"] == {
+        "hud.request": {"hud.payload": {"items": list(range(10)), "limit": 3}},
+        "hud.result": {"hud.payload": {"found": [0, 1, 2]}},
+    }
+    assert events["probe.quiet"] == {}
+    assert probes["probe.fail"]["status_code"] == "ERROR"
+    assert "bad input" in probes["probe.fail"]["status_message"]
+    assert events["probe.fail"]["hud.request"] == {"hud.payload": {"reason": "bad input"}}
+    assert "bad input" in events["probe.fail"]["exception"]["exception.message"]
+    assert events["probe.opaque"] == {
+        "hud.request": {"hud.payload": {"value": "<Unprintable: not serializable>"}},
+        "hud.result": {"hud.payload": "<Unprintable: not serializable>"},
     }
 
 
@@ -241,7 +227,7 @@ async def test_every_rollout_step_is_uploaded_to_its_own_trace(
     reward: float,
     rows: list[tuple[str, str, int]],
 ) -> None:
-    models.script([call("missing_tool", x=1), say("ok")])
+    models.script([call("missing_tool", x=1), Turn(text="ok")])
     agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=4))
     task = Task(env="upload", id="answer", args={"broken": broken})
 

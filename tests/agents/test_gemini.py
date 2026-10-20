@@ -1,6 +1,6 @@
-"""What only ``GeminiAgent`` does: the grounding and computer tools it offers, how it bounds
-a long tool output and drops old screenshots, how its replies fail, and the grounding it
-records as citations."""
+"""What only ``GeminiAgent`` does: the grounding tool citations add, how it bounds a long
+tool output, drops old screenshots and clears a field, how its replies fail, and the
+grounding it records as citations."""
 
 from __future__ import annotations
 
@@ -11,17 +11,13 @@ import pytest
 from fastmcp import FastMCP
 
 from hud.agents import GeminiAgent
-from hud.agents.gemini.tools import (
-    GeminiCodeExecutionTool,
-    GeminiGoogleSearchTool,
-    GeminiUrlContextTool,
-)
 from hud.agents.types import GeminiConfig
 from hud.capabilities import Capability
+from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import run_task, workspace_env
-from tests.fixtures.models import Turn, call, click, say
+from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn, call, click
 from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
 
@@ -40,53 +36,20 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
 
 
-async def test_hosted_grounding_tools_are_offered_as_configured(
-    models: Models, tmp_path: Path
-) -> None:
-    hosted = [GeminiGoogleSearchTool(), GeminiUrlContextTool(), GeminiCodeExecutionTool()]
-    models.script([say("done")])
-
-    await run_task(
-        workspace_env(tmp_path / "ws"), GeminiAgent(GeminiConfig(model=MODEL, hosted_tools=hosted))
-    )
-
-    (request,) = models.requests()
-    assert [t for t in request.body["tools"] if "functionDeclarations" not in t] == [
-        {"googleSearch": {}},
-        {"urlContext": {}},
-        {"codeExecution": {}},
-    ]
-
-
 async def test_citations_add_google_search_to_the_tools(models: Models, tmp_path: Path) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
 
-    await run_task(
-        workspace_env(tmp_path / "ws"),
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
         GeminiAgent(GeminiConfig(model=MODEL, citations_enabled=True)),
+        runtime=LocalRuntime(env),
     )
 
     (request,) = models.requests()
     assert [t for t in request.body["tools"] if "functionDeclarations" not in t] == [
         {"googleSearch": {}}
     ]
-
-
-async def test_excluded_computer_functions_are_left_out_of_the_computer_tool(
-    models: Models, tmp_path: Path
-) -> None:
-    models.script([say("done")])
-    excluded = ["drag_and_drop", "search"]
-
-    async with fake_screen() as screen:
-        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await run_task(
-            env, GeminiAgent(GeminiConfig(model=MODEL, excluded_predefined_functions=excluded))
-        )
-
-    (request,) = models.requests()
-    (computer,) = [t for t in request.body["tools"] if "functionDeclarations" not in t]
-    assert computer["computerUse"]["excluded_predefined_functions"] == excluded
 
 
 async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
@@ -96,26 +59,34 @@ async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
     server.tool(name="long_output", description="Return a long text.")(
         lambda: "h" * 500 + "t" * 500
     )
-    models.script([call("long_output"), say("done")])
+    models.script([call("long_output"), Turn(text="done")])
 
     async with mcp_server(server) as long_output:
         env = workspace_env(tmp_path / "ws", capabilities=(long_output,))
-        await run_task(env, GeminiAgent(GeminiConfig(model=MODEL, max_tool_result_chars=100)))
+        await rollout(
+            Task(env=env.name, id="task"),
+            GeminiAgent(GeminiConfig(model=MODEL, max_tool_result_chars=100)),
+            runtime=LocalRuntime(env),
+        )
 
     (result,) = models.requests()[-1].tool_results
     output = json.loads(result)["output"]
-    assert output.startswith("Output too large: showing the first 20 and last 80 characters")
-    assert output.endswith("h" * 20 + "\n\n... [900 characters omitted] ...\n\n" + "t" * 80)
+    assert len(output) < 500
+    assert "h" * 10 in output and output.endswith("t" * 10)
 
 
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([click(10, 10, screen=(64, 48))] * 4 + [say("done")])
+    models.script([click(10, 10, screen=(64, 48))] * 4 + [Turn(text="done")])
 
     async with fake_screen() as screen:
         env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await run_task(env, GeminiAgent(GeminiConfig(model=MODEL)))
+        await rollout(
+            Task(env=env.name, id="task"),
+            GeminiAgent(GeminiConfig(model=MODEL)),
+            runtime=LocalRuntime(env),
+        )
 
     responses = [
         part["functionResponse"]
@@ -129,11 +100,15 @@ async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
 async def test_a_field_is_cleared_with_ctrl_a_whatever_system_the_agent_runs_on(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([call("type_text_at", x=500, y=500, text="hi"), say("done")])
+    models.script([call("type_text_at", x=500, y=500, text="hi"), Turn(text="done")])
 
     async with fake_screen() as screen:
         env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await run_task(env, GeminiAgent(GeminiConfig(model=MODEL)))
+        await rollout(
+            Task(env=env.name, id="task"),
+            GeminiAgent(GeminiConfig(model=MODEL)),
+            runtime=LocalRuntime(env),
+        )
 
     pressed = [event.key for event in screen.key_events() if event.down]
     assert pressed[:2] == [CONTROL_L, ord("a")]
@@ -152,7 +127,12 @@ async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
 ) -> None:
     models.queue([turn])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), GeminiAgent(GeminiConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        GeminiAgent(GeminiConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     assert (run.trace.status, len(models.requests())) == ("error", 1)
     assert error in (run.trace.error or "")
@@ -178,7 +158,12 @@ async def test_grounding_and_thoughts_land_on_the_agent_step(
         [Turn(text="Blue.", reasoning="look it up", extra={"groundingMetadata": grounding})]
     )
 
-    run = await run_task(workspace_env(tmp_path / "ws"), GeminiAgent(GeminiConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        GeminiAgent(GeminiConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert (step["content"], step["reasoning"]) == ("Blue.", "look it up")

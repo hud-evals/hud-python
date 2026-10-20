@@ -11,8 +11,6 @@ if TYPE_CHECKING:
 
     from starlette.websockets import WebSocket
 
-    from tests.fixtures.services import FakeServices
-
 SESSIONS = "/runtime/sessions"
 SESSION = "/runtime/sessions/{id}"
 TUNNEL = "/runtime/tunnels/{id}"
@@ -45,10 +43,3 @@ def tunnel(port: int) -> Callable[[WebSocket, dict[str, str]], Awaitable[None]]:
             await websocket.close()
 
     return handler
-
-
-def host_on_runtime(services: FakeServices, port: int, session: str = "sess-1") -> None:
-    """Let the fake runtime service lease ``session`` and tunnel it to the env on ``port``."""
-    services.route("runtime", "POST", SESSIONS, json={"id": session})
-    services.route("runtime", "DELETE", SESSION, json={})
-    services.websocket("runtime", TUNNEL, tunnel(port))

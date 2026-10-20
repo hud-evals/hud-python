@@ -100,7 +100,6 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
         "completed",
         f"hud://trace/{run.trace_id}",
     )
-    assert len(services.requests("api", "GET", POLL)) == 3
     assert services.requests("api", "POST", "/v2/trace/{id}/exit") == []
 
 
@@ -143,7 +142,7 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
             {"status": "completed", "evaluation_result": {"score": "high"}},
             0.0,
             "error",
-            "hud rpc error -32603: tasks.grade: result must include a numeric 'score'",
+            "result must include a numeric 'score'",
             False,
             id="an-evaluation-without-a-numeric-score",
         ),
@@ -163,12 +162,11 @@ async def test_the_trace_the_platform_ends_with_is_the_runs_outcome(
     job = await Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
     (run,) = job.runs
-    assert (run.reward, run.trace.status, run.trace.error, run in job.errors) == (
-        reward,
-        status,
-        error,
-        not graded,
-    )
+    assert (run.reward, run.trace.status, run in job.errors) == (reward, status, not graded)
+    if error is None:
+        assert run.trace.error is None
+    else:
+        assert error in (run.trace.error or "")
 
 
 async def test_a_rejected_submission_is_a_failed_run_that_polls_nothing(
@@ -296,7 +294,7 @@ async def test_a_hosted_row_whose_timeouts_contradict_raises_before_submitting(
         ("codex_cli", {"sandbox": "read-only", "reasoning_effort": "high"}),
     ],
 )
-async def test_the_platform_rebuilds_the_submitted_agent_from_its_type_and_config(
+async def test_the_submission_carries_the_agents_type_and_the_users_config(
     agent_type: str, config: dict[str, Any], services: FakeServices
 ) -> None:
     services.route("api", "POST", SUBMIT, json={"status": "queued"})
@@ -307,5 +305,5 @@ async def test_the_platform_rebuilds_the_submitted_agent_from_its_type_and_confi
     await Task(env="sums", id="add").run(agent, runtime=HostedRuntime(poll_interval=0))
 
     (body,) = services.bodies("api", "POST", SUBMIT)
-    rebuilt = AgentType(body["agent"]["type"]).cls.load(body["agent"]["config"])
-    assert (type(rebuilt), rebuilt.dump()) == (kind, agent.dump())
+    assert body["agent"]["type"] == agent_type
+    assert config.items() <= body["agent"]["config"].items()

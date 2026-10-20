@@ -1,7 +1,7 @@
 """What only ``RFBClient`` does: encoding the framebuffer as the caller asks.
 
 The contract every client keeps, reconnecting after a drop among it, is in
-``test_clients.py``.
+``test_capability_clients.py``.
 """
 
 from __future__ import annotations

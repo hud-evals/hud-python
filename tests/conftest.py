@@ -21,7 +21,6 @@ import importlib.util
 import inspect
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -82,15 +81,6 @@ PROVIDER_ENV = (
 )
 
 
-def setting_variables() -> list[str]:
-    """Environment variable names the SDK settings read."""
-    return [
-        field.validation_alias
-        for field in Settings.model_fields.values()
-        if isinstance(field.validation_alias, str)
-    ]
-
-
 class HudEnv:
     """Isolated SDK configuration for one test: a fresh home and no developer credentials."""
 
@@ -105,7 +95,12 @@ class HudEnv:
         )
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setenv("USERPROFILE", str(home))
-        for name in (*setting_variables(), *PROVIDER_ENV):
+        settings_read = [
+            field.validation_alias
+            for field in Settings.model_fields.values()
+            if isinstance(field.validation_alias, str)
+        ]
+        for name in (*settings_read, *PROVIDER_ENV):
             monkeypatch.delenv(name, raising=False)
         for name, value in ISOLATED.items():
             monkeypatch.setenv(name, value)
@@ -132,18 +127,6 @@ class HudEnv:
         list_gateway_models.cache_clear()
 
 
-BOX_DRAWING = re.compile(r"[\u2500-\u259f]+")
-
-
-def words(text: str) -> list[str]:
-    """``text`` as a reader sees it: box drawing and padding gone, blank lines dropped.
-
-    Rich lays panels out for the terminal's width, so output is compared by its words.
-    """
-    stripped = (" ".join(BOX_DRAWING.sub(" ", line).split()) for line in text.splitlines())
-    return [line for line in stripped if line]
-
-
 @dataclass(frozen=True)
 class Result:
     exit_code: int
@@ -154,11 +137,6 @@ class Result:
     def json(self) -> Any:
         """The single JSON document a ``--json`` command prints on stdout."""
         return json.loads(self.stdout)
-
-    @property
-    def lines(self) -> list[str]:
-        """Stdout as a reader sees its words; see :func:`words`."""
-        return words(self.stdout)
 
     def __str__(self) -> str:
         return f"exit {self.exit_code}\n--- stdout\n{self.stdout}\n--- stderr\n{self.stderr}"
@@ -468,23 +446,23 @@ def _docker_available() -> bool:
     return probe.returncode == 0
 
 
-def _modal_available() -> bool:
-    home = REAL_ENVIRONMENT.get("HOME", "")
-    return "MODAL_TOKEN_ID" in REAL_ENVIRONMENT or (Path(home) / ".modal.toml").is_file()
-
-
-def _sandbox_available() -> bool:
-    return sys.platform == "linux" and os.geteuid() == 0 and shutil.which("bwrap") is not None
-
-
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Skip selected ``e2e`` tests whose daemon, sandbox, or credentials are missing."""
     del config
     checks = {
         "docker": (_docker_available, "needs a running Docker daemon"),
-        "sandbox": (_sandbox_available, "needs Linux, root, and bubblewrap"),
+        "sandbox": (
+            lambda: sys.platform == "linux" and os.geteuid() == 0 and bool(shutil.which("bwrap")),
+            "needs Linux, root, and bubblewrap",
+        ),
         "live": (lambda: real_hud_api_key() is not None, "needs HUD_API_KEY"),
-        "modal": (_modal_available, "needs a Modal account"),
+        "modal": (
+            lambda: (
+                "MODAL_TOKEN_ID" in REAL_ENVIRONMENT
+                or (Path(REAL_ENVIRONMENT.get("HOME", "")) / ".modal.toml").is_file()
+            ),
+            "needs a Modal account",
+        ),
         "lerobot": (
             lambda: importlib.util.find_spec("lerobot") is not None,
             "needs lerobot[dataset]",

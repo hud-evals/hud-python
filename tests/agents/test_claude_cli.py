@@ -15,9 +15,10 @@ from hud.agents import ClaudeCLIAgent
 from hud.agents.types import ClaudeCLIConfig
 from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
+from hud.eval import LocalRuntime, Task, rollout
 from tests.fixtures import clis
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import run_task, workspace_env
+from tests.fixtures.environments import workspace_env
 from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
@@ -42,12 +43,16 @@ async def test_the_cli_is_given_the_prompt_its_allowed_tools_and_the_environment
 
     async with mcp_server(lookups) as server:
         env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=(server,))
-        await run_task(env, ClaudeCLIAgent(), prompt="Fix the bug.")
+        await rollout(
+            Task(env=env.name, id="task", args={"prompt": "Fix the bug."}),
+            ClaudeCLIAgent(ClaudeCLIConfig(allowed_tools=["Read", "Bash(git:*)"])),
+            runtime=LocalRuntime(env),
+        )
 
     ((argv, stdin, files),) = [(c["argv"], c["stdin"], c["files"]) for c in stub.captures()]
     allowed = [argv[index + 1] for index, arg in enumerate(argv) if arg == "--allowedTools"]
     assert clis.prompt("claude", stdin) == "Fix the bug."
-    assert allowed == ClaudeCLIConfig().allowed_tools
+    assert allowed == ["Read", "Bash(git:*)"]
     assert list(json.loads(files[".hud_mcp_config.json"])["mcpServers"]) == ["tools"]
 
 
@@ -73,27 +78,31 @@ async def test_the_cli_is_pointed_at_the_provider_with_its_own_key_or_else_the_g
     stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
 
-    await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env()),
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    await rollout(
+        Task(env=env.name, id="task"),
         ClaudeCLIAgent(ClaudeCLIConfig(gateway=gateway)),
+        runtime=LocalRuntime(env),
     )
 
-    (env,) = [capture["env"] for capture in stub.captures()]
-    assert env.get("ANTHROPIC_BASE_URL") == (models.url if via_gateway else None)
-    assert env.get("ANTHROPIC_API_KEY") == credential
-    assert ("Trace-Id: " in env.get("ANTHROPIC_CUSTOM_HEADERS", "")) is via_gateway
+    (variables,) = [capture["env"] for capture in stub.captures()]
+    assert variables.get("ANTHROPIC_BASE_URL") == (models.url if via_gateway else None)
+    assert variables.get("ANTHROPIC_API_KEY") == credential
+    assert ("Trace-Id: " in variables.get("ANTHROPIC_CUSTOM_HEADERS", "")) is via_gateway
 
 
 async def test_every_model_tier_and_subagents_use_the_configured_model(tmp_path: Path) -> None:
     stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
 
-    await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env()),
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    await rollout(
+        Task(env=env.name, id="task"),
         ClaudeCLIAgent(ClaudeCLIConfig(model="claude-opus-5", gateway=True)),
+        runtime=LocalRuntime(env),
     )
 
-    (env,) = [capture["env"] for capture in stub.captures()]
+    (variables,) = [capture["env"] for capture in stub.captures()]
     tiers = (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -101,7 +110,7 @@ async def test_every_model_tier_and_subagents_use_the_configured_model(tmp_path:
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
         "CLAUDE_CODE_SUBAGENT_MODEL",
     )
-    assert {env[name] for name in tiers} == {"claude-opus-5"}
+    assert {variables[name] for name in tiers} == {"claude-opus-5"}
 
 
 WRITE = clis.claude_assistant(
@@ -157,7 +166,8 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
     stub = clis.Stub(tmp_path / "stub", "claude", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
-    run = await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), ClaudeCLIAgent())
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    run = await rollout(Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env))
 
     assert (run.trace.status, run.trace.content) == (status, content)
     assert run.trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
@@ -173,13 +183,12 @@ async def test_mcp_servers_reach_the_cli_in_a_config_removed_after_the_run(
         Capability.mcp(name="search", url="http://search.internal:8000/sse", transport="sse"),
     )
 
-    await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=servers),
-        ClaudeCLIAgent(),
-    )
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=servers)
+    await rollout(Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env))
 
     (capture,) = stub.captures()
-    assert capture["argv"][-2:] == ["--mcp-config", ".hud_mcp_config.json"]
+    argv = capture["argv"]
+    assert argv[argv.index("--mcp-config") + 1] == ".hud_mcp_config.json"
     configured = json.loads(capture["files"][".hud_mcp_config.json"])["mcpServers"]
     assert {name: (server["type"], server["url"]) for name, server in configured.items()} == {
         "database": ("http", "http://db.internal:8000/mcp"),
@@ -203,7 +212,9 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: P
         env = workspace_env(
             tmp_path / "ws", env=stub.shell_env(), capabilities=(Capability.rfb(url=screen.url),)
         )
-        run = await run_task(env, ClaudeCLIAgent())
+        run = await rollout(
+            Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env)
+        )
 
     (capture,) = stub.captures()
     assert run.trace.status == "completed"
@@ -228,7 +239,9 @@ async def test_an_mcp_server_named_like_the_computer_bridge_is_refused(tmp_path:
             Capability.mcp(name="computer-use", url="http://tools.internal:8000/mcp"),
         )
         env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=clash)
-        run = await run_task(env, ClaudeCLIAgent())
+        run = await rollout(
+            Task(env=env.name, id="task"), ClaudeCLIAgent(), runtime=LocalRuntime(env)
+        )
 
     assert (run.trace.error, stub.captures()) == (
         "[agent loop] RuntimeError: duplicate MCP server name 'computer-use'",
@@ -257,7 +270,12 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
         track_files=False,
     )
 
-    run = await run_task(env, ClaudeCLIAgent(), connections=(connection,))
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeCLIAgent(),
+        runtime=LocalRuntime(env),
+        connections=(connection,),
+    )
 
     (capture,) = stub.captures()
     assert run.trace.status == "completed"

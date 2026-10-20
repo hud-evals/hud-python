@@ -62,10 +62,6 @@ class Turn:
     extra: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
-def say(text: str, *, reasoning: str | None = None) -> Turn:
-    return Turn(text=text, reasoning=reasoning)
-
-
 def call(name: str, /, **arguments: Any) -> Turn:
     return Turn(tool_calls=(ToolCall(name, arguments),))
 
@@ -78,14 +74,6 @@ def shell(command: str) -> Turn:
 def click(x: int, y: int, *, screen: tuple[int, int]) -> Turn:
     """Left-click pixel (``x``, ``y``) of a ``screen`` the model sees, with its computer tool."""
     return Turn(click=(x, y, *screen))
-
-
-def calls(*tool_calls: ToolCall, text: str | None = None) -> Turn:
-    return Turn(text=text, tool_calls=tool_calls)
-
-
-def fail(status: int, message: str = "scripted provider error") -> Turn:
-    return Turn(fail=Reply(status=status, json={"error": {"type": "error", "message": message}}))
 
 
 def shell_call(*commands: str, id: str = "call_shell", **action: Any) -> Turn:

@@ -21,9 +21,10 @@ from openpi_client import msgpack_numpy
 
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
+from hud.clients import connect
 from hud.environment import Environment
 from hud.environment.robot import GymBridge, RobotEndpoint
-from tests.fixtures.environments import served
+from hud.eval import LocalRuntime, Task
 
 from .sims import Reach, plain_env, vector_env
 
@@ -85,7 +86,10 @@ def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:
 async def step_once(env: Environment, action: list[float]) -> tuple[dict[str, Any], Any]:
     """Start ``episode`` on *env*, play *action* once, and grade: the stepped observation
     and the grade."""
-    async with served(env) as client:
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+    ):
         started = await client.start_task("episode")
         agent = await RobotClient.connect(
             client.binding("robot"), token=started["bindings"]["robot"]["token"]
@@ -117,7 +121,11 @@ async def test_a_vector_env_built_from_kwargs_gets_one_action_row_per_env() -> N
 
 
 async def test_a_plain_env_observation_is_sliced_to_one_slot_with_its_frames() -> None:
-    async with served(gym_env(plain_env)) as client:
+    env = gym_env(plain_env)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+    ):
         started = await client.start_task("episode")
         agent = await RobotClient.connect(
             client.binding("robot"), token=started["bindings"]["robot"]["token"]

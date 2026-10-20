@@ -265,7 +265,7 @@ async def test_a_child_process_serves_a_live_env_from_the_file_its_templates_are
         pytest.param(
             "from hud import Environment\n",
             "other",
-            "ValueError",
+            "no Environment named 'other'",
             id="a-source-without-the-rows-env",
         ),
         pytest.param(

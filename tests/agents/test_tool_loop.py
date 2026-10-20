@@ -20,10 +20,12 @@ from fastmcp import FastMCP
 
 from hud.agents import ClaudeAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, OpenAIChatConfig
+from hud.eval import LocalRuntime, Task, rollout
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import run_task, workspace_env
-from tests.fixtures.models import Turn, call, fail, say, shell
+from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn, call, shell
 from tests.fixtures.relay import relay
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,11 +64,15 @@ def failing_tools() -> FastMCP:
 async def test_a_call_that_cannot_run_is_told_to_the_model_and_the_run_goes_on(
     turn: Turn, told: str, models: Models, tmp_path: Path
 ) -> None:
-    models.script([turn, say("done")])
+    models.script([turn, Turn(text="done")])
 
     async with mcp_server(failing_tools()) as server:
         env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        run = await run_task(env, OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))
+        run = await rollout(
+            Task(env=env.name, id="task"),
+            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+            runtime=LocalRuntime(env),
+        )
 
     assert (run.trace.status, run.trace.content) == ("completed", "done")
     assert told in json.dumps(models.requests()[-1].body)
@@ -95,9 +101,11 @@ async def test_stop_on_ends_the_run_at_the_call_it_names(
 ) -> None:
     models.script([turn])
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws"),
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
         OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", stop_on={reason})),
+        runtime=LocalRuntime(env),
     )
 
     assert (run.trace.status, run.trace.stop_reason) == ("completed", reason)
@@ -109,9 +117,11 @@ async def test_the_step_budget_ends_a_model_that_never_finishes(
 ) -> None:
     models.respond(lambda request: shell("true"))
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws"),
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
         OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=2)),
+        runtime=LocalRuntime(env),
     )
 
     assert (run.trace.status, run.trace.stop_reason, len(models.requests())) == (
@@ -153,11 +163,13 @@ async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
                 (workspace,) = relays
                 workspace.refuse(sys.maxsize)
                 workspace.sever()
-            return turns[request.turn] if request.turn < len(turns) else say("done")
+            return turns[request.turn] if request.turn < len(turns) else Turn(text="done")
 
         models.respond(answer)
-        run = await run_task(
-            env, OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=10))
+        run = await rollout(
+            Task(env=env.name, id="task"),
+            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=10)),
+            runtime=LocalRuntime(env),
         )
 
     assert run.trace.status == status
@@ -171,17 +183,26 @@ RESPONDER = "You are an assistant that helps determine"
 @pytest.mark.parametrize(
     ("decision", "content"),
     [
-        pytest.param(say("CONTINUE"), "finished", id="continue"),
-        pytest.param(say("STOP"), "Shall I go on?", id="stop"),
-        pytest.param(fail(400), "Shall I go on?", id="the-responder-fails"),
+        pytest.param(Turn(text="CONTINUE"), "finished", id="continue"),
+        pytest.param(Turn(text="STOP"), "Shall I go on?", id="stop"),
+        pytest.param(
+            Turn(
+                fail=Reply(
+                    status=400,
+                    json={"error": {"type": "error", "message": "scripted provider error"}},
+                )
+            ),
+            "Shall I go on?",
+            id="the-responder-fails",
+        ),
     ],
 )
 async def test_auto_respond_answers_a_question_or_lets_the_run_end(
     decision: Turn, content: str, models: Models, tmp_path: Path
 ) -> None:
     """The auto-responder is its own Responses call beside the agent's own requests."""
-    decisions = iter([decision, say("STOP")])
-    replies = [say("Shall I go on?"), say("finished")]
+    decisions = iter([decision, Turn(text="STOP")])
+    replies = [Turn(text="Shall I go on?"), Turn(text="finished")]
     models.respond(
         lambda request: (
             next(decisions)
@@ -190,12 +211,20 @@ async def test_auto_respond_answers_a_question_or_lets_the_run_end(
         )
     )
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws"),
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
         OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", auto_respond=True)),
+        runtime=LocalRuntime(env),
     )
 
+    asked = [
+        request
+        for request in models.requests()
+        if str(request.body.get("instructions", "")).startswith(RESPONDER)
+    ]
     assert run.trace.content == content
+    assert asked
 
 
 # ─── the tool timeout ──────────────────────────────────────────────────
@@ -217,11 +246,13 @@ async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on
     models: Models, tmp_path: Path
 ) -> None:
     root = tmp_path / "ws"
-    models.script([shell("sleep 3; touch late"), shell("touch quick"), say("done")])
+    models.script([shell("sleep 3; touch late"), shell("touch quick"), Turn(text="done")])
 
-    run = await run_task(
-        workspace_env(root),
+    env = workspace_env(root)
+    run = await rollout(
+        Task(env=env.name, id="task"),
         OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1)),
+        runtime=LocalRuntime(env),
     )
     await asyncio.sleep(3)
 
@@ -231,12 +262,14 @@ async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on
 
 
 async def test_an_mcp_tool_is_left_to_its_own_time(models: Models, tmp_path: Path) -> None:
-    models.script([call("wait"), say("done")])
+    models.script([call("wait"), Turn(text="done")])
 
     async with mcp_server(slow_tools()) as server:
         env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        run = await run_task(
-            env, OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1))
+        run = await rollout(
+            Task(env=env.name, id="task"),
+            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", tool_timeout_seconds=1)),
+            runtime=LocalRuntime(env),
         )
 
     assert run.trace.status == "completed"
@@ -255,11 +288,13 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
         old_str="a",
         new_str="b",
     )
-    models.script([call("bash", command="mkfifo pipe"), edit, say("done")])
+    models.script([call("bash", command="mkfifo pipe"), edit, Turn(text="done")])
 
-    run = await run_task(
-        workspace_env(root),
+    env = workspace_env(root)
+    run = await rollout(
+        Task(env=env.name, id="task"),
         ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", tool_timeout_seconds=1)),
+        runtime=LocalRuntime(env),
     )
 
     assert run.trace.status == "completed"
@@ -281,7 +316,7 @@ def named(name: str, *tools: str) -> FastMCP:
 async def test_mcp_tools_from_several_servers_are_qualified_within_64_characters(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
     long = "lookup_" * 10
 
     async with (
@@ -289,24 +324,32 @@ async def test_mcp_tools_from_several_servers_are_qualified_within_64_characters
         mcp_server(named("company-tools", long + "b"), name="company-tools") as dashed,
     ):
         env = workspace_env(tmp_path / "ws", capabilities=(dotted, dashed))
-        await run_task(env, OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))
+        await rollout(
+            Task(env=env.name, id="task"),
+            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+            runtime=LocalRuntime(env),
+        )
 
     (request,) = models.requests()
     qualified = [name for name in request.tools if long[:20] in name]
-    assert len(qualified) == 2 and all(len(name) <= 64 for name in qualified)
+    assert len(set(qualified)) == 2 and all(len(name) <= 64 for name in qualified)
 
 
 async def test_two_mcp_tools_qualified_to_one_name_fail_the_run(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
 
     async with (
         mcp_server(named("a", "b__c"), name="a") as first,
         mcp_server(named("a__b", "c"), name="a__b") as second,
     ):
         env = workspace_env(tmp_path / "ws", capabilities=(first, second))
-        run = await run_task(env, OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))
+        run = await rollout(
+            Task(env=env.name, id="task"),
+            OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")),
+            runtime=LocalRuntime(env),
+        )
 
     assert run.trace.error == (
         "[agent loop] ValueError: MCP tool name collision after qualification: 'a__b__c'"

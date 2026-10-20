@@ -7,7 +7,7 @@ import contextlib
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -18,25 +18,18 @@ _DEFAULT_ID = object()
 
 @dataclass(frozen=True)
 class Action:
-    kind: str
+    """What the peer does with the next frame on a connection.
+
+    ``"answer"`` replies with ``result`` or ``error`` under ``reply_id`` (the request's
+    id unless given), ``"hang_up"`` closes the connection (before reading when
+    ``immediately``), and ``"hold"`` reads on without replying.
+    """
+
+    kind: Literal["answer", "hang_up", "hold"]
     result: Any = None
     error: dict[str, Any] | None = None
     reply_id: Any = _DEFAULT_ID
     immediately: bool = False
-
-
-def answer(
-    result: Any = None, *, error: dict[str, Any] | None = None, id: Any = _DEFAULT_ID
-) -> Action:
-    return Action("answer", result=result, error=error, reply_id=id)
-
-
-def hang_up(*, immediately: bool = False) -> Action:
-    return Action("hang_up", immediately=immediately)
-
-
-def hold() -> Action:
-    return Action("hold")
 
 
 @dataclass(frozen=True)
@@ -105,7 +98,7 @@ class ControlPeer:
         message: dict[str, Any] | None = first
         while message is not None:
             self.frames.append(Frame(connection, message))
-            action = script.pop(0) if script else hold()
+            action = script.pop(0) if script else Action("hold")
             if action.kind == "hang_up":
                 return
             if action.kind == "answer":

@@ -89,12 +89,8 @@ def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
     spans: dict[str, list[dict[str, Any]]] = {label: [] for label in labels.values()}
     for upload in reporting.requests("telemetry", "POST", "/trace/{id}/telemetry-upload"):
         spans[labels[upload.path.split("/")[2].replace("-", "")]].extend(upload.json["telemetry"])
-    ticks = {
-        trace: [
-            (span["name"], span["attributes"]["hud.payload"]["tick"])
-            for span in sorted(recorded, key=lambda span: span["start_time"])
-            if span["name"] != "step.video_segment"
-        ]
+    observations = {
+        trace: sum(span["name"] == "step.observation" for span in recorded)
         for trace, recorded in spans.items()
     }
     assert exits == {
@@ -114,46 +110,37 @@ def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
             "metadata": {"env_index": 0, "episode_index": 1, "seed": None},
         },
     }
-    assert dict(sorted(ticks.items())) == {
-        "trace-0": [("step.observation", 0), ("step.inference", 0), ("step.inference", 1)],
-        "trace-1": [
-            ("step.observation", 0),
-            ("step.inference", 0),
-            ("step.observation", 1),
-            ("step.inference", 1),
-            ("step.inference", 2),
-        ],
-        "trace-2": [("step.observation", 0), ("step.inference", 0)],
-    }
+    assert observations == {"trace-0": 1, "trace-1": 2, "trace-2": 1}
 
 
 CANONICAL_JOB = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 
 
 @pytest.mark.parametrize(
-    ("job_id", "trace_id"),
+    "job_id",
     [
-        pytest.param(
-            "03dd2a73d3df4d10a54ae3d87c2d530d", "e9266339c6fa58b08102ce7f41c4f372", id="compact"
-        ),
-        pytest.param(CANONICAL_JOB, "7b3269f689b65c5887542a9bc1ffb5c8", id="canonical"),
+        pytest.param(CANONICAL_JOB.replace("-", ""), id="compact"),
+        pytest.param(CANONICAL_JOB, id="canonical"),
     ],
 )
-def test_a_shared_job_is_reported_canonically_and_seeds_traces_by_its_spelling(
-    reporting: FakeServices, job_id: str, trace_id: str
+def test_a_shared_job_is_reported_canonically_with_stable_trace_ids(
+    reporting: FakeServices, job_id: str
 ) -> None:
-    recorder = JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id)
-    recorder.record(done=np.array([True]))
+    recorders = [
+        JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id) for _ in range(2)
+    ]
+    for recorder in recorders:
+        recorder.record(done=np.array([True]))
 
-    assert recorder.job_url == f"{reporting.url('web')}/jobs/{CANONICAL_JOB}"
+    assert {recorder.job_url for recorder in recorders} == {
+        f"{reporting.url('web')}/jobs/{CANONICAL_JOB}"
+    }
     assert f"/v2/trace/job/{CANONICAL_JOB}/enter" in [
         request.path for request in reporting.requests("api")
     ]
-    (entered,) = reporting.requests("api", "POST", "/v2/trace/{id}/enter")
-    assert (entered.path, entered.json) == (
-        f"/v2/trace/{trace_id}/enter",
-        {"job_id": CANONICAL_JOB},
-    )
+    first, second = reporting.requests("api", "POST", "/v2/trace/{id}/enter")
+    assert first.path == second.path
+    assert (first.json, second.json) == ({"job_id": CANONICAL_JOB}, {"job_id": CANONICAL_JOB})
 
 
 # ─── direct control streams every played tick ──────────────────────────

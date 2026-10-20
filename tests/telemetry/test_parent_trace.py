@@ -15,7 +15,7 @@ from hud.agents.types import OpenAIChatConfig
 from hud.eval import HostedRuntime, LocalRuntime, Task, rollout
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.models import say
+from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
     from tests.conftest import HudEnv
@@ -59,7 +59,7 @@ async def test_the_model_gateway_is_told_the_parent_trace(
     ambient: str, parent: str | None, models: Models, hud_env: HudEnv
 ) -> None:
     hud_env.set(HUD_API_KEY="k")
-    models.script([say("yes")])
+    models.script([Turn(text="yes")])
 
     with set_trace_context(ambient):
         await rollout(

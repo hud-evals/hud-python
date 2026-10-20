@@ -6,20 +6,23 @@ itself is a row."""
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import uuid
 from typing import TYPE_CHECKING
 
 import pytest
 from fastmcp import FastMCP
+from PIL import Image
 
 from hud.agents.types import ToolStep
 from hud.capabilities import Capability, RFBClient
-from hud.eval import LocalRuntime, Task, Taskset
+from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.types import AgentType
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import run_task, workspace_env
-from tests.fixtures.models import Turn, click, say, shell
+from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn, click, shell
 from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
 
@@ -56,12 +59,16 @@ async def test_the_model_is_given_the_prompt_a_shell_and_the_environments_tools(
 ) -> None:
     lookups = FastMCP("tools")
     lookups.tool(name="lookup", description="Look a key up.")(lambda key: key)
-    models.script([say("done")])
+    models.script([Turn(text="done")])
     kind = AgentType(agent_type).cls
 
     async with mcp_server(lookups) as server:
         env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        await run_task(env, kind(kind.config_cls(model=model)), prompt="Fix the bug.")
+        await rollout(
+            Task(env=env.name, id="task", args={"prompt": "Fix the bug."}),
+            kind(kind.config_cls(model=model)),
+            runtime=LocalRuntime(env),
+        )
 
     (request,) = models.requests()
     assert (request.prompt, "lookup" in request.tools) == ("Fix the bug.", True)
@@ -72,12 +79,21 @@ async def test_the_model_is_given_the_prompt_a_shell_and_the_environments_tools(
 async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_conversation(
     agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
 ) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
     kind = AgentType(agent_type).cls
     env, agent = workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model))
 
     runs = await asyncio.gather(
-        run_task(env, agent, prompt="first"), run_task(env, agent, prompt="second")
+        rollout(
+            Task(env=env.name, id="task", args={"prompt": "first"}),
+            agent,
+            runtime=LocalRuntime(env),
+        ),
+        rollout(
+            Task(env=env.name, id="task", args={"prompt": "second"}),
+            agent,
+            runtime=LocalRuntime(env),
+        ),
     )
 
     assert [run.trace.status for run in runs] == ["completed", "completed"]
@@ -88,10 +104,13 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_conversati
 async def test_a_shell_call_acts_on_the_workspace_and_its_result_reaches_the_model(
     agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
 ) -> None:
-    models.script([shell("touch made && echo made-it"), say("done")])
+    models.script([shell("touch made && echo made-it"), Turn(text="done")])
     kind = AgentType(agent_type).cls
 
-    run = await run_task(workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
+    )
 
     assert (run.trace.status, run.trace.content) == ("completed", "done")
     assert (tmp_path / "ws" / "made").exists()
@@ -116,19 +135,35 @@ def test_every_family_that_drives_a_screen_is_a_computer_use_row() -> None:
 @pytest.mark.parametrize(
     ("agent_type", "model"), COMPUTER_USERS, ids=[r[0] for r in COMPUTER_USERS]
 )
-async def test_a_click_lands_on_the_screen_where_the_model_pointed(
+async def test_a_click_lands_where_the_model_pointed_and_the_screen_is_sent_back(
     agent_type: str, model: str, models: Models, tmp_path: Path
 ) -> None:
-    models.script([click(150, 25, screen=(200, 100)), say("done")])
+    models.script([click(150, 25, screen=(200, 100)), Turn(text="done")])
     kind = AgentType(agent_type).cls
 
     async with fake_screen(width=200, height=100) as screen:
         env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        run = await run_task(env, kind(kind.config_cls(model=model)))
+        run = await rollout(
+            Task(env=env.name, id="task"),
+            kind(kind.config_cls(model=model)),
+            runtime=LocalRuntime(env),
+        )
 
     pressed = {(event.x, event.y) for event in screen.pointer_events() if event.buttons & 1}
     assert (run.trace.status, pressed) == ("completed", {(150, 25)})
-    assert "image" in json.dumps(models.requests()[-1].body)
+    last = models.requests()[-1]
+    if last.protocol == "anthropic":
+        (result,) = last.body["messages"][-1]["content"]
+        (image,) = [block for block in result["content"] if block["type"] == "image"]
+        screenshot = base64.b64decode(image["source"]["data"])
+    elif last.protocol == "responses":
+        (result,) = [item for item in last.body["input"] if item["type"] == "computer_call_output"]
+        screenshot = base64.b64decode(result["output"]["image_url"].split("base64,")[1])
+    else:
+        (part,) = last.body["contents"][-1]["parts"]
+        (image,) = part["functionResponse"]["parts"]
+        screenshot = base64.urlsafe_b64decode(image["inline_data"]["data"])
+    assert Image.open(io.BytesIO(screenshot)).size == (200, 100)
 
 
 @EVERY_PROVIDER
@@ -138,7 +173,10 @@ async def test_a_reply_cut_at_the_token_cap_ends_the_run_as_truncated(
     models.script([Turn(text="part", truncated=True)])
     kind = AgentType(agent_type).cls
 
-    run = await run_task(workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
+    )
 
     assert (run.trace.status, run.trace.stop_reason, run.trace.content) == (
         "completed",
@@ -154,7 +192,10 @@ async def test_a_provider_fault_ends_the_run_with_its_error(
     models.script([Turn(fail=Reply(status=400, json={"error": {"message": "model unavailable"}}))])
     kind = AgentType(agent_type).cls
 
-    run = await run_task(workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
+    )
 
     assert run.trace.status == "error"
     assert "model unavailable" in (run.trace.error or "")
@@ -165,10 +206,13 @@ async def test_an_overloaded_provider_is_asked_again(
     agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
 ) -> None:
     busy = Reply(status=503, headers={"retry-after-ms": "0"}, json={"error": {"message": "busy"}})
-    models.queue([Turn(fail=busy), say("done")])
+    models.queue([Turn(fail=busy), Turn(text="done")])
     kind = AgentType(agent_type).cls
 
-    run = await run_task(workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"), kind(kind.config_cls(model=model)), runtime=LocalRuntime(env)
+    )
 
     assert (run.trace.status, run.trace.content, len(models.requests())) == (
         "completed",
@@ -210,12 +254,15 @@ async def test_requests_go_to_the_provider_with_its_own_key_and_otherwise_to_the
         GOOGLE_GEMINI_BASE_URL=provider.url,
         **{key: own_key},
     )
-    models.script([say("done")])
-    provider.script([say("done")])
+    models.script([Turn(text="done")])
+    provider.script([Turn(text="done")])
     kind = AgentType(agent_type).cls
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws"), kind(kind.config_cls(model=model, gateway=gateway))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        kind(kind.config_cls(model=model, gateway=gateway)),
+        runtime=LocalRuntime(env),
     )
 
     (request,) = {"gateway": models, "provider": provider}[route].requests()
@@ -227,7 +274,7 @@ async def test_requests_go_to_the_provider_with_its_own_key_and_otherwise_to_the
 async def test_each_gateway_request_carries_its_own_runs_trace_id(
     agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
 ) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
     env = workspace_env(tmp_path / "ws")
     kind = AgentType(agent_type).cls
 

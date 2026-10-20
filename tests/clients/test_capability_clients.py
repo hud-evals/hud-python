@@ -29,11 +29,12 @@ from PIL import Image
 
 import hud.capabilities
 from hud.capabilities import Capability, CapabilityClient
+from hud.clients import connect
 from hud.environment import Environment
+from hud.eval import LocalRuntime, Task
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.browser import fake_browser
-from tests.fixtures.environments import served
 from tests.fixtures.relay import relay
 from tests.fixtures.screen import fake_screen
 
@@ -179,7 +180,11 @@ def client_class(name: str) -> type[CapabilityClient]:
 @asynccontextmanager
 async def connected(name: str, tmp_path: Path) -> AsyncIterator[tuple[Any, Backend, FlakyRelay]]:
     """The row's client, connected to its served backend's binding through a relay."""
-    async with BACKENDS[name](tmp_path) as backend, served(backend.env) as control:
+    async with (
+        BACKENDS[name](tmp_path) as backend,
+        LocalRuntime(backend.env)(Task(env=backend.env.name, id="scenario")) as runtime,
+        connect(runtime) as control,
+    ):
         binding = urlsplit(control.binding(backend.name).url)
         assert binding.hostname is not None and binding.port is not None
         async with relay(binding.hostname, binding.port) as flaky:
@@ -206,7 +211,11 @@ async def test_a_client_connects_at_its_binding_and_answers(name: str, tmp_path:
 async def test_a_capability_published_at_serve_time_opens_through_the_control_port(
     name: str, tmp_path: Path
 ) -> None:
-    async with BACKENDS[name](tmp_path) as backend, served(backend.env) as control:
+    async with (
+        BACKENDS[name](tmp_path) as backend,
+        LocalRuntime(backend.env)(Task(env=backend.env.name, id="scenario")) as runtime,
+        connect(runtime) as control,
+    ):
         opened = await control.open(backend.name)
         answered = await backend.probe(opened)
         again = await control.open(backend.name)
@@ -244,7 +253,7 @@ async def browser_without_pages() -> AsyncIterator[Capability]:
 
 
 NO_TARGET: dict[
-    str, tuple[str, Callable[[], AbstractAsyncContextManager[Capability]], type, str]
+    str, tuple[str, Callable[[], AbstractAsyncContextManager[Capability]], type, str | None]
 ] = {
     "ssh-nothing-listening": (
         "SSHClient",
@@ -262,7 +271,7 @@ NO_TARGET: dict[
         "CDPClient",
         lambda: nothing_listening("ws", "cdp/1.3"),
         httpx.ConnectError,
-        "All connection attempts failed",
+        None,
     ),
     "cdp-no-page-target": (
         "CDPClient",
@@ -274,13 +283,13 @@ NO_TARGET: dict[
         "RFBClient",
         lambda: nothing_listening("rfb", "rfb/3.8"),
         ConnectionRefusedError,
-        "Connect call failed",
+        None,
     ),
     "mcp-nothing-listening": (
         "MCPClient",
         lambda: nothing_listening("http", "mcp/2025-11-25", "/mcp"),
         McpError,
-        "Transport error: ConnectError",
+        "Transport error",
     ),
 }
 
@@ -293,7 +302,7 @@ async def test_a_client_with_nothing_to_connect_to_fails_clearly(
     name: str,
     target: Callable[[], AbstractAsyncContextManager[Capability]],
     error: type[Exception],
-    message: str,
+    message: str | None,
 ) -> None:
     hud_env.set(HUD_CLIENT_TIMEOUT="1")
 

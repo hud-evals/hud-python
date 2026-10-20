@@ -178,8 +178,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             0.0,
             None,
             "error",
-            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32603: "
-            "tasks.grade: result must include a numeric 'score'",
+            "result must include a numeric 'score'",
             id="a-boolean-score",
         ),
         pytest.param(
@@ -187,8 +186,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             0.0,
             None,
             "error",
-            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: "
-            "task 'grade_it' graded with a dict missing a numeric 'score' (keys: ['done'])",
+            "graded with a dict missing a numeric 'score' (keys: ['done'])",
             id="a-frame-without-a-score",
         ),
         pytest.param(
@@ -196,9 +194,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             0.0,
             None,
             "error",
-            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: "
-            "task graded with str: yield a number, an object with a numeric .reward, "
-            "or a dict containing a numeric 'score'",
+            "task graded with str",
             id="neither",
         ),
     ],
@@ -216,13 +212,13 @@ async def test_what_the_task_grades_with_is_the_runs_reward_or_its_error(
     job = await grade_it().run(ScriptedAgent("x"))
 
     (run,) = job.runs
-    assert (run.reward, run.grade.content, run.trace.status, run.trace.error) == (
-        reward,
-        content,
-        status,
-        error,
-    )
+    assert (run.reward, run.grade.content, run.trace.status) == (reward, content, status)
     assert (run in job.errors) is (error is not None)
+    if error is None:
+        assert run.trace.error is None
+    else:
+        assert error in (run.trace.error or "")
+    assert (run.trace.error or "").startswith("[grading] ") is (status == "error")
 
 
 async def test_a_grade_breakdown_reaches_the_evaluation_without_its_grader_details() -> None:

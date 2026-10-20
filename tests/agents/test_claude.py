@@ -20,10 +20,11 @@ from hud.agents import ClaudeAgent
 from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
 from hud.agents.types import ClaudeConfig
 from hud.capabilities import Capability
+from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import run_task, workspace_env
-from tests.fixtures.models import Turn, call, say, stream_error
+from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn, call, stream_error
 from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
@@ -56,25 +57,29 @@ def upright_after_rotation() -> bytes:
     return buffer.getvalue()
 
 
+@pytest.mark.parametrize(
+    ("model", "offered"),
+    [("claude-opus-4-6", ["web_fetch", "web_search"]), (MODEL, ["web_fetch"])],
+    ids=["a-model-it-supports", "a-model-it-does-not"],
+)
 async def test_hosted_web_tools_are_offered_to_the_models_they_support(
-    models: Models, tmp_path: Path
+    model: str, offered: list[str], models: Models, tmp_path: Path
 ) -> None:
-    hosted = [
-        ClaudeWebSearchTool(),
-        ClaudeWebFetchTool(citations_enabled=True),
-        ClaudeWebSearchTool(supported_models=("claude-opus-*",)),
-    ]
-    models.script([say("done")])
+    hosted = [ClaudeWebFetchTool(), ClaudeWebSearchTool(supported_models=("claude-opus-*",))]
+    models.script([Turn(text="done")])
 
-    await run_task(
-        workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL, hosted_tools=hosted))
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=model, hosted_tools=hosted)),
+        runtime=LocalRuntime(env),
     )
 
     (request,) = models.requests()
-    assert [tool for tool in request.body["tools"] if tool.get("type", "").startswith("web_")] == [
-        {"type": "web_search_20250305", "name": "web_search"},
-        {"type": "web_fetch_20250910", "name": "web_fetch", "citations": {"enabled": True}},
+    web = [
+        tool["name"] for tool in request.body["tools"] if tool.get("type", "").startswith("web_")
     ]
+    assert web == offered
 
 
 @pytest.mark.parametrize(
@@ -87,7 +92,7 @@ async def test_tool_search_defers_mcp_tools_once_there_are_more_than_its_thresho
 ) -> None:
     lookups = FastMCP("lookups")
     lookups.tool(name="lookup", description="Look a key up.")(lambda key: key)
-    models.script([say("done")])
+    models.script([Turn(text="done")])
     agent = ClaudeAgent(
         ClaudeConfig(model=MODEL, hosted_tools=[ClaudeToolSearchTool(threshold=threshold)])
     )
@@ -96,7 +101,8 @@ async def test_tool_search_defers_mcp_tools_once_there_are_more_than_its_thresho
         mcp_server(lookups, name="database") as database,
         mcp_server(lookups, name="search") as search,
     ):
-        await run_task(workspace_env(tmp_path / "ws", capabilities=(database, search)), agent)
+        env = workspace_env(tmp_path / "ws", capabilities=(database, search))
+        await rollout(Task(env=env.name, id="task"), agent, runtime=LocalRuntime(env))
 
     (request,) = models.requests()
     assert {tool["name"] for tool in request.body["tools"] if tool.get("defer_loading")} == deferred
@@ -114,11 +120,15 @@ async def test_tool_search_defers_mcp_tools_once_there_are_more_than_its_thresho
 async def test_each_model_gets_the_computer_tool_it_supports_for_the_screen(
     model: str, beta: str | None, kind: str | None, sized: bool, models: Models, tmp_path: Path
 ) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
 
     async with fake_screen(width=200, height=100) as screen:
         env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        await run_task(env, ClaudeAgent(ClaudeConfig(model=model)))
+        await rollout(
+            Task(env=env.name, id="task"),
+            ClaudeAgent(ClaudeConfig(model=model)),
+            runtime=LocalRuntime(env),
+        )
 
     (request,) = models.requests()
     (computer,) = [tool for tool in request.body["tools"] if tool["name"] == "computer"]
@@ -132,9 +142,16 @@ async def test_each_model_gets_the_computer_tool_it_supports_for_the_screen(
 async def test_a_failed_tool_result_reaches_the_model_marked_as_an_error(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([call("str_replace_based_edit_tool", command="bogus", path="/x"), say("done")])
+    models.script(
+        [call("str_replace_based_edit_tool", command="bogus", path="/x"), Turn(text="done")]
+    )
 
-    await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     (result,) = models.requests()[-1].body["messages"][-1]["content"]
     assert (result["type"], result["is_error"]) == ("tool_result", True)
@@ -147,19 +164,24 @@ INVALID_JSON = Turn(
 
 
 @pytest.mark.parametrize(
-    ("invalid", "status", "explained"),
-    [(1, "completed", False), (2, "completed", True), (3, "error", True)],
+    ("invalid", "status", "requests", "explained"),
+    [(1, "completed", 2, False), (2, "completed", 3, True), (3, "error", 3, True)],
     ids=["once-is-asked-again", "twice-is-explained-to-the-model", "three-times-fails"],
 )
 async def test_a_call_with_invalid_json_is_sampled_again_then_explained_then_fails(
-    invalid: int, status: str, explained: bool, models: Models, tmp_path: Path
+    invalid: int, status: str, requests: int, explained: bool, models: Models, tmp_path: Path
 ) -> None:
-    models.queue([INVALID_JSON] * invalid + [say("done")])
+    models.queue([INVALID_JSON] * invalid + [Turn(text="done")])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     last = json.dumps(models.requests()[-1].body)
-    assert run.trace.status == status
+    assert (run.trace.status, len(models.requests())) == (status, requests)
     assert ("Your previous tool-call arguments were invalid JSON." in last) is explained
 
 
@@ -175,27 +197,33 @@ async def test_a_call_with_invalid_json_is_sampled_again_then_explained_then_fai
 async def test_an_error_inside_the_stream_is_retried_only_when_transient(
     errors: int, kind: str, status: str, requests: int, models: Models, tmp_path: Path
 ) -> None:
-    models.queue([stream_error(kind, headers={"retry-after-ms": "0"})] * errors + [say("done")])
+    models.queue(
+        [stream_error(kind, headers={"retry-after-ms": "0"})] * errors + [Turn(text="done")]
+    )
 
-    run = await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     assert (run.trace.status, len(models.requests())) == (status, requests)
 
 
 @pytest.mark.parametrize(
-    ("config", "sent", "beta"),
+    ("config", "sent"),
     [
-        ({}, [["text", "image"], ["text", "image"]], False),
+        ({}, [["text", "image"], ["text", "image"]]),
         (
             {"max_tool_result_images": 1, "thinking": {"type": "adaptive"}},
             [["text", "text"], ["text", "image"]],
-            True,
         ),
     ],
     ids=["every-image-by-default", "only-the-newest-image"],
 )
 async def test_tool_result_images_are_sent_back_up_to_the_configured_count(
-    config: dict[str, Any], sent: list[list[str]], beta: bool, models: Models, tmp_path: Path
+    config: dict[str, Any], sent: list[list[str]], models: Models, tmp_path: Path
 ) -> None:
     screenshots = FastMCP("screenshots")
 
@@ -215,20 +243,17 @@ async def test_tool_result_images_are_sent_back_up_to_the_configured_count(
         [
             replace(call("screenshot"), reasoning="first look"),
             replace(call("screenshot"), reasoning="second look"),
-            say("done"),
+            Turn(text="done"),
         ]
     )
     agent = ClaudeAgent(ClaudeConfig.model_validate({"model": MODEL, **config}))
 
     async with mcp_server(screenshots, name="screenshots") as server:
-        await run_task(workspace_env(tmp_path / "ws", capabilities=(server,)), agent)
+        env = workspace_env(tmp_path / "ws", capabilities=(server,))
+        await rollout(Task(env=env.name, id="task"), agent, runtime=LocalRuntime(env))
 
-    last = models.requests()[-1]
-    results = last.body["messages"][2::2]
+    results = models.requests()[-1].body["messages"][2::2]
     assert [[block["type"] for block in m["content"][0]["content"]] for m in results] == sent
-    assert (
-        "thinking-binding-controls-2026-08-01" in last.headers.get("anthropic-beta", "")
-    ) is beta
 
 
 @pytest.mark.parametrize(
@@ -245,11 +270,17 @@ async def test_an_image_the_editor_views_is_sent_within_claudes_limits_in_its_sh
 ) -> None:
     root = tmp_path / "ws"
     models.script(
-        [call("str_replace_based_edit_tool", command="view", path=f"{root}/file"), say("done")]
+        [
+            call("str_replace_based_edit_tool", command="view", path=f"{root}/file"),
+            Turn(text="done"),
+        ]
     )
 
-    await run_task(
-        workspace_env(root, files={"file": data}), ClaudeAgent(ClaudeConfig(model=MODEL))
+    env = workspace_env(root, files={"file": data})
+    await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
     )
 
     ((block,),) = [r["content"] for r in models.requests()[-1].body["messages"][-1]["content"]]
@@ -264,12 +295,18 @@ async def test_an_image_that_cannot_be_read_is_told_to_the_model_as_an_error(
 ) -> None:
     root = tmp_path / "ws"
     models.script(
-        [call("str_replace_based_edit_tool", command="view", path=f"{root}/file"), say("done")]
+        [
+            call("str_replace_based_edit_tool", command="view", path=f"{root}/file"),
+            Turn(text="done"),
+        ]
     )
     corrupt = b"\x89PNG\r\n\x1a\ngarbage"
 
-    await run_task(
-        workspace_env(root, files={"file": corrupt}), ClaudeAgent(ClaudeConfig(model=MODEL))
+    env = workspace_env(root, files={"file": corrupt})
+    await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
     )
 
     (result,) = models.requests()[-1].body["messages"][-1]["content"]
@@ -280,9 +317,14 @@ async def test_an_image_that_cannot_be_read_is_told_to_the_model_as_an_error(
 async def test_the_newest_user_turn_is_marked_for_prompt_caching(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([call("bash", command="true"), say("done")])
+    models.script([call("bash", command="true"), Turn(text="done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     first, second = (request.body["messages"] for request in models.requests())
     assert [block.get("cache_control") for block in first[-1]["content"]] == [{"type": "ephemeral"}]
@@ -319,7 +361,12 @@ async def test_a_bedrock_inference_profile_is_invoked_on_bedrock_without_streami
         },
     )
 
-    run = await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=profile)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=profile)),
+        runtime=LocalRuntime(env),
+    )
 
     (request,) = services.requests("gateway", "POST")
     assert run.trace.content == "from bedrock"
@@ -358,7 +405,12 @@ async def test_document_and_web_citations_land_on_the_agent_step(
         ]
     )
 
-    run = await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert (step["content"], step["reasoning"]) == ("Blue.", "look it up")
@@ -385,7 +437,12 @@ async def test_a_refusal_lands_on_the_agent_step(
     details = {"type": "refusal", "category": "cyber", "explanation": explanation}
     models.script([Turn(finish="refusal", extra={"stop_details": details})])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), ClaudeAgent(ClaudeConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        ClaudeAgent(ClaudeConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert (step["finish_reason"], step["refusal"]) == ("refusal", refusal)

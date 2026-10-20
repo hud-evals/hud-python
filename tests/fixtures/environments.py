@@ -6,22 +6,17 @@ agent out on one. Environments loaded from a file are in ``tests/fixtures/envs``
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from hud import Environment
-from hud.clients import connect
-from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import write_files
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
-    from hud.agents.base import Agent
     from hud.capabilities import Capability
-    from hud.clients import HudClient
-    from hud.eval import Run
+    from hud.eval import Task
 
 
 def solve(prompt: str) -> str:
@@ -159,9 +154,6 @@ def judge(env: Environment | None = None, *, verdict: str = "check") -> Environm
     return env
 
 
-PROMPT = "Do the task."
-
-
 def workspace_env(
     root: Path,
     *,
@@ -187,25 +179,9 @@ def workspace_env(
         write_files(root, files or {})
 
     @env.template()
-    async def task(prompt: str = PROMPT):
+    async def task(prompt: str = "Do the task."):
         yield prompt
         await asyncio.sleep(settle)
         yield 1.0 if passes(root) else 0.0
 
     return env
-
-
-@asynccontextmanager
-async def served(env: Environment, *, row: Task | None = None) -> AsyncIterator[HudClient]:
-    """Serve ``env`` on loopback and yield a control-channel client connected to it."""
-    task = row or Task(env=env.name, id="scenario")
-    async with LocalRuntime(env)(task) as runtime, connect(runtime) as client:
-        yield client
-
-
-async def run_task(env: Environment, agent: Agent, *, prompt: str = PROMPT, **options: Any) -> Run:
-    """Roll ``agent`` out on ``env``'s ``task`` in this process."""
-    args = {} if prompt == PROMPT else {"prompt": prompt}
-    return await rollout(
-        Task(env=env.name, id="task", args=args), agent, runtime=LocalRuntime(env), **options
-    )

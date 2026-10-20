@@ -8,10 +8,11 @@ import base64
 import hashlib
 from typing import TYPE_CHECKING
 
+from hud.clients import connect
 from hud.environment import Environment
+from hud.eval import LocalRuntime, Task
 from tests.conftest import write_files
 from tests.environment.conftest import wire
-from tests.fixtures.environments import served
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,7 +49,12 @@ async def test_a_snapshot_lists_the_files_it_tracks_leaving_out_what_is_not_the_
         },
     )
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         snapshot = await peer.call("snapshot")
 
     files = {entry["path"]: entry["content_hash"] for entry in snapshot["result"]["files"]}
@@ -60,7 +66,12 @@ async def test_a_diff_reports_what_changed_since_the_last_one(tmp_path: Path) ->
     root = tmp_path / "root"
     write_files(root, {"edited.txt": "line1\nline2\n", "removed.txt": "gone\n"})
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         await peer.call("snapshot")
         before = await peer.call("diff")
         write_files(root, {"edited.txt": "line1\nCHANGED\n", "added.txt": "hello\n"})
@@ -85,7 +96,12 @@ async def test_secrets_never_leave_in_a_diff(tmp_path: Path) -> None:
         {".env": "API_KEY=supersecretvalue\n", ".gitmodules": "url = https://token@x/p.git\n"},
     )
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         await peer.call("snapshot")
         write_files(
             root,
@@ -108,7 +124,12 @@ async def test_a_file_over_the_diff_limit_is_reported_without_its_contents(
     root = tmp_path / "root"
     write_files(root, {"big.txt": "a" * BIG_TEXT})
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         await peer.call("snapshot")
         write_files(root, {"big.txt": "b" * (BIG_TEXT + 1)})
         edited = await peer.call("diff")
@@ -126,7 +147,12 @@ async def test_setup_and_advance_each_move_the_baseline_later_diffs_start_from(
     root = tmp_path / "root"
     write_files(root, {"src.py": "x = 1\n"})
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         await peer.call("snapshot")
         write_files(root, {"generated.txt": "setup\n", "src.py": "x = 2\n"})
         setup = await peer.call("setup")
@@ -148,7 +174,12 @@ async def test_a_flush_diffs_the_deliverables_and_captures_the_documents_under_t
     root = tmp_path / "root"
     write_files(root, {".env.xlsx": "API_KEY=before"})
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         await peer.call("snapshot")
         write_files(
             root,
@@ -183,7 +214,12 @@ async def test_an_unknown_request_is_refused_and_tracking_goes_on(tmp_path: Path
     root = tmp_path / "root"
     write_files(root, {"a.txt": "one\n"})
 
-    async with served(tracked(root)) as client, wire(client.binding("filetracking").url) as peer:
+    env = tracked(root)
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+        wire(client.binding("filetracking").url) as peer,
+    ):
         refused = await peer.call("rewind")
         snapshot = await peer.call("snapshot")
 

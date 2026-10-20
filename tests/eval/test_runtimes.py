@@ -37,7 +37,7 @@ from hud.eval import (
 )
 from hud.eval import runtime as runtime_module
 from tests.conftest import eventually
-from tests.eval.conftest import SESSION, SESSIONS, host_on_runtime
+from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, tunnel
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
 
@@ -132,7 +132,9 @@ async def placed(
             services: FakeServices = request.getfixturevalue("services")
             request.getfixturevalue("hud_env").set(HUD_API_KEY="k")
             async with SubprocessRuntime(path)(Task(env=fixture, id="serve")) as served:
-                host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
+                services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
+                services.route("runtime", "DELETE", SESSION, json={})
+                services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
 
                 async def released() -> bool:
                     created = len(services.requests("runtime", "POST", SESSIONS))
@@ -376,7 +378,11 @@ async def test_docker_refuses_what_it_cannot_provision_before_running_anything(
             "alternative GPU types",
             id="alternative-gpu-types",
         ),
-        pytest.param({"resources": {"os": "windows"}}, "resources.os", id="an-os"),
+        pytest.param(
+            {"resources": {"os": "windows"}},
+            "does not support runtime_config.resources.os",
+            id="an-os",
+        ),
         pytest.param(
             {**COMPOSE, "resources": {"gpu": {}}}, "cannot attach GPUs", id="a-gpu-for-compose"
         ),

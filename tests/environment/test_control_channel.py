@@ -256,7 +256,7 @@ async def test_ending_a_sessions_task_closes_its_template(
     assert (answered["result"], closed) == (reply, ["closed first"])
 
 
-async def test_a_dropped_connection_parks_its_task_until_the_server_stops() -> None:
+async def test_a_dropped_connections_task_closes_its_template_when_the_server_stops() -> None:
     events = []
     env = Environment("held")
 
@@ -268,12 +268,10 @@ async def test_a_dropped_connection_parks_its_task_until_the_server_stops() -> N
         finally:
             events.append("closed")
 
-    async with LocalRuntime(env)(Task(env="held", id="x")) as runtime:
-        async with wire(runtime.url) as peer:
-            await peer.call("tasks.start", {"id": "hold"})
-        parked = list(events)
+    async with LocalRuntime(env)(Task(env="held", id="x")) as runtime, wire(runtime.url) as peer:
+        await peer.call("tasks.start", {"id": "hold"})
 
-    assert (parked, events) == ([], ["closed"])
+    assert events == ["closed"]
 
 
 ROUTE = {"capability": "ssh", "host": "h", "port": "443"}

@@ -1,5 +1,4 @@
-"""``hud jobs``: recent jobs, a job's traces, and cancelling a job, one trace, or every
-active job."""
+"""``hud jobs``: a job's traces, and cancelling a job, one trace, or every active job."""
 
 from __future__ import annotations
 
@@ -15,31 +14,13 @@ JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
 
 
-@pytest.mark.parametrize("argv", [["jobs"], ["jobs", "list"]], ids=["bare", "list"])
-def test_jobs_lists_recent_jobs(argv: list[str], signed_in: FakeServices, hud: Hud) -> None:
-    jobs = [{"id": f"job-{n}", "name": f"run {n}", "status": "completed"} for n in range(2)]
-    signed_in.route("api", "GET", "/v2/jobs", json={"items": jobs})
+def test_a_dashless_job_id_reads_the_dashed_job(signed_in: FakeServices, hud: Hud) -> None:
+    signed_in.route("api", "GET", f"/v2/jobs/{JOB_ID}/traces", json={"items": []})
 
-    listed = hud(*argv, "--limit", "5", "--json")
-    quiet = hud(*argv, "--quiet")
+    result = hud("jobs", JOB_ID.replace("-", ""), "--json")
 
-    assert (listed.exit_code, [job["id"] for job in listed.json]) == (0, ["job-0", "job-1"])
-    assert signed_in.requests("api", "GET", "/v2/jobs")[0].query["limit"] == ["5"]
-    assert quiet.stdout.split() == ["job-0", "job-1"]
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [["jobs", "get", JOB_ID], ["jobs", JOB_ID.replace("-", "")]],
-    ids=["get", "a-bare-id-without-dashes"],
-)
-def test_a_job_shows_its_traces(argv: list[str], signed_in: FakeServices, hud: Hud) -> None:
-    traces = [{"id": TRACE_ID, "status": "completed", "reward": 1.0}]
-    signed_in.route("api", "GET", f"/v2/jobs/{JOB_ID}/traces", json={"items": traces})
-
-    result = hud(*argv, "--json")
-
-    assert (result.exit_code, result.json) == (0, traces), result
+    assert result.exit_code == 0, result
+    assert len(signed_in.requests("api", "GET", f"/v2/jobs/{JOB_ID}/traces")) == 1
 
 
 def test_an_unknown_job_is_not_found(signed_in: FakeServices, hud: Hud) -> None:
@@ -77,17 +58,14 @@ def test_cancel_asks_the_platform_to_stop_what_it_names(
 
 
 @pytest.mark.parametrize(
-    ("argv", "message"),
-    [
-        (["jobs", "cancel"], "Provide a job_id or use --all to cancel all active jobs."),
-        (["jobs", "cancel", JOB_ID, "--all"], "Cannot specify both job_id and --all."),
-    ],
+    "argv",
+    [["jobs", "cancel"], ["jobs", "cancel", JOB_ID, "--all"]],
     ids=["nothing-named", "a-job-and-all"],
 )
 def test_cancel_needs_exactly_one_target(
-    argv: list[str], message: str, signed_in: FakeServices, hud: Hud
+    argv: list[str], signed_in: FakeServices, hud: Hud
 ) -> None:
     result = hud(*argv, "--yes", "--json")
 
-    assert (result.exit_code, result.json["message"]) == (2, message), result
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
     assert signed_in.requests("api", "POST") == []

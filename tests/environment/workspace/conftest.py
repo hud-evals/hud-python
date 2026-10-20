@@ -17,8 +17,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from hud.clients import connect
 from hud.environment import Environment
-from tests.fixtures.environments import served
+from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -38,5 +39,8 @@ async def shell(root: Path, **options: Any) -> AsyncIterator[tuple[Workspace, SS
     """Serve a workspace over ``root`` and connect to its shell binding."""
     env = Environment("workspace")
     workspace = env.workspace(root, track_files=False, **options)
-    async with served(env) as client:
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime) as client,
+    ):
         yield workspace, cast("SSHClient", await client.open("shell"))

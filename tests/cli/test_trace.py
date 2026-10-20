@@ -11,7 +11,7 @@ from hud import Environment
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, rollout
-from tests.fixtures.models import call, say
+from tests.fixtures.models import Turn, call
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,7 +76,7 @@ async def write_a_report(
         yield "Write PASS to REPORT.md."
         yield 1.0 if report.read_text().strip() == "PASS" else 0.0
 
-    models.script([call("write", filePath="REPORT.md", content="PASS"), say("Wrote it.")])
+    models.script([call("write", filePath="REPORT.md", content="PASS"), Turn(text="Wrote it.")])
     agent = OpenAIChatAgent(OpenAIChatConfig(model="scripted", max_steps=4))
     run = await rollout(Task(env="report", id="write_report"), agent, runtime=LocalRuntime(env))
     assert run.reward == 1.0

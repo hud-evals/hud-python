@@ -201,16 +201,34 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
 
 
 @pytest.mark.parametrize(
-    ("agent_timeout", "row_config", "provider_limits", "verifier_limits", "rollout_timeout"),
+    (
+        "agent_timeout",
+        "row_config",
+        "provider_limits",
+        "verifier_limits",
+        "rollout_timeout",
+        "message",
+    ),
     [
-        pytest.param(None, None, None, None, 0, id="no-time-at-all"),
-        pytest.param(10, None, None, None, 10, id="an-agent-timeout-at-the-rollout-timeout"),
+        pytest.param(
+            None, None, None, None, 0, "rollout_timeout must be greater than 0", id="no-time-at-all"
+        ),
+        pytest.param(
+            10,
+            None,
+            None,
+            None,
+            10,
+            r"agent timeout \(10s\) must be less than rollout_timeout",
+            id="an-agent-timeout-at-the-rollout-timeout",
+        ),
         pytest.param(
             3600,
             {"limits": {"run_timeout_s": 3600}},
             None,
             None,
             None,
+            r"agent timeout \(3600s\) must be less than runtime_config\.limits\.run_timeout_s",
             id="an-agent-timeout-at-the-run-limit",
         ),
         pytest.param(
@@ -219,6 +237,7 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
             None,
             None,
             3600,
+            r"actor runtime_config\.limits\.run_timeout_s \(3600s\) must be less than",
             id="a-run-limit-at-the-rollout-timeout",
         ),
         pytest.param(
@@ -227,6 +246,7 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
             {"startup_timeout_s": 90},
             None,
             60,
+            r"actor runtime_config\.limits\.startup_timeout_s \(90s\) must be less than",
             id="a-providers-limit-past-the-rollout-timeout",
         ),
         pytest.param(
@@ -235,6 +255,7 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
             None,
             {"startup_timeout_s": 90},
             90,
+            r"verifier runtime_config\.limits\.startup_timeout_s \(90s\) must be less than",
             id="a-verifiers-limit-at-the-rollout-timeout",
         ),
     ],
@@ -245,6 +266,7 @@ async def test_timeouts_that_contradict_each_other_raise_before_any_rollout(
     provider_limits: dict[str, int] | None,
     verifier_limits: dict[str, int] | None,
     rollout_timeout: float | None,
+    message: str,
     services: FakeServices,
     hud_env: HudEnv,
 ) -> None:
@@ -266,7 +288,7 @@ async def test_timeouts_that_contradict_each_other_raise_before_any_rollout(
         "lab", runtime_config=RuntimeConfig.model_validate({"limits": provider_limits})
     )
 
-    with pytest.raises(ValueError, match="must be"):
+    with pytest.raises(ValueError, match=message):
         await task.run(ScriptedAgent("x"), runtime=provider, rollout_timeout=rollout_timeout)
 
     assert services.requests() == []
@@ -294,9 +316,7 @@ async def test_a_row_naming_an_image_is_placed_in_docker(hud_env: HudEnv) -> Non
         ScriptedAgent("x")
     )
 
-    assert job.runs[0].trace.error == (
-        "[provisioning] FileNotFoundError: [Errno 2] No such file or directory: 'docker'"
-    )
+    assert "'docker'" in (job.runs[0].trace.error or "")
 
 
 async def test_an_empty_taskset_needs_no_runtime() -> None:
@@ -315,13 +335,8 @@ async def test_an_empty_taskset_needs_no_runtime() -> None:
     ],
 )
 async def test_a_run_registers_one_job_named_for_what_it_runs(
-    slugs: list[str], group: int, name: str, services: FakeServices, hud_env: HudEnv
+    slugs: list[str], group: int, name: str, reporting: FakeServices
 ) -> None:
-    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
-    services.route("api", "POST", "/v2/trace/job/{id}/enter", json={})
-    services.route("api", "POST", "/v2/trace/{id}/enter", json={})
-    services.route("api", "POST", "/v2/trace/{id}/exit", json={})
-    services.route("telemetry", "POST", "/trace/{id}/telemetry-upload", json={})
     env = Environment("letters")
 
     @env.template()
@@ -332,7 +347,7 @@ async def test_a_run_registers_one_job_named_for_what_it_runs(
     rows = [solve().model_copy(update={"slug": slug}) for slug in slugs]
     job = await Taskset("letters", rows).run(ScriptedAgent("x"), group=group)
 
-    (registered,) = services.requests("api", "POST", "/v2/trace/job/{id}/enter")
+    (registered,) = reporting.requests("api", "POST", "/v2/trace/job/{id}/enter")
     assert registered.path == f"/v2/trace/job/{job.id}/enter"
     assert (registered.json["name"], registered.json["group"]) == (name, group)
 

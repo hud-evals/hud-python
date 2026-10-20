@@ -5,7 +5,6 @@ evaluation show the result."""
 from __future__ import annotations
 
 import time
-import warnings
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -23,13 +22,13 @@ from hud.graders import (
     exact_match,
 )
 from tests.fixtures.agents import ScriptedAgent
-from tests.fixtures.models import say
+from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.conftest import HudEnv
-    from tests.fixtures.models import ModelRequest, Models, Turn
+    from tests.fixtures.models import ModelRequest, Models
 
 ANSWER = "Paris is the capital."
 
@@ -151,12 +150,10 @@ async def test_subscores_that_do_not_match_the_reward_warn() -> None:
         yield "go"
         yield EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
+    with pytest.warns(UserWarning, match="Subscores don't match reward"):
         (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
 
     assert run.reward == 1.0
-    assert any(issubclass(warning.category, UserWarning) for warning in caught)
 
 
 async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore_and_keeps_its_inputs() -> None:
@@ -336,7 +333,7 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
     def judge(request: ModelRequest) -> Turn:
         prompt = request.body["messages"][1]["content"]
         criterion = prompt.split("<criterion>\n", 1)[1].split("\n</criterion>", 1)[0]
-        return say(VERDICTS[verdicts[criterion]])
+        return Turn(text=VERDICTS[verdicts[criterion]])
 
     models.respond(judge)
     env = Environment("graders")

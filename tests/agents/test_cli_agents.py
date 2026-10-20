@@ -15,7 +15,7 @@ from hud.agents.types import ToolStep
 from hud.eval import LocalRuntime, Shared, Task, rollout
 from hud.types import AgentType
 from tests.fixtures import clis
-from tests.fixtures.environments import run_task, workspace_env
+from tests.fixtures.environments import workspace_env
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,24 +37,22 @@ def signed_in(hud_env: HudEnv) -> None:
 
 
 @EVERY_CLI
-async def test_a_command_the_cli_ran_acts_on_the_workspace_and_lands_on_the_trace(
+async def test_the_cli_runs_in_the_workspace_and_a_command_it_reports_lands_on_the_trace(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    stub = clis.Stub(
-        tmp_path / "stub",
-        cli,
-        commands=["touch made"],
-        stdout=clis.shell(cli, "touch made", "done"),
-    )
+    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.shell(cli, "make check", "done"))
     stub.install()
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env()), AgentType(agent_type).cls()
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    run = await rollout(
+        Task(env=env.name, id="task"), AgentType(agent_type).cls(), runtime=LocalRuntime(env)
     )
 
+    (capture,) = stub.captures()
+    (recorded,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
     assert (run.trace.status, run.trace.content) == ("completed", "done")
-    assert (tmp_path / "ws" / "made").exists()
-    assert sum(isinstance(step, ToolStep) for step in run.trace.steps) == 1
+    assert capture["cwd"] == str(tmp_path / "ws")
+    assert recorded.call is not None and recorded.call.arguments == {"command": "make check"}
 
 
 @EVERY_CLI
@@ -66,7 +64,16 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_cli(
     env, agent = workspace_env(tmp_path / "ws", env=stub.shell_env()), AgentType(agent_type).cls()
 
     runs = await asyncio.gather(
-        run_task(env, agent, prompt="first"), run_task(env, agent, prompt="second")
+        rollout(
+            Task(env=env.name, id="task", args={"prompt": "first"}),
+            agent,
+            runtime=LocalRuntime(env),
+        ),
+        rollout(
+            Task(env=env.name, id="task", args={"prompt": "second"}),
+            agent,
+            runtime=LocalRuntime(env),
+        ),
     )
 
     assert [run.trace.status for run in runs] == ["completed", "completed"]
@@ -83,8 +90,9 @@ async def test_a_failure_the_cli_reports_ends_the_run_with_its_error(
     stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.fault(cli, "model unavailable"))
     stub.install()
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env()), AgentType(agent_type).cls()
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    run = await rollout(
+        Task(env=env.name, id="task"), AgentType(agent_type).cls(), runtime=LocalRuntime(env)
     )
 
     assert run.trace.status == "error"
@@ -100,8 +108,11 @@ async def test_routing_through_the_gateway_without_a_hud_key_is_refused_before_t
     stub.install()
     kind = AgentType(agent_type).cls
 
-    run = await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env()), kind(kind.config_cls(gateway=True))
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        kind(kind.config_cls(gateway=True)),
+        runtime=LocalRuntime(env),
     )
 
     assert "HUD_API_KEY is required for HUD gateway routing" in (run.trace.error or "")
@@ -116,7 +127,9 @@ async def test_a_cli_missing_from_the_workspace_names_the_platform_it_needs(
     stub.install()
     env = workspace_env(tmp_path / "ws", env=stub.shell_env(path="/usr/bin:/bin"))
 
-    run = await run_task(env, AgentType(agent_type).cls())
+    run = await rollout(
+        Task(env=env.name, id="task"), AgentType(agent_type).cls(), runtime=LocalRuntime(env)
+    )
 
     assert "is unavailable for runtime platform " in (run.trace.error or "")
     assert "install it in the environment or provide a managed runtime bundle" in (
@@ -135,7 +148,8 @@ async def test_the_agent_timeout_ends_the_run_and_the_cli_while_the_workspace_li
     stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     started = time.monotonic()
-    await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), kind())
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    await rollout(Task(env=env.name, id="task"), kind(), runtime=LocalRuntime(env))
     timeout = 1.0 + 2 * (time.monotonic() - started)
     hung = clis.Stub(
         tmp_path / "stub", cli, stdout=clis.answer(cli, "done").splitlines()[0] + "\n", hang=True

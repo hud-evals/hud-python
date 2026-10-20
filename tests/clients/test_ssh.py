@@ -1,16 +1,15 @@
-"""What only ``SSHClient`` does: file transfer, Windows shells, its reconnect policy.
+"""What only ``SSHClient`` does: file transfer and its reconnect policy.
 
 Every test serves a real ``env.workspace`` on loopback and connects to its
 ``ssh`` binding through :func:`tests.fixtures.relay.relay`, which can sever the
 connection mid-command, refuse reconnects, or stall a handshake. The contract
 every client keeps (connecting, a drop, a cancelled or timed-out command) is in
-``test_clients.py``.
+``test_capability_clients.py``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -22,10 +21,10 @@ import pytest
 from hud import Environment
 from hud.capabilities import Connection, SSHClient
 from hud.clients import connect
+from hud.eval import LocalRuntime, Task
 from hud.eval.runtime import Runtime
-from tests.clients.conftest import answer, control_peer
+from tests.clients.conftest import Action, control_peer
 from tests.conftest import eventually
-from tests.fixtures.environments import served
 from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:
@@ -34,37 +33,16 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the workspace shell is POSIX")
 
-POWERSHELL = """\
-#!{python}
-import base64, pathlib, re, sys
-
-script = base64.b64decode(sys.argv[-1]).decode("utf-16-le")
-with open({log!r}, "a") as log:
-    log.write(script + "\\n")
-literals = [text.replace("''", "'") for text in re.findall(r"'((?:[^']|'')*)'", script)]
-path = literals[-1]
-if "ReadAllBytes" in script:
-    print(base64.b64encode(pathlib.Path(path).read_bytes()).decode())
-elif "Get-ChildItem" in script:
-    print("\\n".join(sorted(entry.name for entry in pathlib.Path(path).iterdir())))
-elif "WriteAllBytes" in script:
-    pathlib.Path(path).write_bytes(b"")
-else:
-    with open(path, "ab") as file:
-        file.write(base64.b64decode(literals[0]))
-"""
-
 
 @asynccontextmanager
-async def shell(
-    tmp_path: Path, *, env: dict[str, str] | None = None
-) -> AsyncIterator[tuple[SSHClient, FlakyRelay, Path]]:
+async def shell(tmp_path: Path) -> AsyncIterator[tuple[SSHClient, FlakyRelay, Path]]:
     """A client connected to a served workspace's ``ssh`` binding through a relay."""
     root = tmp_path / "workspace"
     root.mkdir()
     environment = Environment("ssh-faults")
-    environment.workspace(root, track_files=False, env=env)
-    async with served(environment) as control:
+    environment.workspace(root, track_files=False)
+    task = Task(env=environment.name, id="scenario")
+    async with LocalRuntime(environment)(task) as runtime, connect(runtime) as control:
         binding = control.binding("shell")
         parts = urlsplit(binding.url)
         assert parts.hostname is not None and parts.port is not None
@@ -98,34 +76,6 @@ async def test_files_round_trip_through_the_exec_channel(tmp_path: Path) -> None
         assert await client.read_text(str(root / "it's here.txt")) == "héllo\nwörld\n"
         assert await client.read_bytes("raw.bin") == b"\x00\xff\x10"
         assert await client.listdir(".") == ["empty.txt", "it's here.txt", "raw.bin"]
-
-
-async def test_windows_shells_move_files_as_base64_through_encoded_powershell(
-    tmp_path: Path,
-) -> None:
-    tools = tmp_path / "tools"
-    tools.mkdir()
-    log = tmp_path / "powershell.log"
-    stub = tools / "powershell"
-    stub.write_text(POWERSHELL.format(python=sys.executable, log=str(log)), encoding="utf-8")
-    stub.chmod(0o755)
-    async with shell(tmp_path, env={"PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"}) as (
-        client,
-        _,
-        root,
-    ):
-        windows_client = SSHClient(
-            replace(client.capability, params={**client.capability.params, "shell": "powershell"}),
-            client.conn,
-        )
-        content = "x" * 7000 + "é"
-        target = str(root / "it's.txt")
-
-        await windows_client.write_text(target, content)
-        read = await windows_client.read_text(target)
-        listing = await windows_client.listdir(str(root))
-
-    assert (read, listing) == (content, ["it's.txt"])
 
 
 async def test_a_command_lost_in_flight_is_not_replayed_and_the_next_one_reconnects(
@@ -225,7 +175,8 @@ async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with
     root.mkdir()
     env = Environment("tunneled")
     env.workspace(root, track_files=False)
-    async with served(env) as workspace:
+    task = Task(env=env.name, id="scenario")
+    async with LocalRuntime(env)(task) as runtime, connect(runtime) as workspace:
         shell_binding = workspace.binding("shell")
         address = urlsplit(shell_binding.url)
         assert address.hostname is not None and address.port is not None
@@ -234,7 +185,7 @@ async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with
             binding = {**shell_binding.to_manifest(), "url": "ssh://agent@environment:22"}
             hello = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}}
             async with control_peer(
-                [answer({**hello, "bindings": [binding]})],
+                [Action("answer", result={**hello, "bindings": [binding]})],
                 upstreams={"shell": ("127.0.0.1", flaky.port)},
             ) as peer:
                 async with connect(Runtime(peer.url)) as client:

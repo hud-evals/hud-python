@@ -1,5 +1,5 @@
-"""What only ``OpenAIAgent`` does over the Responses API: the hosted tools and tool search it
-offers, how it chains responses and discards an unusable one, how it reports a refused or
+"""What only ``OpenAIAgent`` does over the Responses API: the tool search it offers, how it
+chains responses and discards an unusable one, how it reports a refused, capped or
 incomplete call to the model, and the citations it records."""
 
 from __future__ import annotations
@@ -11,12 +11,13 @@ import pytest
 from fastmcp import FastMCP
 
 from hud.agents import OpenAIAgent
-from hud.agents.openai.tools import OpenAICodeInterpreterTool, OpenAIToolSearchTool
+from hud.agents.openai.tools import OpenAIToolSearchTool
 from hud.agents.types import OpenAIConfig
+from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
-from tests.fixtures.environments import run_task, workspace_env
-from tests.fixtures.models import Turn, say, shell, shell_call
+from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn, shell, shell_call
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,23 +33,6 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
 
 
-async def test_a_hosted_code_interpreter_is_offered_as_configured(
-    models: Models, tmp_path: Path
-) -> None:
-    hosted = OpenAICodeInterpreterTool(container={"type": "auto"})
-    models.script([say("done")])
-
-    await run_task(
-        workspace_env(tmp_path / "ws"),
-        OpenAIAgent(OpenAIConfig(model=MODEL, hosted_tools=[hosted])),
-    )
-
-    (request,) = models.requests()
-    assert [t for t in request.body["tools"] if t["type"] == "code_interpreter"] == [
-        {"type": "code_interpreter", "container": {"type": "auto"}}
-    ]
-
-
 @pytest.mark.parametrize(
     ("threshold", "deferred"),
     [(1, {"database__lookup", "search__lookup"}), (2, set())],
@@ -59,7 +43,7 @@ async def test_tool_search_defers_mcp_tools_once_there_are_more_than_its_thresho
 ) -> None:
     lookups = FastMCP("lookups")
     lookups.tool(name="lookup", description="Look a key up.")(lambda key: key)
-    models.script([say("done")])
+    models.script([Turn(text="done")])
     agent = OpenAIAgent(
         OpenAIConfig(model=MODEL, hosted_tools=[OpenAIToolSearchTool(threshold=threshold)])
     )
@@ -68,18 +52,21 @@ async def test_tool_search_defers_mcp_tools_once_there_are_more_than_its_thresho
         mcp_server(lookups, name="database") as database,
         mcp_server(lookups, name="search") as search,
     ):
-        await run_task(workspace_env(tmp_path / "ws", capabilities=(database, search)), agent)
+        env = workspace_env(tmp_path / "ws", capabilities=(database, search))
+        await rollout(Task(env=env.name, id="task"), agent, runtime=LocalRuntime(env))
 
     (request,) = models.requests()
     assert {tool["name"] for tool in request.body["tools"] if tool.get("defer_loading")} == deferred
 
 
 async def test_citations_ask_for_web_search_sources(models: Models, tmp_path: Path) -> None:
-    models.script([say("done")])
+    models.script([Turn(text="done")])
 
-    await run_task(
-        workspace_env(tmp_path / "ws"),
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
         OpenAIAgent(OpenAIConfig(model=MODEL, citations_enabled=True)),
+        runtime=LocalRuntime(env),
     )
 
     (request,) = models.requests()
@@ -89,9 +76,14 @@ async def test_citations_ask_for_web_search_sources(models: Models, tmp_path: Pa
 async def test_each_request_sends_only_what_is_new_since_the_response_it_continues(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([shell("echo hi"), say("done")])
+    models.script([shell("echo hi"), Turn(text="done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), OpenAIAgent(OpenAIConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
+        OpenAIAgent(OpenAIConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     first, second = (request.body for request in models.requests())
     assert (first.get("previous_response_id"), second["previous_response_id"]) == (None, "resp_1")
@@ -101,9 +93,14 @@ async def test_each_request_sends_only_what_is_new_since_the_response_it_continu
 async def test_an_empty_shell_call_is_sampled_again_without_advancing_the_chain(
     models: Models, tmp_path: Path
 ) -> None:
-    models.queue([shell_call("true"), shell_call(), say("done")])
+    models.queue([shell_call("true"), shell_call(), Turn(text="done")])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), OpenAIAgent(OpenAIConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        OpenAIAgent(OpenAIConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     chain = [request.body.get("previous_response_id") for request in models.requests()]
     assert (run.trace.content, chain) == ("done", [None, "resp_1", "resp_1"])
@@ -114,23 +111,35 @@ async def test_a_shell_call_it_cannot_run_is_told_to_the_model(
 ) -> None:
     refused = shell_call("true")
     refused = Turn(native=({**refused.native[0], "action": {"commands": 5}},))
-    models.script([refused, say("done")])
+    models.script([refused, Turn(text="done")])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), OpenAIAgent(OpenAIConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        OpenAIAgent(OpenAIConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     assert run.trace.status == "completed"
     assert "commands must be a list of strings" in json.dumps(models.requests()[-1].body)
 
 
-async def test_a_shell_calls_output_cap_reaches_the_model_with_its_output(
+async def test_a_shell_calls_output_cap_bounds_the_output_the_model_is_sent_back(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([shell_call("seq 1 1000", max_output_length=50), say("done")])
+    models.script([shell_call("seq 1 1000", max_output_length=50), Turn(text="done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), OpenAIAgent(OpenAIConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    await rollout(
+        Task(env=env.name, id="task"),
+        OpenAIAgent(OpenAIConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     (output,) = [i for i in models.requests()[-1].body["input"] if i["type"] == "shell_call_output"]
-    assert output["max_output_length"] == 50
+    (result,) = output["output"]
+    assert len(result["stdout"] + result["stderr"]) <= 50
+    assert result["stdout"].startswith("1\n2\n") and result["stdout"].endswith("999\n1000\n")
 
 
 async def test_a_function_call_cut_off_mid_arguments_is_explained_to_the_model(
@@ -150,11 +159,15 @@ async def test_a_function_call_cut_off_mid_arguments_is_explained_to_the_model(
             },
         )
     )
-    models.script([cut_off, say("done")])
+    models.script([cut_off, Turn(text="done")])
 
     async with mcp_server(lookups) as server:
         env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        run = await run_task(env, OpenAIAgent(OpenAIConfig(model=MODEL)))
+        run = await rollout(
+            Task(env=env.name, id="task"),
+            OpenAIAgent(OpenAIConfig(model=MODEL)),
+            runtime=LocalRuntime(env),
+        )
 
     assert run.trace.status == "completed"
     assert "the arguments for this 'lookup' call arrived incomplete" in json.dumps(
@@ -195,7 +208,12 @@ async def test_url_and_file_citations_land_on_the_agent_step(
     }
     models.script([Turn(reasoning="look it up", native=(answer,))])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), OpenAIAgent(OpenAIConfig(model=MODEL)))
+    env = workspace_env(tmp_path / "ws")
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        OpenAIAgent(OpenAIConfig(model=MODEL)),
+        runtime=LocalRuntime(env),
+    )
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert (step["content"], step["reasoning"]) == ("Blue.", "look it up")

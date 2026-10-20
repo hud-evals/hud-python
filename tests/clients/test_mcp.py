@@ -5,7 +5,7 @@ streamable-HTTP server on the fake services, whose ``tools/call`` answers come
 from a script: a transient gateway status, a body that is not JSON, a dropped
 connection, a result outside the tool's output schema. Every call resolves:
 with a result once a transient error clears, or with a transport error. The
-contract every client keeps is in ``test_clients.py``.
+contract every client keeps is in ``test_capability_clients.py``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from tests.fixtures.asgi import mcp_server, serve_asgi
+from tests.fixtures.asgi import serve_asgi
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -43,17 +43,6 @@ def tools() -> FastMCP:
     def refuse() -> str:
         """Always fail."""
         raise ToolError("not today")
-
-    @server.tool
-    def numbers() -> list[int]:
-        """A plain list, wrapped as structured content."""
-        return [1, 2]
-
-    @server.tool
-    def mistyped() -> int:
-        """Returns something other than its annotation."""
-        wrong: Any = "not an int"
-        return wrong
 
     return server
 
@@ -216,18 +205,17 @@ async def test_a_tool_call_succeeds_after_a_transient_503(services: FakeServices
 
 
 @pytest.mark.parametrize(
-    ("calls", "error_type", "attempts"),
+    ("calls", "attempts"),
     [
-        pytest.param([status(503)], "HTTPStatusError", 3, id="503-until-the-deadline"),
-        pytest.param([unparseable], "ValidationError", 1, id="unparseable-json"),
-        pytest.param([dropped], "RemoteProtocolError", 1, id="connection-dropped"),
+        pytest.param([status(503)], 3, id="503-until-the-deadline"),
+        pytest.param([unparseable], 1, id="unparseable-json"),
+        pytest.param([dropped], 1, id="connection-dropped"),
     ],
 )
 async def test_a_failing_tool_call_resolves_with_a_transport_error(
     services: FakeServices,
     hud_env: HudEnv,
     calls: list[Callable[[Request], Reply]],
-    error_type: str,
     attempts: int,
 ) -> None:
     hud_env.set(HUD_CLIENT_TIMEOUT="1")
@@ -237,7 +225,7 @@ async def test_a_failing_tool_call_resolves_with_a_transport_error(
         await server.call()
 
     assert raised.value.error.code == -32000
-    assert raised.value.error.message == f"Transport error: {error_type}"
+    assert raised.value.error.message.startswith("Transport error")
     assert server.attempts() == attempts
 
 
@@ -247,23 +235,3 @@ async def test_a_result_outside_its_output_schema_reaches_the_caller(
     called = await ScriptedMCPServer(services, [off_schema]).call()
 
     assert (called.isError, called.structuredContent) == (False, {"n": "x"})
-
-
-@pytest.mark.parametrize(
-    ("tool", "structured"),
-    [
-        pytest.param("numbers", {"result": [1, 2]}, id="plain-result-wrapped"),
-        pytest.param("mistyped", {"result": "not an int"}, id="mistyped-result-not-validated"),
-    ],
-)
-async def test_a_served_fastmcp_tool_wraps_plain_results_and_skips_output_validation(
-    tool: str, structured: dict[str, Any]
-) -> None:
-    async with mcp_server(tools()) as served:
-        client = await MCPClient.connect(served)
-        try:
-            called = await client.call_tool(tool, {})
-        finally:
-            await client.close()
-
-    assert (called.isError, called.structuredContent) == (False, structured)

@@ -15,12 +15,12 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tests.fixtures.models import call, say
+from tests.fixtures.models import Turn, call
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.fixtures.models import ModelRequest, Turn
+    from tests.fixtures.models import ModelRequest
 
 HERE = Path(__file__).parent
 
@@ -35,7 +35,7 @@ def source(name: str) -> Path:
 def repeat_word(request: ModelRequest) -> Turn:
     """Answer ``echo`` and ``verifier``: the word the prompt asks for."""
     match = re.search(r"Reply with: (\S+)", request.prompt)
-    return say(match.group(1) if match else "no word in the prompt")
+    return Turn(text=match.group(1) if match else "no word in the prompt")
 
 
 def collect_digits() -> Callable[[ModelRequest], Turn]:
@@ -51,7 +51,7 @@ def collect_digits() -> Callable[[ModelRequest], Turn]:
             latest = re.search(r"\b(\d|done)\b", request.tool_results[-1])
             assert latest is not None, request.tool_results[-1]
             if latest.group(1) == "done":
-                return say("".join(digits))
+                return Turn(text="".join(digits))
             digits.append(latest.group(1))
         (tool,) = [name for name in request.tools if name.endswith("next_digit")]
         return call(tool)
@@ -66,7 +66,7 @@ def read_token(request: ModelRequest) -> Turn:
         assert path is not None, request.prompt
         return call("bash", command=f"cat {path.group(1)}")
     token = re.search(r"^[0-9a-f]{16}$", request.tool_results[-1], re.MULTILINE)
-    return say(token.group(0) if token else "no token in the tool result")
+    return Turn(text=token.group(0) if token else "no token in the tool result")
 
 
 def capable_model(fixture: str) -> Callable[[ModelRequest], Turn]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -171,6 +172,4 @@ def test_qa_results_read_a_verdict_from_each_result_shape(
     text = hud("qa", "results", TRACE_ID)
 
     assert text.exit_code == 0, text
-    assert [
-        line.removeprefix("Verdict: ") for line in text.lines if line.startswith("Verdict:")
-    ] == verdicts
+    assert re.findall(r"Verdict: (\w+)", text.stdout) == verdicts

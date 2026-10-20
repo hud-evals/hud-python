@@ -217,32 +217,6 @@ def claude_result(text: str = "done", *, is_error: bool = False) -> dict[str, An
     }
 
 
-def claude_answer(text: str) -> str:
-    return jsonl(claude_assistant({"type": "text", "text": text}), claude_result(text))
-
-
-def claude_shell(command: str, then: str) -> str:
-    return jsonl(
-        claude_assistant(
-            {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {"command": command}},
-            stop="tool_use",
-        ),
-        {
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "ran"}],
-            },
-        },
-        claude_assistant({"type": "text", "text": then}),
-        claude_result(then),
-    )
-
-
-def claude_fault(message: str) -> str:
-    return jsonl(claude_result(message, is_error=True))
-
-
 def codex_item(kind: str, item_id: str, **fields: Any) -> dict[str, Any]:
     return {"type": "item.completed", "item": {"id": item_id, "type": kind, **fields}}
 
@@ -254,13 +228,36 @@ CODEX_COMPLETED = {
 }
 
 
-def codex_answer(text: str) -> str:
+# ─── either CLI, by executable name ────────────────────────────────────
+
+
+def answer(cli: str, text: str) -> str:
+    """The stream ``cli`` prints when it answers ``text``."""
+    if cli == "claude":
+        return jsonl(claude_assistant({"type": "text", "text": text}), claude_result(text))
     return jsonl(
         CODEX_STARTED, codex_item("agent_message", "message-1", text=text), CODEX_COMPLETED
     )
 
 
-def codex_shell(command: str, then: str) -> str:
+def shell(cli: str, command: str, then: str) -> str:
+    """The stream ``cli`` prints when it runs ``command`` and then answers ``then``."""
+    if cli == "claude":
+        return jsonl(
+            claude_assistant(
+                {"type": "tool_use", "id": "tool-1", "name": "Bash", "input": {"command": command}},
+                stop="tool_use",
+            ),
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "ran"}],
+                },
+            },
+            claude_assistant({"type": "text", "text": then}),
+            claude_result(then),
+        )
     return jsonl(
         CODEX_STARTED,
         codex_item(
@@ -276,34 +273,11 @@ def codex_shell(command: str, then: str) -> str:
     )
 
 
-def codex_fault(message: str) -> str:
-    return jsonl({"type": "turn.started"}, {"type": "turn.failed", "error": {"message": message}})
-
-
-# ─── the command line a CLI was launched with ──────────────────────────
-
-
-def overrides(argv: list[str]) -> dict[str, str]:
-    """Codex's ``-c key=value`` overrides, values as written (TOML)."""
-    return dict(argv[index + 1].split("=", 1) for index, arg in enumerate(argv) if arg == "-c")
-
-
-# ─── either CLI, by executable name ────────────────────────────────────
-
-
-def answer(cli: str, text: str) -> str:
-    """The stream ``cli`` prints when it answers ``text``."""
-    return {"claude": claude_answer, "codex": codex_answer}[cli](text)
-
-
-def shell(cli: str, command: str, then: str) -> str:
-    """The stream ``cli`` prints when it runs ``command`` and then answers ``then``."""
-    return {"claude": claude_shell, "codex": codex_shell}[cli](command, then)
-
-
 def fault(cli: str, message: str) -> str:
     """The stream ``cli`` prints when its turn fails with ``message``."""
-    return {"claude": claude_fault, "codex": codex_fault}[cli](message)
+    if cli == "claude":
+        return jsonl(claude_result(message, is_error=True))
+    return jsonl({"type": "turn.started"}, {"type": "turn.failed", "error": {"message": message}})
 
 
 def prompt(cli: str, stdin: str) -> str:

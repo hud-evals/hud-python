@@ -137,8 +137,7 @@ async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_c
             "raise",
             "check",
             1.0,
-            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: "
-            "actor grade exploded",
+            ("[grading] ", "actor grade exploded"),
             True,
             id="the-actors-grader-raised",
         ),
@@ -146,8 +145,7 @@ async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_c
             "scoreless",
             "check",
             1.0,
-            "[grading] hud.clients.client.HudProtocolError: hud rpc error -32000: "
-            "task 'solve' graded with a dict missing a numeric 'score' (keys: ['answer'])",
+            ("[grading] ", "graded with a dict missing a numeric 'score' (keys: ['answer'])"),
             True,
             id="a-scoreless-actor-grade",
         ),
@@ -155,8 +153,7 @@ async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_c
             "score",
             "raise",
             0.0,
-            "[verifying] hud.clients.client.HudProtocolError: hud rpc error -32000: "
-            "verifier exploded",
+            ("[verifying] ", "verifier exploded"),
             False,
             id="the-verifier-raised",
         ),
@@ -164,8 +161,7 @@ async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_c
             "score",
             "scoreless",
             0.0,
-            "[verifying] hud.clients.client.HudProtocolError: hud rpc error -32000: "
-            "task 'verify' graded with a dict missing a numeric 'score' (keys: ['verdict'])",
+            ("[verifying] ", "graded with a dict missing a numeric 'score' (keys: ['verdict'])"),
             False,
             id="a-scoreless-verdict",
         ),
@@ -173,7 +169,7 @@ async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_c
     ],
 )
 async def test_the_verdict_is_the_grade_whichever_side_fails(
-    grading: str, verdict: str, reward: float, error: str | None, graded: bool
+    grading: str, verdict: str, reward: float, error: tuple[str, str] | None, graded: bool
 ) -> None:
     actor = Environment("actor")
     judge = Environment("judge")
@@ -200,7 +196,13 @@ async def test_the_verdict_is_the_grade_whichever_side_fails(
     job = await task.run(ScriptedAgent("secret"))
 
     (run,) = job.runs
-    assert (run.reward, run.trace.error, run in job.errors) == (reward, error, not graded)
+    assert (run.reward, run in job.errors) == (reward, not graded)
+    if error is None:
+        assert run.trace.error is None
+    else:
+        phase, phrase = error
+        assert (run.trace.error or "").startswith(phase)
+        assert phrase in (run.trace.error or "")
 
 
 async def test_an_agent_that_fails_after_answering_is_still_judged() -> None:

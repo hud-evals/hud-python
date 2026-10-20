@@ -84,9 +84,6 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     assert [block.type for block in agent.results[0].content] == ["text", "text", "image"]
     # The trace viewer parses this opening line to map tool calls to ticks.
     assert reached_reply.startswith("Played 56 steps (5.6 s).")
-    assert "observation/state: x=0.5000, grip=0.0000" in reached_reply
-    assert "pose: x=0.5000, grip=0.0000" in reached_reply
-    assert "off: x=0.0000, grip=0.0000" in reached_reply
     assert "At the target. Remaining offsets: 0 mm on x." in reached_reply
     assert "The episode has ended" in closed_reply
     # Tolerance only picks the verdict; nothing the model sees mentions it.

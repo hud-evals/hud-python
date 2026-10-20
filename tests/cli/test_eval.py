@@ -11,7 +11,7 @@ import pytest
 from hud import Environment
 from hud.eval import LocalRuntime, Task
 from tests.conftest import write_files
-from tests.fixtures.models import say
+from tests.fixtures.models import Turn
 
 from .conftest import API_KEY
 
@@ -42,7 +42,7 @@ SCRIPTED = ("openai_compatible", "-m", "scripted")
 @pytest.fixture
 def gateway(models: Models, signed_in: FakeServices) -> Models:
     """A signed-in user whose agents reach a scripted model that always answers "ok"."""
-    models.script([say("ok")])
+    models.script([Turn(text="ok")])
     return models
 
 

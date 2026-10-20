@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hud.agents import create_agent
-from tests.fixtures.environments import run_task, workspace_env
-from tests.fixtures.models import say
+from hud.eval import LocalRuntime, Task, rollout
+from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -59,9 +60,10 @@ async def test_a_created_agent_speaks_its_models_protocol_through_the_gateway(
         Reply(json={"items": CATALOG[:2], "total": 3}),
         Reply(json={"items": CATALOG[2:], "total": 3}),
     )
-    models.script([say("done")])
+    models.script([Turn(text="done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), create_agent(name))
+    env = workspace_env(tmp_path / "ws")
+    await rollout(Task(env=env.name, id="task"), create_agent(name), runtime=LocalRuntime(env))
 
     (request,) = models.requests()
     assert (request.protocol, request.model, request.credential) == (protocol, model, "hud-key")

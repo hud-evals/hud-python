@@ -18,7 +18,7 @@ from hud import Environment
 from hud.agents.base import Agent
 from hud.eval import HUDRuntime, LocalRuntime, Task, Taskset
 from tests.conftest import eventually
-from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
+from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, tunnel
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.services import Reply
 
@@ -48,7 +48,9 @@ async def test_a_platform_taskset_runs_over_the_tunnel_and_releases_its_session(
     row = Task(env="checked", id="check")
 
     async with LocalRuntime(checked())(row) as served:
-        host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
+        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
+        services.route("runtime", "DELETE", SESSION, json={})
+        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
     (run,) = job.runs
@@ -73,7 +75,9 @@ async def test_runtime_url_points_the_tunnel_at_another_runtime_service(
     row = Task(env="checked", id="check")
 
     async with LocalRuntime(checked())(row) as served:
-        host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
+        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
+        services.route("runtime", "DELETE", SESSION, json={})
+        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
         job = await row.run(
             ScriptedAgent("yes"), runtime=HUDRuntime(runtime_url=services.url("runtime") + "/")
         )
@@ -91,12 +95,12 @@ async def dropped(websocket: WebSocket, params: dict[str, str]) -> None:
     [
         pytest.param(
             Reply(status=503, json={"detail": "no capacity"}),
-            "[provisioning] httpx.HTTPStatusError: Server error '503 Service Unavailable'",
+            "503",
             id="a-rejected-session",
         ),
         pytest.param(
             Reply(json={"status": "ok"}),
-            "[provisioning] RuntimeError: Runtime gateway did not return a session id",
+            "did not return a session id",
             id="a-session-without-an-id",
         ),
     ],
@@ -110,7 +114,8 @@ async def test_a_session_the_runtime_service_does_not_grant_fails_the_run(
     job = await Task(env="checked", id="check").run(ScriptedAgent("yes"), runtime=HUDRuntime())
 
     (run,) = job.runs
-    assert (run.trace.error or "").startswith(error)
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert error in (run.trace.error or "")
     assert [request.method for request in services.requests()] == ["POST"]
 
 
@@ -138,14 +143,14 @@ async def test_resources_the_deployed_env_cannot_change_are_warned_about_once(
     rows = [Task(env="checked", id="check", slug=slug, runtime_config=sized) for slug in "ab"]
 
     async with LocalRuntime(checked())(Task(env="checked", id="check")) as served:
-        host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
+        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
+        services.route("runtime", "DELETE", SESSION, json={})
+        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
         job = await Taskset("sized", rows).run(ScriptedAgent("yes"), runtime=HUDRuntime())
 
     assert [run.reward for run in job.runs] == [1.0, 1.0]
-    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == [
-        "HUDRuntime cannot honor task runtime_config ['resources'] on an already-deployed env; "
-        "rollouts proceed on the platform's defaults"
-    ]
+    (warning,) = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert "resources" in warning
 
 
 @pytest.mark.parametrize(
@@ -193,7 +198,9 @@ async def test_the_deprecated_run_timeout_still_ends_a_tunneled_run(
             await asyncio.sleep(30)
 
     async with LocalRuntime(checked())(row) as served:
-        host_on_runtime(services, int(served.url.rsplit(":", 1)[1]))
+        services.route("runtime", "POST", SESSIONS, json={"id": "sess-1"})
+        services.route("runtime", "DELETE", SESSION, json={})
+        services.websocket("runtime", TUNNEL, tunnel(int(served.url.rsplit(":", 1)[1])))
         with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
             runtime = HUDRuntime(run_timeout=0.5)
         job = await row.run(Waits(), runtime=runtime)

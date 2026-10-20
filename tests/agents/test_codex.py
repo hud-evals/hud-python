@@ -14,8 +14,9 @@ from hud.agents import CodexCLIAgent
 from hud.agents.types import CodexCLIConfig, ToolStep
 from hud.capabilities import Connection
 from hud.environment.egress import ANY_HOST
+from hud.eval import LocalRuntime, Task, rollout
 from tests.fixtures import clis
-from tests.fixtures.environments import run_task, workspace_env
+from tests.fixtures.environments import workspace_env
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -57,13 +58,16 @@ async def test_codex_is_pointed_at_the_gateway_over_responses_unless_it_has_its_
     stub = clis.Stub(tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"))
     stub.install()
 
-    await run_task(
-        workspace_env(tmp_path / "ws", env=stub.shell_env()),
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    await rollout(
+        Task(env=env.name, id="task"),
         CodexCLIAgent(CodexCLIConfig(gateway=gateway)),
+        runtime=LocalRuntime(env),
     )
 
     (capture,) = stub.captures()
-    settings = clis.overrides(capture["argv"])
+    argv = capture["argv"]
+    settings = dict(argv[index + 1].split("=", 1) for index, arg in enumerate(argv) if arg == "-c")
     key = json.loads(settings.get("model_providers.hud.env_key", '"CODEX_API_KEY"'))
     assert settings.get("model_providers.hud.base_url") == (
         json.dumps(models.url) if via_gateway else None
@@ -152,7 +156,8 @@ async def test_each_item_codex_ran_lands_on_the_trace_as_a_tool_step(
     stub = clis.Stub(tmp_path / "stub", "codex", stdout=stdout)
     stub.install()
 
-    run = await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), CodexCLIAgent())
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    run = await rollout(Task(env=env.name, id="task"), CodexCLIAgent(), runtime=LocalRuntime(env))
 
     (recorded,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
     assert recorded.call is not None and recorded.result is not None
@@ -205,7 +210,8 @@ async def test_how_codex_exits_decides_how_the_run_ends(
     stub = clis.Stub(tmp_path / "stub", "codex", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
-    run = await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), CodexCLIAgent())
+    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
+    run = await rollout(Task(env=env.name, id="task"), CodexCLIAgent(), runtime=LocalRuntime(env))
 
     assert (run.trace.status, run.trace.content, run.trace.error) == (
         "error",
@@ -235,7 +241,12 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
         track_files=False,
     )
 
-    run = await run_task(env, CodexCLIAgent(), connections=(connection,))
+    run = await rollout(
+        Task(env=env.name, id="task"),
+        CodexCLIAgent(),
+        runtime=LocalRuntime(env),
+        connections=(connection,),
+    )
 
     assert "/codex is a launcher script, but a process-bound inference connection " in (
         run.trace.error or ""

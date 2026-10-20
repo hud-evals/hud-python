@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from tests.fixtures.models import say
+from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
     from tests.conftest import Result
-    from tests.fixtures.models import ModelRequest, Turn
+    from tests.fixtures.models import ModelRequest
 
 # Tool steps may fail without failing the run: a real model can call a tool badly.
 LIFECYCLE_SOURCES = {"task", "agent", "system"}
@@ -39,8 +39,8 @@ def assert_clean_lifecycle(steps: list[dict[str, Any]]) -> tuple[dict[str, Any],
 def scripted(request: ModelRequest) -> Turn:
     """The agent answers at once; the LLM judge finds every criterion met."""
     if request.protocol == "chat":
-        return say(json.dumps({"criterion_status": "MET", "explanation": "scripted judge"}))
-    return say("done")
+        return Turn(text=json.dumps({"criterion_status": "MET", "explanation": "scripted judge"}))
+    return Turn(text="done")
 
 
 def evaluated(result: Result) -> dict[str, Any]:

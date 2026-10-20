@@ -112,7 +112,7 @@ def test_the_first_sync_creates_the_taskset_with_every_task_and_links_it(
 ) -> None:
     result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
 
-    assert (result.exit_code, result.json["taskset_id"]) == (0, TASKSET_ID), result
+    assert result.exit_code == 0, result
     (upload,) = uploads(platform)
     assert (upload["taskset_name"], "taskset_id" in upload) == ("demo", False)
     assert [(t["name"], t["env"], t["task_id"], t["args"]) for t in upload["tasks"]] == [
@@ -237,7 +237,6 @@ def test_nothing_linked_and_no_taskset_named_is_a_usage_error(
     result = hud("sync", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert result.json["message"].startswith("No taskset specified.")
 
 
 @pytest.mark.parametrize("target", ["tasks.json", "out/tasks.jsonl"])

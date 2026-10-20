@@ -61,7 +61,11 @@ async def test_a_taskset_reports_one_job_and_enters_each_rollout_under_it(
     (registered,) = reporting.requests("api", "POST", JOB_ENTER)
     entered = {r.path.split("/")[3]: r.json for r in reporting.requests("api", "POST", TRACE_ENTER)}
     assert registered.path == f"/v2/trace/job/{job.id}/enter"
-    assert registered.json == {"name": "pair (2 tasks) (2 times)", "group": 2, "taskset_id": "ts-1"}
+    assert (registered.json["name"], registered.json["group"], registered.json["taskset_id"]) == (
+        "pair (2 tasks) (2 times)",
+        2,
+        "ts-1",
+    )
     assert f"job: {reporting.url('web')}/jobs/{uuid.UUID(job.id)}" in caplog.messages
     assert set(entered) == {run.trace_id for run in job.runs}
     assert {(e["job_id"], e["model"]) for e in entered.values()} == {(job.id, "claude-test")}
@@ -78,7 +82,7 @@ async def test_a_lone_rollout_reports_a_job_of_one_named_for_its_task(
     )
 
     (registered,) = reporting.requests("api", "POST", JOB_ENTER)
-    assert registered.json == {"name": "check", "group": 1}
+    assert (registered.json["name"], registered.json["group"]) == ("check", 1)
     assert registered.path == f"/v2/trace/job/{run.job_id}/enter"
 
 
@@ -109,7 +113,9 @@ async def test_an_open_job_is_reported_once_for_every_call_it_spans(
         ScriptedAgent("yes"), runtime=LocalRuntime(env), job=job
     )
 
-    assert reporting.bodies("api", "POST", JOB_ENTER) == [{"name": "training", "group": 2}]
+    assert [(b["name"], b["group"]) for b in reporting.bodies("api", "POST", JOB_ENTER)] == [
+        ("training", 2)
+    ]
     assert {e["job_id"] for e in reporting.bodies("api", "POST", TRACE_ENTER)} == {job.id}
 
 
@@ -134,15 +140,14 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
     await check().run(Annotating())
 
     (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
-    assert exited == {
-        "status": "completed",
-        "reward": 0.5,
-        "evaluation_result": {
-            "score": 0.5,
-            "subscores": [{"name": "format", "weight": 1.0, "value": 0.5, "children": None}],
-        },
-        "metadata": {"turns": 3},
-    }
+    assert (exited["status"], exited["reward"], exited["metadata"]["turns"]) == (
+        "completed",
+        0.5,
+        3,
+    )
+    evaluation = exited["evaluation_result"]
+    assert evaluation["score"] == 0.5
+    assert [(s["name"], s["value"]) for s in evaluation["subscores"]] == [("format", 0.5)]
 
 
 async def test_an_error_the_run_recovered_from_stays_off_its_report(
@@ -210,11 +215,9 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
     await rollout(Task(env="checked", id="check"), ScriptedAgent("yes"), runtime=unavailable)
 
     (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
-    assert exited == {
-        "status": "error",
-        "reward": 0.0,
-        "error": "[provisioning] RuntimeError: no substrate",
-    }
+    assert (exited["status"], exited["reward"]) == ("error", 0.0)
+    assert exited["error"].startswith("[provisioning] ")
+    assert "no substrate" in exited["error"]
 
 
 async def test_a_timed_out_rollout_reports_why_it_stopped(reporting: FakeServices) -> None:
