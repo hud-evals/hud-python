@@ -105,10 +105,10 @@ def _state(agent: ClaudeAgent) -> Any:
 
 def _inline_error(type_: str, *, headers: dict[str, str] | None = None) -> APIStatusError:
     body = {"type": "error", "error": {"type": type_, "message": "stream failed"}}
-    response = httpx.Response(
+    response = httpx2.Response(
         200,
         headers=headers,
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
     return APIStatusError(str(body), response=response, body=body)
 
@@ -752,9 +752,9 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "telemetry_enabled", False)
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def respond(request: httpx.Request) -> httpx.Response:
+    def respond(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         tool_turn = len(requests) == 1
         block = (
@@ -790,7 +790,7 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
             {"type": "message_stop"},
         ]
         body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
-        return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=body)
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, text=body)
 
     source = BytesIO()
     Image.new("RGB", (128, 72), "white").save(source, format="PNG")
@@ -816,7 +816,7 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
         ),
     )
     async with AsyncAnthropic(
-        api_key="test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        api_key="test", http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond))
     ) as client:
         await ClaudeAgent(
             ClaudeConfig(model="claude-sonnet-5-5", model_client=client, max_steps=2)
