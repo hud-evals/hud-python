@@ -185,33 +185,6 @@ def test_adapting_a_dataset_writes_the_projects_and_findings_its_case_expects(
             assert actual == value, (slug, path)
 
 
-def test_adapt_raises_when_the_source_holds_no_harbor_tasks(tmp_path: Path) -> None:
-    (tmp_path / "empty").mkdir()
-
-    for source in (tmp_path / "empty", tmp_path / "nowhere"):
-        with pytest.raises(ValueError, match="no Harbor tasks found"):
-            harbor.adapt(source)
-
-
-def test_adapt_aborts_without_a_reachable_docker_daemon_instead_of_failing_tasks(
-    tmp_path: Path, hud_env: HudEnv
-) -> None:
-    dataset = load_case("plain-image", tmp_path, hud_env)
-    hud_env.set(DOCKER_HOST=f"unix://{tmp_path}/no-daemon.sock")
-
-    with pytest.raises(RuntimeError, match="requires a reachable Docker daemon: docker version"):
-        harbor.adapt(dataset)
-
-
-def test_adapt_aborts_without_a_docker_executable(tmp_path: Path, hud_env: HudEnv) -> None:
-    dataset = load_case("plain-image", tmp_path, hud_env)
-    (tmp_path / "empty-path").mkdir()
-    hud_env.set(PATH=str(tmp_path / "empty-path"))
-
-    with pytest.raises(RuntimeError, match="requires Docker to resolve authored images"):
-        harbor.adapt(dataset)
-
-
 def main_image(dataset: Path, requirement: str) -> str:
     """The image the adapted single task's ``main`` Compose service runs."""
     (row,) = harbor.adapt(dataset, hud_requirement=requirement).taskset

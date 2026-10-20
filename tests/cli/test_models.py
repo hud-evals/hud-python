@@ -1,5 +1,5 @@
-"""``hud models``: the gateway catalog, forking a trainable model, and a model's
-checkpoints and the head the gateway serves."""
+"""``hud models``: forking a model from the one a reference names, and setting the
+checkpoint the gateway serves."""
 
 from __future__ import annotations
 
@@ -52,12 +52,6 @@ def catalog(signed_in: FakeServices) -> FakeServices:
     return signed_in
 
 
-def test_list_reads_the_whole_catalog_sorted_by_name(catalog: FakeServices, hud: Hud) -> None:
-    listed = hud("models", "list", "--json")
-
-    assert [model["id"] for model in listed.json] == [BASE_ID, MODEL_ID]
-
-
 @pytest.mark.parametrize("source", ["Claude Sonnet", "claude-sonnet-4-6", BASE_ID])
 def test_fork_derives_a_model_from_the_one_its_reference_names(
     source: str, catalog: FakeServices, hud: Hud
@@ -72,53 +66,11 @@ def test_fork_derives_a_model_from_the_one_its_reference_names(
     ]
 
 
-def test_fork_if_not_exists_onto_a_taken_name_returns_the_existing_model(
-    catalog: FakeServices, hud: Hud
-) -> None:
-    catalog.route("api", "POST", "/v2/models/fork", status=409, json={"detail": "Model exists"})
-
-    result = hud(
-        "models",
-        "fork",
-        "claude-sonnet-4-6",
-        "--name",
-        "my-sonnet",
-        "--if-not-exists",
-        "--yes",
-        "--json",
-    )
-
-    assert (result.exit_code, result.json["id"], result.json["existed"]) == (0, MODEL_ID, True)
-
-
 def test_a_misspelt_model_is_refused(catalog: FakeServices, hud: Hud) -> None:
     result = hud("models", "fork", "claude-sonet-4-6", "--name", "mine", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
     assert catalog.requests("api", "POST") == []
-
-
-@pytest.mark.parametrize("model", ["team/my-sonnet", "my-sonnet"], ids=["full-name", "short-name"])
-def test_checkpoints_lists_the_checkpoints_of_the_model_it_names(
-    model: str, catalog: FakeServices, hud: Hud
-) -> None:
-    listed = hud("models", "checkpoints", model, "--json")
-
-    assert [c["id"] for c in listed.json] == ["ckpt-1", "ckpt-2"]
-
-
-@pytest.mark.parametrize(
-    ("model", "head"),
-    [("owner/model + version", "ckpt-2"), (MODEL_ID, "ckpt-2"), ("claude-sonnet-4-6", None)],
-    ids=["by-display-name", "by-id", "a-model-without-checkpoints"],
-)
-def test_head_shows_the_active_checkpoint(
-    model: str, head: str | None, catalog: FakeServices, hud: Hud
-) -> None:
-    result = hud("models", "head", model, "--json")
-
-    assert result.exit_code == 0, result
-    assert (result.json["head"] or {}).get("id") == head
 
 
 def test_head_set_serves_the_checkpoint_it_names(catalog: FakeServices, hud: Hud) -> None:

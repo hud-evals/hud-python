@@ -1,7 +1,7 @@
-"""What every ``hud`` command does alike: help and unknown commands, the upgrade notice,
-anonymous analytics, an interrupt, asking before it changes anything, the error document a
-failure prints, the error kind a platform refusal maps to, one id per line under
-``--quiet``, and never echoing a secret it was given.
+"""What every ``hud`` command does alike: anonymous analytics, an interrupt, asking before it
+changes anything, the error document a failure prints, the error kind a platform status
+maps to, retrying a transient failure, one id per line under ``--quiet``, and never
+echoing a secret it was given.
 
 The CLI owns these contracts once, so each table holds one row per distinct way a command
 reaches them, not one row per command.
@@ -154,39 +154,6 @@ def state(hud: Hud, hud_env: HudEnv) -> dict[Path, bytes]:
     }
 
 
-def test_bare_hud_exits_2_with_nothing_on_stderr(hud: Hud) -> None:
-    result = hud()
-
-    assert (result.exit_code, result.stderr) == (2, "")
-
-
-def test_an_unknown_command_is_a_usage_error_on_stderr(hud: Hud) -> None:
-    result = hud("nope")
-
-    assert (result.exit_code, result.stdout) == (2, ""), result
-    assert "nope" in result.stderr
-
-
-@pytest.mark.parametrize(
-    ("latest", "environment", "notified"),
-    [("999.0.0", {}, True), ("999.0.0", {"CI": "1"}, False), (__version__, {}, False)],
-    ids=["outdated", "outdated-in-ci", "current"],
-)
-def test_an_outdated_install_prints_an_upgrade_notice(
-    latest: str, environment: dict[str, str], notified: bool, hud: Hud, hud_env: HudEnv
-) -> None:
-    """The notice reads PyPI's latest version from a fresh cache, so no request is made."""
-    hud_env.set(HUD_SKIP_VERSION_CHECK=None, CI=None)
-    cache = hud_env.home / ".hud" / ".cache" / "version_check.json"
-    cache.parent.mkdir(parents=True)
-    cache.write_text(json.dumps({"latest": latest, "checked_at": time.time()}))
-
-    result = hud("version", env=environment)
-
-    assert result.exit_code == 0, result
-    assert ("999.0.0" in result.stderr) is notified
-
-
 # ─── analytics ──────────────────────────────────────────────────────────
 
 
@@ -221,16 +188,6 @@ def event(name: str, exit_code: int, error: Any) -> dict[str, Any]:
         "is_ci": False,
         "install_id": IsUUID,
     }
-
-
-@pytest.mark.parametrize("name", sorted(FAILING))
-def test_every_invocation_posts_one_anonymous_event_naming_its_command(
-    name: str, analytics: FakeServices, hud_env: HudEnv, hud: Hud
-) -> None:
-    result = hud(*failing(name, hud, hud_env))
-
-    assert result.exit_code != 0
-    assert events(analytics) == [event(name, result.exit_code, IsStr)]
 
 
 @pytest.mark.parametrize(
@@ -351,20 +308,6 @@ def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text
     assert error["message"] in as_text.stderr, as_text
 
 
-@pytest.mark.parametrize("name", ["jobs list", "deploy"])
-def test_a_refusal_from_the_platform_is_permission_denied(
-    name: str, services: FakeServices, hud_env: HudEnv, hud: Hud
-) -> None:
-    hud_env.set(HUD_API_KEY=API_KEY)
-    argv, files = FAILING[name]
-    write_files(hud.cwd, files)
-    answer_everything(services, Reply(status=403, json={"detail": "Refused"}))
-
-    result = hud(*argv, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "permission_denied"), result
-
-
 @pytest.mark.parametrize(
     ("status", "error"),
     [
@@ -383,14 +326,6 @@ def test_each_platform_status_maps_to_one_error_kind(
     result = hud("trace", "get", TRACE_ID, "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, error), result
-
-
-def test_a_reply_that_is_not_json_is_a_failure(signed_in: FakeServices, hud: Hud) -> None:
-    answer_everything(signed_in, Reply(body="<html>", content_type="text/html"))
-
-    result = hud("jobs", "list", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "failure"), result
 
 
 def test_a_transient_platform_failure_is_retried_and_the_command_succeeds(

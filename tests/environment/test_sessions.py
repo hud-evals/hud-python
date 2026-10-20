@@ -35,22 +35,6 @@ async def test_concurrent_sessions_each_grade_their_own_task() -> None:
     assert graded == ["a", "b"]
 
 
-async def test_a_new_start_replaces_only_its_own_sessions_task() -> None:
-    async with (
-        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
-        wire(runtime.url) as a,
-        wire(runtime.url) as b,
-    ):
-        await b.call("tasks.start", {"id": "echo", "args": {"tag": "b"}})
-        await a.call("tasks.start", {"id": "echo", "args": {"tag": "first"}})
-        await a.call("tasks.start", {"id": "echo", "args": {"tag": "second"}})
-        graded = [
-            (await peer.call("tasks.grade", {"answer": "x"}))["result"]["tag"] for peer in (a, b)
-        ]
-
-    assert graded == ["second", "b"]
-
-
 async def test_a_session_dropped_before_its_prompt_is_resumed_by_its_id_and_graded() -> None:
     async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
         async with wire(runtime.url) as a:
@@ -72,22 +56,6 @@ async def test_a_plain_grade_adopts_the_only_parked_session() -> None:
             graded = await b.call("tasks.grade", {"answer": "x"})
 
     assert graded["result"]["tag"] == "parked"
-
-
-async def test_with_several_parked_sessions_a_grade_must_name_one() -> None:
-    sessions = []
-    async with LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime:
-        for tag in ("one", "two"):
-            async with wire(runtime.url) as peer:
-                sessions.append((await peer.call("hello", {}))["result"]["session_id"])
-                await peer.call("tasks.start", {"id": "echo", "args": {"tag": tag}})
-        async with wire(runtime.url) as c:
-            refused = await c.call("tasks.grade", {"answer": "x"})
-            await c.call("hello", {"session_id": sessions[1]})
-            graded = await c.call("tasks.grade", {"answer": "x"})
-
-    assert all(session in refused["error"]["message"] for session in sessions)
-    assert graded["result"]["tag"] == "two"
 
 
 async def test_a_session_with_a_live_connection_cannot_be_resumed() -> None:

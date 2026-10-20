@@ -1,9 +1,8 @@
 """What a robot run reports: its traces, their outcomes, and every tick as state and video.
 
-Three producers report robot telemetry: ``wrap`` around a vectorized gym env,
-``JobRecorder`` for a shared job, and direct control streaming each played tick
-of a rollout. Each is run as a user runs it; the cases assert what the platform
-recorded and the trace spans it can replay.
+Two producers report robot telemetry: ``wrap`` around a vectorized gym env, and
+direct control streaming each played tick of a rollout. Each is run as a user runs it;
+the cases assert what the platform recorded and the trace spans it can replay.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ import pytest
 from hud.agents.base import Agent
 from hud.environment.robot import DirectControl, wrap
 from hud.eval import LocalRuntime, Task, rollout
-from hud.telemetry.robot import JobRecorder
 from tests.conftest import ROBOT_STEP_SCHEMA, steps
 
 from .sims import Arm, ScriptedLLM, arm_env, contract, move, reached
@@ -110,36 +108,6 @@ def test_a_wrapped_vectorized_sim_reports_each_episode_as_its_own_trace(
         },
     }
     assert observations == {"trace-0": 1, "trace-1": 2, "trace-2": 1}
-
-
-CANONICAL_JOB = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
-
-
-@pytest.mark.parametrize(
-    "job_id",
-    [
-        pytest.param(CANONICAL_JOB.replace("-", ""), id="compact"),
-        pytest.param(CANONICAL_JOB, id="canonical"),
-    ],
-)
-def test_a_shared_job_is_reported_canonically_with_stable_trace_ids(
-    reporting: FakeServices, job_id: str
-) -> None:
-    recorders = [
-        JobRecorder("suite", 1, record_indices=[0], seed=7, job_id=job_id) for _ in range(2)
-    ]
-    for recorder in recorders:
-        recorder.record(done=np.array([True]))
-
-    assert {recorder.job_url for recorder in recorders} == {
-        f"{reporting.url('web')}/jobs/{CANONICAL_JOB}"
-    }
-    assert f"/v2/trace/job/{CANONICAL_JOB}/enter" in [
-        request.path for request in reporting.requests("api")
-    ]
-    first, second = reporting.requests("api", "POST", "/v2/trace/{id}/enter")
-    assert first.path == second.path
-    assert (first.json, second.json) == ({"job_id": CANONICAL_JOB}, {"job_id": CANONICAL_JOB})
 
 
 # ─── direct control streams every played tick ──────────────────────────

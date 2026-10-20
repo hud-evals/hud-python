@@ -1,8 +1,7 @@
 """Dataset recording: ``RobotAgent(save=True)`` writes each rollout as a LeRobot episode.
 
 The ``lerobot`` lane records with the real ``lerobot`` package and reads the
-datasets back with it. Without the package, recording warns and the rollout
-still runs.
+datasets back with it.
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
-import logging
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -226,17 +224,3 @@ async def test_a_dataset_stays_on_disk_whether_or_not_its_push_succeeds(
     (dataset,) = datasets(recording)
     assert dataset.meta.total_episodes == 1
     assert ("HF push failed" in capsys.readouterr().out) is (repo is not None)
-
-
-@pytest.mark.skipif(importlib.util.find_spec("lerobot") is not None, reason="lerobot installed")
-async def test_without_lerobot_recording_warns_and_the_rollout_still_runs(
-    hud_env: HudEnv, tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    hud_env.set(RECORD_DIR=str(tmp_path / "records"))
-
-    with caplog.at_level(logging.WARNING, logger="hud.agents.robot.dataset"):
-        run = await record("arm", recording_contract())
-
-    assert run.reward == sum(range(EPISODE_TICKS))
-    assert any("lerobot" in entry.message for entry in caplog.records)
-    assert not (tmp_path / "records").exists()

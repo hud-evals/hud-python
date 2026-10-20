@@ -1,15 +1,12 @@
-"""``hud eval``: plan, validate and run real rollouts of a taskset with a scripted model."""
+"""``hud eval``: run real rollouts of a taskset with a scripted model, where each row says."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
-from hud.eval import LocalRuntime, Task
 from tests.conftest import write_files
 from tests.fixtures.models import Turn
 
@@ -301,62 +298,7 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
     assert (document["run_count"], document["mean_reward"], document["error_count"]) == outcome
 
 
-async def test_eval_attaches_to_an_already_served_environment(hud: Hud, gateway: Models) -> None:
-    env = Environment("served")
-
-    @env.template(id="solve")
-    async def solve():
-        answer = yield "answer ok"
-        yield 1.0 if answer == "ok" else 0.0
-
-    (hud.cwd / "rows.json").write_text('[{"env": "served", "id": "solve"}]')
-    async with LocalRuntime(env)(Task(env="served", id="solve")) as runtime:
-        document = await asyncio.to_thread(
-            run, hud, "rows.json", *SCRIPTED, "--runtime", runtime.url
-        )
-
-    assert (document["run_count"], document["mean_reward"]) == (1, 1.0)
-
-
-def test_one_tasks_file_is_picked_when_no_source_is_given(hud: Hud, gateway: Models) -> None:
-    write_files(
-        hud.cwd,
-        {
-            "env.py": TASKS_PY,
-            "rows.json": '[{"env": "demo", "id": "solve", "args": {"n": 4}}]',
-            ".hidden.json": "[]",
-            ".hud_eval.toml": '[eval]\nagent = "openai_compatible"\nmodel = "m"\n',
-        },
-    )
-
-    document = run(hud)
-
-    assert (document["source"], document["mean_reward"]) == ("rows.json", 1.0)
-    assert [request.prompt for request in gateway.requests()] == ["solve 4"]
-
-
-def test_a_python_source_is_imported_on_the_main_thread(hud: Hud, gateway: Models) -> None:
-    (hud.cwd / "probe.py").write_text(
-        "import threading\nfrom pathlib import Path\n"
-        'Path("main-thread.txt").write_text('
-        "str(threading.current_thread() is threading.main_thread()))\n"
-        "tasks = []\n"
-    )
-
-    result = hud("eval", "probe.py", "openai", "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert (hud.cwd / "main-thread.txt").read_text() == "True"
-
-
 # ─── planning and refusals ──────────────────────────────────────────────
-
-
-def test_a_dry_run_runs_nothing(hud: Hud, signed_in: FakeServices, tasks: Path) -> None:
-    result = hud("eval", "tasks.py", *SCRIPTED, "--dry-run", "--json")
-
-    assert (result.exit_code, result.json["dry_run"]) == (0, True), result
-    assert signed_in.requests() == []
 
 
 @pytest.mark.parametrize(

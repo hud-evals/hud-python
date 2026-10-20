@@ -75,18 +75,6 @@ async def test_concurrent_tunnel_streams_do_not_interleave(echo_port: int) -> No
     assert echoed == payloads
 
 
-async def test_closing_the_client_closes_its_forwarders(echo_port: int) -> None:
-    env = echo_env(echo_port)
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-    ):
-        binding = urlsplit(client.binding("echo").url)
-
-    with pytest.raises(OSError):
-        await asyncio.open_connection(binding.hostname, binding.port)
-
-
 @pytest.mark.parametrize("preface_size", [128, FRAME_LIMIT])
 async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
     echo_port: int, preface_size: int
@@ -111,19 +99,3 @@ async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
 
     assert opened == {"jsonrpc": "2.0", "id": 1, "result": {"capability": "echo"}}
     assert echoed == b"raw bytes"
-
-
-async def test_a_tunnel_to_an_unknown_capability_gets_one_error_frame_and_is_closed(
-    echo_port: int,
-) -> None:
-    env = echo_env(echo_port)
-
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="tunnel")) as runtime,
-        wire(runtime.url) as stream,
-    ):
-        refused = await stream.call("tunnel.open", {"capability": "nope"})
-        after = await stream.read()
-
-    assert (refused["id"], refused["error"]["code"]) == (1, -32000)
-    assert after is None

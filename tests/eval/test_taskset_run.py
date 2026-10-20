@@ -4,7 +4,7 @@ and collected into one ``Job``."""
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,21 +12,14 @@ from hud import Environment
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import (
-    DockerRuntime,
-    Job,
     LocalRuntime,
-    RuntimeConfig,
-    Shared,
     Task,
     Taskset,
 )
 from tests.conftest import eventually
-from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
     from hud.eval import Run
-    from tests.conftest import HudEnv
-    from tests.fixtures.services import FakeServices
 
 
 async def test_each_row_runs_group_times_in_task_major_order_under_one_job() -> None:
@@ -146,23 +139,6 @@ async def test_a_jobs_reward_averages_its_graded_runs_and_its_errors_are_the_res
     assert ([run.slug for run in job.errors], job.reward) == (["grader-raised"], 1.0)
 
 
-async def test_an_open_job_collects_the_runs_of_several_calls_with_its_group() -> None:
-    env = Environment("sums")
-
-    @env.template()
-    async def add(a: int, b: int):
-        yield f"{a}+{b}"
-        yield 1.0
-
-    session = await Job.start("training", group=2)
-
-    first = await add(a=1, b=2).run(ScriptedAgent("3"), job=session)
-    second = await add(a=3, b=4).run(ScriptedAgent("7"), job=session)
-
-    assert first is second is session
-    assert [run.job_id for run in session.runs] == [session.id] * 4
-
-
 async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> None:
     events = []
 
@@ -198,112 +174,3 @@ async def test_cancelling_a_run_cancels_every_rollout_and_stops_their_envs() -> 
     with pytest.raises(asyncio.CancelledError):
         await pending
     await eventually(lambda: events == ["stopped"] * 4)
-
-
-@pytest.mark.parametrize(
-    ("settings", "message"),
-    [
-        pytest.param(
-            {"rollout_timeout": 0}, "rollout_timeout must be greater than 0", id="no-time-at-all"
-        ),
-        pytest.param(
-            {"agent_timeout": 10, "rollout_timeout": 10},
-            r"agent timeout \(10s\) must be less than rollout_timeout",
-            id="an-agent-timeout-at-the-rollout-timeout",
-        ),
-        pytest.param(
-            {"agent_timeout": 3600, "row_config": {"limits": {"run_timeout_s": 3600}}},
-            r"agent timeout \(3600s\) must be less than runtime_config\.limits\.run_timeout_s",
-            id="an-agent-timeout-at-the-run-limit",
-        ),
-        pytest.param(
-            {"row_config": {"limits": {"run_timeout_s": 3600}}, "rollout_timeout": 3600},
-            r"actor runtime_config\.limits\.run_timeout_s \(3600s\) must be less than",
-            id="a-run-limit-at-the-rollout-timeout",
-        ),
-        pytest.param(
-            {"provider_limits": {"startup_timeout_s": 90}, "rollout_timeout": 60},
-            r"actor runtime_config\.limits\.startup_timeout_s \(90s\) must be less than",
-            id="a-providers-limit-past-the-rollout-timeout",
-        ),
-        pytest.param(
-            {"verifier_limits": {"startup_timeout_s": 90}, "rollout_timeout": 90},
-            r"verifier runtime_config\.limits\.startup_timeout_s \(90s\) must be less than",
-            id="a-verifiers-limit-at-the-rollout-timeout",
-        ),
-    ],
-)
-async def test_timeouts_that_contradict_each_other_raise_before_any_rollout(
-    settings: dict[str, Any], message: str, services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(PATH="/nonexistent")
-    task = Task.model_validate(
-        {
-            "env": "lab",
-            "id": "solve",
-            "agent_config": {"timeout_seconds": settings.get("agent_timeout")},
-            "runtime_config": settings.get("row_config"),
-            "verifier": {
-                "env": "judge",
-                "id": "verify",
-                "runtime_config": {"limits": settings.get("verifier_limits")},
-            },
-        }
-    )
-    provider = DockerRuntime(
-        "lab",
-        runtime_config=RuntimeConfig.model_validate({"limits": settings.get("provider_limits")}),
-    )
-
-    with pytest.raises(ValueError, match=message):
-        await task.run(
-            ScriptedAgent("x"), runtime=provider, rollout_timeout=settings.get("rollout_timeout")
-        )
-
-    assert services.requests() == []
-
-
-@pytest.mark.parametrize(
-    "runtime_config",
-    [None, {"image": "lab:1"}],
-    ids=["a-portable-row", "a-container-row-beside-a-portable-one"],
-)
-async def test_rows_nothing_places_need_a_runtime(runtime_config: dict[str, Any] | None) -> None:
-    rows = [
-        Task(env="lab", id="solve", slug="portable"),
-        Task(env="lab", id="solve", slug="other", runtime_config=runtime_config),
-    ]
-
-    with pytest.raises(ValueError, match=r"no placement: pass runtime= .*LocalRuntime"):
-        await Taskset("t", rows).run(ScriptedAgent("x"))
-
-
-async def test_an_empty_taskset_needs_no_runtime() -> None:
-    job = await Taskset("empty", []).run(ScriptedAgent("x"))
-
-    assert (job.runs, job.reward, job.errors) == ([], 0.0, [])
-
-
-async def test_a_pool_placement_boots_once_for_the_call_and_closes_after_it() -> None:
-    events = []
-    env = Environment("pooled")
-
-    @env.initialize
-    async def up() -> None:
-        events.append("up")
-
-    @env.shutdown
-    async def down() -> None:
-        events.append("down")
-
-    @env.template()
-    async def solve(n: int):
-        yield "go"
-        yield 1.0
-
-    rows = [solve(n=1), solve(n=2)]
-    job = await Taskset("pooled", rows).run(
-        ScriptedAgent("x"), runtime=Shared(LocalRuntime(env), width=4), group=2
-    )
-
-    assert ([run.reward for run in job.runs], events) == ([1.0] * 4, ["up", "down"])

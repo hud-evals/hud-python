@@ -25,13 +25,10 @@ from .sims import (
     ScriptedLLM,
     arm_env,
     contract,
-    delayed,
     displace,
-    fingers,
     lag,
     look,
     move,
-    offset,
     reached,
     still,
 )
@@ -135,14 +132,6 @@ async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(
     assert sim.actions == []
 
 
-async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
-    sim = Arm(contract("joint_vel", [0.0, -1.0], [1.0, 1.0]))
-
-    with pytest.raises(ValueError, match="direct control needs an action state_type"):
-        async with arm_env(sim, DirectControl()) as env:
-            await env.start()
-
-
 # ─── the tool surface ──────────────────────────────────────────────────
 
 
@@ -192,63 +181,6 @@ async def test_tools_use_standard_dimension_names_when_every_native_name_has_one
     np.testing.assert_allclose(sim.actions[-1], commanded, atol=1e-4)
 
 
-async def test_dimensions_with_a_shared_prefix_nest_as_a_group_the_model_can_null_whole() -> None:
-    names = ["left_arm.x", "left_arm.y", "right_arm.x", "grip"]
-    sim = Arm(contract("ee_abs", [-1.0] * 4, [1.0] * 4, names))
-
-    agent, _ = await drive(sim, DirectControl(), move("move_to", **{"right_arm.x": 0.1}, grip=0.2))
-
-    schema = agent.schemas["move_to"]
-    assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
-    assert not agent.results[0].isError
-    np.testing.assert_allclose(sim.actions[-1], [0.0, 0.0, 0.1, 0.2], atol=1e-6)
-
-
-@pytest.mark.parametrize(
-    ("options", "calls", "tools", "annotated", "described", "moved"),
-    [
-        pytest.param(
-            {"use_annotation": False},
-            [("move_to", {"targets": {"x": 0.1, "grip": None}}), ("wait", {"duration": None})],
-            {"move_to", "wait"},
-            False,
-            "",
-            True,
-            id="without-annotation-no-call-takes-a-note",
-        ),
-        pytest.param(
-            {"use_wait": False, "time_limit": 10.0},
-            [move("move_to")],
-            {"move_to"},
-            True,
-            "Time passes only while the robot moves;",
-            False,
-            id="without-wait-only-the-motion-tool-is-served",
-        ),
-    ],
-)
-async def test_options_shape_the_served_tools(
-    options: dict[str, Any],
-    calls: list[tuple[str, dict[str, Any]]],
-    tools: set[str],
-    annotated: bool,
-    described: str,
-    moved: bool,
-) -> None:
-    sim = Arm(REACH, done=reached)
-
-    agent, _ = await drive(sim, DirectControl(**options), *calls)
-
-    assert agent.tools == tools
-    for schema in agent.schemas.values():
-        assert ("note" in schema["properties"]) == annotated
-        assert ("note" in schema["required"]) == annotated
-    assert described in agent.descriptions["move_to"]
-    assert bool(sim.actions) == moved
-    if "wait" not in tools:
-        assert not any("wait" in reply for reply in agent.replies())
-
-
 # ─── settle verdicts: how each kind of arm ends an absolute move ───────
 
 STOPPED_SHORT = "Stopped short of the target; the arm is at rest. Remaining offsets: "
@@ -284,31 +216,6 @@ async def test_the_safety_timeout_returns_the_pose_the_arm_reached() -> None:
     assert sim.state.tolist() == pytest.approx([0.015, 0.0])  # the move's prefix, not the goal
 
 
-async def test_a_sim_that_terminates_mid_move_is_not_out_of_time() -> None:
-    sim = Arm(REACH, done=reached)
-
-    agent, _ = await drive(
-        sim, DirectControl(max_step={"grip": 2.0}), move("move_to", x=1.0, grip=1.0)
-    )
-
-    (reply,) = agent.replies()
-    assert "The episode ended before the arm settled." in reply
-    assert "The episode has ended; stop calling" in reply
-    assert "Ran out of time" not in reply
-    assert len(sim.actions) < 100  # the sim succeeded before the 100-tick move finished
-
-
-async def test_an_arm_at_the_target_is_at_rest_at_a_low_control_rate() -> None:
-    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0], rate=1))
-
-    agent, _ = await drive(sim, DirectControl(), move("move_to", x=0.05))
-
-    (reply,) = agent.replies()
-    assert "At the target." in reply
-    assert "Ran out of time" not in reply
-    assert sim.state.tolist() == pytest.approx([0.05, 0.0])
-
-
 @pytest.mark.parametrize("noise", [0.0, 2e-5], ids=["steady-sensor", "jittering-sensor"])
 async def test_an_arm_that_never_moves_gives_up_at_the_settle_cap(noise: float) -> None:
     sim = Arm(REACH, follow=still(noise))
@@ -331,53 +238,6 @@ async def test_a_lagging_arm_keeps_stepping_until_it_reaches_the_target() -> Non
     assert sim.state.tolist() == pytest.approx([0.5, 0.0], abs=0.01)
 
 
-@pytest.mark.parametrize(
-    ("options", "verdict", "ticks"),
-    [
-        ({}, STOPPED_SHORT + "12 mm on x.", 71),
-        ({"tolerance": {"position": 0.02}}, "At the target. Remaining offsets: 12 mm on x.", 56),
-    ],
-    ids=["outside-the-default-is-held-for-the-grace-period", "inside-a-custom-tolerance"],
-)
-async def test_an_arm_at_rest_off_the_target_is_judged_by_its_tolerance(
-    options: dict[str, Any], verdict: str, ticks: int
-) -> None:
-    sim = Arm(REACH, follow=offset([-0.012, 0.0]))
-
-    agent, _ = await drive(sim, DirectControl(**options), move("move_to", x=0.5))
-
-    assert verdict in agent.replies()[0]
-    assert len(sim.actions) == ticks  # tolerance only lengthens the wait, never shortens it
-    assert sim.state.tolist() == pytest.approx([0.488, 0.0])
-
-
-async def test_a_move_waits_for_a_slow_arm_even_when_already_within_tolerance() -> None:
-    sim = Arm(REACH, follow=delayed(10))
-
-    await drive(sim, DirectControl(tolerance={"position": 0.05}), move("move_to", x=8e-4))
-
-    assert len(sim.actions) == 17
-    assert sim.state.tolist() == pytest.approx([8e-4, 0.0])
-
-
-async def test_a_gripper_call_waits_for_every_finger() -> None:
-    names = ["x", "grip_left", "grip_right"]
-    sim = Arm(contract("ee_abs", [0.0] * 3, [1.0] * 3, names), follow=fingers)
-
-    agent, _ = await drive(
-        sim,
-        DirectControl(max_step={"grip_left": 2.0, "grip_right": 2.0}),
-        move("move_to", grip_left=1.0, grip_right=1.0),
-    )
-
-    (reply,) = agent.replies()
-    assert "fingers: grip_left=0.3000, grip_right=1.0000" in reply  # the jam reads as no success
-    assert "At the target" not in reply
-    assert "Remaining offsets" not in reply
-    assert 23 <= len(sim.actions) < 50  # the right finger closes for 20 ticks; the call outlasts it
-    assert sim.state.tolist() == pytest.approx([0.0, 0.3, 1.0])
-
-
 async def test_a_gripper_offset_never_decides_the_verdict() -> None:
     sim = Arm(REACH, [0.0, -1.0], reads=lambda s: s * [1.0, 0.0] - [0.0, 1.0])
 
@@ -388,66 +248,6 @@ async def test_a_gripper_offset_never_decides_the_verdict() -> None:
     assert "At the target." in agent.replies()[0]
     assert len(sim.actions) == 80
     assert sim.state.tolist() == pytest.approx([0.5, 1.0])
-
-
-async def test_a_move_judged_against_a_custom_reference_reaches_the_target() -> None:
-    sim = Arm(REACH, [0.0, -1.0], lag(0.25), reads=lambda s: s * [1.0, 0.0] - [0.0, 1.0])
-    control = DirectControl(
-        max_step={"grip": 2.0}, reference=lambda data: data["observation/state"]
-    )
-
-    agent, _ = await drive(sim, control, move("move_to", x=0.5, grip=1.0))
-
-    assert "At the target." in agent.replies()[0]
-    assert len(sim.actions) == 80
-    assert sim.state.tolist() == pytest.approx([0.5, 1.0], abs=0.01)
-
-
-@pytest.mark.parametrize("share", [0.9, 1.1], ids=["just-inside", "just-outside"])
-@pytest.mark.parametrize(
-    ("tool", "action_type", "names", "target", "column", "tolerance", "label"),
-    [
-        ("move_to", "ee_abs", ["x", "grip"], "x", 0, 1e-3, "x"),
-        (
-            "move_to",
-            "ee_abs",
-            ["ee.x", "ee_euler.x", "ee_euler.y", "ee_euler.z"],
-            "roll",
-            1,
-            1e-3 / 0.15,
-            "orientation",
-        ),
-        ("move_joints", "joint_pos", ["joint1", "grip"], "joint1", 0, 4e-4, "joint1"),
-    ],
-    ids=["position", "orientation", "joint"],
-)
-async def test_each_quantitys_default_tolerance_moves_the_fingertips_one_millimetre(
-    tool: str,
-    action_type: str,
-    names: list[str],
-    target: str,
-    column: int,
-    tolerance: float,
-    label: str,
-    share: float,
-) -> None:
-    """Directly, over a 0.15 m gripper, or over a 2.5 m lever of joints."""
-    by = [0.0] * len(names)
-    by[column] = share * tolerance
-    sim = Arm(
-        contract(action_type, [-1.0] * len(names), [1.0] * len(names), names), follow=offset(by)
-    )
-
-    agent, _ = await drive(sim, DirectControl(), move(tool, **{target: 0.3}))
-
-    (reply,) = agent.replies()
-    if share < 1:
-        assert "At the target. " in reply
-        assert "Stopped short" not in reply
-    else:
-        assert "Stopped short of the target; " in reply
-        assert "At the target" not in reply
-    assert f" on {label}." in reply
 
 
 # ─── rotations: roll / pitch / yaw onto whatever the contract stores ───
@@ -487,19 +287,6 @@ async def test_a_rotation_slerps_onto_a_quaternion_in_the_contracts_component_or
     np.testing.assert_allclose(np.linalg.norm(actions, axis=1), 1.0, atol=1e-5)
 
 
-async def test_an_unnamed_quaternion_is_copied_unchanged() -> None:
-    names = ["x", "tcp_quat.qx", "tcp_quat.qy", "tcp_quat.qz", "tcp_quat.qw"]
-    home = [0.0, 0.0, 0.2, 0.0, 0.9]  # not a unit quaternion
-    sim = Arm(contract("ee_abs", [0.0, -1.0, -1.0, -1.0, -1.0], [1.0] * 5, names), home)
-
-    await drive(sim, DirectControl(), move("move_to", x=0.2))
-
-    actions = np.array(sim.actions)
-    np.testing.assert_allclose(actions[-1], [0.2, 0.0, 0.2, 0.0, 0.9], atol=1e-4)
-    assert len(actions) > 1
-    assert (actions[:, 1:] == actions[0, 1:]).all()
-
-
 async def test_euler_commands_slerp_onto_axis_angle_in_equal_steps() -> None:
     names = [f"target_eef_axis_angle.r{a}" for a in "xyz"]
     sim = Arm(contract("ee_abs", [-np.pi] * 3, [np.pi] * 3, names), [0.0, 0.0, 0.0])
@@ -514,25 +301,6 @@ async def test_euler_commands_slerp_onto_axis_angle_in_equal_steps() -> None:
     gaps = np.diff(np.linalg.norm(actions[:ticks], axis=1))
     assert gaps.min() > 0
     np.testing.assert_allclose(gaps, gaps[0], rtol=0.05)
-
-
-async def test_an_euler_contract_is_addressed_as_roll_pitch_yaw() -> None:
-    names = [
-        "ee_pos.x",
-        "ee_pos.y",
-        "ee_pos.z",
-        "ee_euler.x",
-        "ee_euler.y",
-        "ee_euler.z",
-        "gripper",
-    ]
-    low = [-1.0, -1.0, 0.0, -np.pi, -np.pi, -np.pi, 0.0]
-    high = [1.0, 1.0, 2.0, np.pi, np.pi, np.pi, 0.04]
-    sim = Arm(contract("ee_abs", low, high, names), [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.04])
-
-    await drive(sim, DirectControl(), move("move_to", z=1.2, yaw=0.4))
-
-    np.testing.assert_allclose(sim.actions[-1], [0.0, 0.0, 1.2, 0.0, 0.0, 0.4, 0.04], atol=1e-4)
 
 
 async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() -> None:

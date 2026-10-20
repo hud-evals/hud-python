@@ -1,5 +1,5 @@
-"""Where a run's spans go: local span files and the HUD telemetry service, including
-``@hud.instrument`` spans, and when an upload is flushed."""
+"""Where a run's spans go: local span files and the HUD telemetry service, and when an
+upload is flushed."""
 
 from __future__ import annotations
 
@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment, instrument
-from hud.agents.base import Agent
+from hud import Environment
 from hud.agents.openai_compatible import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.telemetry import flush
-from tests.conftest import spans, steps
+from tests.conftest import spans
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn, call
 from tests.fixtures.services import Reply
@@ -76,78 +75,6 @@ async def test_spans_are_written_where_the_configuration_says(
     assert written == {name: name == written_to for name in directories}
     assert flush(timeout=10)
     assert bool(reporting.requests("telemetry", "POST", UPLOAD)) is uploaded
-
-
-async def test_step_spans_carry_the_step_payload() -> None:
-    run = await rollout(TASK, ScriptedAgent("ok"), runtime=LocalRuntime(spans_env()))
-
-    (prompted,) = [step for step in steps(run.trace_id) if step["source"] == "user"]
-    assert prompted["messages"][0]["content"]["text"] == "Reply with ok."
-
-
-class Probe:
-    """An agent-side helper whose methods are instrumented."""
-
-    @instrument(name="probe.lookup")
-    async def lookup(self, items: list[int], limit: int = 3) -> dict[str, Any]:
-        return {"found": items[:limit]}
-
-    @instrument(name="probe.quiet", record_args=False, record_result=False)
-    def quiet(self, secret: str) -> str:
-        return secret
-
-    @instrument(name="probe.fail")
-    def fail(self, reason: str) -> None:
-        raise ValueError(reason)
-
-    @instrument(name="probe.opaque")
-    def opaque(self, value: object) -> object:
-        return value
-
-
-class Unprintable:
-    def __repr__(self) -> str:
-        raise RuntimeError("no repr")
-
-
-class ProbingAgent(Agent):
-    """Calls each instrumented helper once, then answers."""
-
-    async def __call__(self, run: Run) -> None:
-        probe = Probe()
-        await probe.lookup(list(range(20)))
-        probe.quiet("hunter2")
-        with pytest.raises(ValueError, match="bad input"):
-            probe.fail("bad input")
-        probe.opaque(Unprintable())
-        run.trace.content = "ok"
-
-
-async def test_instrumented_calls_inside_a_run_record_their_arguments_and_outcome() -> None:
-    run = await rollout(TASK, ProbingAgent(), runtime=LocalRuntime(spans_env()))
-
-    assert run.reward == 1.0
-    probes = {
-        span["name"]: span for span in spans(run.trace_id) if span["name"].startswith("probe.")
-    }
-    events = {
-        name: {event["name"]: event["attributes"] for event in span["events"]}
-        for name, span in probes.items()
-    }
-    assert [
-        probes[name]["status_code"] for name in ("probe.lookup", "probe.quiet", "probe.opaque")
-    ] == ["OK"] * 3
-    assert {"hud.request", "hud.result"} <= events["probe.lookup"].keys()
-    assert events["probe.quiet"] == {}
-    assert probes["probe.fail"]["status_code"] == "ERROR"
-    assert "bad input" in probes["probe.fail"]["status_message"]
-
-
-async def test_instrumented_calls_outside_a_run_export_nothing(hud_env: HudEnv) -> None:
-    probe = Probe()
-
-    assert await probe.lookup([1, 2]) == {"found": [1, 2]}
-    assert not (hud_env.home / ".hud" / "spans").exists()
 
 
 # ─── the HUD telemetry service ─────────────────────────────────────────

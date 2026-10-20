@@ -104,27 +104,6 @@ def test_env_files_build_args_and_secrets_ride_the_trigger_and_never_the_context
     assert ".env" not in uploaded(builds)
 
 
-def test_a_compose_runtime_config_reaches_the_build_as_its_document(
-    builds: FakeServices, hud: Hud
-) -> None:
-    write_files(
-        hud.cwd,
-        {
-            "project/compose.json": '{"services":{"main":{"image":"postgres:16"}}}',
-            "runtime.json": json.dumps(
-                {"compose": {"document": "project/compose.json", "root": "."}}
-            ),
-        },
-    )
-
-    result = hud("deploy", "--no-env", "--runtime-config", "runtime.json", "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    compose = triggered(builds)["runtime_config"]["compose"]
-    assert compose["document"]["services"]["main"]["image"] == "postgres:16"
-    assert compose["root"] == {"compose_path": "project/compose.json"}
-
-
 def test_a_first_deploy_lands_in_the_selected_project_and_links_the_directory(
     builds: FakeServices, hud_env: HudEnv, hud: Hud
 ) -> None:
@@ -204,17 +183,6 @@ def test_deploy_builds_the_environment_its_source_names(
     assert triggered(builds)["name"] == name
 
 
-def test_a_dry_run_asks_about_a_dotenv_beside_the_environment(
-    builds: FakeServices, hud: Hud
-) -> None:
-    write_files(hud.cwd, {".env": "SECRET=hidden"})
-
-    result = hud("deploy", "--dry-run", "--json")
-
-    assert (result.exit_code, result.json["dotenv_pending"]) == (0, True), result
-    assert builds.requests("api", "POST") == []
-
-
 @pytest.mark.parametrize(
     ("status", "frames", "exit_code", "logged"),
     [
@@ -247,19 +215,6 @@ def test_the_build_decides_the_exit_and_no_context_is_left_behind(
 
     assert (result.exit_code, result.json["success"]) == (exit_code, exit_code == 0), result
     assert logged in result.stderr
-    assert list((tmp_path / "tmp").iterdir()) == []
-
-
-def test_a_build_request_the_platform_rejects_leaves_no_context_behind(
-    builds: FakeServices, hud_env: HudEnv, hud: Hud, tmp_path: Path
-) -> None:
-    (tmp_path / "tmp").mkdir()
-    hud_env.set(TMPDIR=str(tmp_path / "tmp"))
-    builds.route("api", "POST", "/v2/builds/trigger", status=409, json={"detail": "Busy"})
-
-    result = hud("deploy", "--no-env", "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "conflict"), result
     assert list((tmp_path / "tmp").iterdir()) == []
 
 

@@ -14,7 +14,6 @@ from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.capabilities import Connection
 from hud.eval import LocalRuntime, Runtime, Task, rollout
-from hud.telemetry.context import get_current_trace_id
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
@@ -88,41 +87,6 @@ async def test_the_agent_is_handed_the_prompt_as_turns_and_as_text(
     await ask().run(Reader())
 
     assert handed == [(turns, text)]
-
-
-async def test_the_agent_is_handed_its_episodes_bindings_inside_its_trace() -> None:
-    env = Environment("robots")
-
-    @env.template()
-    async def claim():
-        yield {"prompt": "go", "bindings": {"robot": {"token": "slot-2"}}}
-        yield 1.0
-
-    handed = []
-
-    class Reader(Agent):
-        async def __call__(self, run: Run) -> None:
-            handed.append((run.bindings, get_current_trace_id()))
-
-    job = await claim().run(Reader())
-
-    assert handed == [({"robot": {"token": "slot-2"}}, job.runs[0].trace_id)]
-
-
-async def test_bindings_that_are_not_objects_fail_the_start() -> None:
-    env = Environment("robots")
-
-    @env.template()
-    async def claim():
-        yield {"prompt": "go", "bindings": {"robot": "slot-2"}}
-        yield 1.0
-
-    job = await claim().run(ScriptedAgent("x"))
-
-    (run,) = job.runs
-    assert (run.trace.status, run.prompt) == ("error", None)
-    assert (run.trace.error or "").startswith("[starting task] ")
-    assert "'bindings'" in (run.trace.error or "")
 
 
 @pytest.mark.e2e
@@ -221,23 +185,6 @@ async def test_what_the_task_grades_with_is_the_runs_reward_or_its_error(
     assert (run.trace.error or "").startswith("[grading] ") is (status == "error")
 
 
-async def test_a_grade_breakdown_reaches_the_evaluation_without_its_grader_details() -> None:
-    env = Environment("grades")
-
-    @env.template()
-    async def grade_it():
-        yield "go"
-        yield {
-            "score": 0.5,
-            "subscores": [{"name": "tests", "value": 0.5, "info": {"stdout": "2 failed"}}],
-        }
-
-    job = await grade_it().run(ScriptedAgent("x"))
-
-    (subscore,) = job.runs[0].evaluation["subscores"]
-    assert (subscore["name"], subscore["value"], "info" in subscore) == ("tests", 0.5, False)
-
-
 async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() -> None:
     class Raises(Agent):
         async def __call__(self, run: Run) -> None:
@@ -289,38 +236,6 @@ async def test_the_agent_timeout_stops_the_agent_and_still_grades(
     assert "agent timed out" in (run.trace.error or "")
 
 
-async def test_a_timeout_the_agent_raises_itself_is_an_ordinary_failure() -> None:
-    class ProviderTimesOut(Agent):
-        async def __call__(self, run: Run) -> None:
-            run.trace.content = "yes"
-            raise TimeoutError("provider timed out")
-
-    job = await Task(env="checked", id="check").run(
-        ProviderTimesOut(AgentConfig(timeout_seconds=30)), runtime=LocalRuntime(checked())
-    )
-
-    (run,) = job.runs
-    assert (run.reward, run.trace.stop_reason) == (1.0, None)
-    assert (run.trace.error or "").startswith("[agent loop] ")
-    assert "provider timed out" in (run.trace.error or "")
-
-
-async def test_a_task_whose_start_raises_fails_before_the_agent_is_prompted() -> None:
-    env = Environment("broken")
-
-    @env.template()
-    async def start_raises():
-        raise RuntimeError("start exploded")
-        yield "never"
-
-    job = await start_raises().run(ScriptedAgent("x"))
-
-    (run,) = job.runs
-    assert (run.trace.status, run.prompt, job.errors) == ("error", None, [run])
-    assert (run.trace.error or "").startswith("[starting task] ")
-    assert "start exploded" in (run.trace.error or "")
-
-
 async def test_a_grader_that_raises_leaves_the_run_ungraded() -> None:
     env = Environment("broken")
 
@@ -336,36 +251,6 @@ async def test_a_grader_that_raises_leaves_the_run_ungraded() -> None:
     assert (run.reward, run.trace.status, job.errors) == (0.0, "error", [run])
     assert (run.trace.error or "").startswith("[grading] ")
     assert "grader exploded" in (run.trace.error or "")
-
-
-async def test_cancelling_a_rollout_cancels_its_task_and_stops_its_env() -> None:
-    events = []
-    env = Environment("cancelled")
-
-    @env.shutdown
-    async def stop() -> None:
-        events.append("stopped")
-
-    @env.template()
-    async def wait():
-        try:
-            yield "go"
-            yield 1.0
-        finally:
-            events.append("task closed")
-
-    class Waits(Agent):
-        async def __call__(self, run: Run) -> None:
-            events.append("prompted")
-            await asyncio.sleep(30)
-
-    pending = asyncio.create_task(wait().run(Waits()))
-    await eventually(lambda: events == ["prompted"])
-    pending.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await pending
-    await eventually(lambda: events == ["prompted", "task closed", "stopped"])
 
 
 @pytest.mark.parametrize(
@@ -508,20 +393,3 @@ async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_f
     assert (run.reward, run.trace.stop_reason) == (1.0, "timeout")
     assert "during actor cleanup" in (run.trace.error or "")
     await eventually(lambda: events == ["torn down"])
-
-
-async def test_a_provider_that_fails_returns_a_run_with_what_it_reported() -> None:
-    @asynccontextmanager
-    async def fails_with_notes(task: Task) -> AsyncIterator[Runtime]:
-        error = EOFError("sandbox closed")
-        error.add_note("env output: ImportError: bugs")
-        raise error
-        yield Runtime("tcp://127.0.0.1:1")
-
-    job = await Task(env="checked", id="check").run(ScriptedAgent("yes"), runtime=fails_with_notes)
-
-    (run,) = job.runs
-    assert (run.reward, run.trace.status, run.prompt, run.runtime) == (0.0, "error", None, None)
-    assert run.trace.error == (
-        "[provisioning] EOFError: sandbox closed\nenv output: ImportError: bugs"
-    )

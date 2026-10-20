@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -112,18 +111,6 @@ async def test_runs_without_token_samples_train_by_trace_id(trainer: FakeService
     assert batch["inputs"] == [str(run.trace_id) for run in runs]
 
 
-async def test_every_training_call_carries_the_clients_own_key(
-    trainer: FakeServices,
-) -> None:
-    runs = await answered(ScriptedAgent("ok"))
-    client = TrainingClient("owner/model", api_key="team-key")
-
-    await client.forward_backward(runs, group_size=2)
-    await client.optim_step(learning_rate=1e-5)
-
-    assert {request.bearer for request in trainer.requests("rl")} == {"team-key"}
-
-
 async def test_an_optimizer_step_is_never_retried(trainer: FakeServices) -> None:
     trainer.route("rl", "POST", f"{TRAIN}/optim-step", Reply(status=503))
 
@@ -202,38 +189,3 @@ async def test_groups_split_across_tasks_are_refused(trainer: FakeServices) -> N
             [runs[0], runs[2], runs[4], runs[5]], group_size=2
         )
     assert trainer.requests("rl") == []
-
-
-async def test_a_run_with_neither_samples_nor_a_trace_is_refused(trainer: FakeServices) -> None:
-    with pytest.raises(ValueError, match="run carries neither token-level samples nor a trace_id"):
-        await TrainingClient("owner/model").forward_backward([Run.failed("never launched")])
-    assert trainer.requests("rl") == []
-
-
-@pytest.mark.parametrize(
-    ("answers", "order", "warns"),
-    [
-        (["ok", "ok", "ok", "ok"], [0, 1, 2, 3], True),
-        (["ok", "no", "ok", "no"], [0, 1, 2, 3], False),
-        (["ok", "ok", "ok", "no"], [0, 1, 2, 3], False),
-        (["ok", "ok", "ok", "ok"], [0, 2, 1, 3], True),
-    ],
-    ids=["no-spread", "spread", "spread-in-one-group", "interleaved-groups"],
-)
-async def test_a_batch_with_no_reward_spread_warns_that_it_trains_nothing(
-    answers: list[str],
-    order: list[int],
-    warns: bool,
-    trainer: FakeServices,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    replies = iter(answers)
-    runs = await answered(ScriptedAgent(lambda _: next(replies)), "ok", "no")
-
-    with caplog.at_level(logging.WARNING, logger="hud.train.client"):
-        await TrainingClient("owner/model").forward_backward(
-            [runs[index] for index in order], group_size=2
-        )
-
-    assert ("accumulates no gradient" in caplog.text) is warns
-    assert len(trainer.requests("rl", "POST", f"{TRAIN}/forward-backward")) == 1

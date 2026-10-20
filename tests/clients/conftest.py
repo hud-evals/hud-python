@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import socket
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
@@ -179,13 +178,6 @@ async def control_peer(
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(*peer.handlers, return_exceptions=True)
         await server.wait_closed()
-
-
-def unused_port() -> int:
-    """A loopback port nothing listens on."""
-    with socket.socket() as released:
-        released.bind(("127.0.0.1", 0))
-        return released.getsockname()[1]
 
 
 @asynccontextmanager

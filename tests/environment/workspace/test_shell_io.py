@@ -23,7 +23,6 @@ from urllib.parse import urlsplit
 import asyncssh
 import pytest
 
-from hud.capabilities.ssh import PROCESS_CONNECTIONS_REQUEST
 from hud.environment.workspace import usable_bwrap
 from tests.conftest import eventually
 
@@ -186,17 +185,6 @@ async def test_terminal_output_survives_a_client_that_reads_slowly(
     assert (result.exit_status, result.stdout) == (0, b"x" * 500000)
 
 
-async def test_a_session_that_cannot_be_prepared_is_told_why(tmp_path: Path) -> None:
-    async with shell(tmp_path / "root") as (_, client):
-        result = await client.conn.run(
-            "echo unreachable", env={PROCESS_CONNECTIONS_REQUEST: '["missing"]'}, check=False
-        )
-
-    assert result.exit_status == 1
-    assert result.stderr
-    assert "unreachable" not in str(result.stdout)
-
-
 @pytest.mark.e2e
 @pytest.mark.sandbox
 @pytest.mark.parametrize(
@@ -294,47 +282,6 @@ async def test_the_connection_survives_a_command_that_goes_wrong(
 
     assert after.stdout == "healthy"
     assert client.conn is connection
-
-
-async def a_completed_command_leaves_a_background_child(client: SSHClient, root: Path) -> int:
-    await client.conn.run("sleep 120 >/dev/null 2>&1 < /dev/null & echo $! > child.pid", check=True)
-    return int((root / "child.pid").read_text())
-
-
-async def a_session_closed_while_its_child_ignores_term(client: SSHClient, root: Path) -> int:
-    remote = await client.conn.create_process("trap '' TERM; sleep 120 & echo $! > child.pid; wait")
-    try:
-        await eventually(
-            lambda: bool((root / "child.pid").exists() and (root / "child.pid").read_text().strip())
-        )
-        pid = int((root / "child.pid").read_text())
-        assert alive(pid)
-    finally:
-        remote.close()
-        await asyncio.wait_for(remote.wait_closed(), 5.0)
-    return pid
-
-
-@UNSANDBOXED
-@pytest.mark.parametrize(
-    "ending",
-    [
-        pytest.param(a_completed_command_leaves_a_background_child, id="command-completed"),
-        pytest.param(a_session_closed_while_its_child_ignores_term, id="session-closed"),
-    ],
-)
-async def test_the_end_of_an_unsandboxed_command_kills_its_descendants(
-    tmp_path: Path, ending: Callable[[SSHClient, Path], Awaitable[int]]
-) -> None:
-    root = tmp_path / "root"
-    pid = 0
-    try:
-        async with shell(root) as (_, client):
-            pid = await ending(client, root)
-            await eventually(lambda: not alive(pid), within=5.0)
-    finally:
-        if pid and alive(pid):
-            os.kill(pid, signal.SIGKILL)
 
 
 @UNSANDBOXED

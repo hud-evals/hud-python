@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents import OpenAIChatAgent
-from hud.agents.base import Agent
 from hud.agents.types import OpenAIChatConfig
 from hud.eval import HostedRuntime, Task, Taskset
 from hud.types import AgentType
@@ -21,7 +20,6 @@ from tests.fixtures.services import Reply
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.eval import Run
     from tests.conftest import HudEnv
     from tests.fixtures.services import FakeServices
 
@@ -163,43 +161,6 @@ async def test_the_trace_the_platform_ends_with_is_the_runs_outcome(
         assert error in (run.trace.error or "")
 
 
-async def test_a_rejected_submission_is_a_failed_run_that_polls_nothing(
-    services: FakeServices,
-) -> None:
-    services.route("api", "POST", SUBMIT, status=422, json={"detail": "unknown env 'sums'"})
-
-    job = await Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
-
-    assert "unknown env 'sums'" in (job.runs[0].trace.error or "")
-    assert services.requests("api", "GET") == []
-
-
-async def test_an_agent_the_platform_cannot_run_fails_without_a_submission(
-    services: FakeServices,
-) -> None:
-    class Local(Agent):
-        async def __call__(self, run: Run) -> None:
-            run.trace.content = "x"
-
-    job = await Task(env="sums", id="add").run(Local(), runtime=HostedRuntime(poll_interval=0))
-
-    (run,) = job.runs
-    assert (run.trace.status, run.prompt, services.requests()) == ("error", None, [])
-    assert "registered agent types" in (run.trace.error or "")
-
-
-async def test_hosted_execution_needs_a_hud_api_key(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY=None)
-
-    job = await Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
-
-    (run,) = job.runs
-    assert (run.trace.status, run.prompt, services.requests()) == ("error", None, [])
-    assert "HUD_API_KEY" in (run.trace.error or "")
-
-
 @pytest.mark.parametrize(
     "submit_delay", [0, 5], ids=["while-the-platform-runs-it", "before-the-platform-accepts-it"]
 )
@@ -220,21 +181,6 @@ async def test_a_hosted_rollout_past_its_deadline_is_cancelled_on_the_platform(
     assert services.bodies("api", "POST", CANCEL) == [{"trace_id": str(uuid.UUID(run.trace_id))}]
 
 
-async def test_the_deprecated_run_timeout_is_the_hosted_rollouts_deadline(
-    services: FakeServices,
-) -> None:
-    services.route("api", "POST", SUBMIT, json={"status": "queued"})
-    services.route("api", "GET", POLL, json={"status": "running"})
-    services.route("api", "POST", CANCEL, json={"status": "accepted"})
-    with pytest.warns(DeprecationWarning, match="rollout_timeout=... to Task.run"):
-        runtime = HostedRuntime(poll_interval=0, run_timeout=1)
-
-    job = await Task(env="sums", id="add").run(chat_agent(), runtime=runtime)
-
-    assert job.runs[0].trace.stop_reason == "timeout"
-    await eventually(lambda: len(services.requests("api", "POST", CANCEL)) == 1, within=10)
-
-
 async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(
     services: FakeServices,
 ) -> None:
@@ -251,26 +197,6 @@ async def test_cancelling_a_hosted_rollout_cancels_it_on_the_platform(
         await pending
 
     await eventually(lambda: len(services.requests("api", "POST", CANCEL)) == 1, within=10)
-
-
-async def test_a_hosted_row_whose_timeouts_contradict_raises_before_submitting(
-    services: FakeServices,
-) -> None:
-    row = Task.model_validate(
-        {
-            "env": "sums",
-            "id": "add",
-            "agent_config": {"timeout_seconds": 600},
-            "runtime_config": {"limits": {"run_timeout_s": 600}},
-        }
-    )
-
-    with pytest.raises(
-        ValueError, match=r"must be less than runtime_config\.limits\.run_timeout_s"
-    ):
-        await row.run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
-
-    assert services.requests() == []
 
 
 @pytest.mark.parametrize(

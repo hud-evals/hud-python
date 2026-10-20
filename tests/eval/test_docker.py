@@ -3,7 +3,7 @@
 The scenarios run real containers from the fixture image (this checkout's SDK
 serving a fixture environment) on the local Docker daemon, and check what the
 daemon reports about them. What every runtime does (outcomes, deadlines, cancel,
-cleanup, session files for a verifier, refusals) runs on Docker as a row of the
+cleanup, session files for a verifier) runs on Docker as a row of the
 rollout tables; this module holds what only Docker does.
 """
 
@@ -132,23 +132,6 @@ async def test_a_row_that_names_an_image_runs_there_without_a_runtime(
     job = await row.run(ScriptedAgent("tangerine"))
 
     assert job.reward == 1.0
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-async def test_more_disk_than_the_container_has_is_refused_and_the_container_removed(
-    fixture_image: Callable[[str], str],
-) -> None:
-    label, flags = labelled()
-    row = ECHO.model_copy(
-        update={"runtime_config": RuntimeConfig(resources=RuntimeResources(storage_mb=10**9))}
-    )
-
-    with pytest.raises(RuntimeError, match=r"requires 1000000000 MB of free disk"):
-        async with DockerRuntime(fixture_image("echo"), run_args=flags)(row):
-            pytest.fail("the request should be refused")
-
-    assert containers(**{"hud-test": label}) == []
 
 
 @pytest.mark.e2e

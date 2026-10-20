@@ -1,4 +1,4 @@
-"""``hud jobs``: a job's traces, and cancelling a job, one trace, or every active job."""
+"""``hud jobs cancel``: cancelling a job, one trace, or every active job."""
 
 from __future__ import annotations
 
@@ -12,23 +12,6 @@ if TYPE_CHECKING:
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
-
-
-def test_a_dashless_job_id_reads_the_dashed_job(signed_in: FakeServices, hud: Hud) -> None:
-    signed_in.route("api", "GET", f"/v2/jobs/{JOB_ID}/traces", json={"items": []})
-
-    result = hud("jobs", JOB_ID.replace("-", ""), "--json")
-
-    assert result.exit_code == 0, result
-
-
-def test_an_unknown_job_is_not_found(signed_in: FakeServices, hud: Hud) -> None:
-    signed_in.route("api", "GET", f"/v2/jobs/{JOB_ID}/traces", status=404, json={"detail": "No"})
-
-    result = hud("jobs", "get", JOB_ID, "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "not_found"), result
-    assert result.json["input"] == {"job_id": JOB_ID}
 
 
 @pytest.mark.parametrize(

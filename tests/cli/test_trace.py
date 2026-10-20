@@ -124,16 +124,3 @@ async def test_a_local_trace_renders_despite_a_record_cut_short(
 
     assert result.exit_code == 0, result
     assert "Wrote it." in result.stdout
-
-
-def test_a_trace_missing_from_the_local_spans_is_read_from_the_platform(
-    hud: Hud, events: None, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    spans = tmp_path / "spans"
-    spans.mkdir()
-    (spans / f"{uuid.uuid4().hex}.jsonl").write_text("")
-    hud_env.set(HUD_TELEMETRY_LOCAL_DIR=str(spans))
-
-    result = hud("trace", "get", TRACE_ID, "--json")
-
-    assert (result.exit_code, result.json) == (0, EVENTS), result

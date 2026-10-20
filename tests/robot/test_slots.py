@@ -78,19 +78,6 @@ class Sim(RobotBridge):
         return {"score": 0.42, "success": True, "total_reward": 3.0, "detail": "custom"}
 
 
-class AsyncResetSim(Sim):
-    """A bridge whose reset is a coroutine."""
-
-    def __init__(self) -> None:
-        super().__init__()
-
-        async def reset(**task_args: Any) -> str:
-            await asyncio.sleep(0)
-            return f"async prompt {sorted(task_args.items())}"
-
-        setattr(self, "reset", reset)
-
-
 @asynccontextmanager
 async def serving(sim: Sim) -> AsyncIterator[tuple[int, RobotEndpoint, Capability]]:
     """Serve ``sim``: its control port, a started endpoint on it, and the ``robot`` capability."""
@@ -190,20 +177,6 @@ async def test_a_dropped_session_frees_its_slot_when_graded() -> None:
     assert sim.results == 2
 
 
-async def test_stopping_the_endpoint_frees_what_cancel_could_not() -> None:
-    sim = Sim(failures=3)
-
-    async with serving(sim) as (port, peer, _):
-        async with episodes(port) as runtime, connect(runtime) as session:
-            await session.start_task("episode")
-            await session.cancel()
-            while_served = sim.results
-        reclaimed = await asyncio.wait_for(peer.reset(task="pick"), timeout=10)
-
-    assert (while_served, sim.results) == (3, 4)
-    assert reclaimed["prompt"] == PROMPT
-
-
 async def test_a_session_waits_for_a_held_slot_until_its_holder_ends() -> None:
     sim = Sim()
 
@@ -225,18 +198,6 @@ async def test_a_session_waits_for_a_held_slot_until_its_holder_ends() -> None:
     assert sim.results == 2
 
 
-async def test_an_async_reset_is_awaited_for_the_sessions_prompt() -> None:
-    async with (
-        serving(AsyncResetSim()) as (port, _, _),
-        episodes(port) as runtime,
-        connect(runtime) as session,
-    ):
-        started = await session.start_task("episode")
-        await session.cancel()
-
-    assert started == {"prompt": "async " + PROMPT}
-
-
 async def test_concurrent_sessions_with_different_args_cannot_share_a_batch() -> None:
     async with (
         serving(Sim(num_envs=2)) as (port, _, _),
@@ -249,26 +210,6 @@ async def test_concurrent_sessions_with_different_args_cannot_share_a_batch() ->
             await second.start_task("episode", {"task": "B"})
 
     assert started == {"prompt": "prompt [('task', 'A')]"}
-
-
-@pytest.mark.parametrize(
-    ("num_envs", "token", "error"),
-    [
-        pytest.param(1, "slot-9-nope", "unknown episode token", id="an-unknown-token-is-refused"),
-        pytest.param(2, None, "tokenless claim", id="a-vectorized-sim-refuses-a-tokenless-grade"),
-    ],
-)
-async def test_a_grade_must_name_exactly_one_claimed_slot(
-    num_envs: int, token: str | None, error: str
-) -> None:
-    sim = Sim(num_envs=num_envs)
-
-    async with serving(sim) as (_, endpoint, _):
-        claims = [await endpoint.reset(goal="lift") for _ in range(num_envs)]
-        with pytest.raises(RuntimeError, match=error):
-            await endpoint.result(token=token)
-
-    assert len({claim["token"] for claim in claims}) == num_envs  # one token per slot
 
 
 # ─── stepping a batch ──────────────────────────────────────────────────

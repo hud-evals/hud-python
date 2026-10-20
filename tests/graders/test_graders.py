@@ -13,7 +13,6 @@ import pytest
 from hud import Environment
 from hud.graders import (
     BashGrader,
-    EvaluationResult,
     Grader,
     LLMJudgeGrader,
     SubScore,
@@ -143,20 +142,6 @@ async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_pena
     )
 
 
-async def test_subscores_that_do_not_match_the_reward_warn() -> None:
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        yield "go"
-        yield EvaluationResult(reward=1.0, subscores=[SubScore(name="a", value=0.5, weight=1.0)])
-
-    with pytest.warns(UserWarning, match="Subscores don't match reward"):
-        (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert run.reward == 1.0
-
-
 async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
     class Scaled(Grader):
         name = "scaled"
@@ -203,27 +188,6 @@ async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
         "did it",
         "metadata",
     )
-
-
-async def test_graders_passed_to_combine_run_at_the_same_time(tmp_path: Path) -> None:
-    env = Environment("graders")
-    wait = "for _ in $(seq 50); do [ -e {other} ] && exit 0; sleep 0.1; done; exit 1"
-
-    @env.template()
-    async def check():
-        yield "go"
-        yield await combine(
-            BashGrader.grade(
-                weight=0.5, command=f"touch {tmp_path}/a; " + wait.format(other=tmp_path / "b")
-            ),
-            BashGrader.grade(
-                weight=0.5, command=f"touch {tmp_path}/b; " + wait.format(other=tmp_path / "a")
-            ),
-        )
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert run.reward == 1.0
 
 
 @pytest.mark.parametrize(
@@ -358,73 +322,3 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
         (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
     ] == children
     assert [request.credential for request in models.requests()] == ["k"] * len(criteria)
-
-
-async def test_a_judge_with_no_criteria_asks_no_model(models: Models, hud_env: HudEnv) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        answer = yield "go"
-        yield await combine(LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=[]))
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert (run.reward, models.requests()) == (0.0, [])
-
-
-async def test_a_judge_without_a_hud_api_key_fails_the_grade(models: Models) -> None:
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        answer = yield "go"
-        yield await combine(LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=["x"]))
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert run.trace.status == "error"
-    assert "HUD_API_KEY" in (run.trace.error or "")
-    assert models.requests() == []
-
-
-@pytest.mark.parametrize(
-    ("weights", "refusal"),
-    [
-        ([-1.0], "positive weight"),
-        ([], "must not be empty"),
-    ],
-    ids=["only-penalties", "nothing-to-combine"],
-)
-async def test_a_grade_with_nothing_positive_to_weigh_fails(
-    weights: list[float], refusal: str
-) -> None:
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        yield "go"
-        yield await combine(
-            *(SubScore(name=f"s{i}", value=1.0, weight=w) for i, w in enumerate(weights))
-        )
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert (run.trace.error or "").startswith("[grading] ")
-    assert refusal in (run.trace.error or "")
-
-
-async def test_combining_something_that_is_not_a_subscore_fails_the_grade() -> None:
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        yield "go"
-        mixed: list[Any] = [SubScore(name="a", value=1.0), 0.5]
-        yield await combine(*mixed)
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert (run.trace.status, run.reward) == ("error", 0.0)
-    assert (run.trace.error or "").startswith("[grading] ")

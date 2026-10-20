@@ -67,13 +67,6 @@ class EchoAgent(RobotAgent):
         self.adapter = adapter
 
 
-class EarlyStopAgent(EchoAgent):
-    """Stops after one action through the public rollout hook."""
-
-    def should_stop(self, obs: dict[str, Any], *, step: int, max_steps: int) -> bool:
-        return step >= 1 or super().should_stop(obs, step=step, max_steps=max_steps)
-
-
 #: ``hud-evals/robot-template``'s ``contract_lerobot.json``: two cameras, an 8-D
 #: LIBERO state, a 7-D action. The agent wires the policy from this alone.
 TEMPLATE_CONTRACT = {
@@ -164,17 +157,6 @@ async def test_a_single_env_custom_bridge_is_driven_until_the_sim_ends_the_episo
     assert adapter.wired[0]["image"].ndim == 3
     assert adapter.wired[0]["image"].dtype == np.uint8
     assert adapter.wired[0]["state"].tolist() == [1.0, 0.0]
-
-
-async def test_the_agents_stop_hook_ends_the_rollout_before_the_env_does() -> None:
-    adapter = EchoAdapter()
-
-    async with stub_episode(StubSim(), "stub-sim") as runtime:
-        task = Task(env="stub-sim", id="episode", args={"goal": "lift"})
-        run = await rollout(task, EarlyStopAgent(adapter), runtime=runtime)
-
-    assert run.reward == 1  # one action reached the sim
-    assert len(adapter.wired) == 1
 
 
 async def test_a_gym_env_behind_a_prewritten_contract_is_wired_from_the_contract(

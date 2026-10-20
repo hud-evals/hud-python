@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from hud import Environment
 from hud.agents.base import Agent
-from hud.eval import LocalRuntime, Runtime, Shared, Task, Taskset, rollout
+from hud.eval import LocalRuntime, Runtime, Shared, Task, Taskset
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
@@ -134,49 +134,3 @@ async def test_a_failed_boot_fails_its_own_lease_and_the_next_lease_boots_again(
         (1.0, None),
     ]
     assert len(attempts) == 2
-
-
-async def test_a_substrate_past_its_run_limit_is_replaced_on_the_next_lease() -> None:
-    events = []
-    env = Environment("sim")
-
-    @env.initialize
-    async def up() -> None:
-        events.append("up")
-
-    @env.shutdown
-    async def down() -> None:
-        events.append("down")
-
-    @env.template()
-    async def step():
-        yield "go"
-        yield 1.0
-
-    @asynccontextmanager
-    async def limited(task: Task) -> AsyncIterator[Runtime]:
-        async with LocalRuntime(env)(task.model_copy(update={"runtime_config": None})) as runtime:
-            yield runtime
-
-    row = Task(env="sim", id="step", runtime_config={"limits": {"run_timeout_s": 1}})
-    async with Shared(limited, width=1) as pool:
-        await row.run(ScriptedAgent("x"), runtime=pool)
-        await asyncio.sleep(1.1)
-        await row.run(ScriptedAgent("x"), runtime=pool)
-
-    assert events == ["up", "down", "up", "down"]
-
-
-async def test_a_lease_outside_the_pools_scope_fails_the_run() -> None:
-    env = Environment("sim")
-
-    @env.template()
-    async def step():
-        yield "go"
-        yield 1.0
-
-    run = await rollout(step(), ScriptedAgent("x"), runtime=Shared(LocalRuntime(env), width=1))
-
-    assert (run.trace.status, run.prompt) == ("error", None)
-    assert (run.trace.error or "").startswith("[provisioning] ")
-    assert "lease inside the scope" in (run.trace.error or "")

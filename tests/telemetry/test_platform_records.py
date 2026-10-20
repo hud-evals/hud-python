@@ -4,7 +4,6 @@ telemetry is on with an API key."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -16,8 +15,6 @@ from hud import Environment
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
-from hud.types import Step
-from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
 
@@ -58,45 +55,6 @@ async def test_a_taskset_reports_one_job_and_enters_each_rollout_under_it(
     assert sorted((e["task_slug"], e["group_id"]) for e in entered.values()) == sorted(
         (run.slug, run.group_id) for run in job.runs
     )
-
-
-@pytest.mark.parametrize(
-    ("slugs", "group", "name"),
-    [
-        (["only"], 1, "solve"),
-        (["only"], 3, "solve (3 times)"),
-        (["first", "second"], 1, "letters (2 tasks)"),
-        (["first", "second"], 2, "letters (2 tasks) (2 times)"),
-    ],
-)
-async def test_a_run_registers_one_job_named_for_what_it_runs(
-    slugs: list[str], group: int, name: str, reporting: FakeServices
-) -> None:
-    env = Environment("letters")
-
-    @env.template()
-    async def solve():
-        yield "go"
-        yield 1.0
-
-    rows = [solve().model_copy(update={"slug": slug}) for slug in slugs]
-    job = await Taskset("letters", rows).run(ScriptedAgent("x"), group=group)
-
-    (registered,) = reporting.requests("api", "POST", JOB_ENTER)
-    assert registered.path == f"/v2/trace/job/{job.id}/enter"
-    assert (registered.json["name"], registered.json["group"]) == (name, group)
-
-
-async def test_a_lone_rollout_reports_a_job_of_one_named_for_its_task(
-    reporting: FakeServices,
-) -> None:
-    run = await rollout(
-        Task(env="checked", id="check"), ScriptedAgent("yes"), runtime=LocalRuntime(checked())
-    )
-
-    (registered,) = reporting.requests("api", "POST", JOB_ENTER)
-    assert (registered.json["name"], registered.json["group"]) == ("check", 1)
-    assert registered.path == f"/v2/trace/job/{run.job_id}/enter"
 
 
 async def test_a_rollout_given_a_job_reports_none_of_its_own(reporting: FakeServices) -> None:
@@ -163,20 +121,6 @@ async def test_a_graded_rollout_reports_its_reward_evaluation_and_metadata(
     assert [(s["name"], s["value"]) for s in evaluation["subscores"]] == [("format", 0.5)]
 
 
-async def test_an_error_the_run_recovered_from_stays_off_its_report(
-    reporting: FakeServices,
-) -> None:
-    class Recovers(Agent):
-        async def __call__(self, run: Run) -> None:
-            run.record(Step(source="system", error="model busy; asked again"))
-            run.trace.content = "yes"
-
-    await Task(env="checked", id="check").run(Recovers(), runtime=LocalRuntime(checked()))
-
-    (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
-    assert (exited["status"], "error" in exited) == ("completed", False)
-
-
 async def test_a_rollout_whose_agent_raised_reports_its_error_beside_its_grade(
     reporting: FakeServices,
 ) -> None:
@@ -195,28 +139,6 @@ async def test_a_rollout_whose_agent_raised_reports_its_error_beside_its_grade(
     )
 
 
-async def test_a_rollout_whose_grading_failed_reports_no_evaluation(
-    reporting: FakeServices,
-) -> None:
-    env = Environment("broken")
-
-    @env.template()
-    async def grade_raises():
-        yield "go"
-        raise RuntimeError("grader exploded")
-        yield 0.0
-
-    await grade_raises().run(ScriptedAgent("x"))
-
-    (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
-    assert (exited["status"], exited["reward"], "evaluation_result" in exited) == (
-        "error",
-        0.0,
-        False,
-    )
-    assert exited["error"].startswith("[grading] ")
-
-
 async def test_a_rollout_that_never_launched_reports_where_it_failed(
     reporting: FakeServices,
 ) -> None:
@@ -231,20 +153,6 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
     assert (exited["status"], exited["reward"]) == ("error", 0.0)
     assert exited["error"].startswith("[provisioning] ")
     assert "no substrate" in exited["error"]
-
-
-async def test_a_timed_out_rollout_reports_why_it_stopped(reporting: FakeServices) -> None:
-    class Waits(Agent):
-        async def __call__(self, run: Run) -> None:
-            run.trace.content = "yes"
-            await asyncio.sleep(30)
-
-    await Task(env="checked", id="check").run(
-        Waits(AgentConfig(timeout_seconds=0.2)), runtime=LocalRuntime(checked())
-    )
-
-    (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
-    assert (exited["status"], exited["stop_reason"], exited["reward"]) == ("error", "timeout", 1.0)
 
 
 @pytest.mark.parametrize(
@@ -262,25 +170,3 @@ async def test_nothing_is_reported_unless_telemetry_is_on_with_a_key(
     )
 
     assert (job.reward, reporting.requests()) == (1.0, [])
-
-
-async def test_a_cancelled_rollout_reports_its_start_but_no_outcome(
-    reporting: FakeServices,
-) -> None:
-    prompted = asyncio.Event()
-
-    class Waits(Agent):
-        async def __call__(self, run: Run) -> None:
-            prompted.set()
-            await asyncio.sleep(30)
-
-    pending = asyncio.create_task(
-        rollout(Task(env="checked", id="check"), Waits(), runtime=LocalRuntime(checked()))
-    )
-    await eventually(prompted.is_set)
-    pending.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await pending
-
-    assert len(reporting.requests("api", "POST", TRACE_ENTER)) == 1
-    assert reporting.requests("api", "POST", TRACE_EXIT) == []

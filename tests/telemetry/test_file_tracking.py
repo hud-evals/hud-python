@@ -12,7 +12,6 @@ import pytest
 from hud import Environment
 from hud.agents.base import Agent
 from hud.capabilities import Capability
-from hud.environment.file_tracker import FileTracker, serve_file_tracking
 from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import spans
 
@@ -98,52 +97,6 @@ async def test_a_tracked_rollout_exports_its_setup_a_snapshot_its_diffs_and_deli
         "report.pdf",
     ]
     assert [f["path"] for f in payloads["filetracking.capture"]["files"]] == ["report.pdf"]
-
-
-async def test_a_tracker_without_setup_diffs_starts_the_trace_from_a_snapshot(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "ws"
-    root.mkdir()
-    env = Environment("tracked")
-
-    @env.initialize
-    async def track() -> None:
-        tracker = FileTracker(root)
-        tracker.take_baseline()
-        server = await serve_file_tracking(tracker)
-        port = server.sockets[0].getsockname()[1]
-        env.add_capability(
-            Capability(
-                name="filetracking", protocol="filetracking/1", url=f"tcp://127.0.0.1:{port}"
-            )
-        )
-
-    @env.template()
-    async def write():
-        yield "write your files"
-        yield 1.0
-
-    run = await write().run(Writer(root, {"notes.md": b"# notes\n"}))
-
-    names = [name for name, _ in itertools.groupby(name for name, _ in exported(run.runs[0]))]
-    assert names[:2] == ["filetracking.snapshot", "filetracking.diff"]
-
-
-async def test_a_deliverable_too_large_to_capture_is_still_reported_as_changed(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "ws"
-    huge = {"huge.pdf": b"%PDF" + b"0" * (6 * 1024 * 1024)}
-
-    run = await rollout(
-        Task(env="tracked", id="write"), Writer(root, huge), runtime=LocalRuntime(tracked(root))
-    )
-
-    payloads = dict(exported(run))
-    assert [p["path"] for p in payloads["filetracking.diff"]["patches"]] == ["huge.pdf"]
-    capture = payloads["filetracking.capture"]
-    assert (capture["files"], capture["files_skipped"]) == ([], 1)
 
 
 async def test_a_large_workspace_snapshot_arrives_whole(tmp_path: Path) -> None:

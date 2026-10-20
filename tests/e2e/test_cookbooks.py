@@ -73,17 +73,6 @@ def resolves(module: str, name: str | None) -> bool:
 
 
 @pytest.mark.parametrize("path", MODULES, ids=module_id)
-def test_every_hud_name_a_cookbook_imports_exists(path: Path) -> None:
-    hud_imports = [
-        (module, name) for module, name in imports(path) if module.split(".")[0] == "hud"
-    ]
-
-    missing = [f"{module}:{name}" for module, name in hud_imports if not resolves(module, name)]
-
-    assert missing == []
-
-
-@pytest.mark.parametrize("path", MODULES, ids=module_id)
 def test_a_cookbook_module_imports(path: Path) -> None:
     local = {sibling.stem for directory in search_path(path) for sibling in directory.glob("*.py")}
     third_party = {

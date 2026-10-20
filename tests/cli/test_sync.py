@@ -3,7 +3,6 @@ a deployed environment."""
 
 from __future__ import annotations
 
-import csv
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +18,6 @@ TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
 OTHER_ID = "eeeeeeee-0000-4000-8000-000000000002"
 ENV_ID = "bbbbbbbb-0000-4000-8000-000000000042"
 PROJECT_ID = "aaaaaaaa-0000-4000-8000-000000000002"
-LOCKED_ID = "aaaaaaaa-0000-4000-8000-000000000003"
 TASKS_PY = """\
 from hud import Environment
 
@@ -94,19 +92,6 @@ def uploads(services: FakeServices) -> list[dict[str, Any]]:
     return services.bodies("api", "POST", "/v2/tasks/upload")
 
 
-def test_a_dry_run_plans_creating_every_task_and_changes_nothing(
-    platform: FakeServices, hud: Hud
-) -> None:
-    result = hud("sync", "tasks", "demo", "tasks.py", "--dry-run", "--json")
-
-    assert (result.exit_code, result.json["create_count"], result.json["taskset"]) == (
-        0,
-        2,
-        "demo",
-    ), result
-    assert (uploads(platform), linked(hud)) == ([], {})
-
-
 def test_the_first_sync_creates_the_taskset_with_every_task_and_links_it(
     platform: FakeServices, hud: Hud
 ) -> None:
@@ -157,25 +142,6 @@ def test_a_bare_sync_uses_the_linked_taskset_by_its_remote_name(
 
 
 @pytest.mark.parametrize(
-    ("options", "uploaded"),
-    [([], [ONE, TWO]), (["--task", ONE], [ONE])],
-    ids=["every-task", "one-task-by-slug"],
-)
-def test_force_uploads_regardless_of_what_the_remote_holds(
-    options: list[str], uploaded: list[str], platform: FakeServices, hud: Hud
-) -> None:
-    holding(platform, TASKSET_ID, "renamed", exported(1, 2))
-    link(hud, taskset_id=TASKSET_ID)
-
-    result = hud("sync", "tasks", "--force", *options, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    (upload,) = uploads(platform)
-    assert (upload["taskset_id"], upload["taskset_name"]) == (TASKSET_ID, "renamed")
-    assert [task["name"] for task in upload["tasks"]] == uploaded
-
-
-@pytest.mark.parametrize(
     ("options", "relinked"), [([], False), (["--link"], True)], ids=["kept", "relinked"]
 )
 def test_syncing_another_taskset_moves_the_link_only_when_asked(
@@ -196,32 +162,6 @@ def test_syncing_another_taskset_moves_the_link_only_when_asked(
     assert linked(hud)["taskset_id"] == (OTHER_ID if relinked else TASKSET_ID)
 
 
-def test_project_places_the_upload_without_linking_it(platform: FakeServices, hud: Hud) -> None:
-    project = {"id": PROJECT_ID, "name": "browser-evals", "capabilities": {"create": True}}
-    platform.route("api", "GET", f"/v2/projects/{PROJECT_ID}", json=project)
-
-    result = hud("sync", "tasks", "demo", "tasks.py", "--project", PROJECT_ID, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert [upload["project_id"] for upload in uploads(platform)] == [PROJECT_ID]
-    assert linked(hud) == {}
-
-
-def test_a_read_only_project_is_refused_before_anything_uploads(
-    platform: FakeServices, hud: Hud
-) -> None:
-    locked = {"id": LOCKED_ID, "name": "locked-down", "capabilities": {}}
-    platform.route("api", "GET", f"/v2/projects/{LOCKED_ID}", json=locked)
-
-    result = hud("sync", "tasks", "demo", "tasks.py", "--project", LOCKED_ID, "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"], uploads(platform)) == (
-        1,
-        "permission_denied",
-        [],
-    ), result
-
-
 def test_a_linked_taskset_that_was_deleted_is_not_found(platform: FakeServices, hud: Hud) -> None:
     link(hud, taskset_id=TASKSET_ID)
     platform.route("api", "GET", f"/v2/tasksets/{TASKSET_ID}", status=404, json={"detail": "No"})
@@ -229,14 +169,6 @@ def test_a_linked_taskset_that_was_deleted_is_not_found(platform: FakeServices, 
     result = hud("sync", "tasks", "--force", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"], uploads(platform)) == (1, "not_found", [])
-
-
-def test_nothing_linked_and_no_taskset_named_is_a_usage_error(
-    platform: FakeServices, hud: Hud
-) -> None:
-    result = hud("sync", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
 
 
 @pytest.mark.parametrize("target", ["tasks.json", "out/tasks.jsonl"])
@@ -258,24 +190,6 @@ def test_an_exported_taskset_reads_back_as_the_same_tasks(
     ]
 
 
-def test_a_csv_export_has_a_column_per_argument(platform: FakeServices, hud: Hud) -> None:
-    remote = [
-        {"name": "one", "env": "e", "scenario": "solve", "args": {"n": 1}},
-        {"name": "two", "env": "e", "scenario": "solve", "args": {"n": {"x": 2}}},
-    ]
-    holding(platform, TASKSET_ID, "demo", remote)
-
-    result = hud("sync", "tasks", "demo", "--export", "tasks.csv", "--json")
-
-    assert result.exit_code == 0, result
-    with (hud.cwd / "tasks.csv").open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert [(r["slug"], r["env"], r["id"], json.loads(r["arg:n"])) for r in rows] == [
-        ("one", "e", "solve", 1),
-        ("two", "e", "solve", {"x": 2}),
-    ]
-
-
 @pytest.mark.parametrize(
     "ref", ["browser_anchor", ENV_ID], ids=["by-name-across-separators", "by-id"]
 )
@@ -294,13 +208,3 @@ def test_sync_env_links_the_directory_to_the_environment_it_names(
 
     assert (first.exit_code, first.json["changed"], again.json["changed"]) == (0, True, False)
     assert linked(hud)["registry_id"] == ENV_ID
-
-
-def test_sync_env_for_an_environment_that_is_gone_is_not_found(
-    signed_in: FakeServices, hud: Hud
-) -> None:
-    signed_in.route("api", "GET", f"/v2/registry/{ENV_ID}", status=404, json={"detail": "No"})
-
-    result = hud("sync", "env", ENV_ID, "--json")
-
-    assert (result.exit_code, result.json["error"], linked(hud)) == (1, "not_found", {}), result

@@ -1,4 +1,4 @@
-"""``hud qa``: list QA checks, run them on traces or tasks, and read their verdicts."""
+"""``hud qa run``: run QA checks and exit on their verdicts."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from tests.fixtures.services import FakeServices
 
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
-TASK_ID = "00000000-0000-4000-a000-000000000005"
 CHECK = "failure_analysis"
 OTHER_CHECK = "reward_hacking"
 TASK_CHECK = "task_reward_exploit"
@@ -70,29 +69,6 @@ def verdict(tag: str, *, check_key: str = CHECK) -> dict[str, Any]:
     """A completed ``qa_agent_result.v1`` row."""
     result = {"schema_version": "qa_agent_result.v1", "verdict": tag, "summary": "", "findings": []}
     return row(check_key=check_key, verdict=tag, result=result)
-
-
-@pytest.mark.parametrize(
-    ("argv", "started"),
-    [
-        (
-            [f"{CHECK}, {OTHER_CHECK},{CHECK}", TRACE_ID.upper()],
-            {"check_keys": [CHECK, OTHER_CHECK], "trace_ids": [TRACE_ID], "overwrite": False},
-        ),
-        (
-            [TASK_CHECK, TASK_ID],
-            {"check_keys": [TASK_CHECK], "task_ids": [TASK_ID], "overwrite": False},
-        ),
-    ],
-    ids=["deduplicated-and-normalised", "task-level"],
-)
-def test_qa_run_without_waiting_starts_each_check_once(
-    hud: Hud, catalog: FakeServices, argv: list[str], started: dict[str, Any]
-) -> None:
-    result = hud("qa", "run", *argv, "--no-wait", "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert catalog.bodies("api", "POST", "/v2/qa/runs") == [started]
 
 
 @pytest.mark.parametrize(

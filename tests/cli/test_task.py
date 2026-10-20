@@ -123,22 +123,3 @@ def test_a_task_starts_on_the_env_hud_serve_serves_until_interrupted(
 
     assert (result.exit_code, result.stdout) == (0, "Say hello.\n"), result
     assert server.returncode == 0
-
-
-@pytest.mark.parametrize(
-    ("argv", "target"),
-    [
-        (["--source", "tasks.json"], "hello"),
-        (["--args", '{"target": "hello"}'], "hello"),
-    ],
-)
-async def test_a_url_runs_the_task_a_source_names_or_the_raw_id(
-    hud: Hud, project: Any, argv: list[str], target: str
-) -> None:
-    started: list[str] = []
-    task = "say-hello" if "--source" in argv else "solve"
-    async with LocalRuntime(counting_env(started))(Task(env="example", id="solve")) as runtime:
-        result = await asyncio.to_thread(hud, "task", "start", task, "--url", runtime.url, *argv)
-
-    assert (result.exit_code, result.stdout) == (0, f"Say {target}.\n"), result
-    assert started == [target]

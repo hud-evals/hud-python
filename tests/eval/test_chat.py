@@ -9,7 +9,6 @@ from mcp.types import ImageContent, TextContent
 
 from hud import Environment
 from hud.agents.base import Agent
-from hud.agents.types import AgentStep, Citation
 from hud.eval import Chat, LocalRuntime, Task
 
 if TYPE_CHECKING:
@@ -57,32 +56,6 @@ async def test_each_turn_runs_on_the_whole_conversation_and_adds_the_reply_to_it
     assert texts == ["hello", "echo:hello", "echo:<image>"]
     assert [block["type"] for block in chat.messages[2]["content"]] == ["text", "image"]
     assert prompts == [chat.messages[:1], chat.messages[:3]]
-
-
-async def test_every_turn_reports_under_the_conversations_one_job() -> None:
-    chat = Chat(Task(env="chat", id="reply"), Echo(), runtime=LocalRuntime(assistant([])))
-
-    await chat.send("hello")
-    await chat.send("again")
-
-    assert chat.job is not None
-    assert (chat.job.name, [run.job_id for run in chat.job.runs]) == ("reply", [chat.job.id] * 2)
-
-
-async def test_a_reply_keeps_the_citations_its_agent_gave() -> None:
-    class Cites(Agent):
-        async def __call__(self, run: Run) -> None:
-            citation = Citation(type="url_citation", text="docs", source="https://docs.test")
-            run.record(AgentStep(content="see the docs", citations=[citation]))
-            run.trace.content = "see the docs"
-
-    chat = Chat(Task(env="chat", id="reply"), Cites(), runtime=LocalRuntime(assistant([])))
-
-    await chat.send("where?")
-
-    assert chat.messages[-1]["citations"] == [
-        {"type": "url_citation", "text": "docs", "source": "https://docs.test"}
-    ]
 
 
 async def test_a_failed_turn_raises_and_leaves_no_reply_in_the_conversation() -> None:

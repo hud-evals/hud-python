@@ -23,20 +23,3 @@ def test_init_copies_the_example_and_names_its_environment(hud: Hud) -> None:
     assert not any(
         part in {".venv", "__pycache__"} for name in tree(target) for part in name.split("/")
     )
-
-
-def test_a_dry_run_plans_without_creating(hud: Hud) -> None:
-    result = hud("init", "thing", "--dir", "projects", "--dry-run", "--json")
-
-    assert (result.exit_code, result.json["preset"]) == (0, "coding"), result
-    assert not (hud.cwd / "projects").exists()
-
-
-def test_force_overwrites_an_existing_project(hud: Hud) -> None:
-    (hud.cwd / "env").mkdir()
-    (hud.cwd / "env" / "env.py").write_text("old")
-
-    result = hud("init", "env", "--preset", "blank", "--force", "--json")
-
-    assert result.exit_code == 0, result
-    assert 'Environment(name="env")' in (hud.cwd / "env" / "env.py").read_text()

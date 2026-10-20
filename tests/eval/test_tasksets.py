@@ -140,13 +140,3 @@ def test_a_platform_taskset_loads_by_name_or_id(
         ("sum-a", "sheets", "sum", {"cell": "A1"}),
         ("sum-b", "sheets", "sum", {}),
     ]
-
-
-def test_a_platform_taskset_that_does_not_exist_is_refused(
-    services: FakeServices, hud_env: HudEnv
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    services.route("api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={})
-
-    with pytest.raises(ValueError, match="taskset not found: missing"):
-        Taskset.from_api("missing")

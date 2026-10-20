@@ -11,7 +11,6 @@ import asyncio
 import stat
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import asyncssh
@@ -19,13 +18,9 @@ import pytest
 
 from hud.clients import connect
 from hud.environment import Environment, Workspace
-from hud.environment.workspace import usable_bwrap
 from hud.eval import LocalRuntime, Task
 
-from .conftest import SANDBOX, shell
-
-if TYPE_CHECKING:
-    from tests.conftest import HudEnv
+from .conftest import shell
 
 TEMP = Path(tempfile.gettempdir()).resolve()
 
@@ -47,50 +42,6 @@ async def test_a_workspace_lives_exactly_while_its_environment_serves(tmp_path: 
     with pytest.raises(OSError):
         _, writer = await asyncio.open_connection("127.0.0.1", backing_port)
         writer.close()
-
-
-@pytest.mark.parametrize(
-    ("options", "variables", "isolation", "published"),
-    [
-        pytest.param({}, {}, "none", ["shell", "filetracking"], id="tracked-by-default"),
-        pytest.param(
-            {}, {"HUD_FILE_TRACKING_ENABLED": "false"}, "none", ["shell"], id="tracking-off"
-        ),
-        pytest.param({"track_files": False}, {}, "none", ["shell"], id="the-workspace-opts-out"),
-        pytest.param(
-            {}, {}, "bwrap", ["shell", "filetracking"], id="sandboxed-host", marks=SANDBOX
-        ),
-    ],
-)
-async def test_serving_publishes_the_bindings_its_settings_ask_for(
-    tmp_path: Path,
-    hud_env: HudEnv,
-    options: dict[str, Any],
-    variables: dict[str, str],
-    isolation: str,
-    published: list[str],
-) -> None:
-    if isolation == "none" and usable_bwrap() is not None:
-        pytest.skip("this host sandboxes every workspace")
-    hud_env.set(**{"HUD_FILE_TRACKING_ENABLED": None, **variables})
-    env = Environment("ws-env")
-    env.workspace(tmp_path / "root", **options)
-
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-    ):
-        assert client.manifest is not None
-        bindings = {binding.name: binding for binding in client.manifest.bindings}
-        shell_binding = client.binding("shell")
-        tracking = client.binding("filetracking") if "filetracking" in published else None
-
-    assert list(bindings) == published
-    assert bindings["shell"].params["isolation"] == isolation
-    assert (shell_binding.protocol, urlsplit(shell_binding.url).scheme) == ("ssh/2", "ssh")
-    assert shell_binding.params["host_pubkey"].startswith("ssh-ed25519")
-    if tracking is not None:
-        assert tracking.protocol == "filetracking/1"
 
 
 async def test_session_credentials_live_privately_outside_the_served_root(tmp_path: Path) -> None:

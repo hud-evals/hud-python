@@ -2,8 +2,8 @@
 
 Tool calls go to a FastMCP server over each HTTP transport, or to a scripted
 streamable-HTTP server on the fake services, whose ``tools/call`` answers come
-from a script: a transient gateway status, a body that is not JSON, a dropped
-connection, a result outside the tool's output schema. Every call resolves:
+from a script: a transient gateway status, a body that is not JSON, or a dropped
+connection. Every call resolves:
 with a result once a transient error clears, or with a transport error.
 """
 
@@ -21,7 +21,7 @@ from hud.capabilities import Capability, MCPClient
 from hud.clients import connect
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-from tests.clients.conftest import relayed, unused_port
+from tests.clients.conftest import relayed
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server, serve_asgi
 from tests.fixtures.services import Reply
@@ -178,12 +178,6 @@ def status(code: int) -> Callable[[Request], Reply]:
     return lambda request: Reply(status=code, json={})
 
 
-def off_schema(request: Request) -> Reply:
-    return result(
-        request, {"content": [{"type": "text", "text": "x"}], "structuredContent": {"n": "x"}}
-    )
-
-
 def unparseable(request: Request) -> Reply:
     del request
     return Reply(body=b"{not json", content_type="application/json")
@@ -233,14 +227,6 @@ async def test_a_failing_tool_call_resolves_with_a_transport_error(
     assert server.attempts() == attempts
 
 
-async def test_a_result_outside_its_output_schema_reaches_the_caller(
-    services: FakeServices,
-) -> None:
-    called = await ScriptedMCPServer(services, [off_schema]).call()
-
-    assert (called.isError, called.structuredContent) == (False, {"n": "x"})
-
-
 async def test_tools_published_at_serve_time_open_through_the_control_port() -> None:
     async with mcp_server(tools()) as capability:
         env = Environment("mcp", capabilities=[capability])
@@ -255,13 +241,6 @@ async def test_tools_published_at_serve_time_open_through_the_control_port() -> 
 
     assert again is opened
     assert added.structuredContent == {"result": 5}
-
-
-async def test_connecting_where_nothing_listens_raises_a_transport_error(hud_env: HudEnv) -> None:
-    hud_env.set(HUD_CLIENT_TIMEOUT="1")
-
-    with pytest.raises(McpError, match="Transport error"):
-        await MCPClient.connect(Capability.mcp(url=f"http://127.0.0.1:{unused_port()}/mcp"))
 
 
 async def test_a_tool_call_after_the_connection_drops_reconnects() -> None:

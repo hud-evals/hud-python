@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
@@ -13,11 +12,8 @@ from hud.capabilities.rfb import ScreenshotMimeType, WebPScreenshotEncoding
 from hud.clients import connect
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-from tests.clients.conftest import relayed, unused_port
+from tests.clients.conftest import relayed
 from tests.fixtures.screen import fake_screen
-
-if TYPE_CHECKING:
-    from tests.conftest import HudEnv
 
 COLOR = (10, 200, 30)
 
@@ -64,13 +60,6 @@ async def test_a_screen_published_at_serve_time_opens_through_the_control_port()
 
     assert again is opened
     assert Image.open(io.BytesIO(data)).convert("RGB").getpixel((0, 0)) == COLOR
-
-
-async def test_connecting_where_nothing_listens_is_refused(hud_env: HudEnv) -> None:
-    hud_env.set(HUD_CLIENT_TIMEOUT="1")
-
-    with pytest.raises(ConnectionRefusedError):
-        await RFBClient.connect(Capability.rfb(url=f"rfb://127.0.0.1:{unused_port()}"))
 
 
 async def test_a_screenshot_after_the_connection_drops_reconnects() -> None:

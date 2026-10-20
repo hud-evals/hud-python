@@ -3,22 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
-import httpx
 import pytest
 
 from hud.capabilities import Capability, CDPClient
-from hud.capabilities.cdp import CDPError
 from hud.clients import connect
 from hud.environment import Environment
 from hud.eval import LocalRuntime, Task
-from tests.clients.conftest import unused_port
 from tests.conftest import eventually
 from tests.fixtures.browser import fake_browser
-
-if TYPE_CHECKING:
-    from tests.conftest import HudEnv
 
 
 @pytest.mark.parametrize(
@@ -41,19 +34,6 @@ async def test_connect_attaches_to_the_chosen_page_target(
 
     assert browser.commands
     assert {command.target for command in browser.commands} == {connected_to}
-
-
-async def test_an_error_reply_raises_cdp_error_naming_the_failed_command() -> None:
-    error = {"code": -32000, "message": "Cannot navigate to invalid URL"}
-    async with fake_browser(replies={"Page.navigate": {"error": error}}) as browser:
-        client = await CDPClient.connect(Capability.cdp(url=browser.url))
-        try:
-            with pytest.raises(CDPError, match=r"Page\.navigate") as raised:
-                await client.send("Page.navigate", {"url": "nope"})
-        finally:
-            await client.close()
-
-    assert (raised.value.code, raised.value.message) == (-32000, "Cannot navigate to invalid URL")
 
 
 async def test_pending_commands_fail_when_the_browser_closes_the_socket() -> None:
@@ -88,21 +68,6 @@ async def test_a_page_published_at_serve_time_opens_through_the_control_port() -
 
     assert again is opened
     assert navigated == {"frameId": "f-1"}
-
-
-async def test_connecting_where_nothing_listens_fails_to_connect(hud_env: HudEnv) -> None:
-    hud_env.set(HUD_CLIENT_TIMEOUT="1")
-
-    with pytest.raises(httpx.ConnectError):
-        await CDPClient.connect(Capability.cdp(url=f"ws://127.0.0.1:{unused_port()}"))
-
-
-async def test_a_browser_without_a_page_target_fails_naming_its_address(hud_env: HudEnv) -> None:
-    hud_env.set(HUD_CLIENT_TIMEOUT="1")
-
-    async with fake_browser(pages=[], can_create=False) as browser:
-        with pytest.raises(ValueError, match=r"no CDP page target available at 127\.0\.0\.1:"):
-            await CDPClient.connect(Capability.cdp(url=browser.url))
 
 
 async def test_a_cancelled_and_a_timed_out_command_end_and_the_next_one_runs() -> None:

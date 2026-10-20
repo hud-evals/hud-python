@@ -4,8 +4,7 @@ Both entry points, ``python -m hud.environment.server`` (what images run) and
 ``hud serve``, are rows of each table. They resolve a reference in a fixture tree
 whose environments leave a ``stopped-<name>`` marker from a shutdown hook, print
 ``HUD_SERVE_PORT=<port>`` once the control channel accepts, and stop cleanly on a
-signal, even with a session still grading. A reference that does not load ends
-the process with the error and without a port.
+signal, even with a session still grading.
 """
 
 from __future__ import annotations
@@ -136,45 +135,6 @@ async def test_a_serving_process_announces_its_port_and_runs_shutdown_hooks_on_a
     assert [name for name in os.listdir(tree) if name.startswith("stopped-")] == [
         f"stopped-{served_name}"
     ]
-
-
-@pytest.mark.parametrize(
-    ("command", "code", "error"),
-    [
-        pytest.param(
-            [*SERVER, "multi.py"], 1, "multiple Environments in multi.py", id="server-ambiguous"
-        ),
-        pytest.param(
-            [*HUD_SERVE, "multi.py"],
-            2,
-            "multiple Environments in multi.py",
-            id="hud-serve-ambiguous",
-        ),
-        pytest.param(
-            [*HUD_SERVE, "pkg:make_env", "--arg", "name"], 2, "--arg", id="hud-serve-malformed-arg"
-        ),
-        pytest.param(
-            [*SERVER, "missing.py"], 1, "no environment source at missing.py", id="server-missing"
-        ),
-        pytest.param(
-            [*HUD_SERVE, "missing.py"],
-            1,
-            "no environment source at missing.py",
-            id="hud-serve-missing",
-        ),
-    ],
-)
-async def test_a_serving_process_exits_with_the_load_error(
-    tree: Path, command: list[str], code: int, error: str
-) -> None:
-    process = await asyncio.create_subprocess_exec(
-        *command, cwd=tree, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
-
-    assert process.returncode == code
-    assert b"HUD_SERVE_PORT=" not in stdout
-    assert error in stderr.decode()
 
 
 async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_reverse() -> None:

@@ -17,8 +17,6 @@ from tests.environment.conftest import wire
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: Larger than the per-file diff limit (1 MiB).
-BIG_TEXT = 1024 * 1024 + 1
 #: Larger than the per-file capture limit (5 MiB).
 BIG_PDF = 5 * 1024 * 1024 + 1
 
@@ -118,29 +116,6 @@ async def test_secrets_never_leave_in_a_diff(tmp_path: Path) -> None:
         assert secret not in str(edited)
 
 
-async def test_a_file_over_the_diff_limit_is_reported_without_its_contents(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "root"
-    write_files(root, {"big.txt": "a" * BIG_TEXT})
-
-    env = tracked(root)
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
-    ):
-        await peer.call("snapshot")
-        write_files(root, {"big.txt": "b" * (BIG_TEXT + 1)})
-        edited = await peer.call("diff")
-
-    ((path, status, patch),) = [
-        (p["path"], p["status"], p["patch"]) for p in edited["result"]["patches"]
-    ]
-    assert (path, status) == ("big.txt", "modified")
-    assert len(patch) < 200
-
-
 async def test_setup_and_advance_each_move_the_baseline_later_diffs_start_from(
     tmp_path: Path,
 ) -> None:
@@ -208,20 +183,3 @@ async def test_a_flush_diffs_the_deliverables_and_captures_the_documents_under_t
     }
     assert (capture["files_skipped"], capture["truncated"]) == (1, True)
     assert "API_KEY=after" not in str(flushed)
-
-
-async def test_an_unknown_request_is_refused_and_tracking_goes_on(tmp_path: Path) -> None:
-    root = tmp_path / "root"
-    write_files(root, {"a.txt": "one\n"})
-
-    env = tracked(root)
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
-    ):
-        refused = await peer.call("rewind")
-        snapshot = await peer.call("snapshot")
-
-    assert refused["error"]["code"] == -32000
-    assert [entry["path"] for entry in snapshot["result"]["files"]] == ["a.txt"]

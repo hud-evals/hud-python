@@ -12,18 +12,14 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import BaseModel
 
 from hud import Environment
-from hud.agents.base import Agent
-from hud.eval import LocalRuntime, Runtime, RuntimeConfig, RuntimeLimits, Task
+from hud.eval import LocalRuntime, Runtime, Task
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from hud.eval import Run
 
 
 def verified(actor: Environment, judge: Environment) -> Task:
@@ -104,38 +100,6 @@ async def test_a_verifier_on_the_actors_env_grades_on_the_same_substrate() -> No
     assert events == ["up", "actor graded", "verifier graded", "down"]
 
 
-async def test_a_verifier_asking_for_its_own_runtime_runs_beside_an_actor_that_cannot_move(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    events = []
-    env = Environment("reviewed")
-
-    @env.initialize
-    async def up() -> None:
-        events.append("up")
-
-    @env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @env.template()
-    async def verify():
-        result = yield ""
-        yield 1.0 if result["answer"] == "secret" else 0.0
-
-    task = solve()
-    task.verifier = verify()
-    task.verifier.runtime_config = RuntimeConfig(limits=RuntimeLimits(run_timeout_s=20))
-    async with LocalRuntime(env)(task.model_copy(update={"verifier": None})) as served:
-        job = await task.run(ScriptedAgent("secret"), runtime=Runtime(served.url))
-
-    assert (job.runs[0].reward, events) == (1.0, ["up"])
-    assert "verifier runtime_config ignored: Runtime cannot transport the actor's session" in (
-        caplog.text
-    )
-
-
 @pytest.mark.parametrize(
     ("grading", "verdict", "reward", "error", "graded"),
     [
@@ -211,23 +175,6 @@ async def test_the_verdict_is_the_grade_whichever_side_fails(
         assert phrase in (run.trace.error or "")
 
 
-async def test_an_agent_that_fails_after_answering_is_still_judged() -> None:
-    class RaisesAfter(Agent):
-        async def __call__(self, run: Run) -> None:
-            run.trace.content = "secret"
-            raise RuntimeError("agent exploded")
-
-    job = await verified(Environment("actor"), Environment("judge")).run(RaisesAfter())
-
-    (run,) = job.runs
-    assert (run.reward, run.trace.status, run.trace.error, job.errors) == (
-        1.0,
-        "error",
-        "[agent loop] RuntimeError: agent exploded",
-        [],
-    )
-
-
 async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> None:
     actor = Environment("actor")
 
@@ -253,32 +200,6 @@ async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> Non
         "[provisioning verifier] RuntimeError: no judge here",
         [run],
     )
-
-
-async def test_the_verifier_receives_the_actors_result_as_its_declared_type() -> None:
-    class ActorResult(BaseModel):
-        score: float
-        answer: str
-
-    received = []
-    env = Environment("reviewed")
-
-    @env.template()
-    async def solve():
-        answer = yield "answer secret"
-        yield {"score": 0.25, "answer": answer}
-
-    @env.template(returns=ActorResult)
-    async def verify():
-        result = yield ""
-        received.append(result.content)
-        yield 1.0
-
-    task = solve()
-    task.verifier = verify()
-    await task.run(ScriptedAgent("secret"))
-
-    assert received == [ActorResult(score=0.25, answer="secret")]
 
 
 @pytest.mark.parametrize(

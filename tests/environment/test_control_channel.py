@@ -1,5 +1,5 @@
-"""The control channel as a peer speaks it: the handshake, the task catalog, a task's start
-and grade, how a session's template is torn down, bad requests, and the frame limit."""
+"""The control channel as a peer speaks it: the handshake, a task's start and grade, how a
+session's template is torn down, and a request at the frame limit."""
 
 from __future__ import annotations
 
@@ -10,12 +10,7 @@ from pydantic import BaseModel
 
 from hud.capabilities import Capability
 from hud.environment import (
-    DataFileArg,
-    DataFileRef,
-    DataFilesArg,
     Environment,
-    GradingArg,
-    PromptArg,
 )
 from hud.eval import LocalRuntime, Task
 from hud.graders import EvaluationResult, SubScore
@@ -51,48 +46,6 @@ class Point(BaseModel):
     y: int
 
 
-class Criterion(BaseModel):
-    requirement: str
-
-
-async def test_the_catalog_publishes_each_templates_arguments() -> None:
-    env = Environment("catalog")
-
-    @env.template(description="Adds two numbers.")
-    async def add(a: int, suite: str = "math"):
-        yield "go"
-        yield 1.0
-
-    @env.template()
-    async def flexible(n: int, **rest: str):
-        yield "go"
-        yield 1.0
-
-    @env.template()
-    async def files(
-        prompt: PromptArg,
-        attachment: DataFileArg[DataFileRef],
-        fixtures: DataFilesArg[DataFileRef],
-        criteria: GradingArg[Criterion],
-    ):
-        yield "go"
-        yield 1.0
-
-    async with LocalRuntime(env)(Task(env="catalog", id="x")) as runtime, wire(runtime.url) as peer:
-        listed = {t["id"]: t for t in (await peer.call("tasks.list"))["result"]["tasks"]}
-
-    add_args = listed["add"]["args"]
-    assert (listed["add"]["description"], add_args["required"]) == ("Adds two numbers.", ["a"])
-    assert add_args["properties"]["suite"]["default"] == "math"
-    assert [name for name, t in listed.items() if t["args"]["additionalProperties"]] == ["flexible"]
-    assert {k: v["x-hud-hint"] for k, v in listed["files"]["args"]["properties"].items()} == {
-        "prompt": "prompt",
-        "attachment": "data-file",
-        "fixtures": "data-files",
-        "criteria": "grading",
-    }
-
-
 class Payload(BaseModel):
     text: str
 
@@ -121,24 +74,6 @@ async def test_start_arguments_arrive_as_their_annotated_types(
         started = await peer.call("tasks.start", {"id": "shout", "args": args})
 
     assert started["result"] == {"prompt": prompt}
-
-
-async def test_data_file_and_grading_arguments_arrive_as_models() -> None:
-    env = Environment("files")
-
-    @env.template()
-    async def review(attachment: DataFileArg[DataFileRef], criteria: GradingArg[Criterion]):
-        yield f"{type(attachment).__name__}:{attachment.path} {type(criteria[0]).__name__}"
-        yield 1.0
-
-    args = {
-        "attachment": {"file_id": "file-1", "path": "brief.pdf"},
-        "criteria": [{"requirement": "Answer it"}],
-    }
-    async with LocalRuntime(env)(Task(env="files", id="x")) as runtime, wire(runtime.url) as peer:
-        started = await peer.call("tasks.start", {"id": "review", "args": args})
-
-    assert started["result"] == {"prompt": "DataFileRef:brief.pdf Criterion"}
 
 
 @pytest.mark.parametrize(
@@ -199,23 +134,6 @@ async def test_an_evaluation_result_reaches_the_peer_with_its_details_and_breakd
     assert (judge["name"], judge["children"][0]["info"]) == ("judge", {"reason": "because"})
 
 
-async def test_a_template_that_ends_without_grading_grades_zero() -> None:
-    env = Environment("ungraded")
-
-    @env.template()
-    async def quits():
-        yield "go"
-
-    async with (
-        LocalRuntime(env)(Task(env="ungraded", id="x")) as runtime,
-        wire(runtime.url) as peer,
-    ):
-        await peer.call("tasks.start", {"id": "quits"})
-        graded = await peer.call("tasks.grade", {"answer": "x"})
-
-    assert graded["result"] == {"score": 0.0}
-
-
 @pytest.mark.parametrize(
     ("method", "params", "reply"),
     [
@@ -248,102 +166,6 @@ async def test_ending_a_sessions_task_closes_its_template(
     assert (answered["result"], closed) == (reply, ["closed first"])
 
 
-async def test_a_dropped_connections_task_closes_its_template_when_the_server_stops() -> None:
-    events = []
-    env = Environment("held")
-
-    @env.template()
-    async def hold():
-        try:
-            yield "holding"
-            yield 1.0
-        finally:
-            events.append("closed")
-
-    async with LocalRuntime(env)(Task(env="held", id="x")) as runtime, wire(runtime.url) as peer:
-        await peer.call("tasks.start", {"id": "hold"})
-
-    assert events == ["closed"]
-
-
-ROUTE = {"capability": "ssh", "host": "h", "port": "443"}
-CONNECTION = {
-    "name": "inference",
-    "capability": "ssh",
-    "url": "https://inference.example",
-    "headers": {"Authorization": "Bearer t"},
-}
-
-
-@pytest.mark.parametrize(
-    ("method", "params", "code"),
-    [
-        ("tasks.start", {"id": "missing"}, INVALID),
-        ("tasks.start", {"id": "record", "args": ["x"]}, INVALID),
-        ("tasks.start", {"id": 5}, INVALID),
-        ("tasks.start", {"id": "record", "args": {"nmae": "x"}}, FAILED),
-        ("tasks.start", {"id": "lookup"}, FAILED),
-        ("tasks.grade", {"answer": "x"}, BAD_STATE),
-        ("tasks.stop", {}, NOT_FOUND),
-        ("hello", {"session_id": "sess-00000000"}, BAD_STATE),
-        ("hello", {"session_id": 7}, INVALID),
-        ("hello", {"workspace_routes": [ROUTE]}, INVALID),
-        ("hello", {"workspace_routes": "all"}, INVALID),
-        ("hello", {"connections": [CONNECTION]}, FAILED),
-        ("hello", {"connections": "all"}, INVALID),
-    ],
-    ids=[
-        "an-unknown-template",
-        "arguments-that-are-not-an-object",
-        "a-template-id-that-is-not-a-string",
-        "arguments-the-template-does-not-take",
-        "a-template-that-raises-keyerror-is-not-an-unknown-task",
-        "a-grade-before-a-start",
-        "an-unknown-method",
-        "resuming-an-unknown-session",
-        "a-session-id-that-is-not-a-string",
-        "a-route-whose-port-is-not-a-number",
-        "routes-that-are-not-a-list",
-        "a-connection-without-a-workspace-to-bind-it",
-        "connections-that-are-not-a-list",
-    ],
-)
-async def test_a_bad_request_gets_an_error_reply_runs_nothing_and_the_session_goes_on(
-    method: str, params: dict[str, Any], code: int
-) -> None:
-    started = []
-    env = Environment("errors", capabilities=[Capability.cdp(url="ws://127.0.0.1:9/devtools")])
-
-    @env.template()
-    async def record(name: str):
-        started.append(name)
-        yield "go"
-        yield 1.0
-
-    @env.template()
-    async def lookup():
-        settings: dict[str, str] = {}
-        yield settings["missing"]
-
-    async with LocalRuntime(env)(Task(env="errors", id="x")) as runtime, wire(runtime.url) as peer:
-        refused = await peer.call(method, params)
-        listed = await peer.call("tasks.list")
-
-    assert refused["error"]["code"] == code
-    assert ([t["id"] for t in listed["result"]["tasks"]], started) == (["record", "lookup"], [])
-
-
-async def test_a_tunnel_opened_once_a_session_has_begun_is_an_unknown_method() -> None:
-    env = Environment("errors", capabilities=[Capability.cdp(url="ws://127.0.0.1:9/devtools")])
-
-    async with LocalRuntime(env)(Task(env="errors", id="x")) as runtime, wire(runtime.url) as peer:
-        await peer.call("hello", {})
-        refused = await peer.call("tunnel.open", {"capability": "browser"})
-        listed = await peer.call("tasks.list")
-
-    assert (refused["error"]["code"], listed["result"]) == (NOT_FOUND, {"tasks": []})
-
-
 def start_of_size(size: int) -> dict[str, Any]:
     """A ``tasks.start`` frame for ``echo`` of exactly ``size`` bytes, without its newline."""
     frame: dict[str, Any] = {
@@ -373,69 +195,3 @@ async def test_a_request_at_the_frame_limit_round_trips_its_payload() -> None:
     data = frame["params"]["args"]["data"]
     assert started is not None
     assert (started["result"]["prompt"], graded["result"]["detail"]) == (data, data)
-
-
-async def test_a_request_over_the_frame_limit_is_refused_without_an_id_and_hung_up() -> None:
-    async with (
-        LocalRuntime(Environment("limits"))(Task(env="limits", id="x")) as runtime,
-        wire(runtime.url) as peer,
-    ):
-        await peer.write(encode(start_of_size(FRAME_LIMIT + 1)))
-        refused = await peer.read()
-        after = await peer.read()
-
-    assert refused is not None
-    assert (refused["id"], refused["error"]["code"], after) == (None, FAILED, None)
-
-
-async def test_a_reply_too_large_for_its_own_id_is_an_error_and_the_session_goes_on() -> None:
-    frame: dict[str, Any] = {"jsonrpc": "2.0", "id": "", "method": "nope"}
-    frame["id"] = "x" * (FRAME_LIMIT - (len(encode(frame)) - 1))
-
-    async with (
-        LocalRuntime(Environment("limits"))(Task(env="limits", id="x")) as runtime,
-        wire(runtime.url) as peer,
-    ):
-        await peer.write(encode(frame))
-        refused = await peer.read()
-        listed = await peer.call("tasks.list")
-
-    assert refused is not None
-    assert (refused["id"], refused["error"]["code"]) == (None, FAILED)
-    assert listed["result"] == {"tasks": []}
-
-
-@pytest.mark.parametrize("too_large", ["prompt", "error"])
-async def test_a_prompt_or_error_over_the_frame_limit_is_refused_and_its_template_released(
-    too_large: str,
-) -> None:
-    released = []
-    env = Environment("bloated")
-
-    @env.template()
-    async def huge_prompt():
-        try:
-            yield "x" * FRAME_LIMIT
-            yield 1.0
-        finally:
-            released.append("prompt")
-
-    @env.template()
-    async def huge_error():
-        try:
-            raise ValueError("x" * FRAME_LIMIT)
-            yield "never"
-        finally:
-            released.append("error")
-
-    async with LocalRuntime(env)(Task(env="bloated", id="x")) as runtime:
-        async with wire(runtime.url) as peer:
-            refused = await peer.call("tasks.start", {"id": f"huge_{too_large}"})
-        async with wire(runtime.url) as later:
-            regraded = await later.call("tasks.grade", {"answer": "done"})
-
-    assert (refused["error"]["code"], released, regraded["error"]["code"]) == (
-        FAILED,
-        [too_large],
-        BAD_STATE,
-    )

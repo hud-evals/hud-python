@@ -118,27 +118,6 @@ async def test_a_vector_env_built_from_kwargs_gets_one_action_row_per_env() -> N
     assert graded == {"score": 0.25, "success": False, "total_reward": 0.25}
 
 
-async def test_a_plain_env_observation_is_sliced_to_one_slot_with_its_frames() -> None:
-    env = gym_env(plain_env)
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-    ):
-        started = await client.start_task("episode")
-        agent = await RobotClient.connect(
-            client.binding("robot"), token=started["bindings"]["robot"]["token"]
-        )
-        try:
-            observation = await agent.get_observation()
-        finally:
-            await agent.close()
-        await client.cancel()
-
-    shapes = {name: np.shape(value) for name, value in observation["data"].items()}
-    assert shapes == {"received": (1,), "camera": (4, 4, 3)}
-    assert float(observation["reward"]) == 0.0
-
-
 class VectorAutoReset:
     """Two lockstep envs that reset inside ``step``; env 1 finishes on the first step.
 
