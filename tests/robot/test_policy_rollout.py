@@ -18,11 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncGenerator  # noqa: TC003 - env.template resolves at runtime
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pytest
 
 from hud.agents.robot import Adapter, Model, RobotAgent
 from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
@@ -30,10 +28,7 @@ from hud.eval import LocalRuntime, Shared, Task, Taskset, rollout
 from .sims import EPISODE_TICKS, StubSim, sim_env, stub_episode
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
     from pathlib import Path
-
-    from hud.eval import Provider
 
 
 class EchoAdapter(Adapter):
@@ -154,74 +149,55 @@ async def episode(task_suite: str = "libero_spatial", task_id: int = 0, seed: in
 '''
 
 
-@asynccontextmanager
-async def custom_bridge(tmp_path: Path) -> AsyncIterator[tuple[Provider, Task]]:
+async def test_a_single_env_custom_bridge_is_driven_until_the_sim_ends_the_episode() -> None:
+    adapter = EchoAdapter()
+
     async with stub_episode(StubSim(), "stub-sim") as runtime:
-        yield runtime, Task(env="stub-sim", id="episode", args={"goal": "lift"})
+        task = Task(env="stub-sim", id="episode", args={"goal": "lift"})
+        run = await rollout(task, EchoAgent(adapter), runtime=runtime)
+
+    assert run.reward == EPISODE_TICKS  # every tick's echoed action reached the sim
+    assert run.prompt == "stub task: lift"  # the sim's prompt, built from the task arg
+    assert adapter.image_keys == ["observation/image"]
+    assert {batch["task"] for batch in adapter.wired} == {"stub task: lift"}
+    # A camera arrives HWC uint8, the state as named: slot 1, before any step.
+    assert adapter.wired[0]["image"].ndim == 3
+    assert adapter.wired[0]["image"].dtype == np.uint8
+    assert adapter.wired[0]["state"].tolist() == [1.0, 0.0]
 
 
-@asynccontextmanager
-async def template_files(tmp_path: Path) -> AsyncIterator[tuple[Provider, Task]]:
+async def test_the_agents_stop_hook_ends_the_rollout_before_the_env_does() -> None:
+    adapter = EchoAdapter()
+
+    async with stub_episode(StubSim(), "stub-sim") as runtime:
+        task = Task(env="stub-sim", id="episode", args={"goal": "lift"})
+        run = await rollout(task, EarlyStopAgent(adapter), runtime=runtime)
+
+    assert run.reward == 1  # one action reached the sim
+    assert len(adapter.wired) == 1
+
+
+async def test_a_gym_env_behind_a_prewritten_contract_is_wired_from_the_contract(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "template_sim.py").write_text(TEMPLATE_SIM, encoding="utf-8")
     (tmp_path / "contract.json").write_text(json.dumps(TEMPLATE_CONTRACT), encoding="utf-8")
     (tmp_path / "env.py").write_text(TEMPLATE_ENV, encoding="utf-8")
-    yield LocalRuntime(tmp_path / "env.py"), Task(env="libero", id="episode", args={"task_id": 0})
-
-
-@pytest.mark.parametrize(
-    ("placement", "agent", "reward", "prompt", "cameras", "state"),
-    [
-        pytest.param(
-            custom_bridge,
-            lambda adapter: EchoAgent(adapter),
-            EPISODE_TICKS,  # every tick's echoed action reached the sim, which ended it
-            "stub task: lift",  # the sim's prompt, built from the task arg
-            ["observation/image"],
-            [1.0, 0.0],  # slot 1, before any step
-            id="single-env-custom-bridge",
-        ),
-        pytest.param(
-            custom_bridge,
-            lambda adapter: EarlyStopAgent(adapter),
-            1,  # the agent's stop hook ended the rollout after one action
-            "stub task: lift",
-            ["observation/image"],
-            [1.0, 0.0],
-            id="the-agent-stop-hook-ends-it-before-the-env",
-        ),
-        pytest.param(
-            template_files,
-            lambda adapter: EchoAgent(adapter, action_dim=7),
-            1.0,  # the sim's own success outranks accumulated reward
-            "pick up the black bowl",  # the sim's instruction, not the task args
-            ["observation/image", "observation/wrist_image"],  # file order, state after them
-            [0.0] * 8,
-            id="gym-behind-a-prewritten-contract",
-        ),
-    ],
-)
-async def test_a_policy_rollout_is_wired_from_the_contract_and_graded_by_the_sim(
-    tmp_path: Path,
-    placement: Callable[[Path], Any],
-    agent: Callable[[EchoAdapter], EchoAgent],
-    reward: float,
-    prompt: str,
-    cameras: list[str],
-    state: list[float],
-) -> None:
     adapter = EchoAdapter()
 
-    async with placement(tmp_path) as (runtime, task):
-        run = await rollout(task, agent(adapter), runtime=runtime)
+    run = await rollout(
+        Task(env="libero", id="episode", args={"task_id": 0}),
+        EchoAgent(adapter, action_dim=7),
+        runtime=LocalRuntime(tmp_path / "env.py"),
+    )
 
-    assert run.reward == reward
-    assert run.prompt == prompt
-    assert adapter.image_keys == cameras
-    assert [batch["task"] for batch in adapter.wired] == [prompt] * len(adapter.wired)
-    # A camera arrives HWC uint8, the state as named.
-    assert adapter.wired[0]["image"].ndim == 3
+    assert run.reward == 1.0  # the sim's own success outranks accumulated reward
+    assert run.prompt == "pick up the black bowl"  # the sim's instruction, not the task args
+    # The contract's camera order, with the state after them.
+    assert adapter.image_keys == ["observation/image", "observation/wrist_image"]
+    assert {batch["task"] for batch in adapter.wired} == {"pick up the black bowl"}
     assert adapter.wired[0]["image"].dtype == np.uint8
-    assert adapter.wired[0]["state"].tolist() == state
+    assert adapter.wired[0]["state"].tolist() == [0.0] * 8
 
 
 async def test_the_slot_token_pins_each_rollout_to_its_own_slot() -> None:

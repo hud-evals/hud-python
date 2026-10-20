@@ -25,7 +25,7 @@ from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator
     from contextlib import AbstractAsyncContextManager
 
     from numpy.typing import NDArray
@@ -139,52 +139,68 @@ GRADE = {"score": 0.42, "success": True, "total_reward": 3.0, "detail": "custom"
 
 
 @pytest.mark.parametrize(
-    ("sim", "ending", "results_while_served", "results_after_stop", "restarts"),
-    [
-        pytest.param(Sim, "cancel", 2, 2, True, id="cancel-frees-the-slot"),
-        pytest.param(Sim, "grade", 2, 2, True, id="grade-frees-the-slot-with-the-sims-grade"),
-        pytest.param(Sim, "drop", 2, 2, True, id="a-dropped-session-frees-it-when-graded"),
-        pytest.param(
-            lambda: Sim(failures=1), "cancel", 3, 3, True, id="cancel-retries-a-failed-release"
-        ),
-        pytest.param(
-            lambda: Sim(failures=3),
-            "cancel",
-            3,
-            4,
-            False,
-            id="stopping-frees-what-cancel-could-not",
-        ),
-    ],
+    ("failures", "results"),
+    [(0, 2), (1, 3)],
+    ids=["first-release", "a-failed-release-is-retried"],
 )
-async def test_ending_a_session_frees_its_slot_exactly_once(
-    sim: Callable[[], Sim],
-    ending: str,
-    results_while_served: int,
-    results_after_stop: int,
-    restarts: bool,
-) -> None:
-    bridge = sim()
+async def test_cancel_frees_the_slot_for_the_next_session(failures: int, results: int) -> None:
+    sim = Sim(failures=failures)
 
-    async with serving(bridge) as (port, peer, _):
-        async with episodes(port) as runtime:
-            async with connect(runtime) as first:
-                assert await first.start_task("episode") == {"prompt": PROMPT}
-                if ending == "cancel":
-                    await first.cancel()
-                elif ending == "grade":
-                    assert await first.grade({"answer": "x"}) == GRADE
-            async with connect(runtime) as second:
-                if ending == "drop":
-                    assert await second.grade({"answer": "x"}) == GRADE
-                if restarts:
-                    started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
-                    assert started == {"prompt": PROMPT}
-                    assert await second.grade({"answer": "x"}) == GRADE
-            while_served = bridge.results
+    async with serving(sim) as (port, _, _), episodes(port) as runtime:
+        async with connect(runtime) as first:
+            await first.start_task("episode")
+            await first.cancel()
+        async with connect(runtime) as second:
+            started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
+            assert await second.grade({"answer": "x"}) == GRADE
+
+    assert started == {"prompt": PROMPT}
+    assert sim.results == results
+
+
+async def test_a_grade_frees_the_slot_with_the_sims_grade() -> None:
+    sim = Sim()
+
+    async with serving(sim) as (port, _, _), episodes(port) as runtime:
+        async with connect(runtime) as first:
+            await first.start_task("episode")
+            graded = await first.grade({"answer": "x"})
+        async with connect(runtime) as second:
+            started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
+            await second.grade({"answer": "x"})
+
+    assert graded == GRADE
+    assert started == {"prompt": PROMPT}
+    assert sim.results == 2
+
+
+async def test_a_dropped_session_frees_its_slot_when_graded() -> None:
+    sim = Sim()
+
+    async with serving(sim) as (port, _, _), episodes(port) as runtime:
+        async with connect(runtime) as first:
+            await first.start_task("episode")
+        async with connect(runtime) as second:
+            graded = await second.grade({"answer": "x"})
+            started = await asyncio.wait_for(second.start_task("episode"), timeout=10)
+            await second.grade({"answer": "x"})
+
+    assert graded == GRADE
+    assert started == {"prompt": PROMPT}
+    assert sim.results == 2
+
+
+async def test_stopping_the_endpoint_frees_what_cancel_could_not() -> None:
+    sim = Sim(failures=3)
+
+    async with serving(sim) as (port, peer, _):
+        async with episodes(port) as runtime, connect(runtime) as session:
+            await session.start_task("episode")
+            await session.cancel()
+            while_served = sim.results
         reclaimed = await asyncio.wait_for(peer.reset(task="pick"), timeout=10)
 
-    assert (while_served, bridge.results) == (results_while_served, results_after_stop)
+    assert (while_served, sim.results) == (3, 4)
     assert reclaimed["prompt"] == PROMPT
 
 

@@ -156,13 +156,13 @@ def displace(arm: Arm, target: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def lag(share: float) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.float64]]:
-    """Closes *share* of the gap to the command each tick; 0 never moves."""
+    """Closes *share* of the gap to the command each tick."""
     return lambda arm, target: arm.state + share * (target - arm.state)
 
 
-def jitter(arm: Arm, target: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Never moves; its sensor reads a little high then low on alternate ticks."""
-    return arm.home + 2e-5 * (-1) ** len(arm.actions)
+def still(noise: float) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.float64]]:
+    """Never moves; its sensor reads *noise* high then low on alternate ticks."""
+    return lambda arm, target: arm.home + noise * (-1) ** len(arm.actions)
 
 
 def offset(by: list[float]) -> Callable[[Arm, NDArray[np.float64]], NDArray[np.float64]]:

@@ -82,23 +82,10 @@ def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:
     return env
 
 
-@pytest.mark.parametrize(
-    ("factory", "defaults", "action", "received", "reward"),
-    [
-        pytest.param(plain_env, {}, [0.1, 0.2, 0.3, 0.4], [2.0, 2.0], 0.5, id="box-2x2-action"),
-        pytest.param(
-            vector_env, {"num_envs": 2}, [0.1, 0.2], [2.0, 2.0], 0.25, id="kwargs-vector-env"
-        ),
-    ],
-)
-async def test_a_flat_action_reaches_the_gym_env_in_its_own_shape(
-    factory: Callable[..., Any],
-    defaults: dict[str, Any],
-    action: list[float],
-    received: list[float],
-    reward: float,
-) -> None:
-    async with served(gym_env(factory, **defaults)) as client:
+async def step_once(env: Environment, action: list[float]) -> tuple[dict[str, Any], Any]:
+    """Start ``episode`` on *env*, play *action* once, and grade: the stepped observation
+    and the grade."""
+    async with served(env) as client:
         started = await client.start_task("episode")
         agent = await RobotClient.connect(
             client.binding("robot"), token=started["bindings"]["robot"]["token"]
@@ -109,12 +96,24 @@ async def test_a_flat_action_reaches_the_gym_env_in_its_own_shape(
             stepped = await agent.get_observation()
         finally:
             await agent.close()
-        graded = await client.grade({"answer": "done"})
+        return stepped, await client.grade({"answer": "done"})
 
-    assert stepped["data"]["received"].tolist() == received
-    assert float(stepped["reward"]) == reward
+
+async def test_a_flat_action_reaches_a_box_action_space_in_its_own_shape() -> None:
+    stepped, graded = await step_once(gym_env(plain_env), [0.1, 0.2, 0.3, 0.4])
+
+    assert stepped["data"]["received"].tolist() == [2.0, 2.0]
+    assert float(stepped["reward"]) == 0.5
     assert stepped["terminated"] is False
-    assert graded == {"score": reward, "success": False, "total_reward": reward}
+    assert graded == {"score": 0.5, "success": False, "total_reward": 0.5}
+
+
+async def test_a_vector_env_built_from_kwargs_gets_one_action_row_per_env() -> None:
+    stepped, graded = await step_once(gym_env(vector_env, num_envs=2), [0.1, 0.2])
+
+    assert stepped["data"]["received"].tolist() == [2.0, 2.0]
+    assert float(stepped["reward"]) == 0.25
+    assert graded == {"score": 0.25, "success": False, "total_reward": 0.25}
 
 
 async def test_a_plain_env_observation_is_sliced_to_one_slot_with_its_frames() -> None:
