@@ -16,19 +16,25 @@ from packaging.version import Version
 
 from hud.cli import CliError
 from hud.utils.hud_console import HUDConsole
-from hud.utils.naming import normalize_environment_name
+from hud.utils.naming import rename_environment_in_source
 from hud.version import __version__
 
 #: ``environments/<id>`` in the SDK repository, with the picker's description.
 EXAMPLES: dict[str, str] = {
-    "coding": "Coding — A repository workspace with a SWE-bench task and hidden-test grading.",
+    "coding": "Coding — A repository workspace with bugfix tasks and hidden-test grading.",
     "cua": "Computer Use — A virtual Linux desktop with deterministic and model-judged grading.",
-    "argument-hints": (
-        "Argument Hints — A prompt, data-file attachments, and rubric grading via console "
-        "form hints."
-    ),
+    "file-analysis": "File Analysis — A workspace for files, operational data, and rubric grading.",
+    "browser-use": "Browser Use — Visual web research with Chromium and screenshot evidence.",
+    "liveweb": "Live Web — Research current websites through a browser and cite sources.",
+    "libbet": "Libbet — Explore a Game Boy puzzle game through visual controls.",
+    "rocket-animation": "Rocket Animation — Build and preview a self-contained animated webpage.",
+    "robot-gripper": "Robot Gripper — Control a tabletop gripper through simulation tools.",
     "blank": "Blank — A minimal letter-counting task for building an environment from scratch.",
 }
+
+
+# Keep the shipped option working without a duplicate template or picker entry.
+EXAMPLE_ALIASES = {"argument-hints": "file-analysis"}
 
 
 def init_command(
@@ -80,7 +86,8 @@ def init_command(
                 message="Nothing to create. Pass a name (hud init my-env) or --template, or "
                 "run in an interactive terminal to choose an example environment.",
             )
-    if preset not in EXAMPLES:
+    example = EXAMPLE_ALIASES.get(preset, preset)
+    if example not in EXAMPLES:
         raise CliError(
             error="usage",
             message=f"Unknown example environment {preset!r}. Available: {', '.join(EXAMPLES)}",
@@ -96,12 +103,12 @@ def init_command(
         return {"dry_run": True, "action": "init", "path": str(target), "preset": preset}
 
     hud_console.header(f"HUD Init: {target.name}")
-    hud_console.info(f"Preparing the {preset} example from the HUD SDK …")
+    hud_console.info(f"Preparing the {example} example from the HUD SDK …")
     created = not target.exists()
     try:
         if target.is_symlink():
             raise ValueError(f"cannot copy an example environment over symlink {target}")
-        local_source = Path(__file__).resolve().parents[2] / "environments" / preset
+        local_source = Path(__file__).resolve().parents[2] / "environments" / example
         if local_source.is_dir():
             # A source checkout: copy the example straight from the repository.
             if any(path.is_symlink() for path in target.rglob("*")):
@@ -134,7 +141,7 @@ def init_command(
             response.raise_for_status()
             target.mkdir(parents=True, exist_ok=True)
             target_root = target.resolve()
-            source_parts = ("environments", preset)
+            source_parts = ("environments", example)
             with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
                 for member in archive.getmembers():
                     parts = PurePosixPath(member.name).parts[1:]
@@ -155,18 +162,7 @@ def init_command(
                         if member.mode & 0o111:
                             destination.chmod(destination.stat().st_mode | (member.mode & 0o111))
 
-        source_name = normalize_environment_name(preset)
-        target_name = normalize_environment_name(target.name)
-        if source_name != target_name:
-            env_path = target / "env.py"
-            contents = env_path.read_text(encoding="utf-8")
-            declaration = f'Environment(name="{source_name}")'
-            if contents.count(declaration) != 1:
-                raise ValueError(f"expected one {declaration} declaration in {env_path}")
-            env_path.write_text(
-                contents.replace(declaration, f'Environment(name="{target_name}")'),
-                encoding="utf-8",
-            )
+        rename_environment_in_source(target, example, target.name)
     except (httpx.HTTPError, tarfile.TarError, ValueError, OSError) as exc:
         # Don't leave a half-written tree behind — it would trip the
         # non-empty-directory guard on the next run. Only remove a directory
@@ -177,7 +173,7 @@ def init_command(
             error="failure",
             message=f"Failed to prepare example environment {preset!r}: {exc}",
         ) from exc
-    hud_console.status_item(f"environments/{preset}", "✓")
+    hud_console.status_item(f"environments/{example}", "✓")
 
     hud_console.section_title("Next Steps")
     hud_console.info("")

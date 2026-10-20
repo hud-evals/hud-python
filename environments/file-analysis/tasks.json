@@ -1,0 +1,116 @@
+[
+  {
+    "env": "file-analysis",
+    "id": "reconcile_supplier_payments",
+    "args": {
+      "prompt": "You are reviewing the September supplier-payment batch for Atelier Demo Ltd as of 2026-10-06. All attached records, suppliers, identifiers, and amounts are fictional demo data; all amounts are EUR.\n\nReconcile each of the four invoices against settled bank payments, signed vendor terms, and the receiving log. Determine which invoices reconcile and which need investigation. Do not assume that two payments always mean a duplicate, or that an invoice total is necessarily the valid contractual charge. Apply 20% VAT to net price adjustments. There are no other payments, refunds, credit notes, replacement deliveries, or fees outside these attachments.\n\nWrite a concise reconciliation report to reconciliation-report.md in the workspace root and include the report in your final answer. Include:\n1. A table for all four invoices showing invoiced amount, paid amount, valid charge, and any recoverable amount.\n2. An explanation of each discrepancy with source filenames and payment/receiving record IDs, showing the calculation including VAT.\n3. The totals invoiced, paid, valid, and recoverable; distinguish requested credits/refunds from amounts already received.\n4. Practical next actions per exception and confirmation of any clean invoice.\n\nInvestigate and report only; do not move funds or contact suppliers.",
+      "attachments": [],
+      "criteria": [
+        {
+          "requirement": "NORTH-1048: identifies DEMO-P001 and DEMO-P004 as two distinct settled EUR 900 payments, with EUR 1800 paid against a valid EUR 900 invoice, making EUR 900 recoverable as duplicate payment. Cites the bank ledger and accepted receipt DEMO-R101; does not treat either payment as a reversal.",
+          "weight": 2
+        },
+        {
+          "requirement": "ORBIT-771: applies the unconditional 10% discount to 12 x EUR45 = EUR540 before VAT. Calculates net EUR486, VAT EUR97.20, valid gross EUR583.20, and EUR64.80 recoverable against EUR648 paid in DEMO-P002. Connects the invoice to Orbit's signed terms and requests a credit/refund rather than claiming one already exists.",
+          "weight": 2
+        },
+        {
+          "requirement": "LUMA-309: uses DEMO-R103 and vendor terms to identify six damaged returned units with no replacement. Calculates 24 accepted x EUR24 = EUR576 net + EUR115.20 VAT = EUR691.20 valid; EUR864 paid in DEMO-P003 means EUR172.80 credit/refund due (6 x24 x1.20).",
+          "weight": 2
+        },
+        {
+          "requirement": "CLEAR-552: correctly marks this clean, with EUR600 invoiced and valid, and two permitted installments DEMO-P005 EUR400 plus DEMO-P006 EUR200 totaling EUR600. Says no recoverable amount; does not mistake these installments for a duplicate.",
+          "weight": 1
+        },
+        {
+          "requirement": "Provides a four-invoice reconciliation table and correct batch totals: EUR3012 originally invoiced, EUR3912 settled payments, EUR2774.40 valid contractual charges, and EUR1137.60 recoverable (900 + 64.80 + 172.80). Treats recoverable credits/refunds as pending, not cash already received, and does not recommend another payment on these invoices.",
+          "weight": 2
+        },
+        {
+          "requirement": "For all three exceptions, cites relevant source filenames and record IDs and recommends concrete follow-up: verify and recover North's duplicate payment, request Orbit's discount credit/refund, and request Luma's return credit/refund with receiving evidence. Recommendations stay within investigation/reporting and do not claim to have executed payments or contacted suppliers.",
+          "weight": 1
+        }
+      ]
+    },
+    "slug": "reconcile-supplier-payment-batch",
+    "agent_config": {
+      "max_steps": 40
+    }
+  },
+  {
+    "env": "file-analysis",
+    "id": "prioritize_support_tickets",
+    "slug": "prioritize-support-queue",
+    "agent_config": {
+      "max_steps": 40
+    },
+    "args": {
+      "prompt": "You are the support operations lead for fictional Folio Dock at 2026-10-20 15:00 UTC. Prepare a handoff using all four bundled files: response-policy.md, accounts.csv, tickets.csv, and investigation-notes.md. There are six open tickets. Do not let customer urgency labels or contract size substitute for verified impact.\n\nWrite support-priorities.md in the workspace root. Include:\n1. A table ranking all six tickets with priority, verified impact, account context, first-response deadline in UTC, and SLA status at the snapshot. Distinguish an overdue first response from an unresolved incident that was already answered. Show overdue durations where applicable.\n2. A short evidence-backed explanation for the ordering, citing ticket IDs, investigation record IDs, and source filenames. Explain important disagreements with customer labels.\n3. The next action and responsible team for each ticket; identify immediate escalations, a safe customer update, and information still needed. Use the policy's ordering and note renewal context without inventing commitments.\n\nRecommend actions only. Do not send messages, change access, copy exposed customer data, or claim to have resolved incidents.",
+      "attachments": [],
+      "criteria": [
+        {
+          "requirement": "Ranks all six tickets by the supplied policy: S-406 P0, S-401 P1, S-405 P2, S-403 P2, S-404 P3, S-402 P4, in that order. S-405 precedes already-answered S-403. Uses confirmed impact, not customer labels or revenue, and includes a complete ranked table.",
+          "weight": 2
+        },
+        {
+          "requirement": "For unanswered S-406, computes 2026-10-20 14:55 UTC first-response deadline and 5 minutes overdue at 15:00; for S-401, 13:10 UTC and 1 hour 50 minutes overdue; for S-405, 14:30 UTC and 30 minutes overdue. Does not confuse response with resolution.",
+          "weight": 2
+        },
+        {
+          "requirement": "Computes the remaining first-response deadlines correctly: S-403 2026-10-20 17:30 UTC with response at 14:00 already meeting its SLA but the defect still open; S-404 2026-10-21 09:00 UTC, not overdue; S-402 2026-10-23 08:00 UTC, not overdue. Uses elapsed 24/7 time, not business hours.",
+          "weight": 1
+        },
+        {
+          "requirement": "Cites investigation-notes.md E-406 for confirmed unauthenticated private-report access and routes to security on-call immediately; cites E-401 for reproduced export blockage with no usable workaround and escalates to incident commander/engineering. Suggests containment/acknowledgment for security without reproducing sensitive report contents or claiming actions were executed.",
+          "weight": 2
+        },
+        {
+          "requirement": "Cites E-403 to reject the unconfirmed breach label: expired session, fresh-private-window workaround, already answered, still intermittent. Cites E-405 for verified idempotent retry workaround, recommends support-engineer response and tracking rather than claiming resolution.",
+          "weight": 1
+        },
+        {
+          "requirement": "Uses accounts.csv to note Marlin Labs EUR240000 annual contract and 2026-10-21 renewal without upgrading its functioning-dashboard feature request above P3. Routes S-404 to customer support with no promised delivery date, routes cosmetic S-402 to product backlog, and gives evidence-based next actions and owners for every ticket without sending messages or claiming fixes.",
+          "weight": 1
+        }
+      ]
+    }
+  },
+  {
+    "env": "file-analysis",
+    "id": "synthesize_customer_feedback",
+    "slug": "synthesize-onboarding-feedback",
+    "agent_config": {
+      "max_steps": 40
+    },
+    "args": {
+      "prompt": "You are preparing the next onboarding design review for fictional Folio Dock. Read study-brief.md, participants.csv, events.csv, and session-notes.md. Turn the eight moderated sessions into a decision brief grounded in observed behavior.\n\nWrite onboarding-feedback.md in the workspace root. Include:\n1. Exactly two primary onboarding improvements, ordered by observed blocking impact. For each, describe the problem, affected sessions, concrete UI change, and evidence with source filenames, event IDs, and brief participant quotations.\n2. Counts and explicit denominators for workspace creation and invitations, for all observed attempts and for first-time users. Explain missing or unattempted outcomes; do not count a disconnected session as a product failure.\n3. Lesser issues and why they are lower priority than the chosen two; distinguish stated preferences from observed obstacles.\n4. A small follow-up validation plan with participant coverage, tasks, measurable success criteria, and remaining uncertainty. Explain what this convenience sample cannot establish.\n\nAll source records are fictional. Do not invent observations, claim population conversion effects, or say any proposed change has already shipped or improved outcomes.",
+      "attachments": [],
+      "criteria": [
+        {
+          "requirement": "First recommendation addresses workspace name/slug validation: F-01 and F-05 enter names with spaces, EV-102 and EV-502 record invalid_slug, and the generic banner fails to identify the field/format. Proposes concrete inline guidance/validation or safe slug derivation and cites events.csv and session-notes.md with a relevant accurate quotation. Places this early-flow blocker ahead of invitation friction.",
+          "weight": 2
+        },
+        {
+          "requirement": "Second recommendation addresses hidden email-verification gating of Invite: F-02/F-08, EV-202/EV-802, disabled button and tooltip-only requirement. Proposes a visible explanation and actionable verify/resend route or invitation draft workflow; cites source files/event IDs and an accurate supporting participant quotation.",
+          "weight": 2
+        },
+        {
+          "requirement": "Reports workspace outcomes with explicit denominators: 6 of 8 succeeded overall (2 of 8 failed); 4 of 6 first-time users succeeded (2 of 6 failed); 2 of 2 returning users succeeded. Does not treat later unattempted tasks as failures.",
+          "weight": 1
+        },
+        {
+          "requirement": "Reports invitations among observed attempts: 3 of 5 succeeded overall and 2 of 5 failed; first-time users 2 of 4 succeeded and 2 of 4 failed. F-07 has an unknown/disconnected outcome and is excluded from these denominators; F-01/F-05 never attempted invitation. Does not claim all eight attempted it.",
+          "weight": 2
+        },
+        {
+          "requirement": "Separates lower-priority evidence: F-04 alone failed to find saved views under Collections (EV-403/EV-404), while F-06 completed tasks and merely requested dark mode. Does not treat either as a more prevalent observed blocker than naming and verification; does not invent a darkness/contrast failure.",
+          "weight": 1
+        },
+        {
+          "requirement": "Proposes a concrete follow-up usability test of both changes with first-time and returning coverage, specified tasks and measurable criteria (successful workspace creation and invite flow, errors/time/help needed). Explicitly states eight convenience-sampled moderated sessions do not establish population conversion lift, causality, revenue effect, or shipped improvement, and notes unknown F-07 outcome and sample uncertainty.",
+          "weight": 1
+        }
+      ]
+    }
+  }
+]

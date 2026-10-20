@@ -108,6 +108,39 @@ def test_blank_materializes_a_runnable_example(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "preset,entrypoint",
+    [
+        ("browser-use", "env.py"),
+        ("liveweb", "env.py"),
+        ("libbet", "env.py"),
+        ("robot-gripper", "environment/env.py"),
+        ("rocket-animation", "env.py"),
+        ("file-analysis", "env.py"),
+        ("argument-hints", "env.py"),
+    ],
+)
+def test_curated_examples_copy_with_custom_names(
+    tmp_path: Path, preset: str, entrypoint: str
+) -> None:
+    _init(tmp_path, "my-example", preset)
+
+    target = tmp_path / "my-example"
+    assert 'Environment(name="my-example")' in (target / entrypoint).read_text()
+    assert (target / "tasks.py").is_file()
+    assert (target / "README.md").is_file()
+    assert (target / "tasks.json").is_file()
+
+
+def test_argument_hints_alias_preserves_its_default_project_name(tmp_path: Path) -> None:
+    _init(tmp_path, None, "argument-hints")
+
+    assert (
+        'Environment(name="argument-hints")' in (tmp_path / "argument-hints" / "env.py").read_text()
+    )
+    assert "argument-hints" not in init_module.EXAMPLES
+
+
 def test_env_name_is_normalized(tmp_path: Path) -> None:
     _init(tmp_path, "My Cool_Env", "blank")
     assert 'Environment(name="my-cool-env")' in (tmp_path / "My Cool_Env" / "env.py").read_text()
@@ -221,7 +254,11 @@ def test_release_archive_is_extracted_for_the_installed_version(
     get = _release(
         _sdk_archive(
             "coding",
-            {"README.md": b"# Coding", "scripts/run.sh": b"#!/bin/sh\n", "env.py": b"x"},
+            {
+                "README.md": b"# Coding",
+                "scripts/run.sh": b"#!/bin/sh\n",
+                "env.py": b'env = Environment(name="coding")',
+            },
         )
     )
     monkeypatch.setattr(init_module.httpx, "get", get)
@@ -253,3 +290,16 @@ def test_development_version_needs_a_checkout(
     monkeypatch.setattr(init_module, "__version__", "1.2.3.dev0")
     with pytest.raises(CliError, match="development version"):
         _init(tmp_path, "project", "coding")
+
+
+def test_missing_release_example_cannot_create_an_empty_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed_sdk: None
+) -> None:
+    monkeypatch.setattr(
+        init_module.httpx, "get", _release(_sdk_archive("another-example", {"env.py": b"x"}))
+    )
+
+    with pytest.raises(CliError, match="expected one"):
+        _init(tmp_path, "coding", "coding")
+
+    assert not (tmp_path / "coding").exists()

@@ -1,0 +1,25 @@
+event_id,session_id,elapsed_seconds,event,detail
+EV-101,F-01,35,workspace_create_attempt,name=Field Team
+EV-102,F-01,36,workspace_create_error,invalid_slug
+EV-103,F-01,168,task_abandoned,no_workspace_created
+EV-201,F-02,42,workspace_created,success
+EV-202,F-02,73,invite_disabled,email_verification_required
+EV-203,F-02,149,task_abandoned,no_invite_sent
+EV-301,F-03,28,workspace_created,success
+EV-302,F-03,46,invite_sent,success
+EV-303,F-03,69,saved_view_opened,success
+EV-401,F-04,39,workspace_created,success
+EV-402,F-04,68,invite_sent,success
+EV-403,F-04,102,search_opened,searches_for_saved_view
+EV-404,F-04,155,task_abandoned,saved_view_not_found
+EV-501,F-05,26,workspace_create_attempt,name=West Office
+EV-502,F-05,27,workspace_create_error,invalid_slug
+EV-503,F-05,141,task_abandoned,no_workspace_created
+EV-601,F-06,33,workspace_created,success
+EV-602,F-06,61,invite_sent,success
+EV-603,F-06,84,saved_view_opened,success
+EV-701,F-07,31,workspace_created,success
+EV-702,F-07,80,session_disconnected,invitation_outcome_not_observed
+EV-801,F-08,47,workspace_created,success
+EV-802,F-08,75,invite_disabled,email_verification_required
+EV-803,F-08,132,task_abandoned,no_invite_sent

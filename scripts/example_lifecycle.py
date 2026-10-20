@@ -16,7 +16,7 @@ from hud.eval import Taskset
 def prepare(example: str) -> None:
     task = next(iter(Taskset.from_file("tasks.py")))
     Path(".hud").mkdir(exist_ok=True)
-    if example == "argument-hints":
+    if example in {"file-analysis", "argument-hints"}:
         file_id = os.environ["HUD_CI_DATA_FILE_ID"]
         if not file_id:
             raise ValueError("HUD_CI_DATA_FILE_ID must reference the shared CI attachment")

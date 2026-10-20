@@ -4,5 +4,5 @@
 !uv.lock
 !env.py
 !grader.py
-!flask.bundle
+!repository.bundle
 **/__pycache__

@@ -6,7 +6,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /hud
-COPY pyproject.toml uv.lock env.py grader.py flask.bundle ./
+COPY pyproject.toml uv.lock env.py grader.py repository.bundle ./
 
 RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
   && mkdir /app \

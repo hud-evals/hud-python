@@ -1,0 +1,9 @@
+session_id,experience,role,workspace_outcome,invite_outcome,saved_view_outcome
+F-01,first-time,operations,failed,not_attempted,not_attempted
+F-02,first-time,finance,succeeded,failed,not_attempted
+F-03,returning,operations,succeeded,succeeded,succeeded
+F-04,first-time,analyst,succeeded,succeeded,failed
+F-05,first-time,operations,failed,not_attempted,not_attempted
+F-06,first-time,design,succeeded,succeeded,succeeded
+F-07,returning,admin,succeeded,unknown,not_attempted
+F-08,first-time,finance,succeeded,failed,not_attempted

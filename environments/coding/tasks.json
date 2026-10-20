@@ -1,0 +1,143 @@
+[
+  {
+    "env": "coding",
+    "id": "coding-task",
+    "slug": "sentry-fix",
+    "args": {
+      "description": "Fix a user-profile crash.\n\nThe get_user_profile(user) function in user_service.py currently crashes when\nprofile is missing or None. For those users, return their top-level name as\ndisplay_name and an empty string as bio. For a complete profile, preserve its\ndisplay_name and bio exactly, including empty strings.\n\nReturn exactly the two keys display_name and bio. Do not modify the supplied\ndictionary or retain state between calls. The user always has a string name; a\npresent non-None profile always contains the two string fields display_name and bio.\n\nExample: {\"name\": \"Mira\", \"profile\": None} should return\n{\"display_name\": \"Mira\", \"bio\": \"\"}. Keep complete profiles working.\n",
+      "test_command": "python -I -m pytest -q -c /dev/null --rootdir=. --confcutdir=tests tests/test_user_service.py --junitxml={junit_path}",
+      "test_patch": "diff --git a/tests/test_user_service.py b/tests/test_user_service.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/test_user_service.py\n@@ -0,0 +1,30 @@\n+import copy\n+import importlib.util\n+from pathlib import Path\n+\n+import pytest\n+\n+source = Path(\"user_service.py\")\n+if source.is_symlink() or not source.is_file():\n+    raise RuntimeError(\"Submit a regular user_service.py file\")\n+spec = importlib.util.spec_from_file_location(\"submitted_user_service\", source)\n+module = importlib.util.module_from_spec(spec)\n+spec.loader.exec_module(module)\n+\n+CASES = [\n+    ({\"name\": \"Mira\", \"profile\": None}, {\"display_name\": \"Mira\", \"bio\": \"\"}),\n+    ({\"name\": \"Noah\"}, {\"display_name\": \"Noah\", \"bio\": \"\"}),\n+    ({\"name\": \"Fallback\", \"profile\": {\"display_name\": \"Ada\", \"bio\": \"builds tools\"}}, {\"display_name\": \"Ada\", \"bio\": \"builds tools\"}),\n+    ({\"name\": \"Fallback\", \"profile\": {\"display_name\": \"\", \"bio\": \"\"}}, {\"display_name\": \"\", \"bio\": \"\"}),\n+    ({\"name\": \"Nora\", \"profile\": {\"display_name\": \"Nora\", \"bio\": \"\"}}, {\"display_name\": \"Nora\", \"bio\": \"\"}),\n+    ({\"name\": \"Renée 田中\", \"profile\": None}, {\"display_name\": \"Renée 田中\", \"bio\": \"\"}),\n+]\n+\n+\n+@pytest.mark.parametrize(\"index\", range(12))\n+def test_profile_behavior(index):\n+    value, expected = (CASES + list(reversed(CASES)))[index]\n+    value = copy.deepcopy(value)\n+    before = copy.deepcopy(value)\n+    assert module.get_user_profile(value) == expected\n+    assert value == before\n",
+      "test_path": "tests",
+      "base_ref": "origin/profile_baseline",
+      "fail_to_pass": [
+        "tests.test_user_service.test_profile_behavior[0]",
+        "tests.test_user_service.test_profile_behavior[1]",
+        "tests.test_user_service.test_profile_behavior[5]",
+        "tests.test_user_service.test_profile_behavior[6]",
+        "tests.test_user_service.test_profile_behavior[10]",
+        "tests.test_user_service.test_profile_behavior[11]"
+      ],
+      "pass_to_pass": [
+        "tests.test_user_service.test_profile_behavior[2]",
+        "tests.test_user_service.test_profile_behavior[3]",
+        "tests.test_user_service.test_profile_behavior[4]",
+        "tests.test_user_service.test_profile_behavior[7]",
+        "tests.test_user_service.test_profile_behavior[8]",
+        "tests.test_user_service.test_profile_behavior[9]"
+      ],
+      "binary": true
+    },
+    "agent_config": {
+      "max_steps": 20
+    }
+  },
+  {
+    "env": "coding",
+    "id": "coding-task",
+    "args": {
+      "description": "Add a file mode parameter to flask.Config.from_file()\nPython 3.11 introduced native TOML support with the `tomllib` package. This could work nicely with the `flask.Config.from_file()` method as an easy way to load TOML config files:\n\n```python\napp.config.from_file(\"config.toml\", tomllib.load)\n```\n\nHowever, `tomllib.load()` takes an object readable in binary mode, while `flask.Config.from_file()` opens a file in text mode, resulting in this error:\n\n```\nTypeError: File must be opened in binary mode, e.g. use `open('foo.toml', 'rb')`\n```\n\nWe can get around this with a more verbose expression, like loading from a file opened with the built-in `open()` function and passing the `dict` to `app.Config.from_mapping()`:\n\n```python\n# We have to repeat the path joining that from_file() does\nwith open(os.path.join(app.config.root_path, \"config.toml\"), \"rb\") as file:\n    app.config.from_mapping(tomllib.load(file))\n```\n\nBut adding a file mode parameter to `flask.Config.from_file()` would enable the use of a simpler expression. E.g.:\n\n```python\napp.config.from_file(\"config.toml\", tomllib.load, mode=\"b\")\n```\n",
+      "test_command": "python -I -m pytest -q -o pythonpath=$PWD/src -c /dev/null --rootdir=. --confcutdir=tests -W ignore::DeprecationWarning tests/test_config.py --junitxml={junit_path}",
+      "test_patch": "diff --git a/tests/static/config.toml b/tests/static/config.toml\nnew file mode 100644\n--- /dev/null\n+++ b/tests/static/config.toml\n@@ -0,0 +1,2 @@\n+TEST_KEY=\"foo\"\n+SECRET_KEY=\"config\"\ndiff --git a/tests/test_config.py b/tests/test_config.py\n--- a/tests/test_config.py\n+++ b/tests/test_config.py\n@@ -6,7 +6,6 @@\n \n import flask\n \n-\n # config keys used for the TestConfig\n TEST_KEY = \"foo\"\n SECRET_KEY = \"config\"\n@@ -30,13 +29,23 @@ def test_config_from_object():\n     common_object_test(app)\n \n \n-def test_config_from_file():\n+def test_config_from_file_json():\n     app = flask.Flask(__name__)\n     current_dir = os.path.dirname(os.path.abspath(__file__))\n     app.config.from_file(os.path.join(current_dir, \"static\", \"config.json\"), json.load)\n     common_object_test(app)\n \n \n+def test_config_from_file_toml():\n+    tomllib = pytest.importorskip(\"tomllib\", reason=\"tomllib added in 3.11\")\n+    app = flask.Flask(__name__)\n+    current_dir = os.path.dirname(os.path.abspath(__file__))\n+    app.config.from_file(\n+        os.path.join(current_dir, \"static\", \"config.toml\"), tomllib.load, text=False\n+    )\n+    common_object_test(app)\n+\n+\n def test_from_prefixed_env(monkeypatch):\n     monkeypatch.setenv(\"FLASK_STRING\", \"value\")\n     monkeypatch.setenv(\"FLASK_BOOL\", \"true\")\n",
+      "test_path": "tests",
+      "base_ref": "origin/flask_4992_baseline",
+      "fail_to_pass": [
+        "tests.test_config.test_config_from_file_toml"
+      ],
+      "pass_to_pass": [
+        "tests.test_config.test_config_from_pyfile",
+        "tests.test_config.test_config_from_object",
+        "tests.test_config.test_config_from_file_json",
+        "tests.test_config.test_from_prefixed_env",
+        "tests.test_config.test_from_prefixed_env_custom_prefix",
+        "tests.test_config.test_from_prefixed_env_nested",
+        "tests.test_config.test_config_from_mapping",
+        "tests.test_config.test_config_from_class",
+        "tests.test_config.test_config_from_envvar",
+        "tests.test_config.test_config_from_envvar_missing",
+        "tests.test_config.test_config_missing",
+        "tests.test_config.test_config_missing_file",
+        "tests.test_config.test_custom_config_class",
+        "tests.test_config.test_session_lifetime",
+        "tests.test_config.test_get_namespace",
+        "tests.test_config.test_from_pyfile_weird_encoding[utf-8]",
+        "tests.test_config.test_from_pyfile_weird_encoding[iso-8859-15]",
+        "tests.test_config.test_from_pyfile_weird_encoding[latin-1]"
+      ],
+      "binary": true
+    },
+    "slug": "flask-4992"
+  },
+  {
+    "env": "coding",
+    "id": "coding-task",
+    "args": {
+      "description": "Flask routes to return domain/sub-domains information\nCurrently when checking **flask routes** it provides all routes but **it is no way to see which routes are assigned to which subdomain**.\n\n**Default server name:**\nSERVER_NAME: 'test.local'\n\n**Domains (sub-domains):**\ntest.test.local\nadmin.test.local\ntest.local\n\n**Adding blueprints:**\napp.register_blueprint(admin_blueprint,url_prefix='',subdomain='admin')\napp.register_blueprint(test_subdomain_blueprint,url_prefix='',subdomain='test')\n\n```\n$ flask routes\n * Tip: There are .env or .flaskenv files present. Do \"pip install python-dotenv\" to use them.\nEndpoint                                                 Methods    Rule\n-------------------------------------------------------  ---------  ------------------------------------------------\nadmin_blueprint.home                                      GET        /home\ntest_subdomain_blueprint.home                             GET        /home\nstatic                                                    GET        /static/<path:filename>\n...\n```\n\n**Feature request**\nIt will be good to see something like below (that will make more clear which route for which subdomain, because now need to go and check configuration).\n**If it is not possible to fix routes**, can you add or tell which method(s) should be used to get below information from flask?\n\n```\n$ flask routes\n * Tip: There are .env or .flaskenv files present. Do \"pip install python-dotenv\" to use them.\nDomain                Endpoint                                             Methods    Rule\n-----------------   ----------------------------------------------------  ----------  ------------------------------------------------\nadmin.test.local     admin_blueprint.home                                  GET        /home\ntest.test.local      test_subdomain_blueprint.home                         GET        /home\ntest.local           static                                                GET        /static/<path:filename>\n...\n```\n",
+      "test_command": "python -I -m pytest -q -o pythonpath=$PWD/src -c /dev/null --rootdir=. --confcutdir=tests -W ignore::DeprecationWarning tests/test_cli.py --junitxml={junit_path}",
+      "test_patch": "diff --git a/tests/test_cli.py b/tests/test_cli.py\n--- a/tests/test_cli.py\n+++ b/tests/test_cli.py\n@@ -433,16 +433,12 @@ class TestRoutes:\n     @pytest.fixture\n     def app(self):\n         app = Flask(__name__)\n-        app.testing = True\n-\n-        @app.route(\"/get_post/<int:x>/<int:y>\", methods=[\"GET\", \"POST\"])\n-        def yyy_get_post(x, y):\n-            pass\n-\n-        @app.route(\"/zzz_post\", methods=[\"POST\"])\n-        def aaa_post():\n-            pass\n-\n+        app.add_url_rule(\n+            \"/get_post/<int:x>/<int:y>\",\n+            methods=[\"GET\", \"POST\"],\n+            endpoint=\"yyy_get_post\",\n+        )\n+        app.add_url_rule(\"/zzz_post\", methods=[\"POST\"], endpoint=\"aaa_post\")\n         return app\n \n     @pytest.fixture\n@@ -450,17 +446,6 @@ def invoke(self, app, runner):\n         cli = FlaskGroup(create_app=lambda: app)\n         return partial(runner.invoke, cli)\n \n-    @pytest.fixture\n-    def invoke_no_routes(self, runner):\n-        def create_app():\n-            app = Flask(__name__, static_folder=None)\n-            app.testing = True\n-\n-            return app\n-\n-        cli = FlaskGroup(create_app=create_app)\n-        return partial(runner.invoke, cli)\n-\n     def expect_order(self, order, output):\n         # skip the header and match the start of each row\n         for expect, line in zip(order, output.splitlines()[2:]):\n@@ -493,11 +478,31 @@ def test_all_methods(self, invoke):\n         output = invoke([\"routes\", \"--all-methods\"]).output\n         assert \"GET, HEAD, OPTIONS, POST\" in output\n \n-    def test_no_routes(self, invoke_no_routes):\n-        result = invoke_no_routes([\"routes\"])\n+    def test_no_routes(self, runner):\n+        app = Flask(__name__, static_folder=None)\n+        cli = FlaskGroup(create_app=lambda: app)\n+        result = runner.invoke(cli, [\"routes\"])\n         assert result.exit_code == 0\n         assert \"No routes were registered.\" in result.output\n \n+    def test_subdomain(self, runner):\n+        app = Flask(__name__, static_folder=None)\n+        app.add_url_rule(\"/a\", subdomain=\"a\", endpoint=\"a\")\n+        app.add_url_rule(\"/b\", subdomain=\"b\", endpoint=\"b\")\n+        cli = FlaskGroup(create_app=lambda: app)\n+        result = runner.invoke(cli, [\"routes\"])\n+        assert result.exit_code == 0\n+        assert \"Subdomain\" in result.output\n+\n+    def test_host(self, runner):\n+        app = Flask(__name__, static_folder=None, host_matching=True)\n+        app.add_url_rule(\"/a\", host=\"a\", endpoint=\"a\")\n+        app.add_url_rule(\"/b\", host=\"b\", endpoint=\"b\")\n+        cli = FlaskGroup(create_app=lambda: app)\n+        result = runner.invoke(cli, [\"routes\"])\n+        assert result.exit_code == 0\n+        assert \"Host\" in result.output\n+\n \n def dotenv_not_available():\n     try:\n",
+      "test_path": "tests",
+      "base_ref": "origin/flask_5063_baseline",
+      "fail_to_pass": [
+        "tests.test_cli.TestRoutes.test_subdomain",
+        "tests.test_cli.TestRoutes.test_host"
+      ],
+      "pass_to_pass": [
+        "tests.test_cli.test_cli_name",
+        "tests.test_cli.test_find_best_app",
+        "tests.test_cli.test_prepare_import[test-path0-test]",
+        "tests.test_cli.test_prepare_import[test.py-path1-test]",
+        "tests.test_cli.test_prepare_import[a/test-path2-test]",
+        "tests.test_cli.test_prepare_import[test/__init__.py-path3-test]",
+        "tests.test_cli.test_prepare_import[test/__init__-path4-test]",
+        "tests.test_cli.test_prepare_import[value5-path5-cliapp.inner1]",
+        "tests.test_cli.test_prepare_import[value6-path6-cliapp.inner1.inner2]",
+        "tests.test_cli.test_prepare_import[test.a.b-path7-test.a.b]",
+        "tests.test_cli.test_prepare_import[value8-path8-cliapp.app]",
+        "tests.test_cli.test_prepare_import[value9-path9-cliapp.message.txt]",
+        "tests.test_cli.test_locate_app[cliapp.app-None-testapp]",
+        "tests.test_cli.test_locate_app[cliapp.app-testapp-testapp]",
+        "tests.test_cli.test_locate_app[cliapp.factory-None-app]",
+        "tests.test_cli.test_locate_app[cliapp.factory-create_app-app]",
+        "tests.test_cli.test_locate_app[cliapp.factory-create_app()-app]",
+        "tests.test_cli.test_locate_app[cliapp.factory-create_app2(\"foo\",",
+        "tests.test_cli.test_locate_app[cliapp.factory-",
+        "tests.test_cli.test_locate_app_raises[notanapp.py-None]",
+        "tests.test_cli.test_locate_app_raises[cliapp/app-None]",
+        "tests.test_cli.test_locate_app_raises[cliapp.app-notanapp]",
+        "tests.test_cli.test_locate_app_raises[cliapp.factory-create_app2(\"foo\")]",
+        "tests.test_cli.test_locate_app_raises[cliapp.factory-create_app(]",
+        "tests.test_cli.test_locate_app_raises[cliapp.factory-no_app]",
+        "tests.test_cli.test_locate_app_raises[cliapp.importerrorapp-None]",
+        "tests.test_cli.test_locate_app_raises[cliapp.message.txt-None]",
+        "tests.test_cli.test_locate_app_suppress_raise",
+        "tests.test_cli.test_get_version",
+        "tests.test_cli.test_scriptinfo",
+        "tests.test_cli.test_app_cli_has_app_context",
+        "tests.test_cli.test_with_appcontext",
+        "tests.test_cli.test_appgroup_app_context",
+        "tests.test_cli.test_flaskgroup_app_context",
+        "tests.test_cli.test_flaskgroup_debug[True]",
+        "tests.test_cli.test_flaskgroup_debug[False]",
+        "tests.test_cli.test_flaskgroup_nested",
+        "tests.test_cli.test_no_command_echo_loading_error",
+        "tests.test_cli.test_help_echo_loading_error",
+        "tests.test_cli.test_help_echo_exception",
+        "tests.test_cli.TestRoutes.test_simple",
+        "tests.test_cli.TestRoutes.test_sort",
+        "tests.test_cli.TestRoutes.test_all_methods",
+        "tests.test_cli.TestRoutes.test_no_routes",
+        "tests.test_cli.test_load_dotenv",
+        "tests.test_cli.test_dotenv_path",
+        "tests.test_cli.test_dotenv_optional",
+        "tests.test_cli.test_disable_dotenv_from_env",
+        "tests.test_cli.test_run_cert_path",
+        "tests.test_cli.test_run_cert_adhoc",
+        "tests.test_cli.test_run_cert_import",
+        "tests.test_cli.test_run_cert_no_ssl",
+        "tests.test_cli.test_cli_blueprints",
+        "tests.test_cli.test_cli_empty"
+      ],
+      "binary": true
+    },
+    "slug": "flask-5063"
+  }
+]

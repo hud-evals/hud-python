@@ -1,0 +1,49 @@
+[
+  {
+    "env": "robot-gripper",
+    "id": "open-drawer",
+    "args": {
+      "scene_id": "tabletop-v1",
+      "target_joint": "drawer_slide",
+      "success_threshold": 0.2
+    },
+    "slug": "open-drawer"
+  },
+  {
+    "env": "robot-gripper",
+    "id": "pick-object",
+    "args": {
+      "scene_id": "tabletop-v1",
+      "target_object": "mug",
+      "lift_height": 0.9
+    },
+    "slug": "pick-mug",
+    "agent_config": {
+      "max_steps": 40
+    }
+  },
+  {
+    "env": "robot-gripper",
+    "id": "move-object",
+    "args": {
+      "scene_id": "tabletop-v1",
+      "target_object": "mug",
+      "goal_x": -0.2,
+      "goal_y": 0.0,
+      "goal_z": 0.75,
+      "tolerance": 0.05
+    },
+    "slug": "move-mug"
+  },
+  {
+    "env": "robot-gripper",
+    "id": "force-grasp",
+    "args": {
+      "scene_id": "tabletop-v1",
+      "target_object": "mug",
+      "min_grip_force": 0.5,
+      "hold_steps": 100
+    },
+    "slug": "force-grasp-mug"
+  }
+]

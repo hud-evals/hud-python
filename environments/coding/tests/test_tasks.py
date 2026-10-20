@@ -8,13 +8,14 @@ from grader import parse_junit, score_tests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_REFS = {
+    "sentry-fix": "origin/profile_golden",
     "flask-4992": "origin/flask_4992_golden",
     "flask-5063": "origin/flask_5063_golden",
 }
 
 
 def test_rows_parameterize_the_same_coding_task_template():
-    assert [task.slug for task in tasks.tasks] == ["flask-4992", "flask-5063"]
+    assert [task.slug for task in tasks.tasks] == ["sentry-fix", "flask-4992", "flask-5063"]
 
     for task in tasks.tasks:
         assert task.env == tasks.env.name
@@ -38,7 +39,7 @@ def test_bundled_task_baselines_fail_and_reference_fixes_pass(tmp_path: Path):
         ):
             repo = tmp_path / f"{task.slug}-{ref.rsplit('/', 1)[-1]}"
             subprocess.run(
-                ["git", "clone", "-q", str(PROJECT_ROOT / "flask.bundle"), str(repo)],
+                ["git", "clone", "-q", str(PROJECT_ROOT / "repository.bundle"), str(repo)],
                 check=True,
             )
             subprocess.run(["git", "checkout", "-qf", ref], cwd=repo, check=True)
@@ -50,6 +51,7 @@ def test_bundled_task_baselines_fail_and_reference_fixes_pass(tmp_path: Path):
                 check=True,
             )
             (repo / "conftest.py").write_text('raise RuntimeError("agent conftest loaded")\n')
+            (repo / "src").mkdir(exist_ok=True)
             (repo / "src" / "sitecustomize.py").write_text('raise RuntimeError("agent sitecustomize loaded")\n')
 
             junit_path = tmp_path / f"{repo.name}.xml"

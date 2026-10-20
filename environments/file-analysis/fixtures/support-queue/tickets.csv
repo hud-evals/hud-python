@@ -1,0 +1,7 @@
+ticket_id,account_id,opened_at,first_response_at,customer_label,subject,status
+S-401,A-CED,2026-10-20T12:10:00Z,,high,CSV export produces empty files,open
+S-402,A-PEB,2026-10-20T08:00:00Z,,urgent,Typo in mobile settings heading,open
+S-403,A-BEL,2026-10-20T13:30:00Z,2026-10-20T14:00:00Z,security breach,Sign-in link appears to leak a workspace,open
+S-404,A-MAR,2026-10-20T09:00:00Z,,critical,Need custom dashboard colors before renewal,open
+S-405,A-JUN,2026-10-20T10:30:00Z,,medium,Import requires repeated retries,open
+S-406,A-VAL,2026-10-20T14:40:00Z,,normal,A report link works while signed out,open
