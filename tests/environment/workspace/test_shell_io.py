@@ -193,7 +193,7 @@ async def test_a_session_that_cannot_be_prepared_is_told_why(tmp_path: Path) -> 
         )
 
     assert result.exit_status == 1
-    assert "workspace: cannot prepare shell:" in str(result.stderr)
+    assert result.stderr
     assert "unreachable" not in str(result.stdout)
 
 

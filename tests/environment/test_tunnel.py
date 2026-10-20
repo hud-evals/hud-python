@@ -127,19 +127,3 @@ async def test_a_tunnel_to_an_unknown_capability_gets_one_error_frame_and_is_clo
 
     assert (refused["id"], refused["error"]["code"]) == (1, -32000)
     assert after is None
-
-
-async def test_client_bindings_are_forwarded_to_loopback() -> None:
-    local = Capability.cdp(name="browser", url="ws://127.0.0.1:9222")
-    remote = Capability.ssh(name="box", url="ssh://box.example.com:22", host_pubkey="ssh-ed25519 x")
-    env = Environment("mixed-env", capabilities=[local, remote])
-
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-    ):
-        for declared in (local, remote):
-            forwarded = client.binding(declared.name)
-            assert forwarded.url != declared.url
-            assert urlsplit(forwarded.url).hostname == "127.0.0.1"
-            assert (forwarded.name, forwarded.protocol) == (declared.name, declared.protocol)

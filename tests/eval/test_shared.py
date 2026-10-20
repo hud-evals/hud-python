@@ -177,7 +177,6 @@ async def test_a_lease_outside_the_pools_scope_fails_the_run() -> None:
 
     run = await rollout(step(), ScriptedAgent("x"), runtime=Shared(LocalRuntime(env), width=1))
 
-    assert (run.trace.error or "").startswith(
-        "[provisioning] RuntimeError: Shared substrates outlive single rollouts; lease inside "
-        "the scope"
-    )
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "lease inside the scope" in (run.trace.error or "")

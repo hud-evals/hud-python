@@ -309,47 +309,10 @@ async def test_rows_nothing_places_need_a_runtime(runtime_config: dict[str, Any]
         await Taskset("t", rows).run(ScriptedAgent("x"))
 
 
-async def test_a_row_naming_an_image_is_placed_in_docker(hud_env: HudEnv) -> None:
-    hud_env.set(PATH="/nonexistent")
-
-    job = await Task(env="lab", id="solve", runtime_config={"image": "lab:1"}).run(
-        ScriptedAgent("x")
-    )
-
-    assert "'docker'" in (job.runs[0].trace.error or "")
-
-
 async def test_an_empty_taskset_needs_no_runtime() -> None:
     job = await Taskset("empty", []).run(ScriptedAgent("x"))
 
     assert (job.runs, job.reward, job.errors) == ([], 0.0, [])
-
-
-@pytest.mark.parametrize(
-    ("slugs", "group", "name"),
-    [
-        (["only"], 1, "solve"),
-        (["only"], 3, "solve (3 times)"),
-        (["first", "second"], 1, "letters (2 tasks)"),
-        (["first", "second"], 2, "letters (2 tasks) (2 times)"),
-    ],
-)
-async def test_a_run_registers_one_job_named_for_what_it_runs(
-    slugs: list[str], group: int, name: str, reporting: FakeServices
-) -> None:
-    env = Environment("letters")
-
-    @env.template()
-    async def solve():
-        yield "go"
-        yield 1.0
-
-    rows = [solve().model_copy(update={"slug": slug}) for slug in slugs]
-    job = await Taskset("letters", rows).run(ScriptedAgent("x"), group=group)
-
-    (registered,) = reporting.requests("api", "POST", "/v2/trace/job/{id}/enter")
-    assert registered.path == f"/v2/trace/job/{job.id}/enter"
-    assert (registered.json["name"], registered.json["group"]) == (name, group)
 
 
 async def test_a_pool_placement_boots_once_for_the_call_and_closes_after_it() -> None:

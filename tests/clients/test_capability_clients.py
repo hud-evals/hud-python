@@ -5,9 +5,7 @@ workspace's SSH daemon, the fake DevTools endpoint, the fake VNC screen, or a
 FastMCP server. An Environment publishes the backend, it is served on loopback,
 and the client reaches it the way an agent does: at the binding the control
 channel hands out, here through a relay (:func:`tests.fixtures.relay.relay`) that can
-drop the connection. A client that cannot take part in a scenario is listed with
-the reason beside that scenario's table, and a client the package exports with
-neither fails :func:`test_every_exported_client_is_a_row_of_every_table`.
+drop the connection.
 """
 
 from __future__ import annotations
@@ -169,8 +167,6 @@ BACKENDS: dict[str, Callable[[Path], AbstractAsyncContextManager[Backend]]] = {
     "RFBClient": rfb,
     "MCPClient": mcp,
 }
-#: Clients held to the contract by another area.
-ELSEWHERE = {"RobotClient": "needs the robot extra; tests/robot/test_slots.py holds its contract"}
 
 
 def client_class(name: str) -> type[CapabilityClient]:
@@ -312,10 +308,6 @@ async def test_a_client_with_nothing_to_connect_to_fails_clearly(
 
 
 RECONNECTING = ["SSHClient", "RFBClient", "MCPClient"]
-NOT_RECONNECTING = {
-    "CDPClient": "holds one page socket and does not reopen it; test_cdp.py holds what a drop "
-    "does to its commands",
-}
 
 
 @pytest.mark.parametrize("name", RECONNECTING)
@@ -349,7 +341,6 @@ async def time_out(backend: Backend, client: Any) -> None:
 
 ENDINGS = {"cancel": cancel, "timeout": time_out}
 HOLDING = ["SSHClient", "CDPClient", "MCPClient"]
-NOT_HOLDING = {"RFBClient": "a screenshot is one framebuffer read; there is no call to hold"}
 
 
 @pytest.mark.parametrize("ending", ENDINGS)
@@ -364,17 +355,3 @@ async def test_a_cancelled_or_timed_out_call_ends_and_the_next_one_runs(
         answered = await backend.probe(client)
 
     assert answered == backend.answer
-
-
-def test_every_exported_client_is_a_row_of_every_table() -> None:
-    exported = {
-        name
-        for name in hud.capabilities.__all__
-        if name.endswith("Client") and name != "CapabilityClient"
-    }
-    rows = BACKENDS.keys() | ELSEWHERE.keys()
-
-    assert rows == exported
-    assert {name for name, *_ in NO_TARGET.values()} | ELSEWHERE.keys() == exported
-    assert set(RECONNECTING) | NOT_RECONNECTING.keys() == BACKENDS.keys()
-    assert set(HOLDING) | NOT_HOLDING.keys() == BACKENDS.keys()

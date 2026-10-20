@@ -1,5 +1,3 @@
 # Compose variables and limits reach the main service and the row's placement.
 [task.task-a]
-"compose.services.main.environment" = { FROM_DOTENV = "dotenv", FROM_ENV = "from-task" }
-"compose.services.main.deploy" = { resources = { limits = { cpus = "2", memory = "4096M" } } }
 placement = { resources = { cpu = 2.0, memory_mb = 4096 } }

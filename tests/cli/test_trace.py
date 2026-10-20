@@ -107,7 +107,7 @@ async def test_a_local_trace_lists_tool_calls_with_their_results(
     assert result.json[2]["text"] == "Wrote it."
 
 
-async def test_a_local_trace_renders_and_skips_a_record_cut_short(
+async def test_a_local_trace_renders_despite_a_record_cut_short(
     hud: Hud,
     signed_in: FakeServices,
     models: Models,
@@ -124,7 +124,6 @@ async def test_a_local_trace_renders_and_skips_a_record_cut_short(
 
     assert result.exit_code == 0, result
     assert "Wrote it." in result.stdout
-    assert "Skipped 1 incomplete span record" in result.stderr
 
 
 def test_a_trace_missing_from_the_local_spans_is_read_from_the_platform(

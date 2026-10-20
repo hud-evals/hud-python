@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -136,40 +135,41 @@ def test_qa_run_times_out_while_checks_are_running(hud: Hud, catalog: FakeServic
     assert (result.exit_code, result.json["error"]) == (1, "timeout"), result
 
 
-def legacy(check_key: str = CHECK, **output: Any) -> dict[str, Any]:
+def legacy(**output: Any) -> dict[str, Any]:
     """A result stored before ``qa_agent_result.v1``, as its check's own JSON."""
-    return row(check_key=check_key, legacy_result={"content": json.dumps(output)})
+    return row(legacy_result={"content": json.dumps(output)})
 
 
 @pytest.mark.parametrize(
-    ("results", "verdicts"),
+    ("outcome", "exit_code"),
     [
         pytest.param(
-            [{**verdict("failed"), "source": "manual", "verdict": "passed"}],
-            ["passed"],
+            {**verdict("failed"), "source": "manual", "verdict": "passed"},
+            0,
             id="a-manual-verdict-wins",
         ),
         pytest.param(
-            [legacy(problems=[{"problem": "No output", "fault": "agent"}])],
-            ["failed"],
+            legacy(problems=[{"problem": "No output", "fault": "agent"}]),
+            1,
             id="legacy-agent-fault",
         ),
         pytest.param(
-            [
-                legacy("false_negative", is_false_negative=False, reasoning="Matches."),
-                legacy("false_negative", is_false_negative=True, reasoning="Grader missed it."),
-            ],
-            ["passed", "failed"],
-            id="legacy-false-negative",
+            legacy(is_false_negative=False, reasoning="Matches."),
+            0,
+            id="legacy-false-negative-cleared",
+        ),
+        pytest.param(
+            legacy(is_false_negative=True, reasoning="Grader missed it."),
+            1,
+            id="legacy-false-negative-found",
         ),
     ],
 )
-def test_qa_results_read_a_verdict_from_each_result_shape(
-    hud: Hud, catalog: FakeServices, results: list[dict[str, Any]], verdicts: list[str]
+def test_qa_run_reads_a_verdict_from_each_result_shape(
+    hud: Hud, catalog: FakeServices, outcome: dict[str, Any], exit_code: int
 ) -> None:
-    catalog.route("api", "GET", "/v2/qa/results", json={"results": results})
+    catalog.route("api", "GET", "/v2/qa/results", json={"results": [outcome]})
 
-    text = hud("qa", "results", TRACE_ID)
+    result = hud("qa", "run", CHECK, TRACE_ID, "--yes", "--json")
 
-    assert text.exit_code == 0, text
-    assert re.findall(r"Verdict: (\w+)", text.stdout) == verdicts
+    assert result.exit_code == exit_code, result

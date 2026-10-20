@@ -18,7 +18,7 @@ from PIL import Image
 
 from hud.agents import ClaudeAgent
 from hud.agents.claude import ClaudeToolSearchTool, ClaudeWebFetchTool, ClaudeWebSearchTool
-from hud.agents.types import ClaudeConfig
+from hud.agents.types import ClaudeConfig, ToolStep
 from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
@@ -139,7 +139,7 @@ async def test_each_model_gets_the_computer_tool_it_supports_for_the_screen(
     assert sized or "display is 200x100 pixels" in computer["description"]
 
 
-async def test_a_failed_tool_result_reaches_the_model_marked_as_an_error(
+async def test_an_unknown_editor_command_fails_its_tool_step(
     models: Models, tmp_path: Path
 ) -> None:
     models.script(
@@ -147,15 +147,19 @@ async def test_a_failed_tool_result_reaches_the_model_marked_as_an_error(
     )
 
     env = workspace_env(tmp_path / "ws")
-    await rollout(
+    run = await rollout(
         Task(env=env.name, id="task"),
         ClaudeAgent(ClaudeConfig(model=MODEL)),
         runtime=LocalRuntime(env),
     )
 
-    (result,) = models.requests()[-1].body["messages"][-1]["content"]
-    assert (result["type"], result["is_error"]) == ("tool_result", True)
-    assert "unknown editor command: 'bogus'" in json.dumps(result["content"])
+    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert step.result is not None
+    (text,) = [
+        block.text for block in step.result.content if isinstance(block, mcp_types.TextContent)
+    ]
+    assert (run.trace.status, step.result.isError) == ("completed", True)
+    assert "unknown editor command: 'bogus'" in text
 
 
 INVALID_JSON = Turn(
@@ -164,12 +168,12 @@ INVALID_JSON = Turn(
 
 
 @pytest.mark.parametrize(
-    ("invalid", "status", "requests", "explained"),
-    [(1, "completed", 2, False), (2, "completed", 3, True), (3, "error", 3, True)],
-    ids=["once-is-asked-again", "twice-is-explained-to-the-model", "three-times-fails"],
+    ("invalid", "status", "requests"),
+    [(1, "completed", 2), (2, "completed", 3), (3, "error", 3)],
+    ids=["once-is-asked-again", "twice-is-asked-again", "three-times-fails"],
 )
-async def test_a_call_with_invalid_json_is_sampled_again_then_explained_then_fails(
-    invalid: int, status: str, requests: int, explained: bool, models: Models, tmp_path: Path
+async def test_a_call_with_invalid_json_is_sampled_again_until_the_third_fails_the_run(
+    invalid: int, status: str, requests: int, models: Models, tmp_path: Path
 ) -> None:
     models.queue([INVALID_JSON] * invalid + [Turn(text="done")])
 
@@ -180,9 +184,7 @@ async def test_a_call_with_invalid_json_is_sampled_again_then_explained_then_fai
         runtime=LocalRuntime(env),
     )
 
-    last = json.dumps(models.requests()[-1].body)
     assert (run.trace.status, len(models.requests())) == (status, requests)
-    assert ("Your previous tool-call arguments were invalid JSON." in last) is explained
 
 
 @pytest.mark.parametrize(
@@ -293,6 +295,8 @@ async def test_an_image_the_editor_views_is_sent_within_claudes_limits_in_its_sh
 async def test_an_image_that_cannot_be_read_is_told_to_the_model_as_an_error(
     models: Models, tmp_path: Path
 ) -> None:
+    """The view itself succeeds; only the image Claude is sent back fails to decode, so
+    the error exists only in the tool result the model receives."""
     root = tmp_path / "ws"
     models.script(
         [

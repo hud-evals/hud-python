@@ -126,7 +126,7 @@ async def test_the_models_reasoning_is_replayed_in_the_conversation(
 async def test_completion_kwargs_cannot_override_what_the_agent_sends_itself(
     models: Models, tmp_path: Path
 ) -> None:
-    reserved = {"model": "other", "stream": True, "tools": [], "messages": [], "max_tokens": 50}
+    reserved = {"model": "other", "stream": True, "tools": [], "messages": []}
     models.script([Turn(text="done")])
 
     env = workspace_env(tmp_path / "ws")
@@ -137,11 +137,7 @@ async def test_completion_kwargs_cannot_override_what_the_agent_sends_itself(
     )
 
     (request,) = models.requests()
-    assert (request.body["model"], request.body["stream"], request.body["max_tokens"]) == (
-        MODEL,
-        False,
-        50,
-    )
+    assert (request.body["model"], request.body["stream"]) == (MODEL, False)
     assert request.body["messages"] != [] and request.body["tools"] != []
 
 

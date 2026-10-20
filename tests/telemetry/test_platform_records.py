@@ -61,17 +61,40 @@ async def test_a_taskset_reports_one_job_and_enters_each_rollout_under_it(
     (registered,) = reporting.requests("api", "POST", JOB_ENTER)
     entered = {r.path.split("/")[3]: r.json for r in reporting.requests("api", "POST", TRACE_ENTER)}
     assert registered.path == f"/v2/trace/job/{job.id}/enter"
-    assert (registered.json["name"], registered.json["group"], registered.json["taskset_id"]) == (
-        "pair (2 tasks) (2 times)",
-        2,
-        "ts-1",
-    )
+    assert (registered.json["group"], registered.json["taskset_id"]) == (2, "ts-1")
     assert f"job: {reporting.url('web')}/jobs/{uuid.UUID(job.id)}" in caplog.messages
     assert set(entered) == {run.trace_id for run in job.runs}
     assert {(e["job_id"], e["model"]) for e in entered.values()} == {(job.id, "claude-test")}
     assert sorted((e["task_slug"], e["group_id"]) for e in entered.values()) == sorted(
         (run.slug, run.group_id) for run in job.runs
     )
+
+
+@pytest.mark.parametrize(
+    ("slugs", "group", "name"),
+    [
+        (["only"], 1, "solve"),
+        (["only"], 3, "solve (3 times)"),
+        (["first", "second"], 1, "letters (2 tasks)"),
+        (["first", "second"], 2, "letters (2 tasks) (2 times)"),
+    ],
+)
+async def test_a_run_registers_one_job_named_for_what_it_runs(
+    slugs: list[str], group: int, name: str, reporting: FakeServices
+) -> None:
+    env = Environment("letters")
+
+    @env.template()
+    async def solve():
+        yield "go"
+        yield 1.0
+
+    rows = [solve().model_copy(update={"slug": slug}) for slug in slugs]
+    job = await Taskset("letters", rows).run(ScriptedAgent("x"), group=group)
+
+    (registered,) = reporting.requests("api", "POST", JOB_ENTER)
+    assert registered.path == f"/v2/trace/job/{job.id}/enter"
+    assert (registered.json["name"], registered.json["group"]) == (name, group)
 
 
 async def test_a_lone_rollout_reports_a_job_of_one_named_for_its_task(

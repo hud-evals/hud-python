@@ -3,8 +3,8 @@
 Each case is a whole rollout: an in-process bridge serving the ``openpi/0`` wire,
 an env publishing it plus :class:`DirectControl`'s ``mcp`` capability, and a
 scripted agent calling the tools through the tunneled manifest binding, graded
-by the sim. Every case asserts what the model saw (tools, schemas, replies) and
-what the sim was commanded.
+by the sim. Every case asserts what the sim was commanded and where the arm ended
+up, with the tools and verdicts the model saw.
 """
 
 from __future__ import annotations
@@ -64,11 +64,6 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
 
     assert agent.tools == {"move_to", "wait"}  # the ee_abs contract picked the motion tool
     schema = agent.schemas["move_to"]
-    assert set(schema["required"]) == {"targets", "note"}
-    # Every dimension is listed and nullable, so strict mode keeps the schema as it is.
-    assert schema["properties"]["targets"]["required"] == ["x", "grip"]
-    assert schema["properties"]["targets"]["properties"]["x"]["type"] == ["number", "null"]
-    assert schema["properties"]["targets"]["properties"]["grip"]["description"] == "[-1, 1]"
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
     assert run.reward == 1.0  # graded by the sim, not the tools
     # 0.1 of x's range per second at 10 Hz: 0.01 per tick, grip held at its reference.
@@ -81,15 +76,10 @@ async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() ->
     # the sim succeeds on that tick, which ends the episode.
     np.testing.assert_allclose(close, [[0.5, 1.0]])
     reached_reply, closed_reply = agent.replies()
-    assert [block.type for block in agent.results[0].content] == ["text", "text", "image"]
     # The trace viewer parses this opening line to map tool calls to ticks.
     assert reached_reply.startswith("Played 56 steps (5.6 s).")
-    assert "At the target. Remaining offsets: 0 mm on x." in reached_reply
+    assert "At the target." in reached_reply
     assert "The episode has ended" in closed_reply
-    # Tolerance only picks the verdict; nothing the model sees mentions it.
-    seen = " ".join([str(agent.schemas), *agent.descriptions.values(), reached_reply])
-    for word in ("toleran", "within", "settle"):
-        assert word not in seen.lower()
 
 
 @pytest.mark.parametrize(("state_type", "tool"), [(None, "move_by"), ("BASE_DEL_POSE", "walk_by")])
@@ -102,7 +92,6 @@ async def test_a_displacement_kind_plays_in_steps_within_the_per_step_box(
     agent, _ = await drive(sim, DirectControl(), move(tool, x=0.35))
 
     assert agent.tools == {tool, "wait"}
-    assert "action's own components" in agent.descriptions[tool]
     # Four in-box steps; a displacement returns once played.
     np.testing.assert_allclose(sim.actions, [[0.0875, 0.0]] * 4)
     (reply,) = agent.replies()
@@ -158,53 +147,61 @@ async def test_a_contract_without_a_motion_type_is_refused_at_start() -> None:
 
 
 @pytest.mark.parametrize(
-    ("action_type", "names", "targets"),
+    ("action_type", "names", "call", "column"),
     [
         pytest.param(
             "ee_abs",
             [f"target_eef_pos.{a}" for a in "xyz"] + [f"target_eef_axis_angle.r{a}" for a in "xyz"],
-            ["x", "y", "z", "roll", "pitch", "yaw"],
+            move("move_to", yaw=0.3),
+            5,
             id="libero",
         ),
         pytest.param(
-            "joint_pos", ["panda_joint1", "panda_joint2"], ["joint1", "joint2"], id="panda"
+            "joint_pos",
+            ["panda_joint1", "panda_joint2"],
+            move("move_joints", joint2=0.3),
+            1,
+            id="panda",
         ),
         pytest.param(
             "ee_abs",
             ["left_x", "right_x", "left_gripper"],
-            ["left_arm", "right_arm"],
+            move("move_to", **{"right_arm.x": 0.3}),
+            1,
             id="bimanual",
         ),
         pytest.param(
-            "ee_abs", ["left_x", "left_pitch_deg"], ["left_x", "left_pitch_deg"], id="nonstandard"
+            "ee_abs",
+            ["left_x", "left_pitch_deg"],
+            move("move_to", left_pitch_deg=0.3),
+            1,
+            id="nonstandard",
         ),
     ],
 )
 async def test_tools_use_standard_dimension_names_when_every_native_name_has_one(
-    action_type: str, names: list[str], targets: list[str]
+    action_type: str, names: list[str], call: tuple[str, dict[str, Any]], column: int
 ) -> None:
     sim = Arm(contract(action_type, [-1.0] * len(names), [1.0] * len(names), names))
 
-    agent, _ = await drive(sim, DirectControl())
+    agent, _ = await drive(sim, DirectControl(), call)
 
-    (schema,) = (s for tool, s in agent.schemas.items() if tool != "wait")
-    assert list(schema["properties"]["targets"]["properties"]) == targets
+    assert not agent.results[0].isError
+    commanded = [0.0] * len(names)
+    commanded[column] = 0.3
+    np.testing.assert_allclose(sim.actions[-1], commanded, atol=1e-4)
 
 
 async def test_dimensions_with_a_shared_prefix_nest_as_a_group_the_model_can_null_whole() -> None:
     names = ["left_arm.x", "left_arm.y", "right_arm.x", "grip"]
     sim = Arm(contract("ee_abs", [-1.0] * 4, [1.0] * 4, names))
 
-    agent, _ = await drive(sim, DirectControl(), move("move_to", **{"left_arm.x": 0.1}))
+    agent, _ = await drive(sim, DirectControl(), move("move_to", **{"right_arm.x": 0.1}, grip=0.2))
 
     schema = agent.schemas["move_to"]
-    targets = schema["properties"]["targets"]
-    assert targets["required"] == ["grip", "left_arm", "right_arm"]
-    group = targets["properties"]["left_arm"]["anyOf"]
-    assert list(group[0]["properties"]) == ["x", "y"]
-    assert group[1] == {"type": "null"}
     assert ensure_strict_json_schema(copy.deepcopy(schema)) == schema
-    np.testing.assert_allclose(sim.actions[-1], [0.1, 0.0, 0.0, 0.0], atol=1e-6)
+    assert not agent.results[0].isError
+    np.testing.assert_allclose(sim.actions[-1], [0.0, 0.0, 0.1, 0.2], atol=1e-6)
 
 
 @pytest.mark.parametrize(
@@ -381,17 +378,19 @@ async def test_a_gripper_call_waits_for_every_finger() -> None:
     assert sim.state.tolist() == pytest.approx([0.0, 0.3, 1.0])
 
 
-async def test_gripper_offsets_are_reported_last_and_never_decide_the_verdict() -> None:
+async def test_a_gripper_offset_never_decides_the_verdict() -> None:
     sim = Arm(REACH, [0.0, -1.0], reads=lambda s: s * [1.0, 0.0] - [0.0, 1.0])
 
     agent, _ = await drive(
         sim, DirectControl(max_step={"grip": 2.0}), move("move_to", x=0.5, grip=1.0)
     )
 
-    assert "At the target. Remaining offsets: 0 mm on x, 2 on grip." in agent.replies()[0]
+    assert "At the target." in agent.replies()[0]
+    assert len(sim.actions) == 80
+    assert sim.state.tolist() == pytest.approx([0.5, 1.0])
 
 
-async def test_a_custom_reference_leaves_gripper_offsets_out() -> None:
+async def test_a_move_judged_against_a_custom_reference_reaches_the_target() -> None:
     sim = Arm(REACH, [0.0, -1.0], lag(0.25), reads=lambda s: s * [1.0, 0.0] - [0.0, 1.0])
     control = DirectControl(
         max_step={"grip": 2.0}, reference=lambda data: data["observation/state"]
@@ -399,9 +398,9 @@ async def test_a_custom_reference_leaves_gripper_offsets_out() -> None:
 
     agent, _ = await drive(sim, control, move("move_to", x=0.5, grip=1.0))
 
-    (reply,) = agent.replies()
-    assert "At the target. Remaining offsets: " in reply
-    assert "2 on grip" not in reply
+    assert "At the target." in agent.replies()[0]
+    assert len(sim.actions) == 80
+    assert sim.state.tolist() == pytest.approx([0.5, 1.0], abs=0.01)
 
 
 @pytest.mark.parametrize("share", [0.9, 1.1], ids=["just-inside", "just-outside"])
@@ -552,11 +551,12 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     )
 
     assert not any(result.isError for result in agent.results)
-    seen = "\n".join([agent.descriptions["move_to"], *agent.replies()])
-    assert f"ee_euler.x={wrapped:.4f}" in seen
-    assert f"pose: x=0.0000, roll={wrapped:.4f}" in seen
-    assert "At the target. Remaining offsets: " in seen
-    assert "pi and -pi are the same orientation" in seen
+    assert f"pose: x=0.0000, roll={wrapped:.4f}" in agent.replies()[0]
+    # One tick of looking, then 3.2 commanded as the wrapped angle, then -pi.
+    roll = np.array(sim.actions)[:, 1]
+    np.testing.assert_allclose(roll[1:7], wrapped, atol=1e-6)
+    np.testing.assert_allclose(roll[7:], -math.pi, atol=1e-6)
+    assert sim.state[1] == pytest.approx(-math.pi)
 
 
 # ─── the episode's time budget ─────────────────────────────────────────

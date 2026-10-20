@@ -1,7 +1,6 @@
 """What every coding-CLI agent does with its CLI: run it in the workspace, record what it
 ran, end the run when it fails, refuse what it cannot route, and stop it at the agent
-timeout. A stand-in on the workspace's ``PATH`` plays each CLI; every CLI family in
-``AgentType`` is a row."""
+timeout. A stand-in on the workspace's ``PATH`` plays each CLI."""
 
 from __future__ import annotations
 
@@ -25,10 +24,6 @@ if TYPE_CHECKING:
 #: (agent type, the executable it launches)
 CLIS = [("claude_cli", "claude"), ("codex_cli", "codex")]
 EVERY_CLI = pytest.mark.parametrize(("agent_type", "cli"), CLIS, ids=[row[0] for row in CLIS])
-
-
-def test_every_cli_family_is_a_row() -> None:
-    assert {row[0] for row in CLIS} == {kind.value for kind in AgentType if kind.is_cli}
 
 
 @pytest.fixture(autouse=True)

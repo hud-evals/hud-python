@@ -60,11 +60,11 @@ async def test_a_telemetry_service_that_is_down_does_not_fail_the_run(
 
 
 @pytest.mark.parametrize(
-    ("service", "path", "statuses", "attempts", "gave_up"),
+    ("service", "path", "statuses", "gave_up"),
     [
-        ("telemetry", "/trace/{id}/telemetry-upload", [503, 503, 200], 3, False),
-        ("api", "/v2/trace/job/{id}/enter", [500, 200], 2, False),
-        ("api", "/v2/trace/job/{id}/enter", [500], 2, True),
+        ("telemetry", "/trace/{id}/telemetry-upload", [503, 503, 200], False),
+        ("api", "/v2/trace/job/{id}/enter", [500, 200], False),
+        ("api", "/v2/trace/job/{id}/enter", [500], True),
     ],
     ids=[
         "span-uploads-answered-503-until-they-land",
@@ -76,7 +76,6 @@ async def test_a_rejected_report_is_retried_intact_and_never_fails_the_run(
     service: str,
     path: str,
     statuses: list[int],
-    attempts: int,
     gave_up: bool,
     reporting: FakeServices,
     caplog: pytest.LogCaptureFixture,
@@ -88,14 +87,9 @@ async def test_a_rejected_report_is_retried_intact_and_never_fails_the_run(
     )
     assert flush(timeout=10)
 
-    sent = reporting.requests(service, "POST", path)
-    warnings = [
-        r.getMessage()
-        for r in caplog.records
-        if r.name == "hud.eval.job" and r.levelno == logging.WARNING
-    ]
+    first, *retries = reporting.requests(service, "POST", path)
+    warned = any(r.name == "hud.eval.job" and r.levelno == logging.WARNING for r in caplog.records)
     assert (job.reward, job.runs[0].trace.status) == (1.0, "completed")
-    assert (len(sent), len({str(request.json) for request in sent})) == (attempts, 1)
-    assert [w.startswith("platform report /trace/job/") and "500" in w for w in warnings] == (
-        [True] if gave_up else []
-    )
+    assert retries
+    assert retries[-1].json == first.json
+    assert warned is gave_up

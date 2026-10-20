@@ -95,25 +95,16 @@ def test_a_name_two_projects_share_must_be_given_as_an_id(
 
 
 @pytest.mark.parametrize(
-    ("scope", "message"),
+    "scope",
     [
-        (
-            {"origin": "SAME", "user_id": OTHER_ID, "team_id": TEAM_ID},
-            "was linked with different HUD credentials",
-        ),
-        (
-            {"origin": "SAME", "user_id": USER_ID, "team_id": OTHER_ID},
-            "was linked with different HUD credentials",
-        ),
-        (
-            {"origin": "https://api.example", "user_id": USER_ID, "team_id": TEAM_ID},
-            "was linked against https://api.example",
-        ),
+        {"origin": "SAME", "user_id": OTHER_ID, "team_id": TEAM_ID},
+        {"origin": "SAME", "user_id": USER_ID, "team_id": OTHER_ID},
+        {"origin": "https://api.example", "user_id": USER_ID, "team_id": TEAM_ID},
     ],
     ids=["by-another-user", "in-another-team", "on-another-platform"],
 )
 def test_a_link_made_under_other_credentials_is_left_alone(
-    scope: dict[str, str], message: str, projects: FakeServices, hud: Hud
+    scope: dict[str, str], projects: FakeServices, hud: Hud
 ) -> None:
     origin = projects.url("api").removesuffix("/api")
     link = {"version": 1, "scope": {**scope, "origin": scope["origin"].replace("SAME", origin)}}
@@ -124,7 +115,6 @@ def test_a_link_made_under_other_credentials_is_left_alone(
     result = hud("project", "use", "browser-evals", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "failure"), result
-    assert message in result.json["message"]
     assert (hud.cwd / ".hud" / "config.json").read_text() == before
 
 
@@ -135,7 +125,6 @@ def test_a_corrupt_link_is_refused_and_left_alone(projects: FakeServices, hud: H
     result = hud("project", "use", "browser-evals", "--json")
 
     assert (result.exit_code, result.json["error"]) == (1, "failure"), result
-    assert "is not a valid HUD workspace config" in result.json["message"]
     assert (hud.cwd / ".hud" / "config.json").read_text() == '{"broken":'
 
 

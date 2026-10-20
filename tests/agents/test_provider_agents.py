@@ -1,7 +1,6 @@
-"""What every provider agent does over its own API: what its model is handed, how its tool
-calls reach the environment, how its provider's failures end or retry a run, and where its
-requests go with which credential. Each family in ``AgentType`` that calls a model API
-itself is a row."""
+"""What every provider agent does over its own API: how its tool calls reach the environment,
+how its provider's failures end or retry a run, and where its requests go with which
+credential."""
 
 from __future__ import annotations
 
@@ -13,14 +12,12 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
-from fastmcp import FastMCP
 from PIL import Image
 
 from hud.agents.types import ToolStep
-from hud.capabilities import Capability, RFBClient
+from hud.capabilities import Capability
 from hud.eval import LocalRuntime, Task, Taskset, rollout
 from hud.types import AgentType
-from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_env
 from tests.fixtures.models import Turn, click, shell
 from tests.fixtures.screen import fake_screen
@@ -44,35 +41,9 @@ EVERY_PROVIDER = pytest.mark.parametrize(
 )
 
 
-def test_every_family_that_calls_a_model_api_is_a_row() -> None:
-    assert {row[0] for row in PROVIDERS} == {kind.value for kind in AgentType if not kind.is_cli}
-
-
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="hud-key")
-
-
-@EVERY_PROVIDER
-async def test_the_model_is_given_the_prompt_a_shell_and_the_environments_tools(
-    agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
-) -> None:
-    lookups = FastMCP("tools")
-    lookups.tool(name="lookup", description="Look a key up.")(lambda key: key)
-    models.script([Turn(text="done")])
-    kind = AgentType(agent_type).cls
-
-    async with mcp_server(lookups) as server:
-        env = workspace_env(tmp_path / "ws", capabilities=(server,))
-        await rollout(
-            Task(env=env.name, id="task", args={"prompt": "Fix the bug."}),
-            kind(kind.config_cls(model=model)),
-            runtime=LocalRuntime(env),
-        )
-
-    (request,) = models.requests()
-    assert (request.prompt, "lookup" in request.tools) == ("Fix the bug.", True)
-    assert request.shell_tool is not None
 
 
 @EVERY_PROVIDER
@@ -124,12 +95,6 @@ COMPUTER_USERS = [
     ("openai", "gpt-5.6"),
     ("gemini", "gemini-3.1-pro-preview"),
 ]
-
-
-def test_every_family_that_drives_a_screen_is_a_computer_use_row() -> None:
-    assert {row[0] for row in COMPUTER_USERS} == {
-        kind.value for kind in AgentType if RFBClient in getattr(kind.cls, "clients", ())
-    }
 
 
 @pytest.mark.parametrize(

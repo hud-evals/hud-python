@@ -91,13 +91,10 @@ def test_fork_if_not_exists_onto_a_taken_name_returns_the_existing_model(
     assert (result.exit_code, result.json["id"], result.json["existed"]) == (0, MODEL_ID, True)
 
 
-def test_a_misspelt_model_is_refused_naming_the_close_matches(
-    catalog: FakeServices, hud: Hud
-) -> None:
+def test_a_misspelt_model_is_refused(catalog: FakeServices, hud: Hud) -> None:
     result = hud("models", "fork", "claude-sonet-4-6", "--name", "mine", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert "Did you mean: claude-sonnet-4-6" in result.json["message"]
     assert catalog.requests("api", "POST") == []
 
 

@@ -1,9 +1,10 @@
 """Stand-ins for the ``claude`` and ``codex`` executables a CLI agent launches.
 
 Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
-files), runs the commands it is told to, prints the JSONL stream the real CLI would, and
-exits as told. :func:`answer`, :func:`shell`, :func:`fault` and :func:`prompt` speak
-either CLI's stream by its executable name.
+files), runs the commands it is told to, sends one model request where its configuration
+points (``provider`` standing in for the CLI's built-in endpoint), prints the JSONL stream
+the real CLI would, and exits as told. :func:`answer`, :func:`shell`, :func:`fault` and
+:func:`prompt` speak either CLI's stream by its executable name.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 AGENT_VARIABLES = ("ANTHROPIC_", "CLAUDE_", "CODEX_", "DISABLE_", "HUD_", "IS_SANDBOX")
 
 STUB = """#!{python}
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, time, tomllib, urllib.request
 
 behavior = json.load(open({behavior!r}))
 record = {{
@@ -78,8 +79,37 @@ def drive_computer(server, actions):
     return results
 
 
+def call_model(provider):
+    headers = {{"content-type": "application/json"}}
+    if {name!r} == "claude":
+        url = (os.environ.get("ANTHROPIC_BASE_URL") or provider) + "/v1/messages"
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            headers["x-api-key"] = os.environ["ANTHROPIC_API_KEY"]
+        if os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            headers["authorization"] = "Bearer " + os.environ["ANTHROPIC_AUTH_TOKEN"]
+        for line in os.environ.get("ANTHROPIC_CUSTOM_HEADERS", "").splitlines():
+            header, _, value = line.partition(":")
+            headers[header.strip()] = value.strip()
+        body = {{"model": os.environ["ANTHROPIC_MODEL"], "max_tokens": 1,
+                 "messages": [{{"role": "user", "content": "hi"}}]}}
+    else:
+        argv = sys.argv[1:]
+        config = tomllib.loads("\\n".join(v for flag, v in zip(argv, argv[1:]) if flag == "-c"))
+        chosen = config.get("model_providers", {{}}).get(config.get("model_provider"), {{}})
+        url = chosen.get("base_url", provider) + "/responses"
+        if key := os.environ.get(chosen.get("env_key", "CODEX_API_KEY")):
+            headers["authorization"] = "Bearer " + key
+        headers.update(chosen.get("http_headers", {{}}))
+        body = {{"model": argv[argv.index("--model") + 1], "input": "hi"}}
+    request = urllib.request.Request(url, json.dumps(body).encode(), headers)
+    urllib.request.urlopen(request).read()
+
+
 for command in behavior["commands"]:
     subprocess.run(command, shell=True, check=True)
+
+if behavior.get("provider"):
+    call_model(behavior["provider"])
 
 if behavior.get("computer"):
     servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
@@ -108,6 +138,7 @@ class Stub:
     stderr: str = ""
     exit: int = 0
     hang: bool = False
+    provider: str = ""
     commands: list[str] = field(default_factory=list[str])
     computer: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
@@ -133,6 +164,7 @@ class Stub:
                     "stderr": self.stderr,
                     "exit": self.exit,
                     "hang": self.hang,
+                    "provider": self.provider,
                     "commands": self.commands,
                     "computer": self.computer,
                 }
@@ -143,6 +175,7 @@ class Stub:
             STUB.format(
                 python=sys.executable,
                 behavior=str(behavior),
+                name=self.name,
                 prefixes=AGENT_VARIABLES,
                 captures=str(self.captures_dir),
             )

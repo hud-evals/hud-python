@@ -182,27 +182,36 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
 
 
 @pytest.mark.parametrize(
-    ("files", "argv", "planned"),
+    ("source", "argv", "name"),
     [
-        ({"env.py": 'env = Environment("my-env")\n'}, [], {"name": "my-env"}),
+        ('env = Environment("my-env")\n', [], "my-env"),
         (
-            {"env.py": 'actor = Environment("workspace")\nverifier = Environment("judge")\n'},
+            'actor = Environment("workspace")\nverifier = Environment("judge")\n',
             ["--name", "judge"],
-            {"name": "judge"},
+            "judge",
         ),
-        ({".env": "SECRET=hidden"}, [], {"name": "example", "dotenv_pending": True}),
     ],
-    ids=["declared", "chosen-among-several", "a-dotenv-beside-it-is-asked-about"],
+    ids=["declared", "chosen-among-several"],
 )
-def test_a_dry_run_plans_the_environment_it_would_deploy(
-    files: dict[str, str], argv: list[str], planned: dict[str, Any], builds: FakeServices, hud: Hud
+def test_deploy_builds_the_environment_its_source_names(
+    source: str, argv: list[str], name: str, builds: FakeServices, hud: Hud
 ) -> None:
-    write_files(hud.cwd, files)
+    write_files(hud.cwd, {"env.py": source})
 
-    result = hud("deploy", *argv, "--dry-run", "--json")
+    result = hud("deploy", *argv, "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert {key: result.json[key] for key in planned} == planned
+    assert triggered(builds)["name"] == name
+
+
+def test_a_dry_run_asks_about_a_dotenv_beside_the_environment(
+    builds: FakeServices, hud: Hud
+) -> None:
+    write_files(hud.cwd, {".env": "SECRET=hidden"})
+
+    result = hud("deploy", "--dry-run", "--json")
+
+    assert (result.exit_code, result.json["dotenv_pending"]) == (0, True), result
     assert builds.requests("api", "POST") == []
 
 
@@ -214,7 +223,7 @@ def test_a_dry_run_plans_the_environment_it_would_deploy(
             {"status": "FAILED", "error_message": "pip install failed"},
             [{"type": "error", "error": "Step 2 failed"}],
             1,
-            "Build error: Step 2 failed",
+            "Step 2 failed",
         ),
     ],
     ids=["a-build-that-succeeds-streams-its-log", "a-build-that-fails"],

@@ -1,5 +1,5 @@
-"""What the provider agents' shared tool loop decides: what the model is told when a call
-cannot run, when a run stops, how long a tool may take, and how MCP tools are named.
+"""What the provider agents' shared tool loop decides: how a call that cannot run fails,
+when a run stops, how long a tool may take, and how MCP tools are named.
 
 The loop is one implementation every provider agent runs, so each rule is checked once,
 on the chat completions agent; what each provider does differently is
@@ -8,7 +8,6 @@ on the chat completions agent; what each provider does differently is
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import replace
@@ -17,9 +16,10 @@ from urllib.parse import urlsplit
 
 import pytest
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 from hud.agents import ClaudeAgent, OpenAIChatAgent
-from hud.agents.types import ClaudeConfig, OpenAIChatConfig
+from hud.agents.types import ClaudeConfig, OpenAIChatConfig, ToolStep
 from hud.eval import LocalRuntime, Task, rollout
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_env
@@ -61,7 +61,7 @@ def failing_tools() -> FastMCP:
         ),
     ],
 )
-async def test_a_call_that_cannot_run_is_told_to_the_model_and_the_run_goes_on(
+async def test_a_call_that_cannot_run_fails_its_tool_step_and_the_run_goes_on(
     turn: Turn, told: str, models: Models, tmp_path: Path
 ) -> None:
     models.script([turn, Turn(text="done")])
@@ -74,8 +74,11 @@ async def test_a_call_that_cannot_run_is_told_to_the_model_and_the_run_goes_on(
             runtime=LocalRuntime(env),
         )
 
-    assert (run.trace.status, run.trace.content) == ("completed", "done")
-    assert told in json.dumps(models.requests()[-1].body)
+    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert step.result is not None
+    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
+    assert (run.trace.status, run.trace.content, step.result.isError) == ("completed", "done", True)
+    assert told in text
 
 
 CUT_OFF = Turn(
@@ -256,8 +259,11 @@ async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on
     )
     await asyncio.sleep(3)
 
-    assert run.trace.status == "completed"
-    assert "timed out after 1s" in json.dumps(models.requests()[1].body)
+    cut, quick = [step.result for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert cut is not None and quick is not None
+    (text,) = [block.text for block in cut.content if isinstance(block, TextContent)]
+    assert (run.trace.status, cut.isError, quick.isError) == ("completed", True, False)
+    assert "timed out after 1s" in text
     assert ((root / "late").exists(), (root / "quick").exists()) == (False, True)
 
 
@@ -272,8 +278,10 @@ async def test_an_mcp_tool_is_left_to_its_own_time(models: Models, tmp_path: Pat
             runtime=LocalRuntime(env),
         )
 
-    assert run.trace.status == "completed"
-    assert "waited" in json.dumps(models.requests()[-1].body)
+    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert step.result is not None
+    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
+    assert (run.trace.status, step.result.isError, text) == ("completed", False, "waited")
 
 
 async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeout(
@@ -297,10 +305,11 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
         runtime=LocalRuntime(env),
     )
 
-    assert run.trace.status == "completed"
-    assert "str_replace_based_edit_tool timed out after 1s" in json.dumps(
-        models.requests()[-1].body
-    )
+    *_, edited = [step.result for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert edited is not None
+    (text,) = [block.text for block in edited.content if isinstance(block, TextContent)]
+    assert (run.trace.status, edited.isError) == ("completed", True)
+    assert "str_replace_based_edit_tool timed out after 1s" in text
 
 
 # ─── MCP tool names ────────────────────────────────────────────────────

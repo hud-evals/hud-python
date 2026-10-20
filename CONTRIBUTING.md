@@ -42,19 +42,11 @@ uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks; CI checks th
 
 ### Writing Tests
 
-Tests are black-box: they drive the SDK through a public boundary and fake only
-what lies outside it.
-
-- `tests/fixtures`: what tests run and run against: fixture environments, an agent
-  with fixed answers, and stand-ins for services CI cannot reach (HUD services, model
-  providers and the `claude` and `codex` CLIs, a browser, a VNC screen, a flaky
-  network relay).
-- A helper only one subsystem uses lives in that subsystem's `conftest.py`.
-- `tests/conftest.py`: the user's machine and the fixtures that wire everything in:
-  `hud_env` (configuration),
-  `services` (the HUD services: a test routes the replies it needs and reads back
-  the requests it got), `reporting` (services that accept job and trace reports),
-  `models` (scripted providers) and `hud` (the CLI in a subprocess).
+Write a test only when it would catch a break a user would notice. Drive the SDK
+as a user does and assert what they see: reward, status, errors, files, exit
+codes. Fake only what CI cannot run; the fakes and fixture environments live in
+`tests/fixtures`, and `tests/conftest.py` wires them in (`services`, `models`,
+`hud`, `hud_env`).
 
 ```python
 env = Environment("echo")
@@ -72,28 +64,6 @@ async def test_a_graded_rollout_reports_its_reward(reporting):
     (exited,) = reporting.bodies("api", "POST", "/v2/trace/{id}/exit")
     assert (job.reward, exited["reward"]) == (1.0, 1.0)
 ```
-
-Test directories follow the SDK's subsystems (`environment`, `clients`, `eval`,
-`agents`, `telemetry`, `cli`, ...), and each file holds the contracts of one owner.
-When a contract has several implementations (runtimes, agent families, commands,
-capability clients), they are rows of one table, and a completeness test fails
-when an implementation has no row.
-
-Rules, enforced by `scripts/check_tests.py` and in review:
-
-- Never patch a `hud` name, import a private one, or touch a private attribute.
-- Never hand-build what a producer emits; run the producer.
-- Write one scenario per contract as a table, and add a row for a new case or a
-  new implementation. Test the contract once, at the outermost boundary where it
-  is observable.
-- Keep a test for one implementation only for behavior no other implementation
-  has, such as a provider's wire translation.
-- Write no unit tests. A test drives a scenario (a command, a rollout, a served
-  environment, a wire peer) and checks what it left behind, never what a
-  function returns.
-- Assert the fields a case is about, not a recorded copy of a whole output: no
-  snapshots of argv, request bodies or rendered text.
-- Do not commit a test to check your own change; use a temporary script.
 
 ### Code Quality
 

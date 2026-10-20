@@ -120,9 +120,8 @@ async def test_bindings_that_are_not_objects_fail_the_start() -> None:
 
     (run,) = job.runs
     assert (run.trace.status, run.prompt) == ("error", None)
-    assert (run.trace.error or "").startswith(
-        "[starting task] TypeError: task start frame 'bindings' must map capability name -> object"
-    )
+    assert (run.trace.error or "").startswith("[starting task] ")
+    assert "'bindings'" in (run.trace.error or "")
 
 
 @pytest.mark.e2e
@@ -178,7 +177,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             0.0,
             None,
             "error",
-            "result must include a numeric 'score'",
+            "'score'",
             id="a-boolean-score",
         ),
         pytest.param(
@@ -186,7 +185,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             0.0,
             None,
             "error",
-            "graded with a dict missing a numeric 'score' (keys: ['done'])",
+            "'score'",
             id="a-frame-without-a-score",
         ),
         pytest.param(
@@ -194,7 +193,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             0.0,
             None,
             "error",
-            "task graded with str",
+            "str",
             id="neither",
         ),
     ],
@@ -234,9 +233,8 @@ async def test_a_grade_breakdown_reaches_the_evaluation_without_its_grader_detai
 
     job = await grade_it().run(ScriptedAgent("x"))
 
-    assert job.runs[0].evaluation["subscores"] == [
-        {"name": "tests", "weight": 1.0, "value": 0.5, "children": None}
-    ]
+    (subscore,) = job.runs[0].evaluation["subscores"]
+    assert (subscore["name"], subscore["value"], "info" in subscore) == ("tests", 0.5, False)
 
 
 async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() -> None:
@@ -254,12 +252,9 @@ async def test_an_agent_that_raises_before_answering_is_graded_on_no_answer() ->
     job = await check().run(Raises())
 
     (run,) = job.runs
-    assert (run.reward, run.trace.status, run.trace.error, job.errors) == (
-        0.0,
-        "error",
-        "[agent loop] RuntimeError: agent exploded",
-        [],
-    )
+    assert (run.reward, run.trace.status, job.errors) == (0.0, "error", [])
+    assert (run.trace.error or "").startswith("[agent loop] ")
+    assert "agent exploded" in (run.trace.error or "")
 
 
 async def test_an_agent_that_raises_after_answering_keeps_its_grade() -> None:
@@ -278,12 +273,9 @@ async def test_an_agent_that_raises_after_answering_keeps_its_grade() -> None:
     job = await check().run(RaisesAfter())
 
     (run,) = job.runs
-    assert (run.reward, run.trace.status, run.trace.error, job.reward) == (
-        1.0,
-        "error",
-        "[agent loop] RuntimeError: agent exploded",
-        1.0,
-    )
+    assert (run.reward, run.trace.status, job.reward) == (1.0, "error", 1.0)
+    assert (run.trace.error or "").startswith("[agent loop] ")
+    assert "agent exploded" in (run.trace.error or "")
 
 
 @pytest.mark.parametrize(
@@ -312,12 +304,8 @@ async def test_the_agent_timeout_stops_the_agent_and_still_grades(
     job = await task.run(AnswersThenWaits(AgentConfig(timeout_seconds=agent_timeout)))
 
     (run,) = job.runs
-    assert (run.reward, run.trace.status, run.trace.stop_reason, run.trace.error) == (
-        1.0,
-        "error",
-        "timeout",
-        "agent timed out after 0.3s",
-    )
+    assert (run.reward, run.trace.status, run.trace.stop_reason) == (1.0, "error", "timeout")
+    assert "agent timed out" in (run.trace.error or "")
 
 
 async def test_a_timeout_the_agent_raises_itself_is_an_ordinary_failure() -> None:
@@ -336,11 +324,9 @@ async def test_a_timeout_the_agent_raises_itself_is_an_ordinary_failure() -> Non
     job = await check().run(ProviderTimesOut(AgentConfig(timeout_seconds=30)))
 
     (run,) = job.runs
-    assert (run.reward, run.trace.stop_reason, run.trace.error) == (
-        1.0,
-        None,
-        "[agent loop] TimeoutError: provider timed out",
-    )
+    assert (run.reward, run.trace.stop_reason) == (1.0, None)
+    assert (run.trace.error or "").startswith("[agent loop] ")
+    assert "provider timed out" in (run.trace.error or "")
 
 
 async def test_a_task_whose_start_raises_fails_before_the_agent_is_prompted() -> None:
@@ -522,12 +508,8 @@ async def test_the_rollout_timeout_ends_a_run_still_being_provisioned() -> None:
     job = await task.run(ScriptedAgent("yes"), runtime=never_ready, rollout_timeout=0.3)
 
     (run,) = job.runs
-    assert (run.trace.status, run.trace.stop_reason, run.trace.error, run.runtime) == (
-        "error",
-        "timeout",
-        "rollout timed out after 0.3s during provisioning",
-        None,
-    )
+    assert (run.trace.status, run.trace.stop_reason, run.runtime) == ("error", "timeout", None)
+    assert "during provisioning" in (run.trace.error or "")
 
 
 async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_finish() -> None:
@@ -552,11 +534,8 @@ async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_f
     release.set()
 
     (run,) = job.runs
-    assert (run.reward, run.trace.stop_reason, run.trace.error) == (
-        1.0,
-        "timeout",
-        "rollout timed out after 0.3s during actor cleanup",
-    )
+    assert (run.reward, run.trace.stop_reason) == (1.0, "timeout")
+    assert "during actor cleanup" in (run.trace.error or "")
     await eventually(lambda: events == ["torn down"])
 
 

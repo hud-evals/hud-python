@@ -629,47 +629,55 @@ async def test_overlapping_verifier_runs_keep_their_own_policies_and_credentials
     assert not route_left_open
 
 
+PROXIED_STATUSES = """
+import base64, http.client, os, sys, urllib.parse
+
+proxy = urllib.parse.urlsplit(os.environ["http_proxy"])
+headers = {}
+if proxy.username:
+    credential = f"{proxy.username}:{urllib.parse.unquote(proxy.password)}"
+    headers["Proxy-Authorization"] = "Basic " + base64.b64encode(credential.encode()).decode()
+
+def status(host):
+    connection = http.client.HTTPConnection("127.0.0.1", proxy.port, timeout=5)
+    connection.request("GET", f"http://{host}/", headers=headers)
+    return str(connection.getresponse().status)
+
+print(" ".join(status(host) for host in sys.argv[1:]))
+"""
+
+
 @pytest.mark.e2e
 @pytest.mark.sandbox
 @pytest.mark.parametrize(
-    ("options", "allowed", "expected"),
+    ("options", "allowed"),
     [
         pytest.param(
-            {"allowed_hosts": {"pypi.org"}},
-            None,
-            {"https_proxy": "http://127.0.0.1:3128"},
-            id="no-policy-of-its-own-uses-the-sessions-proxy",
+            {"allowed_hosts": {"pypi.org"}}, None, id="no-policy-of-its-own-uses-the-sessions"
         ),
         pytest.param(
-            {"allowed_hosts": {"pypi.org"}},
-            {"pypi.org"},
-            {"https_proxy": "http://127.0.0.1:3128"},
-            id="the-sessions-policy-uses-the-sessions-proxy",
+            {"allowed_hosts": {"pypi.org"}}, {"pypi.org"}, id="the-sessions-policy-is-its-own"
         ),
         pytest.param(
             {"peers": [Peer("db", 5432)], "ports": [5432]},
             {"pypi.org"},
-            {"https_proxy": "@127.0.0.1:3129", "NO_PROXY": "db,127.0.0.2"},
             id="a-policy-of-its-own-gets-the-visitor-route",
         ),
     ],
 )
-async def test_a_verifier_run_is_pointed_at_the_proxy_for_its_policy(
-    tmp_path: Path, options: dict[str, Any], allowed: set[str] | None, expected: dict[str, str]
+async def test_a_verifier_run_is_held_to_the_policy_it_runs_under(
+    tmp_path: Path, options: dict[str, Any], allowed: set[str] | None
 ) -> None:
     async with shell(tmp_path / "root", require_isolation=True, **options) as (workspace, _):
-        result = await workspace.run(["env"], allowed_hosts=allowed, identity=None)
-    environment = parsed(result.stdout)
+        result = await workspace.run(
+            ["python3", "-c", PROXIED_STATUSES, "pypi.org", "example.com"],
+            allowed_hosts=allowed,
+            identity=None,
+        )
 
-    for name, value in expected.items():
-        if name == "https_proxy":
-            assert environment[name].endswith(value)
-        else:
-            assert set(value.split(",")) <= set(environment[name].split(","))
-
-
-def parsed(output: bytes) -> dict[str, str]:
-    return dict(line.split("=", 1) for line in output.decode().splitlines() if "=" in line)
+    permitted, refused = result.stdout.decode().split()
+    assert permitted != "403"
+    assert refused == "403"
 
 
 @contextmanager

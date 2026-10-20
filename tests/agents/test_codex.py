@@ -5,7 +5,6 @@ live lane."""
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -17,6 +16,7 @@ from hud.environment.egress import ANY_HOST
 from hud.eval import LocalRuntime, Task, rollout
 from tests.fixtures import clis
 from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,12 +31,12 @@ def signed_in(hud_env: HudEnv) -> None:
 
 
 @pytest.mark.parametrize(
-    ("variables", "gateway", "via_gateway", "credential"),
+    ("variables", "gateway", "route", "credential"),
     [
-        ({"OPENAI_API_KEY": "own-key"}, False, False, "own-key"),
-        ({}, False, True, "hud-key"),
-        ({"OPENAI_API_KEY": "own-key"}, True, True, "hud-key"),
-        ({"HUD_API_KEY": None}, False, False, None),
+        ({"OPENAI_API_KEY": "own-key"}, False, "provider", "own-key"),
+        ({}, False, "gateway", "hud-key"),
+        ({"OPENAI_API_KEY": "own-key"}, True, "gateway", "hud-key"),
+        ({"HUD_API_KEY": None}, False, "provider", ""),
     ],
     ids=[
         "its-own-key",
@@ -45,36 +45,34 @@ def signed_in(hud_env: HudEnv) -> None:
         "no-key-leaves-its-own-login",
     ],
 )
-async def test_codex_is_pointed_at_the_gateway_over_responses_unless_it_has_its_own_key(
+async def test_codex_calls_the_gateway_over_responses_unless_it_has_its_own_key(
     variables: dict[str, str | None],
     gateway: bool,
-    via_gateway: bool,
-    credential: str | None,
+    route: str,
+    credential: str,
     models: Models,
+    provider: Models,
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
     hud_env.set(**variables)
-    stub = clis.Stub(tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"))
+    models.script([Turn(text="done")])
+    provider.script([Turn(text="done")])
+    stub = clis.Stub(
+        tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"), provider=provider.url
+    )
     stub.install()
 
     env = workspace_env(tmp_path / "ws", env=stub.shell_env())
-    await rollout(
+    run = await rollout(
         Task(env=env.name, id="task"),
         CodexCLIAgent(CodexCLIConfig(gateway=gateway)),
         runtime=LocalRuntime(env),
     )
 
-    (capture,) = stub.captures()
-    argv = capture["argv"]
-    settings = dict(argv[index + 1].split("=", 1) for index, arg in enumerate(argv) if arg == "-c")
-    key = json.loads(settings.get("model_providers.hud.env_key", '"CODEX_API_KEY"'))
-    assert settings.get("model_providers.hud.base_url") == (
-        json.dumps(models.url) if via_gateway else None
-    )
-    assert settings.get("model_providers.hud.wire_api") == ('"responses"' if via_gateway else None)
-    assert capture["env"].get(key) == credential
-    assert ('"Trace-Id"=' in settings.get("model_providers.hud.http_headers", "")) is via_gateway
+    (request,) = {"gateway": models, "provider": provider}[route].requests()
+    assert (run.trace.status, request.credential) == ("completed", credential)
+    assert ("trace-id" in request.headers) is (route == "gateway")
 
 
 @pytest.mark.parametrize(

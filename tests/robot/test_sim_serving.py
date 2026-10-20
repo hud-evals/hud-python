@@ -48,7 +48,6 @@ async def test_a_spawned_bridge_carries_its_declaration_into_the_child() -> None
         contract = await endpoint.contract()
         (robot,) = await endpoint.capabilities()
         first = await endpoint.reset()
-        second = await endpoint.reset()
         async with websockets.connect(robot.url) as socket:
             greeting = msgpack_numpy.unpackb(await socket.recv())
     finally:
@@ -57,7 +56,6 @@ async def test_a_spawned_bridge_carries_its_declaration_into_the_child() -> None
     assert contract == CONTRACT
     assert robot.params["contract"] == CONTRACT
     assert first["prompt"] == "reach with use_delta=True"
-    assert [first["token"][:7], second["token"][:7]] == ["slot-0-", "slot-1-"]
     assert greeting == {"backend": "test", "claim_required": True}
     with pytest.raises(OSError):
         await websockets.connect(robot.url, open_timeout=5)

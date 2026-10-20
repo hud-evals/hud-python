@@ -63,9 +63,7 @@ async def test_a_platform_taskset_runs_over_the_tunnel_and_releases_its_session(
     assert {
         (tunnel.params["id"], tunnel.bearer) for tunnel in services.requests("runtime", "WS")
     } == {("sess-1", "k")}
-    assert [request.path for request in services.requests("runtime", "DELETE")] == [
-        "/runtime/sessions/sess-1"
-    ]
+    assert len(services.requests("runtime", "DELETE", SESSION)) == 1
 
 
 async def test_runtime_url_points_the_tunnel_at_another_runtime_service(
@@ -131,7 +129,8 @@ async def test_a_tunnel_that_keeps_dropping_ends_at_the_deadline_and_releases_th
         ScriptedAgent("yes"), runtime=HUDRuntime(), rollout_timeout=0.5
     )
 
-    assert job.runs[0].trace.error == "rollout timed out after 0.5s during starting task"
+    assert job.runs[0].trace.stop_reason == "timeout"
+    assert "during starting task" in (job.runs[0].trace.error or "")
     await eventually(lambda: len(services.requests("runtime", "DELETE", SESSION)) == 1)
 
 
@@ -171,20 +170,19 @@ async def test_requirements_the_deployed_env_cannot_meet_fail_the_run_before_a_s
 
     job = await row.run(ScriptedAgent("yes"), runtime=HUDRuntime())
 
-    assert (job.runs[0].trace.error or "").startswith(
-        "[provisioning] ValueError: HUDRuntime cannot honor this task's declared placement "
-        "requirements or limits"
-    )
-    assert services.requests() == []
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt, services.requests()) == ("error", None, [])
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "cannot honor" in (run.trace.error or "")
 
 
 async def test_the_tunnel_needs_a_hud_api_key(services: FakeServices) -> None:
     job = await Task(env="checked", id="check").run(ScriptedAgent("yes"), runtime=HUDRuntime())
 
-    assert job.runs[0].trace.error == (
-        "[provisioning] RuntimeError: HUD runtime tunnel requires HUD_API_KEY"
-    )
-    assert services.requests() == []
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt, services.requests()) == ("error", None, [])
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "HUD_API_KEY" in (run.trace.error or "")
 
 
 async def test_the_deprecated_run_timeout_still_ends_a_tunneled_run(
@@ -206,7 +204,5 @@ async def test_the_deprecated_run_timeout_still_ends_a_tunneled_run(
         job = await row.run(Waits(), runtime=runtime)
         await eventually(lambda: len(services.requests("runtime", "DELETE", SESSION)) == 1)
 
-    assert (job.runs[0].trace.stop_reason, job.runs[0].trace.error) == (
-        "timeout",
-        "rollout timed out after 0.5s during agent loop",
-    )
+    assert job.runs[0].trace.stop_reason == "timeout"
+    assert "during agent loop" in (job.runs[0].trace.error or "")

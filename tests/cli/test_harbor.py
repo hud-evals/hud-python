@@ -17,11 +17,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.conftest import Hud
-    from tests.fixtures.services import FakeServices
+    from tests.fixtures.services import FakeServices, Request
 
 IMPORT_ID = "66666666-6666-4666-8666-666666666666"
 FILE_ID = "ffffffff-0000-4000-8000-000000000001"
 TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
+OTHER_TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000002"
 REPORT = {
     "schema_version": "harbor_import_report.v5",
     "taskset_id": TASKSET_ID,
@@ -305,10 +306,24 @@ def test_imports_lists_a_tasksets_harbor_imports(signed_in: FakeServices, hud: H
     signed_in.route(
         "api", "GET", f"/v2/tasksets/{TASKSET_ID}", json={"id": TASKSET_ID, "name": "tb2"}
     )
-    signed_in.route("api", "GET", "/v2/imports", json={"imports": [record("running")], "total": 1})
+    imports = [
+        record("running"),
+        {**record("running"), "id": f"{IMPORT_ID[:-1]}7", "taskset_id": OTHER_TASKSET_ID},
+        {**record("running", format="parquet"), "id": f"{IMPORT_ID[:-1]}8"},
+    ]
+
+    def filtered(request: Request) -> Reply:
+        matching = [
+            item
+            for item in imports
+            if [item["format"]] == request.query.get("format", [item["format"]])
+            and [item["taskset_id"]] == request.query.get("taskset_id", [item["taskset_id"]])
+        ]
+        return Reply(json={"imports": matching, "total": len(matching)})
+
+    signed_in.route("api", "GET", "/v2/imports", handler=filtered)
 
     listed = hud("harbor", "imports", "--taskset", "tb2", "--json")
 
     assert listed.exit_code == 0, listed
-    query = signed_in.requests("api", "GET", "/v2/imports")[0].query
-    assert (query["format"], query["taskset_id"]) == (["harbor"], [TASKSET_ID])
+    assert [item["id"] for item in listed.json["imports"]] == [IMPORT_ID]

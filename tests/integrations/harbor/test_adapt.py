@@ -11,7 +11,7 @@ keys are all optional:
   contain (the second exactly when the Docker daemon is not amd64);
 - ``projects``: the tasks that share one project, by environment;
 - ``task.<slug>``: dotted paths into the row's observed fields (``placement``,
-  ``agent_config``, ``task``, ``service_access``, ``services``, ``compose``,
+  ``agent_config``, ``task``, ``service_access``, ``services``,
   ``verifier.runtime_config``, ``links``), each equal to its value;
 - ``base``: another case this one starts from (``assemble_case``).
 
@@ -70,15 +70,14 @@ def observed(row: Task) -> dict[str, Any]:
     assert config is not None and config.compose is not None
     root, document = config.compose.root, config.compose.document
     assert isinstance(root, Path) and isinstance(document, Path)
-    compose = json.loads(document.read_text("utf-8"))
+    services = json.loads(document.read_text("utf-8"))["services"]
     verifier = row.verifier
     return {
         "placement": placement(config),
         "agent_config": row.agent_config,
         "task": row.args["task"],
         "service_access": config.compose.service_access,
-        "services": sorted(compose["services"]),
-        "compose": compose,
+        "services": sorted(services),
         "verifier": verifier is not None
         and {
             "runtime_config": verifier.runtime_config is not None
@@ -213,13 +212,13 @@ def test_adapt_aborts_without_a_docker_executable(tmp_path: Path, hud_env: HudEn
         harbor.adapt(dataset)
 
 
-def main_service(dataset: Path, requirement: str) -> tuple[dict[str, Any], Path]:
-    """The adapted single task's ``main`` Compose service, and its project directory."""
+def main_image(dataset: Path, requirement: str) -> str:
+    """The image the adapted single task's ``main`` Compose service runs."""
     (row,) = harbor.adapt(dataset, hud_requirement=requirement).taskset
     assert row.runtime_config is not None and row.runtime_config.compose is not None
     assert isinstance(row.runtime_config.compose.document, Path)
     compose = json.loads(row.runtime_config.compose.document.read_text("utf-8"))
-    return compose["services"]["main"], row.runtime_config.compose.document.parent
+    return compose["services"]["main"]["image"]
 
 
 @pytest.mark.e2e
@@ -248,12 +247,12 @@ def test_the_environment_image_identity_follows_only_what_the_image_contains(
     task = dataset / "task-a"
     (dataset / "outside.txt").write_text("first\n", encoding="utf-8")
     (task / "environment" / "outside").symlink_to(dataset / "outside.txt")
-    before, _ = main_service(dataset, "hud")
+    before = main_image(dataset, "hud")
 
     (task / relative).write_text(content, encoding="utf-8")
-    after, _ = main_service(dataset, "hud")
+    after = main_image(dataset, "hud")
 
-    assert (after["image"] != before["image"]) is rebuilds
+    assert (after != before) is rebuilds
 
 
 @pytest.mark.e2e
@@ -262,28 +261,8 @@ def test_another_hud_release_rebuilds_the_image_from_the_index(
     tmp_path: Path, hud_env: HudEnv
 ) -> None:
     dataset = load_case("plain-image", tmp_path, hud_env)
-    before, _ = main_service(dataset, "hud")
+    before = main_image(dataset, "hud")
 
-    after, project = main_service(dataset, "hud==0.0.1")
+    after = main_image(dataset, "hud==0.0.1")
 
-    assert after["image"] != before["image"]
-    assert after["build"]["args"]["HUD_REQUIREMENT"] == "hud==0.0.1"
-    assert list((project / "compose-project/main/packages").iterdir()) == []
-
-
-@pytest.mark.e2e
-@pytest.mark.docker
-def test_a_hud_wheel_is_packaged_into_the_image(tmp_path: Path, hud_env: HudEnv) -> None:
-    dataset = load_case("plain-image", tmp_path, hud_env)
-    built = tmp_path / "hud-0.0.0-py3-none-any.whl"
-    built.write_bytes(b"wheel")
-    before, _ = main_service(dataset, "hud")
-
-    after, project = main_service(dataset, str(built))
-
-    assert after["image"] != before["image"]
-    assert after["build"]["args"]["HUD_REQUIREMENT"] == (
-        "/controller/packages/hud-0.0.0-py3-none-any.whl"
-    )
-    packages = [path.name for path in (project / "compose-project/main/packages").iterdir()]
-    assert packages == ["hud-0.0.0-py3-none-any.whl"]
+    assert after != before

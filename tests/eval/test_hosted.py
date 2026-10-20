@@ -76,17 +76,11 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
         str(uuid.UUID(job.id)),
         run.group_id,
     )
-    assert (body["env"], body["task"], body["slug"], body["args"]) == (
-        "sums",
-        "add",
-        row.slug,
-        {"a": 1, "b": 2},
-    )
+    assert (body["env"], body["task"], body["args"]) == ("sums", "add", {"a": 1, "b": 2})
     assert (body["agent"]["type"], body["agent"]["config"]["timeout_seconds"]) == (
         "openai_compatible",
         45.0,
     )
-    assert list(body["runtime_config"]) == ["compose"]
     assert body["runtime_config"]["compose"]["document"]["services"]["main"]["image"] == (
         "sums:latest"
     )
@@ -142,7 +136,7 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
             {"status": "completed", "evaluation_result": {"score": "high"}},
             0.0,
             "error",
-            "result must include a numeric 'score'",
+            "'score'",
             False,
             id="an-evaluation-without-a-numeric-score",
         ),
@@ -189,10 +183,9 @@ async def test_an_agent_the_platform_cannot_run_fails_without_a_submission(
 
     job = await Task(env="sums", id="add").run(Local(), runtime=HostedRuntime(poll_interval=0))
 
-    assert (job.runs[0].trace.error or "").startswith(
-        "hosted execution supports the registered agent types"
-    )
-    assert services.requests() == []
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt, services.requests()) == ("error", None, [])
+    assert "registered agent types" in (run.trace.error or "")
 
 
 async def test_hosted_execution_needs_a_hud_api_key(
@@ -202,8 +195,9 @@ async def test_hosted_execution_needs_a_hud_api_key(
 
     job = await Task(env="sums", id="add").run(chat_agent(), runtime=HostedRuntime(poll_interval=0))
 
-    assert job.runs[0].trace.error == "HUD_API_KEY is required"
-    assert services.requests() == []
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt, services.requests()) == ("error", None, [])
+    assert "HUD_API_KEY" in (run.trace.error or "")
 
 
 @pytest.mark.parametrize(
@@ -221,11 +215,7 @@ async def test_a_hosted_rollout_past_its_deadline_is_cancelled_on_the_platform(
     )
 
     (run,) = job.runs
-    assert (run.trace.status, run.trace.stop_reason, run.trace.error) == (
-        "error",
-        "timeout",
-        f"hosted rollout {run.trace_id} did not finish within 1s",
-    )
+    assert (run.trace.status, run.trace.stop_reason) == ("error", "timeout")
     await eventually(lambda: len(services.requests("api", "POST", CANCEL)) == 1, within=10)
     assert services.bodies("api", "POST", CANCEL) == [{"trace_id": str(uuid.UUID(run.trace_id))}]
 

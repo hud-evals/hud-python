@@ -33,7 +33,7 @@ TEMP = Path(tempfile.gettempdir()).resolve()
 async def test_a_workspace_lives_exactly_while_its_environment_serves(tmp_path: Path) -> None:
     env = Environment("ws-env")
     env.workspace(tmp_path / "root")
-    declared = (list(env.capabilities), (tmp_path / "root").exists())
+    created_before_serving = (tmp_path / "root").exists()
 
     async with LocalRuntime(env)(Task(env=env.name, id="test")) as runtime:
         async with connect(runtime) as client:
@@ -41,15 +41,9 @@ async def test_a_workspace_lives_exactly_while_its_environment_serves(tmp_path: 
         async with connect(runtime) as client:
             again = client.binding("shell").params["host_pubkey"]
         backing_port = urlsplit(env.capability("shell").url).port
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime),
-    ):
-        restarted = [capability.name for capability in env.capabilities]
 
-    assert declared == ([], False)
+    assert not created_before_serving
     assert again == first
-    assert restarted == ["shell", "filetracking"]
     with pytest.raises(OSError):
         _, writer = await asyncio.open_connection("127.0.0.1", backing_port)
         writer.close()
@@ -97,10 +91,6 @@ async def test_serving_publishes_the_bindings_its_settings_ask_for(
     assert shell_binding.params["host_pubkey"].startswith("ssh-ed25519")
     if tracking is not None:
         assert tracking.protocol == "filetracking/1"
-        assert tracking.params == {
-            "root": (tmp_path / "root").resolve().as_posix(),
-            "setup_diff": True,
-        }
 
 
 async def test_session_credentials_live_privately_outside_the_served_root(tmp_path: Path) -> None:

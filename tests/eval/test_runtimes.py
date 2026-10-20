@@ -35,8 +35,7 @@ from hud.eval import (
     SubprocessRuntime,
     Task,
 )
-from hud.eval import runtime as runtime_module
-from tests.conftest import eventually
+from tests.conftest import CLOSED_PORT, eventually
 from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, tunnel
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
@@ -51,11 +50,6 @@ if TYPE_CHECKING:
 
 CONTAINER = pytest.param("DockerRuntime", marks=[pytest.mark.e2e, pytest.mark.docker])
 MODAL = pytest.param("ModalRuntime", marks=[pytest.mark.e2e, pytest.mark.modal])
-#: Runtimes no placement contract runs on, and why.
-NOT_PLACED = {
-    "DaytonaRuntime": "no lane has a Daytona account; its refusals are a table below",
-    "HostedRuntime": "the platform runs the whole rollout; test_hosted holds what it owes",
-}
 EVERY_RUNTIME = [
     "LocalRuntime",
     "SubprocessRuntime",
@@ -65,13 +59,6 @@ EVERY_RUNTIME = [
     CONTAINER,
     MODAL,
 ]
-
-
-def test_every_runtime_hud_exports_is_a_row_or_says_why_not() -> None:
-    exported = {name for name in runtime_module.__all__ if name.endswith("Runtime")} | {"Shared"}
-    rows = {row if isinstance(row, str) else row.values[0] for row in EVERY_RUNTIME}
-
-    assert rows | NOT_PLACED.keys() == exported
 
 
 def gone(pid: int) -> bool:
@@ -290,15 +277,18 @@ async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
 
 @pytest.mark.parametrize("runtime", [LocalRuntime, SubprocessRuntime])
 async def test_a_local_runtime_refuses_a_row_that_asks_for_its_own_runtime(
-    runtime: type[LocalRuntime | SubprocessRuntime],
+    runtime: type[LocalRuntime | SubprocessRuntime], hud_env: HudEnv, tmp_path: Path
 ) -> None:
+    lifecycle = tmp_path / "lifecycle.log"
+    hud_env.set(HUD_FIXTURE_LIFECYCLE=str(lifecycle))
     row = Task(env="echo", id="echo", runtime_config={"image": "lab"})
 
     job = await row.run(ScriptedAgent("x"), runtime=runtime(source("echo")))
 
-    assert job.runs[0].trace.error == (
-        f"[provisioning] ValueError: {runtime.__name__} does not support task runtime_config"
-    )
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt, lifecycle.exists()) == ("error", None, False)
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "runtime_config" in (run.trace.error or "")
 
 
 COMPOSE = {"compose": {"document": "compose.yaml"}}
@@ -389,9 +379,10 @@ async def test_docker_refuses_what_it_cannot_provision_before_running_anything(
     ],
 )
 async def test_modal_refuses_what_it_cannot_provision_before_creating_a_sandbox(
-    runtime_config: dict[str, Any], message: str, tmp_path: Path
+    runtime_config: dict[str, Any], message: str, hud_env: HudEnv, tmp_path: Path
 ) -> None:
     pytest.importorskip("modal", reason="needs the modal extra")
+    hud_env.set(MODAL_SERVER_URL=CLOSED_PORT)
     (tmp_path / ".env").write_text("")
     (tmp_path / "compose.yaml").write_text(SIMPLE)
     row = Task.model_validate(
@@ -401,11 +392,16 @@ async def test_modal_refuses_what_it_cannot_provision_before_creating_a_sandbox(
 
     job = await row.run(ScriptedAgent("x"), runtime=ModalRuntime("hud-lab"))
 
-    assert message in (job.runs[0].trace.error or "")
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert message in (run.trace.error or "")
 
 
-async def test_modal_refuses_sandbox_secrets_for_a_compose_project(tmp_path: Path) -> None:
+async def test_modal_refuses_sandbox_secrets_for_a_compose_project(
+    hud_env: HudEnv, tmp_path: Path
+) -> None:
     modal = pytest.importorskip("modal", reason="needs the modal extra")
+    hud_env.set(MODAL_SERVER_URL=CLOSED_PORT)
     (tmp_path / ".env").write_text("")
     (tmp_path / "compose.yaml").write_text(SIMPLE)
     row = Task.model_validate(
@@ -415,7 +411,9 @@ async def test_modal_refuses_sandbox_secrets_for_a_compose_project(tmp_path: Pat
 
     job = await row.run(ScriptedAgent("x"), runtime=runtime)
 
-    assert "sandbox secrets require an image runtime" in (job.runs[0].trace.error or "")
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert "sandbox secrets" in (run.trace.error or "")
 
 
 @pytest.mark.parametrize(
@@ -456,10 +454,11 @@ async def test_daytona_refuses_what_it_cannot_provision_before_creating_a_sandbo
     runtime_config: dict[str, Any] | None,
     message: str,
     hud_env: HudEnv,
+    services: FakeServices,
     tmp_path: Path,
 ) -> None:
     pytest.importorskip("daytona", reason="needs the daytona extra")
-    hud_env.set(DAYTONA_API_KEY="k", DAYTONA_API_URL="http://127.0.0.1:9")
+    hud_env.set(DAYTONA_API_KEY="k", DAYTONA_API_URL=f"http://127.0.0.1:{services.port}/daytona")
     (tmp_path / ".env").write_text("")
     (tmp_path / "compose.yaml").write_text(SIMPLE)
     row = Task.model_validate(
@@ -469,4 +468,6 @@ async def test_daytona_refuses_what_it_cannot_provision_before_creating_a_sandbo
 
     job = await row.run(ScriptedAgent("x"), runtime=DaytonaRuntime(snapshot))
 
-    assert message in (job.runs[0].trace.error or "")
+    (run,) = job.runs
+    assert (run.trace.status, run.prompt, services.requests("daytona")) == ("error", None, [])
+    assert message in (run.trace.error or "")

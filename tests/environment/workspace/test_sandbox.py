@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.environment import Peer, Workspace
-from hud.environment.workspace import Bubblewrap, usable_bwrap
+from hud.environment.workspace import usable_bwrap
 
 from .conftest import SANDBOX, shell
 
@@ -204,7 +204,7 @@ async def test_concurrent_sessions_share_one_sandbox(tmp_path: Path) -> None:
 @pytest.mark.e2e
 @pytest.mark.sandbox
 @pytest.mark.parametrize(
-    ("allowed_hosts", "network", "owns"),
+    ("allowed_hosts", "network", "own_network"),
     [
         pytest.param({"example.com"}, True, True, id="a-policy-needs-a-network-to-apply-to"),
         pytest.param(set(), True, True, id="declared-unreachable"),
@@ -213,15 +213,14 @@ async def test_concurrent_sessions_share_one_sandbox(tmp_path: Path) -> None:
     ],
 )
 async def test_sessions_get_a_network_of_their_own_exactly_when_the_task_bounds_it(
-    tmp_path: Path, allowed_hosts: set[str] | None, network: bool, owns: bool
+    tmp_path: Path, allowed_hosts: set[str] | None, network: bool, own_network: bool
 ) -> None:
     async with shell(
         tmp_path / "root", allowed_hosts=allowed_hosts, network=network, require_isolation=True
-    ) as (workspace, client):
+    ) as (_, client):
         session = str((await client.run("readlink /proc/self/ns/net", check=True)).stdout).strip()
 
-    assert workspace.owns_netns is owns
-    assert (session != namespace("net")) is owns
+    assert (session != namespace("net")) is own_network
 
 
 @pytest.mark.e2e
@@ -352,22 +351,28 @@ done
 """
 
 
+PUBLISHED_ISOLATION = """
+import asyncio, sys
+from hud.environment import Workspace
+
+async def main():
+    workspace = Workspace(sys.argv[1])
+    print(workspace.capability().params["isolation"])
+    await workspace.stop()
+
+asyncio.run(main())
+"""
+
+
 @pytest.mark.parametrize(
-    ("refused", "with_unshare", "expected"),
+    ("refused", "isolation"),
     [
-        pytest.param("*", False, None, id="unusable-install"),
-        pytest.param("--never", False, {"tmpfs_modes": True}, id="direct"),
-        pytest.param(
-            "--unshare-pid",
-            True,
-            {"pid_unshare": "unshare", "tmpfs_modes": True},
-            id="staged-when-direct-pid-mounting-is-blocked",
-        ),
-        pytest.param("--perms", False, {"tmpfs_modes": False}, id="without-tmpfs-modes"),
+        pytest.param("*", "none", id="unusable-install"),
+        pytest.param("--never", "bwrap", id="usable-install"),
     ],
 )
-def test_bubblewrap_is_used_only_in_a_launch_mode_that_works(
-    tmp_path: Path, refused: str, with_unshare: bool, expected: dict[str, Any] | None
+def test_a_workspace_publishes_bwrap_isolation_only_when_bubblewrap_works(
+    tmp_path: Path, refused: str, isolation: str
 ) -> None:
     """An installed bwrap that cannot create namespaces must not be used."""
     tools = tmp_path / "bin"
@@ -375,31 +380,16 @@ def test_bubblewrap_is_used_only_in_a_launch_mode_that_works(
     for name, script in {
         "bwrap": FAKE_BWRAP.format(refused=refused, succeed="exit 0"),
         "true": "#!/bin/sh\nexit 0\n",
-        **({"unshare": '#!/bin/sh\nshift 3\nexec "$@"\n'} if with_unshare else {}),
     }.items():
         (tools / name).write_text(script)
         (tools / name).chmod(0o755)
 
     probe = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from hud.environment.workspace import usable_bwrap; print(repr(usable_bwrap()))",
-        ],
+        [sys.executable, "-c", PUBLISHED_ISOLATION, str(tmp_path / "root")],
         env={**os.environ, "PATH": str(tools)},
         capture_output=True,
         text=True,
         check=True,
     )
 
-    if expected is None:
-        assert probe.stdout.strip() == "None"
-    else:
-        unshare = expected.get("pid_unshare")
-        assert probe.stdout.strip() == repr(
-            Bubblewrap(
-                str(tools / "bwrap"),
-                pid_unshare=str(tools / unshare) if unshare else None,
-                tmpfs_modes=expected["tmpfs_modes"],
-            )
-        )
+    assert probe.stdout.strip() == isolation

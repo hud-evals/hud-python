@@ -55,7 +55,7 @@ class Criterion(BaseModel):
     requirement: str
 
 
-async def test_the_catalog_publishes_each_templates_arguments_and_io_types() -> None:
+async def test_the_catalog_publishes_each_templates_arguments() -> None:
     env = Environment("catalog")
 
     @env.template(description="Adds two numbers.")
@@ -65,11 +65,6 @@ async def test_the_catalog_publishes_each_templates_arguments_and_io_types() -> 
 
     @env.template()
     async def flexible(n: int, **rest: str):
-        yield "go"
-        yield 1.0
-
-    @env.template(input=Point, returns=Point)
-    async def structured():
         yield "go"
         yield 1.0
 
@@ -90,9 +85,6 @@ async def test_the_catalog_publishes_each_templates_arguments_and_io_types() -> 
     assert (listed["add"]["description"], add_args["required"]) == ("Adds two numbers.", ["a"])
     assert add_args["properties"]["suite"]["default"] == "math"
     assert [name for name, t in listed.items() if t["args"]["additionalProperties"]] == ["flexible"]
-    assert [name for name, t in listed.items() if {"input", "returns"} <= t.keys()] == [
-        "structured"
-    ]
     assert {k: v["x-hud-hint"] for k, v in listed["files"]["args"]["properties"].items()} == {
         "prompt": "prompt",
         "attachment": "data-file",

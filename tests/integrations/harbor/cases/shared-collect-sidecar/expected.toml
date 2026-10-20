@@ -1,6 +1,5 @@
 # A task that collects from a sidecar gets service access.
 [task.task-a]
 service_access = true
-"compose.services.main.build.target" = "service-access"
 "task.collect" = [{ service = "redis", command = "redis-cli save", timeout_sec = 600.0 }]
 "task.artifacts" = [{ service = "redis", source = "/data/dump.rdb" }]

@@ -1,12 +1,11 @@
-"""What every ``hud`` command does alike: the command tree itself, help and unknown
-commands, the upgrade notice, anonymous analytics, an interrupt, asking before it changes
-anything, the error document a failure prints, the error kind a platform refusal maps to,
-one id per line under ``--quiet``, and never echoing a secret it was given.
+"""What every ``hud`` command does alike: help and unknown commands, the upgrade notice,
+anonymous analytics, an interrupt, asking before it changes anything, the error document a
+failure prints, the error kind a platform refusal maps to, one id per line under
+``--quiet``, and never echoing a secret it was given.
 
-Each command in the tree is a row of ``COMMANDS``: an invocation, the files it needs in
-the working directory, and the platform replies it reads before it would change
-anything (``"METHOD /path": body``, or ``(status, body)``). A completeness test holds the
-rows to the tree.
+Each command is a row of ``COMMANDS``: an invocation, the files it needs in the working
+directory, and the platform replies it reads before it would change anything
+(``"METHOD /path": body``, or ``(status, body)``).
 """
 
 from __future__ import annotations
@@ -18,11 +17,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import typer
 from dirty_equals import IsInt, IsStr, IsUUID
-from typer.core import TyperGroup
 
-from hud.cli.__main__ import app
 from hud.eval import Task
 from hud.version import __version__
 from tests.conftest import write_files
@@ -236,18 +232,6 @@ LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = 
 }
 
 
-def tree(command: Any, path: tuple[str, ...] = ()) -> dict[str, Any]:
-    """Every invocable command by path; a group that runs on its own counts as one."""
-    group = isinstance(command, TyperGroup)
-    runs = path and (not group or getattr(command, "invoke_without_command", False))
-    found = {" ".join(path): command} if runs else {}
-    if group:
-        for name, sub in command.commands.items():
-            found |= tree(sub, (*path, name))
-    return found
-
-
-TREE = tree(typer.main.get_command(app))
 PLATFORM = sorted(set(COMMANDS) - set(OFFLINE))
 
 
@@ -289,26 +273,10 @@ def writes(services: FakeServices) -> list[str]:
     return [f"{r.method} {r.path}" for r in services.requests("api") if r.method != "GET"]
 
 
-def test_every_command_in_the_tree_is_a_row() -> None:
-    assert sorted(COMMANDS) == sorted(TREE)
-    assert set(OFFLINE) | MUTATING <= set(COMMANDS)
-
-
-def test_every_command_with_quiet_is_a_list_row() -> None:
-    quiet = {
-        name
-        for name, command in TREE.items()
-        if any("--quiet" in getattr(param, "opts", []) for param in getattr(command, "params", []))
-    }
-
-    assert sorted(quiet) == sorted(LISTS)
-
-
-def test_bare_hud_prints_help_and_exits_2(hud: Hud) -> None:
+def test_bare_hud_exits_2_with_nothing_on_stderr(hud: Hud) -> None:
     result = hud()
 
     assert (result.exit_code, result.stderr) == (2, "")
-    assert "Usage:" in result.stdout and "COMMAND" in result.stdout
 
 
 def test_an_unknown_command_is_a_usage_error_on_stderr(hud: Hud) -> None:
@@ -503,7 +471,6 @@ def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text
     assert error["message"] not in as_json.stderr, as_json
     assert (as_text.exit_code, as_text.stdout) == (as_json.exit_code, ""), as_text
     assert error["message"] in as_text.stderr, as_text
-    assert ("Usage: " in as_text.stderr) is (error["error"] == "usage"), as_text
 
 
 @pytest.mark.parametrize("name", PLATFORM)

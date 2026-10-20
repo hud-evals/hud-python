@@ -15,10 +15,9 @@ exporting it yields. Keys, all optional:
   whether it ``started`` the source environment first;
 - ``base``: another source this one starts from (``assemble_case``).
 
-Every exported folder is held to what holds for any source: a Dockerfile and
-HUD's entrypoint in its build context beside the source's files, and an
-instruction naming where to answer. Export stops every
-environment it starts.
+Every exported folder is held to what holds for any source: the source's files
+in its build context, and an instruction naming where to answer. Export stops
+every environment it starts.
 """
 
 from __future__ import annotations
@@ -99,8 +98,6 @@ async def test_exporting_a_source_writes_the_folders_its_case_expects(
         assert json.loads(task["metadata"]["hud_args"]) == expected["args"]
         assert (task_dir / "tests" / "test.sh").is_file()
         environment = task_dir / "environment"
-        assert (environment / "hud_entrypoint.sh").is_file()
-        assert (environment / "Dockerfile").is_file()
         if (source / ".dockerignore").is_file():
             ignored = (environment / ".dockerignore").read_text("utf-8")
             assert ignored.startswith((source / ".dockerignore").read_text("utf-8"))

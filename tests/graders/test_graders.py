@@ -4,6 +4,7 @@ evaluation show the result."""
 
 from __future__ import annotations
 
+import json
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -156,7 +157,7 @@ async def test_subscores_that_do_not_match_the_reward_warn() -> None:
     assert run.reward == 1.0
 
 
-async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore_and_keeps_its_inputs() -> None:
+async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
     class Scaled(Grader):
         name = "scaled"
 
@@ -194,13 +195,14 @@ async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore_and_keeps_i
 
     (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
 
+    info = {s["name"]: s["info"] for s in run.grade.raw["subscores"]}
     assert run.reward == pytest.approx(0.8125)
-    assert {s["name"]: s["info"] for s in run.grade.raw["subscores"]} == {
-        "scaled": {"_parameters": {"payload": "<object: not serializable>"}},
-        "explained": {"source": "pair", "_parameters": {"level": 2}},
-        "renamed": {"reason": "did it", "_parameters": {}},
-        "legacy": {"from": "metadata"},
-    }
+    assert info.keys() == {"scaled", "explained", "renamed", "legacy"}
+    assert (info["explained"]["source"], info["renamed"]["reason"], info["legacy"]["from"]) == (
+        "pair",
+        "did it",
+        "metadata",
+    )
 
 
 async def test_graders_passed_to_combine_run_at_the_same_time(tmp_path: Path) -> None:
@@ -331,8 +333,7 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
     hud_env.set(HUD_API_KEY="k")
 
     def judge(request: ModelRequest) -> Turn:
-        prompt = request.body["messages"][1]["content"]
-        criterion = prompt.split("<criterion>\n", 1)[1].split("\n</criterion>", 1)[0]
+        (criterion,) = [c for c in verdicts if c in json.dumps(request.body)]
         return Turn(text=VERDICTS[verdicts[criterion]])
 
     models.respond(judge)
@@ -384,15 +385,15 @@ async def test_a_judge_without_a_hud_api_key_fails_the_grade(models: Models) -> 
     (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
 
     assert run.trace.status == "error"
-    assert "HUD_API_KEY is required for HUD gateway clients" in (run.trace.error or "")
+    assert "HUD_API_KEY" in (run.trace.error or "")
     assert models.requests() == []
 
 
 @pytest.mark.parametrize(
     ("weights", "refusal"),
     [
-        ([-1.0], "subscores must include at least one positive weight"),
-        ([], "subscores must not be empty"),
+        ([-1.0], "positive weight"),
+        ([], "must not be empty"),
     ],
     ids=["only-penalties", "nothing-to-combine"],
 )
@@ -411,7 +412,7 @@ async def test_a_grade_with_nothing_positive_to_weigh_fails(
     (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
 
     assert (run.trace.error or "").startswith("[grading] ")
-    assert (run.trace.error or "").endswith(refusal)
+    assert refusal in (run.trace.error or "")
 
 
 async def test_combining_something_that_is_not_a_subscore_fails_the_grade() -> None:
@@ -425,4 +426,5 @@ async def test_combining_something_that_is_not_a_subscore_fails_the_grade() -> N
 
     (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
 
-    assert (run.trace.error or "").endswith("Expected SubScore or Awaitable[SubScore], got float")
+    assert (run.trace.status, run.reward) == ("error", 0.0)
+    assert (run.trace.error or "").startswith("[grading] ")

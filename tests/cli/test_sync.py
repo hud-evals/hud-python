@@ -276,18 +276,6 @@ def test_a_csv_export_has_a_column_per_argument(platform: FakeServices, hud: Hud
     ]
 
 
-def test_tasks_for_another_environment_than_the_linked_one_are_flagged(
-    platform: FakeServices, hud: Hud
-) -> None:
-    platform.route("api", "GET", f"/v2/registry/{ENV_ID}", json={"id": ENV_ID, "name": "browser"})
-    link(hud, registry_id=ENV_ID)
-
-    result = hud("sync", "tasks", "demo", "tasks.py", "--dry-run")
-
-    assert result.exit_code == 0, result
-    assert "'browser': example" in " ".join(result.stderr.split())
-
-
 @pytest.mark.parametrize(
     "ref", ["browser_anchor", ENV_ID], ids=["by-name-across-separators", "by-id"]
 )

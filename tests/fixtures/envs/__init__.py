@@ -64,8 +64,8 @@ def read_token(request: ModelRequest) -> Turn:
     if not request.tool_results:
         path = re.search(r"Read the file (\S+) and", request.prompt)
         assert path is not None, request.prompt
-        return call("bash", command=f"cat {path.group(1)}")
-    token = re.search(r"^[0-9a-f]{16}$", request.tool_results[-1], re.MULTILINE)
+        return Turn(shell=f"cat {path.group(1)}")
+    token = re.search(r"(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])", request.tool_results[-1])
     return Turn(text=token.group(0) if token else "no token in the tool result")
 
 

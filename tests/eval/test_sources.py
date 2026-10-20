@@ -271,8 +271,7 @@ async def test_a_child_process_serves_a_live_env_from_the_file_its_templates_are
         pytest.param(
             "import asyncio\n\nasyncio.run(asyncio.sleep(0))\n",
             "lab",
-            "the env source ran async code while being imported to place a rollout — guard "
-            'top-level run calls with `if __name__ == "__main__":`',
+            "ran async code while being imported",
             id="a-source-that-runs-an-event-loop-at-import",
         ),
     ],
@@ -298,10 +297,9 @@ async def test_a_constructor_that_returns_something_else_fails_the_run() -> None
         Task(env="lab", id="solve"), ScriptedAgent("x"), runtime=LocalRuntime(build)
     )
 
-    assert (
-        run.trace.error
-        == "[provisioning] TypeError: LocalRuntime: constructor returned 'lab', not an Environment"
-    )
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "not an Environment" in (run.trace.error or "")
 
 
 async def test_an_in_process_env_is_torn_down_while_a_peer_still_holds_a_connection() -> None:
@@ -357,10 +355,9 @@ async def test_a_missing_source_fails_the_run(tmp_path: Path) -> None:
         runtime=SubprocessRuntime(tmp_path / "missing.py"),
     )
 
-    assert run.trace.error == (
-        f"[provisioning] FileNotFoundError: SubprocessRuntime: source not found: "
-        f"{tmp_path / 'missing.py'}"
-    )
+    assert (run.trace.status, run.prompt) == ("error", None)
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "source not found" in (run.trace.error or "")
 
 
 def gone(pid: int) -> bool:
@@ -402,9 +399,8 @@ async def test_a_child_that_exits_before_serving_reports_its_output_and_takes_it
         Task(env="leaky", id="solve"), ScriptedAgent("x"), runtime=SubprocessRuntime(source)
     )
 
-    assert f"spawned env exited with code 3 before serving (source: {source}):\n" in (
-        run.trace.error or ""
-    )
+    assert (run.trace.error or "").startswith("[provisioning] ")
+    assert "exited with code 3" in (run.trace.error or "")
     assert "daemon starting" in (run.trace.error or "")
     pid = int((tmp_path / "child.pid").read_text())
     try:

@@ -31,9 +31,8 @@ inventory of current incidents.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
-- `tests/` follows the SDK's subsystems; `tests/fixtures` holds what tests run and
-  run against (fixture environments and agents, and stand-ins for services CI cannot
-  reach), and `tests/conftest.py` the user's machine (configuration, the `hud` CLI).
+- `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture environments
+  and fakes for what CI cannot reach.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
@@ -125,36 +124,14 @@ Python `>=3.11, <3.13`.
 
 ## Testing
 
-Tests are black-box: they drive the SDK through a public boundary and fake only
-what lies outside it, using the stand-ins in `tests/fixtures`. `CONTRIBUTING.md`
-shows how.
+Write a test only when it would catch a break a user would notice.
 
-- Enter through a public boundary: the `hud` CLI, an exported name, the control
-  channel or another wire protocol, a file format, or a process effect.
-- Fake only the outside world: HUD services, model providers, Docker, cloud SDKs,
-  the clock. Never patch a `hud` name, import a private one, or touch a private
-  attribute; `scripts/check_tests.py` enforces this in CI. Configure the SDK the
-  way a user does, through environment variables (`hud_env.set(...)`).
-- Never hand-build what a producer emits. Run the producer, so the test covers
-  the seam between it and its consumer.
-- Assert what a user or a peer observes: the reward, run and trace fields,
-  output and exit codes, files, what the platform recorded, wire frames. Prefer
-  fixture environments whose reward proves the path ran.
-- Write each contract once, as a table, at the outermost boundary where it is
-  observable. A contract's implementations (runtimes, agent families, commands)
-  are rows, drawn from the product's own list, and a completeness test fails when
-  one has no row.
-- No unit tests: drive a scenario and check what it left behind, never what a
-  function returns.
-- Assert the fields the case is about, never a recorded copy of a whole output:
-  no snapshots of argv, request bodies or rendered text.
-- Do not add tests to check your own change. Check it with a temporary script,
-  and extend a scenario only when the change adds or fixes a contract; a bug fix
-  lands with the scenario row that failed before it.
-- Rows needing something outside the process are marked `e2e` plus `docker`,
-  `modal`, `sandbox`, `live` (a real HUD account) or `hosted`, and run only when
-  selected.
-- Test names describe the observable behavior, not the mechanism.
+- Drive the SDK as a user does (CLI, public API) and assert what they see:
+  reward, status, errors, files, exit codes. Not prompt text, rendered output,
+  argv or request bodies.
+- Fake only what CI cannot run (HUD services, model providers, Docker). Never
+  touch `hud` internals; `scripts/check_tests.py` enforces this.
+- A bug fix comes with the test that failed before it.
 
 ## Operational Debugging
 

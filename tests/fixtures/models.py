@@ -600,6 +600,7 @@ def _text(content: Any) -> str:
         return content
     if isinstance(content, list):
         return "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+            part.get("text", part.get("stdout", "")) if isinstance(part, dict) else str(part)
+            for part in content
         )
     return json.dumps(content)

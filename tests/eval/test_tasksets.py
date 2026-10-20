@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 def test_a_taskset_written_to_a_data_file_reads_back_row_for_row(
     suffix: str, tmp_path: Path
 ) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
+    project = tmp_path / "repo" / "project"
+    project.mkdir(parents=True)
     (project / "compose.yaml").write_text("services:\n  main:\n    image: lab\n")
     rows = [
         Task(env="lab", id="add", args={"a": 2, "b": 3}),
@@ -55,12 +55,16 @@ def test_a_taskset_written_to_a_data_file_reads_back_row_for_row(
         ),
     ]
 
-    written = Taskset("demo", rows).to_file(tmp_path / "out" / f"tasks{suffix}")
+    written = Taskset("demo", rows).to_file(tmp_path / "repo" / "out" / f"tasks{suffix}")
     loaded = Taskset.from_file(written)
+    (tmp_path / "repo").rename(tmp_path / "moved")
+    *_, moved = Taskset.from_file(tmp_path / "moved" / "out" / f"tasks{suffix}")
 
     assert loaded.name == "tasks"
     assert [row.model_dump() for row in loaded] == [row.model_dump() for row in rows]
-    assert '"document": "../project/compose.yaml"' in written.read_text()
+    assert moved.runtime_config is not None
+    assert moved.runtime_config.compose is not None
+    assert moved.runtime_config.compose.document == tmp_path / "moved" / "project" / "compose.yaml"
 
 
 SOURCE = """

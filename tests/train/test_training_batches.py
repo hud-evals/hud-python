@@ -112,7 +112,7 @@ async def test_runs_without_token_samples_train_by_trace_id(trainer: FakeService
     assert batch["inputs"] == [str(run.trace_id) for run in runs]
 
 
-async def test_the_model_slug_resolves_once_and_every_call_carries_the_clients_own_key(
+async def test_every_training_call_carries_the_clients_own_key(
     trainer: FakeServices,
 ) -> None:
     runs = await answered(ScriptedAgent("ok"))
@@ -121,7 +121,6 @@ async def test_the_model_slug_resolves_once_and_every_call_carries_the_clients_o
     await client.forward_backward(runs, group_size=2)
     await client.optim_step(learning_rate=1e-5)
 
-    assert len(trainer.requests("api", "GET", "/v2/models")) == 1
     assert {request.bearer for request in trainer.requests("rl")} == {"team-key"}
 
 

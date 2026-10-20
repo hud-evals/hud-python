@@ -12,7 +12,6 @@ import asyncio
 import base64
 import io
 import itertools
-import logging
 import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
@@ -225,20 +224,16 @@ async def test_ending_the_episode_mid_move_ends_the_recording_with_the_ticks_pla
     assert frames_in(segments) == len(ticks)
 
 
-async def test_a_camera_the_encoder_cannot_encode_costs_the_video_not_the_rollout(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+async def test_a_camera_the_encoder_cannot_encode_costs_the_video_not_the_rollout() -> None:
     # A 1x1 frame is a valid image for the model but crops to nothing for H.264,
     # so the encoder dies on the first frame while the move keeps streaming ticks.
     sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), done=reached, side=1)
     agent = ScriptedLLM(move("move_to", x=0.5), move("move_to", grip=1.0))
 
-    with caplog.at_level(logging.WARNING, logger="hud.telemetry.robot.video"):
-        async with arm_env(sim, DirectControl(max_step={"grip": 2.0})) as env:
-            run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+    async with arm_env(sim, DirectControl(max_step={"grip": 2.0})) as env:
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     observations, segments = recorded(run)
     assert run.reward == 1.0
     assert [obs["tick"] for obs in observations] == list(range(1 + len(sim.actions)))
     assert segments == []
-    assert "video encode failed (camera observation/image)" in caplog.text

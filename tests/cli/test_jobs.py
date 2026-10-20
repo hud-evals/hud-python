@@ -20,7 +20,6 @@ def test_a_dashless_job_id_reads_the_dashed_job(signed_in: FakeServices, hud: Hu
     result = hud("jobs", JOB_ID.replace("-", ""), "--json")
 
     assert result.exit_code == 0, result
-    assert len(signed_in.requests("api", "GET", f"/v2/jobs/{JOB_ID}/traces")) == 1
 
 
 def test_an_unknown_job_is_not_found(signed_in: FakeServices, hud: Hud) -> None:

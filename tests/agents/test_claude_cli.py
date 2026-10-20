@@ -19,6 +19,7 @@ from hud.eval import LocalRuntime, Task, rollout
 from tests.fixtures import clis
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_env
+from tests.fixtures.models import Turn
 from tests.fixtures.screen import fake_screen
 
 if TYPE_CHECKING:
@@ -57,38 +58,42 @@ async def test_the_cli_is_given_the_prompt_its_allowed_tools_and_the_environment
 
 
 @pytest.mark.parametrize(
-    ("own_key", "gateway", "via_gateway", "credential"),
+    ("own_key", "gateway", "route", "credential"),
     [
-        ("own-key", False, False, "own-key"),
-        (None, False, True, "hud-key"),
-        ("own-key", True, True, "hud-key"),
+        ("own-key", False, "provider", "own-key"),
+        (None, False, "gateway", "hud-key"),
+        ("own-key", True, "gateway", "hud-key"),
     ],
     ids=["its-own-key", "only-a-hud-key", "the-gateway-forced-over-its-own-key"],
 )
-async def test_the_cli_is_pointed_at_the_provider_with_its_own_key_or_else_the_gateway(
+async def test_the_cli_calls_the_provider_with_its_own_key_or_else_the_gateway(
     own_key: str | None,
     gateway: bool,
-    via_gateway: bool,
+    route: str,
     credential: str,
     models: Models,
+    provider: Models,
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
     hud_env.set(ANTHROPIC_API_KEY=own_key)
-    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    models.script([Turn(text="done")])
+    provider.script([Turn(text="done")])
+    stub = clis.Stub(
+        tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"), provider=provider.url
+    )
     stub.install()
 
     env = workspace_env(tmp_path / "ws", env=stub.shell_env())
-    await rollout(
+    run = await rollout(
         Task(env=env.name, id="task"),
         ClaudeCLIAgent(ClaudeCLIConfig(gateway=gateway)),
         runtime=LocalRuntime(env),
     )
 
-    (variables,) = [capture["env"] for capture in stub.captures()]
-    assert variables.get("ANTHROPIC_BASE_URL") == (models.url if via_gateway else None)
-    assert variables.get("ANTHROPIC_API_KEY") == credential
-    assert ("Trace-Id: " in variables.get("ANTHROPIC_CUSTOM_HEADERS", "")) is via_gateway
+    (request,) = {"gateway": models, "provider": provider}[route].requests()
+    assert (run.trace.status, request.credential) == ("completed", credential)
+    assert ("trace-id" in request.headers) is (route == "gateway")
 
 
 async def test_every_model_tier_and_subagents_use_the_configured_model(tmp_path: Path) -> None:

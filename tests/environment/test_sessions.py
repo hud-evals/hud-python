@@ -86,10 +86,7 @@ async def test_with_several_parked_sessions_a_grade_must_name_one() -> None:
             await c.call("hello", {"session_id": sessions[1]})
             graded = await c.call("tasks.grade", {"answer": "x"})
 
-    assert refused["error"]["message"] == (
-        f"2 parked sessions ({', '.join(sorted(sessions))}); "
-        "resume one by sending hello with its session_id"
-    )
+    assert all(session in refused["error"]["message"] for session in sessions)
     assert graded["result"]["tag"] == "two"
 
 
@@ -100,6 +97,9 @@ async def test_a_session_with_a_live_connection_cannot_be_resumed() -> None:
         wire(runtime.url) as b,
     ):
         session = (await a.call("hello", {}))["result"]["session_id"]
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
         refused = await b.call("hello", {"session_id": session})
+        graded = await a.call("tasks.grade", {"answer": "x"})
 
-    assert refused["error"]["message"] == f"session {session!r} has a live connection"
+    assert refused["error"]["code"] == -32600
+    assert graded["result"]["tag"] == "a"

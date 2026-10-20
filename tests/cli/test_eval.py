@@ -155,16 +155,16 @@ KIMI_TOML = (
             id="model-flag-wins-over-toml",
         ),
         pytest.param(
+            ["openai_compatible"],
+            '[openai_compatible]\nmodel = "${MY_EVAL_MODEL}"\n',
+            {"model": "z-ai/glm-5.2-from-env"},
+            id="toml-model-from-a-variable",
+        ),
+        pytest.param(
             ["glm-5.2"],
             "",
             {"protocol": "chat", "model": "z-ai/glm-5.2"},
             id="catalog-alias",
-        ),
-        pytest.param(
-            ["claude", "--config", "max_tokens=100"],
-            "",
-            {"max_tokens": 100, "key": API_KEY},
-            id="config-flag",
         ),
         pytest.param(
             ["openai_compatible", "-m", "custom", "-c", "api_key=custom-key", "-c", "base_url=URL"],
@@ -187,7 +187,11 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
     """Provider SDKs read their own ``*_BASE_URL``, which here points at the scripted model."""
     signed_in.route("api", "GET", "/v2/models", json={"items": [GLM], "total": 1})
     (hud.cwd / ".hud_eval.toml").write_text(config)
-    hud_env.set(OPENAI_BASE_URL=gateway.url, ANTHROPIC_BASE_URL=gateway.url)
+    hud_env.set(
+        OPENAI_BASE_URL=gateway.url,
+        ANTHROPIC_BASE_URL=gateway.url,
+        MY_EVAL_MODEL="z-ai/glm-5.2-from-env",
+    )
 
     # The same scripted model under another host name, so it is not the HUD gateway.
     custom = gateway.url.replace("127.0.0.1", "localhost")
@@ -204,7 +208,6 @@ def test_the_agent_reaches_its_model_with_the_right_key_and_settings(
         "model": request.model,
         "key": credential,
         "temperature": request.body.get("temperature"),
-        "max_tokens": request.body.get("max_tokens"),
     }
     assert {name: observed[name] for name in expected} == expected
 
@@ -349,49 +352,48 @@ def test_a_python_source_is_imported_on_the_main_thread(hud: Hud, gateway: Model
 # ─── planning and refusals ──────────────────────────────────────────────
 
 
+def test_a_dry_run_runs_nothing(hud: Hud, signed_in: FakeServices, tasks: Path) -> None:
+    result = hud("eval", "tasks.py", *SCRIPTED, "--dry-run", "--json")
+
+    assert (result.exit_code, result.json["dry_run"]) == (0, True), result
+    assert signed_in.requests() == []
+
+
 @pytest.mark.parametrize(
-    ("config", "argv", "expected"),
+    ("config", "argv", "hosted"),
     [
+        pytest.param("", ["tasks.py"], False, id="a-local-source-runs-here"),
+        pytest.param("", ["My Tasks"], True, id="a-platform-taskset-runs-hosted"),
+        pytest.param("[eval]\nremote = true\n", ["tasks.py"], True, id="the-toml-asks-for-hosted"),
         pytest.param(
-            "", ["tasks.py", "openai"], {"runtime": "local"}, id="a-local-source-runs-here"
-        ),
-        pytest.param(
-            "", ["My Tasks", "openai"], {"runtime": "hosted"}, id="a-platform-taskset-runs-hosted"
-        ),
-        pytest.param(
-            "[eval]\nremote = true\n",
-            ["tasks.py", "openai"],
-            {"runtime": "hosted"},
-            id="the-toml-asks-for-hosted",
-        ),
-        pytest.param(
-            "[eval]\nremote = false\n",
-            ["tasks.py", "openai", "--remote"],
-            {"runtime": "hosted"},
-            id="a-flag-beats-the-toml",
-        ),
-        pytest.param(
-            '[openai]\nmodel = "${MY_EVAL_MODEL}"\n',
-            ["tasks.py", "openai"],
-            {"model": "gpt-4o"},
-            id="the-toml-model-from-a-variable",
+            "[eval]\nremote = false\n", ["tasks.py", "--remote"], True, id="a-flag-beats-the-toml"
         ),
     ],
 )
-def test_a_dry_run_reports_the_plan_and_runs_nothing(
+def test_eval_runs_each_row_where_its_placement_says(
     hud: Hud,
+    gateway: Models,
     signed_in: FakeServices,
-    hud_env: HudEnv,
     tasks: Path,
     config: str,
     argv: list[str],
-    expected: dict[str, Any],
+    hosted: bool,
 ) -> None:
-    hud_env.set(MY_EVAL_MODEL="gpt-4o")
+    signed_in.route(
+        "api", "GET", "/v2/tasksets/by-name/My Tasks", json={"taskset_id": "ts", "name": "My Tasks"}
+    )
+    signed_in.route(
+        "api",
+        "GET",
+        "/v2/tasksets/ts/export",
+        json={"name": "My Tasks", "tasks": [{"name": "one", "env": "demo", "scenario": "solve"}]},
+    )
+    signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
+    signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "completed", "reward": 0.5})
     (hud.cwd / ".hud_eval.toml").write_text(config)
 
-    result = hud("eval", *argv, "--dry-run", "--json")
+    document = run(hud, argv[0], *SCRIPTED, *argv[1:])
 
-    assert result.exit_code == 0, result
-    assert {name: result.json[name] for name in expected} == expected
-    assert signed_in.requests() == []
+    assert document["mean_reward"] == (0.5 if hosted else 1.0)
+    assert len(signed_in.requests("api", "POST", "/v2/rollouts/submit")) == hosted
+    assert [request.prompt for request in gateway.requests()] == ([] if hosted else ["solve 0"])

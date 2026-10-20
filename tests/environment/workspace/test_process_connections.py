@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import pytest
 
 from hud.capabilities import Connection, SSHClient
-from hud.clients import HudProtocolError, connect
+from hud.clients import HudClient, HudProtocolError, connect
 from hud.environment import Environment, Peer, WorkspaceRoute, process_guard
 from hud.environment.egress import ANY_HOST, BRIDGE_PORT
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
@@ -104,26 +104,6 @@ def guard_directory() -> Iterator[Path]:
         yield directory / "guard"
     finally:
         shutil.rmtree(directory, ignore_errors=True)
-
-
-def test_the_guard_projects_a_helper_that_runs_on_its_own(tmp_path: Path) -> None:
-    with guard_directory() as directory:
-        guard = ProcessConnectionGuard(directory, set(), set(), backend="notify")
-        guard.start()
-        projected = guard.helper_path.read_bytes()
-        mode = guard.helper_path.stat().st_mode & 0o777
-        standalone = subprocess.run(
-            [sys.executable, "-I", str(guard.helper_path), "--help"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        guard.close()
-
-    assert projected.startswith(b'"""Linux process-bound network connection enforcement."""')
-    assert mode == 0o500
-    assert (standalone.returncode, standalone.stderr) == (0, "")
 
 
 def backend_works(backend: str) -> bool:
@@ -325,7 +305,6 @@ async def test_a_later_session_cannot_launch_against_a_released_connection(
 
     assert first_status == 0
     assert result.returncode == 1
-    assert b"process connection is not bound: inference" in cast("bytes", result.stderr)
 
 
 def echo_env() -> Environment:
@@ -348,15 +327,22 @@ def inference(token: str) -> Connection:
     )
 
 
+async def resolved_names(client: HudClient) -> list[str]:
+    """The names a session of ``client`` resolves through its ``/etc/hosts``."""
+    ssh = cast("SSHClient", await client.open("ssh"))
+    hosts = str((await ssh.run("cat /etc/hosts", check=True)).stdout)
+    return [name for line in hosts.splitlines() for name in line.split()[1:]]
+
+
 async def a_finished_session_releases_its_connection(env: Environment, root: Path) -> None:
-    workspace = env.workspace(root, network=False)
+    env.workspace(root, network=False)
     async with LocalRuntime(env)(ECHO) as runtime:
         async with connect(runtime, connections=[inference("first")]) as first:
             await first.start_task("echo", {"tag": "a"})
             await first.grade({"answer": "x"})
         async with connect(runtime, connections=[inference("rotated")]) as second:
             await second.start_task("echo", {"tag": "b"})
-            names = [peer.name for peer in workspace.peers]
+            names = await resolved_names(second)
             assert names.count(inference("rotated").host) == 1
             assert (await second.grade({"answer": "x"}))["tag"] == "b"
 
@@ -370,18 +356,16 @@ async def a_live_session_keeps_its_connection_name(env: Environment, root: Path)
 
 
 async def a_finished_session_takes_its_route_with_it(env: Environment, root: Path) -> None:
-    workspace = env.workspace(root, network=False)
+    env.workspace(root, network=False)
     route = WorkspaceRoute("ssh", "inference.hud.so", 443)
     async with LocalRuntime(env)(ECHO) as runtime:
         async with connect(runtime, workspace_routes=[route, route]) as first:
             await first.start_task("echo", {"tag": "a"})
-            assert workspace.peers == (
-                Peer("inference.hud.so", 443, target=("inference.hud.so", 443)),
-            )
+            assert (await resolved_names(first)).count("inference.hud.so") == 1
             await first.grade({"answer": "x"})
         async with connect(runtime) as later:
             await later.start_task("echo", {"tag": "later"})
-            assert workspace.peers == ()
+            assert "inference.hud.so" not in await resolved_names(later)
             await later.grade({"answer": "x"})
 
 

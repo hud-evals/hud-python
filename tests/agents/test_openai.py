@@ -1,18 +1,18 @@
 """What only ``OpenAIAgent`` does over the Responses API: the tool search it offers, how it
-chains responses and discards an unusable one, how it reports a refused, capped or
-incomplete call to the model, and the citations it records."""
+chains responses and discards an unusable one, how a refused, capped or incomplete call
+lands on the trace, and the citations it records."""
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import pytest
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 from hud.agents import OpenAIAgent
 from hud.agents.openai.tools import OpenAIToolSearchTool
-from hud.agents.types import OpenAIConfig
+from hud.agents.types import OpenAIConfig, ToolStep
 from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
@@ -106,7 +106,7 @@ async def test_an_empty_shell_call_is_sampled_again_without_advancing_the_chain(
     assert (run.trace.content, chain) == ("done", [None, "resp_1", "resp_1"])
 
 
-async def test_a_shell_call_it_cannot_run_is_told_to_the_model(
+async def test_a_shell_call_it_cannot_run_fails_its_tool_step_and_the_run_goes_on(
     models: Models, tmp_path: Path
 ) -> None:
     refused = shell_call("true")
@@ -120,29 +120,33 @@ async def test_a_shell_call_it_cannot_run_is_told_to_the_model(
         runtime=LocalRuntime(env),
     )
 
-    assert run.trace.status == "completed"
-    assert "commands must be a list of strings" in json.dumps(models.requests()[-1].body)
+    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert step.result is not None
+    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
+    assert (run.trace.status, step.result.isError) == ("completed", True)
+    assert "commands must be a list of strings" in text
 
 
-async def test_a_shell_calls_output_cap_bounds_the_output_the_model_is_sent_back(
+async def test_a_shell_calls_output_cap_keeps_the_head_and_tail_of_its_output(
     models: Models, tmp_path: Path
 ) -> None:
     models.script([shell_call("seq 1 1000", max_output_length=50), Turn(text="done")])
 
     env = workspace_env(tmp_path / "ws")
-    await rollout(
+    run = await rollout(
         Task(env=env.name, id="task"),
         OpenAIAgent(OpenAIConfig(model=MODEL)),
         runtime=LocalRuntime(env),
     )
 
-    (output,) = [i for i in models.requests()[-1].body["input"] if i["type"] == "shell_call_output"]
-    (result,) = output["output"]
-    assert len(result["stdout"] + result["stderr"]) <= 50
-    assert result["stdout"].startswith("1\n2\n") and result["stdout"].endswith("999\n1000\n")
+    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert step.result is not None
+    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
+    assert len(text) <= 50
+    assert text.startswith("1\n2\n") and text.endswith("999\n1000\n")
 
 
-async def test_a_function_call_cut_off_mid_arguments_is_explained_to_the_model(
+async def test_a_function_call_cut_off_mid_arguments_fails_its_tool_step_unrun(
     models: Models, tmp_path: Path
 ) -> None:
     lookups = FastMCP("lookups")
@@ -169,10 +173,11 @@ async def test_a_function_call_cut_off_mid_arguments_is_explained_to_the_model(
             runtime=LocalRuntime(env),
         )
 
-    assert run.trace.status == "completed"
-    assert "the arguments for this 'lookup' call arrived incomplete" in json.dumps(
-        models.requests()[-1].body
-    )
+    (step,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
+    assert step.result is not None
+    (text,) = [block.text for block in step.result.content if isinstance(block, TextContent)]
+    assert (run.trace.status, step.result.isError) == ("completed", True)
+    assert "the arguments for this 'lookup' call arrived incomplete" in text
 
 
 async def test_url_and_file_citations_land_on_the_agent_step(
