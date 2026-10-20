@@ -1,8 +1,8 @@
 # Reviewing hud-python
 
 Review adversarially: assume the change breaks something and find where. The
-tests cover contracts at public boundaries, so the review is where a broken
-seam, a missing scenario, or an unintended behavior change gets caught.
+tests pin what a user would notice, so the review is where a broken seam or an
+unintended behavior change gets caught.
 
 ## Behavior
 
@@ -10,20 +10,18 @@ seam, a missing scenario, or an unintended behavior change gets caught.
   calls the code, with what inputs, and what they do with its output.
 - Look for inputs a real producer emits that the change mishandles, and for
   outputs the change emits that a real consumer cannot read.
-- When you find a break, give the scenario row that fails because of it.
+- When you find a break, give the input or sequence that triggers it.
 
 ## Tests
 
 The rules are under "Testing" in `AGENTS.md`. Treat each of these as a finding:
 
-- A test that patches a `hud` name, reads a private attribute, hand-builds what
-  a producer emits, or asserts that a mock was called the way it was set up.
-- A bug fix without a scenario row that fails before the fix.
-- A changed inline snapshot that the change does not explain. Every snapshot
-  change is a behavior change; one updated just to make a test pass hides one.
-- A new test that only re-checks the author's change without adding a contract.
-  That belongs in a temporary script.
-- A scenario that could pass with the code under test deleted.
+- A test that patches a `hud` name, reads a private attribute, or asserts that a
+  fake was called the way it was set up.
+- A test that asserts prompt text, rendered output or argv.
+- A test that only re-checks the author's change, or that would pass with the
+  code under test deleted.
+- A regression test that would still pass with its fix reverted.
 
 ## Isolation and credentials
 

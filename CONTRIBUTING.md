@@ -42,11 +42,12 @@ uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks; CI checks th
 
 ### Writing Tests
 
-Write a test only when it would catch a break a user would notice. Drive the SDK
-as a user does and assert what they see: reward, status, errors, files, exit
-codes. Fake only what CI cannot run; the fakes and fixture environments live in
+Write a test only when it would catch a break a user would notice; a change
+needs none by default. Drive the SDK as a user does and assert what they see:
+reward, status, errors, files, exit codes, and what the HUD platform records.
+Fake only what CI cannot run; the fakes and fixture environments live in
 `tests/fixtures`, and `tests/conftest.py` wires them in (`services`, `models`,
-`hud`, `hud_env`).
+`hud`, `hud_env`). A regression test must fail with its fix reverted.
 
 ```python
 env = Environment("echo")
@@ -84,7 +85,7 @@ uv run --extra dev --extra train ty check  # Type checking
 
 1. **Branch naming**: `feature/description` or `fix/issue-number`
 2. **Commits**: Use clear, descriptive messages
-3. **Tests**: All CI checks must pass (ruff, ty, the test policy check, pytest)
+3. **Checks**: All CI checks must pass (ruff, ty, pytest)
 4. **Review**: Address feedback promptly
 
 ## Releases

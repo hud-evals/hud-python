@@ -126,11 +126,12 @@ Python `>=3.11, <3.13`.
 Write a test only when it would catch a break a user would notice.
 
 - Drive the SDK as a user does (CLI, public API) and assert what they see:
-  reward, status, errors, files, exit codes. Not prompt text, rendered output,
-  argv or request bodies.
+  reward, status, errors, files, exit codes, and what the HUD platform records.
+  Not prompt text, rendered output or argv.
 - Fake only what CI cannot run (HUD services, model providers, Docker). Never
   touch `hud` internals; ruff's SLF001 enforces this.
-- A bug fix comes with the test that failed before it.
+- A change needs no test by default. Add one when a fix could plausibly regress; it
+  must fail with the fix reverted.
 
 ## Operational Debugging
 
