@@ -7,17 +7,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.agents import OpenAIAgent, create_agent
+from hud.agents import create_agent
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import say
-from tests.support.platform import API_KEY
+from tests.support import Reply, say
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    from hud.agents.base import Agent
-    from tests.support import HudEnv, Models, Platform
+    from tests.support import FakeServices, HudEnv, Models
 
 CATALOG = [
     {
@@ -32,56 +29,36 @@ CATALOG = [
 
 
 @pytest.mark.parametrize(
-    ("build", "protocol", "model", "credential"),
+    ("name", "protocol", "model"),
     [
-        pytest.param(
-            lambda: create_agent("openai"), "responses", "gpt-5.6", f"Bearer {API_KEY}", id="openai"
-        ),
-        pytest.param(
-            lambda: create_agent("claude"), "anthropic", "claude-sonnet-4-6", API_KEY, id="claude"
-        ),
-        pytest.param(
-            lambda: create_agent("ft:custom-123"),
-            "chat",
-            "gpt-5.5",
-            f"Bearer {API_KEY}",
-            id="a-catalog-id",
-        ),
-        pytest.param(
-            lambda: create_agent("minimax-m3"),
-            "chat",
-            "MiniMax-M3",
-            f"Bearer {API_KEY}",
-            id="a-catalog-name-in-any-case",
-        ),
-        pytest.param(
-            lambda: OpenAIAgent.load(create_agent("openai").dump()),
-            "responses",
-            "gpt-5.6",
-            f"Bearer {API_KEY}",
-            id="dumped-and-loaded",
-        ),
+        ("openai", "responses", "gpt-5.6"),
+        ("claude", "anthropic", "claude-sonnet-4-6"),
+        ("Claude Sonnet 4.6", "anthropic", "claude-sonnet-4-6"),
+        ("ft:custom-123", "chat", "gpt-5.5"),
+        ("minimax-m3", "chat", "MiniMax-M3"),
     ],
+    ids=["an-agent-type", "another-agent-type", "a-display-name", "a-catalog-id", "any-case"],
 )
 async def test_a_created_agent_speaks_its_models_protocol_through_the_gateway(
-    build: Callable[[], Agent],
+    name: str,
     protocol: str,
     model: str,
-    credential: str,
-    platform: Platform,
+    services: FakeServices,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
-    """The provider's own keys are set too, and still not used."""
-    hud_env.set(OPENAI_API_KEY="openai-key", ANTHROPIC_API_KEY="anthropic-key")
-    platform.page_size = 2
-    for entry in CATALOG:
-        platform.add_model(**entry)
+    hud_env.set(HUD_API_KEY="hud-key", OPENAI_API_KEY="own-key", ANTHROPIC_API_KEY="own-key")
+    services.route(
+        "api",
+        "GET",
+        "/v2/models",
+        Reply(json={"items": CATALOG[:2], "total": 3}),
+        Reply(json={"items": CATALOG[2:], "total": 3}),
+    )
     models.script([say("done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), build())
+    await run_task(workspace_env(tmp_path / "ws"), create_agent(name))
 
     (request,) = models.requests()
-    sent = request.headers.get("authorization") or request.headers.get("x-api-key")
-    assert (request.protocol, request.model, sent) == (protocol, model, credential)
+    assert (request.protocol, request.model, request.credential) == (protocol, model, "hud-key")

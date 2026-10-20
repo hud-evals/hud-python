@@ -5,8 +5,8 @@ this process, in a child process, in a container, or attached by address.
 Scenarios load them by path with ``source``. Modules with a ``tasks`` list also
 load the way a user's tasks file does, through ``hud eval`` or ``Taskset.from_file``.
 
-The policies below answer a fixture the way a capable model would, from what
-the agent actually sent.
+``capable_model`` answers a fixture the way a capable model would, from what the
+agent actually sent.
 """
 
 from __future__ import annotations
@@ -67,3 +67,15 @@ def read_token(request: ModelRequest) -> Turn:
         return call("bash", command=f"cat {path.group(1)}")
     token = re.search(r"^[0-9a-f]{16}$", request.tool_results[-1], re.MULTILINE)
     return say(token.group(0) if token else "no token in the tool result")
+
+
+def capable_model(fixture: str) -> Callable[[ModelRequest], Turn]:
+    """A scripted model that takes fixture environment ``fixture`` to its reward."""
+    match fixture:
+        case "echo" | "verifier":
+            return repeat_word
+        case "secret":
+            return read_token
+        case "tools":
+            return collect_digits()
+    raise ValueError(f"no scripted model answers {fixture!r}")

@@ -1,6 +1,10 @@
-"""Stub ``claude`` and ``codex`` executables: each records what the agent handed it (argv,
-the variables it set, stdin, ``.hud_*`` files), runs the commands it is told to, prints the
-JSONL stream the real CLI would, and exits as told."""
+"""Stand-ins for the ``claude`` and ``codex`` executables a CLI agent launches.
+
+Each records what the agent handed it (argv, the variables it set, stdin, ``.hud_*``
+files), runs the commands it is told to, prints the JSONL stream the real CLI would, and
+exits as told. :func:`answer`, :func:`shell`, :func:`fault` and :func:`prompt` speak
+either CLI's stream by its executable name.
+"""
 
 from __future__ import annotations
 
@@ -279,16 +283,31 @@ def codex_fault(message: str) -> str:
 # ─── the command line a CLI was launched with ──────────────────────────
 
 
-def flag(argv: list[str], name: str) -> str | None:
-    """The value of ``name value`` or ``name=value`` in a command line."""
-    for index, arg in enumerate(argv):
-        if arg == name:
-            return argv[index + 1]
-        if arg.startswith(f"{name}="):
-            return arg.removeprefix(f"{name}=")
-    return None
-
-
 def overrides(argv: list[str]) -> dict[str, str]:
     """Codex's ``-c key=value`` overrides, values as written (TOML)."""
     return dict(argv[index + 1].split("=", 1) for index, arg in enumerate(argv) if arg == "-c")
+
+
+# ─── either CLI, by executable name ────────────────────────────────────
+
+
+def answer(cli: str, text: str) -> str:
+    """The stream ``cli`` prints when it answers ``text``."""
+    return {"claude": claude_answer, "codex": codex_answer}[cli](text)
+
+
+def shell(cli: str, command: str, then: str) -> str:
+    """The stream ``cli`` prints when it runs ``command`` and then answers ``then``."""
+    return {"claude": claude_shell, "codex": codex_shell}[cli](command, then)
+
+
+def fault(cli: str, message: str) -> str:
+    """The stream ``cli`` prints when its turn fails with ``message``."""
+    return {"claude": claude_fault, "codex": codex_fault}[cli](message)
+
+
+def prompt(cli: str, stdin: str) -> str:
+    """The prompt ``cli`` read from its stdin: Claude's stream-json message, or codex's text."""
+    if cli == "claude":
+        return json.loads(stdin)["message"]["content"][0]["text"]
+    return stdin

@@ -1,7 +1,7 @@
-"""What ``CodexCLIAgent`` hands ``codex exec`` (its prompt, model, settings, where its requests
-go and with which credential), what it records from codex's items, and how codex's exit
-ends the run. A stub ``codex`` on the workspace's ``PATH`` records what it was handed; the
-real CLI runs in the live lane."""
+"""What only ``CodexCLIAgent`` does: where it points ``codex exec`` and with which credential,
+what it records from codex's items, and how codex's exit ends the run. A stand-in
+``codex`` on the workspace's ``PATH`` records what it was handed; the real CLI runs in the
+live lane."""
 
 from __future__ import annotations
 
@@ -9,23 +9,13 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from dirty_equals import IsStr
 
 from hud.agents import CodexCLIAgent
 from hud.agents.types import CodexCLIConfig, ToolStep
 from hud.capabilities import Connection
 from hud.environment.egress import ANY_HOST
-from tests.agents.cli_stub import (
-    CODEX_COMPLETED,
-    CODEX_STARTED,
-    Stub,
-    codex_answer,
-    codex_item,
-    flag,
-    jsonl,
-    overrides,
-)
 from tests.fixtures.environments import run_task, workspace_env
+from tests.support import clis
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,94 +28,55 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="hud-key")
 
 
-async def handed(tmp_path: Path, prompt: str = "Do the task.", **config: Any) -> dict[str, Any]:
-    """What one run of ``codex`` was handed: its argv, env and stdin."""
-    stub = Stub(tmp_path / "stub", "codex", stdout=codex_answer("done"))
-    stub.install()
-    env = workspace_env(tmp_path / "ws", env=stub.shell_env())
-    run = await run_task(env, CodexCLIAgent(CodexCLIConfig(**config)), prompt=prompt)
-    assert run.trace.status == "completed", run.trace.error
-    (capture,) = stub.captures()
-    return capture
-
-
-async def test_codex_reads_the_prompt_on_its_stdin(tmp_path: Path) -> None:
-    capture = await handed(tmp_path, prompt="Fix the bug.")
-
-    assert capture["stdin"] == "Fix the bug."
-
-
 @pytest.mark.parametrize(
-    ("variables", "config", "route", "credential"),
+    ("variables", "gateway", "via_gateway", "credential"),
     [
-        pytest.param({"OPENAI_API_KEY": "own-key"}, {}, "provider", "own-key", id="its-own-key"),
-        pytest.param({}, {}, "gateway", "hud-key", id="a-hud-key-only"),
-        pytest.param(
-            {"OPENAI_API_KEY": "own-key"},
-            {"gateway": True},
-            "gateway",
-            "hud-key",
-            id="the-gateway-forced-over-its-own-key",
-        ),
-        pytest.param(
-            {"HUD_API_KEY": None}, {}, "its-own-login", None, id="no-key-leaves-its-own-login"
-        ),
+        ({"OPENAI_API_KEY": "own-key"}, False, False, "own-key"),
+        ({}, False, True, "hud-key"),
+        ({"OPENAI_API_KEY": "own-key"}, True, True, "hud-key"),
+        ({"HUD_API_KEY": None}, False, False, None),
+    ],
+    ids=[
+        "its-own-key",
+        "only-a-hud-key",
+        "the-gateway-forced-over-its-own-key",
+        "no-key-leaves-its-own-login",
     ],
 )
-async def test_codex_is_pointed_where_the_sign_in_routes_it(
+async def test_codex_is_pointed_at_the_gateway_over_responses_unless_it_has_its_own_key(
     variables: dict[str, str | None],
-    config: dict[str, Any],
-    route: str,
+    gateway: bool,
+    via_gateway: bool,
     credential: str | None,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
     hud_env.set(**variables)
+    stub = clis.Stub(tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"))
+    stub.install()
 
-    capture = await handed(tmp_path, **config)
+    await run_task(
+        workspace_env(tmp_path / "ws", env=stub.shell_env()),
+        CodexCLIAgent(CodexCLIConfig(gateway=gateway)),
+    )
 
-    env, settings = capture["env"], overrides(capture["argv"])
-    if route == "gateway":
-        assert json.loads(settings["model_providers.hud.base_url"]) == models.url
-        assert env[json.loads(settings["model_providers.hud.env_key"])] == credential
-        assert '"Trace-Id"=' in settings["model_providers.hud.http_headers"]
-    else:
-        assert "model_providers.hud.base_url" not in settings
-        assert env.get("CODEX_API_KEY") == credential
-
-
-@pytest.mark.parametrize(
-    ("config", "read", "value"),
-    [
-        pytest.param({"model": "gpt-5.4-mini"}, "--model", "gpt-5.4-mini", id="model"),
-        pytest.param({"sandbox": "read-only"}, "--sandbox", "read-only", id="sandbox"),
-        pytest.param(
-            {"reasoning_effort": "high"}, "model_reasoning_effort", '"high"', id="reasoning-effort"
-        ),
-        pytest.param({}, "model_reasoning_effort", None, id="no-effort-leaves-the-cli-default"),
-        pytest.param(
-            {"gateway": True},
-            "model_providers.hud.wire_api",
-            '"responses"',
-            id="the-gateway-speaks-the-responses-api",
-        ),
-    ],
-)
-async def test_codex_is_given_the_settings_its_configuration_sets(
-    config: dict[str, Any], read: str, value: str | None, tmp_path: Path
-) -> None:
-    argv = (await handed(tmp_path, **config))["argv"]
-
-    given = flag(argv, read) if read.startswith("--") else overrides(argv).get(read)
-    assert given == value
+    (capture,) = stub.captures()
+    settings = clis.overrides(capture["argv"])
+    key = json.loads(settings.get("model_providers.hud.env_key", '"CODEX_API_KEY"'))
+    assert settings.get("model_providers.hud.base_url") == (
+        json.dumps(models.url) if via_gateway else None
+    )
+    assert settings.get("model_providers.hud.wire_api") == ('"responses"' if via_gateway else None)
+    assert capture["env"].get(key) == credential
+    assert ('"Trace-Id"=' in settings.get("model_providers.hud.http_headers", "")) is via_gateway
 
 
 @pytest.mark.parametrize(
-    ("item", "step"),
+    ("item", "name", "is_error", "texts"),
     [
-        pytest.param(
-            codex_item(
+        (
+            clis.codex_item(
                 "command_execution",
                 "c",
                 command="false",
@@ -133,21 +84,23 @@ async def test_codex_is_given_the_settings_its_configuration_sets(
                 exit_code=1,
                 status="completed",
             ),
-            ("shell", True, [""]),
-            id="a-failed-command",
+            "shell",
+            True,
+            [""],
         ),
-        pytest.param(
-            codex_item(
+        (
+            clis.codex_item(
                 "file_change",
                 "f",
                 changes=[{"kind": "update", "path": "a.txt"}],
                 status="completed",
             ),
-            ("apply_patch", False, ["update: a.txt"]),
-            id="a-file-change",
+            "apply_patch",
+            False,
+            ["update: a.txt"],
         ),
-        pytest.param(
-            codex_item(
+        (
+            clis.codex_item(
                 "mcp_tool_call",
                 "m",
                 server="tools",
@@ -156,11 +109,12 @@ async def test_codex_is_given_the_settings_its_configuration_sets(
                 result={"content": [{"type": "text", "text": "found"}]},
                 status="completed",
             ),
-            ("lookup", False, ["found"]),
-            id="an-mcp-tool-call",
+            "lookup",
+            False,
+            ["found"],
         ),
-        pytest.param(
-            codex_item(
+        (
+            clis.codex_item(
                 "mcp_tool_call",
                 "m",
                 server="tools",
@@ -169,82 +123,94 @@ async def test_codex_is_given_the_settings_its_configuration_sets(
                 error={"message": "no such key"},
                 status="failed",
             ),
-            ("lookup", True, ["no such key"]),
-            id="a-failed-mcp-tool-call",
+            "lookup",
+            True,
+            ["no such key"],
         ),
-        pytest.param(
-            codex_item("web_search", "w", query="sky", action={"type": "search", "query": "sky"}),
-            ("web_search", False, ['{"type":"search","query":"sky"}']),
-            id="a-web-search",
+        (
+            clis.codex_item(
+                "web_search", "w", query="sky", action={"type": "search", "query": "sky"}
+            ),
+            "web_search",
+            False,
+            ['{"type":"search","query":"sky"}'],
         ),
+    ],
+    ids=[
+        "a-failed-command",
+        "a-file-change",
+        "an-mcp-tool-call",
+        "a-failed-mcp-tool-call",
+        "a-web-search",
     ],
 )
 async def test_each_item_codex_ran_lands_on_the_trace_as_a_tool_step(
-    item: dict[str, Any], step: tuple[str, bool, list[str]], tmp_path: Path
+    item: dict[str, Any], name: str, is_error: bool, texts: list[str], tmp_path: Path
 ) -> None:
-    stub = Stub(tmp_path / "stub", "codex", stdout=jsonl(CODEX_STARTED, item, CODEX_COMPLETED))
+    stdout = clis.jsonl(clis.CODEX_STARTED, item, clis.CODEX_COMPLETED)
+    stub = clis.Stub(tmp_path / "stub", "codex", stdout=stdout)
     stub.install()
 
     run = await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), CodexCLIAgent())
 
-    (recorded,) = [s for s in run.trace.steps if isinstance(s, ToolStep)]
+    (recorded,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
     assert recorded.call is not None and recorded.result is not None
-    texts = [getattr(block, "text", None) for block in recorded.result.content]
-    assert (recorded.call.name, recorded.result.isError, texts) == step
+    sent = [getattr(block, "text", None) for block in recorded.result.content]
+    assert (recorded.call.name, recorded.result.isError, sent) == (name, is_error, texts)
 
 
 @pytest.mark.parametrize(
-    ("behavior", "ending"),
+    ("stdout", "stderr", "exit", "content", "error"),
     [
-        pytest.param(
-            {
-                "stdout": jsonl(
-                    {"type": "turn.started"},
-                    {"type": "turn.failed", "error": {"message": "model unavailable"}},
-                )
-            },
-            ("error", None, "[agent loop] RuntimeError: model unavailable"),
-            id="a-failed-turn",
-        ),
-        pytest.param(
-            {"stdout": "", "stderr": "authentication failed", "exit": 1},
-            ("error", None, "[agent loop] RuntimeError: authentication failed"),
-            id="a-nonzero-exit",
-        ),
-        pytest.param(
-            {
-                "stdout": jsonl({"type": "error", "message": "gateway rejected streaming"}),
-                "stderr": "noisy",
-                "exit": 1,
-            },
-            ("error", None, "[agent loop] RuntimeError: gateway rejected streaming"),
-            id="a-nonzero-exit-with-a-structured-error",
-        ),
-        pytest.param(
-            {
-                "stdout": jsonl(
-                    CODEX_STARTED,
-                    codex_item("agent_message", "message-1", text="Implemented and verified."),
-                )
-            },
-            (
-                "error",
-                "Implemented and verified.",
-                "[agent loop] RuntimeError: codex CLI exited without a turn.completed event",
+        (
+            clis.jsonl(
+                {"type": "turn.started"},
+                {"type": "turn.failed", "error": {"message": "model unavailable"}},
             ),
-            id="a-zero-exit-without-turn-completed",
+            "",
+            0,
+            None,
+            "model unavailable",
         ),
+        ("", "authentication failed", 1, None, "authentication failed"),
+        (
+            clis.jsonl({"type": "error", "message": "gateway rejected streaming"}),
+            "noisy",
+            1,
+            None,
+            "gateway rejected streaming",
+        ),
+        (
+            clis.jsonl(
+                clis.CODEX_STARTED,
+                clis.codex_item("agent_message", "message-1", text="Implemented and verified."),
+            ),
+            "",
+            0,
+            "Implemented and verified.",
+            "codex CLI exited without a turn.completed event",
+        ),
+    ],
+    ids=[
+        "a-failed-turn",
+        "a-nonzero-exit",
+        "a-nonzero-exit-with-a-structured-error",
+        "a-zero-exit-without-turn-completed",
     ],
 )
 async def test_how_codex_exits_decides_how_the_run_ends(
-    behavior: dict[str, Any], ending: tuple[str, str | None, str], tmp_path: Path
+    stdout: str, stderr: str, exit: int, content: str | None, error: str, tmp_path: Path
 ) -> None:
-    stub = Stub(tmp_path / "stub", "codex", **behavior)
+    stub = clis.Stub(tmp_path / "stub", "codex", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
     run = await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), CodexCLIAgent())
 
-    assert (run.trace.status, run.trace.content, run.trace.error) == ending
+    assert (run.trace.status, run.trace.content, run.trace.error) == (
+        "error",
+        content,
+        f"[agent loop] RuntimeError: {error}",
+    )
 
 
 @pytest.mark.e2e
@@ -258,7 +224,7 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
         url="https://inference.hud.so/v1",
         headers={"Authorization": "Bearer scoped-runtime-token"},
     )
-    stub = Stub(tmp_path / "stub", "codex", stdout=codex_answer("Implemented and verified."))
+    stub = clis.Stub(tmp_path / "stub", "codex", stdout=clis.answer("codex", "done"))
     stub.install()
     env = workspace_env(
         tmp_path / "ws",
@@ -270,7 +236,7 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
 
     run = await run_task(env, CodexCLIAgent(), connections=(connection,))
 
-    assert (run.trace.error, stub.captures()) == (
-        IsStr(regex=r".*/codex is a launcher script, but a process-bound inference connection .*"),
-        [],
+    assert "/codex is a launcher script, but a process-bound inference connection " in (
+        run.trace.error or ""
     )
+    assert stub.captures() == []

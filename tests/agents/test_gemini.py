@@ -1,11 +1,11 @@
-"""What only ``GeminiAgent`` sends and records: its grounding tools and output cap in the
-generateContent request, the computer functions it leaves out, how it bounds a long tool
-output it sends back, and the grounding it reads back as citations."""
+"""What only ``GeminiAgent`` does: the grounding and computer tools it offers, how it bounds
+a long tool output and drops old screenshots, how its replies fail, and the grounding it
+records as citations."""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from fastmcp import FastMCP
@@ -19,16 +19,15 @@ from hud.agents.gemini.tools import (
 from hud.agents.types import GeminiConfig
 from hud.capabilities import Capability
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Turn, call, fake_screen, mcp_server, say, steps
+from tests.support import Reply, Turn, call, click, fake_screen, mcp_server, say, steps
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support import HudEnv, ModelRequest, Models
+    from tests.support import HudEnv, Models
 
-
-def gemini(**config: Any) -> GeminiAgent:
-    return GeminiAgent(GeminiConfig.model_validate({"model": "gemini-3.1-pro-preview", **config}))
+MODEL = "gemini-3.1-pro-preview"
+CONTROL_L = 0xFFE3
 
 
 @pytest.fixture(autouse=True)
@@ -36,71 +35,53 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
 
 
-async def first_request(
-    models: Models, root: Path, capabilities: tuple[Capability, ...] = (), **config: Any
-) -> ModelRequest:
-    models.script([say("done")])
-    await run_task(workspace_env(root, capabilities=capabilities), gemini(**config))
-    return models.requests()[0]
-
-
-def hosted(request: ModelRequest) -> list[dict[str, Any]]:
-    return [tool for tool in request.body["tools"] if "functionDeclarations" not in tool]
-
-
-@pytest.mark.parametrize(
-    ("config", "tools"),
-    [
-        pytest.param(
-            {
-                "hosted_tools": [
-                    GeminiGoogleSearchTool(),
-                    GeminiUrlContextTool(),
-                    GeminiCodeExecutionTool(),
-                ]
-            },
-            [{"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}}],
-            id="hosted-grounding-tools",
-        ),
-        pytest.param(
-            {"citations_enabled": True},
-            [{"googleSearch": {}}],
-            id="citations-ask-for-google-search",
-        ),
-    ],
-)
-async def test_the_hosted_tools_its_configuration_names_are_offered(
-    config: dict[str, Any], tools: list[dict[str, Any]], models: Models, tmp_path: Path
+async def test_hosted_grounding_tools_are_offered_as_configured(
+    models: Models, tmp_path: Path
 ) -> None:
-    request = await first_request(models, tmp_path / "ws", **config)
+    hosted = [GeminiGoogleSearchTool(), GeminiUrlContextTool(), GeminiCodeExecutionTool()]
+    models.script([say("done")])
 
-    assert hosted(request) == tools
+    await run_task(
+        workspace_env(tmp_path / "ws"), GeminiAgent(GeminiConfig(model=MODEL, hosted_tools=hosted))
+    )
+
+    (request,) = models.requests()
+    assert [t for t in request.body["tools"] if "functionDeclarations" not in t] == [
+        {"googleSearch": {}},
+        {"urlContext": {}},
+        {"codeExecution": {}},
+    ]
+
+
+async def test_citations_add_google_search_to_the_tools(models: Models, tmp_path: Path) -> None:
+    models.script([say("done")])
+
+    await run_task(
+        workspace_env(tmp_path / "ws"),
+        GeminiAgent(GeminiConfig(model=MODEL, citations_enabled=True)),
+    )
+
+    (request,) = models.requests()
+    assert [t for t in request.body["tools"] if "functionDeclarations" not in t] == [
+        {"googleSearch": {}}
+    ]
 
 
 async def test_excluded_computer_functions_are_left_out_of_the_computer_tool(
     models: Models, tmp_path: Path
 ) -> None:
+    models.script([say("done")])
+    excluded = ["drag_and_drop", "search"]
+
     async with fake_screen() as screen:
-        request = await first_request(
-            models,
-            tmp_path / "ws",
-            (Capability.rfb(url=screen.url),),
-            excluded_predefined_functions=["drag_and_drop", "search"],
+        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        await run_task(
+            env, GeminiAgent(GeminiConfig(model=MODEL, excluded_predefined_functions=excluded))
         )
 
-    (computer,) = hosted(request)
-    assert computer["computerUse"]["excluded_predefined_functions"] == ["drag_and_drop", "search"]
-
-
-@pytest.mark.parametrize(("cap", "sent"), [(None, None), (4096, 4096)], ids=["unset", "configured"])
-async def test_the_output_cap_is_sent_only_when_configured(
-    cap: int | None, sent: int | None, models: Models, tmp_path: Path
-) -> None:
-    config: dict[str, Any] = {} if cap is None else {"max_output_tokens": cap}
-
-    request = await first_request(models, tmp_path / "ws", **config)
-
-    assert request.body.get("generationConfig", {}).get("maxOutputTokens") == sent
+    (request,) = models.requests()
+    (computer,) = [t for t in request.body["tools"] if "functionDeclarations" not in t]
+    assert computer["computerUse"]["excluded_predefined_functions"] == excluded
 
 
 async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
@@ -114,7 +95,7 @@ async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
 
     async with mcp_server(server) as long_output:
         env = workspace_env(tmp_path / "ws", capabilities=(long_output,))
-        await run_task(env, gemini(max_tool_result_chars=100))
+        await run_task(env, GeminiAgent(GeminiConfig(model=MODEL, max_tool_result_chars=100)))
 
     (result,) = models.requests()[-1].tool_results
     output = json.loads(result)["output"]
@@ -122,34 +103,77 @@ async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
     assert output.endswith("h" * 20 + "\n\n... [900 characters omitted] ...\n\n" + "t" * 80)
 
 
-async def test_grounding_lands_on_the_agent_step_as_citations(
+async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
+    models: Models, tmp_path: Path
+) -> None:
+    models.script([click(10, 10, screen=(64, 48))] * 4 + [say("done")])
+
+    async with fake_screen() as screen:
+        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        await run_task(env, GeminiAgent(GeminiConfig(model=MODEL)))
+
+    responses = [
+        part["functionResponse"]
+        for content in models.requests()[-1].body["contents"]
+        for part in content["parts"]
+        if "functionResponse" in part
+    ]
+    assert [bool(response.get("parts")) for response in responses] == [False, True, True, True]
+
+
+async def test_a_field_is_cleared_with_ctrl_a_whatever_system_the_agent_runs_on(
+    models: Models, tmp_path: Path
+) -> None:
+    models.script([call("type_text_at", x=500, y=500, text="hi"), say("done")])
+
+    async with fake_screen() as screen:
+        env = workspace_env(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
+        await run_task(env, GeminiAgent(GeminiConfig(model=MODEL)))
+
+    pressed = [event.key for event in screen.key_events() if event.down]
+    assert pressed[:2] == [CONTROL_L, ord("a")]
+
+
+@pytest.mark.parametrize(
+    ("turn", "error"),
+    [
+        (Turn(fail=Reply(json={"candidates": []})), "Gemini returned no candidates"),
+        (Turn(finish="MALFORMED_FUNCTION_CALL"), "Provider returned a malformed function call"),
+    ],
+    ids=["no-candidates", "a-malformed-function-call"],
+)
+async def test_a_reply_it_cannot_use_ends_the_run_with_its_error(
+    turn: Turn, error: str, models: Models, tmp_path: Path
+) -> None:
+    models.queue([turn])
+
+    run = await run_task(workspace_env(tmp_path / "ws"), GeminiAgent(GeminiConfig(model=MODEL)))
+
+    assert (run.trace.status, len(models.requests())) == ("error", 1)
+    assert error in (run.trace.error or "")
+
+
+async def test_grounding_and_thoughts_land_on_the_agent_step(
     models: Models, tmp_path: Path
 ) -> None:
     web = "https://example.com/sky"
+    grounding = {
+        "groundingChunks": [
+            {"web": {"uri": web, "title": "Sky"}},
+            {"web": {"uri": "https://example.com/unused", "title": "Unused"}},
+        ],
+        "groundingSupports": [
+            {
+                "segment": {"text": "Blue.", "startIndex": 0, "endIndex": 5},
+                "groundingChunkIndices": [0],
+            }
+        ],
+    }
     models.script(
-        [
-            Turn(
-                text="Blue.",
-                reasoning="look it up",
-                extra={
-                    "groundingMetadata": {
-                        "groundingChunks": [
-                            {"web": {"uri": web, "title": "Sky"}},
-                            {"web": {"uri": "https://example.com/unused", "title": "Unused"}},
-                        ],
-                        "groundingSupports": [
-                            {
-                                "segment": {"text": "Blue.", "startIndex": 0, "endIndex": 5},
-                                "groundingChunkIndices": [0],
-                            }
-                        ],
-                    }
-                },
-            )
-        ]
+        [Turn(text="Blue.", reasoning="look it up", extra={"groundingMetadata": grounding})]
     )
 
-    run = await run_task(workspace_env(tmp_path / "ws"), gemini())
+    run = await run_task(workspace_env(tmp_path / "ws"), GeminiAgent(GeminiConfig(model=MODEL)))
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert (step["content"], step["reasoning"]) == ("Blue.", "look it up")

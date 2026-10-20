@@ -1,9 +1,10 @@
-"""What only ``OpenAIChatAgent`` sends and records: its completion options on every Chat
-Completions request (token ids, checkpoints), how it replays a cut-off call, and the
-training sample it exports."""
+"""What only ``OpenAIChatAgent`` does over Chat Completions: where its requests go, how it
+continues a sampled conversation by token ids, how it replays an incomplete call, and the
+training sample it records."""
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -11,94 +12,128 @@ import pytest
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import Turn, call, say, steps
+from tests.support import Turn, say, steps
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.support import HudEnv, Models
 
-
-def chat(**config: Any) -> OpenAIChatAgent:
-    return OpenAIChatAgent(OpenAIChatConfig.model_validate({"model": "qwen3.6-plus", **config}))
+MODEL = "qwen3.6-plus"
+TOKEN_IDS = {"extra_body": {"return_token_ids": True}}
 
 
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
-    hud_env.set(HUD_API_KEY="k")
-
-
-BASE = {"model": "qwen3.6-plus", "stream": False}
-TOKEN_IDS = {"extra_body": {"return_token_ids": True}}
-SAMPLED = BASE | {"logprobs": True, "return_token_ids": True}
-CALL = call("bash", command="true").tool_calls
+    hud_env.set(HUD_API_KEY="hud-key")
 
 
 @pytest.mark.parametrize(
-    ("config", "turns", "options"),
+    ("openai_key", "explicit", "route", "credential"),
     [
-        pytest.param(
-            {"completion_kwargs": TOKEN_IDS},
+        (None, True, "provider", "explicit"),
+        (None, False, "gateway", "hud-key"),
+        ("openai-key", False, "gateway", "hud-key"),
+    ],
+    ids=["an-explicit-endpoint", "only-a-hud-key", "an-openai-key-is-not-its-own"],
+)
+async def test_requests_go_to_an_explicit_endpoint_and_otherwise_to_the_gateway(
+    openai_key: str | None,
+    explicit: bool,
+    route: str,
+    credential: str,
+    models: Models,
+    provider: Models,
+    hud_env: HudEnv,
+    tmp_path: Path,
+) -> None:
+    hud_env.set(OPENAI_API_KEY=openai_key)
+    models.script([say("done")])
+    provider.script([say("done")])
+    endpoint = {"api_key": "explicit", "base_url": provider.url} if explicit else {}
+
+    run = await run_task(
+        workspace_env(tmp_path / "ws"), OpenAIChatAgent(OpenAIChatConfig(model=MODEL, **endpoint))
+    )
+
+    (request,) = {"gateway": models, "provider": provider}[route].requests()
+    assert (run.trace.status, request.credential) == ("completed", credential)
+
+
+SAMPLED = {"logprobs": True, "return_token_ids": True}
+
+
+@pytest.mark.parametrize(
+    ("sampled", "continued"),
+    [
+        (
+            [{"prompt_token_ids": [1, 2], "token_ids": [3]}, {"token_ids": [5]}],
+            [{}, {"prompt_token_ids": [1, 2, 3], "continuation_from": 2}],
+        ),
+        (
             [
-                Turn(tool_calls=CALL, extra={"prompt_token_ids": [1, 2], "token_ids": [3]}),
-                Turn(text="done", extra={"prompt_token_ids": [1, 2, 3, 4], "token_ids": [5]}),
+                {"prompt_token_ids": [1, 2], "token_ids": [3]},
+                {"prompt_chunks": [{"type": "text", "text": "hi"}], "token_ids": [4]},
+                {"token_ids": [5]},
             ],
-            [SAMPLED, SAMPLED | {"prompt_token_ids": [1, 2, 3], "continuation_from": 2}],
-            id="token-ids-continue-the-kv-cache",
-        ),
-        pytest.param(
-            {"completion_kwargs": TOKEN_IDS},
-            [
-                Turn(
-                    tool_calls=CALL,
-                    extra={"prompt_chunks": [{"type": "text", "text": "hi"}], "token_ids": [3]},
-                ),
-                say("done"),
-            ],
-            [SAMPLED, SAMPLED],
-            id="multimodal-prompt-chunks-reset-the-continuation",
-        ),
-        pytest.param(
-            {"checkpoint": "ckpt-7"},
-            [say("done")],
-            [BASE | {"checkpoint": "ckpt-7"}],
-            id="a-checkpoint-routes-in-the-body",
-        ),
-        pytest.param(
-            {
-                "completion_kwargs": {
-                    "model": "other",
-                    "stream": True,
-                    "tools": [],
-                    "messages": [],
-                    "max_tokens": 50,
-                }
-            },
-            [say("done")],
-            [BASE | {"max_tokens": 50}],
-            id="reserved-completion-kwargs-are-dropped",
+            [{}, {"prompt_token_ids": [1, 2, 3], "continuation_from": 2}, {}],
         ),
     ],
+    ids=["text-prompts-continue-the-kv-cache", "a-multimodal-prompt-starts-over"],
 )
-async def test_every_request_carries_the_completion_options_its_configuration_sets(
-    config: dict[str, Any],
-    turns: list[Turn],
-    options: list[dict[str, Any]],
+async def test_token_ids_continue_the_conversation_from_what_was_sampled(
+    sampled: list[dict[str, Any]],
+    continued: list[dict[str, Any]],
     models: Models,
     tmp_path: Path,
 ) -> None:
-    models.script(turns)
+    *calls, last = sampled
+    models.script(
+        [Turn(shell="true", extra=extra) for extra in calls] + [Turn(text="done", extra=last)]
+    )
 
-    await run_task(workspace_env(tmp_path / "ws"), chat(**config))
+    await run_task(
+        workspace_env(tmp_path / "ws"),
+        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=TOKEN_IDS)),
+    )
 
-    sent = [
-        {key: value for key, value in request.body.items() if key not in {"messages", "tools"}}
-        for request in models.requests()
-    ]
-    assert sent == options
+    keys = {"prompt_token_ids", "continuation_from", *SAMPLED}
+    sent = [{k: v for k, v in r.body.items() if k in keys} for r in models.requests()]
+    assert sent == [SAMPLED | expected for expected in continued]
 
 
-async def test_a_cut_off_call_is_replayed_to_the_model_with_empty_arguments(
+async def test_the_models_reasoning_is_replayed_in_the_conversation(
+    models: Models, tmp_path: Path
+) -> None:
+    models.script([Turn(shell="true", reasoning="check first"), say("done")])
+
+    await run_task(workspace_env(tmp_path / "ws"), OpenAIChatAgent(OpenAIChatConfig(model=MODEL)))
+
+    replayed = models.requests()[-1].body["messages"][1]
+    assert (replayed["role"], replayed["reasoning_content"]) == ("assistant", "check first")
+
+
+async def test_completion_kwargs_cannot_override_what_the_agent_sends_itself(
+    models: Models, tmp_path: Path
+) -> None:
+    reserved = {"model": "other", "stream": True, "tools": [], "messages": [], "max_tokens": 50}
+    models.script([say("done")])
+
+    await run_task(
+        workspace_env(tmp_path / "ws"),
+        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=reserved)),
+    )
+
+    (request,) = models.requests()
+    assert (request.body["model"], request.body["stream"], request.body["max_tokens"]) == (
+        MODEL,
+        False,
+        50,
+    )
+    assert request.body["messages"] != [] and request.body["tools"] != []
+
+
+async def test_an_incomplete_call_is_explained_and_replayed_with_empty_arguments(
     models: Models, tmp_path: Path
 ) -> None:
     cut_off = Turn(
@@ -112,33 +147,30 @@ async def test_a_cut_off_call_is_replayed_to_the_model_with_empty_arguments(
     )
     models.script([cut_off, say("done")])
 
-    await run_task(workspace_env(tmp_path / "ws"), chat())
+    run = await run_task(
+        workspace_env(tmp_path / "ws"), OpenAIChatAgent(OpenAIChatConfig(model=MODEL))
+    )
 
-    replayed = models.requests()[-1].body["messages"][1]["tool_calls"][0]
-    assert replayed["function"]["arguments"] == "{}"
+    last = models.requests()[-1].body
+    assert run.trace.status == "completed"
+    assert last["messages"][1]["tool_calls"][0]["function"]["arguments"] == "{}"
+    assert "the arguments for this 'bash' call arrived incomplete" in json.dumps(last)
 
 
-async def test_a_completion_with_token_ids_exports_its_training_sample(
+async def test_a_completion_with_token_ids_records_its_training_sample(
     models: Models, tmp_path: Path
 ) -> None:
     logprobs = [
         {"token": "Bl", "logprob": -0.5, "bytes": None, "top_logprobs": []},
         {"token": "ue.", "logprob": -0.25, "bytes": None, "top_logprobs": []},
     ]
-    models.script(
-        [
-            Turn(
-                text="Blue.",
-                extra={
-                    "prompt_token_ids": [1, 2],
-                    "token_ids": [3, 4],
-                    "logprobs": {"content": logprobs},
-                },
-            )
-        ]
-    )
+    sample = {"prompt_token_ids": [1, 2], "token_ids": [3, 4], "logprobs": {"content": logprobs}}
+    models.script([Turn(text="Blue.", extra=sample)])
 
-    run = await run_task(workspace_env(tmp_path / "ws"), chat(completion_kwargs=TOKEN_IDS))
+    run = await run_task(
+        workspace_env(tmp_path / "ws"),
+        OpenAIChatAgent(OpenAIChatConfig(model=MODEL, completion_kwargs=TOKEN_IDS)),
+    )
 
     (step,) = [step for step in steps(run.trace_id) if step["source"] == "agent"]
     assert step["sample"] == {

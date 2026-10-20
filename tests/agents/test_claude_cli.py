@@ -1,7 +1,7 @@
-"""What ``ClaudeCLIAgent`` hands the ``claude`` CLI (its prompt, tools, model, flags, where its
-requests go and with which credential), and how the CLI's exit ends the run. A stub
-``claude`` on the workspace's ``PATH`` records what it was handed; the real CLI runs in
-the live lane."""
+"""What only ``ClaudeCLIAgent`` does: what it hands the ``claude`` CLI (prompt, tools, MCP
+servers, where its requests go and which model each tier uses), how the CLI's exit ends
+the run, and the computer bridge it serves the CLI. A stand-in ``claude`` on the
+workspace's ``PATH`` records what it was handed; the real CLI runs in the live lane."""
 
 from __future__ import annotations
 
@@ -15,16 +15,8 @@ from hud.agents import ClaudeCLIAgent
 from hud.agents.types import ClaudeCLIConfig
 from hud.capabilities import Capability, Connection
 from hud.environment.egress import ANY_HOST
-from tests.agents.cli_stub import (
-    Stub,
-    claude_answer,
-    claude_assistant,
-    claude_result,
-    flag,
-    jsonl,
-)
 from tests.fixtures.environments import run_task, workspace_env
-from tests.support import fake_screen, mcp_server
+from tests.support import clis, fake_screen, mcp_server
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,81 +29,68 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="hud-key")
 
 
-async def handed(
-    tmp_path: Path,
-    capabilities: tuple[Capability, ...] = (),
-    prompt: str = "Do the task.",
-    **config: Any,
-) -> dict[str, Any]:
-    """What one run of ``claude`` was handed: its argv, env, stdin and ``.hud_*`` files."""
-    stub = Stub(tmp_path / "stub", "claude", stdout=claude_answer("done"))
-    stub.install()
-    env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=capabilities)
-    run = await run_task(env, ClaudeCLIAgent(ClaudeCLIConfig(**config)), prompt=prompt)
-    assert run.trace.status == "completed", run.trace.error
-    (capture,) = stub.captures()
-    return capture
-
-
-def lookup_server() -> FastMCP:
-    server = FastMCP("tools")
-    server.tool(name="lookup", description="Look a key up.")(lambda key: key)
-    return server
-
-
 async def test_the_cli_is_given_the_prompt_its_allowed_tools_and_the_environments_servers(
     tmp_path: Path,
 ) -> None:
-    async with mcp_server(lookup_server()) as server:
-        capture = await handed(tmp_path, (server,), prompt="Fix the bug.")
+    lookups = FastMCP("tools")
+    lookups.tool(name="lookup", description="Look a key up.")(lambda key: key)
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
 
-    argv = capture["argv"]
-    (message,) = [json.loads(line) for line in capture["stdin"].splitlines()]
+    async with mcp_server(lookups) as server:
+        env = workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=(server,))
+        await run_task(env, ClaudeCLIAgent(), prompt="Fix the bug.")
+
+    ((argv, stdin, files),) = [(c["argv"], c["stdin"], c["files"]) for c in stub.captures()]
     allowed = [argv[index + 1] for index, arg in enumerate(argv) if arg == "--allowedTools"]
-    servers = json.loads(capture["files"][".hud_mcp_config.json"])["mcpServers"]
-    assert message["message"]["content"][0]["text"] == "Fix the bug."
-    assert (allowed, list(servers)) == (ClaudeCLIConfig().allowed_tools, ["tools"])
+    assert clis.prompt("claude", stdin) == "Fix the bug."
+    assert allowed == ClaudeCLIConfig().allowed_tools
+    assert list(json.loads(files[".hud_mcp_config.json"])["mcpServers"]) == ["tools"]
 
 
 @pytest.mark.parametrize(
-    ("variables", "config", "base_url", "key", "traced"),
+    ("own_key", "gateway", "via_gateway", "credential"),
     [
-        pytest.param(
-            {"ANTHROPIC_API_KEY": "own-key"}, {}, None, "own-key", False, id="its-own-key"
-        ),
-        pytest.param({}, {}, "<gateway>", "hud-key", True, id="a-hud-key-only"),
-        pytest.param(
-            {"ANTHROPIC_API_KEY": "own-key"},
-            {"gateway": True},
-            "<gateway>",
-            "hud-key",
-            True,
-            id="the-gateway-forced-over-its-own-key",
-        ),
+        ("own-key", False, False, "own-key"),
+        (None, False, True, "hud-key"),
+        ("own-key", True, True, "hud-key"),
     ],
+    ids=["its-own-key", "only-a-hud-key", "the-gateway-forced-over-its-own-key"],
 )
-async def test_the_cli_is_pointed_where_the_sign_in_routes_it(
-    variables: dict[str, str],
-    config: dict[str, Any],
-    base_url: str | None,
-    key: str,
-    traced: bool,
+async def test_the_cli_is_pointed_at_the_provider_with_its_own_key_or_else_the_gateway(
+    own_key: str | None,
+    gateway: bool,
+    via_gateway: bool,
+    credential: str,
     models: Models,
     hud_env: HudEnv,
     tmp_path: Path,
 ) -> None:
-    hud_env.set(**variables)
+    hud_env.set(ANTHROPIC_API_KEY=own_key)
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
 
-    env = (await handed(tmp_path, **config))["env"]
+    await run_task(
+        workspace_env(tmp_path / "ws", env=stub.shell_env()),
+        ClaudeCLIAgent(ClaudeCLIConfig(gateway=gateway)),
+    )
 
-    headers = env.get("ANTHROPIC_CUSTOM_HEADERS", "")
-    assert env.get("ANTHROPIC_BASE_URL") == (models.url if base_url else None)
-    assert (env.get("ANTHROPIC_API_KEY"), "Trace-Id: " in headers) == (key, traced)
+    (env,) = [capture["env"] for capture in stub.captures()]
+    assert env.get("ANTHROPIC_BASE_URL") == (models.url if via_gateway else None)
+    assert env.get("ANTHROPIC_API_KEY") == credential
+    assert ("Trace-Id: " in env.get("ANTHROPIC_CUSTOM_HEADERS", "")) is via_gateway
 
 
-async def test_the_model_is_named_for_every_tier(tmp_path: Path) -> None:
-    env = (await handed(tmp_path, model="claude-opus-5", gateway=True))["env"]
+async def test_every_model_tier_and_subagents_use_the_configured_model(tmp_path: Path) -> None:
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
 
+    await run_task(
+        workspace_env(tmp_path / "ws", env=stub.shell_env()),
+        ClaudeCLIAgent(ClaudeCLIConfig(model="claude-opus-5", gateway=True)),
+    )
+
+    (env,) = [capture["env"] for capture in stub.captures()]
     tiers = (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -122,105 +101,81 @@ async def test_the_model_is_named_for_every_tier(tmp_path: Path) -> None:
     assert {env[name] for name in tiers} == {"claude-opus-5"}
 
 
-@pytest.mark.parametrize(
-    ("config", "name", "value"),
-    [
-        pytest.param({"reasoning_effort": "max"}, "--effort", "max", id="reasoning-effort"),
-        pytest.param({}, "--effort", None, id="no-effort-leaves-the-cli-default"),
-        pytest.param(
-            {"system_prompt": "Be brief."}, "--system-prompt", "Be brief.", id="system-prompt"
-        ),
-        pytest.param(
-            {"permission_mode": "acceptEdits"},
-            "--permission-mode",
-            "acceptEdits",
-            id="permission-mode",
-        ),
-        pytest.param({"max_steps": 2}, "--max-turns", "2", id="the-step-budget"),
-        pytest.param({}, "--max-turns", None, id="no-step-budget"),
-    ],
-)
-async def test_the_cli_is_given_the_flags_its_configuration_sets(
-    config: dict[str, Any], name: str, value: str | None, tmp_path: Path
-) -> None:
-    capture = await handed(tmp_path, **config)
-
-    assert flag(capture["argv"], name) == value
-
-
-WRITE = claude_assistant(
+WRITE = clis.claude_assistant(
     {"type": "text", "text": "editing"},
     {"type": "tool_use", "id": "tool-1", "name": "Write", "input": {"file_path": "a.txt"}},
     stop="tool_use",
 )
-DONE = claude_assistant({"type": "text", "text": "done"})
+DONE = clis.claude_assistant({"type": "text", "text": "done"})
 
 
 @pytest.mark.parametrize(
-    ("behavior", "ending"),
+    ("stdout", "stderr", "exit", "status", "content", "error"),
     [
-        pytest.param(
-            {"stdout": "", "stderr": "boom", "exit": 1},
-            ("error", None, "[agent loop] RuntimeError: boom"),
-            id="a-nonzero-exit-without-output",
+        ("", "boom", 1, "error", None, "boom"),
+        (clis.answer("claude", "done"), "transport failed", 1, "error", "done", "transport failed"),
+        (clis.answer("claude", "done"), "", 1, "completed", "done", None),
+        (clis.jsonl(DONE), "", 0, "error", "done", "claude CLI exited without a result event"),
+        (
+            clis.jsonl(DONE, clis.claude_result("rate limited upstream", is_error=True)),
+            "",
+            0,
+            "error",
+            "rate limited upstream",
+            "rate limited upstream",
         ),
-        pytest.param(
-            {"stdout": claude_answer("done"), "stderr": "transport failed", "exit": 1},
-            ("error", "done", "[agent loop] RuntimeError: transport failed"),
-            id="a-nonzero-exit-after-a-result-with-stderr",
+        (
+            clis.jsonl(WRITE, clis.claude_result()),
+            "",
+            0,
+            "error",
+            "done",
+            "claude CLI exited without results for tool calls: tool-1",
         ),
-        pytest.param(
-            {"stdout": claude_answer("done"), "exit": 1},
-            ("completed", "done", None),
-            id="a-nonzero-exit-after-a-result-without-stderr",
-        ),
-        pytest.param(
-            {"stdout": jsonl(DONE)},
-            (
-                "error",
-                "done",
-                "[agent loop] RuntimeError: claude CLI exited without a result event",
-            ),
-            id="a-zero-exit-without-a-result",
-        ),
-        pytest.param(
-            {"stdout": jsonl(DONE, claude_result("rate limited upstream", is_error=True))},
-            ("error", "rate limited upstream", "[agent loop] RuntimeError: rate limited upstream"),
-            id="a-result-reporting-an-error",
-        ),
-        pytest.param(
-            {"stdout": jsonl(WRITE, claude_result())},
-            (
-                "error",
-                "done",
-                "[agent loop] RuntimeError: "
-                "claude CLI exited without results for tool calls: tool-1",
-            ),
-            id="a-tool-call-left-without-a-result",
-        ),
+    ],
+    ids=[
+        "a-nonzero-exit-without-output",
+        "a-nonzero-exit-after-a-result-with-stderr",
+        "a-nonzero-exit-after-a-result-without-stderr",
+        "a-zero-exit-without-a-result",
+        "a-result-reporting-an-error",
+        "a-tool-call-left-without-a-result",
     ],
 )
 async def test_how_the_cli_exits_decides_how_the_run_ends(
-    behavior: dict[str, Any], ending: tuple[str, str | None, str | None], tmp_path: Path
+    stdout: str,
+    stderr: str,
+    exit: int,
+    status: str,
+    content: str | None,
+    error: str | None,
+    tmp_path: Path,
 ) -> None:
-    stub = Stub(tmp_path / "stub", "claude", **behavior)
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
     run = await run_task(workspace_env(tmp_path / "ws", env=stub.shell_env()), ClaudeCLIAgent())
 
-    assert (run.trace.status, run.trace.content, run.trace.error) == ending
+    assert (run.trace.status, run.trace.content) == (status, content)
+    assert run.trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
 
 
 async def test_mcp_servers_reach_the_cli_in_a_config_removed_after_the_run(
     tmp_path: Path,
 ) -> None:
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
     servers = (
         Capability.mcp(name="database", url="http://db.internal:8000/mcp", auth_token="secret"),
         Capability.mcp(name="search", url="http://search.internal:8000/sse", transport="sse"),
     )
 
-    capture = await handed(tmp_path, servers)
+    await run_task(
+        workspace_env(tmp_path / "ws", env=stub.shell_env(), capabilities=servers),
+        ClaudeCLIAgent(),
+    )
 
+    (capture,) = stub.captures()
     assert capture["argv"][-2:] == ["--mcp-config", ".hud_mcp_config.json"]
     assert json.loads(capture["files"][".hud_mcp_config.json"]) == {
         "mcpServers": {
@@ -236,11 +191,12 @@ async def test_mcp_servers_reach_the_cli_in_a_config_removed_after_the_run(
 
 
 async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: Path) -> None:
-    stub = Stub(
-        tmp_path / "stub",
-        "claude",
-        stdout=claude_answer("done"),
-        computer=[{"action": "left_click", "coordinate": [3, 4]}, {"action": "frobnicate"}],
+    actions: list[dict[str, Any]] = [
+        {"action": "left_click", "coordinate": [3, 4]},
+        {"action": "frobnicate"},
+    ]
+    stub = clis.Stub(
+        tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"), computer=actions
     )
     stub.install()
 
@@ -264,7 +220,7 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: P
 
 
 async def test_an_mcp_server_named_like_the_computer_bridge_is_refused(tmp_path: Path) -> None:
-    stub = Stub(tmp_path / "stub", "claude", stdout=claude_answer("done"))
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
 
     async with fake_screen() as screen:
@@ -292,7 +248,7 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
         url="https://inference.hud.so/v1",
         headers={"Authorization": "Bearer scoped-runtime-token"},
     )
-    stub = Stub(tmp_path / "stub", "claude", stdout=claude_answer("done"))
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
     env = workspace_env(
         tmp_path / "ws",

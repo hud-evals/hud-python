@@ -1,38 +1,70 @@
 """An agent takes each fixture environment to its reward, on a scripted model or on its
 real model (the ``live`` lane). A reward of 1 proves the prompt reached the model, its
-tool calls reached the environment, and the grade came from the right task. Every agent
-in ``hud.agents`` has a live row, or the reason it has none."""
+tool calls reached the environment, and the grade came from the right task. Every family
+in ``AgentType`` has live rows."""
 
 from __future__ import annotations
 
-import importlib
-import inspect
-import pkgutil
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-import hud.agents
-from hud.agents import ClaudeAgent, ClaudeCLIAgent, CodexCLIAgent, create_agent
-from hud.agents.base import Agent
-from hud.agents.types import ClaudeCLIConfig, ClaudeConfig, CodexCLIConfig
+from hud.agents import ClaudeAgent
+from hud.agents.types import ClaudeConfig
 from hud.eval import LocalRuntime, Task, Taskset
-from tests.e2e.lifecycle import task_calls
-from tests.fixtures.envs import collect_digits, read_token, repeat_word, source
+from hud.types import AgentType
+from tests.fixtures.envs import capable_model, source
 from tests.support import steps
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from tests.support import Hud, HudEnv, Models
 
-    from tests.support import Hud, HudEnv, ModelRequest, Models, Turn
+#: (fixture, tool steps its scripted model takes, task phases the trace records)
+SCRIPTED = [
+    ("echo", 0, ["setup", "evaluate"]),
+    ("secret", 1, ["setup", "evaluate"]),
+    ("tools", 5, ["setup", "evaluate"]),
+    ("verifier", 0, ["setup", "evaluate", "setup", "evaluate"]),
+]
 
-MODEL = "claude-sonnet-4-6"
-MAX_STEPS = 8
-EVAL_ARGS = ("claude", "--model", MODEL, "--max-steps", str(MAX_STEPS), "-y", "--json")
 
-#: Each fixture's row, as the live lane runs it.
-FIXTURES: dict[str, Task] = {
+@pytest.mark.parametrize("entry", ["hud eval", "Taskset.run"])
+@pytest.mark.parametrize(
+    ("fixture", "tool_steps", "phases"), SCRIPTED, ids=[r[0] for r in SCRIPTED]
+)
+async def test_a_scripted_model_takes_each_fixture_to_its_reward(
+    entry: str,
+    fixture: str,
+    tool_steps: int,
+    phases: list[str],
+    models: Models,
+    hud_env: HudEnv,
+    hud: Hud,
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    models.respond(capable_model(fixture))
+    path = source(fixture)
+
+    run: dict[str, Any]
+    if entry == "hud eval":
+        result = hud("eval", str(path), "claude", "--max-steps", "8", "-y", "--json")
+        assert result.exit_code == 0, result
+        (run,) = result.json["runs"]
+    else:
+        agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6", max_steps=8))
+        (done,) = (await Taskset.from_file(path).run(agent, runtime=LocalRuntime(path))).runs
+        run = {"reward": done.reward, "trace_id": done.trace_id, "error": done.trace.error}
+
+    recorded = steps(run["trace_id"])
+    calls = [step["task_call"] for step in recorded if step["source"] == "task"]
+    assert (run["reward"], run.get("error")) == (1.0, None)
+    assert [step["error"] for step in recorded if step.get("error")] == []
+    assert [call["phase"] for call in calls] == phases
+    assert sum(step["source"] == "tool" for step in recorded) == tool_steps
+    assert calls[0]["result"]["prompt"] == models.requests()[0].prompt
+
+
+FIXTURES = {
     "echo": Task(env="echo", id="echo", args={"word": "tangerine"}),
     "tools": Task(env="tools", id="collect_code"),
     "servers": Task(env="servers", id="look_up_both"),
@@ -40,138 +72,38 @@ FIXTURES: dict[str, Task] = {
     "picture": Task(env="picture", id="name_the_colour", args={"colour": "red"}),
     "screen": Task(env="screen", id="click_target"),
 }
-ONCE = ("setup", "evaluate")
-#: The fixtures a scripted model answers from their tasks file: its policy, the tool
-#: steps that takes, and the task phases the trace records.
-SCRIPTED: dict[str, tuple[Callable[[], Callable[[ModelRequest], Turn]], int, tuple[str, ...]]] = {
-    "echo": (lambda: repeat_word, 0, ONCE),
-    "secret": (lambda: read_token, 1, ONCE),
-    "tools": (collect_digits, 5, ONCE),
-    "verifier": (lambda: repeat_word, 0, (*ONCE, *ONCE)),
-}
-
-EVERY_FIXTURE = dict.fromkeys(FIXTURES, 1.0)
-# The cheapest model of each agent the gateway serves (Gemini's must support computer use),
-# and the reward each fixture pays it.
-LIVE: dict[str, tuple[Callable[[], Agent], dict[str, float]]] = {
-    "ClaudeAgent": (lambda: create_agent("claude-haiku-4-5"), EVERY_FIXTURE),
-    "OpenAIAgent": (lambda: create_agent("gpt-5.4-mini"), EVERY_FIXTURE),
-    "GeminiAgent": (lambda: create_agent("gemini-3.8-flash"), EVERY_FIXTURE),
-    # Chat Completions agents have no computer use: offered a screen, they leave it alone.
-    "OpenAIChatAgent": (
-        lambda: create_agent("deepseek/deepseek-v4-flash"),
-        EVERY_FIXTURE | {"screen": 0.0},
-    ),
-    "ClaudeCLIAgent": (
-        lambda: ClaudeCLIAgent(ClaudeCLIConfig(model="claude-haiku-4-5")),
-        {"workspace": 1.0},
-    ),
-    "CodexCLIAgent": (
-        lambda: CodexCLIAgent(CodexCLIConfig(model="gpt-5.4-mini")),
-        {"workspace": 1.0},
-    ),
-}
-NOT_LIVE = {
-    "RobotAgent": "drives a robot capability with a policy model; tests/robot holds it",
-    "BatchedAgent": "a RobotAgent that batches policy forwards; tests/robot holds it",
-}
-
-
-def test_every_agent_in_hud_agents_has_a_live_row_or_a_reason() -> None:
-    agents: set[str] = set()
-    for info in pkgutil.walk_packages(hud.agents.__path__, "hud.agents."):
-        module = importlib.import_module(info.name)
-        agents |= {
-            value.__name__
-            for value in vars(module).values()
-            if inspect.isclass(value)
-            and issubclass(value, Agent)
-            and value.__module__ == module.__name__
-            and not inspect.isabstract(value)
-        }
-
-    assert agents == LIVE.keys() | NOT_LIVE.keys()
-
-
-@dataclass(frozen=True)
-class Backing:
-    """A scripted model answering with ``policy``, or the real model ``agent`` builds."""
-
-    entry: str
-    reward: float
-    agent: Callable[[], Agent] | None = None
-    policy: Callable[[], Callable[[ModelRequest], Turn]] | None = None
-    tool_steps: int | None = None
-    phases: tuple[str, ...] = ()
-
-
-ROWS = [
-    *(
-        pytest.param(
-            fixture,
-            Backing(entry, 1.0, policy=policy, tool_steps=tools, phases=phases),
-            id=f"{entry}-{fixture}",
-        )
-        for fixture, (policy, tools, phases) in SCRIPTED.items()
-        for entry in ("hud eval", "Taskset.run")
-    ),
-    *(
-        pytest.param(
-            fixture,
-            Backing("Taskset.run", reward, agent=build),
-            id=f"live-{name}-{fixture}",
-            marks=[pytest.mark.e2e, pytest.mark.live],
-        )
-        for name, (build, rewards) in LIVE.items()
-        for fixture, reward in rewards.items()
-    ),
+#: (agent type, the cheapest model the gateway serves it, the fixtures it runs). Chat
+#: Completions agents have no computer use, so a screen pays them nothing.
+LIVE = [
+    ("claude", "claude-haiku-4-5", list(FIXTURES)),
+    ("openai", "gpt-5.4-mini", list(FIXTURES)),
+    ("gemini", "gemini-3.8-flash", list(FIXTURES)),
+    ("openai_compatible", "deepseek/deepseek-v4-flash", list(FIXTURES)),
+    ("claude_cli", "claude-haiku-4-5", ["workspace"]),
+    ("codex_cli", "gpt-5.4-mini", ["workspace"]),
 ]
 
 
-@pytest.mark.parametrize(("fixture", "backing"), ROWS)
-async def test_an_agent_takes_each_fixture_to_its_reward(
-    fixture: str,
-    backing: Backing,
-    models: Models,
-    hud_env: HudEnv,
-    hud: Hud,
-    request: pytest.FixtureRequest,
+def test_every_agent_family_has_live_rows() -> None:
+    assert {row[0] for row in LIVE} == {kind.value for kind in AgentType}
+
+
+@pytest.mark.e2e
+@pytest.mark.live
+@pytest.mark.parametrize(
+    ("agent_type", "model", "fixture"),
+    [(kind, model, fixture) for kind, model, fixtures in LIVE for fixture in fixtures],
+)
+async def test_a_real_model_takes_each_fixture_to_its_reward(
+    agent_type: str, model: str, fixture: str, live: HudEnv
 ) -> None:
+    kind = AgentType(agent_type).cls
     path = source(fixture)
-    if backing.policy is not None:
-        hud_env.set(HUD_API_KEY="k")
-        models.respond(backing.policy())
-    else:
-        request.getfixturevalue("live")
 
-    run: dict[str, Any]
-    if backing.entry == "hud eval":
-        result = hud("eval", str(path), *EVAL_ARGS)
-        assert result.exit_code == 0, result
-        (run,) = result.json["runs"]
-    else:
-        agent = (
-            backing.agent()
-            if backing.agent is not None
-            else ClaudeAgent(ClaudeConfig(model=MODEL, max_steps=MAX_STEPS))
-        )
-        rows = (
-            Taskset(fixture, [FIXTURES[fixture]])
-            if backing.agent is not None
-            else Taskset.from_file(path)
-        )
-        (completed,) = (await rows.run(agent, runtime=LocalRuntime(path))).runs
-        run = {
-            "reward": completed.reward,
-            "is_error": completed.trace.is_error,
-            "trace_id": completed.trace_id,
-            "error": completed.trace.error,
-        }
+    job = await Taskset(fixture, [FIXTURES[fixture]]).run(
+        kind(kind.config_cls(model=model)), runtime=LocalRuntime(path)
+    )
 
-    assert (run["reward"], run["is_error"], run.get("error")) == (backing.reward, False, None)
-    if backing.policy is not None:
-        recorded = steps(run["trace_id"])
-        assert [step["error"] for step in recorded if step.get("error")] == []
-        assert tuple(call["phase"] for call in task_calls(recorded)) == backing.phases
-        assert sum(step["source"] == "tool" for step in recorded) == backing.tool_steps
-        assert task_calls(recorded)[0]["result"]["prompt"] == models.requests()[0].prompt
+    (run,) = job.runs
+    pays = 0.0 if (agent_type, fixture) == ("openai_compatible", "screen") else 1.0
+    assert (run.reward, run.trace.error) == (pays, None)
