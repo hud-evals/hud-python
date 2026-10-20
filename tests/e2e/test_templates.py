@@ -5,8 +5,8 @@ checkout into it, lists its tasks, passes the template's own lint and tests,
 and runs one capped rollout of its first task with ``hud eval``. Three lanes run
 that lifecycle:
 
-- a scripted model behind the fake gateway, on every PR, or a cheap real model
-  through the HUD gateway in the ``live`` lane: the model is a row;
+- a scripted model behind the fake gateway, on every PR;
+- a cheap real model through the HUD gateway, in the ``live`` lane;
 - ``hosted``: deployed to HUD and run on its runtime, with the trace read back
   from the platform. The pre-release workflow runs it one template per job.
 
@@ -35,7 +35,7 @@ from .projects import ROWS, TEMPLATES, assert_lifecycle, generate
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from tests.support import FakeServices, Hud, HudEnv, Uv
+    from tests.support import FakeServices, Hud, HudEnv, Models, Uv
     from tests.support.machine import Result
 
 SANDBOXED = {"coding"}
@@ -46,53 +46,13 @@ HOSTED_MODEL = "claude-sonnet-4-6"
 REAL_MODEL = ("--gateway", "--config", "max_tokens=2048")
 
 
-def scripted_model(
-    request: pytest.FixtureRequest, template: str
-) -> tuple[str | None, tuple[str, ...]]:
-    """A scripted model behind the fake gateway, and a data file the fake platform serves."""
-    services: FakeServices = request.getfixturevalue("services")
-    request.getfixturevalue("models").respond(scripted)
-    request.getfixturevalue("hud_env").set(HUD_API_KEY="k")
-    services.route("api", "GET", "/v2/data/ci-notes", json={"filename": "notes.txt"})
-    services.route(
-        "api",
-        "GET",
-        "/v2/data/ci-notes/download",
-        json={"url": f"{services.url('api')}/files/notes"},
+#: Every template; one serving an isolated workspace joins the sandbox lane.
+ROWS_BY_TEMPLATE = [
+    pytest.param(
+        name, marks=[pytest.mark.e2e, pytest.mark.sandbox] if name in SANDBOXED else [], id=name
     )
-    services.route("api", "GET", "/files/notes", Reply(body=b"2, 3 and 5 are prime."))
-    return ("ci-notes" if template in TAKES_DATA_FILES else None), ()
-
-
-def real_model(request: pytest.FixtureRequest, template: str) -> tuple[str | None, tuple[str, ...]]:
-    """A cheap real model through the HUD gateway, and the shared CI attachment."""
-    request.getfixturevalue("live")
-    data_file = (
-        REAL_ENVIRONMENT.get("HUD_CI_DATA_FILE_ID") if template in TAKES_DATA_FILES else None
-    )
-    return data_file, (*REAL_MODEL, "--model", LIVE_MODEL)
-
-
-MODELS = {"scripted": scripted_model, "live": real_model}
-MODEL_LANES = {"scripted": [], "live": [pytest.mark.e2e, pytest.mark.live]}
-
-
-def lane() -> list[Any]:
-    """One case per template and model; templates serving an isolated workspace join the
-    sandbox lane, and the real model runs in the live lane."""
-    return [
-        pytest.param(
-            name,
-            model,
-            id=f"{name}-{model}",
-            marks=[
-                *marks,
-                *([pytest.mark.e2e, pytest.mark.sandbox] if name in SANDBOXED else []),
-            ],
-        )
-        for model, marks in MODEL_LANES.items()
-        for name in TEMPLATES
-    ]
+    for name in TEMPLATES
+]
 
 
 @pytest.fixture
@@ -106,24 +66,19 @@ def environment(request: pytest.FixtureRequest) -> Iterator[Path | None]:
     shutil.rmtree(location, ignore_errors=True)
 
 
-@pytest.mark.timeout(1800)
-@pytest.mark.parametrize(("template", "model"), lane())
-async def test_a_template_runs_from_init_to_a_graded_rollout(
+async def init_and_evaluate(
+    hud: Hud,
     template: str,
-    model: str,
+    directory: Path,
+    *model_args: str,
+    data_file: str | None,
     environment: Path | None,
     hud_env: HudEnv,
-    hud: Hud,
     uv: Uv,
-    sdk_wheel: Path,
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> None:
-    data_file, model_args = MODELS[model](request, template)
-
-    project = generate(
-        hud, template, tmp_path / f"ci-{template}", wheel=sdk_wheel, uv=uv, environment=environment
-    )
+    wheel: Path,
+) -> dict[str, Any]:
+    """Generate *template*, list its tasks, pass its own checks, and evaluate its first task."""
+    project = generate(hud, template, directory, wheel=wheel, uv=uv, environment=environment)
     listed = project.hud("task", "list", "--json")
     assert listed.exit_code == 0, listed
     assert listed.json, "the template lists no tasks"
@@ -132,7 +87,78 @@ async def test_a_template_runs_from_init_to_a_graded_rollout(
     project.write_rows(data_file)
     async with fake_screen() as screen:
         hud_env.set(VNC_PORT=str(screen.port))
-        run = evaluated(await asyncio.to_thread(project.hud, *EVAL, *model_args, timeout=900))
+        return evaluated(await asyncio.to_thread(project.hud, *EVAL, *model_args, timeout=900))
+
+
+@pytest.mark.timeout(1800)
+@pytest.mark.parametrize("template", ROWS_BY_TEMPLATE)
+async def test_a_template_runs_from_init_to_a_graded_rollout(
+    template: str,
+    environment: Path | None,
+    services: FakeServices,
+    models: Models,
+    hud_env: HudEnv,
+    hud: Hud,
+    uv: Uv,
+    sdk_wheel: Path,
+    tmp_path: Path,
+) -> None:
+    models.respond(scripted)
+    hud_env.set(HUD_API_KEY="k")
+    services.route("api", "GET", "/v2/data/ci-notes", json={"filename": "notes.txt"})
+    services.route(
+        "api",
+        "GET",
+        "/v2/data/ci-notes/download",
+        json={"url": f"{services.url('api')}/files/notes"},
+    )
+    services.route("api", "GET", "/files/notes", Reply(body=b"2, 3 and 5 are prime."))
+    data_file = "ci-notes" if template in TAKES_DATA_FILES else None
+
+    run = await init_and_evaluate(
+        hud,
+        template,
+        tmp_path / f"ci-{template}",
+        data_file=data_file,
+        environment=environment,
+        hud_env=hud_env,
+        uv=uv,
+        wheel=sdk_wheel,
+    )
+
+    assert_lifecycle(steps(run["trace_id"]), data_file)
+
+
+@pytest.mark.e2e
+@pytest.mark.live
+@pytest.mark.timeout(1800)
+@pytest.mark.parametrize("template", ROWS_BY_TEMPLATE)
+async def test_a_template_runs_against_a_real_model_through_the_gateway(
+    template: str,
+    environment: Path | None,
+    live: HudEnv,
+    hud: Hud,
+    uv: Uv,
+    sdk_wheel: Path,
+    tmp_path: Path,
+) -> None:
+    data_file = (
+        REAL_ENVIRONMENT.get("HUD_CI_DATA_FILE_ID") if template in TAKES_DATA_FILES else None
+    )
+
+    run = await init_and_evaluate(
+        hud,
+        template,
+        tmp_path / f"ci-{template}",
+        *REAL_MODEL,
+        "--model",
+        LIVE_MODEL,
+        data_file=data_file,
+        environment=environment,
+        hud_env=live,
+        uv=uv,
+        wheel=sdk_wheel,
+    )
 
     assert_lifecycle(steps(run["trace_id"]), data_file)
 
