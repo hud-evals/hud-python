@@ -188,10 +188,6 @@ IO_URING_DENIED = (
     "result=libc.syscall(425,0,None);"
     "sys.exit(0 if result == -1 and ctypes.get_errno() == errno.EPERM else 1)"
 )
-PROXY_ENVIRONMENT = (
-    "import os;print(os.environ.get('http_proxy',''));"
-    "print(os.environ.get('https_proxy',''));print(os.environ.get('no_proxy',''))"
-)
 
 
 @pytest.mark.e2e
@@ -238,7 +234,7 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
                 True,
             ),
             "bound-io-uring": (IO_URING_DENIED, True),
-            "bound-proxy-environment": (PROXY_ENVIRONMENT, True),
+            "bound-ordinary-peer": (fetch("http://ordinary.hud.invalid"), True),
             "unbound-ordinary-peer": (fetch("http://ordinary.hud.invalid"), False),
         }
         results: dict[str, tuple[int | None, str]] = {}
@@ -265,10 +261,7 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
     ):
         assert results[case][0] == 0 and results[case][1].strip() != "0", case
     assert results["bound-io-uring"][0] == 0
-    http_proxy, https_proxy, no_proxy = results["bound-proxy-environment"][1].splitlines()
-    assert http_proxy == https_proxy == f"http://127.0.0.1:{BRIDGE_PORT}"
-    assert "ordinary.hud.invalid" in no_proxy.split(",")
-    assert results["unbound-ordinary-peer"] == (0, "ok\n")
+    assert results["bound-ordinary-peer"] == results["unbound-ordinary-peer"] == (0, "ok\n")
     assert set(protected_seen) == {"Bearer scoped-runtime-token"}
     assert set(ordinary_seen) == {"Bearer visible"}
 
