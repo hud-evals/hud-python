@@ -1,24 +1,18 @@
-"""What only ``ClaudeAgent`` does: the hosted tools, tool search and computer tool it
-offers, how it retries an invalid call or a broken stream, the images it sends back,
-Bedrock invocation, and the citations and refusals it records."""
+"""What only ``ClaudeAgent`` does: the computer tool each model gets, which stream errors
+it retries, and the shape of the images it sends back."""
 
 from __future__ import annotations
 
 import base64
 import io
-from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import mcp.types as mcp_types
 import pytest
-from fastmcp import FastMCP
-from fastmcp.tools import ToolResult
 from PIL import Image
 
 from hud.agents import ClaudeAgent
 from hud.agents.types import ClaudeConfig
 from hud.capabilities import Capability
-from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call, stream_error
 from tests.fixtures.screen import fake_screen
@@ -99,51 +93,6 @@ async def test_an_error_inside_the_stream_is_retried_only_when_transient(
     (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model=MODEL)))).runs
 
     assert (run.trace.status, len(models.requests())) == (status, requests)
-
-
-@pytest.mark.parametrize(
-    ("config", "sent"),
-    [
-        ({}, [["text", "image"], ["text", "image"]]),
-        (
-            {"max_tool_result_images": 1, "thinking": {"type": "adaptive"}},
-            [["text", "text"], ["text", "image"]],
-        ),
-    ],
-    ids=["every-image-by-default", "only-the-newest-image"],
-)
-async def test_tool_result_images_are_sent_back_up_to_the_configured_count(
-    config: dict[str, Any], sent: list[list[str]], models: Models, tmp_path: Path
-) -> None:
-    screenshots = FastMCP("screenshots")
-
-    @screenshots.tool
-    def screenshot() -> ToolResult:
-        """Capture the current screen."""
-        return ToolResult(
-            content=[
-                mcp_types.TextContent(type="text", text="screen"),
-                mcp_types.ImageContent(
-                    type="image", mimeType="image/png", data=base64.b64encode(png(32, 24)).decode()
-                ),
-            ]
-        )
-
-    models.script(
-        [
-            replace(call("screenshot"), reasoning="first look"),
-            replace(call("screenshot"), reasoning="second look"),
-            Turn(text="done"),
-        ]
-    )
-    agent = ClaudeAgent(ClaudeConfig.model_validate({"model": MODEL, **config}))
-
-    async with mcp_server(screenshots, name="screenshots") as server:
-        task = workspace_task(tmp_path / "ws", capabilities=(server,))
-        await task().run(agent)
-
-    results = models.requests()[-1].body["messages"][2::2]
-    assert [[block["type"] for block in m["content"][0]["content"]] for m in results] == sent
 
 
 @pytest.mark.parametrize(

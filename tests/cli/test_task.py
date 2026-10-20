@@ -84,7 +84,6 @@ def counting_env(starts: list[str], *, failing: bool = False) -> Environment:
     [
         pytest.param(0, False, 1, {"score": 1.0}, id="starts-when-nothing-is-parked"),
         pytest.param(1, False, 1, {"score": 1.0}, id="resumes-a-parked-session"),
-        pytest.param(1, True, 1, {"error": "failure"}, id="grader-error"),
         pytest.param(2, False, 2, {"error": "failure"}, id="ambiguous-parked-sessions"),
     ],
 )

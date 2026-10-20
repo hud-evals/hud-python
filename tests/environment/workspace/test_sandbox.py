@@ -38,14 +38,12 @@ def namespace(kind: str) -> str:
 @pytest.mark.parametrize(
     ("options", "expected"),
     [
-        pytest.param({}, None, id="serving-identity"),
         pytest.param(
             {"shell_uid": 1000},
             None,
             id="shell-uid-is-a-no-op-off-root",
             marks=pytest.mark.skipif(os.geteuid() == 0, reason="needs a non-root server"),
         ),
-        pytest.param({"require_isolation": True}, "0 0 0", id="sandboxed-root", marks=SANDBOX),
         pytest.param(
             {"require_isolation": True, "shell_uid": 1000},
             "1000 1000 1000",

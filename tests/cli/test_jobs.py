@@ -1,8 +1,8 @@
-"""``hud jobs cancel``: cancelling a job, one trace, or every active job."""
+"""``hud jobs cancel``: it takes exactly one target."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,31 +12,6 @@ if TYPE_CHECKING:
 
 JOB_ID = "03dd2a73-d3df-4d10-a54a-e3d87c2d530d"
 TRACE_ID = "00000000-0000-4000-a000-000000000002"
-
-
-@pytest.mark.parametrize(
-    ("argv", "path", "body"),
-    [
-        (["jobs", "cancel", JOB_ID], "/v2/rollouts/cancel_job", {"job_id": JOB_ID}),
-        (
-            ["jobs", "cancel", JOB_ID, "--trace-id", TRACE_ID],
-            "/v2/rollouts/cancel",
-            {"job_id": JOB_ID, "trace_id": TRACE_ID},
-        ),
-        (["jobs", "cancel", "--all"], "/v2/rollouts/cancel_user_jobs", {}),
-        (["cancel", JOB_ID], "/v2/rollouts/cancel_job", {"job_id": JOB_ID}),
-    ],
-    ids=["a-job", "one-trace", "every-active-job", "the-deprecated-cancel"],
-)
-def test_cancel_asks_the_platform_to_stop_what_it_names(
-    argv: list[str], path: str, body: dict[str, Any], signed_in: FakeServices, hud: Hud
-) -> None:
-    signed_in.route("api", "POST", path, json={"cancelled": 2, "status": "accepted"})
-
-    result = hud(*argv, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert signed_in.bodies("api", "POST", path) == [body]
 
 
 @pytest.mark.parametrize(

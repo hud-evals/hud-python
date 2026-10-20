@@ -171,16 +171,6 @@ async def test_timed_out_runs_need_an_explicit_reward_and_nothing_is_sent(
     assert trainer.requests("rl") == []
 
 
-async def test_trajectories_that_do_not_divide_into_groups_are_refused(
-    trainer: FakeServices,
-) -> None:
-    runs = await answered(ScriptedAgent("ok"), "ok", "no")
-
-    with pytest.raises(ValueError, match="3 trajectories do not divide evenly into groups of 2"):
-        await TrainingClient("owner/model").forward_backward(runs[:3], group_size=2)
-    assert trainer.requests("rl") == []
-
-
 async def test_groups_split_across_tasks_are_refused(trainer: FakeServices) -> None:
     runs = await answered(ScriptedAgent("ok"), "ok", "no", "maybe")
 

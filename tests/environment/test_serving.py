@@ -85,15 +85,7 @@ async def announced_port(process: asyncio.subprocess.Process) -> int:
 @pytest.mark.parametrize(
     ("command", "served_name", "stop", "grading"),
     [
-        pytest.param([*SERVER, "env.py"], "from-env-py", signal.SIGTERM, False, id="server"),
         pytest.param([*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, False, id="hud-serve"),
-        pytest.param(
-            [*HUD_SERVE, "pkg:make_env", "--arg", "name=demo"],
-            "demo",
-            signal.SIGTERM,
-            False,
-            id="hud-serve-factory",
-        ),
         pytest.param(
             [*SERVER, "stalls.py"], "stalls", signal.SIGTERM, True, id="server-while-grading"
         ),

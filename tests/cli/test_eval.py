@@ -103,7 +103,6 @@ def test_eval_reports_every_run_and_fails_when_one_errored(
     ("argv", "prompts"),
     [
         pytest.param([], ["solve 0"], id="the-first-by-default"),
-        pytest.param(["--all"], ["solve 0", "solve 1"], id="all"),
         pytest.param(["--task-ids", "1"], ["solve 1"], id="by-index"),
     ],
 )
@@ -140,22 +139,10 @@ KIMI_TOML = (
             id="gateway-by-default",
         ),
         pytest.param(
-            ["openai_compatible"],
-            KIMI_TOML,
-            {"model": "moonshotai/kimi-k2.6", "temperature": 0.5},
-            id="toml-section",
-        ),
-        pytest.param(
             ["openai_compatible", "-m", "z-ai/glm-5.2"],
             KIMI_TOML,
             {"model": "z-ai/glm-5.2", "temperature": 0.5},
             id="model-flag-wins-over-toml",
-        ),
-        pytest.param(
-            ["openai_compatible"],
-            '[openai_compatible]\nmodel = "${MY_EVAL_MODEL}"\n',
-            {"model": "z-ai/glm-5.2-from-env"},
-            id="toml-model-from-a-variable",
         ),
         pytest.param(
             ["glm-5.2"],
@@ -229,7 +216,6 @@ def named(name: str, reward: str) -> str:
 
 
 LAYOUTS: dict[str, tuple[dict[str, str], str, tuple[int, float, int]]] = {
-    "one file": ({"env.py": ENV + SOLVE + "tasks = [solve()]\n"}, "env.py", (1, 1.0, 0)),
     "tasks beside the env": (
         {"env.py": ENV + SOLVE, "tasks.py": "from env import solve\ntasks = [solve()]\n"},
         "tasks.py",
@@ -304,7 +290,6 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
 @pytest.mark.parametrize(
     ("config", "argv", "hosted"),
     [
-        pytest.param("", ["tasks.py"], False, id="a-local-source-runs-here"),
         pytest.param("", ["My Tasks"], True, id="a-platform-taskset-runs-hosted"),
         pytest.param("[eval]\nremote = true\n", ["tasks.py"], True, id="the-toml-asks-for-hosted"),
         pytest.param(

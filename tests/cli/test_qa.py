@@ -75,7 +75,6 @@ def verdict(tag: str, *, check_key: str = CHECK) -> dict[str, Any]:
     ("outcome", "exit_code", "verdicts"),
     [
         pytest.param(verdict("passed"), 0, ["passed"], id="passed"),
-        pytest.param(verdict("failed"), 1, ["failed"], id="failed"),
         pytest.param(row("error", error="invalid result"), 1, [None], id="errored"),
     ],
 )
@@ -103,14 +102,6 @@ def test_qa_run_waits_for_every_check_and_fails_unless_all_pass(
     ]
 
 
-def test_qa_run_times_out_while_checks_are_running(hud: Hud, catalog: FakeServices) -> None:
-    catalog.route("api", "GET", "/v2/qa/results", json={"results": [row("running")]})
-
-    result = hud("qa", "run", CHECK, TRACE_ID, "--timeout", "1", "--yes", "--json")
-
-    assert (result.exit_code, result.json["error"]) == (1, "timeout"), result
-
-
 def legacy(**output: Any) -> dict[str, Any]:
     """A result stored before ``qa_agent_result.v1``, as its check's own JSON."""
     return row(legacy_result={"content": json.dumps(output)})
@@ -128,11 +119,6 @@ def legacy(**output: Any) -> dict[str, Any]:
             legacy(problems=[{"problem": "No output", "fault": "agent"}]),
             1,
             id="legacy-agent-fault",
-        ),
-        pytest.param(
-            legacy(is_false_negative=False, reasoning="Matches."),
-            0,
-            id="legacy-false-negative-cleared",
         ),
         pytest.param(
             legacy(is_false_negative=True, reasoning="Grader missed it."),

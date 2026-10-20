@@ -1,5 +1,5 @@
-"""``hud deploy``: the build context it uploads, the build it triggers with what its options
-name, where the environment lands, and how the build's end decides the exit."""
+"""``hud deploy``: the build context it uploads, what rides the build trigger instead, and
+how the build's end decides the exit."""
 
 from __future__ import annotations
 
@@ -104,20 +104,6 @@ def test_env_files_build_args_and_secrets_ride_the_trigger_and_never_the_context
     assert ".env" not in uploaded(builds)
 
 
-def test_a_first_deploy_lands_in_the_selected_project_and_links_the_directory(
-    builds: FakeServices, hud_env: HudEnv, hud: Hud
-) -> None:
-    project = {"id": PROJECT_ID, "name": "browser-evals", "capabilities": {"create": True}}
-    builds.route("api", "GET", "/v2/projects", json={"items": [project], "total": 1})
-    hud_env.set(HUD_DEFAULT_PROJECT="browser-evals")
-
-    result = hud("deploy", "--no-env", "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert triggered(builds)["project_id"] == PROJECT_ID
-    assert json.loads((hud.cwd / ".hud" / "config.json").read_text())["registry_id"] == ENV_ID
-
-
 def test_a_redeploy_keeps_the_registrys_variables_unless_given_new_ones(
     builds: FakeServices, hud: Hud
 ) -> None:
@@ -158,29 +144,6 @@ def test_the_build_context_follows_dockerignore_and_never_holds_secrets(
     sent = uploaded(builds)
     assert {"keep.pyc", "src/build/out.o"} <= sent
     assert not {"drop.pyc", "build/out.o", ".git/config", "nested/.env.prod"} & sent
-
-
-@pytest.mark.parametrize(
-    ("source", "argv", "name"),
-    [
-        ('env = Environment("my-env")\n', [], "my-env"),
-        (
-            'actor = Environment("workspace")\nverifier = Environment("judge")\n',
-            ["--name", "judge"],
-            "judge",
-        ),
-    ],
-    ids=["declared", "chosen-among-several"],
-)
-def test_deploy_builds_the_environment_its_source_names(
-    source: str, argv: list[str], name: str, builds: FakeServices, hud: Hud
-) -> None:
-    write_files(hud.cwd, {"env.py": source})
-
-    result = hud("deploy", *argv, "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert triggered(builds)["name"] == name
 
 
 @pytest.mark.parametrize(

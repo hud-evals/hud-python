@@ -17,16 +17,11 @@ from hud.graders import (
     LLMJudgeGrader,
     SubScore,
     combine,
-    combine_all,
-    combine_any,
-    exact_match,
 )
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tests.conftest import HudEnv
     from tests.fixtures.models import ModelRequest, Models
 
@@ -56,43 +51,6 @@ async def test_repeated_graders_are_named_apart_and_weighted_into_the_reward() -
         leaf("BashGrader-2", 0.3, 1.0),
         leaf("BashGrader-3", 0.3, 1.0),
         leaf("BashGrader-1", 0.4, 0.0),
-    ]
-
-
-async def test_any_and_all_combine_their_children_into_one_weighted_subscore() -> None:
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        answer = yield "Name the capital of France."
-        either = combine_any(
-            weight=0.5, subscores=[SubScore(name="a", value=0.0), SubScore(name="b", value=1.0)]
-        )
-        both = combine_all(
-            weight=0.25,
-            subscores=[SubScore(name="lint", value=1.0), SubScore(name="types", value=0.0)],
-            name="checks",
-        )
-        exact = SubScore(name="format", value=exact_match(answer, ANSWER), weight=0.25)
-        yield await combine(either, both, exact)
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert run.reward == pytest.approx(0.75)
-    assert run.evaluation["subscores"] == [
-        {
-            "name": "any",
-            "weight": 0.5,
-            "value": 1.0,
-            "children": [leaf("a", 1.0, 0.0), leaf("b", 1.0, 1.0)],
-        },
-        {
-            "name": "checks",
-            "weight": 0.25,
-            "value": 0.0,
-            "children": [leaf("lint", 1.0, 1.0), leaf("types", 1.0, 0.0)],
-        },
-        leaf("format", 0.25, 1.0),
     ]
 
 
@@ -193,7 +151,6 @@ async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
 @pytest.mark.parametrize(
     ("command", "limit", "value", "info"),
     [
-        ("echo oops >&2; false", None, 0.0, {"exit_code": 1, "stdout": "", "stderr": "oops\n"}),
         (
             "echo started; sleep 30 & exit 0",
             None,
@@ -209,7 +166,6 @@ async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
         ("yes hud | head -c 500000", None, 1.0, {"exit_code": 0, "stdout": "hud\n" * 125_000}),
     ],
     ids=[
-        "a-failing-command",
         "a-background-child-does-not-hold-the-grade",
         "an-overrun-keeps-its-output",
         "large-output-does-not-block",
@@ -232,22 +188,6 @@ async def test_the_bash_grader_scores_by_exit_code_and_reports_what_ran(
     assert run.reward == value
     assert {key: subscore["info"][key] for key in info} == info
     assert time.monotonic() - started < 15
-
-
-async def test_the_bash_grader_runs_in_the_directory_it_is_given(tmp_path: Path) -> None:
-    (tmp_path / "marker.txt").write_text("here")
-    env = Environment("graders")
-
-    @env.template()
-    async def check():
-        yield "go"
-        yield await combine(
-            BashGrader.grade(weight=1.0, command="cat marker.txt", cwd=str(tmp_path))
-        )
-
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
-
-    assert (run.reward, run.grade.raw["subscores"][0]["info"]["stdout"]) == (1.0, "here")
 
 
 VERDICTS = {

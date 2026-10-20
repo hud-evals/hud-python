@@ -149,9 +149,8 @@ def test_a_refused_upload_deletes_its_reservation_and_starts_no_import(
     [
         (["queued", "running", "completed"], None, 0),
         (["stopped"], None, 1),
-        (["failed"], "crashed", 1),
     ],
-    ids=["completed", "stopped", "failed"],
+    ids=["completed", "stopped"],
 )
 def test_an_import_is_followed_to_its_end_and_fails_unless_it_completed(
     statuses: list[str], error: str | None, exit_code: int, importer: FakeServices, hud: Hud

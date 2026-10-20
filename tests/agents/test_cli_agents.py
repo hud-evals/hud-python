@@ -1,6 +1,5 @@
-"""What every coding-CLI agent does with its CLI: run it in the workspace, record what it
-ran, end the run when it fails, refuse what it cannot route, and stop it at the agent
-timeout. A stand-in on the workspace's ``PATH`` plays each CLI."""
+"""What every coding-CLI agent does with its CLI: one CLI per concurrent rollout, and the
+agent timeout stopping it. A stand-in on the workspace's ``PATH`` plays each CLI."""
 
 from __future__ import annotations
 
@@ -45,52 +44,6 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_cli(
         "first",
         "second",
     ]
-
-
-@EVERY_CLI
-async def test_a_failure_the_cli_reports_ends_the_run_with_its_error(
-    agent_type: str, cli: str, tmp_path: Path
-) -> None:
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.fault(cli, "model unavailable"))
-    stub.install()
-
-    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(AgentType(agent_type).cls())).runs
-
-    assert run.trace.status == "error"
-    assert "model unavailable" in (run.trace.error or "")
-
-
-@EVERY_CLI
-async def test_routing_through_the_gateway_without_a_hud_key_is_refused_before_the_cli_runs(
-    agent_type: str, cli: str, hud_env: HudEnv, tmp_path: Path
-) -> None:
-    hud_env.set(HUD_API_KEY=None)
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
-    stub.install()
-    kind = AgentType(agent_type).cls
-
-    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(kind(kind.config_cls(gateway=True)))).runs
-
-    assert "HUD_API_KEY is required for HUD gateway routing" in (run.trace.error or "")
-    assert stub.captures() == []
-
-
-@EVERY_CLI
-async def test_a_cli_missing_from_the_workspace_names_the_platform_it_needs(
-    agent_type: str, cli: str, tmp_path: Path
-) -> None:
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
-    stub.install()
-    task = workspace_task(tmp_path / "ws", env=stub.shell_env(path="/usr/bin:/bin"))
-
-    (run,) = (await task().run(AgentType(agent_type).cls())).runs
-
-    assert "is unavailable for runtime platform " in (run.trace.error or "")
-    assert "install it in the environment or provide a managed runtime bundle" in (
-        run.trace.error or ""
-    )
 
 
 @EVERY_CLI

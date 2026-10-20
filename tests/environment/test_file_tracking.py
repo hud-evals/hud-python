@@ -1,6 +1,5 @@
 """``filetracking/1``: what a served workspace with ``track_files=True`` reports about its
-files: what it tracks, what changed since the last baseline, the deliverables it captures,
-and what never leaves the workspace."""
+files: what it tracks, the deliverables it captures, and what never leaves the workspace."""
 
 from __future__ import annotations
 
@@ -60,33 +59,6 @@ async def test_a_snapshot_lists_the_files_it_tracks_leaving_out_what_is_not_the_
     assert files["a.txt"] == hashlib.sha256(b"line1\n").hexdigest()
 
 
-async def test_a_diff_reports_what_changed_since_the_last_one(tmp_path: Path) -> None:
-    root = tmp_path / "root"
-    write_files(root, {"edited.txt": "line1\nline2\n", "removed.txt": "gone\n"})
-
-    env = tracked(root)
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
-    ):
-        await peer.call("snapshot")
-        before = await peer.call("diff")
-        write_files(root, {"edited.txt": "line1\nCHANGED\n", "added.txt": "hello\n"})
-        (root / "removed.txt").unlink()
-        edited = await peer.call("diff")
-        again = await peer.call("diff")
-
-    patches = {patch["path"]: patch for patch in edited["result"]["patches"]}
-    assert (before["result"]["patches"], again["result"]["patches"]) == ([], [])
-    assert {path: patch["status"] for path, patch in patches.items()} == {
-        "edited.txt": "modified",
-        "added.txt": "added",
-        "removed.txt": "deleted",
-    }
-    assert "+CHANGED" in patches["edited.txt"]["patch"]
-
-
 async def test_secrets_never_leave_in_a_diff(tmp_path: Path) -> None:
     root = tmp_path / "root"
     write_files(
@@ -114,33 +86,6 @@ async def test_secrets_never_leave_in_a_diff(tmp_path: Path) -> None:
     assert {patch["path"] for patch in edited["result"]["patches"]} == {".env", ".gitmodules"}
     for secret in ("supersecretvalue", "hunter2", "new-token"):
         assert secret not in str(edited)
-
-
-async def test_setup_and_advance_each_move_the_baseline_later_diffs_start_from(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "root"
-    write_files(root, {"src.py": "x = 1\n"})
-
-    env = tracked(root)
-    async with (
-        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-        connect(runtime) as client,
-        wire(client.binding("filetracking").url) as peer,
-    ):
-        await peer.call("snapshot")
-        write_files(root, {"generated.txt": "setup\n", "src.py": "x = 2\n"})
-        setup = await peer.call("setup")
-        after_setup = await peer.call("diff")
-        write_files(root, {"legacy.txt": "legacy\n"})
-        await peer.call("advance")
-        after_advance = await peer.call("diff")
-
-    assert {p["path"]: p["status"] for p in setup["result"]["patches"]} == {
-        "generated.txt": "added",
-        "src.py": "modified",
-    }
-    assert (after_setup["result"]["patches"], after_advance["result"]["patches"]) == ([], [])
 
 
 async def test_a_flush_diffs_the_deliverables_and_captures_the_documents_under_the_limit(

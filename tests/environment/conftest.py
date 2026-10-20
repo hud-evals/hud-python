@@ -12,14 +12,9 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from dirty_equals import IsStr
-
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-
-#: A control session id as the server mints it.
-SESSION_ID = IsStr(regex=r"sess-[0-9a-f]{8}")
 
 #: The control channel's frame limit, in bytes, excluding the newline.
 FRAME_LIMIT = 16 * 1024 * 1024

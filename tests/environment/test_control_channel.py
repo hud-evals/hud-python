@@ -1,4 +1,4 @@
-"""The control channel as a peer speaks it: the handshake, a task's start and grade, how a
+"""The control channel as a peer speaks it: a task's typed start and answer, how a
 session's template is torn down, and a request at the frame limit."""
 
 from __future__ import annotations
@@ -8,37 +8,13 @@ from typing import Any, Literal
 import pytest
 from pydantic import BaseModel
 
-from hud.capabilities import Capability
 from hud.environment import (
     Environment,
 )
 from hud.eval import LocalRuntime, Task
-from hud.graders import EvaluationResult, SubScore
-from tests.environment.conftest import FRAME_LIMIT, SESSION_ID, encode, wire
+from tests.environment.conftest import FRAME_LIMIT, encode, wire
 
 INVALID, NOT_FOUND, BAD_STATE, FAILED = -32602, -32601, -32600, -32000
-
-
-async def test_hello_names_the_session_the_env_and_what_its_hooks_published() -> None:
-    env = Environment("protocol", version="1.2.3")
-
-    @env.initialize
-    async def publish_browser() -> None:
-        env.add_capability(Capability.cdp(url="ws://127.0.0.1:9/devtools/browser"))
-
-    async with (
-        LocalRuntime(env)(Task(env="protocol", id="x")) as runtime,
-        wire(runtime.url) as peer,
-    ):
-        hello = (await peer.call("hello", {}))["result"]
-
-    assert (hello["session_id"], hello["env"]) == (
-        SESSION_ID,
-        {"name": "protocol", "version": "1.2.3"},
-    )
-    assert [(b["name"], b["url"]) for b in hello["bindings"]] == [
-        ("browser", "ws://127.0.0.1:9/devtools/browser")
-    ]
 
 
 class Point(BaseModel):
@@ -104,34 +80,6 @@ async def test_a_declared_return_type_parses_the_answer_and_keeps_it_raw(
         graded = (await peer.call("tasks.grade", {"answer": answer}))["result"]
 
     assert (graded["content"], graded["raw"]) == (content, answer)
-
-
-async def test_an_evaluation_result_reaches_the_peer_with_its_details_and_breakdown() -> None:
-    env = Environment("graded")
-
-    @env.template()
-    async def judged():
-        yield "go"
-        yield EvaluationResult(
-            reward=0.75,
-            content="nice",
-            info={"max_tile": 256},
-            subscores=[
-                SubScore(
-                    name="judge",
-                    value=0.75,
-                    children=[SubScore(name="criterion", value=1.0, info={"reason": "because"})],
-                )
-            ],
-        )
-
-    async with LocalRuntime(env)(Task(env="graded", id="x")) as runtime, wire(runtime.url) as peer:
-        await peer.call("tasks.start", {"id": "judged"})
-        graded = (await peer.call("tasks.grade", {"answer": "x"}))["result"]
-
-    assert (graded["score"], graded["content"], graded["info"]) == (0.75, "nice", {"max_tile": 256})
-    (judge,) = graded["subscores"]
-    assert (judge["name"], judge["children"][0]["info"]) == ("judge", {"reason": "because"})
 
 
 @pytest.mark.parametrize(

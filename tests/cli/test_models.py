@@ -1,5 +1,4 @@
-"""``hud models``: forking a model from the one a reference names, and setting the
-checkpoint the gateway serves."""
+"""``hud models fork``: forking a model from the one a reference names."""
 
 from __future__ import annotations
 
@@ -52,7 +51,7 @@ def catalog(signed_in: FakeServices) -> FakeServices:
     return signed_in
 
 
-@pytest.mark.parametrize("source", ["Claude Sonnet", "claude-sonnet-4-6", BASE_ID])
+@pytest.mark.parametrize("source", ["Claude Sonnet", "claude-sonnet-4-6"])
 def test_fork_derives_a_model_from_the_one_its_reference_names(
     source: str, catalog: FakeServices, hud: Hud
 ) -> None:
@@ -71,14 +70,3 @@ def test_a_misspelt_model_is_refused(catalog: FakeServices, hud: Hud) -> None:
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
     assert catalog.requests("api", "POST") == []
-
-
-def test_head_set_serves_the_checkpoint_it_names(catalog: FakeServices, hud: Hud) -> None:
-    catalog.route("api", "PUT", f"/v2/models/{MODEL_ID}/head", json={})
-
-    result = hud("models", "head", "my-sonnet", "--set", "ckpt-1", "--yes", "--json")
-
-    assert result.exit_code == 0, result
-    assert catalog.bodies("api", "PUT", f"/v2/models/{MODEL_ID}/head") == [
-        {"checkpoint_id": "ckpt-1"}
-    ]

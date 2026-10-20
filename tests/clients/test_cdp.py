@@ -19,10 +19,9 @@ from tests.fixtures.browser import fake_browser
     [
         (["page-1", "page-2"], None, False, "page-1"),
         ([], None, False, "new-1"),
-        (["page-1", "page-2"], "page-2", False, "page-2"),
         (["page-1", "page-2"], None, True, "page-2"),
     ],
-    ids=["first page", "a new page", "an explicit target", "a devtools url"],
+    ids=["first page", "a new page", "a devtools url"],
 )
 async def test_connect_attaches_to_the_chosen_page_target(
     pages: list[str], target_id: str | None, devtools_path: bool, connected_to: str

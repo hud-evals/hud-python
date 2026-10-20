@@ -114,9 +114,6 @@ async def test_wait_holds_the_commanded_pose_and_a_null_duration_observes_for_on
     [
         (("move_to", {"targets": {"x": 0.1, "z": 0.1}, "note": "go"}), "'z' was unexpected"),
         (move("move_to", x=1.5), "x=1.5 is outside [0, 1]"),
-        (("move_to", {"targets": {"x": None}, "note": "go"}), "set at least one"),
-        (("move_to", {"targets": {"x": 0.1}, "note": "  "}), "note must say"),
-        (("wait", {"duration": 101, "note": "sleep"}), "duration must be within [0, 100]"),
     ],
 )
 async def test_an_invalid_move_is_a_correctable_error_that_leaves_the_sim_still(

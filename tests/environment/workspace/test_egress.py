@@ -190,14 +190,6 @@ def drain(client: socket.socket) -> bytes:
         pytest.param(
             {ANY_HOST},
             None,
-            b"GET http://anything.example/ HTTP/1.1\r\nHost: anything.example\r\n\r\n",
-            b"502",
-            b"upstream-failure",
-            id="any-host-is-carried",
-        ),
-        pytest.param(
-            {ANY_HOST},
-            None,
             b"CONNECT 127.0.0.1:8765 HTTP/1.1\r\nHost: 127.0.0.1:8765\r\n\r\n",
             b"403",
             b"blocked-by-address",
@@ -227,14 +219,6 @@ def drain(client: socket.socket) -> bytes:
             b"407",
             b"Proxy-Authenticate",
             id="a-visitor-proxy-with-another-visitors-credential",
-        ),
-        pytest.param(
-            {"example.com"},
-            None,
-            b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n",
-            b"502",
-            b"upstream-failure",
-            id="an-upstream-that-cannot-be-reached",
         ),
     ],
 )

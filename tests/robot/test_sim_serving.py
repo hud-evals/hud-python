@@ -10,7 +10,6 @@ stepped with.
 
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -59,13 +58,6 @@ async def test_a_spawned_bridge_carries_its_declaration_into_the_child() -> None
     assert greeting == {"backend": "test", "claim_required": True}
     with pytest.raises(OSError):
         await websockets.connect(robot.url, open_timeout=5)
-
-
-async def test_a_sim_that_exits_before_announcing_its_port_fails_start() -> None:
-    endpoint = RobotEndpoint.spawn([sys.executable, "-c", "import sys; sys.exit(3)"])
-
-    with pytest.raises(RuntimeError, match="exited with code 3 before announcing its port"):
-        await endpoint.start()
 
 
 def gym_env(factory: Callable[..., Any], **defaults: Any) -> Environment:

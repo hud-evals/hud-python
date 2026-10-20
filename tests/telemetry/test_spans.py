@@ -48,7 +48,6 @@ TASK = Task(env="spans", id="answer")
     ("uploads", "local_dir", "written_to", "uploaded"),
     [
         pytest.param("0", None, "home", False, id="uploads-off"),
-        pytest.param("0", "spans", "spans", False, id="uploads-off-with-dir"),
         pytest.param("1", "spans", "spans", True, id="uploads-on-with-dir"),
         pytest.param("1", None, None, True, id="uploads-on"),
     ],

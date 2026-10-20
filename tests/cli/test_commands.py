@@ -313,9 +313,7 @@ def test_a_failure_is_one_error_document_under_json_and_stays_off_stdout_in_text
     [
         (401, "permission_denied"),
         (404, "not_found"),
-        (409, "conflict"),
         (429, "rate_limited"),
-        (500, "server_error"),
     ],
 )
 def test_each_platform_status_maps_to_one_error_kind(

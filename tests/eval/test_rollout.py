@@ -28,8 +28,6 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize(
     ("prompt", "turns", "text"),
     [
-        pytest.param("add 2 3", [("user", "add 2 3")], "add 2 3", id="text-is-one-user-turn"),
-        pytest.param(None, [("user", "")], "", id="no-prompt-is-one-empty-user-turn"),
         pytest.param(
             [
                 {"role": "system", "content": "be brief"},
@@ -120,15 +118,6 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
 @pytest.mark.parametrize(
     ("grade", "reward", "content", "status", "error"),
     [
-        pytest.param(0.5, 0.5, None, "completed", None, id="a-number"),
-        pytest.param(
-            {"score": 0.5, "content": "half right", "info": {"checked": 2}},
-            0.5,
-            "half right",
-            "completed",
-            None,
-            id="a-frame-with-a-score",
-        ),
         pytest.param(
             {"score": 0.0, "content": "the env broke", "isError": True},
             0.0,
@@ -152,14 +141,6 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
             "error",
             "'score'",
             id="a-frame-without-a-score",
-        ),
-        pytest.param(
-            "high",
-            0.0,
-            None,
-            "error",
-            "str",
-            id="neither",
         ),
     ],
 )

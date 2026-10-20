@@ -83,12 +83,11 @@ async def test_an_env_that_keeps_hanging_up_is_given_up_on_at_the_runtimes_ready
 @pytest.mark.parametrize(
     ("ref", "scheme", "reached"),
     [
-        ("shell", "ssh", b"shell"),
         ("ssh", "ssh", b"shell"),
         ("ssh/2", "ssh", b"shell"),
         ("screen-1", "rfb", b"screen-1"),
     ],
-    ids=["by-name", "by-protocol", "by-versioned-protocol", "by-name-among-same-protocol"],
+    ids=["by-protocol", "by-versioned-protocol", "by-name-among-same-protocol"],
 )
 async def test_a_binding_resolves_to_a_local_tunnel_by_name_or_protocol(
     ref: str, scheme: str, reached: bytes

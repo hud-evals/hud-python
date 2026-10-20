@@ -251,6 +251,3 @@ async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
     (run,) = job.runs
     assert run.reward == reward
     assert ("runtime session contains" in (run.trace.error or "")) is link
-
-
-# ─── what each runtime refuses to provision ────────────────────────────

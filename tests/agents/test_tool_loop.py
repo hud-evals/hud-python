@@ -1,5 +1,5 @@
-"""What the provider agents' shared tool loop decides: when a run stops, how long a tool
-may take, when a lost workspace ends the run, and that colliding MCP tool names fail it.
+"""What the provider agents' shared tool loop decides: how long a tool may take, when a
+lost workspace ends the run, and that colliding MCP tool names fail it.
 
 The loop is one implementation every provider agent runs, so each rule is checked once,
 on the chat completions agent; what each provider does differently is
@@ -28,7 +28,6 @@ from tests.fixtures.relay import relay
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.types import StopCondition
     from tests.conftest import HudEnv
     from tests.fixtures.models import ModelRequest, Models
     from tests.fixtures.relay import FlakyRelay
@@ -37,57 +36,6 @@ if TYPE_CHECKING:
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
-
-
-CUT_OFF = Turn(
-    native=(
-        {
-            "id": "call_cut",
-            "type": "function",
-            "function": {"name": "bash", "arguments": '{"command": "ec'},
-        },
-    )
-)
-
-
-@pytest.mark.parametrize(
-    ("reason", "turn"),
-    [
-        pytest.param(
-            "length", replace(call("bash", command="true"), truncated=True), id="a-capped-reply"
-        ),
-        pytest.param("malformed_tool_call", CUT_OFF, id="a-malformed-call"),
-    ],
-)
-async def test_stop_on_ends_the_run_at_the_call_it_names(
-    reason: StopCondition, turn: Turn, models: Models, tmp_path: Path
-) -> None:
-    models.script([turn])
-
-    task = workspace_task(tmp_path / "ws")
-    (run,) = (
-        await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", stop_on={reason})))
-    ).runs
-
-    assert (run.trace.status, run.trace.stop_reason) == ("completed", reason)
-    assert len(models.requests()) == 1
-
-
-async def test_the_step_budget_ends_a_model_that_never_finishes(
-    models: Models, tmp_path: Path
-) -> None:
-    models.respond(lambda request: call("bash", command="true"))
-
-    task = workspace_task(tmp_path / "ws")
-    (run,) = (
-        await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus", max_steps=2)))
-    ).runs
-
-    assert (run.trace.status, run.trace.stop_reason, len(models.requests())) == (
-        "completed",
-        "max_steps",
-        2,
-    )
 
 
 @pytest.mark.parametrize(

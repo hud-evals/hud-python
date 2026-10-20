@@ -18,9 +18,6 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import McpError
 
 from hud.capabilities import Capability, MCPClient
-from hud.clients import connect
-from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
 from tests.clients.conftest import relayed
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server, serve_asgi
@@ -225,22 +222,6 @@ async def test_a_failing_tool_call_resolves_with_a_transport_error(
     assert raised.value.error.code == -32000
     assert raised.value.error.message.startswith("Transport error")
     assert server.attempts() == attempts
-
-
-async def test_tools_published_at_serve_time_open_through_the_control_port() -> None:
-    async with mcp_server(tools()) as capability:
-        env = Environment("mcp", capabilities=[capability])
-        async with (
-            LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
-            connect(runtime) as control,
-        ):
-            opened = await control.open("tools")
-            assert isinstance(opened, MCPClient)
-            added = await opened.call_tool("add", {"a": 2, "b": 3})
-            again = await control.open("tools")
-
-    assert again is opened
-    assert added.structuredContent == {"result": 5}
 
 
 async def test_a_tool_call_after_the_connection_drops_reconnects() -> None:

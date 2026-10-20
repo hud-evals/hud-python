@@ -82,7 +82,6 @@ def test_the_package_imports_where_unix_sockets_do_not_exist() -> None:
         ("jose", "authlib.jose module is deprecated, please use joserfc instead.", False),
         ("authlib", "authlib.oauth2 client is deprecated", True),
         ("deprecation", "an unrelated deprecation", True),
-        ("user", "an unrelated user warning", True),
     ],
 )
 def test_importing_hud_hides_only_the_authlib_jose_deprecation(

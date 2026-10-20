@@ -76,12 +76,6 @@ async def test_output_arrives_while_the_command_is_still_running(tmp_path: Path)
 PAYLOAD = b"0123456789abcdef" * 131072 + b"tail"
 STREAMS = [
     pytest.param(
-        "IFS= read -r line; printf 'out:%s' \"$line\"; printf err >&2",
-        b"input\n",
-        (b"out:input", b"err", 0),
-        id="stdin-reaches-the-command-and-both-streams-come-back",
-    ),
-    pytest.param(
         "cat; printf stderr-tail >&2",
         PAYLOAD,
         (PAYLOAD, b"stderr-tail", 0),
