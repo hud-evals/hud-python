@@ -61,7 +61,7 @@ jobs:
 
       - name: Run ty
         run: >-
-          uv run --extra dev --extra train --extra modal --extra daytona
+          uv run --extra dev --extra train --extra modal --extra daytona --extra tensorlake
           ty check --error-on-warning
 
   docker:

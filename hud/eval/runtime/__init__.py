@@ -17,6 +17,7 @@ from .hosted import HostedRuntime
 from .hud import HUDRuntime
 from .local import LocalRuntime, SubprocessRuntime
 from .modal import ModalRuntime
+from .tensorlake import TensorlakeRuntime
 
 __all__ = [
     "ComposeProject",
@@ -36,4 +37,5 @@ __all__ = [
     "RuntimeTPU",
     "Shared",
     "SubprocessRuntime",
+    "TensorlakeRuntime",
 ]

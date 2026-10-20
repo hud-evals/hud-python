@@ -160,6 +160,11 @@ daytona = [
     "daytona>=0.100",
 ]
 
+# Tensorlake placement (TensorlakeRuntime): per-rollout cloud sandboxes from a registered image
+tensorlake = [
+    "tensorlake>=0.5",
+]
+
 # Client-side custom training losses (TrainingClient.forward_backward_custom).
 # Only the custom-loss path needs torch autograd; the built-in loss_fn path and
 # the rest of the client are torch-free.

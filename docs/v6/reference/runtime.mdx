@@ -23,13 +23,14 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `DockerRuntime("my-env")` | A fresh local container per rollout | Reproducibility and parity with production |
 | `ModalRuntime("my-env")` | A fresh [Modal](https://modal.com/) sandbox per rollout | Cloud scale, no infra to manage |
 | `DaytonaRuntime("my-env")` | A fresh [Daytona](https://www.daytona.io/) sandbox per rollout | Cloud scale on Daytona |
+| `TensorlakeRuntime("my-env")` | A fresh [Tensorlake](https://tensorlake.ai/) sandbox per rollout | Cloud scale on Tensorlake |
 | `Runtime("tcp://host:8765")` | A substrate you already started | Attaching to a long-lived container or sandbox you own |
 | `Shared(provider, width=N)` | One substrate from `provider`, shared by up to N concurrent connections | Multi-agent evals - agents that share, compete, or coordinate over one live environment |
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
 Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
-HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
+HostedRuntime, Runtime`); `ModalRuntime`, `DaytonaRuntime`, and `TensorlakeRuntime` import from `hud.eval`.
 
 <Note>
 **You can usually omit `runtime=`.** A run without one uses its known placement:
@@ -79,11 +80,11 @@ RuntimeConfig(resources=RuntimeResources(tpu=RuntimeTPU(type="v5", topology="2x2
 | `limits` | `RuntimeLimits(startup_timeout_s, run_timeout_s)`. |
 
 Support differs per runtime. Providers reject unsupported requirements except `storage_mb`, which
-is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntime` provisions
-enough whole GiB, while providers without disk sizing proceed with their default capacity.
+is best effort: `DockerRuntime` admits against available disk, `DaytonaRuntime` provisions
+enough whole GiB, and `TensorlakeRuntime` sizes the sandbox disk in MB, while providers without disk sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
 or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
-alternatives; Modal accepts one GPU type. Daytona rejects Compose, `run_timeout_s`, and resource overrides
+alternatives; Modal and Tensorlake accept one GPU type. Daytona rejects Compose, `run_timeout_s`, and resource overrides
 when booting from an already-built snapshot. `LocalRuntime` rejects a
 per-task `runtime_config`.
 
@@ -104,7 +105,8 @@ When the SDK owns the environment process, its output is part of the local eval:
 `SubprocessRuntime`, Docker image and Compose runtimes, Modal image and Compose sandboxes,
 and Daytona sandboxes stream stdout and stderr directly to the terminal without
 reformatting them. `LocalRuntime` already shares the eval process's terminal. HUD-hosted
-runtimes retain environment output on the hosted trace instead.
+runtimes retain environment output on the hosted trace instead. `TensorlakeRuntime` does not
+stream; when the control channel fails, it attaches the environment's output to the error.
 
 ## Runtime directory
 
@@ -223,6 +225,20 @@ Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`
 `DockerRuntime` or `ModalRuntime` for [Compose environments](/v6/experimental/compose).
 
 Measured behavior at scale, up to 256 concurrent sandboxes with warm pools, is written up in the [Daytona cookbook](/v6/cookbooks/daytona-rl) and the [full guide on Daytona's docs](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
+
+### `TensorlakeRuntime`
+
+```python
+TensorlakeRuntime(image_name=None, *, command=None, workdir="/app", port=8765, runtime_config=None)
+```
+
+- **`image_name`** - registered Tensorlake sandbox image to boot from (the durable handle). Register one with `tl sbx image create` or `tensorlake.image.Image.build`; Tensorlake does not accept arbitrary registry references. `runtime_config.image` means the same registered name.
+- **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint).
+- **`workdir`** / **`port`** - guest working directory and in-sandbox serving port. The port is reached over the SDK's TCP tunnel, which relays a local ephemeral port into the sandbox.
+
+Resources map onto the sandbox at creation time: `cpu` (fractional allowed), `memory_mb`, `storage_mb` as the root disk, and one GPU type with a count. Both `startup_timeout_s` and `run_timeout_s` are honored; `run_timeout_s` becomes the sandbox lifetime. Compose input is rejected.
+
+Requires the `tensorlake` extra and `TENSORLAKE_API_KEY`.
 
 ### `HUDRuntime`
 

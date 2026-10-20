@@ -452,6 +452,7 @@ port a different way:
 | `DockerRuntime` | a `docker run` container | publishing the port, reading the `docker port` mapping |
 | `ModalRuntime` | a Modal sandbox | a raw-TCP tunnel (`unencrypted_ports`) |
 | `DaytonaRuntime` | a Daytona sandbox | an SSH local-forward to a local port |
+| `TensorlakeRuntime` | a Tensorlake sandbox | the SDK's WebSocket TCP tunnel to a local port |
 | `HUDRuntime` | a HUD-hosted env | a WebSocket tunnel behind a local TCP listener |
 | `Runtime(url)` | one already served elsewhere | nothing - the url passes straight through |
 

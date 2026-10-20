@@ -50,6 +50,7 @@ from .runtime import (
     RuntimeTPU,
     Shared,
     SubprocessRuntime,
+    TensorlakeRuntime,
 )
 from .sync import SyncPlan
 from .task import Task
@@ -79,6 +80,7 @@ __all__ = [
     "SyncPlan",
     "Task",
     "Taskset",
+    "TensorlakeRuntime",
     "Trace",
     "rollout",
 ]

@@ -30,6 +30,7 @@ from hud.eval import (
     Runtime,
     SubprocessRuntime,
     Taskset,
+    TensorlakeRuntime,
 )
 from hud.settings import settings
 from hud.types import AgentType
@@ -62,6 +63,7 @@ class Placement(StrEnum):
     DOCKER = "docker"
     MODAL = "modal"
     DAYTONA = "daytona"
+    TENSORLAKE = "tensorlake"
 
 
 TcpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["tcp"])]
@@ -188,7 +190,7 @@ def eval_command(
         None,
         "--runtime",
         help="Placement: local (subprocess/Docker per row), hud (runtime tunnel), hosted (whole "
-        "rollout on the platform), docker, modal, daytona, or a tcp:// url. "
+        "rollout on the platform), docker, modal, daytona, tensorlake, or a tcp:// url. "
         "Default: local for a tasks file; hosted for a platform taskset.",
     ),
     remote: bool = typer.Option(
@@ -457,6 +459,8 @@ def eval_command(
             placement = ModalRuntime()
         case Placement.DAYTONA:
             placement = DaytonaRuntime()
+        case Placement.TENSORLAKE:
+            placement = TensorlakeRuntime()
         case _:
             assert_never(cfg.runtime)
 
