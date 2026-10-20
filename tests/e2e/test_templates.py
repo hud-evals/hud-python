@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 SANDBOXED = {"coding"}
 TAKES_DATA_FILES = {"argument-hints"}
 EVAL = ("eval", ROWS, "claude", "--max-steps", "10", "-y", "--json")
-LIVE_MODEL = "claude-haiku-4-5"
+LIVE_MODEL = "claude-haiku-5-5"
 HOSTED_MODEL = "claude-sonnet-4-6"
 REAL_MODEL = ("--gateway", "--config", "max_tokens=2048")
 

@@ -87,12 +87,12 @@ FIXTURES = {
 #: (agent type, the cheapest model the gateway serves it, the fixtures it runs). Chat
 #: Completions agents have no computer use, so a screen pays them nothing.
 LIVE = [
-    ("claude", "claude-haiku-4-5", list(FIXTURES)),
-    ("openai", "gpt-5.4-mini", list(FIXTURES)),
+    ("claude", "claude-haiku-5-5", list(FIXTURES)),
+    ("openai", "gpt-6-luna", list(FIXTURES)),
     ("gemini", "gemini-3.8-flash", list(FIXTURES)),
-    ("openai_compatible", "deepseek/deepseek-v4-flash", list(FIXTURES)),
-    ("claude_cli", "claude-haiku-4-5", ["workspace"]),
-    ("codex_cli", "gpt-5.4-mini", ["workspace"]),
+    ("openai_compatible", "deepseek/deepseek-v4.1-flash", list(FIXTURES)),
+    ("claude_cli", "claude-haiku-5-5", ["workspace"]),
+    ("codex_cli", "gpt-6-luna", ["workspace"]),
 ]
 
 
