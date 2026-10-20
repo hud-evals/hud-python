@@ -38,6 +38,29 @@ def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
 
 
+async def test_a_call_cut_off_mid_arguments_is_refused_and_the_model_can_reissue_it(
+    models: Models, tmp_path: Path
+) -> None:
+    root = tmp_path / "ws"
+    cut_off = {
+        "id": "call_cut",
+        "type": "function",
+        "function": {"name": "bash", "arguments": '{"command": "touch fi'},
+    }
+    models.script([Turn(native=(cut_off,)), call("bash", command="touch fixed"), Turn(text="done")])
+
+    task = workspace_task(root)
+    (run,) = (await task().run(OpenAIChatAgent(OpenAIChatConfig(model="qwen3.6-plus")))).runs
+
+    (cut_failed, _), (reissued_failed, _) = tool_results(run)
+    assert (run.trace.status, run.trace.stop_reason) == ("completed", "done")
+    assert (cut_failed, reissued_failed, sorted(path.name for path in root.iterdir())) == (
+        True,
+        False,
+        ["fixed"],
+    )
+
+
 @pytest.mark.parametrize(
     ("calls", "status"),
     [

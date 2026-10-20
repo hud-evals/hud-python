@@ -171,6 +171,18 @@ def test_a_linked_taskset_that_was_deleted_is_not_found(platform: FakeServices, 
     assert (result.exit_code, result.json["error"], uploads(platform)) == (1, "not_found", [])
 
 
+def test_an_upload_the_platform_rejects_fails_the_sync_and_links_nothing(
+    platform: FakeServices, hud: Hud
+) -> None:
+    detail = "Taskset belongs to another project"
+    platform.route("api", "POST", "/v2/tasks/upload", status=400, json={"detail": detail})
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+
+    assert result.exit_code == 1, result
+    assert (detail in result.json["message"], linked(hud)) == (True, {})
+
+
 @pytest.mark.parametrize("target", ["tasks.json", "out/tasks.jsonl"])
 def test_an_exported_taskset_reads_back_as_the_same_tasks(
     target: str, platform: FakeServices, hud: Hud
