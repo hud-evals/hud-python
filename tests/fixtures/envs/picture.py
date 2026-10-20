@@ -1,7 +1,8 @@
 """A tool that shows a colour: only a model that saw the image can name it.
 
 The prompt never says which colour the task chose, so with a real model a reward
-of 1 proves the tool's image reached it.
+of 1 proves the tool's image reached it. The image is wider than some providers
+accept, so the agent has to fit it first.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ shown: list[str] = []
 def look() -> list[mcp_types.ContentBlock]:
     """Show the picture."""
     buffer = io.BytesIO()
-    Image.new("RGB", (64, 64), shown[-1]).save(buffer, format="PNG")
+    Image.new("RGB", (9000, 600), shown[-1]).save(buffer, format="PNG")
     data = base64.b64encode(buffer.getvalue()).decode()
     return [mcp_types.ImageContent(type="image", data=data, mimeType="image/png")]
 
@@ -50,7 +51,7 @@ async def stop_picture() -> None:
 async def name_the_colour(colour: str):
     shown.append(colour)
     answer = yield "Call the look tool, then reply with the name of the colour it shows."
-    yield 1.0 if colour in answer.lower() else 0.0
+    yield 1.0 if colour in (answer or "").lower() else 0.0
 
 
 tasks = [name_the_colour(colour="red")]

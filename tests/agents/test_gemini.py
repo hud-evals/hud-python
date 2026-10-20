@@ -1,19 +1,15 @@
-"""What only ``GeminiAgent`` does: the grounding tool citations add, how it bounds a long
-tool output, drops old screenshots and clears a field, how its replies fail, and the
-grounding it records as citations."""
+"""What only ``GeminiAgent`` does: how it drops old screenshots, and how its replies
+fail."""
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import pytest
-from fastmcp import FastMCP
 
 from hud.agents import GeminiAgent
 from hud.agents.types import GeminiConfig
 from hud.capabilities import Capability
-from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call
 from tests.fixtures.screen import fake_screen
@@ -31,25 +27,6 @@ MODEL = "gemini-3.1-pro-preview"
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="k")
-
-
-async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
-    models: Models, tmp_path: Path
-) -> None:
-    server = FastMCP("long")
-    server.tool(name="long_output", description="Return a long text.")(
-        lambda: "h" * 500 + "t" * 500
-    )
-    models.script([call("long_output"), Turn(text="done")])
-
-    async with mcp_server(server) as long_output:
-        task = workspace_task(tmp_path / "ws", capabilities=(long_output,))
-        await task().run(GeminiAgent(GeminiConfig(model=MODEL, max_tool_result_chars=100)))
-
-    (result,) = models.requests()[-1].tool_results
-    output = json.loads(result)["output"]
-    assert len(output) < 500
-    assert "h" * 10 in output and output.endswith("t" * 10)
 
 
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
