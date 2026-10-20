@@ -124,6 +124,11 @@ def build_model_client(
     return AsyncOpenAI(api_key=key)
 
 
+# The gateway answers 503 + Retry-After when a pod is at capacity; the OpenAI and
+# Anthropic SDKs wait the header out, but their default of two retries is too few.
+GATEWAY_MAX_RETRIES = 6
+
+
 def build_gateway_client(provider: str) -> GatewayClient:
     """A *provider* SDK client pointed at the HUD gateway, with trace headers attached."""
     # Provider SDK clients bypass hud.utils.requests, so guard here.
@@ -141,6 +146,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
         return AsyncAnthropic(
             api_key=settings.api_key,
             base_url=settings.hud_gateway_url,
+            max_retries=GATEWAY_MAX_RETRIES,
             http_client=AnthropicHttpClient(
                 event_hooks={"request": [_inject_trace_id]},
             ),
@@ -150,10 +156,11 @@ def build_gateway_client(provider: str) -> GatewayClient:
         from google import genai
         from google.genai.types import HttpOptions, HttpRetryOptions
 
+        # google-genai ignores Retry-After, so its backoff is set to the gateway's 3 s.
         return genai.Client(
             api_key=settings.api_key,
             http_options=HttpOptions(
-                retry_options=HttpRetryOptions(initial_delay=10),
+                retry_options=HttpRetryOptions(initial_delay=3, max_delay=5),
                 api_version="v1beta",
                 base_url=settings.hud_gateway_url,
                 client_args={
@@ -172,6 +179,7 @@ def build_gateway_client(provider: str) -> GatewayClient:
     return AsyncOpenAI(
         api_key=settings.api_key,
         base_url=settings.hud_gateway_url,
+        max_retries=GATEWAY_MAX_RETRIES,
         http_client=DefaultAsyncHttpxClient(
             event_hooks={"request": [_inject_trace_id]},
         ),

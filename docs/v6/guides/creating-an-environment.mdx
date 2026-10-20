@@ -58,8 +58,8 @@ async def _teardown():
 
 @env.template(id="count")
 async def count(sentence: str, letter: str):
-    answer = yield f"How many times does '{letter}' appear in '{sentence}'?"
-    yield 1.0 if str(sentence.lower().count(letter.lower())) in (answer or "") else 0.0
+    answer = yield f"How many times does '{letter}' appear in '{sentence}'? Reply with just the number."
+    yield 1.0 if (answer or "").strip() == str(sentence.lower().count(letter.lower())) else 0.0
 ```
 
 </Accordion>
@@ -194,8 +194,8 @@ count matches, else `0.0`.
 ```python
 @env.template(id="count")
 async def count(sentence: str, letter: str):
-    answer = yield f"How many times does '{letter}' appear in '{sentence}'?"
-    yield 1.0 if str(sentence.lower().count(letter.lower())) in (answer or "") else 0.0
+    answer = yield f"How many times does '{letter}' appear in '{sentence}'? Reply with just the number."
+    yield 1.0 if (answer or "").strip() == str(sentence.lower().count(letter.lower())) else 0.0
 ```
 
 </div>

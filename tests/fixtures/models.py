@@ -5,7 +5,8 @@ One provider-neutral script answers the four wire protocols hud's agents speak:
 - OpenAI Chat Completions: ``POST /chat/completions``
 - OpenAI Responses: ``POST /responses``
 - Anthropic Messages, streamed as server-sent events: ``POST /v1/messages``
-- Gemini: ``POST /v1beta/models/{model}:generateContent``
+- Gemini: ``POST /v1beta/models/{model}:generateContent``, or ``:streamGenerateContent``
+  as server-sent events
 
 A script is a list of turns, or a function from :class:`ModelRequest` to a turn.
 The turn a request gets is read from the conversation the request carries (how
@@ -178,6 +179,12 @@ class Models:
         services.route("gateway", "POST", "/v1/messages", handler=self._anthropic)
         services.route(
             "gateway", "POST", "/v1beta/models/{model}:generateContent", handler=self._gemini
+        )
+        services.route(
+            "gateway",
+            "POST",
+            "/v1beta/models/{model}:streamGenerateContent",
+            handler=self._gemini_stream,
         )
 
     @property
@@ -412,6 +419,14 @@ class Models:
                 "modelVersion": raw.params["model"],
             }
         )
+
+    def _gemini_stream(self, raw: Request) -> Reply:
+        """The same reply as one server-sent event; an error status answers as is."""
+        reply = self._gemini(raw)
+        if reply.status != 200 or reply.json is None:
+            return reply
+        event = f"data: {json.dumps(reply.json)}\n\n".encode()
+        return Reply(stream=[event], headers=reply.headers, content_type="text/event-stream")
 
 
 def _sse(kind: str, data: dict[str, Any]) -> bytes:

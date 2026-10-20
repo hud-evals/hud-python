@@ -97,7 +97,7 @@ env = Environment(name="letter-count")
 @env.template()
 async def count_letter(word: str = "strawberry", letter: str = "r"):
     answer = yield f"How many '{letter}'s are in '{word}'? Reply with just the number."
-    yield 1.0 if answer and str(word.count(letter)) in answer else 0.0
+    yield 1.0 if (answer or "").strip() == str(word.count(letter)) else 0.0
 
 
 tasks = [count_letter(word=w) for w in ("strawberry", "raspberry", "blueberry")]

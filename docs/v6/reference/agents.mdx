@@ -57,7 +57,7 @@ agent = ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-5", max_steps=30))
 |-------|--------|---------------|
 | `ClaudeAgent` | `ClaudeConfig` | `claude-sonnet-4-6` |
 | `OpenAIAgent` | `OpenAIConfig` | `gpt-5.6` |
-| `GeminiAgent` | `GeminiConfig` | `gemini-3-pro-preview` |
+| `GeminiAgent` | `GeminiConfig` | `gemini-3.1-pro-preview` |
 | `OpenAIChatAgent` | `OpenAIChatConfig` | `gpt-5.4-mini` |
 | `ClaudeCLIAgent` | `ClaudeCLIConfig` | `claude-sonnet-5` |
 | `CodexCLIAgent` | `CodexCLIConfig` | `gpt-5.6-sol` |
@@ -71,6 +71,10 @@ filesystem. SSH-only runs support POSIX and Windows workspaces; `ClaudeCLIAgent`
 config; `__call__(run)` takes only the run.
 
 `OpenAIConfig.max_output_tokens` and `GeminiConfig.max_output_tokens` are unset by default, so each request gets the model's own output limit. Set them to cap output per turn. Gemini counts thinking tokens toward the cap, so a low cap can truncate a thinking model before it answers.
+
+`GeminiConfig.temperature`, `top_p`, and `top_k` are unset by default, so each request uses the model's own sampling; Gemini 4 models ignore them. `GeminiConfig.thinking_level` accepts `minimal`, `low`, `medium`, or `high`, subject to the model (Gemini 4 Argon rejects `minimal`); unset uses the model's default.
+
+`GeminiAgent` streams each turn. For Gemini 4 long decode, set `max_output_tokens` above 65,536 and install `google-genai` 2.30.1 or later; the turn then runs past the per-request output cap and is recorded as one turn. Otherwise a turn that reaches the cap ends the run with `stop_reason="length"`. Keep `include_thoughts` on for long-thinking runs, since without it the model sends nothing while it thinks and a long think can hit the stream's first-chunk deadline.
 
 `OpenAIConfig` generates a stable `prompt_cache_key` for the agent and sends it with every Responses
 request. Pass your own key when multiple agent instances should share the same cached prompt prefix.

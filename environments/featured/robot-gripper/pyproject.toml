@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 # Eval-machine dependencies. The Newton physics engine (`newton` + `gizmo`) is
 # NOT on PyPI: it ships as a pre-built wheel in wheels/ (see [tool.uv.sources]).
 dependencies = [
-    "hud==0.6.19",  # HUD SDK: Environment, capabilities, hud eval
+    "hud==0.6.20",  # HUD SDK: Environment, capabilities, hud eval
     "mujoco>=3.2.0",       # rendering, model name lookups, IK
     "numpy>=1.26.0",
     "Pillow>=10.0.0",      # base64 PNG encode/decode for render()

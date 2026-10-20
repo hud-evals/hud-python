@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from anthropic.types.beta import (
-    BetaCitationsConfigParam,
     BetaToolSearchToolBm25_20251119Param,
     BetaToolUnionParam,
     BetaWebFetchTool20250910Param,
@@ -75,7 +74,7 @@ class ClaudeWebFetchTool(ClaudeHostedTool):
         if self.max_content_tokens is not None:
             params["max_content_tokens"] = self.max_content_tokens
         if self.citations_enabled:
-            params["citations"] = BetaCitationsConfigParam(enabled=True)
+            params["citations"] = {"enabled": True}
         return params
 
 

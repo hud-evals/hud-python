@@ -127,6 +127,8 @@ bedrock = [
 dev = [
     "hud[agents]",  # Include agents for dev
     "hud[robot]",  # the robot scenarios in tests/robot run the real wire
+    # GeminiAgent's long-decode continuation relies on google-genai 2.30.1 or later.
+    "google-genai>=2.30.1",
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff==0.16.1",
