@@ -51,3 +51,6 @@ async def name_the_colour(colour: str):
     shown.append(colour)
     answer = yield "Call the look tool, then reply with the name of the colour it shows."
     yield 1.0 if colour in answer.lower() else 0.0
+
+
+tasks = [name_the_colour(colour="red")]

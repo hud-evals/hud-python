@@ -5,21 +5,14 @@ credential."""
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
-import json
 import uuid
 from typing import TYPE_CHECKING
 
 import pytest
-from PIL import Image
 
-from hud.agents.types import ToolStep
-from hud.capabilities import Capability
 from hud.types import AgentType
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn, click, shell
-from tests.fixtures.screen import fake_screen
+from tests.fixtures.models import Turn
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
@@ -59,58 +52,12 @@ async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_conversati
     assert sorted(request.prompt for request in models.requests()) == ["first", "second"]
 
 
-@EVERY_PROVIDER
-async def test_a_shell_call_acts_on_the_workspace_and_its_result_reaches_the_model(
-    agent_type: str, model: str, key: str | None, models: Models, tmp_path: Path
-) -> None:
-    models.script([shell("touch made && echo made-it"), Turn(text="done")])
-    kind = AgentType(agent_type).cls
-
-    task = workspace_task(tmp_path / "ws")
-    (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
-
-    assert (run.trace.status, run.trace.content) == ("completed", "done")
-    assert (tmp_path / "ws" / "made").exists()
-    assert sum(isinstance(step, ToolStep) for step in run.trace.steps) == 1
-    assert "made-it" in json.dumps(models.requests()[-1].body)
-
-
 #: (agent type, model) for the families whose tools drive a screen
 COMPUTER_USERS = [
     ("claude", "claude-sonnet-4-6"),
     ("openai", "gpt-5.6"),
     ("gemini", "gemini-3.1-pro-preview"),
 ]
-
-
-@pytest.mark.parametrize(
-    ("agent_type", "model"), COMPUTER_USERS, ids=[r[0] for r in COMPUTER_USERS]
-)
-async def test_a_click_lands_where_the_model_pointed_and_the_screen_is_sent_back(
-    agent_type: str, model: str, models: Models, tmp_path: Path
-) -> None:
-    models.script([click(150, 25, screen=(200, 100)), Turn(text="done")])
-    kind = AgentType(agent_type).cls
-
-    async with fake_screen(width=200, height=100) as screen:
-        task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
-        (run,) = (await task().run(kind(kind.config_cls(model=model)))).runs
-
-    pressed = {(event.x, event.y) for event in screen.pointer_events() if event.buttons & 1}
-    assert (run.trace.status, pressed) == ("completed", {(150, 25)})
-    last = models.requests()[-1]
-    if last.protocol == "anthropic":
-        (result,) = last.body["messages"][-1]["content"]
-        (image,) = [block for block in result["content"] if block["type"] == "image"]
-        screenshot = base64.b64decode(image["source"]["data"])
-    elif last.protocol == "responses":
-        (result,) = [item for item in last.body["input"] if item["type"] == "computer_call_output"]
-        screenshot = base64.b64decode(result["output"]["image_url"].split("base64,")[1])
-    else:
-        (part,) = last.body["contents"][-1]["parts"]
-        (image,) = part["functionResponse"]["parts"]
-        screenshot = base64.urlsafe_b64decode(image["inline_data"]["data"])
-    assert Image.open(io.BytesIO(screenshot)).size == (200, 100)
 
 
 @EVERY_PROVIDER

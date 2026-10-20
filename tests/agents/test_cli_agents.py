@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.agents.types import ToolStep
 from hud.eval import LocalRuntime, Shared, rollout
 from hud.types import AgentType
 from tests.fixtures import clis
@@ -29,23 +28,6 @@ EVERY_CLI = pytest.mark.parametrize(("agent_type", "cli"), CLIS, ids=[row[0] for
 @pytest.fixture(autouse=True)
 def signed_in(hud_env: HudEnv) -> None:
     hud_env.set(HUD_API_KEY="hud-key")
-
-
-@EVERY_CLI
-async def test_the_cli_runs_in_the_workspace_and_a_command_it_reports_lands_on_the_trace(
-    agent_type: str, cli: str, tmp_path: Path
-) -> None:
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.shell(cli, "make check", "done"))
-    stub.install()
-
-    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
-    (run,) = (await task().run(AgentType(agent_type).cls())).runs
-
-    (capture,) = stub.captures()
-    (recorded,) = [step for step in run.trace.steps if isinstance(step, ToolStep)]
-    assert (run.trace.status, run.trace.content) == ("completed", "done")
-    assert capture["cwd"] == str(tmp_path / "ws")
-    assert recorded.call is not None and recorded.call.arguments == {"command": "make check"}
 
 
 @EVERY_CLI

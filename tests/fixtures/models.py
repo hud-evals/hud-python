@@ -18,7 +18,7 @@ from __future__ import annotations
 import itertools
 import json
 import threading
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .services import Reply
@@ -51,11 +51,6 @@ class Turn:
     tool_calls: tuple[ToolCall, ...] = ()
     reasoning: str | None = None
     truncated: bool = False
-    #: A command to run with whichever tool the request offers for running commands.
-    shell: str | None = None
-    #: A left click at pixel (x, y) of a screen (width, height), in the form the offered
-    #: computer tool takes.
-    click: tuple[int, int, int, int] | None = None
     fail: Reply | None = None
     native: tuple[dict[str, Any], ...] = ()
     finish: str | None = None
@@ -64,16 +59,6 @@ class Turn:
 
 def call(name: str, /, **arguments: Any) -> Turn:
     return Turn(tool_calls=(ToolCall(name, arguments),))
-
-
-def shell(command: str) -> Turn:
-    """Run ``command`` with whichever shell tool the request offers, as a model would."""
-    return Turn(shell=command)
-
-
-def click(x: int, y: int, *, screen: tuple[int, int]) -> Turn:
-    """Left-click pixel (``x``, ``y``) of a ``screen`` the model sees, with its computer tool."""
-    return Turn(click=(x, y, *screen))
 
 
 def shell_call(*commands: str, id: str = "call_shell", **action: Any) -> Turn:
@@ -122,34 +107,6 @@ class ModelRequest:
             elif "name" in tool:
                 names.append(tool["name"])
         return names
-
-    @property
-    def shell_tool(self) -> str | None:
-        """The offered tool that runs a shell command: a provider-defined shell tool, or a
-        function taking a ``command``."""
-        for tool in self.body.get("tools") or []:
-            if self.protocol == "gemini":
-                for decl in tool.get("functionDeclarations", []):
-                    schema = (
-                        decl.get("parameters_json_schema")
-                        or decl.get("parametersJsonSchema")
-                        or decl.get("parameters")
-                        or {}
-                    )
-                    if "command" in schema.get("properties", {}):
-                        return decl["name"]
-            elif self.protocol == "chat":
-                schema = tool["function"].get("parameters") or {}
-                if "command" in schema.get("properties", {}):
-                    return tool["function"]["name"]
-            elif self.protocol == "responses" and tool.get("type") == "shell":
-                return "shell"
-            else:
-                schema = tool.get("input_schema") or tool.get("parameters") or {}
-                native = str(tool.get("type", "")).startswith("bash_")
-                if native or "command" in schema.get("properties", {}):
-                    return tool["name"]
-        return None
 
     @property
     def credential(self) -> str:
@@ -256,41 +213,7 @@ class Models:
             )
         else:
             turn = self._turns[request.turn]
-        if turn.click is not None:
-            return self._click(request, *turn.click)
-        if turn.shell is None:
-            return turn
-        tool = request.shell_tool
-        if tool is None:
-            raise AssertionError(f"the request offers no shell tool: {request.tools}")
-        if request.protocol == "responses" and tool == "shell":
-            return replace(shell_call(turn.shell), text=turn.text)
-        return replace(turn, tool_calls=(ToolCall(tool, {"command": turn.shell}),))
-
-    def _click(self, request: ModelRequest, x: int, y: int, width: int, height: int) -> Turn:
-        """A left click in the protocol's computer-use form: Anthropic's ``computer`` tool,
-        a Responses ``computer_call``, or Gemini's ``click_at`` on its 0-999 grid."""
-        tools = request.body.get("tools") or []
-        if request.protocol == "anthropic":
-            (name,) = [t["name"] for t in tools if str(t.get("type", "")).startswith("computer_")]
-            return call(name, action="left_click", coordinate=[x, y])
-        if request.protocol == "responses":
-            call_id = self._id("call")
-            return Turn(
-                native=(
-                    {
-                        "type": "computer_call",
-                        "id": f"cu_{call_id}",
-                        "call_id": call_id,
-                        "action": {"type": "click", "button": "left", "x": x, "y": y},
-                        "pending_safety_checks": [],
-                        "status": "completed",
-                    },
-                )
-            )
-        if request.protocol == "gemini":
-            return call("click_at", x=x * 1000 // width, y=y * 1000 // height)
-        raise AssertionError(f"{request.protocol} has no computer-use tool")
+        return turn
 
     def _id(self, prefix: str) -> str:
         return f"{prefix}_{next(self._ids)}"

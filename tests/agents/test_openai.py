@@ -16,7 +16,7 @@ from tests.agents.conftest import tool_results
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn, shell, shell_call
+from tests.fixtures.models import Turn, shell_call
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -71,7 +71,7 @@ async def test_citations_ask_for_web_search_sources(models: Models, tmp_path: Pa
 async def test_each_request_sends_only_what_is_new_since_the_response_it_continues(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([shell("echo hi"), Turn(text="done")])
+    models.script([shell_call("echo hi"), Turn(text="done")])
 
     task = workspace_task(tmp_path / "ws")
     await task().run(OpenAIAgent(OpenAIConfig(model=MODEL)))

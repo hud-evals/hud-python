@@ -47,3 +47,6 @@ async def click_target():
     ]
     landed = all(abs(x - TARGET[0]) <= SLACK and abs(y - TARGET[1]) <= SLACK for x, y in pressed)
     yield 1.0 if pressed and landed else 0.0
+
+
+tasks = [click_target()]

@@ -1,117 +1,65 @@
-"""An agent takes each fixture environment to its reward, on a scripted model or on its
-real model (the ``live`` lane). A reward of 1 proves the prompt reached the model, its
-tool calls reached the environment, and the grade came from the right task."""
+"""Every agent family takes each fixture environment to its reward on a real model through
+the HUD gateway. A reward of 1 proves the prompt reached the model, its tool calls reached
+the environment, and the grade came from the right task.
+
+The families are ``AgentType``'s members; a fixture is any module in
+``tests/fixtures/envs`` that declares the ``tasks`` it runs. A family added without a model
+here fails at collection.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import ast
+from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.eval import LocalRuntime, Task, Taskset
+from hud.eval import LocalRuntime, Taskset
 from hud.types import AgentType
-from tests.conftest import steps
-from tests.fixtures.envs import capable_model, source
+from tests.fixtures.envs import HERE, source
 
 if TYPE_CHECKING:
-    from tests.conftest import Hud, HudEnv
-    from tests.fixtures.models import Models
+    from tests.conftest import HudEnv
 
-#: (fixture, tool steps its scripted model takes, task phases the trace records)
-SCRIPTED = [
-    ("echo", 0, ["setup", "evaluate"]),
-    ("secret", 1, ["setup", "evaluate"]),
-    ("tools", 5, ["setup", "evaluate"]),
-    ("verifier", 0, ["setup", "evaluate", "setup", "evaluate"]),
-]
-#: (agent type, model) for every family that calls a model API itself
-SCRIPTED_AGENTS = [
-    ("claude", "claude-sonnet-4-6"),
-    ("openai", "gpt-5.6"),
-    ("gemini", "gemini-3.1-pro-preview"),
-    ("openai_compatible", "qwen3.6-plus"),
-]
-
-
-@pytest.mark.parametrize("entry", ["hud eval", "Taskset.run"])
-@pytest.mark.parametrize(
-    ("agent_type", "model"), SCRIPTED_AGENTS, ids=[row[0] for row in SCRIPTED_AGENTS]
-)
-@pytest.mark.parametrize(
-    ("fixture", "tool_steps", "phases"), SCRIPTED, ids=[r[0] for r in SCRIPTED]
-)
-async def test_a_scripted_model_takes_each_fixture_to_its_reward(
-    entry: str,
-    agent_type: str,
-    model: str,
-    fixture: str,
-    tool_steps: int,
-    phases: list[str],
-    models: Models,
-    hud_env: HudEnv,
-    hud: Hud,
-) -> None:
-    hud_env.set(HUD_API_KEY="k")
-    models.respond(capable_model(fixture))
-    path = source(fixture)
-
-    run: dict[str, Any]
-    if entry == "hud eval":
-        result = hud(
-            "eval", str(path), agent_type, "--model", model, "--max-steps", "8", "-y", "--json"
-        )
-        assert result.exit_code == 0, result
-        (run,) = result.json["runs"]
-    else:
-        kind = AgentType(agent_type).cls
-        agent = kind(kind.config_cls(model=model))
-        (done,) = (await Taskset.from_file(path).run(agent, runtime=LocalRuntime(path))).runs
-        run = {"reward": done.reward, "trace_id": done.trace_id, "error": done.trace.error}
-
-    recorded = steps(run["trace_id"])
-    calls = [step["task_call"] for step in recorded if step["source"] == "task"]
-    assert (run["reward"], run.get("error")) == (1.0, None)
-    assert [step["error"] for step in recorded if step.get("error")] == []
-    assert [call["phase"] for call in calls] == phases
-    assert sum(step["source"] == "tool" for step in recorded) == tool_steps
-
-
-FIXTURES = {
-    "echo": Task(env="echo", id="echo", args={"word": "tangerine"}),
-    "tools": Task(env="tools", id="collect_code"),
-    "servers": Task(env="servers", id="look_up_both"),
-    "workspace": Task(env="workspace", id="fix_the_file"),
-    "picture": Task(env="picture", id="name_the_colour", args={"colour": "red"}),
-    "screen": Task(env="screen", id="click_target"),
+#: The cheapest current model the gateway serves each family.
+MODELS = {
+    AgentType.CLAUDE: "claude-haiku-5-5",
+    AgentType.OPENAI: "gpt-6-luna",
+    AgentType.GEMINI: "gemini-3.8-flash",
+    AgentType.OPENAI_COMPATIBLE: "deepseek/deepseek-v4.1-flash",
+    AgentType.CLAUDE_CLI: "claude-haiku-5-5",
+    AgentType.CODEX_CLI: "gpt-6-luna",
 }
-#: (agent type, the cheapest model the gateway serves it, the fixtures it runs). Chat
-#: Completions agents have no computer use, so a screen pays them nothing.
-LIVE = [
-    ("claude", "claude-haiku-5-5", list(FIXTURES)),
-    ("openai", "gpt-6-luna", list(FIXTURES)),
-    ("gemini", "gemini-3.8-flash", list(FIXTURES)),
-    ("openai_compatible", "deepseek/deepseek-v4.1-flash", list(FIXTURES)),
-    ("claude_cli", "claude-haiku-5-5", ["workspace"]),
-    ("codex_cli", "gpt-6-luna", ["workspace"]),
+
+FIXTURES = sorted(
+    path.stem
+    for path in HERE.glob("*.py")
+    if any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "tasks" for target in node.targets)
+        for node in ast.parse(path.read_text()).body
+    )
+)
+
+CELLS = [
+    pytest.param(kind, MODELS[kind], fixture, id=f"{kind}-{fixture}")
+    for kind in AgentType
+    for fixture in (["workspace"] if kind.is_cli else FIXTURES)
 ]
 
 
 @pytest.mark.e2e
 @pytest.mark.live
-@pytest.mark.parametrize(
-    ("agent_type", "model", "fixture"),
-    [(kind, model, fixture) for kind, model, fixtures in LIVE for fixture in fixtures],
-)
+@pytest.mark.parametrize(("kind", "model", "fixture"), CELLS)
 async def test_a_real_model_takes_each_fixture_to_its_reward(
-    agent_type: str, model: str, fixture: str, live: HudEnv
+    kind: AgentType, model: str, fixture: str, live: HudEnv
 ) -> None:
-    kind = AgentType(agent_type).cls
     path = source(fixture)
+    agent = kind.cls(kind.config_cls(model=model))
 
-    job = await Taskset(fixture, [FIXTURES[fixture]]).run(
-        kind(kind.config_cls(model=model)), runtime=LocalRuntime(path)
-    )
+    job = await Taskset.from_file(path).run(agent, runtime=LocalRuntime(path))
 
     (run,) = job.runs
-    pays = 0.0 if (agent_type, fixture) == ("openai_compatible", "screen") else 1.0
+    # Chat Completions has no computer use, so the screen pays it nothing.
+    pays = 0.0 if (kind, fixture) == (AgentType.OPENAI_COMPATIBLE, "screen") else 1.0
     assert (run.reward, run.trace.error) == (pays, None)

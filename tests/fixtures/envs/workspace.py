@@ -28,3 +28,6 @@ async def fix_the_file():
         "and leave the other lines as they are."
     )
     yield 1.0 if notes.read_text() == "one\n2\nthree\n" else 0.0
+
+
+tasks = [fix_the_file()]

@@ -5,6 +5,7 @@ training sample it records."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -13,7 +14,7 @@ from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
 from tests.conftest import steps
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn
+from tests.fixtures.models import Turn, call
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,7 +88,8 @@ async def test_token_ids_continue_the_conversation_from_what_was_sampled(
 ) -> None:
     *calls, last = sampled
     models.script(
-        [Turn(shell="true", extra=extra) for extra in calls] + [Turn(text="done", extra=last)]
+        [replace(call("bash", command="true"), extra=extra) for extra in calls]
+        + [Turn(text="done", extra=last)]
     )
 
     task = workspace_task(tmp_path / "ws")
@@ -101,7 +103,9 @@ async def test_token_ids_continue_the_conversation_from_what_was_sampled(
 async def test_the_models_reasoning_is_replayed_in_the_conversation(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([Turn(shell="true", reasoning="check first"), Turn(text="done")])
+    models.script(
+        [replace(call("bash", command="true"), reasoning="check first"), Turn(text="done")]
+    )
 
     task = workspace_task(tmp_path / "ws")
     await task().run(OpenAIChatAgent(OpenAIChatConfig(model=MODEL)))

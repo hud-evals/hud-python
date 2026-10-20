@@ -54,3 +54,6 @@ async def look_up_both():
     )
     found = answers["database:alpha"] in answer and answers["search:beta"] in answer
     yield 1.0 if found else 0.0
+
+
+tasks = [look_up_both()]

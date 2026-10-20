@@ -22,7 +22,7 @@ from hud.agents.types import ClaudeConfig, OpenAIChatConfig
 from tests.agents.conftest import tool_results
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn, call, shell
+from tests.fixtures.models import Turn, call
 from tests.fixtures.relay import relay
 from tests.fixtures.services import Reply
 
@@ -88,7 +88,9 @@ CUT_OFF = Turn(
 @pytest.mark.parametrize(
     ("reason", "turn"),
     [
-        pytest.param("length", replace(shell("true"), truncated=True), id="a-capped-reply"),
+        pytest.param(
+            "length", replace(call("bash", command="true"), truncated=True), id="a-capped-reply"
+        ),
         pytest.param("malformed_tool_call", CUT_OFF, id="a-malformed-call"),
     ],
 )
@@ -109,7 +111,7 @@ async def test_stop_on_ends_the_run_at_the_call_it_names(
 async def test_the_step_budget_ends_a_model_that_never_finishes(
     models: Models, tmp_path: Path
 ) -> None:
-    models.respond(lambda request: shell("true"))
+    models.respond(lambda request: call("bash", command="true"))
 
     task = workspace_task(tmp_path / "ws")
     (run,) = (
@@ -135,7 +137,9 @@ async def test_the_step_budget_ends_a_model_that_never_finishes(
 async def test_a_lost_workspace_ends_the_run_after_three_consecutive_failures(
     calls: list[str], status: str, models: Models, tmp_path: Path
 ) -> None:
-    turns = [shell("true")] + [shell("true") if name == "shell" else call(name) for name in calls]
+    turns = [call("bash", command="true")] + [
+        call("bash", command="true") if name == "shell" else call(name) for name in calls
+    ]
     task = workspace_task(tmp_path / "ws")
     relays: list[FlakyRelay] = []
 
@@ -234,7 +238,13 @@ async def test_a_shell_call_past_the_tool_timeout_is_cut_off_and_the_run_goes_on
     models: Models, tmp_path: Path
 ) -> None:
     root = tmp_path / "ws"
-    models.script([shell("sleep 3; touch late"), shell("touch quick"), Turn(text="done")])
+    models.script(
+        [
+            call("bash", command="sleep 3; touch late"),
+            call("bash", command="touch quick"),
+            Turn(text="done"),
+        ]
+    )
 
     task = workspace_task(root)
     (run,) = (

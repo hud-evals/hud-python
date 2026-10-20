@@ -16,7 +16,7 @@ from hud.capabilities import Capability
 from tests.conftest import steps
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
-from tests.fixtures.models import Turn, call, click
+from tests.fixtures.models import Turn, call
 from tests.fixtures.screen import fake_screen
 from tests.fixtures.services import Reply
 
@@ -69,7 +69,7 @@ async def test_a_long_tool_output_is_sent_back_with_its_head_and_tail(
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([click(10, 10, screen=(64, 48))] * 4 + [Turn(text="done")])
+    models.script([call("click_at", x=156, y=208)] * 4 + [Turn(text="done")])
 
     async with fake_screen() as screen:
         task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
