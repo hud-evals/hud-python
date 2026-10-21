@@ -105,9 +105,10 @@ When the SDK owns the environment process, its output is part of the local eval:
 `SubprocessRuntime`, Docker image and Compose runtimes, Modal image and Compose sandboxes,
 and Daytona sandboxes stream stdout and stderr directly to the terminal without
 reformatting them. `LocalRuntime` already shares the eval process's terminal. HUD-hosted
-runtimes retain environment output on the hosted trace instead. `TensorlakeRuntime` does not
-stream: the SDK's `follow_output` returns a process's output only after it exits. When the
-control channel fails, it attaches the environment's output to the error.
+runtimes retain environment output on the hosted trace instead. `TensorlakeRuntime` polls the
+sandbox once a second and writes the combined stdout and stderr to the terminal's stdout, since
+the SDK has no live output stream. When the control channel fails, it also attaches the
+environment's output to the error.
 
 ## Runtime directory
 

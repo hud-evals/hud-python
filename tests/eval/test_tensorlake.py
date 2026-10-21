@@ -56,6 +56,7 @@ class _FakeTensorlakeSandbox:
         self._calls = calls
         self._terminate_fails = terminate_fails
         self.output_lines = ["ImportError: no module named bugs"]
+        calls["sandbox"] = self
 
     async def start_process(
         self, command: str, args: list[str], *, working_dir: str | None
@@ -69,7 +70,8 @@ class _FakeTensorlakeSandbox:
 
     async def get_output(self, pid: int) -> SimpleNamespace:
         self._calls["get_output"] = pid
-        return SimpleNamespace(pid=pid, lines=self.output_lines, line_count=len(self.output_lines))
+        lines = list(self.output_lines)
+        return SimpleNamespace(pid=pid, lines=lines, line_count=len(lines))
 
     async def terminate(self) -> None:
         if self._terminate_fails:
@@ -290,6 +292,21 @@ async def test_tensorlake_runtime_config_rejects_unsupported_fields(
             pass
 
     assert client.created == []
+
+
+async def test_tensorlake_streams_env_output_to_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = _install_fake_tensorlake(monkeypatch)
+
+    async with TensorlakeRuntime("hud-env")(_row()):
+        await asyncio.sleep(0)
+        client.calls["sandbox"].output_lines.append("grader warning")
+
+    # Each line once: the first poll at start, the last poll on exit.
+    assert capsys.readouterr().out == "ImportError: no module named bugs\ngrader warning\n"
+    assert client.calls["terminated"] == "sandbox-1"
 
 
 async def test_tensorlake_attaches_the_env_output_to_a_failed_handshake(

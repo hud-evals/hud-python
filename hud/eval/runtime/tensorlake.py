@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+
+from hud.utils.process import finish_output, output_writer
 
 from .core import Runtime, RuntimeConfig
 
@@ -14,6 +19,27 @@ if TYPE_CHECKING:
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.eval.runtime")
+
+# The sandbox SDK has no live output stream (``follow_output`` returns only
+# after the process exits), so env output is polled at this interval.
+OUTPUT_POLL_INTERVAL = 1.0
+
+
+async def _follow_output(sandbox: Any, pid: int, stopped: asyncio.Event) -> None:
+    write, finish = output_writer(sys.stdout)
+    seen = 0
+    try:
+        while True:
+            output = await sandbox.get_output(pid)
+            for line in output.lines[seen:]:
+                write(f"{line}\n")
+            seen = len(output.lines)
+            if stopped.is_set():
+                return
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stopped.wait(), OUTPUT_POLL_INTERVAL)
+    finally:
+        finish()
 
 
 class TensorlakeRuntime:
@@ -36,10 +62,9 @@ class TensorlakeRuntime:
     A sandbox process starts in ``~``, not the image's WORKDIR, so *workdir*
     defaults to ``/app`` to match :class:`DaytonaRuntime` and the Daytona
     cookbook image; ``hud init`` scaffolds use ``WORKDIR /hud``, so pass
-    ``workdir="/hud"`` for those. Env output is not streamed to the terminal:
-    the SDK's ``follow_output`` returns a process's output only after it
-    exits, so the output is attached to the error when the control channel
-    fails instead.
+    ``workdir="/hud"`` for those. Env output (stdout and stderr combined) is
+    polled once a second and written to stdout, since the SDK has no live
+    stream; it is also attached to the error when the control channel fails.
     Requires the ``tensorlake`` extra and ``TENSORLAKE_API_KEY``.
     """
 
@@ -127,6 +152,8 @@ class TensorlakeRuntime:
                     "sh", ["-c", self.command], working_dir=self.workdir
                 )
                 tunnel = await sandbox.create_tunnel(self.port, local_port=0)
+                stopped = asyncio.Event()
+                output_task = asyncio.create_task(_follow_output(sandbox, process.pid, stopped))
                 try:
                     yield Runtime(
                         f"tcp://{tunnel.local_host}:{tunnel.local_port}",
@@ -150,6 +177,16 @@ class TensorlakeRuntime:
                     raise
                 finally:
                     await tunnel.close()
+                    # One last poll picks up what the env printed while the
+                    # rollout ended; the sandbox is still alive here.
+                    stopped.set()
+                    await finish_output(output_task)
+                    if not output_task.cancelled() and output_task.exception() is not None:
+                        logger.warning(
+                            "stopped following env output in Tensorlake sandbox %s",
+                            sandbox.sandbox_id,
+                            exc_info=output_task.exception(),
+                        )
             finally:
                 try:
                     if sandbox is None:
