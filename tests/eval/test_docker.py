@@ -14,6 +14,7 @@ import json
 import subprocess
 import tarfile
 import textwrap
+import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -167,6 +168,28 @@ async def test_a_restored_session_archive_may_hold_only_files_and_directories(
             await runtime.restore_session("sess-12345678", archive)
 
 
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_container_that_exits_before_serving_fails_at_once_with_its_output(
+    fixture_image: Callable[[str], str],
+) -> None:
+    label, flags = labelled()
+    row = Task(
+        env="broken",
+        id="never",
+        runtime_config=RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=60)),
+    )
+    started = time.monotonic()
+
+    with pytest.raises(RuntimeError, match="exited with code 1") as raised:
+        async with DockerRuntime(fixture_image("broken"), run_args=flags)(row):
+            pytest.fail("the container should not serve")
+
+    assert "no module named bugs" in str(raised.value)
+    assert time.monotonic() - started < 30
+    assert containers(**{"hud-test": label}) == []
+
+
 def compose_file(tmp_path: Path, document: str, env_file: str = "") -> ComposeProject:
     (tmp_path / ".env").write_text(env_file)
     path = tmp_path / "compose.yaml"
@@ -235,5 +258,35 @@ async def test_a_compose_project_whose_network_owner_dies_is_taken_down(
         async with DockerRuntime()(row):
             pytest.fail("the project should not serve")
 
+    working_dir = {"com.docker.compose.project.working_dir": str(tmp_path)}
+    assert containers(**working_dir) == []
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
+async def test_a_compose_project_whose_main_exits_before_serving_fails_at_once_with_its_output(
+    fixture_image: Callable[[str], str], tmp_path: Path
+) -> None:
+    project = compose_file(
+        tmp_path,
+        f"""
+        services:
+          main:
+            image: {fixture_image("broken")}
+        """,
+    )
+    row = Task(
+        env="broken",
+        id="never",
+        runtime_config=RuntimeConfig(compose=project, limits=RuntimeLimits(startup_timeout_s=60)),
+    )
+    started = time.monotonic()
+
+    with pytest.raises(RuntimeError, match="exited with code 1") as raised:
+        async with DockerRuntime()(row):
+            pytest.fail("the project should not serve")
+
+    assert "no module named bugs" in str(raised.value)
+    assert time.monotonic() - started < 30
     working_dir = {"com.docker.compose.project.working_dir": str(tmp_path)}
     assert containers(**working_dir) == []
