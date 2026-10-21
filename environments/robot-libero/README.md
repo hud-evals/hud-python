@@ -40,6 +40,10 @@ docker build -f Dockerfile.hud -t robot-libero .
 docker run -p 8765:8765 -e LIBERO_CONTROL=delta robot-libero
 ```
 
+The image installs the SDK from `main`. To build with an exact SDK artifact,
+place one `hud-*.whl` in `.hud-sdk/` before building; the image installs that
+wheel with the `robot` extra instead.
+
 ## Results
 
 `gpt-6-astra` at medium reasoning effort, up to 100 tool-calling turns, one

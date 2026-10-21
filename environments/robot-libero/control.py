@@ -6,12 +6,15 @@ already prints. It does not read contacts or object pose.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from hud.environment.robot import DirectControl
 from mcp.types import ImageContent, TextContent
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from hud.environment.robot.control import _Gap
 
 Content = list[TextContent | ImageContent]
 
@@ -42,12 +45,14 @@ class LiberoDirectControl(DirectControl):
         self,
         obs: dict[str, Any],
         played: int,
-        proprio: NDArray[np.float64] | None,
+        proprio: NDArray[np.float64],
         *,
-        timed_out: bool,
+        rested: bool,
+        gaps: list[_Gap] | None,
         goal: NDArray[np.float64] | None,
+        ticks_left: int | None,
     ) -> Content:
-        content = super()._render(obs, played, proprio, timed_out=timed_out, goal=goal)
+        content = super()._render(obs, played, proprio, rested=rested, gaps=gaps, goal=goal, ticks_left=ticks_left)
         names = list(self._states["observation/state"])
         state = np.asarray(obs["data"]["observation/state"], dtype=np.float64).reshape(-1)
         fingers = [float(state[i]) for i, name in enumerate(names) if name.startswith(_FINGER)]

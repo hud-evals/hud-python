@@ -1,4 +1,6 @@
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 *.py[cod]
 .venv/
 venv/
@@ -8,6 +10,7 @@ venv/
 .uv/
 .hud/
 .hud_eval.toml
+.hud-sdk/
 datasets/
 results/
 telemetry-dump/

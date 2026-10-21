@@ -45,12 +45,18 @@ from libero.libero.envs import OffScreenRenderEnv; print('libero import OK')"
 
 # openpi-client, pulled in by the robot extra, over-pins numpy<2; the sim stack needs 2.2.6 and
 # only uses openpi-client's version-agnostic msgpack codec.
-RUN pip install --no-cache-dir "hud[robot]==0.6.20" \
-    && pip install --no-cache-dir numpy==2.2.6
-
 WORKDIR /app
-COPY env.py bridge.py control.py ./
-COPY contracts/ contracts/
+COPY . /app/
+RUN set -eu; \
+    if [ -d .hud-sdk ]; then \
+        set -- .hud-sdk/hud-*.whl; \
+        test "$#" -eq 1; \
+        test -f "$1"; \
+        pip install --no-cache-dir "$1[robot]"; \
+    else \
+        pip install --no-cache-dir "hud[robot] @ git+https://github.com/hud-evals/hud-python.git@main"; \
+    fi; \
+    pip install --no-cache-dir numpy==2.2.6
 
 EXPOSE 8765
 CMD ["hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
