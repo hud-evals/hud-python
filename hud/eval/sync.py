@@ -171,12 +171,9 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
 
 
 def _task_signature(task: Task) -> str:
-    sig_data = task.model_dump(
-        mode="json",
-        exclude_none=True,
-        exclude={"env", "id", "slug"},
-    )
-    return f"{task.id}|" + json.dumps(
+    # The slug keys the row; everything else, its env included, is what it runs.
+    sig_data = task.model_dump(mode="json", exclude_none=True, exclude={"slug"})
+    return json.dumps(
         sig_data,
         sort_keys=True,
         default=str,
