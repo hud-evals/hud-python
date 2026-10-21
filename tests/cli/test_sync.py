@@ -35,12 +35,12 @@ tasks = [solve(n=1), solve(n=2)]
 ONE, TWO = (Task(env="example", id="solve", args={"n": n}).slug for n in (1, 2))
 
 
-def exported(*ns: int) -> list[dict[str, Any]]:
-    """Tasks as the platform exports them: the local rows for ``solve(n)``."""
+def exported(*ns: int, env: str = "example") -> list[dict[str, Any]]:
+    """Tasks as the platform exports them: the local rows for ``solve(n)``, in ``env``."""
     return [
         {
             "name": Task(env="example", id="solve", args={"n": n}).slug,
-            "env": "example",
+            "env": env,
             "scenario": "solve",
             "args": {"n": n},
         }
@@ -124,6 +124,17 @@ def test_a_sync_uploads_only_what_the_remote_taskset_lacks(
         [uploaded] if uploaded else []
     )
     assert all(u["taskset_id"] == TASKSET_ID for u in uploads(platform))
+
+
+def test_a_task_moved_to_another_env_uploads_again(platform: FakeServices, hud: Hud) -> None:
+    holding(platform, TASKSET_ID, "demo", exported(1, 2, env="other"))
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+
+    assert (result.exit_code, result.json["status"]) == (0, "synced"), result
+    assert [[(t["name"], t["env"]) for t in u["tasks"]] for u in uploads(platform)] == [
+        [(ONE, {"name": "example"}), (TWO, {"name": "example"})]
+    ]
 
 
 def test_a_bare_sync_uses_the_linked_taskset_by_its_remote_name(
