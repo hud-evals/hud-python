@@ -26,6 +26,7 @@ from typing import Any
 
 import httpx
 
+from hud.telemetry.redaction import redact_runtime_credentials
 from hud.telemetry.span import TASK_RUN_ID_ATTRIBUTE
 from hud.utils import make_request_sync
 
@@ -98,6 +99,7 @@ def queue_span(span: dict[str, Any]) -> None:
 
     if not span.get("attributes", {}).get(TASK_RUN_ID_ATTRIBUTE):
         return
+    span = redact_runtime_credentials(span)
     _export_local(span, settings.span_dir)
     if not settings.telemetry_enabled or not settings.api_key:
         return

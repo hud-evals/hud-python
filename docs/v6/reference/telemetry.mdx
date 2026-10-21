@@ -30,6 +30,10 @@ workspace configuration, span payloads can include:
 Spans also include execution metadata such as step order, timings, status, and errors. Trace
 uploads require your API key and power the trace viewer.
 
+Before local export or upload, runtime-injected `hud_api_key` fields and their
+echoed values within the same span are replaced with `[REDACTED]`. Other task
+arguments remain visible; this does not remove arbitrary sensitive task data.
+
 - **No API key (the default):** spans are not uploaded anywhere.
 - **`HUD_TELEMETRY_ENABLED=0`:** spans are not uploaded. Emitted spans are written to
   `~/.hud/spans` so `hud trace` can still read them. Override the directory with
