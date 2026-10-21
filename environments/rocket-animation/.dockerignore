@@ -1,8 +1,0 @@
-__pycache__
-.pytest_cache
-tests
-.hud
-*.pyc
-.env
-.venv
-.git
