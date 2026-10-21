@@ -209,17 +209,16 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             if citation_doc is not None:
                 sibling_docs.append(citation_doc)
 
-        tool_result_msg = BetaMessageParam(
-            role="user",
-            content=[
-                BetaToolResultBlockParam(
-                    type="tool_result",
-                    tool_use_id=tool_use_id,
-                    content=claude_blocks,
-                    is_error=bool(result.isError) or image_error,
-                ),
-            ],
+        tool_result = BetaToolResultBlockParam(
+            type="tool_result",
+            tool_use_id=tool_use_id,
+            content=claude_blocks,
+            is_error=bool(result.isError) or image_error,
         )
+        if call.provider_name is not None:
+            # A toolset member's result names the family its tool_use came from.
+            tool_result["toolset_name"] = call.name
+        tool_result_msg = BetaMessageParam(role="user", content=[tool_result])
         if sibling_docs:
             return [tool_result_msg, BetaMessageParam(role="user", content=sibling_docs)]
         return tool_result_msg
@@ -462,16 +461,24 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         for block in response.content:
             match block.type:
                 case "tool_use":
-                    result.tool_calls.append(
-                        MCPToolCall(
-                            id=block.id,
-                            name=block.name,
-                            arguments=dict(block.input) if block.input else {},
-                            _meta=mcp_types.RequestParams.Meta.model_validate(
-                                {"citations_enabled": citations_enabled},
-                            ),
-                        )
+                    arguments = dict(block.input) if block.input else {}
+                    meta = mcp_types.RequestParams.Meta.model_validate(
+                        {"citations_enabled": citations_enabled},
                     )
+                    if block.toolset_name is None:
+                        call = MCPToolCall(
+                            id=block.id, name=block.name, arguments=arguments, _meta=meta
+                        )
+                    else:
+                        # A toolset member is one action of the family's tool.
+                        call = MCPToolCall(
+                            id=block.id,
+                            name=block.toolset_name,
+                            arguments={"action": block.name, **arguments},
+                            provider_name=block.name,
+                            _meta=meta,
+                        )
+                    result.tool_calls.append(call)
                     result.done = False
                 case "text":
                     text_parts.append(block.text)

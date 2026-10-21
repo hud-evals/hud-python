@@ -23,6 +23,7 @@ from .base import ClaudeToolSpec, is_anthropic_model
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
+        BetaComputerToolset20260801Param,
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
         BetaToolUnionParam,
@@ -87,6 +88,9 @@ def _hold_keys(text: str | None) -> list[str] | None:
 
 # ─── Claude tool specs (per-model gating) ───────────────────────────
 
+#: Current Claude models take the computer toolset; only the older models listed in
+#: ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
+COMPUTER_TOOLSET_SPEC = ClaudeToolSpec(api_type="computer_toolset_20260801", api_name="computer")
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ClaudeToolSpec(
@@ -110,9 +114,6 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
         ),
     ),
 )
-
-# Fallback for unknown Claude models — use the latest version.
-_DEFAULT_COMPUTER_SPEC = CLAUDE_COMPUTER_SPECS[0]
 
 GENERIC_COMPUTER_SPEC = ClaudeToolSpec(
     api_type="function",
@@ -207,11 +208,19 @@ class ClaudeComputerTool(RFBTool):
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
-        return _DEFAULT_COMPUTER_SPEC
+        return COMPUTER_TOOLSET_SPEC
 
     def to_params(
         self,
-    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param | BetaToolUnionParam:
+    ) -> (
+        BetaComputerToolset20260801Param
+        | BetaToolComputerUse20250124Param
+        | BetaToolComputerUse20251124Param
+        | BetaToolUnionParam
+    ):
+        if self.spec.api_type == COMPUTER_TOOLSET_SPEC.api_type:
+            # The model calls each member as its own tool and sizes clicks from screenshots.
+            return cast("BetaComputerToolset20260801Param", {"type": "computer_toolset_20260801"})
         if self.spec.api_type == "function":
             return cast(
                 "BetaToolUnionParam",
@@ -473,4 +482,9 @@ def _crop_png(
     return buf.getvalue(), encoding.mime_type
 
 
-__all__ = ["CLAUDE_COMPUTER_SPECS", "GENERIC_COMPUTER_SPEC", "ClaudeComputerTool"]
+__all__ = [
+    "CLAUDE_COMPUTER_SPECS",
+    "COMPUTER_TOOLSET_SPEC",
+    "GENERIC_COMPUTER_SPEC",
+    "ClaudeComputerTool",
+]
