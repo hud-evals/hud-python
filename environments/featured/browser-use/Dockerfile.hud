@@ -1,4 +1,9 @@
 FROM mcr.microsoft.com/playwright/python:v1.63.0-noble@sha256:72bd171a9ffc2b4b59532aaa6210e21014d07093120dc25528870c0b840da1f0
+# noble-security ca-certificates 20260816ubuntu0.24.04.1 distrusts emSign ECC Root CA - G3, whose
+# intermediates were compromised on 2026-10-17; the pinned base image predates that upload.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt /app/
 COPY .hud-sdk/ .hud-sdk/
