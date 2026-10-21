@@ -3,3 +3,6 @@ __pycache__
 tests
 .hud
 *.pyc
+.env
+.venv
+.git

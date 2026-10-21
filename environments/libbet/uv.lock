@@ -536,7 +536,7 @@ wheels = [
 [[package]]
 name = "hud"
 version = "0.6.20"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/hud-evals/hud-python.git?branch=main#f009a285a1cdfbdec1b82c59bb63048fee121516" }
 dependencies = [
     { name = "anthropic" },
     { name = "asyncssh" },
@@ -558,10 +558,6 @@ dependencies = [
     { name = "typer" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/15/a18b524a7eb51c1e8bee1289e8ff0b89a547f973677c544fbacc95a9ae6b/hud-0.6.20.tar.gz", hash = "sha256:4ffb877da4e9fd7f0c397fb60874a997824c110d3e6903fae2595f35b81a66f9", size = 623289, upload-time = "2026-10-11T19:10:18.434Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/14/08cad6667f2642adc7d0009969d3022d7326ce17f950248680c4245391e0/hud-0.6.20-py3-none-any.whl", hash = "sha256:7f5d084c12093dfe68b4e845cd428cf29208545d57085b6bb7c8c11437ec6802", size = 730660, upload-time = "2026-10-11T19:10:17.038Z" },
-]
 
 [[package]]
 name = "hud-vgbench"
@@ -579,7 +575,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "hud", specifier = "==0.6.20" },
+    { name = "hud", git = "https://github.com/hud-evals/hud-python.git?branch=main" },
     { name = "imagehash", specifier = ">=4.3.1" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=10.0.0" },

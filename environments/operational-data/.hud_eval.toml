@@ -1,0 +1,7 @@
+[eval]
+source = "tasks.py"
+agent = "claude"
+max_steps = 60
+
+[claude]
+model = "claude-sonnet-5-5"

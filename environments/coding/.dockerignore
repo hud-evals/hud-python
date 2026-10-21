@@ -5,4 +5,6 @@
 !env.py
 !grader.py
 !repository.bundle
+!.hud-sdk/
+!.hud-sdk/**
 **/__pycache__

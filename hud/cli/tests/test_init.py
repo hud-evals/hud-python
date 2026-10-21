@@ -113,9 +113,7 @@ def test_blank_materializes_a_runnable_example(tmp_path: Path) -> None:
     [
         ("browser-use", "env.py"),
         ("liveweb", "env.py"),
-        ("libbet", "env.py"),
-        ("robot-gripper", "environment/env.py"),
-        ("rocket-animation", "env.py"),
+        ("operational-data", "env.py"),
         ("file-analysis", "env.py"),
         ("argument-hints", "env.py"),
     ],

@@ -1,5 +1,0 @@
-hud[agents]==0.6.20
-playwright==1.63.0
-rubric==2.2.0
-anthropic==0.121.0
-httpx==0.28.1

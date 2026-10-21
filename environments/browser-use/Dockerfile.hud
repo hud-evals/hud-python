@@ -3,14 +3,25 @@ FROM mcr.microsoft.com/playwright/python:v1.63.0-noble@sha256:72bd171a9ffc2b4b59
 # intermediates were compromised on 2026-10-17; the pinned base image predates that upload.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        bubblewrap dbus-x11 git supervisor util-linux x11vnc xfce4 xvfb \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY requirements.txt /app/
-ARG HUD_SDK_VERSION=0.6.20
-RUN python3 -m pip install --no-cache-dir --require-hashes -r requirements.txt \
-    && python3 -c "from importlib.metadata import version; import os; assert version('hud') == os.environ['HUD_SDK_VERSION']; assert version('playwright') == '1.63.0'; print('HUD_ENV_SDK_VERSION=' + version('hud'))"
-COPY --chmod=644 env.py tasks.py tasks.json /app/
-ENV PYTHONDONTWRITEBYTECODE=1
-USER pwuser
+COPY . /app/
+RUN set -eu; \
+    python3 -m pip install --no-cache-dir --require-hashes -r requirements.txt; \
+    if [ -d .hud-sdk ]; then \
+        set -- .hud-sdk/hud-*.whl; \
+        test "$#" -eq 1; \
+        test -f "$1"; \
+        python3 -m pip install --no-cache-dir "$1[agents]"; \
+    else \
+        python3 -m pip install --no-cache-dir "hud[agents] @ git+https://github.com/hud-evals/hud-python.git@main"; \
+    fi
+RUN python3 -c "from pathlib import Path; from playwright.sync_api import sync_playwright; p = sync_playwright().start(); Path('/usr/local/bin/hud-chromium').symlink_to(p.chromium.executable_path); p.stop()" \
+    && chmod -R go-rwx /app \
+    && install -d -o pwuser -g pwuser /home/pwuser/Desktop /home/pwuser/Downloads /workspace \
+    && install -d -m 1777 /tmp/.X11-unix /tmp/.ICE-unix
+ENV DISPLAY=:1 PYTHONDONTWRITEBYTECODE=1 NO_AT_BRIDGE=1
 EXPOSE 8765
-CMD ["hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["supervisord", "-c", "/app/supervisord.conf"]

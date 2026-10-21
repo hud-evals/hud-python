@@ -13,3 +13,5 @@ logs/
 dist/
 *.state
 .DS_Store
+.env
+.hud/

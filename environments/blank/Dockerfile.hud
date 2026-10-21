@@ -1,8 +1,16 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /hud
 COPY . .
-RUN uv sync
+RUN set -eu; \
+    if [ -d .hud-sdk ]; then \
+        set -- .hud-sdk/hud-*.whl; test "$#" -eq 1; test -f "$1"; \
+        uv add --no-sync "$1"; \
+    fi; \
+    uv sync --upgrade-package hud
 
 EXPOSE 8765
 CMD ["uv", "run", "hud", "serve", "env.py", "--host", "0.0.0.0", "--port", "8765"]

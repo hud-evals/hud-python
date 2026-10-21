@@ -4,5 +4,78 @@
     "id": "rental-kitchen-chairs",
     "args": {},
     "slug": "rental-kitchen-chairs"
+  },
+  {
+    "env": "browser-use",
+    "id": "web-research",
+    "args": {
+      "url": "https://diamondrosesanctuary.com/rentals",
+      "prompt": "You are visiting diamondrosesanctuary.com. I'm booking a trip here and want to know how many chairs are at the kitchen table. State the precise number of chairs.",
+      "rubric_items": [
+        {
+          "weight": 100,
+          "requirement": "Confirms there are 7 chairs at the kitchen table"
+        }
+      ]
+    },
+    "slug": "diamond-rose-seats"
+  },
+  {
+    "env": "browser-use",
+    "id": "web-research",
+    "args": {
+      "url": "https://www.epa.gov/",
+      "prompt": "You are on epa.gov. Navigate to and use the EPA's AirNow interactive map service to find the air quality data near zip code 35173 for April 19, 2024. Your answer should identify the nearest monitoring site, its specific site ID, the primary pollutant reported, and the daily AQI value for that date.",
+      "rubric_items": [
+        {
+          "weight": 20,
+          "requirement": "The agent identifies the nearest monitoring site as Leeds"
+        },
+        {
+          "weight": 20,
+          "requirement": "The agent provides the correct site ID: 010731010"
+        },
+        {
+          "weight": 30,
+          "requirement": "The agent correctly states the main pollutant as PM2.5"
+        },
+        {
+          "weight": 30,
+          "requirement": "The agent reports the daily AQI value for April 19, 2024, as 56"
+        }
+      ]
+    },
+    "slug": "epa-air-quality"
+  },
+  {
+    "env": "browser-use",
+    "id": "web-research",
+    "args": {
+      "url": "https://sketchfab.com/models/bb0d472df4824cf394bb75215966b490/embed",
+      "prompt": "You are viewing a Sketchfab page displaying a 3D model of a ladybird. Carefully examine the 3D model and count all spots on the ladybird's body/shell (excluding the head). State the total spot count.",
+      "rubric_items": [
+        {
+          "weight": 20,
+          "requirement": "The response commits to one unambiguous final integer total for the spots on the ladybird body/shell, excluding the head. Accept digits or number words. Ignore intermediate counts and numbers unrelated to the final spot total. If the response offers a range, multiple alternative final totals, or no final total, this criterion is UNMET. The final total is exactly 16."
+        },
+        {
+          "weight": 20,
+          "requirement": "The response commits to one unambiguous final integer total for the spots on the ladybird body/shell, excluding the head. Accept digits or number words. Ignore intermediate counts and numbers unrelated to the final spot total. If the response offers a range, multiple alternative final totals, or no final total, this criterion is UNMET. The final total is between 15 and 17, inclusive."
+        },
+        {
+          "weight": 20,
+          "requirement": "The response commits to one unambiguous final integer total for the spots on the ladybird body/shell, excluding the head. Accept digits or number words. Ignore intermediate counts and numbers unrelated to the final spot total. If the response offers a range, multiple alternative final totals, or no final total, this criterion is UNMET. The final total is between 14 and 18, inclusive."
+        },
+        {
+          "weight": 20,
+          "requirement": "The response commits to one unambiguous final integer total for the spots on the ladybird body/shell, excluding the head. Accept digits or number words. Ignore intermediate counts and numbers unrelated to the final spot total. If the response offers a range, multiple alternative final totals, or no final total, this criterion is UNMET. The final total is between 13 and 19, inclusive."
+        },
+        {
+          "weight": 20,
+          "requirement": "The response commits to one unambiguous final integer total for the spots on the ladybird body/shell, excluding the head. Accept digits or number words. Ignore intermediate counts and numbers unrelated to the final spot total. If the response offers a range, multiple alternative final totals, or no final total, this criterion is UNMET. The final total is between 12 and 20, inclusive."
+        }
+      ]
+    },
+    "slug": "ladybird-spot-num"
   }
 ]

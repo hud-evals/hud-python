@@ -1,0 +1,2224 @@
+[
+  {
+    "env": "operational-data",
+    "id": "assist",
+    "args": {
+      "as_of": "2026-03-31",
+      "prompt": "Set up the board deck review Jordan asked for in #leadership: find an hour next week (April 6 to 10) when Jordan, Dana, Sam and Elena can all meet, put it on their calendars, and confirm the time in #leadership.",
+      "criteria": [
+        {
+          "requirement": "Books Thursday, April 9, 2026 from 2:00 to 3:00 PM Pacific, the only hour that week when all four are free.",
+          "weight": 3.0
+        },
+        {
+          "requirement": "Invites Jordan Blake, Dana Whitfield, Sam Patel and Elena Ruiz.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Treats Sam's declined 2:00 PM marketing sync as free when choosing the slot. A correct April 9, 2:00 to 3:00 PM Pacific booking satisfies this criterion; no separate explanation of the declined invitation is required.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Posts the booked time in #leadership.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Books a time that overlaps an accepted meeting for any of the four.",
+          "weight": -3.0
+        }
+      ],
+      "bundled": {
+        "slack": [
+          "slack/Larkspur Slack export.zip"
+        ],
+        "calendar": [
+          "calendar/dana@larkspur.co.ics",
+          "calendar/elena@larkspur.co.ics",
+          "calendar/jordan@larkspur.co.ics",
+          "calendar/sam@larkspur.co.ics"
+        ]
+      }
+    },
+    "slug": "board-review-scheduling",
+    "columns": {
+      "domain": "Management"
+    },
+    "agent_config": {
+      "model": "claude-sonnet-5-5",
+      "max_steps": 60
+    }
+  },
+  {
+    "env": "operational-data",
+    "id": "assist",
+    "args": {
+      "as_of": "2026-03-31",
+      "prompt": "I'm out Thursday and Friday. Give me the status of the March close: what is done, what is still open and who owns it, what has to land before I leave, and anything at risk.",
+      "criteria": [
+        {
+          "requirement": "Reports CLOSE-16, the prepaids and fixed asset roll-forward, as the only March close task that is done.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Flags CLOSE-14, the March accruals owned by Marcus Lee, as due today and still To Do, including Kestrel's $18,000 March fee.",
+          "weight": 2.0
+        },
+        {
+          "requirement": "Identifies CLOSE-17 (flash P&L and cash) and CLOSE-18 (variance commentary) as Elena Ruiz's open work due April 1, and links the flash report with its commentary to the 3:00 PM Pacific Flash P&L review that day. Accept shared owner/date columns and combined wording across the answer: a table can give both due dates, another sentence can state the review time, and a list can bundle flash P&L and cash with variance commentary. Do not require the deadline to be repeated separately for each task, or treat a broader before-leaving/EOD heading alone as a plan to miss the review. An explicit plan to deliver either review input only after the 3:00 PM review does not satisfy this criterion.",
+          "weight": 2.0
+        },
+        {
+          "requirement": "Reports CLOSE-13 (Meridian, Tom Okafor) as in progress, with a $44,900 short-pay planned for the April 4 due date.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Lists Priya Shah's open work: bank reconciliations CLOSE-11 and CLOSE-12 are not started and due April 2; AR aging and collection reminders CLOSE-15 are in progress and due April 1.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Reports February close tasks (CLOSE-1 to CLOSE-5) as part of March.",
+          "weight": -2.0
+        }
+      ],
+      "bundled": {
+        "slack": [
+          "slack/Larkspur Slack export.zip"
+        ],
+        "jira": [
+          "jira/Jira export.csv"
+        ],
+        "calendar": [
+          "calendar/dana@larkspur.co.ics",
+          "calendar/elena@larkspur.co.ics",
+          "calendar/jordan@larkspur.co.ics",
+          "calendar/sam@larkspur.co.ics"
+        ]
+      }
+    },
+    "slug": "march-close-status",
+    "columns": {
+      "domain": "Finance"
+    },
+    "agent_config": {
+      "model": "claude-sonnet-5-5",
+      "max_steps": 60
+    }
+  },
+  {
+    "env": "operational-data",
+    "id": "assist",
+    "args": {
+      "as_of": "2026-03-31",
+      "prompt": "Tom is out next week. Build the AP payment run for every bill due through Friday, April 10, starting from the attached aging report. Save it as ap-payment-run.xlsx with one row per bill (vendor, bill number, due date, open balance, amount to pay, pay date) and a total. Apply any payment decisions recorded in Slack or Jira, and post the run total in #ap-payables.",
+      "criteria": [
+        {
+          "requirement": "The workbook schedules Meridian ML-4471 at the approved $44,900.00 rather than its $48,200 open balance because the fuel surcharge is billed twice (credit memo CM-0219), retaining April 4, 2026 as the contractual due date. Accept a pay date of April 4 or Friday April 3 when the workbook or accompanying answer explicitly states the preceding-business-day adjustment for the Saturday due date. Do not require an unstated bank-holiday or processing rule, or accept a later pay date.",
+          "weight": 3.0
+        },
+        {
+          "requirement": "The workbook schedules Kestrel KP-2026-02 ($18,000), Harborline HL-55102 ($1,980), Pacific Trims PT-0488 ($3,150) and Northline NF-2291 ($27,640) in full.",
+          "weight": 2.0
+        },
+        {
+          "requirement": "Does not schedule another payment for Pacific Trims PT-0471, which Tom already paid with check 1047 on March 27 despite the aging showing it open. Accept omission from the payment rows, or retaining the bill for reconciliation with amount to pay zero, no active pay date, and an already-paid explanation. Do not require the paid bill to be removed entirely from the workbook.",
+          "weight": 2.0
+        },
+        {
+          "requirement": "The workbook totals the run at $95,670.00.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Posts the run total in #ap-payables.",
+          "weight": 1.0
+        },
+        {
+          "requirement": "Schedules a bill due after April 10 (Cedar & Loom CL-0119 or Bluebird BF-12101).",
+          "weight": -2.0
+        },
+        {
+          "requirement": "Schedules Meridian ML-4471 at the full $48,200.",
+          "weight": -3.0
+        }
+      ],
+      "deliverables": [
+        "ap-payment-run.xlsx"
+      ],
+      "bundled": {
+        "slack": [
+          "slack/Larkspur Slack export.zip"
+        ],
+        "jira": [
+          "jira/Jira export.csv"
+        ],
+        "attachments": [
+          "attachments/AP aging 2026-03-31.xlsx"
+        ]
+      }
+    },
+    "slug": "ap-payment-run",
+    "columns": {
+      "domain": "Finance"
+    },
+    "agent_config": {
+      "model": "claude-sonnet-5-5",
+      "max_steps": 60
+    }
+  },
+  {
+    "env": "operational-data",
+    "id": "review",
+    "args": {
+      "as_of": "2026-05-15",
+      "prompt": "Review Larkspur's balance with Alderstone Components LLC as of the end of May 15, 2026, and recommend the May 18 payment batch. Use the attached agreements and records, applying their commercial terms without external assumptions.\n\nSave reconciliation.xlsx and decision.md in outputs/, following settlement-report-format.md. Support your recommendation with source references and flag unresolved items for procurement or treasury. Do not execute payments or contact anyone.",
+      "criteria": [
+        {
+          "requirement": "The saved Reconciliation sheet has exactly one row per each of the 19 unique invoice IDs and all required headers.",
+          "weight": 1,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101"
+                      },
+                      {
+                        "invoice_id": "ALD-4102"
+                      },
+                      {
+                        "invoice_id": "ALD-4103"
+                      },
+                      {
+                        "invoice_id": "ALD-4104"
+                      },
+                      {
+                        "invoice_id": "ALD-4105"
+                      },
+                      {
+                        "invoice_id": "ALD-4106"
+                      },
+                      {
+                        "invoice_id": "ALD-4107"
+                      },
+                      {
+                        "invoice_id": "ALD-4108"
+                      },
+                      {
+                        "invoice_id": "ALD-4109"
+                      },
+                      {
+                        "invoice_id": "ALD-4110"
+                      },
+                      {
+                        "invoice_id": "ALD-4111"
+                      },
+                      {
+                        "invoice_id": "ALD-4112"
+                      },
+                      {
+                        "invoice_id": "ALD-4113"
+                      },
+                      {
+                        "invoice_id": "ALD-4114"
+                      },
+                      {
+                        "invoice_id": "ALD-4115"
+                      },
+                      {
+                        "invoice_id": "ALD-4116"
+                      },
+                      {
+                        "invoice_id": "ALD-4117"
+                      },
+                      {
+                        "invoice_id": "ALD-4118"
+                      },
+                      {
+                        "invoice_id": "ALD-4119"
+                      }
+                    ],
+                    "required_columns": [
+                      "schedule",
+                      "corrected_gross",
+                      "net_settled",
+                      "open_before_discount",
+                      "discount",
+                      "recommended_cash",
+                      "decision",
+                      "evidence"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Saves both requested files with a traceable summary and evidence; recognizes ERP-020 duplicates ERP-007 for ALD-4107.",
+          "weight": 1
+        },
+        {
+          "requirement": "Every corrected_gross workbook cell agrees with the accepted delivery schedule, eligible credits, permitted freight and tax; unknown liability is blank and VOID liability is zero.",
+          "weight": 1,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "corrected_gross": 2047.88
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "corrected_gross": 2683.2
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "corrected_gross": 2171.5
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "corrected_gross": 1102.95
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "corrected_gross": 2709.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "corrected_gross": 2210.2
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "corrected_gross": 2378.44
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "corrected_gross": 1509.3
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "corrected_gross": 2208.27
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "corrected_gross": 1440.5
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "corrected_gross": 3586.2
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "corrected_gross": 1161.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "corrected_gross": 1026.63
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "corrected_gross": 793.35
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "corrected_gross": null
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "corrected_gross": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "corrected_gross": 1056.19
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "corrected_gross": 1717.31
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "corrected_gross": 1599.6
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains schedule selection by accepted delivery date with inclusive April15 cutoff, rather than invoice/signature date. Correctly distinguishes base and A1 unit-price/freight rules and identifies the base-schedule exceptions.",
+          "weight": 2
+        },
+        {
+          "requirement": "Applies APPROVED credits posted by May15: CN-810,811,813,814,815,816,820; counts CN-820 only once. Excludes CN-812 (postedMay16), CN-817 VOID, CN-818 future, CN-819 SUPERSEDED and duplicate CR-012. Credits reduce goods before discount and tax.",
+          "weight": 3
+        },
+        {
+          "requirement": "Every net_settled workbook cell equals net bank cash known as of May15, including reversals, partial settlements and zero cash for pending/failed events.",
+          "weight": 2,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "net_settled": 1000.0
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "net_settled": 500.0
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "net_settled": 600.0
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "net_settled": 500.0
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "net_settled": 1161.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "net_settled": 1030.0
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "net_settled": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "net_settled": 1000.0
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "net_settled": 0.0
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains which bank evidence is admitted at the May15 cutoff: B002/B003 fully cancel; B011/B012 are future; B009 is a pending hold and B013 failed. Distinguishes partial settlements from fully settled invoices and cites the records used.",
+          "weight": 1
+        },
+        {
+          "requirement": "Discount workbook cells are correct on every invoice and sum to USD155.21; the unknown-liability discount is blank. Any supplied nonblank discount_rate for an eligible invoice must be accurate; the optional column is not required.",
+          "weight": 2,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "discount": 53.81
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "discount": 19.5
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "discount": 81.9
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "discount": null
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "discount": 0.0
+                      }
+                    ],
+                    "totals": {
+                      "discount": 155.21
+                    },
+                    "optional_assertions": [
+                      {
+                        "invoice_id": "ALD-4107",
+                        "discount_rate": 0.025
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "discount_rate": 0.015
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "discount_rate": 0.025
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains the original1.5% versus amended2.5% net-goods discount, inclusive10-day payment window and exclusion of positive-net-settled, future-due and held invoices. Correctly justifies ALD-4107/4110/4111 eligibility.",
+          "weight": 1
+        },
+        {
+          "requirement": "Workbook PAY decisions and cash match the exact 12-invoice payment batch and derived cash total USD22041.44; excluded invoices recommend zero cash.",
+          "weight": 3,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "decision": "PAY",
+                        "recommended_cash": 1047.88
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "decision": "PAY",
+                        "recommended_cash": 2683.2
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "decision": "PAY",
+                        "recommended_cash": 1671.5
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "decision": "FUTURE DUE",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "decision": "PAY",
+                        "recommended_cash": 2709.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "decision": "PAY",
+                        "recommended_cash": 1610.2
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "decision": "PAY",
+                        "recommended_cash": 2320.59
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "decision": "FUTURE DUE",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "decision": "PAY",
+                        "recommended_cash": 1708.27
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "decision": "PAY",
+                        "recommended_cash": 1419.54
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "decision": "PAY",
+                        "recommended_cash": 3498.16
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "decision": "SETTLED",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "decision": "OVERPAID",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "decision": "HOLD PENDING",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "decision": "HOLD RECEIPT",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "decision": "VOID",
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "decision": "PAY",
+                        "recommended_cash": 1056.19
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "decision": "PAY",
+                        "recommended_cash": 717.31
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "decision": "PAY",
+                        "recommended_cash": 1599.6
+                      }
+                    ],
+                    "totals": {
+                      "recommended_cash": 22041.44
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Both files agree on total recommended cash USD22041.44, the 12 PAY invoices and retained exclusions.",
+          "weight": 1
+        },
+        {
+          "requirement": "All five required monetary workbook columns have correct numeric values or required unknown blanks, with per-invoice cent arithmetic.",
+          "weight": 3,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "corrected_gross": 2047.88,
+                        "net_settled": 1000.0,
+                        "open_before_discount": 1047.88,
+                        "discount": 0.0,
+                        "recommended_cash": 1047.88
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "corrected_gross": 2683.2,
+                        "net_settled": 0.0,
+                        "open_before_discount": 2683.2,
+                        "discount": 0.0,
+                        "recommended_cash": 2683.2
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "corrected_gross": 2171.5,
+                        "net_settled": 500.0,
+                        "open_before_discount": 1671.5,
+                        "discount": 0.0,
+                        "recommended_cash": 1671.5
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "corrected_gross": 1102.95,
+                        "net_settled": 0.0,
+                        "open_before_discount": 1102.95,
+                        "discount": 0.0,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "corrected_gross": 2709.0,
+                        "net_settled": 0.0,
+                        "open_before_discount": 2709.0,
+                        "discount": 0.0,
+                        "recommended_cash": 2709.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "corrected_gross": 2210.2,
+                        "net_settled": 600.0,
+                        "open_before_discount": 1610.2,
+                        "discount": 0.0,
+                        "recommended_cash": 1610.2
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "corrected_gross": 2378.44,
+                        "net_settled": 0.0,
+                        "open_before_discount": 2378.44,
+                        "discount": 53.81,
+                        "recommended_cash": 2320.59
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "corrected_gross": 1509.3,
+                        "net_settled": 0.0,
+                        "open_before_discount": 1509.3,
+                        "discount": 0.0,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "corrected_gross": 2208.27,
+                        "net_settled": 500.0,
+                        "open_before_discount": 1708.27,
+                        "discount": 0.0,
+                        "recommended_cash": 1708.27
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "corrected_gross": 1440.5,
+                        "net_settled": 0.0,
+                        "open_before_discount": 1440.5,
+                        "discount": 19.5,
+                        "recommended_cash": 1419.54
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "corrected_gross": 3586.2,
+                        "net_settled": 0.0,
+                        "open_before_discount": 3586.2,
+                        "discount": 81.9,
+                        "recommended_cash": 3498.16
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "corrected_gross": 1161.0,
+                        "net_settled": 1161.0,
+                        "open_before_discount": 0.0,
+                        "discount": 0.0,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "corrected_gross": 1026.63,
+                        "net_settled": 1030.0,
+                        "open_before_discount": -3.37,
+                        "discount": 0.0,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "corrected_gross": 793.35,
+                        "net_settled": 0.0,
+                        "open_before_discount": 793.35,
+                        "discount": 0.0,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "corrected_gross": null,
+                        "net_settled": 0.0,
+                        "open_before_discount": null,
+                        "discount": null,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "corrected_gross": 0.0,
+                        "net_settled": 0.0,
+                        "open_before_discount": 0.0,
+                        "discount": 0.0,
+                        "recommended_cash": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "corrected_gross": 1056.19,
+                        "net_settled": 0.0,
+                        "open_before_discount": 1056.19,
+                        "discount": 0.0,
+                        "recommended_cash": 1056.19
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "corrected_gross": 1717.31,
+                        "net_settled": 1000.0,
+                        "open_before_discount": 717.31,
+                        "discount": 0.0,
+                        "recommended_cash": 717.31
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "corrected_gross": 1599.6,
+                        "net_settled": 0.0,
+                        "open_before_discount": 1599.6,
+                        "discount": 0.0,
+                        "recommended_cash": 1599.6
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains applying7.5% tax to goods after credits and discount plus allowed freight, with half-up per-invoice cent rounding and net settled cash subtracted after tax.",
+          "weight": 1
+        },
+        {
+          "requirement": "Workbook decisions and open balances distinguish future due, settled, overpaid, pending, unknown receipt and VOID rows; unknown balances are blank and overpayments negative.",
+          "weight": 2,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "decision": "PAY",
+                        "open_before_discount": 1047.88
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "decision": "PAY",
+                        "open_before_discount": 2683.2
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "decision": "PAY",
+                        "open_before_discount": 1671.5
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "decision": "FUTURE DUE",
+                        "open_before_discount": 1102.95
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "decision": "PAY",
+                        "open_before_discount": 2709.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "decision": "PAY",
+                        "open_before_discount": 1610.2
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "decision": "PAY",
+                        "open_before_discount": 2378.44
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "decision": "FUTURE DUE",
+                        "open_before_discount": 1509.3
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "decision": "PAY",
+                        "open_before_discount": 1708.27
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "decision": "PAY",
+                        "open_before_discount": 1440.5
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "decision": "PAY",
+                        "open_before_discount": 3586.2
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "decision": "SETTLED",
+                        "open_before_discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "decision": "OVERPAID",
+                        "open_before_discount": -3.37
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "decision": "HOLD PENDING",
+                        "open_before_discount": 793.35
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "decision": "HOLD RECEIPT",
+                        "open_before_discount": null
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "decision": "VOID",
+                        "open_before_discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "decision": "PAY",
+                        "open_before_discount": 1056.19
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "decision": "PAY",
+                        "open_before_discount": 717.31
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "decision": "PAY",
+                        "open_before_discount": 1599.6
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains each retained exclusion using evidence, including ALD-4115 missing acceptance and separate unresolved ERP exposure USD1545.31; does not present unknown liability as zero.",
+          "weight": 1
+        },
+        {
+          "requirement": "The workbook derives known signed open balances before new discounts USD25610.52 from the 19 unique rows, excluding unknown liability while retaining signed overpayments.",
+          "weight": 1,
+          "workbook": {
+            "file": "reconciliation.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Reconciliation",
+                    "keys": [
+                      "invoice_id"
+                    ],
+                    "key_pattern": "ALD-[0-9]+",
+                    "rows": [
+                      {
+                        "invoice_id": "ALD-4101",
+                        "open_before_discount": 1047.88
+                      },
+                      {
+                        "invoice_id": "ALD-4102",
+                        "open_before_discount": 2683.2
+                      },
+                      {
+                        "invoice_id": "ALD-4103",
+                        "open_before_discount": 1671.5
+                      },
+                      {
+                        "invoice_id": "ALD-4104",
+                        "open_before_discount": 1102.95
+                      },
+                      {
+                        "invoice_id": "ALD-4105",
+                        "open_before_discount": 2709.0
+                      },
+                      {
+                        "invoice_id": "ALD-4106",
+                        "open_before_discount": 1610.2
+                      },
+                      {
+                        "invoice_id": "ALD-4107",
+                        "open_before_discount": 2378.44
+                      },
+                      {
+                        "invoice_id": "ALD-4108",
+                        "open_before_discount": 1509.3
+                      },
+                      {
+                        "invoice_id": "ALD-4109",
+                        "open_before_discount": 1708.27
+                      },
+                      {
+                        "invoice_id": "ALD-4110",
+                        "open_before_discount": 1440.5
+                      },
+                      {
+                        "invoice_id": "ALD-4111",
+                        "open_before_discount": 3586.2
+                      },
+                      {
+                        "invoice_id": "ALD-4112",
+                        "open_before_discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4113",
+                        "open_before_discount": -3.37
+                      },
+                      {
+                        "invoice_id": "ALD-4114",
+                        "open_before_discount": 793.35
+                      },
+                      {
+                        "invoice_id": "ALD-4115",
+                        "open_before_discount": null
+                      },
+                      {
+                        "invoice_id": "ALD-4116",
+                        "open_before_discount": 0.0
+                      },
+                      {
+                        "invoice_id": "ALD-4117",
+                        "open_before_discount": 1056.19
+                      },
+                      {
+                        "invoice_id": "ALD-4118",
+                        "open_before_discount": 717.31
+                      },
+                      {
+                        "invoice_id": "ALD-4119",
+                        "open_before_discount": 1599.6
+                      }
+                    ],
+                    "totals": {
+                      "open_before_discount": 25610.52
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Separately labels the summary known signed open before new discounts USD25610.52 and unresolved ERP exposure USD1545.31; does not combine them. Explains evidence precedence and cites source clause/row/credit/bank identifiers for material exceptions.",
+          "weight": 1
+        },
+        {
+          "requirement": "Recommends paying a pending, VOID, fully settled, missing-receipt or future-due invoice, double-counts ALD-4107, or proposes a negative cash payment for an overpayment.",
+          "weight": -4
+        },
+        {
+          "requirement": "Uses future evidence as if known by May15, fabricates receipt confirmation, or treats the unknown corrected liability of ALD-4115 as zero/a proven known amount.",
+          "weight": -3
+        },
+        {
+          "requirement": "Claims to have saved the deliverables but the required workbook or memo is missing or unreadable.",
+          "weight": -4
+        },
+        {
+          "requirement": "Asserts an incorrect commercial rate, settlement amount, discount-eligibility conclusion or payment recommendation anywhere in the final answer or saved files, including optional analysis and quantified hypothetical scenarios. A correct required payment batch does not excuse false additional figures. Verify claimed rates and scenario cash against the source terms and stated assumptions, including applicable discounts and tax. Explicit hypothetical assumptions are allowed, but arithmetic and contractual rules not changed by those assumptions must still be correct. Do not penalize omitted optional analysis, cosmetic wording, correctly rounded displays whose underlying numeric values remain accurate, or an alternative supported by evidence. Exclude these separately penalized errors: paying pending, VOID, fully settled, missing-receipt or future-due invoices; duplicate ALD-4107; negative payment; using future evidence as current; fabricated receipt; treating unknown ALD-4115 liability as known; and missing or unreadable deliverables. Verification facts for optional scenarios, not required topics: ALD-4108 is dated May9 and becomes due May19, exactly day10; with the original May15 evidence it qualifies for the A1 discount on May19 (goods1344.00, discount33.60, freight60.00, tax102.78, cash1473.18). Saying that May19 is outside the discount window is an eligibility error even if the May18 batch is correct. If B011 is confirmed as a full reversal of B010 before the May18 payment, ALD-4118 has zero net settled cash and remains within the inclusive10-day window: goods1537.50 minus discount38.44 plus freight60.00 plus tax116.93 gives cash1675.99. Its undiscounted gross/open balance1717.31 is correct as a balance, but recommending cash to match1717.31 in that scenario is an error. A conditional recommendation must obey the unchanged terms; offering a hold as another option does not make an incorrect quoted cash amount correct. Do not penalize merely stating the correct undiscounted balance, omitting these scenarios, or explicitly changing assumptions in a legitimate hypothetical.",
+          "weight": -3
+        }
+      ],
+      "deliverables": [
+        "reconciliation.xlsx",
+        "decision.md"
+      ],
+      "bundled": {
+        "attachments": [
+          "attachments/supplier-settlement-review/bank_payments.csv",
+          "attachments/supplier-settlement-review/credit_notes.json",
+          "attachments/supplier-settlement-review/invoice_register.xlsx",
+          "attachments/supplier-settlement-review/purchasing_agreement.pdf",
+          "attachments/supplier-settlement-review/settlement-report-format.md",
+          "attachments/supplier-settlement-review/signed_amendment.docx"
+        ]
+      }
+    },
+    "slug": "supplier-settlement-review",
+    "columns": {
+      "domain": "Procurement",
+      "scenario": "Files only"
+    },
+    "agent_config": {
+      "model": "claude-sonnet-5-5",
+      "max_steps": 60
+    }
+  },
+  {
+    "env": "operational-data",
+    "id": "plan",
+    "args": {
+      "as_of": "2026-11-12",
+      "prompt": "Prepare Larkspur Instruments' dispatch plan for Friday, November 13, 2026, using information known at 14:00 UTC on November 12. Choose orders and schedule their dispatch under the attached operating policy.\n\nSave dispatch-plan.xlsx and release-note.md in outputs/, following dispatch-report-format.md. Explain your selections and deferrals, justify the plan against the policy's objective, and identify operational follow-ups. Do not modify the inputs or contact anyone.",
+      "criteria": [
+        {
+          "requirement": "Uses the 2026-11-12 14:00 UTC knowledge cutoff and OPS-09 r3 as authority over the prior-day briefing. Correctly distinguishes physical records, forecasts, sent EX-17 approval and unsent EX-18 draft. Does not apply draft64-minute North capacity or later LS-311 deadline. Evidence audit cites specific relevant IDs and timestamps, not generic caveats.",
+          "weight": 8
+        },
+        {
+          "requirement": "Inventory worksheet numeric gross stock and selected snapshot IDs match the independently reconstructed latest complete snapshots and eligible physical events.",
+          "weight": 10,
+          "workbook": {
+            "file": "dispatch-plan.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Inventory",
+                    "keys": [
+                      "warehouse",
+                      "sku"
+                    ],
+                    "rows": [
+                      {
+                        "warehouse": "North",
+                        "sku": "BATTERY",
+                        "snapshot_id": "N-1300",
+                        "gross": 36
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "CORE",
+                        "snapshot_id": "N-1300",
+                        "gross": 22
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "PACK",
+                        "snapshot_id": "N-1300",
+                        "gross": 23
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "SENSOR-A",
+                        "snapshot_id": "N-1300",
+                        "gross": 20
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "SENSOR-B",
+                        "snapshot_id": "N-1300",
+                        "gross": 9
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "BATTERY",
+                        "snapshot_id": "S-1200",
+                        "gross": 24
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "CORE",
+                        "snapshot_id": "S-1200",
+                        "gross": 14
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "PACK",
+                        "snapshot_id": "S-1200",
+                        "gross": 15
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "SENSOR-A",
+                        "snapshot_id": "S-1200",
+                        "gross": 14
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "SENSOR-B",
+                        "snapshot_id": "S-1200",
+                        "gross": 8
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains why latest complete N-1300 and S-1200 snapshots replace older snapshots, admits only eligible posted post-snapshot physical events once, and excludes N-INCLUDED/S-INCLUDED, N-LATE-BACKFILL, N-FUTURE-RECEIPT, S-FORECAST and N-VOID. Explains quarantine without double subtraction; cites the relevant records.",
+          "weight": 3
+        },
+        {
+          "requirement": "Inventory worksheet reservations and available quantities match the cutoff-consistent reservation status on every warehouse/SKU row.",
+          "weight": 8,
+          "workbook": {
+            "file": "dispatch-plan.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Inventory",
+                    "keys": [
+                      "warehouse",
+                      "sku"
+                    ],
+                    "rows": [
+                      {
+                        "warehouse": "North",
+                        "sku": "BATTERY",
+                        "reserved": 4,
+                        "available": 32
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "CORE",
+                        "reserved": 3,
+                        "available": 19
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "PACK",
+                        "reserved": 3,
+                        "available": 20
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "SENSOR-A",
+                        "reserved": 2,
+                        "available": 18
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "SENSOR-B",
+                        "reserved": 1,
+                        "available": 8
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "BATTERY",
+                        "reserved": 7,
+                        "available": 17
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "CORE",
+                        "reserved": 2,
+                        "available": 12
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "PACK",
+                        "reserved": 2,
+                        "available": 13
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "SENSOR-A",
+                        "reserved": 2,
+                        "available": 12
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "SENSOR-B",
+                        "reserved": 1,
+                        "available": 7
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains keeping protected reservations separate from snapshots, releasing R-N-PROMO before cutoff, and retaining R-S-LOAN because RE-LOAN was recorded14:03. Cites the authority for each material reservation decision.",
+          "weight": 2
+        },
+        {
+          "requirement": "Dispatch worksheet covers all 11 candidate orders with the correct SHIP/DEFER decisions and realized quantities, points and USD; all deferrals have zero realized values.",
+          "weight": 6,
+          "workbook": {
+            "file": "dispatch-plan.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Dispatch",
+                    "keys": [
+                      "order_id"
+                    ],
+                    "rows": [
+                      {
+                        "order_id": "LS-301",
+                        "decision": "SHIP",
+                        "quantity": 6,
+                        "priority_points": 70,
+                        "contribution_usd": 9000
+                      },
+                      {
+                        "order_id": "LS-302",
+                        "decision": "SHIP",
+                        "quantity": 5,
+                        "priority_points": 42,
+                        "contribution_usd": 10500
+                      },
+                      {
+                        "order_id": "LS-303",
+                        "decision": "DEFER",
+                        "quantity": 0,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-304",
+                        "decision": "SHIP",
+                        "quantity": 3,
+                        "priority_points": 29,
+                        "contribution_usd": 6600
+                      },
+                      {
+                        "order_id": "LS-305",
+                        "decision": "DEFER",
+                        "quantity": 0,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-306",
+                        "decision": "SHIP",
+                        "quantity": 4,
+                        "priority_points": 36,
+                        "contribution_usd": 7800
+                      },
+                      {
+                        "order_id": "LS-307",
+                        "decision": "SHIP",
+                        "quantity": 3,
+                        "priority_points": 26,
+                        "contribution_usd": 5400
+                      },
+                      {
+                        "order_id": "LS-308",
+                        "decision": "DEFER",
+                        "quantity": 0,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-309",
+                        "decision": "DEFER",
+                        "quantity": 0,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-310",
+                        "decision": "DEFER",
+                        "quantity": 0,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-311",
+                        "decision": "DEFER",
+                        "quantity": 0,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      }
+                    ],
+                    "required_columns": [
+                      "kit",
+                      "warehouse",
+                      "dispatch_utc",
+                      "reason",
+                      "evidence"
+                    ],
+                    "key_pattern": "LS-.*"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains why LS-309 remains QA_HOLD (OE-309-RELEASE first recorded14:10) and LS-310 is CANCELLED by an event known before cutoff. Do not infer READY eligibility from the old briefing's customer list. Correct cutoff-consistent status explanations supported by cited records satisfy this criterion; an explicit comparison with the old briefing is not required.",
+          "weight": 2
+        },
+        {
+          "requirement": "The workbook selects the unique optimal order/warehouse set, with full quantities, 21 kits, 203 priority points and USD39300 contribution derived from actual Dispatch rows.",
+          "weight": 10,
+          "workbook": {
+            "file": "dispatch-plan.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Dispatch",
+                    "keys": [
+                      "order_id"
+                    ],
+                    "rows": [
+                      {
+                        "order_id": "LS-301",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 6,
+                        "warehouse": "North",
+                        "priority_points": 70,
+                        "contribution_usd": 9000
+                      },
+                      {
+                        "order_id": "LS-302",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 5,
+                        "warehouse": "North",
+                        "priority_points": 42,
+                        "contribution_usd": 10500
+                      },
+                      {
+                        "order_id": "LS-303",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-304",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "priority_points": 29,
+                        "contribution_usd": 6600
+                      },
+                      {
+                        "order_id": "LS-305",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-306",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 4,
+                        "warehouse": "South",
+                        "priority_points": 36,
+                        "contribution_usd": 7800
+                      },
+                      {
+                        "order_id": "LS-307",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "priority_points": 26,
+                        "contribution_usd": 5400
+                      },
+                      {
+                        "order_id": "LS-308",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-309",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-310",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-311",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      }
+                    ],
+                    "totals": {
+                      "quantity": 21,
+                      "priority_points": 203,
+                      "contribution_usd": 39300
+                    },
+                    "key_pattern": "LS-.*"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Provides a checkable optimization justification using reproducible enumeration, a bound or an equivalent correct proof. Explains the policy objective and tie handling rather than merely claiming optimality; exact reference enumeration counts are not required.",
+          "weight": 8
+        },
+        {
+          "requirement": "Actual Dispatch rows and Capacity rows match one complete feasible optimal wave pattern, including all usage and limits. All three reference optima are accepted; cross-pattern schedule/capacity mixtures are not.",
+          "weight": 12,
+          "workbook": {
+            "file": "dispatch-plan.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Dispatch",
+                    "keys": [
+                      "order_id"
+                    ],
+                    "rows": [
+                      {
+                        "order_id": "LS-301",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 6,
+                        "warehouse": "North",
+                        "dispatch_utc": "2026-11-13T12:00:00Z",
+                        "priority_points": 70,
+                        "contribution_usd": 9000
+                      },
+                      {
+                        "order_id": "LS-302",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 5,
+                        "warehouse": "North",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 42,
+                        "contribution_usd": 10500
+                      },
+                      {
+                        "order_id": "LS-303",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-304",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 29,
+                        "contribution_usd": 6600
+                      },
+                      {
+                        "order_id": "LS-305",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-306",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 4,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T12:00:00Z",
+                        "priority_points": 36,
+                        "contribution_usd": 7800
+                      },
+                      {
+                        "order_id": "LS-307",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 26,
+                        "contribution_usd": 5400
+                      },
+                      {
+                        "order_id": "LS-308",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-309",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-310",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-311",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      }
+                    ],
+                    "utc_columns": [
+                      "dispatch_utc"
+                    ],
+                    "key_pattern": "LS-.*"
+                  },
+                  {
+                    "sheet": "Capacity",
+                    "keys": [
+                      "warehouse"
+                    ],
+                    "rows": [
+                      {
+                        "warehouse": "North",
+                        "early_minutes": 18,
+                        "early_minutes_limit": 24,
+                        "daily_minutes": 38,
+                        "daily_minutes_limit": 50,
+                        "early_cartons": 6,
+                        "early_cartons_limit": 10,
+                        "late_cartons": 5,
+                        "late_cartons_limit": 12
+                      },
+                      {
+                        "warehouse": "South",
+                        "early_minutes": 16,
+                        "early_minutes_limit": 20,
+                        "daily_minutes": 37,
+                        "daily_minutes_limit": 38,
+                        "early_cartons": 4,
+                        "early_cartons_limit": 8,
+                        "late_cartons": 6,
+                        "late_cartons_limit": 10
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "tables": [
+                  {
+                    "sheet": "Dispatch",
+                    "keys": [
+                      "order_id"
+                    ],
+                    "rows": [
+                      {
+                        "order_id": "LS-301",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 6,
+                        "warehouse": "North",
+                        "dispatch_utc": "2026-11-13T12:00:00Z",
+                        "priority_points": 70,
+                        "contribution_usd": 9000
+                      },
+                      {
+                        "order_id": "LS-302",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 5,
+                        "warehouse": "North",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 42,
+                        "contribution_usd": 10500
+                      },
+                      {
+                        "order_id": "LS-303",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-304",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 29,
+                        "contribution_usd": 6600
+                      },
+                      {
+                        "order_id": "LS-305",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-306",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 4,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 36,
+                        "contribution_usd": 7800
+                      },
+                      {
+                        "order_id": "LS-307",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T12:00:00Z",
+                        "priority_points": 26,
+                        "contribution_usd": 5400
+                      },
+                      {
+                        "order_id": "LS-308",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-309",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-310",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-311",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      }
+                    ],
+                    "utc_columns": [
+                      "dispatch_utc"
+                    ],
+                    "key_pattern": "LS-.*"
+                  },
+                  {
+                    "sheet": "Capacity",
+                    "keys": [
+                      "warehouse"
+                    ],
+                    "rows": [
+                      {
+                        "warehouse": "North",
+                        "early_minutes": 18,
+                        "early_minutes_limit": 24,
+                        "daily_minutes": 38,
+                        "daily_minutes_limit": 50,
+                        "early_cartons": 6,
+                        "early_cartons_limit": 10,
+                        "late_cartons": 5,
+                        "late_cartons_limit": 12
+                      },
+                      {
+                        "warehouse": "South",
+                        "early_minutes": 9,
+                        "early_minutes_limit": 20,
+                        "daily_minutes": 37,
+                        "daily_minutes_limit": 38,
+                        "early_cartons": 3,
+                        "early_cartons_limit": 8,
+                        "late_cartons": 7,
+                        "late_cartons_limit": 10
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "tables": [
+                  {
+                    "sheet": "Dispatch",
+                    "keys": [
+                      "order_id"
+                    ],
+                    "rows": [
+                      {
+                        "order_id": "LS-301",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 6,
+                        "warehouse": "North",
+                        "dispatch_utc": "2026-11-13T12:00:00Z",
+                        "priority_points": 70,
+                        "contribution_usd": 9000
+                      },
+                      {
+                        "order_id": "LS-302",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 5,
+                        "warehouse": "North",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 42,
+                        "contribution_usd": 10500
+                      },
+                      {
+                        "order_id": "LS-303",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-304",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 29,
+                        "contribution_usd": 6600
+                      },
+                      {
+                        "order_id": "LS-305",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-306",
+                        "decision": "SHIP",
+                        "kit": "Relay",
+                        "quantity": 4,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 36,
+                        "contribution_usd": 7800
+                      },
+                      {
+                        "order_id": "LS-307",
+                        "decision": "SHIP",
+                        "kit": "Scout",
+                        "quantity": 3,
+                        "warehouse": "South",
+                        "dispatch_utc": "2026-11-13T16:00:00Z",
+                        "priority_points": 26,
+                        "contribution_usd": 5400
+                      },
+                      {
+                        "order_id": "LS-308",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-309",
+                        "decision": "DEFER",
+                        "kit": "Scout",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-310",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      },
+                      {
+                        "order_id": "LS-311",
+                        "decision": "DEFER",
+                        "kit": "Relay",
+                        "quantity": 0,
+                        "warehouse": null,
+                        "dispatch_utc": null,
+                        "priority_points": 0,
+                        "contribution_usd": 0
+                      }
+                    ],
+                    "utc_columns": [
+                      "dispatch_utc"
+                    ],
+                    "key_pattern": "LS-.*"
+                  },
+                  {
+                    "sheet": "Capacity",
+                    "keys": [
+                      "warehouse"
+                    ],
+                    "rows": [
+                      {
+                        "warehouse": "North",
+                        "early_minutes": 18,
+                        "early_minutes_limit": 24,
+                        "daily_minutes": 38,
+                        "daily_minutes_limit": 50,
+                        "early_cartons": 6,
+                        "early_cartons_limit": 10,
+                        "late_cartons": 5,
+                        "late_cartons_limit": 12
+                      },
+                      {
+                        "warehouse": "South",
+                        "early_minutes": 0,
+                        "early_minutes_limit": 20,
+                        "daily_minutes": 37,
+                        "daily_minutes_limit": 38,
+                        "early_cartons": 0,
+                        "early_cartons_limit": 8,
+                        "late_cartons": 10,
+                        "late_cartons_limit": 10
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains full-order, one-warehouse and one-wave rules, deadlines, and the actual dispatch authorization. EX-17 authorizes only LS-304 South16:00, not stock transfers or extra limits. Accept any of the three valid South wave patterns; do not require the solver to list other optima.",
+          "weight": 3
+        },
+        {
+          "requirement": "Inventory workbook gross, reservations, available, consumed and remaining values reconcile on all 10 warehouse/SKU rows against the optimal dispatch; numeric balances and snapshot IDs are correct.",
+          "weight": 13,
+          "workbook": {
+            "file": "dispatch-plan.xlsx",
+            "alternatives": [
+              {
+                "tables": [
+                  {
+                    "sheet": "Inventory",
+                    "keys": [
+                      "warehouse",
+                      "sku"
+                    ],
+                    "rows": [
+                      {
+                        "warehouse": "North",
+                        "sku": "BATTERY",
+                        "snapshot_id": "N-1300",
+                        "gross": 36,
+                        "reserved": 4,
+                        "available": 32,
+                        "consumed": 16,
+                        "remaining": 16
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "CORE",
+                        "snapshot_id": "N-1300",
+                        "gross": 22,
+                        "reserved": 3,
+                        "available": 19,
+                        "consumed": 11,
+                        "remaining": 8
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "PACK",
+                        "snapshot_id": "N-1300",
+                        "gross": 23,
+                        "reserved": 3,
+                        "available": 20,
+                        "consumed": 11,
+                        "remaining": 9
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "SENSOR-A",
+                        "snapshot_id": "N-1300",
+                        "gross": 20,
+                        "reserved": 2,
+                        "available": 18,
+                        "consumed": 12,
+                        "remaining": 6
+                      },
+                      {
+                        "warehouse": "North",
+                        "sku": "SENSOR-B",
+                        "snapshot_id": "N-1300",
+                        "gross": 9,
+                        "reserved": 1,
+                        "available": 8,
+                        "consumed": 5,
+                        "remaining": 3
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "BATTERY",
+                        "snapshot_id": "S-1200",
+                        "gross": 24,
+                        "reserved": 7,
+                        "available": 17,
+                        "consumed": 17,
+                        "remaining": 0
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "CORE",
+                        "snapshot_id": "S-1200",
+                        "gross": 14,
+                        "reserved": 2,
+                        "available": 12,
+                        "consumed": 10,
+                        "remaining": 2
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "PACK",
+                        "snapshot_id": "S-1200",
+                        "gross": 15,
+                        "reserved": 2,
+                        "available": 13,
+                        "consumed": 10,
+                        "remaining": 3
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "SENSOR-A",
+                        "snapshot_id": "S-1200",
+                        "gross": 14,
+                        "reserved": 2,
+                        "available": 12,
+                        "consumed": 6,
+                        "remaining": 6
+                      },
+                      {
+                        "warehouse": "South",
+                        "sku": "SENSOR-B",
+                        "snapshot_id": "S-1200",
+                        "gross": 8,
+                        "reserved": 1,
+                        "available": 7,
+                        "consumed": 7,
+                        "remaining": 0
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "requirement": "Explains which inventory and assembly/carrier constraints bind or retain slack, connecting the explanation to actual Dispatch rows rather than copied target totals. Distinguishes South binding batteries/SENSOR-B from remaining North resources.",
+          "weight": 2
+        },
+        {
+          "requirement": "Both requested files are saved, readable and consistent. Evidence contains a source audit trail. The release-note states the cutoff, executable schedule, aggregate quantities/objective, EX-17 scope, substantive reasons for every deferral and operational follow-ups. Deferral explanations must be financially and operationally correct: LS-303 lacks SENSOR-A while its daily labor fits; LS-305 competes for South resources; LS-308 lacks South B/batteries; LS-311 cannot fit North early with LS-301 and needs more North B with LS-302. Equivalent opportunity-cost explanations are accepted. Do not penalize a valid wave tie or presentation style.",
+          "weight": 13
+        },
+        {
+          "requirement": "Makes an incorrect calculation, source claim or recommendation affecting order eligibility, resource feasibility, objective value or an executable dispatch schedule anywhere in the final answer or saved files, including optional analysis, quantified hypothetical scenarios and contradictions between deliverables. A correct required plan does not excuse false additional figures. Explicit hypothetical assumptions are allowed, but arithmetic and policy rules not changed by those assumptions must still be correct. Do not penalize omitted optional analysis, cosmetic wording, correctly rounded displays whose underlying numeric values remain accurate, or a valid alternative supported by the evidence.",
+          "weight": -5
+        }
+      ],
+      "deliverables": [
+        "dispatch-plan.xlsx",
+        "release-note.md"
+      ],
+      "bundled": {
+        "attachments": [
+          "attachments/launch-dispatch-plan/dispatch-report-format.md",
+          "attachments/launch-dispatch-plan/exception-ex17-approved.eml",
+          "attachments/launch-dispatch-plan/exception-ex18-unsent-draft.eml",
+          "attachments/launch-dispatch-plan/larkspur-dispatch.sqlite",
+          "attachments/launch-dispatch-plan/launch-briefing-2026-11-11.pptx",
+          "attachments/launch-dispatch-plan/ops-09-dispatch-policy.pdf"
+        ]
+      }
+    },
+    "slug": "launch-dispatch-plan",
+    "agent_config": {
+      "model": "claude-sonnet-5-5",
+      "max_steps": 60
+    }
+  }
+]

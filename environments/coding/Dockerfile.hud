@@ -6,9 +6,14 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /hud
-COPY pyproject.toml uv.lock env.py grader.py repository.bundle ./
+COPY . /hud/
 
-RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
+RUN set -eu; \
+    if [ -d .hud-sdk ]; then \
+        set -- .hud-sdk/hud-*.whl; test "$#" -eq 1; test -f "$1"; \
+        uv add --no-sync "$1"; \
+    fi; \
+    UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --upgrade-package hud --no-install-project \
   && mkdir /app \
   && chown 1000:1000 /app \
   && chmod -R a+rX /usr/local/venv \
