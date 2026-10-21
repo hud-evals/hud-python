@@ -22,7 +22,7 @@ dependencies = [
     # For all inference agents
     "openai>=2.45.0",
     "anthropic>=0.98.0",
-    "google-genai>=1.75.0",
+    "google-genai>=2.30.1",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
@@ -127,8 +127,6 @@ bedrock = [
 dev = [
     "hud[agents]",  # Include agents for dev
     "hud[robot]",  # the robot scenarios in tests/robot run the real wire
-    # GeminiAgent's long-decode continuation relies on google-genai 2.30.1 or later.
-    "google-genai>=2.30.1",
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff==0.16.1",

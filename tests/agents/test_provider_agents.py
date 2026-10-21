@@ -8,11 +8,13 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from fastmcp import FastMCP
 
 from hud.agents import ClaudeAgent, GeminiAgent
 from hud.agents.types import ClaudeConfig, GeminiConfig
 from hud.capabilities import Capability
 from hud.types import AgentType
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call, stream_error
 from tests.fixtures.screen import fake_screen
@@ -128,6 +130,23 @@ async def test_an_error_inside_the_stream_is_retried_only_when_transient(
     assert (run.trace.status, len(models.requests())) == (status, requests)
 
 
+async def test_an_excluded_computer_action_reaches_the_environment_tool_of_that_name(
+    models: Models, tmp_path: Path
+) -> None:
+    notes = FastMCP("notes")
+    typed: list[str] = []
+    notes.tool(name="type", description="Record text.")(lambda text: typed.append(text) or "noted")
+    models.script([call("type", text="hello"), Turn(text="done")])
+    config = GeminiConfig(model=GEMINI_MODEL, excluded_predefined_functions=["type"])
+
+    async with fake_screen() as screen, mcp_server(notes, name="notes") as tools:
+        capabilities = (Capability.rfb(url=screen.url), tools)
+        task = workspace_task(tmp_path / "ws", capabilities=capabilities)
+        (run,) = (await task().run(GeminiAgent(config))).runs
+
+    assert (run.trace.status, typed, screen.key_events()) == ("completed", ["hello"], [])
+
+
 async def test_a_computer_toolset_member_lands_on_the_screen_and_answers_as_the_toolset(
     models: Models, tmp_path: Path
 ) -> None:
@@ -165,7 +184,7 @@ GEMINI_MODEL = "gemini-3.1-pro-preview"
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([call("click_at", x=156, y=208)] * 4 + [Turn(text="done")])
+    models.script([call("click", x=156, y=208)] * 4 + [Turn(text="done")])
 
     async with fake_screen() as screen:
         task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))

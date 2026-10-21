@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 from .settings import gemini_agent_settings
 from .tools import (
-    PREDEFINED_COMPUTER_USE_FUNCTIONS,
     GeminiComputerTool,
     GeminiEditTool,
     GeminiGlobTool,
@@ -165,7 +164,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
 
         # Drop screenshots from older computer tool turns.
         computer_tool = self._find_computer_tool(state)
-        predefined = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS)
+        computer_actions = computer_tool.actions if computer_tool is not None else frozenset()
         screenshot_turns: list[list[genai_types.FunctionResponse]] = []
         for content in reversed(messages):
             if content.role != "user":
@@ -173,7 +172,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
             turn_responses: list[genai_types.FunctionResponse] = []
             for part in content.parts or []:
                 fr = part.function_response
-                if fr is not None and fr.parts and fr.name in predefined:
+                if fr is not None and fr.parts and fr.name in computer_actions:
                     turn_responses.append(fr)
             if turn_responses:
                 screenshot_turns.append(turn_responses)
@@ -294,8 +293,7 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
     ) -> MCPToolCall:
         name = function_call.name or ""
         arguments = dict(function_call.args) if function_call.args else {}
-        predefined = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS)
-        if computer_tool is not None and name in predefined:
+        if computer_tool is not None and name in computer_tool.actions:
             return MCPToolCall(
                 name=computer_tool.name,
                 arguments={"action": name, **arguments},
