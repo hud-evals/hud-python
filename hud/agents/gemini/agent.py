@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
     from hud.agents.tools.base import AgentTool
 
-
 from .settings import gemini_agent_settings
 from .tools import (
     PREDEFINED_COMPUTER_USE_FUNCTIONS,

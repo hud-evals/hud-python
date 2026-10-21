@@ -23,6 +23,7 @@ from .base import ClaudeToolSpec, is_anthropic_model
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
+        BetaComputerToolset20260801Param,
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
         BetaToolUnionParam,
@@ -87,6 +88,9 @@ def _hold_keys(text: str | None) -> list[str] | None:
 
 # ─── Claude tool specs (per-model gating) ───────────────────────────
 
+#: Current Claude models take the computer toolset; only the older models listed in
+#: ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
+COMPUTER_TOOLSET_SPEC = ClaudeToolSpec(api_type="computer_toolset_20260801", api_name="computer")
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ClaudeToolSpec(
@@ -94,6 +98,7 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
         api_name="computer",
         beta="computer-use-2025-11-24",
         supported_models=(
+            "*claude-opus-4-5*",
             "*claude-opus-4-6*",
             "*claude-sonnet-4-6*",
             "*claude-opus-4-7*",
@@ -104,15 +109,22 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
         api_type="computer_20250124",
         api_name="computer",
         beta="computer-use-2025-01-24",
+        # Claude Opus 4 and Sonnet 4 go by bare, ``-0`` alias, dated, and Vertex ``@`` ids.
         supported_models=(
             "*claude-sonnet-4-5*",
             "*claude-haiku-4-5*",
+            "*claude-opus-4-1*",
+            "*claude-opus-4",
+            "*claude-opus-4-0*",
+            "*claude-opus-4-2025*",
+            "*claude-opus-4@*",
+            "*claude-sonnet-4",
+            "*claude-sonnet-4-0*",
+            "*claude-sonnet-4-2025*",
+            "*claude-sonnet-4@*",
         ),
     ),
 )
-
-# Fallback for unknown Claude models — use the latest version.
-_DEFAULT_COMPUTER_SPEC = CLAUDE_COMPUTER_SPECS[0]
 
 GENERIC_COMPUTER_SPEC = ClaudeToolSpec(
     api_type="function",
@@ -207,11 +219,24 @@ class ClaudeComputerTool(RFBTool):
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
-        return _DEFAULT_COMPUTER_SPEC
+        return COMPUTER_TOOLSET_SPEC
+
+    @property
+    def is_toolset(self) -> bool:
+        """Whether the model calls this tool as the computer toolset, one tool per action."""
+        return self.spec.api_type == COMPUTER_TOOLSET_SPEC.api_type
 
     def to_params(
         self,
-    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param | BetaToolUnionParam:
+    ) -> (
+        BetaComputerToolset20260801Param
+        | BetaToolComputerUse20250124Param
+        | BetaToolComputerUse20251124Param
+        | BetaToolUnionParam
+    ):
+        if self.is_toolset:
+            # The model calls each member as its own tool and sizes clicks from screenshots.
+            return cast("BetaComputerToolset20260801Param", {"type": "computer_toolset_20260801"})
         if self.spec.api_type == "function":
             return cast(
                 "BetaToolUnionParam",
@@ -473,4 +498,9 @@ def _crop_png(
     return buf.getvalue(), encoding.mime_type
 
 
-__all__ = ["CLAUDE_COMPUTER_SPECS", "GENERIC_COMPUTER_SPEC", "ClaudeComputerTool"]
+__all__ = [
+    "CLAUDE_COMPUTER_SPECS",
+    "COMPUTER_TOOLSET_SPEC",
+    "GENERIC_COMPUTER_SPEC",
+    "ClaudeComputerTool",
+]
