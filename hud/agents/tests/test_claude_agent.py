@@ -729,45 +729,106 @@ async def test_computer_schema_selection_preserves_legacy_and_generic_models(
         assert params[0]["name"] == "computer"
 
 
-async def test_sonnet55_bedrock_uses_its_supported_legacy_computer_protocol() -> None:
+async def test_sonnet55_bedrock_uses_its_supported_legacy_computer_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from anthropic import AsyncAnthropicBedrock
 
+    monkeypatch.setattr(settings, "telemetry_enabled", False)
     client = AsyncAnthropicBedrock(
         aws_access_key="test", aws_secret_key="test", aws_region="us-east-1"
     )
+    create = AsyncMock(
+        return_value=_final(
+            SimpleNamespace(type="text", text="done", citations=None), stop_reason="end_turn"
+        )
+    )
+    monkeypatch.setattr(client.beta.messages, "create", create)
     try:
         agent = ClaudeAgent(
             ClaudeConfig(model="anthropic.claude-sonnet-5-5-v1:0", model_client=client)
         )
         screen = Mock(spec=RFBClient)
         screen.width, screen.height = 1280, 720
-        tools, params = await agent._build_tools({"screen": screen})
-        assert params[0]["type"] == "computer_20251124"
-        assert getattr(tools["computer"].spec, "beta", None) == "computer-use-2025-11-24"
+        trace = Trace()
+        run = cast(
+            "Run",
+            SimpleNamespace(
+                trace=trace,
+                record=trace.record,
+                client=SimpleNamespace(
+                    manifest=SimpleNamespace(
+                        bindings=[Capability.rfb(name="screen", url="rfb://screen.invalid:5900")]
+                    ),
+                    open=AsyncMock(return_value=screen),
+                ),
+                prompt_messages=[
+                    mcp_types.PromptMessage(
+                        role="user", content=mcp_types.TextContent(type="text", text="go")
+                    )
+                ],
+            ),
+        )
+        await agent(run)
+        assert trace.status == "completed"
+        request = create.call_args.kwargs
+        assert request["tools"][0]["type"] == "computer_20251124"
+        assert "computer-use-2025-11-24" in request["betas"]
+        assert request["tool_choice"]["disable_parallel_tool_use"] is True
     finally:
         await client.close()
 
 
-async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
+@pytest.mark.parametrize(
+    ("model", "has_screen", "expected_type"),
+    [
+        ("claude-sonnet-5-5", True, "computer_toolset_20260801"),
+        ("claude-sonnet-4-6", True, "computer_20251124"),
+        ("claude-sonnet-4-5", True, "computer_20250124"),
+        ("qwen/qwen3.8-max", True, None),
+        ("claude-sonnet-5-5", False, None),
+    ],
+)
+async def test_computer_batches_preserve_protocol_and_round_trip_on_wire(
     monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    has_screen: bool,
+    expected_type: str | None,
 ) -> None:
     monkeypatch.setattr(settings, "telemetry_enabled", False)
     requests: list[httpx2.Request] = []
+    native_toolset = expected_type == "computer_toolset_20260801"
 
     def respond(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        tool_turn = len(requests) == 1
-        block = (
-            {
-                "type": "tool_use",
-                "id": "native-shot",
-                "name": "screenshot",
-                "toolset_name": "computer",
-                "input": {},
-            }
-            if tool_turn
-            else {"type": "text", "text": "done"}
-        )
+        tool_turn = has_screen and len(requests) == 1
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": "done"}]
+        if tool_turn:
+            blocks = (
+                [
+                    {
+                        "type": "tool_use",
+                        "id": id,
+                        "name": name,
+                        "toolset_name": "computer",
+                        "input": arguments,
+                    }
+                    for id, name, arguments in [
+                        ("native-click", "left_click", {"coordinate": [10, 20]}),
+                        ("native-type", "type", {"text": "hello"}),
+                        ("native-shot", "screenshot", {}),
+                    ]
+                ]
+                if native_toolset
+                else [
+                    {
+                        "type": "tool_use",
+                        "id": "legacy-shot",
+                        "name": "computer",
+                        "input": {"action": "screenshot"},
+                    }
+                ]
+            )
         events = [
             {
                 "type": "message_start",
@@ -775,20 +836,29 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
                     "id": "msg",
                     "type": "message",
                     "role": "assistant",
-                    "model": "claude-sonnet-5-5",
+                    "model": model,
                     "content": [],
                     "usage": {"input_tokens": 1, "output_tokens": 0},
                 },
             },
-            {"type": "content_block_start", "index": 0, "content_block": block},
-            {"type": "content_block_stop", "index": 0},
-            {
-                "type": "message_delta",
-                "delta": {"stop_reason": "tool_use" if tool_turn else "end_turn"},
-                "usage": {"output_tokens": 1},
-            },
-            {"type": "message_stop"},
         ]
+        for index, block in enumerate(blocks):
+            events.extend(
+                [
+                    {"type": "content_block_start", "index": index, "content_block": block},
+                    {"type": "content_block_stop", "index": index},
+                ]
+            )
+        events.extend(
+            [
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "tool_use" if tool_turn else "end_turn"},
+                    "usage": {"output_tokens": 1},
+                },
+                {"type": "message_stop"},
+            ]
+        )
         body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
         return httpx2.Response(200, headers={"content-type": "text/event-stream"}, text=body)
 
@@ -797,7 +867,12 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
     screen = Capability.rfb(name="screen", url="rfb://screen.invalid:5900")
     rfb = Mock(spec=RFBClient)
     rfb.width, rfb.height = 128, 72
-    rfb.screenshot_png = AsyncMock(return_value=(source.getvalue(), "image/png"))
+    actions = Mock()
+    rfb.conn = SimpleNamespace(mouse=actions.mouse, keyboard=actions.keyboard)
+    rfb.drain = AsyncMock()
+    screenshot = AsyncMock(return_value=(source.getvalue(), "image/png"))
+    actions.attach_mock(screenshot, "screenshot")
+    rfb.screenshot_png = screenshot
     trace = Trace()
     run = cast(
         "Run",
@@ -805,7 +880,7 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
             trace=trace,
             record=trace.record,
             client=SimpleNamespace(
-                manifest=SimpleNamespace(bindings=[screen]),
+                manifest=SimpleNamespace(bindings=[screen] if has_screen else []),
                 open=AsyncMock(return_value=rfb),
             ),
             prompt_messages=[
@@ -818,18 +893,41 @@ async def test_sonnet55_toolset_survives_the_real_anthropic_wire_codec(
     async with AsyncAnthropic(
         api_key="test", http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond))
     ) as client:
-        await ClaudeAgent(
-            ClaudeConfig(model="claude-sonnet-5-5", model_client=client, max_steps=2)
-        )(run)
+        await ClaudeAgent(ClaudeConfig(model=model, model_client=client, max_steps=2))(run)
     assert trace.status == "completed"
-    assert len(requests) == 2
-    assert "anthropic-beta" not in requests[0].headers
-    assert json.loads(requests[0].content)["tools"] == [{"type": "computer_toolset_20260801"}]
-    result = json.loads(requests[1].content)["messages"][-1]["content"][0]
-    assert result["tool_use_id"] == "native-shot"
-    assert result["toolset_name"] == "computer"
-    assert result["content"][0]["type"] == "image"
-    assert not result["is_error"]
+    assert len(requests) == (2 if has_screen else 1)
+    for request in requests:
+        body = json.loads(request.content)
+        assert body["tool_choice"]["disable_parallel_tool_use"] is not native_toolset
+        if has_screen:
+            assert body["tools"][0].get("type") == expected_type
+        else:
+            assert body["tools"] == []
+    if not has_screen:
+        screenshot.assert_not_awaited()
+        return
+    messages = json.loads(requests[1].content)["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "user"]
+    results = messages[-1]["content"]
+    assert all(not result["is_error"] for result in results)
+    assert results[-1]["content"][0]["type"] == "image"
+    if native_toolset:
+        assert "anthropic-beta" not in requests[0].headers
+        assert [result["tool_use_id"] for result in results] == [
+            "native-click",
+            "native-type",
+            "native-shot",
+        ]
+        assert all(result["toolset_name"] == "computer" for result in results)
+        assert actions.mock_calls == [
+            call.mouse.move(10, 20),
+            call.mouse.click(0),
+            call.keyboard.write("hello"),
+            call.screenshot("image/png"),
+        ]
+    else:
+        assert [result["tool_use_id"] for result in results] == ["legacy-shot"]
+        assert "toolset_name" not in results[0]
 
 
 async def test_computer_toolset_rejects_reserved_custom_computer_name() -> None:

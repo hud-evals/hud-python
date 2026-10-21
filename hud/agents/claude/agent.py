@@ -375,8 +375,13 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             else Omit()
         )
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
-        tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
         tools = cast("list[BetaToolUnionParam]", list(state.params))
+        tool_choice = BetaToolChoiceAutoParam(
+            type="auto",
+            disable_parallel_tool_use=not any(
+                tool.get("type") == "computer_toolset_20260801" for tool in tools
+            ),
+        )
         system = system_prompt if system_prompt is not None else Omit()
         is_bedrock = isinstance(self.anthropic_client, AsyncAnthropicBedrock)
 
