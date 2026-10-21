@@ -530,6 +530,7 @@ async def rollout(
             parent_trace_id=parent_trace_id,
         )
         run: Run | None = None
+        cancellation: asyncio.CancelledError | None = None
         _phase = "provisioning"
         rollout_expired = False
 
@@ -688,14 +689,17 @@ async def rollout(
                         run.trace.status = "error"
                         run.record(Step(source="system", error=detail))
                     run.trace.stop_reason = "timeout"
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancel:
             if client is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(client.cancel(), timeout=2.0)
                 client.abort()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
-            raise
+            cancellation = cancel
+            if run is None:
+                run = Run.failed(f"[{_phase}] cancelled")
+            run.trace.status = "cancelled"
         except Exception as exc:
             # format_exception_only keeps __notes__ — a provider attaches what
             # only it can see there, like the sandbox's env output on a failed
@@ -717,6 +721,11 @@ async def rollout(
         run.job_id = job_id
         run.group_id = group_id
         run.slug = task.slug
+        if cancellation is not None:
+            # The platform still closes the trace; a hung report must not hold the cancel.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(trace_exit(run), timeout=5.0)
+            raise cancellation
         await trace_exit(run)
     return run
 

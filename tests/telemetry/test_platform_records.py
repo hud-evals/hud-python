@@ -4,6 +4,7 @@ sent only while telemetry is on with an API key."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -154,6 +155,26 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
     assert (exited["status"], exited["reward"]) == ("error", 0.0)
     assert exited["error"].startswith("[provisioning] ")
     assert "no substrate" in exited["error"]
+
+
+async def test_a_cancelled_rollout_still_closes_its_trace(reporting: FakeServices) -> None:
+    started = asyncio.Event()
+
+    class Waits(Agent):
+        async def __call__(self, run: Run) -> None:
+            started.set()
+            await asyncio.Event().wait()
+
+    running = asyncio.create_task(
+        Task(env="checked", id="check").run(Waits(), runtime=LocalRuntime(checked()))
+    )
+    await started.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    (exited,) = reporting.bodies("api", "POST", TRACE_EXIT)
+    assert exited["status"] == "cancelled"
 
 
 @pytest.mark.parametrize(
