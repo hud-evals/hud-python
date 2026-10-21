@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+# A whole uppercase MET; an UN or NOT prefix ("not" in any case) makes it UNMET.
+_VERDICT = re.compile(r"\b(UN[_-]?|(?i:not)[\s_-]+)?MET\b")
 
 _SYSTEM_PROMPT = """You evaluate a response against a single criterion and decide \
 whether the thing the criterion describes is present in the response.
@@ -140,7 +144,7 @@ def _user_prompt(criterion: _Criterion, answer: str, question: str) -> str:
 
 
 def _parse_verdict(content: str) -> tuple[bool, str]:
-    """Extract ``(met, explanation)`` from the judge's JSON reply, tolerantly."""
+    """Extract ``(met, explanation)`` from the judge's reply; raise if it has no verdict."""
     text = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
@@ -150,9 +154,11 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
             return status == "MET", str(data.get("explanation", ""))
         except (ValueError, AttributeError):
             logger.debug("LLMJudgeGrader: unparseable judge reply: %s", text[:200])
-    # Fallback: scan for a verdict token (UNMET contains MET, so test it first).
-    upper = text.upper()
-    return ("UNMET" not in upper and "MET" in upper), text[:200]
+    # Fallback: verdicts in prose. Any UNMET wins; lowercase "met" is prose, not a verdict.
+    negations = _VERDICT.findall(text)
+    if not negations:
+        raise ValueError(f"LLMJudgeGrader: judge reply has no MET/UNMET verdict: {text[:200]!r}")
+    return not any(negations), text[:200]
 
 
 def _rubric_value(subscores: list[SubScore]) -> float:

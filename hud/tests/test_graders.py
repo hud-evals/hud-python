@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import warnings
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
 
 import pytest
 
+from hud.agents.base import Agent
+from hud.eval import SubprocessRuntime, Task
 from hud.graders import (
     BashGrader,
     EvaluationResult,
@@ -28,6 +32,10 @@ from hud.graders import (
     normalize,
     numeric_match,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 
 class TestResultShapes:
@@ -585,6 +593,104 @@ class TestLLMJudgeGrader:
         ]
         assert subscore.info is not None
         assert subscore.info["model"] == "claude-haiku-4-5"
+
+
+_JUDGED_ENV = """\
+from hud import Environment
+from hud.graders import LLMJudgeGrader, combine
+
+env = Environment("judged")
+
+
+@env.template()
+async def judge(criteria: list[str]):
+    answer = yield "Answer anything."
+    yield await combine(LLMJudgeGrader.grade(weight=1.0, answer=answer, criteria=criteria))
+"""
+
+
+class _EchoJudgeGateway(BaseHTTPRequestHandler):
+    """A gateway whose judge answers each criterion with the criterion's own text."""
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        prompt = body["messages"][1]["content"]
+        reply = prompt.split("<criterion>\n", 1)[1].split("\n</criterion>", 1)[0]
+        message = {"role": "assistant", "content": reply}
+        completion = {
+            "id": "judge",
+            "object": "chat.completion",
+            "created": 0,
+            "model": body["model"],
+            "choices": [{"index": 0, "finish_reason": "stop", "message": message}],
+        }
+        data = json.dumps(completion).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        del format, args
+
+
+class _AnswerAgent(Agent):
+    async def __call__(self, run: Any) -> None:
+        run.trace.content = "some answer"
+
+
+@pytest.fixture
+def judged_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """An env file whose judge talks to a local echo gateway (the env runs in a child process)."""
+    with ThreadingHTTPServer(("127.0.0.1", 0), _EchoJudgeGateway) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("HUD_API_KEY", "test-key")
+        monkeypatch.setenv("HUD_GATEWAY_URL", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.setenv("HUD_API_URL", "http://127.0.0.1:9")
+        monkeypatch.setenv("HUD_TELEMETRY_ENABLED", "0")
+        path = tmp_path / "env.py"
+        path.write_text(_JUDGED_ENV, encoding="utf-8")
+        yield path
+        server.shutdown()
+
+
+async def test_judge_verdict_in_prose_is_read_as_a_whole_word(judged_env: Path) -> None:
+    verdicts = {
+        '{"criterion_status": "MET", "explanation": "ok"}': 1.0,
+        '{"criterion_status": "UNMET", "explanation": "no"}': 0.0,
+        "MET": 1.0,
+        "criterion_status: **MET**": 1.0,
+        "UNMET": 0.0,
+        "Criterion status: NOT MET": 0.0,
+        "Partially MET, mostly UNMET.": 0.0,
+        '{"criterion_status": "NOT MET", "explanation": "cut off': 0.0,
+    }
+    task = Task(env="judged", id="judge", args={"criteria": list(verdicts)})
+
+    job = await task.run(_AnswerAgent(), runtime=SubprocessRuntime(judged_env))
+
+    (judge,) = job.runs[0].evaluation["subscores"]
+    assert {child["name"]: child["value"] for child in judge["children"]} == verdicts
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I'm sorry, something went wrong.",
+        "The response uses the wrong method.",
+        "The criterion has not been met.",
+    ],
+)
+async def test_judge_reply_without_a_verdict_fails_the_grade(judged_env: Path, reply: str) -> None:
+    task = Task(env="judged", id="judge", args={"criteria": ["MET", reply]})
+
+    job = await task.run(_AnswerAgent(), runtime=SubprocessRuntime(judged_env))
+
+    (run,) = job.runs
+    assert job.errors == [run]
+    assert "no MET/UNMET verdict" in (run.trace.error or "")
 
 
 @pytest.mark.skipif(not _HAS_BASH, reason="/bin/bash not available (e.g. Windows)")
