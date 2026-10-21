@@ -46,6 +46,10 @@ wheel with the `robot` extra instead.
 
 ## Results
 
+These runs used the earlier release-pinned image. The switch to SDK `main` has
+local protocol regression coverage; a fresh container and hosted check is still
+required before deploying this version.
+
 `gpt-6-astra` at medium reasoning effort, up to 100 tool-calling turns, one
 episode per task (`init_state_id` 0), on the absolute interface:
 
