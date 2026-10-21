@@ -16,6 +16,7 @@ import mcp.types as mcp_types
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
+from hud.agents.tools.rfb import keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import MCPToolResult
 
@@ -34,51 +35,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ─── Anthropic → X11 keysym translation ─────────────────────────────
-#
-# Claude emits keys in the xdotool / Anthropic vocabulary (``Return``,
-# ``Page_Down``, ``Control_L``, ``cmd``, etc.). asyncvnc's keysymdef table
-# accepts X11 names directly and already aliases common short forms (``Cmd``,
-# ``Alt``, ``Ctrl``, ``Super``, ``Shift``, ``Backspace``, ``Del``, ``Esc``).
-# This map covers the residual Anthropic-specific spellings.
-
-_ANTHROPIC_TO_X11: dict[str, str] = {
-    "alt": "Alt_L",
-    "ctrl": "Control_L",
-    "shift": "Shift_L",
-    "meta": "Super_L",
-    "super": "Super_L",
-    "win": "Super_L",
-    "cmd": "Super_L",
-    "command": "Super_L",
-    "option": "Alt_L",
-    "enter": "Return",
-    "return": "Return",
-    "esc": "Escape",
-    "del": "Delete",
-    "pageup": "Page_Up",
-    "pagedown": "Page_Down",
-    "arrowup": "Up",
-    "arrowdown": "Down",
-    "arrowleft": "Left",
-    "arrowright": "Right",
-    "space": "space",
-    "backspace": "BackSpace",
-    "capslock": "Caps_Lock",
-    "printscreen": "Print",
-}
-
-
-def _translate_key(token: str) -> str:
-    if "+" in token:
-        return "+".join(_translate_key(part) for part in token.split("+"))
-    return _ANTHROPIC_TO_X11.get(token.lower(), token)
-
-
 def _split_keys(text: str | None) -> list[str]:
     if not text:
         return []
-    return [_translate_key(part.strip()) for part in text.split("+") if part.strip()]
+    return [keysym(part.strip()) for part in text.split("+") if part.strip()]
 
 
 def _hold_keys(text: str | None) -> list[str] | None:

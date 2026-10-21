@@ -134,7 +134,7 @@ GEMINI_MODEL = "gemini-3.1-pro-preview"
 async def test_only_the_three_newest_computer_turns_keep_their_screenshots(
     models: Models, tmp_path: Path
 ) -> None:
-    models.script([call("click_at", x=156, y=208)] * 4 + [Turn(text="done")])
+    models.script([call("click", x=156, y=208)] * 4 + [Turn(text="done")])
 
     async with fake_screen() as screen:
         task = workspace_task(tmp_path / "ws", capabilities=(Capability.rfb(url=screen.url),))
