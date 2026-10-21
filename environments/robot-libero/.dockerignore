@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+.env
+.hud/
+.hud_eval.toml
+.DS_Store
+tests/
