@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from hud.eval import Run
     from tests.conftest import HudEnv
 
-#: lerobot's video encoder hangs on frames under 32 px.
+#: Clear of the 32 px floor lerobot's episode video encoder needs.
 RECORD_SIDE = 64
 
 
@@ -66,8 +66,10 @@ class Recorder(RobotAgent):
         self.adapter = None
 
 
-async def record(name: str, contract: dict[str, Any], *, fail_at: int | None = None) -> Run:
-    async with stub_episode(StubSim(contract=contract, side=RECORD_SIDE), name) as runtime:
+async def record(
+    name: str, contract: dict[str, Any], *, fail_at: int | None = None, side: int = RECORD_SIDE
+) -> Run:
+    async with stub_episode(StubSim(contract=contract, side=side), name) as runtime:
         return await rollout(
             Task(env=name, id="episode"), Recorder(fail_at=fail_at), runtime=runtime
         )
@@ -224,3 +226,14 @@ async def test_a_dataset_stays_on_disk_whether_or_not_its_push_succeeds(
     (dataset,) = datasets(recording)
     assert dataset.meta.total_episodes == 1
     assert ("HF push failed" in capsys.readouterr().out) is (repo is not None)
+
+
+@pytest.mark.e2e
+@pytest.mark.lerobot
+async def test_a_camera_too_small_to_encode_fails_the_rollout_before_recording(
+    recording: Path,
+) -> None:
+    run = await record("arm", recording_contract(), side=16)
+    DatasetWriter.finalize()
+
+    assert (run.trace.status, datasets(recording)) == ("error", [])
