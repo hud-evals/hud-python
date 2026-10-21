@@ -31,6 +31,10 @@ video and state and action plots.
 | `absolute` (default) | absolute end-effector targets | `move_to` | Tool-calling agents, from the web app or `hud eval` |
 | `delta` | end-effector deltas | none | Policies trained on LIBERO, such as pi0.5 |
 
+Both modes run at the contract's 10 Hz. Episodes end on success or the simulator's
+1,000-step horizon, including 10 settling steps (990 agent-controlled steps).
+A horizon timeout scores zero.
+
 The platform runs the default. To run a policy against the delta interface,
 serve the image locally and point the agent at it (see the
 [robot benchmark cookbook](https://docs.hud.ai/v6/cookbooks/robot-benchmark)):
@@ -46,9 +50,9 @@ wheel with the `robot` extra instead.
 
 ## Results
 
-These runs used the earlier release-pinned image. The switch to SDK `main` has
-local protocol regression coverage; a fresh container and hosted check is still
-required before deploying this version.
+These runs used the earlier release-pinned image and simulator settings. The SDK
+and timing changes have local regression coverage; a fresh container and hosted
+check is still required before deploying this version.
 
 `gpt-6-astra` at medium reasoning effort, up to 100 tool-calling turns, one
 episode per task (`init_state_id` 0), on the absolute interface:

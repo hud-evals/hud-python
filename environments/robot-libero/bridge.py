@@ -50,7 +50,10 @@ class LiberoSimBridge(RobotBridge):
             self._env.close()
         bddl = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
         self._env = OffScreenRenderEnv(
-            bddl_file_name=bddl, camera_heights=self._image_size, camera_widths=self._image_size
+            bddl_file_name=bddl,
+            camera_heights=self._image_size,
+            camera_widths=self._image_size,
+            control_freq=self.contract["control_rate"],
         )
         self._env.reset()
         self._env.set_init_state(suite.get_task_init_states(task_id)[init_state_id])
