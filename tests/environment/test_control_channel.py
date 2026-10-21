@@ -122,6 +122,37 @@ async def test_ending_a_sessions_task_closes_its_template(
     assert (answered["result"], closed) == (reply, ["closed first"])
 
 
+def stalled(events: list[str]) -> Environment:
+    env = Environment("stalled")
+
+    @env.template()
+    async def stall():
+        try:
+            yield "go"
+            await asyncio.Event().wait()
+            yield 1.0
+        finally:
+            events.append("closed")
+
+    return env
+
+
+@pytest.mark.parametrize("ending", ["cancel", "hang-up"])
+async def test_a_grade_still_running_ends_with_its_session(ending: str) -> None:
+    events: list[str] = []
+    async with LocalRuntime(stalled(events))(Task(env="stalled", id="stall")) as runtime:
+        async with wire(runtime.url) as peer:
+            await peer.call("tasks.start", {"id": "stall"})
+            await peer.send("tasks.grade", {"answer": "x"})
+            if ending == "cancel":
+                await peer.call("tasks.cancel")
+            else:
+                await peer.hang_up()
+        closed = list(events)
+
+    assert closed == ["closed"]
+
+
 def start_of_size(size: int) -> dict[str, Any]:
     """A ``tasks.start`` frame for ``echo`` of exactly ``size`` bytes, without its newline."""
     frame: dict[str, Any] = {
