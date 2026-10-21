@@ -252,9 +252,6 @@ class Jira(DataSource):
         """Search issues with JQL; an empty query lists every issue, most recently updated first."""
         try:
             query = parse(jql, self.context.today)
-        except JqlError as error:
-            raise ToolError(f"JQL error: {error}") from error
-        try:
             found = [issue for issue in self._issues.values() if query.where(_reader(issue))]
         except JqlError as error:
             raise ToolError(f"JQL error: {error}") from error
@@ -320,6 +317,8 @@ class Jira(DataSource):
         issue.updated = self._now()
         if target.lower() in _DONE:
             issue.resolved, issue.resolution = issue.updated, issue.resolution or "Done"
+        else:
+            issue.resolved, issue.resolution = None, None
         self.record(
             "transition_issue",
             {"key": issue.key, "status": target},

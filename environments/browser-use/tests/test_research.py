@@ -1,6 +1,8 @@
 """Check LiveWeb task grading and real CDP/RFB readiness contracts offline."""
 
+import base64
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -49,6 +51,65 @@ async def test_rubric_uses_real_weighting_and_records_each_judgment(browser_env,
         "<domains_visited>\nwww.epa.gov\n</domains_visited>" in call.kwargs["messages"][0]["content"]
         for call in create.await_args_list
     )
+
+
+@pytest.mark.parametrize(
+    "raw_weights,verdicts,expected_score,display_weights",
+    [
+        ([1, 1, 1], ["MET", "MET", "MET"], 1.0, [0.333, 0.333, 0.333]),
+        ([1, 1, 1], ["MET", "MET", "UNMET"], 0.667, [0.333, 0.333, 0.333]),
+        ([1, 1, 1, -1], ["MET"] * 4, 0.667, [0.333, 0.333, 0.333, -0.333]),
+        ([1, -1, -1, -5], ["MET"] * 4, 0.1, [1.0, -0.129, -0.129, -0.643]),
+    ],
+)
+async def test_rubric_scores_use_full_precision_before_display_rounding(
+    browser_env, monkeypatch, raw_weights, verdicts, expected_score, display_weights
+):
+    import grader
+
+    create = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                content=[SimpleNamespace(text=json.dumps({"criterion_status": verdict, "explanation": "judged"}))]
+            )
+            for verdict in verdicts
+        ]
+    )
+    monkeypatch.setattr(
+        grader, "AsyncAnthropic", lambda **kwargs: SimpleNamespace(messages=SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr(grader.settings, "api_key", "local-mocked-key")
+    result = await grader.grade_with_rubric(
+        "The completed research",
+        [{"requirement": f"Criterion {index}", "weight": weight} for index, weight in enumerate(raw_weights)],
+        "Research the question",
+    )
+
+    assert result["score"] == expected_score
+    assert [item["weight"] for item in result["report"]] == display_weights
+    assert result["weights"] == {
+        f"criterion_{index + 1}": weight for index, weight in enumerate(display_weights) if raw_weights[index] >= 0
+    }
+    assert [item["verdict"] for item in result["report"]] == verdicts
+    assert create.await_count == len(raw_weights)
+
+
+@pytest.mark.parametrize("limit", [0, 1, 10])
+def test_visual_evidence_keeps_final_frame_after_recent_ring_samples(browser_env, limit):
+    import grader
+
+    directory = Path(grader.SCREENSHOT_DIR)
+    directory.mkdir()
+    chronological = [f"frame-{index % 10:02d}.png" for index in range(7, 17)] + ["final.png"]
+    for index, name in enumerate(chronological):
+        path = directory / name
+        path.write_bytes(name.encode())
+        os.utime(path, (100 + index, 100 + index))
+
+    images = grader.load_screenshots_for_grading(max_screenshots=limit)
+    selected = [base64.b64decode(image["source"]["data"]).decode() for image in images]
+
+    assert selected == (chronological[-limit:] if limit else [])
 
 
 async def test_task_navigates_and_grades_final_answer_through_runner(started_browser):

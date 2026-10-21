@@ -15,8 +15,6 @@ import openpyxl
 from data_sources.base import ExportError
 from data_sources.values import parse_date, parse_datetime, parse_number, split_list
 
-TABLE_SUFFIXES = frozenset({".csv", ".tsv", ".txt", ".xlsx", ".xlsm"})
-
 
 @dataclass(frozen=True, slots=True)
 class Table:

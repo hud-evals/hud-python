@@ -243,9 +243,9 @@ async def _stop(server: uvicorn.Server, task: asyncio.Task[None]) -> None:
 
 
 class Workflow:
-    """One environment's task sessions and optional source-tool server."""
+    """One environment's task sessions and source-tool server."""
 
-    def __init__(self, environment: Environment, *, source_tools: bool = False) -> None:
+    def __init__(self, environment: Environment) -> None:
         self.env = environment
         self._mounted = MountedSources()
         self.tool_server = FastMCP(environment.name, providers=[self._mounted])
@@ -257,9 +257,8 @@ class Workflow:
             env={"PATH": agent_workspace.SHELL_PATH},
             require_isolation=True,
         )
-        if source_tools:
-            environment.initialize(self.serve_tools)
-            environment.shutdown(self.stop_tools)
+        environment.initialize(self.serve_tools)
+        environment.shutdown(self.stop_tools)
 
     async def serve_tools(self) -> None:
         self._resources = contextlib.AsyncExitStack()

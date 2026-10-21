@@ -62,6 +62,10 @@ argument selects paths under `samples/`; only its `attachments` enter the
 workspace. Source exports stay behind the tools. Bundled and uploaded data can
 be combined; filename collisions fail explicitly.
 
+Slack ZIP exports accept JSON members up to 16 MiB each and 64 MiB of expanded
+JSON across the archive. All JSON entries, including duplicate filenames, count
+toward these limits; oversized exports fail before their contents are read.
+
 `as_of` fixes the scenario date. `deliverables` names files to save under
 `/workspace/outputs`; attachments appear under `/workspace/files`. Every task
 starts with an empty workspace, and one task can occupy it at a time. The agent

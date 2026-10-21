@@ -64,7 +64,7 @@ def _unit(value: float) -> float:
 
 
 def _similarity(error: float, numerical_margin: float, wrong: float) -> float:
-    return _unit((wrong - abs(error)) / max(wrong - numerical_margin, 1e-9))
+    return _unit((wrong - abs(error)) / (wrong - numerical_margin))
 
 
 def _mean(values: list[float]) -> float:

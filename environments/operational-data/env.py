@@ -23,7 +23,7 @@ from workflow import (
 )
 
 env = Environment(name="operational-data")
-workflow = Workflow(env, source_tools=True)
+workflow = Workflow(env)
 tool_server = workflow.tool_server
 
 

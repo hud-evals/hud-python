@@ -29,7 +29,6 @@ EXAMPLES: dict[str, str] = {
 }
 
 
-# Keep the shipped option working without a duplicate template or picker entry.
 EXAMPLE_ALIASES = {
     "argument-hints": "operational-data",
     "file-analysis": "operational-data",

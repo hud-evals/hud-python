@@ -37,6 +37,8 @@ _CHANNEL_FILES: tuple[tuple[str, Literal["public", "private", "direct"]], ...] =
     ("mpims.json", "private"),
     ("dms.json", "direct"),
 )
+MAX_JSON_BYTES = 16 * 1024 * 1024
+MAX_EXPANDED_JSON_BYTES = 64 * 1024 * 1024
 
 ChannelName = Annotated[str, Field(description="Channel name, e.g. #finance-close")]
 
@@ -113,28 +115,40 @@ class Slack(DataSource):
         except zipfile.BadZipFile as error:
             raise ExportError(f"{path.name}: not a zip archive") from error
         with archive:
-            members = [PurePosixPath(name) for name in archive.namelist() if name.endswith(".json")]
+            entries = [item for item in archive.infolist() if item.filename.endswith(".json")]
+            for entry in entries:
+                if entry.file_size > MAX_JSON_BYTES:
+                    raise ExportError(
+                        f"{path.name}: {entry.filename} exceeds the "
+                        f"{MAX_JSON_BYTES}-byte JSON limit"
+                    )
+            if sum(entry.file_size for entry in entries) > MAX_EXPANDED_JSON_BYTES:
+                raise ExportError(
+                    f"{path.name}: exceeds the {MAX_EXPANDED_JSON_BYTES}-byte expanded JSON limit"
+                )
+            members = {PurePosixPath(entry.filename): entry for entry in entries}
             markers = [m.parent for m in members if m.name in {"users.json", "channels.json"}]
             root = min(markers, key=lambda parent: len(parent.parts), default=PurePosixPath("."))
 
-            def read(member: PurePosixPath) -> Any:
-                return json.loads(archive.read(str(member)).decode("utf-8"))
+            def read(member: zipfile.ZipInfo) -> Any:
+                return json.loads(archive.read(member).decode("utf-8"))
 
-            if (users := root / "users.json") in members:
+            if users := members.get(root / "users.json"):
                 for raw in read(users):
                     self._add_user(raw)
             folders: dict[str, str] = {}
             for filename, kind in _CHANNEL_FILES:
-                if (listing := root / filename) in members:
+                if listing := members.get(root / filename):
                     for raw in read(listing):
                         name = self._add_channel(raw, kind)
                         folders[str(raw.get("name") or raw.get("id"))] = name
-            for member in members:
+            for entry in entries:
+                member = PurePosixPath(entry.filename)
                 if member.parent.parent != root or member.parent == root:
                     continue
                 folder = member.parent.name
                 channel = folders.get(folder) or self._add_channel({"name": folder}, "public")
-                self._raw.setdefault(channel, []).extend(read(member))
+                self._raw.setdefault(channel, []).extend(read(entry))
         if not self._raw:
             raise ExportError(f"{path.name}: no channel messages found in this Slack export")
 

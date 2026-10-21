@@ -61,12 +61,14 @@ website. `web-research` accepts arbitrary HTTP(S) URLs, questions, and weighted
 `rubric_items`; `patterns` instead enables case-insensitive regex grading. Nonempty
 `archives` is rejected because this runtime uses live websites.
 
-Rubric grading preserves the existing rounded weight normalization, penalty
-scaling and score clamp. It uses `HUD_API_KEY` via the HUD gateway, or
+Rubric grading normalizes weights at full precision, preserves penalty scaling
+and the score clamp, and rounds the final score and reported weights to three
+decimals. It uses `HUD_API_KEY` via the HUD gateway, or
 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` directly. `GRADER_MODEL` overrides the
 existing `claude-opus-4-5` default. Hosted research tasks opt into protected grader
 credential injection through `hud_api_key`; never store credentials in task data.
-Optional `use_visual_grading` supplies recent browser screenshots to the grader.
+Optional `use_visual_grading` supplies up to ten recent browser screenshots in
+capture order, including the final browser image.
 
 The bundled websites can change. Inspect a fresh run before presenting a result
 or reusing historical reference answers.

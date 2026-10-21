@@ -24,10 +24,6 @@ class UnreadableDocument(Exception):
     """A file whose format is unsupported or whose contents could not be parsed."""
 
 
-def _cell(value: object) -> str:
-    return "" if value is None else str(value)
-
-
 def _rows(lines: Iterator[list[str]]) -> Iterator[str]:
     for cells in lines:
         if any(cells):

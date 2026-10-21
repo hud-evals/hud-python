@@ -21,9 +21,12 @@ VISUAL_GRADING_ENABLED = True
 
 
 def load_screenshots_for_grading(max_screenshots: int = 10) -> list[dict]:
-    if not VISUAL_GRADING_ENABLED:
+    if not VISUAL_GRADING_ENABLED or max_screenshots <= 0:
         return []
-    screenshot_files = sorted(glob.glob(f"{SCREENSHOT_DIR}/*.png"))
+    screenshot_files = sorted(
+        glob.glob(f"{SCREENSHOT_DIR}/*.png"),
+        key=lambda path: (os.path.basename(path) == "final.png", os.path.getmtime(path), path),
+    )
     if not screenshot_files:
         return []
     images = []
@@ -135,9 +138,6 @@ async def generate_with_anthropic(
         content = user_prompt
 
     response = await client.messages.create(
-        # (claude-opus-4-5, claude-sonnet-4-6, claude-haiku-4-5, ...). The dated
-        # snapshot form "claude-opus-4-5-20251101" is rejected with
-        # "model ... is not supported" and every grade fails.
         model=os.environ.get("GRADER_MODEL", "claude-opus-4-5"),
         max_tokens=1024,
         system=grading_prompt,
@@ -194,14 +194,12 @@ async def grade_with_rubric(
         key = f"criterion_{i + 1}"
         criterion_score = 1.0 if criterion.verdict == "MET" else 0.0
         if criterion.weight >= 0:
-            normalized_weight = round(criterion.weight / positive_weight_sum, 3)
+            normalized_weight = criterion.weight / positive_weight_sum
             subscores[key] = criterion_score
-            weights[key] = normalized_weight
-            computed_score += criterion_score * normalized_weight
+            weights[key] = round(normalized_weight, 3)
         else:
-            scaled_weight = round((criterion.weight * negative_scale) / positive_weight_sum, 3)
-            computed_score += criterion_score * scaled_weight
-            normalized_weight = scaled_weight
+            normalized_weight = (criterion.weight * negative_scale) / positive_weight_sum
+        computed_score += criterion_score * normalized_weight
         report.append(
             {
                 "criterion": key,
@@ -209,7 +207,7 @@ async def grade_with_rubric(
                 "verdict": criterion.verdict,
                 "reason": criterion.reason,
                 "raw_weight": criterion.weight,
-                "weight": normalized_weight,
+                "weight": round(normalized_weight, 3),
                 "score": criterion_score,
             }
         )

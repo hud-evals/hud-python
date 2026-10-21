@@ -109,22 +109,14 @@ def test_blank_materializes_a_runnable_example(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "preset,entrypoint",
-    [
-        ("browser-use", "env.py"),
-        ("liveweb", "env.py"),
-        ("operational-data", "env.py"),
-        ("file-analysis", "env.py"),
-        ("argument-hints", "env.py"),
-    ],
+    "preset",
+    ["browser-use", "liveweb", "operational-data", "file-analysis", "argument-hints"],
 )
-def test_curated_examples_copy_with_custom_names(
-    tmp_path: Path, preset: str, entrypoint: str
-) -> None:
+def test_curated_examples_copy_with_custom_names(tmp_path: Path, preset: str) -> None:
     _init(tmp_path, "my-example", preset)
 
     target = tmp_path / "my-example"
-    assert 'Environment(name="my-example")' in (target / entrypoint).read_text()
+    assert 'Environment(name="my-example")' in (target / "env.py").read_text()
     assert (target / "tasks.py").is_file()
     assert (target / "README.md").is_file()
     assert (target / "tasks.json").is_file()

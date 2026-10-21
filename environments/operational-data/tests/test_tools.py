@@ -1,6 +1,8 @@
 """The tool surface the agent sees: listing, JSON arguments, errors, and the action log."""
 
+import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 from exports import load
@@ -9,7 +11,7 @@ from fastmcp.client.transports import FastMCPTransport
 
 from data_sources.base import ActionLog, DataSource, TaskContext
 from data_sources.provider import MountedSources, TaskInProgress
-from data_sources.sources import SOURCES, Slack
+from data_sources.sources import SOURCES, Jira, Slack
 
 Agent = Client[FastMCPTransport]
 
@@ -63,6 +65,53 @@ async def test_rejected_writes_change_nothing(agent: Agent, log: ActionLog):
     issue = await agent.call_tool("jira_get_issue", {"key": "CLOSE-14"})
     assert issue.structured_content is not None
     assert issue.structured_content["status"] == "To Do"
+
+
+@pytest.mark.parametrize("status", ["To Do", "In Progress"])
+async def test_reopened_jira_issues_are_open_in_search_and_project_counts(
+    tmp_path: Path, context: TaskContext, status: str
+):
+    path = tmp_path / "jira.json"
+    path.write_text(
+        json.dumps(
+            {
+                "issues": [
+                    {
+                        "key": "CLOSE-1",
+                        "fields": {
+                            "summary": "Resolved close issue",
+                            "status": {"name": "Done"},
+                            "resolution": {"name": "Fixed"},
+                            "resolutiondate": "2026-03-01T12:00:00Z",
+                        },
+                    },
+                    {"key": "CLOSE-2", "summary": "Queued issue", "status": "To Do"},
+                    {"key": "CLOSE-3", "summary": "Active issue", "status": "In Progress"},
+                ]
+            }
+        )
+    )
+    mounted = MountedSources()
+    mounted.mount([Jira.load([path], context)])
+    async with Client(FastMCP("jira-reopen", providers=[mounted])) as agent:
+        before = await agent.call_tool("jira_get_issue", {"key": "CLOSE-1"})
+        assert before.structured_content["resolution"] == "Fixed"
+        assert before.structured_content["resolved"] is not None
+        await agent.call_tool("jira_transition_issue", {"key": "CLOSE-1", "status": status})
+        reopened = await agent.call_tool("jira_get_issue", {"key": "CLOSE-1"})
+        assert reopened.structured_content["status"] == status
+        assert reopened.structured_content["resolved"] is None
+        assert reopened.structured_content["resolution"] is None
+        found = await agent.call_tool(
+            "jira_search_issues",
+            {
+                "jql": "key = CLOSE-1 AND statusCategory != Done "
+                "AND resolution IS EMPTY AND resolved IS EMPTY"
+            },
+        )
+        assert [issue["key"] for issue in found.structured_content["items"]] == ["CLOSE-1"]
+        projects = await agent.call_tool("jira_list_projects")
+        assert projects.data[0].open == 3
 
 
 def test_two_sources_cannot_define_the_same_tool(context: TaskContext):
