@@ -144,7 +144,8 @@ async def wait_for_desktop(timeout: float = 40.0) -> None:
             try:
                 response = await client.get(f"{CDP_URL}/json/version")
                 response.raise_for_status()
-                if not response.json().get("webSocketDebuggerUrl"):
+                version = response.json()
+                if not isinstance(version, dict) or not version.get("webSocketDebuggerUrl"):
                     raise ValueError("Chromium did not advertise a CDP websocket")
                 reader, writer = await asyncio.wait_for(asyncio.open_connection(VNC_HOST, VNC_PORT), 2)
                 try:
@@ -155,7 +156,7 @@ async def wait_for_desktop(timeout: float = 40.0) -> None:
                     writer.close()
                     await writer.wait_closed()
                 return
-            except (httpx.HTTPError, OSError, TimeoutError, asyncio.IncompleteReadError):
+            except (httpx.HTTPError, OSError, TimeoutError, ValueError, asyncio.IncompleteReadError):
                 await asyncio.sleep(0.2)
     raise RuntimeError("Chromium CDP and the RFB desktop did not become ready")
 

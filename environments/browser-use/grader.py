@@ -69,8 +69,8 @@ def extract_verdict_from_response(text: str) -> tuple[str, str]:
         try:
             data = json.loads(json_match.group())
             status = str(data.get("criterion_status", "")).upper()
-            if status == "MET":
-                return "MET", str(data.get("explanation") or data.get("reason", ""))
+            if status in {"MET", "UNMET"}:
+                return status, str(data.get("explanation") or data.get("reason", ""))
         except (json.JSONDecodeError, TypeError):
             pass
     try:

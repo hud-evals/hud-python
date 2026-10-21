@@ -155,6 +155,56 @@ async def test_startup_checks_both_cdp_and_rfb_before_publishing(browser_env, mo
     connection.assert_awaited_once_with("127.0.0.1", 5900)
 
 
+@pytest.mark.parametrize(
+    "initial_response",
+    [
+        httpx.Response(200, text="Chromium is starting"),
+        httpx.Response(200, json={}),
+        httpx.Response(200, json=[]),
+    ],
+    ids=["non-json", "missing-websocket", "non-object"],
+)
+async def test_startup_retries_incomplete_cdp_responses(browser_env, monkeypatch, initial_response):
+    responses = [initial_response, httpx.Response(200, json={"webSocketDebuggerUrl": "ws://localhost/browser/test"})]
+
+    def version(request):
+        return responses.pop(0)
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        browser_env.httpx, "AsyncClient", lambda **kwargs: original_client(transport=httpx.MockTransport(version))
+    )
+    reader = SimpleNamespace(readexactly=AsyncMock(return_value=b"RFB 003.008\n"))
+    writer = SimpleNamespace(close=lambda: None, wait_closed=AsyncMock())
+    connection = AsyncMock(return_value=(reader, writer))
+    monkeypatch.setattr(browser_env.asyncio, "open_connection", connection)
+
+    await browser_env.wait_for_desktop(timeout=2)
+
+    assert not responses
+    connection.assert_awaited_once_with("127.0.0.1", 5900)
+    writer.wait_closed.assert_awaited_once()
+
+
+async def test_persistently_invalid_cdp_responses_fail_at_the_deadline(browser_env, monkeypatch):
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        browser_env.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, text="Chromium is starting"))
+        ),
+    )
+    connection = AsyncMock()
+    monkeypatch.setattr(browser_env.asyncio, "open_connection", connection)
+
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        await browser_env.wait_for_desktop(timeout=0.3)
+
+    connection.assert_not_awaited()
+    assert not browser_env.env.capabilities
+
+
 async def test_an_open_non_rfb_port_is_not_a_ready_desktop(browser_env, monkeypatch):
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
@@ -168,9 +218,11 @@ async def test_an_open_non_rfb_port_is_not_a_ready_desktop(browser_env, monkeypa
     )
     reader = SimpleNamespace(readexactly=AsyncMock(return_value=b"HTTP/1.1 200"))
     writer = SimpleNamespace(close=lambda: None, wait_closed=AsyncMock())
-    monkeypatch.setattr(browser_env.asyncio, "open_connection", AsyncMock(return_value=(reader, writer)))
-    with pytest.raises(ValueError, match="RFB banner"):
-        await browser_env.wait_for_desktop()
+    connection = AsyncMock(return_value=(reader, writer))
+    monkeypatch.setattr(browser_env.asyncio, "open_connection", connection)
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        await browser_env.wait_for_desktop(timeout=0.3)
+    assert writer.wait_closed.await_count == connection.await_count > 0
     assert {cap.protocol for cap in browser_env.env.capabilities} == set()
 
 
