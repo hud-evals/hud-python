@@ -80,7 +80,13 @@ def importer(signed_in: FakeServices, hud: Hud) -> FakeServices:
     signed_in.route("api", "PUT", "/uploads/{id}", json={})
     signed_in.route("api", "POST", "/v2/data/{id}/complete", json={"id": FILE_ID})
     signed_in.route("api", "DELETE", "/v2/data/{id}", status=204)
-    signed_in.route("api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={"detail": "No"})
+    signed_in.route(
+        "api",
+        "GET",
+        "/v2/tasksets/by-name/{name}",
+        status=404,
+        json={"detail": "Taskset not found"},
+    )
     signed_in.route(
         "api", "POST", "/v2/tasksets", json={"id": TASKSET_ID, "name": "tb2", "can_edit": True}
     )
@@ -102,6 +108,7 @@ def test_folders_are_zipped_by_their_own_paths_and_imported_into_the_new_taskset
     result = hud("harbor", "import", "tasks", "run-1", "--taskset", "TB2", "--yes", "--json")
 
     assert result.exit_code == 0, result
+    assert "Taskset not found" not in result.stderr
     assert bundle(importer) == {name: text.encode() for name, text in FOLDERS.items()}
     assert importer.bodies("api", "POST", "/v2/tasksets")[0]["name"] == "tb2"
     assert importer.bodies("api", "POST", "/v2/imports")[0]["taskset_id"] == TASKSET_ID
