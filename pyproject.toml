@@ -162,7 +162,7 @@ daytona = [
 
 # Tensorlake placement (TensorlakeRuntime): per-rollout cloud sandboxes from a registered image
 tensorlake = [
-    "tensorlake>=0.5",
+    "tensorlake>=0.5.157",
 ]
 
 # Client-side custom training losses (TrainingClient.forward_backward_custom).
