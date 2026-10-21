@@ -30,9 +30,16 @@ class TensorlakeRuntime:
     Pass an image name — ``TensorlakeRuntime("hud-libero-env")`` — or set
     ``runtime_config.image``. Tensorlake accepts registered image names only,
     not registry references. Resources (cpu/memory/disk/gpu) and both
-    ``RuntimeLimits`` map onto the sandbox at creation time. *workdir*
-    defaults to ``/app`` (the scaffolded ``Dockerfile.hud`` WORKDIR) since a
-    sandbox process starts in ``~``, not the image's WORKDIR.
+    ``RuntimeLimits`` map onto the sandbox at creation time. Without
+    ``startup_timeout_s`` the wait for a running sandbox is bounded by the
+    SDK client's request timeout (300 s), not unbounded.
+    A sandbox process starts in ``~``, not the image's WORKDIR, so *workdir*
+    defaults to ``/app`` to match :class:`DaytonaRuntime` and the Daytona
+    cookbook image; ``hud init`` scaffolds use ``WORKDIR /hud``, so pass
+    ``workdir="/hud"`` for those. Env output is not streamed to the terminal:
+    the SDK's ``follow_output`` returns a process's output only after it
+    exits, so the output is attached to the error when the control channel
+    fails instead.
     Requires the ``tensorlake`` extra and ``TENSORLAKE_API_KEY``.
     """
 
