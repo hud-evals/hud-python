@@ -71,7 +71,10 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 
 Each request and response is one newline-delimited JSON frame. Calls on a
 `HudClient` are serialized, and reply ids must match the corresponding request.
-A malformed or unknown call receives a JSON-RPC error frame.
+A malformed or unknown call receives a JSON-RPC error frame. A frame without an
+`id` is a notification and gets no reply. When a rollout gives up while
+`tasks.start` or `tasks.grade` is in flight, the client sends `tasks.cancel` this
+way before closing, and the server runs it once that request returns.
 
 Control requests and responses support up to **16 MiB (16,777,216 bytes)** of
 encoded JSON, including the JSON-RPC wrapper and escaped strings, excluding the
@@ -137,7 +140,10 @@ connection reaches the same runner in either of two ways:
 
 Zero parked runners produces `no task in progress`; multiple parked runners
 produce an ambiguity error that names their session ids. This is the channel
-mechanism behind split `hud task start` and `hud task grade` invocations.
+mechanism behind split `hud task start` and `hud task grade` invocations. A
+`tasks.start` that its client abandons mid-call (for example, a cancelled
+rollout) is cancelled rather than parked, since nobody received its prompt; a
+transport failure still leaves it parked.
 
 ## Capability streams
 

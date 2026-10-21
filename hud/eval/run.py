@@ -478,9 +478,10 @@ async def rollout(
     ``cleanup``) so
     callers can tell where the failure landed without reading the trace.
 
-    ``rollout_timeout`` bounds execution through grading. A timeout aborts the
-    control transport, lets provider teardown finish in the background, and
-    returns an errored run immediately.
+    ``rollout_timeout`` bounds execution through grading. A timeout cancels the
+    env's task (waiting up to 2 s for its teardown when no request is in flight,
+    queuing the cancel when one is), aborts the control transport, lets provider
+    teardown finish in the background, and returns an errored run.
     """
     from .runtime.core import resolve_runtime_config
 
@@ -663,11 +664,7 @@ async def rollout(
                     if client is not None:
                         # Cancel before abort so env teardown frees robot slots;
                         # a bare abort parks the session and would leak claims.
-                        # Bound cancel: a live-but-silent peer would otherwise hang
-                        # forever inside read_frame and never reach abort.
-                        with contextlib.suppress(Exception):
-                            await asyncio.wait_for(client.cancel(), timeout=2.0)
-                        client.abort()
+                        await client.cancel_and_abort(reply_timeout=2.0)
                     if phase not in {"actor cleanup", "cleanup"}:
                         driver.cancel()
                     driver.add_done_callback(_consume_task_result)
@@ -681,9 +678,7 @@ async def rollout(
                     run.trace.stop_reason = "timeout"
         except asyncio.CancelledError:
             if client is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(client.cancel(), timeout=2.0)
-                client.abort()
+                await client.cancel_and_abort(reply_timeout=2.0)
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
             raise
