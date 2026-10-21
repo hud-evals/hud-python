@@ -112,10 +112,11 @@ def _inline_error(type_: str, *, headers: dict[str, str] | None = None) -> APISt
     return APIStatusError(str(body), response=response, body=body)
 
 
-def test_format_message_shape() -> None:
+@pytest.mark.parametrize("role", ["assistant", "user"])
+def test_format_message_shape(role: str) -> None:
     agent = _agent(SimpleNamespace(content=[], stop_reason="end_turn"))
-    msg = agent._format_message("assistant", "hi")
-    assert msg["role"] == "assistant"
+    msg = agent._format_message(role, "hi")
+    assert msg == {"role": role, "content": [{"type": "text", "text": "hi"}]}
 
 
 async def test_get_response_text_and_tool_use() -> None:
