@@ -134,7 +134,9 @@ class RFBTool(AgentTool[RFBClient]):
                 self.client.conn.mouse.scroll_down(scroll_y)
             elif scroll_y < 0:
                 self.client.conn.mouse.scroll_up(-scroll_y)
-            # asyncvnc has no horizontal scroll; ignore scroll_x silently for now.
+            # RFB wheel buttons 6 and 7 encode horizontal scrolling.
+            for _ in range(abs(scroll_x)):
+                self.client.conn.mouse.click(6 if scroll_x > 0 else 5)
         await self.client.drain()
 
     async def drag(

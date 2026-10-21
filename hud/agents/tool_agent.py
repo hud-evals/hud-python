@@ -6,13 +6,13 @@ import asyncio
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 import mcp.types as mcp_types
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
-from hud.agents.tools.base import AgentTool, provider_tool_name
+from hud.agents.tools.base import AgentTool, AgentToolSpec, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
 from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
@@ -23,6 +23,8 @@ from hud.types import MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from hud.agents.types import ToolAgentConfig
     from hud.capabilities import CapabilityClient
     from hud.eval.run import Run
@@ -124,7 +126,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         qualify_mcp_names = len(mcp_clients) > 1
 
         for tool_cls in type(self).tool_catalog:
-            spec = tool_cls.default_spec(model)
+            spec = self._tool_spec(tool_cls)
             if spec is None:
                 continue
             for connection_name, client in connections.items():
@@ -169,6 +171,26 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         )
 
         return tools, params
+
+    def _tool_spec(self, tool_cls: type[AgentTool[Any]]) -> AgentToolSpec | None:
+        """Select a tool schema for this agent's model and provider."""
+        return tool_cls.default_spec(self.config.model)
+
+    async def _execute_tool_calls(
+        self, calls: list[MCPToolCall], state: RunState[MessageT]
+    ) -> AsyncIterator[tuple[MCPToolCall, MCPToolResult]]:
+        """Execute a provider turn in order, yielding every call's result."""
+        for call in calls:
+            yield call, await self._dispatch_call(call, state)
+
+    def _append_tool_result(
+        self, call: MCPToolCall, result: MCPToolResult, state: RunState[MessageT]
+    ) -> None:
+        message = self._format_result(call, result, state)
+        if isinstance(message, list):
+            state.messages.extend(message)
+        elif message is not None:
+            state.messages.append(message)
 
     async def _loop(
         self,
@@ -222,15 +244,11 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                 if (stopped := self._stop_condition(step)) is not None:
                     break
 
-                for call in step.tool_calls:
-                    call_started_at = now_iso()
-                    result = await self._dispatch_call(call, state)
+                call_started_at = now_iso()
+                async for call, result in self._execute_tool_calls(step.tool_calls, state):
                     run.record(ToolStep(call=call, result=result, started_at=call_started_at))
-                    msg = self._format_result(call, result, state)
-                    if isinstance(msg, list):
-                        state.messages.extend(msg)
-                    elif msg is not None:
-                        state.messages.append(cast("MessageT", msg))
+                    self._append_tool_result(call, result, state)
+                    call_started_at = now_iso()
 
                     if isinstance(result, SSHInfrastructureErrorResult):
                         consecutive_ssh_failures += 1

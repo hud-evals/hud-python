@@ -7,9 +7,10 @@ from __future__ import annotations
 from io import BytesIO
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import mcp.types as mcp_types
+import pytest
 from PIL import Image
 
 from hud.agents.claude.tools.computer import (
@@ -34,6 +35,7 @@ class RecordingComputer(ClaudeComputerTool):
     client: Any
 
     def __init__(self) -> None:
+        self.spec = CLAUDE_COMPUTER_SPECS[0]
         self.calls: list[tuple[Any, ...]] = []
         self.screenshot_encoding = WebPScreenshotEncoding(quality=42)
         self.client = SimpleNamespace(width=200, height=100)
@@ -225,3 +227,116 @@ async def test_zoom_reports_encoded_mime_type() -> None:
     crop.assert_called_once_with(b"png", (0, 0, 10, 10), tool.screenshot_encoding)
     image = next(block for block in result.content if isinstance(block, mcp_types.ImageContent))
     assert image.mimeType == "image/webp"
+
+
+async def test_key_repeat_executes_every_press() -> None:
+    tool = RecordingComputer()
+    spec = ClaudeComputerTool.default_spec("claude-sonnet-5-5")
+    assert spec is not None
+    tool.spec = spec
+    result = await tool.execute({"action": "key", "text": "Tab", "repeat": 100})
+    assert not result.isError
+    assert len(tool.calls) == 100
+    assert all(item == ("keys", ("Tab",), {}) for item in tool.calls)
+
+
+@pytest.mark.parametrize("repeat", [0, 101, True, "2", 2.5])
+async def test_key_repeat_rejects_out_of_contract_values(repeat: Any) -> None:
+    tool = RecordingComputer()
+    result = await tool.execute({"action": "key", "text": "Tab", "repeat": repeat})
+    assert result.isError
+    assert tool.calls == []
+
+
+@pytest.mark.parametrize("duration", [-1, 301, float("inf"), "3", None, True])
+async def test_toolset_wait_rejects_invalid_duration(duration: Any) -> None:
+    tool = RecordingComputer()
+    spec = ClaudeComputerTool.default_spec("claude-sonnet-5-5")
+    assert spec is not None
+    tool.spec = spec
+    result = await tool.execute({"action": "wait", "duration": duration})
+    assert result.isError
+    assert tool.calls == []
+
+
+async def test_toolset_resizes_screenshots_and_remaps_pointer_and_zoom() -> None:
+    import base64
+    import math
+
+    from hud.capabilities import RFBClient
+
+    source = BytesIO()
+    Image.new("RGB", (3840, 2160), "red").save(source, format="PNG")
+    client = Mock(spec=RFBClient)
+    client.width, client.height = 3840, 2160
+    client.conn = SimpleNamespace(mouse=Mock(x=1920, y=1080))
+    client.screenshot_png = AsyncMock(return_value=(source.getvalue(), "image/png"))
+    client.drain = AsyncMock()
+    spec = ClaudeComputerTool.default_spec("claude-sonnet-5-5")
+    assert spec is not None
+    tool = ClaudeComputerTool(spec=spec, client=client)
+
+    screenshot = await tool.execute({"action": "screenshot"})
+    assert not screenshot.isError
+    image = screenshot.content[0]
+    assert isinstance(image, mcp_types.ImageContent)
+    with Image.open(BytesIO(base64.b64decode(image.data))) as frame:
+        width, height = frame.size
+        assert max(width, height) <= 2000
+        assert math.ceil(width / 28) * math.ceil(height / 28) <= 4784
+    result = await tool.execute({"action": "left_click", "coordinate": [width // 2, height // 2]})
+    assert result_text(result) == "OK"
+    client.conn.mouse.move.assert_called_once_with(
+        (width // 2) * 3840 // width, (height // 2) * 2160 // height
+    )
+    cursor = await tool.execute({"action": "cursor_position"})
+    assert result_text(cursor) == f"({1920 * width // 3840}, {1080 * height // 2160})"
+    zoom = await tool.execute({"action": "zoom", "region": [0, 0, width, height]})
+    assert not zoom.isError
+    zoom_image = zoom.content[0]
+    assert isinstance(zoom_image, mcp_types.ImageContent)
+    with Image.open(BytesIO(base64.b64decode(zoom_image.data))) as frame:
+        assert frame.size == (width, height)
+        assert frame.getpixel((0, 0)) == (255, 0, 0)
+
+
+async def test_toolset_hold_key_preserves_chord_and_flushes_while_held() -> None:
+    from hud.capabilities import RFBClient
+
+    client = Mock(spec=RFBClient)
+    client.width, client.height = 1280, 720
+    keyboard = Mock()
+    keyboard.hold.return_value.__enter__ = Mock()
+    keyboard.hold.return_value.__exit__ = Mock(return_value=False)
+    client.conn = SimpleNamespace(keyboard=keyboard)
+    client.drain = AsyncMock()
+    spec = ClaudeComputerTool.default_spec("claude-sonnet-5-5")
+    assert spec is not None
+    tool = ClaudeComputerTool(spec=spec, client=client)
+    with patch("hud.agents.tools.rfb.asyncio.sleep", new_callable=AsyncMock) as sleep:
+        result = await tool.execute({"action": "hold_key", "text": "ctrl+a", "duration": 0.01})
+    assert not result.isError
+    keyboard.hold.assert_called_once_with("Control_L", "a")
+    sleep.assert_awaited_once_with(0.01)
+    assert client.drain.await_count == 2
+
+
+@pytest.mark.parametrize(("direction", "button"), [("left", 5), ("right", 6)])
+async def test_toolset_horizontal_scroll_sends_rfb_wheel_events(
+    direction: str, button: int
+) -> None:
+    from hud.capabilities import RFBClient
+
+    client = Mock(spec=RFBClient)
+    client.width, client.height = 1280, 720
+    client.conn = SimpleNamespace(mouse=Mock())
+    client.drain = AsyncMock()
+    spec = ClaudeComputerTool.default_spec("claude-sonnet-5-5")
+    assert spec is not None
+    tool = ClaudeComputerTool(spec=spec, client=client)
+    result = await tool.execute(
+        {"action": "scroll", "scroll_direction": direction, "scroll_amount": 2}
+    )
+    assert not result.isError
+    assert client.conn.mouse.click.call_args_list == [call(button), call(button)]
+    client.drain.assert_awaited_once_with()

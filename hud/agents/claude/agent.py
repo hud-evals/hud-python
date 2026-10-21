@@ -8,7 +8,7 @@ import json
 import logging
 import math
 from random import SystemRandom
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import httpx2
@@ -38,16 +38,19 @@ from anthropic.types.beta import (
 from PIL import Image
 
 from hud.agents.tool_agent import RunState, ToolAgent
+from hud.agents.tools.base import AgentTool, AgentToolSpec, tool_err
 from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils import gateway
 
 from .images import image_source
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
-from .tools.computer import ClaudeComputerTool
+from .tools.computer import CLAUDE_COMPUTER_SPECS, ClaudeComputerTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from anthropic.types.beta import BetaTextCitation
 
 
@@ -125,6 +128,63 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
     ) -> RunState[BetaMessageParam]:
         return RunState(messages=self._initial_messages(prompt))
 
+    def _tool_spec(self, tool_cls: type[AgentTool[Any]]) -> AgentToolSpec | None:
+        spec = super()._tool_spec(tool_cls)
+        if (
+            tool_cls is ClaudeComputerTool
+            and spec is not None
+            and spec.api_type == "computer_toolset_20260801"
+            and isinstance(self.anthropic_client, AsyncAnthropicBedrock)
+        ):
+            return CLAUDE_COMPUTER_SPECS[0]
+        return spec
+
+    async def _execute_tool_calls(
+        self, calls: list[MCPToolCall], state: RunState[BetaMessageParam]
+    ) -> AsyncIterator[tuple[MCPToolCall, MCPToolResult]]:
+        computer_failed = False
+        for call in calls:
+            tool = state.tools.get(call.name)
+            if computer_failed:
+                result = tool_err("Not executed: an earlier computer action in this turn failed.")
+            elif call.toolset_name is not None and (
+                call.toolset_name != "computer"
+                or not isinstance(tool, ClaudeComputerTool)
+                or tool.spec.api_type != "computer_toolset_20260801"
+            ):
+                result = tool_err(f"unknown toolset: {call.toolset_name!r}")
+            else:
+                result = await self._dispatch_call(call, state)
+            if call.toolset_name == "computer" and result.isError:
+                computer_failed = True
+            yield call, result
+
+    def _append_tool_result(
+        self, call: MCPToolCall, result: MCPToolResult, state: RunState[BetaMessageParam]
+    ) -> None:
+        message = self._format_result(call, result, state)
+        messages = message if isinstance(message, list) else [message] if message else []
+        for current in messages:
+            previous = state.messages[-1] if state.messages else None
+            content = previous["content"] if previous else None
+            if previous and previous["role"] == "user" and isinstance(content, list):
+                blocks = cast("list[ClaudeToolResultContent | BetaToolResultBlockParam]", content)
+                if any(block.get("type") == "tool_result" for block in blocks):
+                    incoming = cast(
+                        "list[ClaudeToolResultContent | BetaToolResultBlockParam]",
+                        current["content"],
+                    )
+                    results = [block for block in incoming if block["type"] == "tool_result"]
+                    rest = [block for block in incoming if block["type"] != "tool_result"]
+                    index = next(
+                        (i for i, block in enumerate(blocks) if block["type"] != "tool_result"),
+                        len(blocks),
+                    )
+                    blocks[index:index] = results
+                    blocks.extend(rest)
+                    continue
+            state.messages.append(current)
+
     def _format_message(self, role: str, text: str) -> BetaMessageParam:
         return BetaMessageParam(
             role="assistant" if role == "assistant" else "user",
@@ -148,9 +208,16 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                 (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
                 "Tool execution failed",
             )
-            result_content = [mcp_types.TextContent(type="text", text=f"Error: {error_msg}")]
+            result_content = [
+                mcp_types.TextContent(
+                    type="text",
+                    text=error_msg if call.toolset_name is not None else f"Error: {error_msg}",
+                )
+            ]
 
-        citations_enabled = bool(getattr(call.meta, "citations_enabled", False))
+        citations_enabled = call.toolset_name is None and bool(
+            getattr(call.meta, "citations_enabled", False)
+        )
         claude_blocks: list[ClaudeToolResultContent] = []
         sibling_docs: list[BetaRequestDocumentBlockParam] = []
 
@@ -208,17 +275,15 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             if citation_doc is not None:
                 sibling_docs.append(citation_doc)
 
-        tool_result_msg = BetaMessageParam(
-            role="user",
-            content=[
-                BetaToolResultBlockParam(
-                    type="tool_result",
-                    tool_use_id=tool_use_id,
-                    content=claude_blocks,
-                    is_error=bool(result.isError) or image_error,
-                ),
-            ],
+        result_block = BetaToolResultBlockParam(
+            type="tool_result",
+            tool_use_id=tool_use_id,
+            content=claude_blocks,
+            is_error=bool(result.isError) or image_error,
         )
+        if call.toolset_name is not None:
+            result_block["toolset_name"] = call.toolset_name
+        tool_result_msg = BetaMessageParam(role="user", content=[result_block])
         if sibling_docs:
             return [tool_result_msg, BetaMessageParam(role="user", content=sibling_docs)]
         return tool_result_msg
@@ -310,8 +375,13 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             else Omit()
         )
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
-        tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
         tools = cast("list[BetaToolUnionParam]", list(state.params))
+        tool_choice = BetaToolChoiceAutoParam(
+            type="auto",
+            disable_parallel_tool_use=not any(
+                tool.get("type") == "computer_toolset_20260801" for tool in tools
+            ),
+        )
         system = system_prompt if system_prompt is not None else Omit()
         is_bedrock = isinstance(self.anthropic_client, AsyncAnthropicBedrock)
 
@@ -440,11 +510,17 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         for block in response.content:
             match block.type:
                 case "tool_use":
+                    toolset_name = getattr(block, "toolset_name", None)
+                    arguments = dict(block.input) if block.input else {}
+                    if toolset_name == "computer":
+                        arguments["action"] = block.name
                     result.tool_calls.append(
                         MCPToolCall(
                             id=block.id,
-                            name=block.name,
-                            arguments=dict(block.input) if block.input else {},
+                            name="computer" if toolset_name == "computer" else block.name,
+                            provider_name=block.name if toolset_name == "computer" else None,
+                            toolset_name=toolset_name,
+                            arguments=arguments,
                             _meta=mcp_types.RequestParams.Meta.model_validate(
                                 {"citations_enabled": citations_enabled},
                             ),
@@ -483,9 +559,10 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             return messages
         cache_control = CacheControlEphemeralParam(type="ephemeral")
         skip = {"redacted_thinking", "thinking"}
-        for block in content:
+        for block in reversed(content):
             if isinstance(block, dict) and block.get("type") not in skip:
                 cast("dict[str, object]", block)["cache_control"] = cache_control
+                break
         return messages
 
     @staticmethod
