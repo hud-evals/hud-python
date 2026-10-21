@@ -60,7 +60,7 @@ class TensorlakeRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
-        from tensorlake.sandbox import AsyncSandboxClient, GpuModel, GpuRequest
+        from tensorlake.sandbox import AsyncSandboxClient, GpuModel, GpuRequest, SandboxPending
 
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         if config.compose is not None:
@@ -69,9 +69,7 @@ class TensorlakeRuntime:
         if image is None:
             raise ValueError("TensorlakeRuntime requires image_name or runtime_config.image")
 
-        # A startup timeout leaves the sandbox queued unless told to cancel;
-        # these sandboxes are per-rollout, so an abandoned one is only a bill.
-        create_kwargs: dict[str, Any] = {"image": image, "cancel_on_timeout": True}
+        create_kwargs: dict[str, Any] = {"image": image}
         resources = config.resources
         if resources is not None:
             resources._require_support(
@@ -93,15 +91,28 @@ class TensorlakeRuntime:
                 create_kwargs["gpu"] = GpuRequest(
                     count=resources.gpu.count, model=GpuModel(gpu_types[0])
                 )
+        startup_timeout = None
         if config.limits is not None:
-            if config.limits.startup_timeout_s is not None:
-                create_kwargs["startup_timeout"] = config.limits.startup_timeout_s
+            startup_timeout = config.limits.startup_timeout_s
             if config.limits.run_timeout_s is not None:
                 create_kwargs["timeout_secs"] = config.limits.run_timeout_s
 
         async with AsyncSandboxClient.for_cloud() as client:
-            sandbox = await client.create_and_connect(**create_kwargs)
+            # A sandbox bills from the moment it is created, queued or not, so
+            # creating and waiting are two steps: a rollout cancelled while
+            # waiting for capacity still reaches the delete below.
+            pending = await client.create(**create_kwargs, wait=False)
+            sandbox = None
             try:
+                try:
+                    sandbox = await pending.ready(startup_timeout)
+                except SandboxPending as exc:
+                    # The SDK's message says the sandbox keeps its queue slot;
+                    # the finally below deletes it.
+                    raise TimeoutError(
+                        f"Tensorlake sandbox {pending.sandbox_id} was still pending after "
+                        f"{exc.timeout}s ({exc.pending_reason or 'no reason given'})"
+                    ) from exc
                 # The image's CMD is not the sandbox's main process, so start the
                 # env server explicitly. connect() retries the handshake, so we
                 # don't poll for readiness here.
@@ -134,11 +145,14 @@ class TensorlakeRuntime:
                     await tunnel.close()
             finally:
                 try:
-                    await sandbox.terminate()
+                    if sandbox is None:
+                        await client.delete(pending.sandbox_id)
+                    else:
+                        await sandbox.terminate()
                 except Exception:
                     # Swallowing this is how a billable sandbox outlives its process.
                     logger.warning(
                         "failed to terminate Tensorlake sandbox %s; it may still be running",
-                        sandbox.sandbox_id,
+                        pending.sandbox_id,
                         exc_info=True,
                     )

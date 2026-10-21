@@ -6,6 +6,7 @@ call. The rows pin what the provider asks Tensorlake for and what it tears down.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from dataclasses import dataclass
@@ -76,11 +77,40 @@ class _FakeTensorlakeSandbox:
         self._calls["terminated"] = self.sandbox_id
 
 
+class _FakeTensorlakeSandboxPending(Exception):
+    def __init__(self, sandbox_id: str, *, pending_reason: str, timeout: float | None) -> None:
+        super().__init__(f"Sandbox {sandbox_id} is still pending; it keeps its place in the queue")
+        self.sandbox_id = sandbox_id
+        self.pending_reason = pending_reason
+        self.timeout = timeout
+
+
+class _FakeTensorlakePendingSandbox:
+    def __init__(self, client: _FakeTensorlakeClient, sandbox_id: str) -> None:
+        self.sandbox_id = sandbox_id
+        self._client = client
+
+    async def ready(self, budget: float | None) -> _FakeTensorlakeSandbox:
+        self._client.calls["ready_timeout"] = budget
+        if self._client.startup == "queued":
+            raise _FakeTensorlakeSandboxPending(
+                self.sandbox_id, pending_reason="no_resources_available", timeout=budget
+            )
+        if self._client.startup == "never":
+            await asyncio.Event().wait()
+        return _FakeTensorlakeSandbox(
+            self._client.calls, self.sandbox_id, terminate_fails=self._client.terminate_fails
+        )
+
+
 class _FakeTensorlakeClient:
     def __init__(self) -> None:
         self.calls: dict[str, Any] = {}
         self.created: list[dict[str, Any]] = []
         self.terminate_fails = False
+        # "running" starts at once; "queued" is still pending when the wait
+        # budget runs out; "never" waits for capacity until cancelled.
+        self.startup = "running"
 
     async def __aenter__(self) -> _FakeTensorlakeClient:
         return self
@@ -88,11 +118,12 @@ class _FakeTensorlakeClient:
     async def __aexit__(self, *exc_info: object) -> None:
         self.calls["client_closed"] = True
 
-    async def create_and_connect(self, **kwargs: Any) -> _FakeTensorlakeSandbox:
+    async def create(self, **kwargs: Any) -> _FakeTensorlakePendingSandbox:
         self.created.append(kwargs)
-        return _FakeTensorlakeSandbox(
-            self.calls, f"sandbox-{len(self.created)}", terminate_fails=self.terminate_fails
-        )
+        return _FakeTensorlakePendingSandbox(self, f"sandbox-{len(self.created)}")
+
+    async def delete(self, sandbox_id: str) -> None:
+        self.calls["deleted"] = sandbox_id
 
 
 def _install_fake_tensorlake(monkeypatch: pytest.MonkeyPatch) -> _FakeTensorlakeClient:
@@ -109,6 +140,7 @@ def _install_fake_tensorlake(monkeypatch: pytest.MonkeyPatch) -> _FakeTensorlake
     setattr(sandbox_module, "AsyncSandboxClient", SimpleNamespace(for_cloud=lambda: client))
     setattr(sandbox_module, "GpuModel", GpuModel)
     setattr(sandbox_module, "GpuRequest", _TensorlakeGpuRequest)
+    setattr(sandbox_module, "SandboxPending", _FakeTensorlakeSandboxPending)
     setattr(tensorlake, "sandbox", sandbox_module)
     monkeypatch.setitem(sys.modules, "tensorlake", tensorlake)
     monkeypatch.setitem(sys.modules, "tensorlake.sandbox", sandbox_module)
@@ -140,15 +172,15 @@ async def test_tensorlake_runtime_config_flows_into_tensorlake_sdk(
     assert client.created == [
         {
             "image": "hud-env",
-            "cancel_on_timeout": True,
             "cpus": 1.5,
             "memory_mb": 4096,
             "disk_mb": 10240,
             "gpu": _TensorlakeGpuRequest(count=2, model="H100"),
-            "startup_timeout": 45,
             "timeout_secs": 600,
+            "wait": False,
         }
     ]
+    assert client.calls["ready_timeout"] == 45
     assert client.calls["start_process"] == (
         "sh",
         ["-c", 'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765'],
@@ -175,7 +207,7 @@ async def test_tensorlake_task_runtime_config_overlays_provider_defaults(
             image="task-image", resources=RuntimeResources(cpu=2)
         )
 
-    assert client.created == [{"image": "task-image", "cancel_on_timeout": True, "cpus": 2}]
+    assert client.created == [{"image": "task-image", "cpus": 2, "wait": False}]
 
 
 async def test_tensorlake_boots_a_bare_image_name_with_sdk_defaults(
@@ -186,7 +218,8 @@ async def test_tensorlake_boots_a_bare_image_name_with_sdk_defaults(
     async with TensorlakeRuntime("hud-env", workdir=None, port=9000)(_row()) as runtime:
         assert runtime.config is None
 
-    assert client.created == [{"image": "hud-env", "cancel_on_timeout": True}]
+    assert client.created == [{"image": "hud-env", "wait": False}]
+    assert client.calls["ready_timeout"] is None
     assert client.calls["start_process"] == (
         "sh",
         ["-c", 'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 9000'],
@@ -273,6 +306,45 @@ async def test_tensorlake_attaches_the_env_output_to_a_failed_handshake(
     assert any("no module named bugs" in note for note in excinfo.value.__notes__)
     assert client.calls["tunnel_closed"] is True
     assert client.calls["terminated"] == "sandbox-1"
+
+
+async def test_tensorlake_deletes_a_sandbox_still_queued_when_the_rollout_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The rollout deadline fires while the sandbox waits for capacity. It was
+    # created, so it bills; the provider must not leave it in the queue.
+    client = _install_fake_tensorlake(monkeypatch)
+    client.startup = "never"
+
+    async def acquire() -> None:
+        async with TensorlakeRuntime("hud-env")(_row()):
+            pass
+
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.05):
+            await acquire()
+
+    assert client.calls["deleted"] == "sandbox-1"
+    assert "terminated" not in client.calls
+    assert client.calls["client_closed"] is True
+
+
+async def test_tensorlake_deletes_a_sandbox_that_missed_its_startup_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _install_fake_tensorlake(monkeypatch)
+    client.startup = "queued"
+    provider = TensorlakeRuntime(
+        "hud-env", runtime_config=RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=30))
+    )
+
+    with pytest.raises(TimeoutError, match=r"sandbox-1 .* 30s \(no_resources_available\)"):
+        async with provider(_row()):
+            pass
+
+    assert client.calls["ready_timeout"] == 30
+    assert client.calls["deleted"] == "sandbox-1"
+    assert "terminated" not in client.calls
 
 
 async def test_tensorlake_names_a_sandbox_it_could_not_terminate(

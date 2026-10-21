@@ -236,7 +236,7 @@ TensorlakeRuntime(image_name=None, *, command=None, workdir="/app", port=8765, r
 - **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint).
 - **`workdir`** / **`port`** - guest working directory and in-sandbox serving port. The port is reached over the SDK's TCP tunnel, which relays a local ephemeral port into the sandbox.
 
-Resources map onto the sandbox at creation time: `cpu` (fractional allowed), `memory_mb`, `storage_mb` as the root disk, and one GPU type with a count. Both `startup_timeout_s` and `run_timeout_s` are honored; `run_timeout_s` becomes the sandbox lifetime. Compose input is rejected.
+Resources map onto the sandbox at creation time: `cpu` (fractional allowed), `memory_mb`, `storage_mb` as the root disk, and one GPU type with a count. Both `startup_timeout_s` and `run_timeout_s` are honored; `run_timeout_s` becomes the sandbox lifetime. A sandbox still queued for capacity when `startup_timeout_s` or the rollout deadline expires is deleted, since Tensorlake bills a sandbox from creation. Compose input is rejected.
 
 Requires the `tensorlake` extra and `TENSORLAKE_API_KEY`.
 
