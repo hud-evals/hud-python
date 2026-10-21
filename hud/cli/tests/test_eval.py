@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import signal
+import subprocess
 import sys
+import textwrap
+import threading
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
@@ -952,3 +959,113 @@ def test_platform_local_placement_checks_separate_verifier(
     if not shared and not configured:
         assert "no env source to spawn locally" in payload["message"]
         assert eval_cli.taskset is None
+
+
+_SIGTERM_ENV = """\
+import os
+
+from hud import Environment
+
+env = Environment("sigterm")
+
+
+@env.initialize
+async def _record_pid() -> None:
+    with open(os.environ["ENV_PID_FILE"], "a") as f:
+        f.write(f"{os.getpid()}\\n")
+
+
+@env.template()
+async def greet():
+    yield "Say hi."
+    yield 1.0
+
+
+tasks = [greet()]
+"""
+
+
+@contextlib.contextmanager
+def _hanging_model() -> Iterator[tuple[str, threading.Event]]:
+    """An OpenAI-compatible endpoint that takes a completion request and never answers."""
+    requested, release = threading.Event(), threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            requested.set()
+            release.wait()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/v1", requested
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_sigterm_tears_down_the_environments_it_spawned(tmp_path: Path) -> None:
+    """SIGTERM (`timeout`, `kill`) must not orphan spawned environments."""
+    source = tmp_path / "env.py"
+    source.write_text(textwrap.dedent(_SIGTERM_ENV))
+    pid_file = tmp_path / "env.pids"
+    log_path = tmp_path / "eval.log"
+    env = {key: value for key, value in os.environ.items() if key != "HUD_API_KEY"}
+    env.update(
+        HOME=str(tmp_path),
+        ENV_PID_FILE=str(pid_file),
+        HUD_SKIP_VERSION_CHECK="1",
+        HUD_CLI_ANALYTICS_ENABLED="0",
+        HUD_TELEMETRY_ENABLED="false",
+    )
+
+    with _hanging_model() as (base_url, requested), log_path.open("w") as log:
+        cli = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "hud.cli",
+                "eval",
+                str(source),
+                "openai_compatible",
+                "--model",
+                "stub",
+                "--config",
+                f"base_url={base_url}",
+                "--config",
+                "api_key=stub",
+                "--yes",
+            ],
+            cwd=tmp_path,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            # The agent is mid-rollout, waiting on the model.
+            assert requested.wait(60), log_path.read_text()
+            env_pids = [int(pid) for pid in pid_file.read_text().split()]
+
+            cli.send_signal(signal.SIGTERM)
+            returncode = cli.wait(30)
+
+            assert [pid for pid in env_pids if _alive(pid)] == []
+            assert returncode == 128 + signal.SIGTERM
+        finally:
+            cli.kill()
+            for pid in pid_file.read_text().split() if pid_file.exists() else []:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(int(pid), signal.SIGKILL)
