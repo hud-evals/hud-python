@@ -151,8 +151,6 @@ class HostedRuntime:
             )
         spec = {"type": agent_type.value, "config": {**agent.dump(), **(task.agent_config or {})}}
         platform = PlatformClient.from_settings()
-        if not platform.api_key:
-            raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
         payload: dict[str, Any] = {
             # The SDK's hex ids travel as canonical UUID strings.
             "trace_id": str(uuid.UUID(trace_id)),
