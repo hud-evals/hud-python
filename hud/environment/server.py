@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import math
 import secrets
 import signal
 from dataclasses import dataclass
@@ -131,6 +132,13 @@ def _build_answer(return_type: Any, payload: dict[str, Any]) -> Any:
     )
 
 
+def _finite(score: float) -> float:
+    """Reject NaN and infinities: they poison every mean reward they enter."""
+    if math.isfinite(score):
+        return float(score)
+    raise ValueError(f"task graded with a non-finite reward ({score!r}): yield a finite number")
+
+
 def _score_value(result: Any) -> float:
     """Normalize a task's grade yield to a float score, loudly.
 
@@ -140,7 +148,7 @@ def _score_value(result: Any) -> float:
     """
     score = getattr(result, "reward", result)
     if isinstance(score, (int, float)):
-        return float(score)
+        return _finite(score)
     raise TypeError(
         f"task graded with {type(result).__name__}: yield a number, an object "
         "with a numeric .reward, or a dict containing a numeric 'score'"
@@ -184,10 +192,12 @@ class TaskRunner:
                     f"task {self.task.id!r} graded with a dict missing a numeric "
                     f"'score' (keys: {sorted(evaluation)})"
                 )
+            _finite(evaluation["score"])
             return cast("dict[str, Any]", _jsonable(evaluation))
         if isinstance(evaluation, EvaluationResult):
             # Forward the full grade frame so metadata (info/content/done/isError/
             # subscores) survives; the wire names the score "score", the model "reward".
+            _finite(evaluation.reward)
             frame = evaluation.model_dump(mode="json")
             frame["score"] = frame.pop("reward")
             return frame
