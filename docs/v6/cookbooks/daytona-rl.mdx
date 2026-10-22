@@ -26,7 +26,7 @@ async def fix_calc(variant: int = 0):
     yield (
         f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
     )
-    passed, total = await run_pytest()
+    passed, total = await run_pytest(variant)
     yield 1.0 if passed == total else 0.0
 ```
 

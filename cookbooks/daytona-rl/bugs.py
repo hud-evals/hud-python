@@ -185,5 +185,15 @@ def build(variant: int) -> tuple[str, str, list[str]]:
     return calc, tests, broken
 
 
+def test_names() -> list[str]:
+    """Names of every test in test_calc.py, in file order."""
+    return [
+        line.removeprefix("def ").split("(", 1)[0]
+        for name in NAMES
+        for line in FUNCS[name]["tests"].splitlines()
+        if line.startswith("def test_")
+    ]
+
+
 def test_count() -> int:
-    return sum(f["tests"].count("def test_") for f in FUNCS.values())
+    return len(test_names())

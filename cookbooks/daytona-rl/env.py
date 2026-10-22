@@ -9,10 +9,11 @@ Reward is binary — every test passes or the rollout scores zero.
 from __future__ import annotations
 
 import asyncio
-import re
+import os
 import sys
 import tempfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 from hud.environment import Environment
 
@@ -25,6 +26,9 @@ ws = env.workspace(WORKSPACE, network=True)
 
 TOTAL_TESTS = bugs.test_count()
 
+# Files in the workspace that pytest would load as configuration or plugins.
+PYTEST_CONFIG_FILES = ("conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini")
+
 
 def seed_bug(variant: int) -> list[str]:
     calc, tests, broken = bugs.build(variant)
@@ -33,22 +37,61 @@ def seed_bug(variant: int) -> list[str]:
     return broken
 
 
-async def run_pytest() -> tuple[int, int]:
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "pytest",
-        "-q",
-        "--no-header",
-        "-p",
-        "no:cacheprovider",
-        cwd=str(WORKSPACE),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    out, _ = await proc.communicate()
-    match = re.search(r"(\d+) passed", out.decode("utf-8", "replace"))
-    return (int(match.group(1)) if match else 0), TOTAL_TESTS
+def passed_tests(report: Path) -> set[str]:
+    """Names of the test cases a JUnit report records as passed."""
+    passed: set[str] = set()
+    for case in ElementTree.parse(report).getroot().iter("testcase"):
+        if not any(child.tag in {"failure", "error", "skipped"} for child in case):
+            passed.add(case.attrib["name"])
+    return passed
+
+
+async def run_pytest(variant: int = 0) -> tuple[int, int]:
+    """Run the variant's own tests against the agent's `calc.py`.
+
+    The agent works in the same directory as the tests, so grading restores
+    `test_calc.py`, drops any pytest configuration the agent added, and reads the
+    outcome from a JUnit report written outside the workspace, never from stdout.
+    """
+    _, tests, _ = bugs.build(variant)
+    (WORKSPACE / "test_calc.py").write_text(tests)
+    for name in PYTEST_CONFIG_FILES:
+        (WORKSPACE / name).unlink(missing_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="calc-grade-") as directory:
+        config = Path(directory) / "pytest.ini"
+        config.write_text("[pytest]\n")
+        report = Path(directory) / "report.xml"
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            str(config),
+            "--rootdir",
+            str(WORKSPACE),
+            "--confcutdir",
+            str(WORKSPACE),
+            f"--junitxml={report}",
+            "test_calc.py",
+            cwd=str(WORKSPACE),
+            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        # A run that exits before writing its report, or with failures, passes nothing.
+        if proc.returncode != 0 or not report.exists():
+            return 0, TOTAL_TESTS
+        try:
+            passed = passed_tests(report)
+        except (ElementTree.ParseError, KeyError):
+            return 0, TOTAL_TESTS
+    return len(passed & set(bugs.test_names())), TOTAL_TESTS
 
 
 @env.template(id="fix_calc")
@@ -57,7 +100,7 @@ async def fix_calc(variant: int = 0):
     yield (
         f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
     )
-    passed, total = await run_pytest()
+    passed, total = await run_pytest(variant)
     yield 1.0 if passed == total else 0.0
 
 
