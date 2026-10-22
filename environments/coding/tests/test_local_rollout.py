@@ -143,11 +143,11 @@ async def test_untouched_baseline_gets_regression_credit(fixture_repo, isolated_
 @pytest.mark.parametrize("task", tasks.tasks, ids=lambda task: task.slug)
 @pytest.mark.parametrize("fixed", [False, True], ids=["baseline", "reference-fix"])
 async def test_bundled_tasks_grade_in_workspace(task, fixed, isolated_workspace, tmp_path, monkeypatch):
-    bundle = tmp_path / "flask.bundle"
-    bundle.write_bytes((PROJECT_ROOT / "flask.bundle").read_bytes())
+    bundle = tmp_path / "repository.bundle"
+    bundle.write_bytes((PROJECT_ROOT / "repository.bundle").read_bytes())
     if fixed:
         task = task.model_copy(
-            update={"args": {**task.args, "base_ref": f"origin/{task.slug.replace('-', '_')}_golden"}}
+            update={"args": {**task.args, "base_ref": task.args["base_ref"].removesuffix("_baseline") + "_golden"}}
         )
     assert await _run_task(bundle, task, monkeypatch) == float(fixed)
 

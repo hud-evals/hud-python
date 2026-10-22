@@ -13,15 +13,9 @@ from pathlib import Path
 from hud.eval import Taskset
 
 
-def prepare(example: str) -> None:
+def prepare() -> None:
     task = next(iter(Taskset.from_file("tasks.py")))
     Path(".hud").mkdir(exist_ok=True)
-    if example == "argument-hints":
-        file_id = os.environ["HUD_CI_DATA_FILE_ID"]
-        if not file_id:
-            raise ValueError("HUD_CI_DATA_FILE_ID must reference the shared CI attachment")
-        task.args["attachments"] = [{"file_id": file_id, "path": "notes.txt"}]
-        task.args["prompt"] = "Read files/notes.txt first. " + task.args["prompt"]
     Taskset(tasks=[task]).to_file(".hud/ci-tasks.json")
 
 
@@ -46,12 +40,6 @@ def check() -> None:
     grade = calls[1]["result"]
     assert not grade.get("isError"), grade
     assert isinstance(grade["score"], int | float) and 0 <= grade["score"] <= 1, grade
-    task = next(iter(Taskset.from_file(".hud/ci-tasks.json")))
-    if attachments := task.args.get("attachments"):
-        assert calls[0]["result"]["data_files"] == [
-            {"path": "files/notes.txt", "file_id": attachments[0]["file_id"]}
-        ]
-
     # Unset local export so `hud trace` must read back from the platform.
     env = {key: value for key, value in os.environ.items() if key != "HUD_TELEMETRY_LOCAL_DIR"}
     for attempt in range(12):
@@ -78,10 +66,10 @@ def check() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("prepare").add_argument("example")
+    commands.add_parser("prepare")
     commands.add_parser("check")
     args = parser.parse_args()
     if args.command == "prepare":
-        prepare(args.example)
+        prepare()
     elif args.command == "check":
         check()

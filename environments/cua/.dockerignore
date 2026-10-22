@@ -4,3 +4,5 @@
 !uv.lock
 !env.py
 !supervisord.conf
+!.hud-sdk/
+!.hud-sdk/**

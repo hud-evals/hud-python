@@ -1,0 +1,128 @@
+{
+  "supplier": "Alderstone Components LLC",
+  "exported_at": "2026-05-17",
+  "amount_basis": "USD before tax; tax follows agreement; no separate tax credit",
+  "records": [
+    {
+      "export_row": "CR-001",
+      "credit_id": "CN-810",
+      "invoice_id": "ALD-4102",
+      "component": "goods",
+      "net_amount_usd": "84.00",
+      "issued_date": "2026-04-29",
+      "posted_date": "2026-04-30",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-002",
+      "credit_id": "CN-811",
+      "invoice_id": "ALD-4104",
+      "component": "goods",
+      "net_amount_usd": "42.00",
+      "issued_date": "2026-05-01",
+      "posted_date": "2026-05-02",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-003",
+      "credit_id": "CN-812",
+      "invoice_id": "ALD-4105",
+      "component": "goods",
+      "net_amount_usd": "123.00",
+      "issued_date": "2026-05-14",
+      "posted_date": "2026-05-16",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-004",
+      "credit_id": "CN-813",
+      "invoice_id": "ALD-4106",
+      "component": "goods",
+      "net_amount_usd": "84.00",
+      "issued_date": "2026-05-12",
+      "posted_date": "2026-05-13",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-005",
+      "credit_id": "CN-814",
+      "invoice_id": "ALD-4107",
+      "component": "goods",
+      "net_amount_usd": "61.50",
+      "issued_date": "2026-05-11",
+      "posted_date": "2026-05-12",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-006",
+      "credit_id": "CN-815",
+      "invoice_id": "ALD-4109",
+      "component": "goods",
+      "net_amount_usd": "16.80",
+      "issued_date": "2026-05-13",
+      "posted_date": "2026-05-14",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-007",
+      "credit_id": "CN-816",
+      "invoice_id": "ALD-4111",
+      "component": "goods",
+      "net_amount_usd": "84.00",
+      "issued_date": "2026-05-15",
+      "posted_date": "2026-05-15",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-008",
+      "credit_id": "CN-817",
+      "invoice_id": "ALD-4117",
+      "component": "goods",
+      "net_amount_usd": "61.50",
+      "issued_date": "2026-05-09",
+      "posted_date": "2026-05-10",
+      "status": "VOID"
+    },
+    {
+      "export_row": "CR-009",
+      "credit_id": "CN-818",
+      "invoice_id": "ALD-4117",
+      "component": "goods",
+      "net_amount_usd": "24.60",
+      "issued_date": "2026-05-16",
+      "posted_date": "2026-05-16",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-010",
+      "credit_id": "CN-819",
+      "invoice_id": "ALD-4119",
+      "component": "goods",
+      "net_amount_usd": "252.00",
+      "issued_date": "2026-05-08",
+      "posted_date": "2026-05-09",
+      "status": "SUPERSEDED",
+      "superseded_by": "CN-820"
+    },
+    {
+      "export_row": "CR-011",
+      "credit_id": "CN-820",
+      "invoice_id": "ALD-4119",
+      "component": "goods",
+      "net_amount_usd": "84.00",
+      "issued_date": "2026-05-10",
+      "posted_date": "2026-05-11",
+      "status": "APPROVED"
+    },
+    {
+      "export_row": "CR-012",
+      "credit_id": "CN-820",
+      "invoice_id": "ALD-4119",
+      "component": "goods",
+      "net_amount_usd": "84.00",
+      "issued_date": "2026-05-10",
+      "posted_date": "2026-05-11",
+      "status": "APPROVED"
+    }
+  ]
+}

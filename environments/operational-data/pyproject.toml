@@ -1,0 +1,52 @@
+[project]
+name = "operational-data-template"
+version = "0.1.0"
+description = "HUD environment that serves uploaded Slack, Jira and calendar exports to the agent as MCP tools, beside a workspace of attached files"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "hud[agents]",
+    "httpx>=0.27.0",
+    "icalendar>=6.1",
+    "openpyxl>=3.1",
+    "pypdf>=5.0",
+    "python-dateutil>=2.9",
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "recurring-ical-events>=3.3",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+# Installed into the image's system Python, which is what the agent's shell runs.
+agent-tools = [
+    "openpyxl>=3.1",
+    "pypdf>=5.0",
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.11.2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = [".", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "C4", "UP"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+hud = { git = "https://github.com/hud-evals/hud-python.git", branch = "main" }

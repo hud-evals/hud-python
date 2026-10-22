@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [blank, coding, cua, argument-hints]
+        template: [blank, coding, cua, operational-data]
 
     steps:
       - name: Check out code
@@ -38,9 +38,6 @@ jobs:
           uv build --wheel --no-create-gitignore --out-dir .hud-sdk "$GITHUB_WORKSPACE"
           uv add --no-sync .hud-sdk/hud-*.whl
           uv sync --all-extras
-          sed -i '/^RUN .*uv sync/i COPY .hud-sdk .hud-sdk' Dockerfile.hud
-          echo '!.hud-sdk/' >> .dockerignore
-          echo '!.hud-sdk/**' >> .dockerignore
 
       - name: Run example checks
         working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
@@ -62,12 +59,11 @@ jobs:
         working-directory: ${{ runner.temp }}/${{ env.EXAMPLE_NAME }}
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
-          HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
           HUD_TELEMETRY_LOCAL_DIR: ${{ runner.temp }}/traces-${{ matrix.template }}
         run: |
-          uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" prepare "${{ matrix.template }}"
+          uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" prepare
           timeout --signal=INT --kill-after=30s 15m uv run --no-sync hud eval .hud/ci-tasks.json claude \
-            --model claude-sonnet-4-6 --gateway --runtime hud --max-steps 10 --config max_tokens=2048 -y
+            --model claude-sonnet-5-5 --gateway --runtime hud --max-steps 10 --config max_tokens=2048 -y
           uv run --no-sync "$GITHUB_WORKSPACE/scripts/example_lifecycle.py" check
 
       - name: Save traces

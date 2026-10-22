@@ -1,0 +1,21 @@
+FROM python:3.11-bookworm
+
+# SDL2 runtime libs for PyBoy (it links SDL even in headless "null" mode).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git libsdl2-2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+COPY . /app/
+RUN set -eu; \
+    if [ -d .hud-sdk ]; then \
+        set -- .hud-sdk/hud-*.whl; test "$#" -eq 1; test -f "$1"; \
+        uv add --no-sync "$1"; \
+    fi; \
+    uv sync --upgrade-package hud --no-dev
+
+# Serve the v6 control channel; @env.initialize brings up the in-process game mcp capability.
+CMD ["/app/.venv/bin/hud", "serve", "env:env", "--host", "0.0.0.0", "--port", "8765"]

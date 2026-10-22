@@ -4,5 +4,7 @@
 !uv.lock
 !env.py
 !grader.py
-!flask.bundle
+!repository.bundle
+!.hud-sdk/
+!.hud-sdk/**
 **/__pycache__

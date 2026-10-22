@@ -72,8 +72,8 @@ experiments/
 .codex/environments/*
 !.codex/environments/environment.toml
 
-# Runtime fixtures and dependency locks for featured environment templates.
-!environments/featured/**/uv.lock
-!environments/featured/file-analysis/fixtures/*.csv
-!environments/featured/libbet/games/test/
-!environments/featured/libbet/games/test/**
+# Runtime fixtures and dependency locks for environment templates.
+!environments/*/uv.lock
+!environments/file-analysis/fixtures/**/*.csv
+!environments/libbet/games/test/
+!environments/libbet/games/test/**

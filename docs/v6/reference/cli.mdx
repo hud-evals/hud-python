@@ -46,17 +46,25 @@ installed SDK rather than `main`.
 hud init                              # choose an example interactively
 hud init my-env                       # coding → ./my-env
 hud init my-env --template cua        # computer use → ./my-env
+hud init my-env --template operational-data # exported tools and attached files → ./my-env
+hud init my-env --template browser-use # visual and live web research → ./my-env
 hud init my-env --template blank      # minimal scaffold → ./my-env
 hud init my-env --dir envs            # coding → ./envs/my-env
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--template`, `-t` | Example environment to use: `coding`, `cua`, `blank`, or `argument-hints`. Omit for the interactive picker; a named non-interactive run uses `coding`. `--preset`/`-p` are aliases. |
+| `--template`, `-t` | Example environment to use: `coding`, `cua`, `operational-data`, `browser-use`, or `blank`. `argument-hints` and `file-analysis` resolve to `operational-data`; `liveweb` resolves to `browser-use`. Omit for the interactive picker; a named non-interactive run uses `coding`. `--preset`/`-p` are aliases. |
 | `--dir`, `-d` | Parent directory (default `.`). |
 | `--force`, `-f` | Overwrite existing files. |
 | `--json` | Structured result on stdout. |
 | `--dry-run` | Print the planned scaffold without writing files. |
+
+The copied projects use SDK `main` by default. Their Dockerfiles also accept one exact SDK
+wheel in `.hud-sdk/`, so checks and deployments can use the SDK checkout they are testing.
+For uv-based projects, run `uv sync --upgrade-package hud` to refresh the SDK source.
+The robotics example has simulator-specific dependencies and a separate container setup;
+follow its environment README instead of using the starter picker.
 
 ### `hud serve`
 

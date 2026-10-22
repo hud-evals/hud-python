@@ -1,0 +1,8 @@
+samples/**/*.pdf binary
+samples/**/*.docx binary
+samples/**/*.xlsx binary
+samples/**/*.pptx binary
+samples/**/*.zip binary
+samples/**/*.sqlite binary
+samples/**/*.csv -text whitespace=cr-at-eol
+samples/**/*.ics -text whitespace=cr-at-eol

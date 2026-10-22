@@ -3,7 +3,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    chromium chromium-sandbox curl dbus-x11 jq supervisor x11vnc xfce4 xfce4-terminal xvfb \
+    chromium chromium-sandbox curl dbus-x11 git jq supervisor x11vnc xfce4 xfce4-terminal xvfb \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 1000 --user-group ubuntu \
@@ -11,9 +11,14 @@ RUN useradd --create-home --uid 1000 --user-group ubuntu \
   && install -d -m 1777 /tmp/.X11-unix /tmp/.ICE-unix
 
 WORKDIR /hud
-COPY pyproject.toml uv.lock env.py supervisord.conf ./
+COPY . /hud/
 
-RUN UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --frozen --no-install-project \
+RUN set -eu; \
+    if [ -d .hud-sdk ]; then \
+        set -- .hud-sdk/hud-*.whl; test "$#" -eq 1; test -f "$1"; \
+        uv add --no-sync "$1"; \
+    fi; \
+    UV_PROJECT_ENVIRONMENT=/usr/local/venv uv sync --upgrade-package hud --no-install-project \
   && chmod -R a+rX /usr/local/venv \
   && chmod -R go-rwx /hud
 
