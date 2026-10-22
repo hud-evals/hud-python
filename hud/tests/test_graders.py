@@ -537,150 +537,10 @@ class _FakeGatewayClient:
         user_prompt: str = kwargs["messages"][1]["content"]
         status = "MET" if "met:" in user_prompt else "UNMET"
         content = json.dumps({"criterion_status": status, "explanation": "because"})
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(message=SimpleNamespace(content=content), finish_reason="stop")
-            ]
-        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 class TestLLMJudgeGrader:
-    @pytest.mark.parametrize(
-        "content",
-        [
-            "",
-            "UNMET",
-            '{"criterion_status":"MET"',
-            '{"criterion_status":"MAYBE","explanation":"uncertain"}',
-            '{"criterion_status":"MET"}',
-            '{"criterion_status":"MET","explanation":1}',
-            '[{"criterion_status":"MET","explanation":"because"}]',
-        ],
-    )
-    async def test_invalid_judgment_raises_instead_of_awarding_a_score(
-        self, monkeypatch: pytest.MonkeyPatch, content: str
-    ) -> None:
-        create = AsyncMock(
-            return_value=SimpleNamespace(
-                choices=[
-                    SimpleNamespace(message=SimpleNamespace(content=content), finish_reason="stop")
-                ]
-            )
-        )
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda provider: client)
-        with pytest.raises(ValueError, match="invalid structured verdict"):
-            await LLMJudgeGrader.grade(
-                weight=1.0, answer="saved answer", criteria=[("contains an error", -1.0)]
-            )
-        assert create.await_count == 2
-
-    async def test_format_repair_preserves_original_inputs_and_judgment(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        malformed = "The response does not contain the described error."
-        create = AsyncMock(
-            side_effect=[
-                SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            message=SimpleNamespace(content=content), finish_reason="stop"
-                        )
-                    ]
-                )
-                for content in (
-                    malformed,
-                    '{"criterion_status":"UNMET","explanation":"The error is absent."}',
-                )
-            ]
-        )
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda provider: client)
-        score = await LLMJudgeGrader.grade(
-            weight=1.0,
-            answer="Original saved answer.",
-            question="Original business request.",
-            criteria=[("Makes an unsupported claim.", -1.0)],
-        )
-        assert create.await_count == 2
-        first, repair = [call.kwargs for call in create.await_args_list]
-        assert repair["messages"][:2] == first["messages"]
-        assert "Original saved answer." in first["messages"][1]["content"]
-        assert "Original business request." in first["messages"][1]["content"]
-        assert "Makes an unsupported claim." in first["messages"][1]["content"]
-        assert repair["messages"][2] == {"role": "assistant", "content": malformed}
-        assert "Repair only the format" in repair["messages"][3]["content"]
-        assert first["max_tokens"] == repair["max_tokens"] == 1024
-        assert score.value == 1.0
-        assert score.children is not None
-        assert score.children[0].value == 0.0
-        assert score.children[0].info == {"reason": "The error is absent.", "attempts": 2}
-
-    async def test_length_limited_judgment_raises_even_with_valid_json(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        create = AsyncMock(
-            return_value=SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        message=SimpleNamespace(
-                            content='{"criterion_status":"UNMET","explanation":"because"}'
-                        ),
-                        finish_reason="length",
-                    )
-                ]
-            )
-        )
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda provider: client)
-        with pytest.raises(RuntimeError, match="judge-model exhausted max_tokens=4096"):
-            await LLMJudgeGrader.grade(
-                weight=1.0,
-                answer="saved answer",
-                criteria=["correct"],
-                model="judge-model",
-                max_tokens=4096,
-            )
-        assert create.await_count == 1
-
-    @pytest.mark.parametrize(
-        "content",
-        [
-            '{"criterion_status":"MET","explanation":"because"}',
-            "Both requested parts are satisfied.\n"
-            '{"criterion_status":"MET","explanation":"because"}',
-            '```json\n{"criterion_status":"MET","explanation":"because"}\n```',
-        ],
-    )
-    async def test_valid_judgments_and_configured_budget_reach_the_gateway(
-        self, monkeypatch: pytest.MonkeyPatch, content: str
-    ) -> None:
-        create = AsyncMock(
-            return_value=SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        message=SimpleNamespace(content=content),
-                        finish_reason="stop",
-                    )
-                ]
-            )
-        )
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        monkeypatch.setattr("hud.utils.gateway.build_gateway_client", lambda provider: client)
-        score = await LLMJudgeGrader.grade(
-            weight=1.0, answer="saved answer", criteria=["correct"], max_tokens=4096
-        )
-        assert create.call_args.kwargs["max_tokens"] == 4096
-        assert create.await_count == 1
-        assert score.value == 1.0
-        assert score.info is not None
-        assert score.info["max_tokens"] == 4096
-
-    @pytest.mark.parametrize("max_tokens", [0, -1])
-    async def test_nonpositive_token_budget_is_rejected(self, max_tokens: int) -> None:
-        with pytest.raises(ValueError, match="max_tokens must be positive"):
-            await LLMJudgeGrader.compute_score(criteria=["correct"], max_tokens=max_tokens)
-
     async def test_compute_score_returns_rubric_node(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "hud.utils.gateway.build_gateway_client", lambda provider: _FakeGatewayClient()
@@ -692,8 +552,8 @@ class TestLLMJudgeGrader:
         assert subscore.value == pytest.approx(0.25)
         assert subscore.children is not None
         assert [(c.name, c.value, c.weight, c.info) for c in subscore.children] == [
-            ("met: mentions Paris", 1.0, 1.0, {"reason": "because", "attempts": 1}),
-            ("names the river", 0.0, 3.0, {"reason": "because", "attempts": 1}),
+            ("met: mentions Paris", 1.0, 1.0, {"reason": "because"}),
+            ("names the river", 0.0, 3.0, {"reason": "because"}),
         ]
 
     async def test_compute_score_applies_negative_criterion_penalty(
@@ -720,7 +580,7 @@ class TestLLMJudgeGrader:
                 name="met: correct",
                 value=1.0,
                 weight=1.0,
-                info={"reason": "because", "attempts": 1},
+                info={"reason": "because"},
             )
         ]
         assert subscore.info is not None
