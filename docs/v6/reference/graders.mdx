@@ -90,11 +90,20 @@ result = await LLMJudgeGrader.grade(
     criteria=["Correct", ("Well-reasoned", 2.0)],
     question=prompt,
     model="claude-haiku-4-5",
+    max_tokens=1024,
 )
 ```
 
 `criteria` items are strings, or `(requirement, weight)` tuples. A negative weight marks an error to
 avoid: the criterion scores as a penalty, MET when the answer actually makes the mistake.
+
+`max_tokens` sets the response budget for each criterion and defaults to 1024. Increase it
+when the judge needs to verify longer documents or calculations. This does not change the
+solving agent's budget.
+
+Verdicts require a non-empty explanation. Malformed verdicts get one format-repair attempt;
+a still-invalid or truncated response raises a grading error instead of being treated as a
+pass or failure.
 
 The returned `SubScore` has one child per criterion: `name` is the requirement, `value` is
 `1.0`/`0.0` for the verdict (on a negative-weight criterion, `1.0` means the error is present),

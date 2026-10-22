@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -19,8 +18,7 @@ from .results import SubScore
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
-
-logger = logging.getLogger(__name__)
+    from openai.types.chat import ChatCompletionMessageParam
 
 _SYSTEM_PROMPT = """You evaluate a response against a single criterion and decide \
 whether the thing the criterion describes is present in the response.
@@ -40,8 +38,14 @@ equivalent statements and reasonable implications.
 - An action required "immediately"/unconditionally is UNMET if the response only does \
 it conditionally ("if Y, then ...").
 - "criterion_status" is about presence, not quality.
+- Include a non-empty explanation for the verdict.
 
 Return ONLY raw JSON, no code fences, in exactly this form:
+{"criterion_status": "MET", "explanation": "Brief reason."}"""
+
+_REPAIR_PROMPT = """Repair only the format of your previous verdict. Keep the same judgment \
+about the original criterion, query and response. Return ONLY one raw JSON object, no prose \
+or code fences. Set criterion_status to MET or UNMET and explanation to a non-empty string: \
 {"criterion_status": "MET", "explanation": "Brief reason."}"""
 
 
@@ -78,10 +82,13 @@ class LLMJudgeGrader(Grader):
         criteria: list[str | tuple[str, float]] | None = None,
         question: str = "",
         model: str = "claude-haiku-4-5",
+        max_tokens: int = 1024,
         **kwargs: Any,
     ) -> SubScore:
         """Evaluate ``answer`` against ``criteria`` via parallel LLM judgments."""
         del kwargs
+        if max_tokens <= 0:
+            raise ValueError("max_tokens must be positive")
         parsed = _parse_criteria(criteria)
         if not parsed:
             return SubScore(name=cls.name, value=0.0, info={"error": "no criteria provided"})
@@ -92,28 +99,47 @@ class LLMJudgeGrader(Grader):
         answer_text = str(answer)
 
         async def _judge(criterion: _Criterion) -> SubScore:
-            response = await client.chat.completions.create(
-                model=model,
-                max_tokens=1024,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": _user_prompt(criterion, answer_text, question)},
-                ],
-            )
-            met, reason = _parse_verdict(response.choices[0].message.content or "")
-            return SubScore(
-                name=criterion.requirement,
-                value=1.0 if met else 0.0,
-                weight=criterion.weight,
-                info={"reason": reason},
-            )
+            messages: list[ChatCompletionMessageParam] = [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": _user_prompt(criterion, answer_text, question)},
+            ]
+            attempts = 0
+            while True:
+                attempts += 1
+                response = await client.chat.completions.create(
+                    model=model, max_tokens=max_tokens, messages=messages
+                )
+                choice = response.choices[0]
+                if choice.finish_reason == "length":
+                    raise RuntimeError(
+                        f"LLM judge {model} exhausted max_tokens={max_tokens} without "
+                        "a complete verdict"
+                    )
+                content = choice.message.content or ""
+                try:
+                    met, reason = _parse_verdict(content)
+                except ValueError:
+                    if attempts == 2:
+                        raise
+                    messages = [
+                        *messages,
+                        {"role": "assistant", "content": content},
+                        {"role": "user", "content": _REPAIR_PROMPT},
+                    ]
+                    continue
+                return SubScore(
+                    name=criterion.requirement,
+                    value=1.0 if met else 0.0,
+                    weight=criterion.weight,
+                    info={"reason": reason, "attempts": attempts},
+                )
 
         verdicts = list(await asyncio.gather(*(_judge(c) for c in parsed)))
         return SubScore(
             name=cls.name,
             value=_rubric_value(verdicts),
             children=verdicts,
-            info={"model": model},
+            info={"model": model, "max_tokens": max_tokens},
         )
 
 
@@ -140,19 +166,24 @@ def _user_prompt(criterion: _Criterion, answer: str, question: str) -> str:
 
 
 def _parse_verdict(content: str) -> tuple[bool, str]:
-    """Extract ``(met, explanation)`` from the judge's JSON reply, tolerantly."""
+    """Require a structured verdict; missing judgments must never become UNMET."""
     text = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        start, end = text.find("{"), text.rfind("}")
         try:
-            data = json.loads(text[start : end + 1])
-            status = str(data.get("criterion_status", "")).upper()
-            return status == "MET", str(data.get("explanation", ""))
-        except (ValueError, AttributeError):
-            logger.debug("LLMJudgeGrader: unparseable judge reply: %s", text[:200])
-    # Fallback: scan for a verdict token (UNMET contains MET, so test it first).
-    upper = text.upper()
-    return ("UNMET" not in upper and "MET" in upper), text[:200]
+            data = json.loads(text[start : end + 1] if start != -1 and end > start else "")
+        except ValueError:
+            raise ValueError("LLM judge returned an invalid structured verdict") from None
+    if (
+        not isinstance(data, dict)
+        or data.get("criterion_status") not in ("MET", "UNMET")
+        or not isinstance(data.get("explanation"), str)
+        or not data["explanation"].strip()
+    ):
+        raise ValueError("LLM judge returned an invalid structured verdict")
+    return data["criterion_status"] == "MET", data["explanation"]
 
 
 def _rubric_value(subscores: list[SubScore]) -> float:
