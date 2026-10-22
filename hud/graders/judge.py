@@ -38,13 +38,14 @@ equivalent statements and reasonable implications.
 - An action required "immediately"/unconditionally is UNMET if the response only does \
 it conditionally ("if Y, then ...").
 - "criterion_status" is about presence, not quality.
+- Include a non-empty explanation for the verdict.
 
 Return ONLY raw JSON, no code fences, in exactly this form:
 {"criterion_status": "MET", "explanation": "Brief reason."}"""
 
 _REPAIR_PROMPT = """Repair only the format of your previous verdict. Keep the same judgment \
 about the original criterion, query and response. Return ONLY one raw JSON object, no prose \
-or code fences, with criterion_status set to MET or UNMET and explanation set to a string: \
+or code fences. Set criterion_status to MET or UNMET and explanation to a non-empty string: \
 {"criterion_status": "MET", "explanation": "Brief reason."}"""
 
 
@@ -179,6 +180,7 @@ def _parse_verdict(content: str) -> tuple[bool, str]:
         not isinstance(data, dict)
         or data.get("criterion_status") not in ("MET", "UNMET")
         or not isinstance(data.get("explanation"), str)
+        or not data["explanation"].strip()
     ):
         raise ValueError("LLM judge returned an invalid structured verdict")
     return data["criterion_status"] == "MET", data["explanation"]

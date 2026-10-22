@@ -554,6 +554,10 @@ class TestLLMJudgeGrader:
             '{"criterion_status":"MAYBE","explanation":"uncertain"}',
             '{"criterion_status":"MET"}',
             '{"criterion_status":"MET","explanation":1}',
+            '{"criterion_status":"MET","explanation":""}',
+            '{"criterion_status":"UNMET","explanation":""}',
+            json.dumps({"criterion_status": "MET", "explanation": " \t\n "}),
+            json.dumps({"criterion_status": "UNMET", "explanation": " \t\n "}),
             '[{"criterion_status":"MET","explanation":"because"}]',
         ],
     )
@@ -575,10 +579,17 @@ class TestLLMJudgeGrader:
             )
         assert create.await_count == 2
 
+    @pytest.mark.parametrize(
+        "malformed",
+        [
+            "The response does not contain the described error.",
+            '{"criterion_status":"UNMET","explanation":""}',
+            json.dumps({"criterion_status": "UNMET", "explanation": " \t\n "}),
+        ],
+    )
     async def test_format_repair_preserves_original_inputs_and_judgment(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, malformed: str
     ) -> None:
-        malformed = "The response does not contain the described error."
         create = AsyncMock(
             side_effect=[
                 SimpleNamespace(
