@@ -1,6 +1,7 @@
 """Tests for selected JUnit scoring."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -146,3 +147,33 @@ async def test_timed_out_grader_does_not_score_partial_report(grading_workspace)
 
     assert result.value == 0.0
     assert result.info["timed_out"] is True
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_timed_out_grader_without_report_is_a_graded_failure(grading_workspace):
+    # A hidden-test run killed at the timeout usually writes no report. It is still the
+    # agent's code that hung, so it must score 0 rather than be marked a grading error.
+    result = await grade_tests(grading_workspace, "sleep 30 {junit_path}", timeout_seconds=1)
+
+    assert result.value == 0.0
+    assert result.info["timed_out"] is True
+    assert "error" not in result.info
+
+
+class _TimedOutWorkspace:
+    """A workspace whose command is cut off at the timeout before writing a report."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    async def run(self, argv, cwd, env, max_wait, scope):
+        return SimpleNamespace(returncode=124, stdout=b"", stderr=b"", timed_out=True)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_timeout_is_scored_before_the_missing_report_check(tmp_path: Path):
+    result = await grade_tests(_TimedOutWorkspace(tmp_path), "pytest --junitxml={junit_path}")
+
+    assert result.value == 0.0
+    assert result.info["timed_out"] is True
+    assert "error" not in result.info

@@ -150,9 +150,14 @@ async def grade_tests(
             "timed_out": process.timed_out,
         }
         failed = SubScore(name="tests", value=0.0, info=info)
+        # A run that hit the timeout was cut off while the hidden tests exercised the
+        # agent's code, so it is a graded failure. Check it before the report: a killed
+        # run usually never writes one, and a missing report is a grading error.
+        if process.timed_out:
+            return failed
         if not report.is_file():
             return failed.model_copy(update={"info": {**info, "error": "test command did not write JUnit XML"}})
-        if process.timed_out or (binary and process.returncode != 0):
+        if binary and process.returncode != 0:
             return failed
         try:
             result = score_tests(parse_junit(report), fail_to_pass, pass_to_pass, binary)
