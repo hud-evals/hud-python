@@ -153,7 +153,7 @@ async def test_timed_out_grader_does_not_score_partial_report(grading_workspace)
 async def test_timed_out_grader_without_report_is_a_graded_failure(grading_workspace):
     # A hidden-test run killed at the timeout usually writes no report. It is still the
     # agent's code that hung, so it must score 0 rather than be marked a grading error.
-    result = await grade_tests(grading_workspace, "sleep 30 {junit_path}", timeout_seconds=1)
+    result = await grade_tests(grading_workspace, "true {junit_path}; sleep 30", timeout_seconds=1)
 
     assert result.value == 0.0
     assert result.info["timed_out"] is True
