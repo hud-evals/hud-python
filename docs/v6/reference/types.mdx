@@ -63,13 +63,19 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 | `runs` | `list[Run]` | The graded runs, in expansion order (task-major, then group). |
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
-| `reward` | `float` | Property: mean reward across runs (`0.0` for an empty job). |
+| `reward` | `float` | Property: mean reward across runs with valid grades (`0.0` if none are graded). |
+| `errors` | `list[Run]` | Property: runs without a valid grade, excluded from the mean reward. |
 | `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
 
 ```python
 job = await ts.run(agent, runtime=LocalRuntime("env.py"), group=4)
-print(job.reward)   # mean across every run
+print(job.reward)   # mean across valid grades
 ```
+
+A provider API or transport failure in a tool agent ends the run with
+`stop_reason="provider_error"`. The task is cancelled without grading or running its verifier,
+and the run appears in `job.errors` rather than contributing a zero to `job.reward`.
+Completed turns and tool results remain on the trace. Provider SDK retries are unchanged.
 
 Each `run` call mints its own job by default. To gather many calls under one id - a training session, a
 multi-turn chat - open one with `Job.start(name, *, group=1, taskset_id=None)` and pass it as `job=`;
@@ -84,7 +90,7 @@ unit of training data. Every recorded step also streams to the platform as one s
 |-------|------|-------------|
 | `steps` | `list[Step]` | The ordered trajectory. |
 | `status` | `"completed" \| "error" \| "cancelled" \| None` | How the run ended (`trace.is_error` reads it). |
-| `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| None` | Why the rollout stopped (`trace.is_truncated` reads it: anything but `"done"` means a limit cut it off). |
+| `stop_reason` | `"done" \| "max_steps" \| "length" \| "timeout" \| "malformed_tool_call" \| "provider_error" \| None` | Why the rollout stopped. Provider failures are errors, not truncations: `trace.is_truncated` is false for `"provider_error"`. |
 | `content` | `str \| None` | The final answer (graded). |
 | `trace_id` | `str \| None` | Keys server-side trajectories. |
 

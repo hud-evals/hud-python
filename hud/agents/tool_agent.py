@@ -9,6 +9,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
 
 import mcp.types as mcp_types
+from anthropic import APIError as AnthropicAPIError
+from google.genai.errors import APIError as GeminiAPIError
+from httpx import TransportError as HTTPXTransportError
+from httpx2 import TransportError as HTTPX2TransportError
+from openai import APIError as OpenAIAPIError
 
 from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
@@ -196,6 +201,19 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                         raise
                     logger.warning("Discarded degenerate turn: %s", exc)
                     continue
+                except (
+                    AnthropicAPIError,
+                    OpenAIAPIError,
+                    GeminiAPIError,
+                    HTTPXTransportError,
+                    HTTPX2TransportError,
+                ) as exc:
+                    logger.exception("Provider request failed")
+                    trace.content = step.content if step else None
+                    trace.status = "error"
+                    trace.stop_reason = "provider_error"
+                    run.record(Step(source="system", error=str(exc)))
+                    return
                 step.started_at = step.started_at or started_at
                 step.model = step.model or self.config.model
                 run.record(step)

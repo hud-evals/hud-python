@@ -320,8 +320,10 @@ class Step(BaseModel):
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
-#: Why the rollout stopped; anything but "done" means a limit cut it off.
-StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
+#: Why the rollout stopped, including provider failures that are not model outcomes.
+StopReason: TypeAlias = Literal[
+    "done", "max_steps", "length", "timeout", "malformed_tool_call", "provider_error"
+]
 
 #: The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 #: conditions the loop may either stop on or answer with an error result.
@@ -394,7 +396,7 @@ class Trace(BaseModel):
     @property
     def is_truncated(self) -> bool:
         """Whether a limit (step budget, token cap, timeout) cut the rollout off."""
-        return self.stop_reason is not None and self.stop_reason != "done"
+        return self.stop_reason is not None and self.stop_reason not in {"done", "provider_error"}
 
     @property
     def error(self) -> str | None:
