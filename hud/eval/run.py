@@ -107,6 +107,20 @@ def validate_rollout_timeouts(
     return agent_timeout
 
 
+def parent_trace(trace_id: str) -> uuid.UUID | None:
+    """The trace a rollout of ``trace_id`` runs inside: the ambient trace, when it is
+    another one. The platform keys traces by UUID, so an ambient id that is not one
+    names no trace it holds, and the rollout has no parent. A caller sends it in the
+    form it sends the rollout's own trace id: hex locally, canonical when hosted."""
+    ambient = get_current_trace_id() or get_mcp_trace_id()
+    if ambient is None or normalize_trace_id(ambient) == normalize_trace_id(trace_id):
+        return None
+    try:
+        return uuid.UUID(ambient)
+    except ValueError:
+        return None
+
+
 def _prompt_messages(item: Any) -> list[mcp_types.PromptMessage]:
     """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
 
@@ -507,11 +521,8 @@ async def rollout(
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
-    parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
-    if parent_trace_id is not None and normalize_trace_id(parent_trace_id) == normalize_trace_id(
-        trace_id
-    ):
-        parent_trace_id = None
+    parent = parent_trace(trace_id)
+    parent_trace_id = parent.hex if parent is not None else None
     # Report the model the agent will sample so the platform attributes the
     # trace to it on enter. Only LLM tool agents carry an inference-model slug
     # (``config.model``); robot/other agents have none. Local import avoids an

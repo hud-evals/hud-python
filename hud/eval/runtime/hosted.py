@@ -8,10 +8,7 @@ import uuid
 import warnings
 from typing import TYPE_CHECKING, Any
 
-from hud.capabilities.mcp import get_mcp_trace_id
-from hud.eval.run import Grade, Run, validate_rollout_timeouts
-from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.span import normalize_trace_id
+from hud.eval.run import Grade, Run, parent_trace, validate_rollout_timeouts
 from hud.types import AgentType, Step
 from hud.utils.platform import PlatformClient
 
@@ -73,16 +70,8 @@ class HostedRuntime:
         local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex
-        parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
-        if parent_trace_id is not None and normalize_trace_id(
-            parent_trace_id
-        ) == normalize_trace_id(trace_id):
-            parent_trace_id = None
-        if parent_trace_id is not None:
-            try:
-                parent_trace_id = str(uuid.UUID(parent_trace_id))
-            except ValueError:
-                parent_trace_id = None
+        parent = parent_trace(trace_id)
+        parent_trace_id = str(parent) if parent is not None else None
         timeout = self.run_timeout if rollout_timeout is None else rollout_timeout
         validate_rollout_timeouts(
             task,
