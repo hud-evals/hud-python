@@ -85,6 +85,7 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
         self.parallel_tool_calls = config.parallel_tool_calls
         self.text = config.text
         self.truncation: Literal["auto", "disabled"] | None = config.truncation
+        self.context_management = config.context_management
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
@@ -240,6 +241,9 @@ class OpenAIAgent(ToolAgent[ResponseInputItemParam, OpenAIConfig]):
             ),
             prompt_cache_key=self.config.prompt_cache_key,
             truncation=self.truncation if self.truncation is not None else Omit(),
+            context_management=(
+                self.context_management if self.context_management is not None else Omit()
+            ),
             include=include_param,
         )
 
