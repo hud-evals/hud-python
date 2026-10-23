@@ -116,7 +116,7 @@ LISTS: dict[str, tuple[list[str], dict[str, str], dict[str, Any], list[str]]] = 
     "jobs": (
         ["jobs"],
         {},
-        {"GET /v2/jobs": {"items": [{"id": "job-1"}, {"id": "job-2"}]}},
+        {"GET /v2/jobs": {"items": [{"id": "job-1"}, {"id": "job-2"}], "total": 2}},
         ["job-1", "job-2"],
     ),
 }
@@ -329,7 +329,7 @@ def test_each_platform_status_maps_to_one_error_kind(
 def test_a_transient_platform_failure_is_retried_and_the_command_succeeds(
     signed_in: FakeServices, hud: Hud
 ) -> None:
-    listed = Reply(json={"items": [{"id": "job-1"}]})
+    listed = Reply(json={"items": [{"id": "job-1"}], "total": 1})
     signed_in.route("api", "GET", "/v2/jobs", Reply(status=503), Reply(status=502), listed)
 
     result = hud("jobs", "list", "--quiet")

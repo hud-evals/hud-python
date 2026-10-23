@@ -6,8 +6,10 @@ import asyncio
 from typing import Any
 
 import typer
+from pydantic import ConfigDict, with_config
 from rich.panel import Panel
 from rich.table import Table
+from typing_extensions import TypedDict
 
 from hud.cli import (
     CLI,
@@ -21,6 +23,13 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
+
+
+@with_config(ConfigDict(extra="allow"))
+class _Forked(TypedDict):
+    id: str
+    model_name: str
+
 
 models_app = CLI(
     name="models",
@@ -128,7 +137,7 @@ def fork_model(
     source_id = resolve_gateway_model(source).id
     try:
         model = PlatformClient.from_settings().post(
-            "/models/fork", json={"source_model_id": source_id, "name": name}
+            "/models/fork", _Forked, json={"source_model_id": source_id, "name": name}
         )
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:

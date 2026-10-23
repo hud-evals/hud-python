@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 
 from hud.settings import settings
 from hud.telemetry.context import get_trace_headers
-from hud.utils.exceptions import HudAuthenticationError
-from hud.utils.platform import PlatformClient
+from hud.utils.exceptions import HudAuthenticationError, HudRequestError
+from hud.utils.platform import Page, PlatformClient
 
 if TYPE_CHECKING:
     from typing import TypeAlias
@@ -47,13 +47,6 @@ class GatewayModelInfo(BaseModel):
     def recency(self) -> datetime:
         """Sort key for "newest first": the model's release, else when it joined the catalog."""
         return self.released_at or self.created_at or datetime.min.replace(tzinfo=UTC)
-
-
-class GatewayModelsResponse(BaseModel):
-    """One page of `GET /models`."""
-
-    items: list[GatewayModelInfo]
-    total: int
 
 
 async def _inject_trace_id(request: httpx.Request) -> None:
@@ -194,14 +187,14 @@ def list_gateway_models(platform: PlatformClient | None = None) -> list[GatewayM
         platform = PlatformClient.from_settings()
     models: list[GatewayModelInfo] = []
     while True:
-        page = GatewayModelsResponse.model_validate(
-            platform.get("/models", params={"limit": 100, "offset": len(models)})
+        page = platform.get(
+            "/models", Page[GatewayModelInfo], params={"limit": 100, "offset": len(models)}
         )
         models.extend(page.items)
         if len(models) >= page.total:
             return models
         if not page.items:
-            raise ValueError("Models API returned an empty page before the reported total")
+            raise HudRequestError("Models API returned an empty page before the reported total")
 
 
 def resolve_gateway_model(model: str, platform: PlatformClient | None = None) -> GatewayModelInfo:

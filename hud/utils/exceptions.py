@@ -172,6 +172,10 @@ class HudRequestError(HudException):
         )
 
 
+class HudReplyError(HudRequestError):
+    """The HUD API answered a request with a body this client cannot read."""
+
+
 class HudAuthenticationError(HudException):
     """Missing or invalid HUD API key."""
 

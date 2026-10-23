@@ -6,7 +6,9 @@ import asyncio
 import logging
 import uuid
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NotRequired, cast
+
+from typing_extensions import TypedDict
 
 from hud.eval.run import Grade, Run, parent_trace, validate_rollout_timeouts
 from hud.types import AgentType, Step
@@ -15,10 +17,18 @@ from hud.utils.platform import PlatformClient
 if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.eval.task import Task
+    from hud.types import TraceStatus
 
 logger = logging.getLogger("hud.eval.runtime")
 
 _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
+
+
+class _TraceState(TypedDict):
+    status: str
+    error: NotRequired[str | None]
+    reward: NotRequired[float | None]
+    evaluation_result: NotRequired[dict[str, Any] | None]
 
 
 class HostedRuntime:
@@ -131,7 +141,7 @@ class HostedRuntime:
         group_id: str | None,
         trace_id: str,
         parent_trace_id: str | None,
-    ) -> dict[str, Any]:
+    ) -> _TraceState:
         agent_type = AgentType.of(agent)
         if agent_type is None:
             raise ValueError(
@@ -164,19 +174,17 @@ class HostedRuntime:
         return await self._await_terminal(platform, payload["trace_id"])
 
     @staticmethod
-    def _fold(state: dict[str, Any], trace_id: str) -> Run:
+    def _fold(state: _TraceState, trace_id: str) -> Run:
         """Build the local view of a remotely-executed rollout from its trace state."""
         run = Run(None, "", {})
-        # The poll loop only returns terminal states, so the status is one of
-        # the trace vocabulary; anything else would be a platform bug.
-        status = state.get("status")
-        run.trace.status = status if status in ("completed", "error", "cancelled") else "error"
+        # The poll loop only returns terminal states.
+        run.trace.status = cast("TraceStatus", state["status"])
         error = state.get("error")
         if error:
-            run.record(Step(source="system", error=str(error)))
+            run.record(Step(source="system", error=error))
         reward = state.get("reward")
         ungraded_failure = run.trace.status in ("error", "cancelled") and reward is None
-        grade_error = str(error) if error else None
+        grade_error = error or None
         if ungraded_failure and grade_error is None:
             grade_error = (
                 "rollout was cancelled before grading"
@@ -188,24 +196,24 @@ class HostedRuntime:
             Grade.from_dict(evaluation_result)
             if evaluation_result is not None
             else Grade(
-                reward=float(reward) if reward is not None else 0.0,
+                reward=reward if reward is not None else 0.0,
                 is_error=ungraded_failure,
                 content=grade_error,
-                raw={"score": float(reward)} if reward is not None else {},
+                raw={"score": reward} if reward is not None else {},
             )
         )
         run._runtime = f"hud://trace/{trace_id}"
         return run
 
-    async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> dict[str, Any]:
+    async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> _TraceState:
         task = asyncio.current_task()
         while True:
             # httpx can swallow a cancellation that lands mid-request, which
             # would leave a timed-out or cancelled rollout polling forever.
             if task is not None and task.cancelling():
                 raise asyncio.CancelledError
-            state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
-            if state.get("status") in _TERMINAL_TRACE_STATUSES:
+            state = await platform.aget(f"/trace/{trace_id}", _TraceState)
+            if state["status"] in _TERMINAL_TRACE_STATUSES:
                 return state
             await asyncio.sleep(self.poll_interval)
 

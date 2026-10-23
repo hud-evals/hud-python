@@ -171,3 +171,13 @@ def test_an_import_is_followed_to_its_end_and_fails_unless_it_completed(
     result = hud("harbor", "import", "tasks", "--taskset", "tb2", "--yes", "--json")
 
     assert (result.exit_code, result.json["import"]["status"]) == (exit_code, statuses[-1]), result
+
+
+def test_an_import_record_the_platform_garbles_is_reported_as_a_platform_failure(
+    signed_in: FakeServices, hud: Hud
+) -> None:
+    signed_in.route("api", "GET", f"/v2/imports/{IMPORT_ID}", json={"id": IMPORT_ID})
+
+    result = hud("harbor", "report", IMPORT_ID, "--json")
+
+    assert (result.exit_code, result.json["error"]) == (1, "failure"), result

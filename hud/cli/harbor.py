@@ -14,10 +14,10 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-from urllib.parse import quote
+from typing import Annotated, Any
 
 import typer
+from pydantic import BaseModel, Discriminator, RootModel, Tag
 from rich.filesize import decimal
 from rich.progress import (
     BarColumn,
@@ -32,6 +32,7 @@ from rich.table import Table
 from hud import imports
 from hud.cli import CLI, AuthScope, CliError, DirectoryLink, DirectoryState, Result
 from hud.cli.project import Placement, Project
+from hud.eval.sync import TasksetRecord, resolve_taskset_id
 from hud.integrations.harbor.importing import (
     IMPORT_FORMAT,
     REPORT_SCHEMAS,
@@ -61,6 +62,29 @@ _STATUS_STYLE: dict[TaskStatus, str] = {
     "skipped": "yellow",
     "failed": "red",
 }
+
+
+class _UnreadReport(BaseModel):
+    """A report in a schema this hud version does not read."""
+
+    schema_version: str
+
+
+def _report_schema(report: Any) -> str:
+    """Route a report by its schema: one this hud version reads, or one it does not."""
+    schema = report.get("schema_version") if isinstance(report, dict) else None
+    return "read" if schema in REPORT_SCHEMAS else "unread"
+
+
+class _Report(
+    RootModel[
+        Annotated[
+            Annotated[ImportReport, Tag("read")] | Annotated[_UnreadReport, Tag("unread")],
+            Discriminator(_report_schema),
+        ]
+    ]
+):
+    pass
 
 
 @dataclass(frozen=True)
@@ -203,7 +227,7 @@ def imports_command(
         record = _find_taskset(platform, _taskset_ref(taskset))
         if record is None:
             raise CliError("not_found", f"Taskset not found: {taskset}", input={"taskset": taskset})
-        taskset_id = str(record["id"])
+        taskset_id = str(record.id)
     found, total = imports.list_imports(
         platform, format=IMPORT_FORMAT, taskset_id=taskset_id, limit=limit
     )
@@ -342,13 +366,15 @@ def _taskset_ref(ref: str) -> uuid.UUID | str:
     return name
 
 
-def _find_taskset(platform: PlatformClient, ref: uuid.UUID | str) -> dict[str, Any] | None:
+def _find_taskset(platform: PlatformClient, ref: uuid.UUID | str) -> TasksetRecord | None:
     """The taskset with this ID or normalized name, or None when there is none."""
+    if isinstance(ref, str):
+        taskset_id, _ = resolve_taskset_id(platform, ref)
+        if not taskset_id:
+            return None
+        ref = taskset_id
     try:
-        if isinstance(ref, str):
-            found = platform.get(f"/tasksets/by-name/{quote(ref, safe='')}")
-            ref = uuid.UUID(str(found["taskset_id"]))
-        return platform.get(f"/tasksets/{ref}")
+        return platform.get(f"/tasksets/{ref}", TasksetRecord)
     except HudRequestError as exc:
         if exc.status_code == 404:
             return None
@@ -382,20 +408,20 @@ def _resolve_target(
         placement.require_writable()
         return _Target(name=ref, id=None, placement=placement)
 
-    if not record["can_edit"]:
+    if not record.can_edit:
         raise CliError(
             "permission_denied",
-            f"You cannot edit taskset {record['name']!r}, so nothing can be imported into it.",
+            f"You cannot edit taskset {record.name!r}, so nothing can be imported into it.",
             input={"taskset": given},
         )
-    if project is not None and Project.resolve(platform, project).id != str(record["project_id"]):
+    if project is not None and Project.resolve(platform, project).id != str(record.project_id):
         raise CliError(
             "usage",
-            f"Taskset {record['name']!r} is in another Project; --project only places a "
+            f"Taskset {record.name!r} is in another Project; --project only places a "
             "taskset this command creates.",
             input={"taskset": given, "project": project},
         )
-    return _Target(name=str(record["name"]), id=str(record["id"]))
+    return _Target(name=record.name, id=str(record.id))
 
 
 def _print_plan(target: _Target, bundle: Path, file_count: int | None, size: int) -> None:
@@ -410,9 +436,11 @@ def _print_plan(target: _Target, bundle: Path, file_count: int | None, size: int
 def _create_taskset(platform: PlatformClient, target: _Target) -> _Target:
     assert target.placement is not None
     record = platform.post(
-        "/tasksets", json={"name": target.name, "project_id": target.placement.project_id}
+        "/tasksets",
+        TasksetRecord,
+        json={"name": target.name, "project_id": target.placement.project_id},
     )
-    return _Target(name=str(record["name"]), id=str(record["id"]))
+    return _Target(name=record.name, id=str(record.id))
 
 
 def _upload(platform: PlatformClient, bundle: Path) -> str:
@@ -488,17 +516,17 @@ def _follow(platform: PlatformClient, import_id: str) -> imports.Import:
 def _read_report(platform: PlatformClient, imported: imports.Import) -> ImportReport | None:
     if not imported.publishes_report:
         return None
-    raw = imports.get_report(platform, imported.id)
-    if raw is None:
+    published = imports.get_report(platform, imported.id, _Report)
+    if published is None:
         return None
-    schema = raw.get("schema_version") if isinstance(raw, dict) else None
-    if schema not in REPORT_SCHEMAS:
+    report = published.root
+    if isinstance(report, _UnreadReport):
         hud_console.warning(
             f"This hud version reads {' and '.join(REPORT_SCHEMAS)} reports, and the import "
-            f"wrote {schema!r}; upgrade hud to see the report in detail."
+            f"wrote {report.schema_version!r}; upgrade hud to see the report in detail."
         )
         return None
-    return ImportReport.model_validate(raw)
+    return report
 
 
 def _status(status: TaskStatus) -> str:
