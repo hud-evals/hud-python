@@ -179,10 +179,11 @@ async def test_a_container_that_exits_before_serving_fails_at_once_with_its_outp
         id="never",
         runtime_config=RuntimeConfig(limits=RuntimeLimits(startup_timeout_s=60)),
     )
+    image = fixture_image("broken")
     started = time.monotonic()
 
     with pytest.raises(RuntimeError, match="exited with code 1") as raised:
-        async with DockerRuntime(fixture_image("broken"), run_args=flags)(row):
+        async with DockerRuntime(image, run_args=flags)(row):
             pytest.fail("the container should not serve")
 
     assert "no module named bugs" in str(raised.value)

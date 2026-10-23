@@ -72,15 +72,35 @@ def resolves(module: str, name: str | None) -> bool:
     )
 
 
+def third_party(path: Path) -> set[str]:
+    """The packages ``path`` needs from outside the stdlib, hud and its cookbook, through the
+    cookbook modules it imports as well."""
+    local = {
+        sibling.stem: sibling
+        for directory in search_path(path)
+        for sibling in directory.glob("*.py")
+    }
+    needed: set[str] = set()
+    seen: set[Path] = set()
+    pending = [path]
+    while pending:
+        module_path = pending.pop()
+        seen.add(module_path)
+        for module, _ in imports(module_path):
+            top = module.split(".")[0]
+            if top in local:
+                if local[top] not in seen:
+                    pending.append(local[top])
+            elif top not in {*sys.stdlib_module_names, "hud", "__future__"}:
+                needed.add(top)
+    return needed
+
+
 @pytest.mark.parametrize("path", MODULES, ids=module_id)
 def test_a_cookbook_module_imports(path: Path) -> None:
-    local = {sibling.stem for directory in search_path(path) for sibling in directory.glob("*.py")}
-    third_party = {
-        module.split(".")[0]
-        for module, _ in imports(path)
-        if module.split(".")[0] not in {*sys.stdlib_module_names, "hud", "__future__", *local}
-    }
-    if missing := sorted(name for name in third_party if importlib.util.find_spec(name) is None):
+    if missing := sorted(
+        name for name in third_party(path) if importlib.util.find_spec(name) is None
+    ):
         pytest.skip(f"needs {', '.join(missing)}")
     program = (
         f"import sys; sys.path[:0] = {[str(p) for p in search_path(path)]!r}; import {path.stem}"
