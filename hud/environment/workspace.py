@@ -571,9 +571,6 @@ class Workspace:
         #: substrate's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
         #: Peers removed while a sandbox ran; that sandbox keeps them until it is discarded.
-        #: Where each peer name answers while a sandbox runs: its bridge bound
-        #: them there at start, so they hold until it is discarded.
-        self._pinned_addresses: dict[str, str] | None = None
         self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
         self.ports = frozenset(ports)
@@ -685,13 +682,21 @@ class Workspace:
         """
         return not self.network or self.allowed_hosts is not None
 
-    def add_peer(self, peer: Peer, *, first: bool = False) -> None:
-        """Add a substrate service before the workspace accepts sessions."""
-        if self._sandbox is not None:
-            raise RuntimeError("workspace peers must be bound before its sandbox starts")
-        self.peers = (peer, *self.peers) if first else (*self.peers, peer)
-        if self._hosts_path is not None:
-            self._hosts_path = self._write_hosts()
+    async def add_peer(self, peer: Peer, *, first: bool = False) -> None:
+        """Add a substrate service, to a running sandbox too: the bridge offers it
+        before this returns, and no other peer moves."""
+        # Held so the add cannot interleave with a sandbox starting.
+        async with self._sandbox_lock:
+            self.peers = (peer, *self.peers) if first else (*self.peers, peer)
+            if self._egress is not None and (listener := self._egress.add_peer(peer)):
+                assert self._bridge is not None
+                self._bridge.stdin.write(json.dumps(listener).encode() + b"\n")
+                await self._bridge.stdin.drain()
+                if await asyncio.wait_for(self._bridge.stdout.readline(), 30.0) != b"ok\n":
+                    detail = (await self._bridge.stderr.read(2048)).decode(errors="replace")
+                    raise RuntimeError(detail.strip() or "workspace bridge refused a peer")
+            if self._hosts_path is not None:
+                self._hosts_path = self._write_hosts()
 
     def remove_peer(self, peer: Peer) -> None:
         """Remove a substrate service, from a running sandbox too: its name stops
@@ -700,18 +705,14 @@ class Workspace:
         self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
         if self._egress is not None and peer in self._egress.peers:
             self._egress.remove_peer(peer)
-        if self._pinned_addresses is not None and all(
-            candidate.name != peer.name for candidate in self.peers
-        ):
-            del self._pinned_addresses[peer.name]
         if self._hosts_path is not None:
             self._hosts_path = self._write_hosts()
 
     @property
     def addresses(self) -> dict[str, str]:
         """Which loopback address each peer name answers on inside the workspace."""
-        if self._pinned_addresses is not None:
-            return self._pinned_addresses
+        if self._egress is not None:
+            return self._egress.addresses
         return bind_addresses(self.peers, reserved_ports=self.ports)
 
     @property
@@ -1357,7 +1358,6 @@ class Workspace:
         bwrap = self._bwrap
         assert bwrap is not None
         try:
-            self._pinned_addresses = bind_addresses(self.peers, reserved_ports=self.ports)
             if self.owns_netns:
                 self._egress = Egress(
                     self._credentials_dir(),
@@ -1515,7 +1515,6 @@ class Workspace:
             self._egress.stop()
             self._egress = None
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
-        self._pinned_addresses = None
         if sandbox is None or sandbox.returncode is not None:
             return
         sandbox.kill()

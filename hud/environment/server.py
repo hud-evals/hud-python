@@ -377,8 +377,8 @@ class _ControlChannel:
                     except ValueError as exc:
                         await error_to(msg_id, -32602, f"hello: {exc}")
                         return
-                    env.bind_connections(connections, session=session_id)
-                    env.bind_workspace_routes(workspace_routes, session=session_id)
+                    await env.bind_connections(connections, session=session_id)
+                    await env.bind_workspace_routes(workspace_routes, session=session_id)
                     # env.start() ran before serving, so hook-published
                     # capabilities (e.g. a workspace's ssh address) are
                     # already concrete here.

@@ -396,7 +396,7 @@ class Environment:
             raise RuntimeError(f"workspace capability {capability!r} does not exist")
         return workspace
 
-    def bind_connections(self, connections: Sequence[Connection], *, session: str) -> None:
+    async def bind_connections(self, connections: Sequence[Connection], *, session: str) -> None:
         """Install one control session's controller connections into their workspaces.
 
         A connection belongs to the session that supplied it until
@@ -445,7 +445,7 @@ class Environment:
                     connection.port,
                     target=("127.0.0.1", relay.port),
                 )
-                workspace.add_peer(peer, first=True)
+                await workspace.add_peer(peer, first=True)
                 workspace.add_process_connection(connection.name, peer)
                 record = _BoundConnection(connection, workspace, peer, relay, session)
                 self._connections[connection.name] = record
@@ -470,8 +470,10 @@ class Environment:
                     workspace.remove_peer(peer)
                 del self._workspace_routes[route]
 
-    def bind_workspace_routes(self, routes: Sequence[WorkspaceRoute], *, session: str) -> None:
-        """Install a control session's routes before a workspace starts its sandbox."""
+    async def bind_workspace_routes(
+        self, routes: Sequence[WorkspaceRoute], *, session: str
+    ) -> None:
+        """Install a control session's routes into their workspaces."""
         if not self._started:
             raise RuntimeError("environment must be started before workspace routes are bound")
 
@@ -509,7 +511,7 @@ class Environment:
         try:
             for route, workspace, peer in planned:
                 if peer is not None:
-                    workspace.add_peer(peer, first=True)
+                    await workspace.add_peer(peer, first=True)
                 self._workspace_routes[route] = (workspace, peer, {session})
                 bound.append((route, workspace, peer))
         except BaseException:

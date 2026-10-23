@@ -362,6 +362,23 @@ async def a_finished_session_takes_its_route_with_it(env: Environment, root: Pat
             await later.grade({"answer": "x"})
 
 
+async def a_later_session_brings_its_own_route_and_connection(env: Environment, root: Path) -> None:
+    env.workspace(root, network=False)
+    route = WorkspaceRoute("ssh", "inference.hud.so", 443)
+    async with LocalRuntime(env)(ECHO) as runtime:
+        async with connect(runtime) as first:
+            await first.start_task("echo", {"tag": "a"})
+            await resolved_names(first)
+            await first.grade({"answer": "x"})
+        async with connect(
+            runtime, connections=[inference("later")], workspace_routes=[route]
+        ) as later:
+            await later.start_task("echo", {"tag": "later"})
+            names = await resolved_names(later)
+            assert {"inference.hud.so", inference("later").host} <= set(names)
+            await later.grade({"answer": "x"})
+
+
 @pytest.mark.e2e
 @pytest.mark.sandbox
 @pytest.mark.parametrize(
@@ -370,6 +387,7 @@ async def a_finished_session_takes_its_route_with_it(env: Environment, root: Pat
         a_finished_session_releases_its_connection,
         a_live_session_keeps_its_connection_name,
         a_finished_session_takes_its_route_with_it,
+        a_later_session_brings_its_own_route_and_connection,
     ],
 )
 async def test_a_sessions_workspace_bindings_end_with_the_session(
