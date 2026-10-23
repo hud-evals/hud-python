@@ -20,6 +20,7 @@ from typing import Annotated, Any, ClassVar, Literal, NotRequired, Self, cast
 from uuid import uuid4
 
 from mcp.types import ContentBlock, ImageContent, TextContent
+from openai.types.responses.response_create_params import ContextManagement
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -172,6 +173,7 @@ class OpenAIConfig(ToolAgentConfig):
     tool_choice: Any = None  # openai ToolChoice
     text: Any = None  # {"verbosity": "low"|"medium"|"high"}
     truncation: Literal["auto", "disabled"] | None = None
+    context_management: list[ContextManagement] | None = None
     parallel_tool_calls: bool | None = None
     prompt_cache_key: str = Field(
         default_factory=lambda: uuid4().hex,

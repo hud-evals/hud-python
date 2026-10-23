@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import mcp.types as mcp_types
 import pytest
+from openai import Omit
 from openai.types.responses import ResponseOutputText
 
 from hud.agents.openai.agent import EmptyShellCallError, OpenAIAgent, OpenAIRunState
@@ -21,6 +22,9 @@ from hud.capabilities import Capability, RFBClient
 from hud.clients.client import HudClient
 from hud.eval.run import Run
 from hud.types import MCPToolCall, MCPToolResult
+
+if TYPE_CHECKING:
+    from openai.types.responses.response_create_params import ContextManagement
 
 
 class FakeResponses:
@@ -153,6 +157,55 @@ async def test_computer_result_reaches_next_model_turn(
             "Remaining actions in this call were not executed" in feedback[1]["content"][0]["text"]
         )
     screen.conn.keyboard.write.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_compaction_configuration_reaches_every_turn_and_serializable_config(
+    computer_client: Mock, enabled: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compaction: list[ContextManagement] | None = (
+        [{"type": "compaction", "compact_threshold": 200_000}] if enabled else None
+    )
+    call = SimpleNamespace(
+        type="computer_call",
+        call_id="call_1",
+        actions=[SimpleNamespace(to_dict=lambda: {"type": "screenshot"})],
+        action=None,
+        pending_safety_checks=[],
+    )
+    output = [call]
+    if enabled:
+        output.insert(0, SimpleNamespace(type="compaction", encrypted_content="opaque-state"))
+    create = AsyncMock(side_effect=[_api_response("resp_1", output), _api_response("resp_2", [])])
+    monkeypatch.setattr(
+        "hud.agents.openai.agent.gateway.build_model_client",
+        lambda *args, **kwargs: Mock(responses=Mock(create=create)),
+    )
+    agent = OpenAIAgent(
+        OpenAIConfig(
+            model="gpt-test",
+            context_management=compaction,
+        )
+    )
+
+    if enabled:
+        config = agent.dump()
+        assert config["context_management"] == compaction
+        assert OpenAIConfig.model_validate(config).context_management == compaction
+
+    async with Run(computer_client, "computer-task", {}) as run:
+        await agent(run)
+
+    assert run.trace.status == "completed"
+    assert create.await_count == 2
+    for request in create.call_args_list:
+        if enabled:
+            assert request.kwargs["context_management"] == compaction
+        else:
+            assert isinstance(request.kwargs.get("context_management", Omit()), Omit)
+    followup = create.call_args_list[1].kwargs
+    assert followup["previous_response_id"] == "resp_1"
+    assert followup["input"][0]["type"] == "computer_call_output"
 
 
 async def test_computer_error_preserves_failed_screenshot_context(computer_client: Mock) -> None:
