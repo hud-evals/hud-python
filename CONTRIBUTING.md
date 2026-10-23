@@ -37,7 +37,7 @@ uv run pytest -m "e2e and live and not hosted"     # HUD_API_KEY; spends credits
 uv run pytest -m "e2e and hosted"                  # deploys and runs on the HUD platform
 uv run pytest -m "e2e and modal"                   # a Modal account
 uv run --with "lerobot[dataset]" pytest -m "e2e and lerobot"  # real LeRobot datasets
-uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks; CI checks them nightly
+uv run pytest -m e2e tests/e2e/test_cookbooks.py   # the cookbooks
 ```
 
 ### Writing Tests
