@@ -1,0 +1,6 @@
+[task]
+name = "sidecar-reachability"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 30

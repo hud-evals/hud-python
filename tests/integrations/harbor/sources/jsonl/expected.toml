@@ -1,0 +1,18 @@
+# Each JSONL taskset row becomes its own folder.
+base = "demo"
+export = "tasks.jsonl"
+
+[folders.four]
+task = "solve"
+args = { n = 4 }
+prompt = "solve 4: "
+
+[[folders.four.grade]]
+answer = "4"
+exit = 0
+reward = "1.0"
+
+[folders.five]
+task = "solve"
+args = { n = 5 }
+prompt = "solve 5: "

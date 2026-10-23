@@ -79,18 +79,9 @@ this for you.
 
 ### Wrap an existing framework: browser-use on `cdp`
 
-The bundled `BrowserUseAgent` is exactly this adapter - `browser-use` driving the `cdp` (browser)
-capability:
-
-```python run.py
-from hud.agents.browser_use import BrowserUseAgent
-from hud.agents.types import BrowserUseConfig
-
-agent = BrowserUseAgent(BrowserUseConfig(model="claude-sonnet-4-5", max_steps=25))
-job = await my_browser_task().run(agent)
-```
-
-Use it as a template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`,
+The [browser-use cookbook](https://github.com/hud-evals/hud-python/tree/main/cookbooks/browser-use)
+is exactly this adapter - `browser-use` driving the `cdp` (browser) capability. Use it as a
+template for wrapping other frameworks over whichever capability they need (`ssh`, `mcp`,
 `rfb`, `robot`).
 
 ### Any OpenAI-compatible endpoint

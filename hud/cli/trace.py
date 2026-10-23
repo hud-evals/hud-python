@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import typer
+from pydantic import BaseModel
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
@@ -24,6 +25,10 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
+
+
+class _Events(BaseModel):
+    events: list[dict[str, Any]]
 
 
 class _TraceGroup(CLIGroup):
@@ -92,30 +97,29 @@ def get_command(
                     }
                 )
             elif payload.get("source") == "tool":
-                for msg in payload.get("messages", []):
-                    if msg.get("role") != "tool":
-                        continue
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        content = "\n".join(
-                            part.get("text", "")
-                            for part in content
-                            if isinstance(part, dict) and part.get("type") == "text"
-                        )
-                    events.append(
-                        {
-                            "kind": "tool_call",
-                            "tool_name": msg.get("name") or msg.get("tool_call_id"),
-                            "result_text": str(content),
-                        }
-                    )
+                # A tool step pairs the originating call with its MCP result.
+                call = payload.get("call") or {}
+                result = payload.get("result") or {}
+                text = "\n".join(
+                    block.get("text", "")
+                    for block in result.get("content") or []
+                    if block.get("type") == "text"
+                )
+                events.append(
+                    {
+                        "kind": "tool_call",
+                        "tool_name": call.get("name"),
+                        "arguments": call.get("arguments") or {},
+                        "result_text": text,
+                        "error": payload.get("error") or (text if result.get("isError") else None),
+                    }
+                )
     else:
         source = "platform"
         try:
-            data = PlatformClient.from_settings().get(f"/trace/{trace_id}/events")
+            events = PlatformClient.from_settings().get(f"/trace/{trace_id}/events", _Events).events
         except HudRequestError as exc:
             raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
-        events = data["events"]
 
     if not events:
         hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")

@@ -10,11 +10,13 @@ from typing import Any, cast
 from uuid import UUID  # noqa: TC003 - typer resolves argument annotations at runtime
 
 import typer
+from pydantic import ConfigDict, with_config
 from rich.console import Group, RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from typing_extensions import TypedDict
 
 from hud.cli import (
     CLI,
@@ -51,6 +53,23 @@ class Level(StrEnum):
 
     trace = "trace"
     task = "task"
+
+
+@with_config(ConfigDict(extra="allow"))
+class _Check(TypedDict):
+    key: str
+    subject_type: Level
+    title: str
+    question: str
+
+
+@with_config(ConfigDict(extra="allow"))
+class _Catalog(TypedDict):
+    checks: list[_Check]
+
+
+class _Results(TypedDict):
+    results: list[dict[str, Any]]
 
 
 _IDS_FIELD = {Level.trace: "trace_ids", Level.task: "task_ids"}
@@ -379,14 +398,13 @@ def _results(
     params: dict[str, Any] = {_IDS_FIELD[level]: ids}
     if history:
         params["include_history"] = True
-    response = cast("dict[str, Any]", platform.get("/qa/results", params=params))
-    return cast("list[dict[str, Any]]", response["results"])
+    return platform.get("/qa/results", _Results, params=params)["results"]
 
 
 def _checks_level(platform: PlatformClient, check_keys: list[str]) -> Level:
     """The one level every named check runs at."""
-    catalog = cast("dict[str, Any]", platform.get("/qa/checks"))["checks"]
-    levels = {check["key"]: Level(check["subject_type"]) for check in catalog}
+    catalog = platform.get("/qa/checks", _Catalog)["checks"]
+    levels = {check["key"]: check["subject_type"] for check in catalog}
     unknown = [key for key in check_keys if key not in levels]
     if unknown:
         raise CliError(
@@ -430,13 +448,11 @@ def list_command(
         hud qa list --json
         hud qa list --quiet[/not dim]
     """
-    response = cast("dict[str, Any]", PlatformClient.from_settings().get("/qa/checks"))
+    catalog = PlatformClient.from_settings().get("/qa/checks", _Catalog)
     checks = [
-        check
-        for check in response["checks"]
-        if level is None or Level(check["subject_type"]) is level
+        check for check in catalog["checks"] if level is None or check["subject_type"] is level
     ]
-    response = {**response, "checks": checks}
+    response = {**catalog, "checks": checks}
     if quiet:
         for check in checks:
             typer.echo(check["key"])
@@ -517,6 +533,12 @@ def run_checks(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Run QA checks on completed evaluation traces or on tasks as one run.
 
@@ -527,6 +549,7 @@ def run_checks(
         hud qa run failure_analysis <trace-id>
         hud qa run reward_hacking,false_positive <trace-id> <trace-id> --no-wait --json
         hud qa run task_reward_exploit,task_failure_analysis <task-id>
+        hud qa run failure_analysis <trace-id> --yes --json
         hud qa run failure_analysis <trace-id> --dry-run --json[/not dim]
     """
     check_keys = list(dict.fromkeys(key.strip() for key in checks.split(",") if key.strip()))
@@ -553,18 +576,18 @@ def run_checks(
             "overwrite": overwrite,
             "wait": wait,
         }
+    CLI.confirm_or_abort(
+        f"Run {len(check_keys)} check(s) on {len(subject_ids)} {level}(s)?", yes=yes, default=True
+    )
 
     try:
-        response = cast(
-            "dict[str, Any]",
-            platform.post(
-                "/qa/runs",
-                json={"check_keys": check_keys, ids_field: subject_ids, "overwrite": overwrite},
-            ),
-        )
+        results = platform.post(
+            "/qa/runs",
+            _Results,
+            json={"check_keys": check_keys, ids_field: subject_ids, "overwrite": overwrite},
+        )["results"]
     except HudException as exc:
         raise map_exception(exc, input={"check_keys": check_keys, ids_field: subject_ids}) from exc
-    results = cast("list[dict[str, Any]]", response["results"])
     if not wait:
         _print_results(results, level)
         return results

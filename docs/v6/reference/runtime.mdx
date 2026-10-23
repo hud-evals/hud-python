@@ -34,7 +34,7 @@ HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.e
 <Note>
 **You can usually omit `runtime=`.** A run without one uses its known placement:
 
-- a platform taskset (`Taskset.from_api`) runs on the platform
+- a platform taskset (`Taskset.from_api`) runs against its deployed environment over the HUD tunnel (`HUDRuntime`), with the agent loop in this process
 - a row whose `runtime_config` names an image or Compose project starts it under `DockerRuntime`
 - a task created by `@env.template` runs against that environment, in this process
 
@@ -83,7 +83,7 @@ is best effort: `DockerRuntime` admits against available disk and `DaytonaRuntim
 enough whole GiB, while providers without disk sizing proceed with their default capacity.
 `HUDRuntime` proceeds on the deployed environment's defaults and warns when it ignores CPU, memory,
 or storage requirements; it rejects GPU, OS, TPU, and `limits`. Daytona accepts a list of GPU
-alternatives; Modal accepts one GPU type. Daytona rejects `run_timeout_s` and resource overrides
+alternatives; Modal accepts one GPU type. Daytona rejects Compose, `run_timeout_s`, and resource overrides
 when booting from an already-built snapshot. `LocalRuntime` rejects a
 per-task `runtime_config`.
 
@@ -219,10 +219,8 @@ DaytonaRuntime(snapshot_name=None, *, image=None, command=None, workdir="/app", 
 
 Resources (cpu/memory/gpu) are fixed on the snapshot at build time. With `image`, a task's `runtime_config.resources` builds a sized variant under a suffixed name (`my-env-4cpu`); without `image`, an already-built snapshot cannot be resized.
 
-For Compose input, Daytona runs `main` as the rollout sandbox and each sidecar
-as a linked sandbox. Sidecar images resolve to reusable Daytona snapshots.
-Compose authoring conventions are documented in
-[Compose environments](/v6/experimental/compose).
+`DaytonaRuntime` does not run Compose projects: a `runtime_config.compose` is rejected. Use
+`DockerRuntime` or `ModalRuntime` for [Compose environments](/v6/experimental/compose).
 
 Measured behavior at scale, up to 256 concurrent sandboxes with warm pools, is written up in the [Daytona cookbook](/v6/cookbooks/daytona-rl) and the [full guide on Daytona's docs](https://www.daytona.io/docs/guides/reinforcement-learning/hud-rl-cookbook).
 

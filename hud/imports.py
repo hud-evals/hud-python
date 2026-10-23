@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasPath, BaseModel, ConfigDict, Field
 
 from hud.utils.exceptions import HudException, HudNetworkError, HudRequestError
 
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
     from hud.utils.platform import PlatformClient
+
+T = TypeVar("T")
 
 _TRANSFER_TIMEOUT = httpx.Timeout(30.0, read=600.0, write=600.0)
 _CHUNK_BYTES = 1024 * 1024
@@ -47,6 +49,15 @@ class ImportFormat(_Record):
     max_input_bytes: int
 
 
+class _Formats(_Record):
+    formats: list[ImportFormat]
+
+
+class _Reservation(_Record):
+    file_id: str = Field(validation_alias=AliasPath("file", "id"))
+    upload_url: str
+
+
 class ImportFile(_Record):
     id: str
     filename: str
@@ -75,10 +86,14 @@ class Import(_Record):
         return self.status in {"completed", "stopped"}
 
 
+class _ImportPage(_Record):
+    imports: list[Import]
+    total: int
+
+
 def list_formats(platform: PlatformClient) -> list[ImportFormat]:
     """The bundle formats this platform imports."""
-    data = platform.get("/imports/formats")
-    return [ImportFormat.model_validate(item) for item in data["formats"]]
+    return platform.get("/imports/formats", _Formats).formats
 
 
 def upload_bundle(
@@ -97,6 +112,7 @@ def upload_bundle(
     size = path.stat().st_size
     reserved = platform.post(
         "/imports/uploads",
+        _Reservation,
         json={
             "format": format,
             "filename": path.name,
@@ -104,11 +120,11 @@ def upload_bundle(
             "content_type": content_type,
         },
     )
-    file_id = str(reserved["file"]["id"])
+    file_id = reserved.file_id
     try:
         with path.open("rb") as stream, httpx.Client(timeout=_TRANSFER_TIMEOUT) as client:
             response = client.put(
-                reserved["upload_url"],
+                reserved.upload_url,
                 content=_chunks(stream, on_progress),
                 # S3 refuses chunked uploads, so the length goes up front.
                 headers={"Content-Type": content_type, "Content-Length": str(size)},
@@ -128,14 +144,15 @@ def upload_bundle(
 
 def start_import(platform: PlatformClient, *, format: str, file_id: str, taskset_id: str) -> Import:
     """Import an uploaded bundle into a taskset the caller can edit."""
-    record = platform.post(
-        "/imports", json={"format": format, "file_id": file_id, "taskset_id": taskset_id}
+    return platform.post(
+        "/imports",
+        Import,
+        json={"format": format, "file_id": file_id, "taskset_id": taskset_id},
     )
-    return Import.model_validate(record)
 
 
 def get_import(platform: PlatformClient, import_id: str) -> Import:
-    return Import.model_validate(platform.get(f"/imports/{import_id}"))
+    return platform.get(f"/imports/{import_id}", Import)
 
 
 def list_imports(
@@ -151,22 +168,22 @@ def list_imports(
         params["format"] = format
     if taskset_id is not None:
         params["taskset_id"] = taskset_id
-    data = platform.get("/imports", params=params)
-    return [Import.model_validate(item) for item in data["imports"]], int(data["total"])
+    page = platform.get("/imports", _ImportPage, params=params)
+    return page.imports, page.total
 
 
 def cancel_import(platform: PlatformClient, import_id: str) -> Import:
     """Request cancellation of an import; one that has ended is returned unchanged."""
-    return Import.model_validate(platform.post(f"/imports/{import_id}/cancel"))
+    return platform.post(f"/imports/{import_id}/cancel", Import)
 
 
-def get_report(platform: PlatformClient, import_id: str) -> Any:
-    """The report a completed or stopped import published, in its format's schema.
+def get_report(platform: PlatformClient, import_id: str, reply: type[T]) -> T | None:
+    """The report a completed or stopped import published, read as its format's ``reply``.
 
     None when the import published no report.
     """
     try:
-        return platform.get(f"/imports/{import_id}/report")
+        return platform.get(f"/imports/{import_id}/report", reply)
     except HudRequestError as exc:
         if exc.status_code == 404:
             return None

@@ -37,5 +37,9 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = ["sandbox: serves the isolated workspace; needs Linux, root, bubblewrap, and the env under /usr"]
+
 [tool.hatch.build.targets.wheel]
 packages = [ ".",]

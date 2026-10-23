@@ -13,6 +13,8 @@ build/
 !docs/v6/build/
 *.egg-info/
 uv.lock
+# Harbor case fixtures carry a project's .env as test data.
+!tests/integrations/harbor/cases/**/.env
 
 # Media files
 *.jpg

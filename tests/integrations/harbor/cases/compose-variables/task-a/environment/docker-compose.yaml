@@ -1,0 +1,16 @@
+services:
+  main:
+    build:
+      context: ${CONTEXT_DIR}
+    image: ${MAIN_IMAGE_NAME}
+    environment:
+      FROM_ENV: ${LITERAL}
+      FROM_DOTENV: ${DOTENV_ONLY}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPUS}
+          memory: ${MEMORY}
+  redis:
+    image: redis:${SIDECAR_TAG}
+    expose: [6379]

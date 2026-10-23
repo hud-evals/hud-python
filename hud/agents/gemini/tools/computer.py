@@ -3,38 +3,49 @@
 from __future__ import annotations
 
 import logging
-import platform
 from typing import TYPE_CHECKING, Any
 
 from google.genai import types as genai_types
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
+from hud.agents.tools.rfb import keysym
 
 from .base import GeminiToolSpec
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from hud.agents.tools.base import AgentToolSpec
+    from hud.capabilities import RFBClient
+    from hud.capabilities.rfb import ScreenshotEncoding
     from hud.types import MCPToolResult
 
 logger = logging.getLogger(__name__)
 
 GEMINI_DRAG_INSET = 25
-IS_MAC = platform.system().lower() == "darwin"
+#: Gemini places every coordinate on a 1000x1000 grid regardless of the screen size.
+GEMINI_COORDINATE_SCALE = 1000
 
+#: The desktop actions Gemini 3 models call; the browser and mobile ones need a page or app.
 PREDEFINED_COMPUTER_USE_FUNCTIONS = (
-    "open_web_browser",
-    "click_at",
-    "hover_at",
-    "type_text_at",
-    "scroll_document",
-    "scroll_at",
-    "wait_5_seconds",
-    "go_back",
-    "go_forward",
-    "search",
-    "navigate",
-    "key_combination",
+    "click",
+    "double_click",
+    "triple_click",
+    "middle_click",
+    "right_click",
+    "mouse_down",
+    "mouse_up",
+    "move",
+    "type",
     "drag_and_drop",
+    "scroll",
+    "wait",
+    "press_key",
+    "key_down",
+    "key_up",
+    "hotkey",
+    "take_screenshot",
 )
 
 GEMINI_COMPUTER_SPEC = GeminiToolSpec(
@@ -44,13 +55,24 @@ GEMINI_COMPUTER_SPEC = GeminiToolSpec(
 
 
 class GeminiComputerTool(RFBTool):
-    """Translate Gemini predefined computer functions into RFBTool primitives."""
+    """Translate Gemini's desktop computer actions into RFBTool primitives.
+
+    The RFB capability is a bare display, so the tool declares the desktop
+    environment: no page to navigate.
+    """
 
     name = "computer_use"
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.excluded_predefined_functions: list[str] = []
+    def __init__(
+        self,
+        *,
+        spec: AgentToolSpec,
+        client: RFBClient,
+        screenshot_encoding: ScreenshotEncoding,
+        excluded_predefined_functions: Sequence[str] = (),
+    ) -> None:
+        super().__init__(spec=spec, client=client, screenshot_encoding=screenshot_encoding)
+        self.excluded_predefined_functions = list(excluded_predefined_functions)
 
     @classmethod
     def default_spec(cls, model: str) -> GeminiToolSpec:
@@ -60,7 +82,7 @@ class GeminiComputerTool(RFBTool):
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(
             computer_use=genai_types.ComputerUse(
-                environment=genai_types.Environment.ENVIRONMENT_BROWSER,
+                environment=genai_types.Environment.ENVIRONMENT_DESKTOP,
                 excluded_predefined_functions=self.excluded_predefined_functions,
             ),
         )
@@ -76,125 +98,80 @@ class GeminiComputerTool(RFBTool):
             return tool_err(f"computer action {action!r} failed: {exc}")
 
     async def _dispatch(self, action: str, args: dict[str, Any]) -> MCPToolResult:
-        if action == "open_web_browser":
-            return await self.screenshot()
+        match action:
+            case "take_screenshot":
+                pass
+            case "click":
+                await self.click(*self._point(args))
+            case "double_click":
+                await self.click(*self._point(args), count=2, interval_ms=100)
+            case "triple_click":
+                await self.click(*self._point(args), count=3, interval_ms=100)
+            case "middle_click":
+                await self.click(*self._point(args), button="middle")
+            case "right_click":
+                await self.click(*self._point(args), button="right")
+            case "move":
+                await self.move(*self._point(args))
+            case "mouse_down":
+                await self.move(*self._point(args))
+                await self.mouse_down()
+            case "mouse_up":
+                await self.move(*self._point(args))
+                await self.mouse_up()
+            case "type":
+                if "x" in args and "y" in args:
+                    await self.click(*self._point(args))
+                await self.type_text(str(args["text"]))
+                if args.get("press_enter"):
+                    await self.press_keys(["Return"])
+            case "drag_and_drop":
+                width, height = self.display_width, self.display_height
+                path = [
+                    (_inset(args["start_x"], width), _inset(args["start_y"], height)),
+                    (_inset(args["end_x"], width), _inset(args["end_y"], height)),
+                ]
+                await self.drag(path)
+            case "scroll":
+                # VNC scrolls in wheel clicks; take a click as a tenth of the screen.
+                clicks = max(1, int(args.get("magnitude_in_pixels", 300)) // 100)
+                sx, sy = {
+                    "down": (0, clicks),
+                    "up": (0, -clicks),
+                    "right": (clicks, 0),
+                    "left": (-clicks, 0),
+                }[args["direction"]]
+                await self.scroll(*self._point(args), scroll_x=sx, scroll_y=sy)
+            case "wait":
+                await self.wait(int(float(args.get("seconds", 1)) * 1000))
+            case "press_key":
+                await self.press_keys(_keys(str(args["key"]).split("+")))
+            case "key_down":
+                await self.key_down(*_keys([str(args["key"])]))
+            case "key_up":
+                await self.key_up(*_keys([str(args["key"])]))
+            case "hotkey":
+                await self.press_keys(_keys([str(key) for key in args["keys"]]))
+            case _:
+                return tool_err(f"Unknown Gemini computer action: {action}")
+        return await self.screenshot()
 
-        if action == "click_at":
-            await self.click(args.get("x"), args.get("y"))
-            return await self.screenshot()
+    def _point(self, args: dict[str, Any]) -> tuple[int, int]:
+        return _pixel(args["x"], self.display_width), _pixel(args["y"], self.display_height)
 
-        if action == "hover_at":
-            x, y = args.get("x"), args.get("y")
-            if x is not None and y is not None:
-                await self.move(int(x), int(y))
-            return await self.screenshot()
 
-        if action == "type_text_at":
-            x, y = args.get("x"), args.get("y")
-            if x is not None and y is not None:
-                await self.move(int(x), int(y))
-                await self.click(int(x), int(y))
-            if args.get("clear_before_typing", True):
-                select_all = ["Super_L", "a"] if IS_MAC else ["Control_L", "a"]
-                delete_key = "BackSpace" if IS_MAC else "Delete"
-                await self.press_keys(select_all)
-                await self.press_keys([delete_key])
-            text = args.get("text")
-            if isinstance(text, str) and text:
-                await self.type_text(text)
-            if args.get("press_enter"):
-                await self.press_keys(["Return"])
-            return await self.screenshot()
+def _pixel(value: float, size: int) -> int:
+    """Map a coordinate on Gemini's normalized 0-999 grid onto a ``size``-pixel axis."""
+    return int(value / GEMINI_COORDINATE_SCALE * size)
 
-        if action in ("scroll_document", "scroll_at"):
-            direction = args.get("direction")
-            magnitude = int(args.get("magnitude") or 3)
-            sx, sy = 0, 0
-            if direction == "down":
-                sy = magnitude
-            elif direction == "up":
-                sy = -magnitude
-            elif direction == "right":
-                sx = magnitude
-            elif direction == "left":
-                sx = -magnitude
-            x = args.get("x") if action == "scroll_at" else None
-            y = args.get("y") if action == "scroll_at" else None
-            await self.scroll(
-                int(x) if x is not None else None,
-                int(y) if y is not None else None,
-                scroll_x=sx,
-                scroll_y=sy,
-            )
-            return await self.screenshot()
 
-        if action == "wait_5_seconds":
-            await self.wait(5000)
-            return await self.screenshot()
+def _inset(value: float, size: int) -> int:
+    """A drag point kept off the screen's edge, where a press can miss the window."""
+    return min(max(_pixel(value, size), GEMINI_DRAG_INSET), size - GEMINI_DRAG_INSET)
 
-        if action == "go_back":
-            keys = ["Super_L", "bracketleft"] if IS_MAC else ["Alt_L", "Left"]
-            await self.press_keys(keys)
-            return await self.screenshot()
 
-        if action == "go_forward":
-            keys = ["Super_L", "bracketright"] if IS_MAC else ["Alt_L", "Right"]
-            await self.press_keys(keys)
-            return await self.screenshot()
-
-        if action == "search":
-            target = args.get("url") or "https://www.google.com"
-            keys = ["Super_L", "l"] if IS_MAC else ["Control_L", "l"]
-            await self.press_keys(keys)
-            await self.type_text(str(target))
-            await self.press_keys(["Return"])
-            return await self.screenshot()
-
-        if action == "navigate":
-            keys = ["Super_L", "l"] if IS_MAC else ["Control_L", "l"]
-            await self.press_keys(keys)
-            url = args.get("url") or ""
-            await self.type_text(str(url))
-            await self.press_keys(["Return"])
-            return await self.screenshot()
-
-        if action == "key_combination":
-            keys_str = args.get("keys")
-            if not isinstance(keys_str, str):
-                return tool_err("keys must be a '+'-separated string")
-            aliases: dict[str, str] = {
-                "control": "Control_L",
-                "ctrl": "Control_L",
-                "cmd": "Super_L",
-                "command": "Super_L",
-                "meta": "Super_L" if IS_MAC else "Control_L",
-                "alt": "Alt_L",
-                "shift": "Shift_L",
-                "return": "Return",
-                "enter": "Return",
-            }
-            normalized = [
-                aliases.get(k, k) for part in keys_str.split("+") if (k := part.strip().lower())
-            ]
-            await self.press_keys(normalized)
-            return await self.screenshot()
-
-        if action == "drag_and_drop":
-            max_coord = max(self.display_width, self.display_height)
-
-            def clamp(v: Any) -> int:
-                if not isinstance(v, int | float):
-                    return 0
-                return min(max(int(v), GEMINI_DRAG_INSET), max_coord - GEMINI_DRAG_INSET)
-
-            path = [
-                (clamp(args.get("x")), clamp(args.get("y"))),
-                (clamp(args.get("destination_x")), clamp(args.get("destination_y"))),
-            ]
-            await self.drag(path)
-            return await self.screenshot()
-
-        return tool_err(f"Unknown Gemini computer action: {action}")
+def _keys(names: list[str]) -> list[str]:
+    return [keysym(name.strip()) for name in names if name.strip()]
 
 
 __all__ = ["GEMINI_COMPUTER_SPEC", "PREDEFINED_COMPUTER_USE_FUNCTIONS", "GeminiComputerTool"]

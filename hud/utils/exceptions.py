@@ -7,7 +7,6 @@ displays alongside the error.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
@@ -27,8 +26,6 @@ from hud.utils.hints import (
     TOOL_NOT_FOUND,
     Hint,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class HudException(Exception):
@@ -160,16 +157,6 @@ class HudRequestError(HudException):
         # Add context if provided
         if context:
             message = f"{context}: {message}"
-
-        # Log the error details
-        logger.error(
-            "HTTP error from HUD SDK: %s | URL: %s | Status: %s | Response: %s%s",
-            message,
-            response.url,
-            status_code,
-            response_text[:500],
-            "..." if len(response_text) > 500 else "",
-        )
         return cls(
             message=message,
             status_code=status_code,
@@ -177,6 +164,14 @@ class HudRequestError(HudException):
             response_json=response_json,
             response_headers=response_headers,
         )
+
+
+class HudReplyError(HudRequestError):
+    """The HUD API answered a request with a body this client cannot read."""
+
+    def __init__(self, message: str, *, url: str, status_code: int) -> None:
+        self.url = url
+        super().__init__(message, status_code)
 
 
 class HudAuthenticationError(HudException):

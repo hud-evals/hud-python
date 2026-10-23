@@ -1,0 +1,10 @@
+[environment]
+cpus = 4
+memory_mb = 14336
+
+[verifier]
+environment_mode = "separate"
+
+[verifier.environment]
+cpus = 4
+memory_mb = 14336

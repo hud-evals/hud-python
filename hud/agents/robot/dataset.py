@@ -140,6 +140,13 @@ class DatasetWriter:
                 logger.warning("obs missing contract feature %r; skipping frame", wire)
                 return
             ft = self._features[key]
+            # 32 px is the smallest side lerobot's AV1 episode encoder was observed
+            # to accept; smaller frames hang or fail when the episode saves.
+            if ft["dtype"] == "video" and min(np.shape(value)[:2]) < 32:
+                raise ValueError(
+                    f"camera {wire!r} frame of shape {np.shape(value)} cannot be recorded: "
+                    "lerobot's episode video encoder needs at least 32 px on each side"
+                )
             row[key] = (
                 np.ascontiguousarray(value, dtype=np.uint8)  # bridge images are uint8 HWC
                 if ft["dtype"] in ("video", "image")

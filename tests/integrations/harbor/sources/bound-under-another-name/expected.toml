@@ -1,0 +1,13 @@
+# A source may bind its environment under any name.
+base = "demo"
+export = "tasks.py"
+
+[folders.solve-4080368a]
+task = "solve"
+args = { n = 2, prompt = "what's next?" }
+prompt = "solve 2: what's next?"
+
+[[folders.solve-4080368a.grade]]
+answer = "2"
+exit = 0
+reward = "1.0"

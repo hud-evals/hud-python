@@ -6,8 +6,10 @@ modality-independent ``optim_step``. Modality clients (e.g.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, TypeVar
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from hud.settings import settings
 from hud.train.types import CheckpointResponse, OptimStepRequest, OptimStepResult
@@ -15,6 +17,12 @@ from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.gateway import resolve_gateway_model
 from hud.utils.platform import PlatformClient
 from hud.utils.requests import make_request
+
+T = TypeVar("T")
+
+
+class _Losses(BaseModel):
+    losses: list[str]
 
 
 class BaseTrainingClient:
@@ -60,26 +68,25 @@ class BaseTrainingClient:
         return f"{self._base_url}/v1/models/{model_id}/train/{suffix}"
 
     async def _post(
-        self, suffix: str, payload: dict[str, Any], *, max_retries: int = 0
-    ) -> dict[str, Any]:
+        self, suffix: str, payload: dict[str, Any], reply: type[T], *, max_retries: int = 0
+    ) -> T:
         url = await self._train_url(suffix)
         # Training POSTs are not safe to auto-retry: forward_backward/backward
         # accumulate gradients in place (a retry double-counts a batch) and
         # optim_step saves a checkpoint (a retry can save a step twice and poison
         # the run). All callers pass max_retries=0; the server owns recovery.
         return await make_request(
-            "POST", url, json=payload, api_key=self._api_key, max_retries=max_retries
+            "POST", url, json=payload, api_key=self._api_key, max_retries=max_retries, reply=reply
         )
 
-    async def _get(self, suffix: str) -> dict[str, Any]:
+    async def _get(self, suffix: str, reply: type[T]) -> T:
         url = await self._train_url(suffix)
-        return await make_request("GET", url, api_key=self._api_key)
+        return await make_request("GET", url, api_key=self._api_key, reply=reply)
 
     async def available_losses(self) -> list[str]:
         """The built-in ``loss_fn`` names this model's provider supports
         (authoritative; :class:`hud.train.BuiltinLoss` lists common ones)."""
-        data = await self._get("losses")
-        return list(data["losses"])
+        return (await self._get("losses", _Losses)).losses
 
     async def optim_step(
         self,
@@ -106,8 +113,7 @@ class BaseTrainingClient:
             eps=eps,
             weight_decay=weight_decay,
         )
-        data = await self._post("optim-step", request.model_dump(), max_retries=0)
-        return OptimStepResult.model_validate(data)
+        return await self._post("optim-step", request.model_dump(), OptimStepResult, max_retries=0)
 
     async def checkpoints(self) -> list[CheckpointResponse]:
         """The model's checkpoint tree (oldest first), each node carrying its
@@ -115,11 +121,9 @@ class BaseTrainingClient:
         programmatic twin of ``hud models checkpoints`` — poll it inside a
         training loop to watch ``mean_reward``, KL, and clip fraction live."""
         model_id = await self._resolve_model_id()
-        # The checkpoints endpoint lives on the catalog API and returns a JSON
-        # array (make_request is typed for the common object response).
+        # The checkpoints endpoint lives on the catalog API.
         url = f"{self._api_url}/v2/models/{model_id}/checkpoints"
-        data: Any = await make_request("GET", url, api_key=self._api_key)
-        return [CheckpointResponse.model_validate(c) for c in data]
+        return await make_request("GET", url, api_key=self._api_key, reply=list[CheckpointResponse])
 
     async def head(self) -> CheckpointResponse | None:
         """The active checkpoint (the weights the gateway serves now), or

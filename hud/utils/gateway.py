@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from hud.settings import settings
 from hud.telemetry.context import get_trace_headers
-from hud.utils.exceptions import HudAuthenticationError
+from hud.utils.exceptions import HudAuthenticationError, HudRequestError
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
@@ -194,14 +194,14 @@ def list_gateway_models(platform: PlatformClient | None = None) -> list[GatewayM
         platform = PlatformClient.from_settings()
     models: list[GatewayModelInfo] = []
     while True:
-        page = GatewayModelsResponse.model_validate(
-            platform.get("/models", params={"limit": 100, "offset": len(models)})
+        page = platform.get(
+            "/models", GatewayModelsResponse, params={"limit": 100, "offset": len(models)}
         )
         models.extend(page.items)
         if len(models) >= page.total:
             return models
         if not page.items:
-            raise ValueError("Models API returned an empty page before the reported total")
+            raise HudRequestError("Models API returned an empty page before the reported total")
 
 
 def resolve_gateway_model(model: str, platform: PlatformClient | None = None) -> GatewayModelInfo:

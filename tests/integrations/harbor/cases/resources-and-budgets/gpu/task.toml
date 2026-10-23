@@ -1,0 +1,6 @@
+[environment]
+cpus = 4
+memory_mb = 8192
+storage_mb = 32768
+gpus = 2
+gpu_types = ["H100"]

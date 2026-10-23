@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from hud.capabilities import Connection
 
@@ -122,9 +122,10 @@ BRIDGE_PORT = 3128
 VISITOR_PORT = 3129
 
 #: Run inside the workspace's network namespace, one listener per route out.
-#: Its stdin is ``[[host, port, socket], ...]``; every listener is bound
-#: before it says it is ready, since a session that starts in between finds
-#: the port refused.
+#: Its stdin's first line is ``[[host, port, socket], ...]``; every listener is
+#: bound before it says it is ready, since a session that starts in between
+#: finds the port refused. Each later line is one more ``[host, port, socket]``,
+#: answered ``ok`` once it is bound.
 _BRIDGE = """
 import asyncio, json, sys
 
@@ -163,7 +164,11 @@ async def main():
         for host, port, path in json.loads(sys.stdin.readline())
     ]
     print("ready", flush=True)
-    await asyncio.gather(*(server.serve_forever() for server in servers))
+    while line := await asyncio.to_thread(sys.stdin.readline):
+        host, port, path = json.loads(line)
+        servers.append(await asyncio.start_server(bridged(path), host, port))
+        print("ok", flush=True)
+    await asyncio.Event().wait()
 
 asyncio.run(main())
 """
@@ -257,11 +262,7 @@ def bind_addresses(
     there, so the second moves down 127.0.0.0/8 and is reached by its name —
     which is how a task naming several services addresses them anyway.
     """
-    taken = {
-        ("127.0.0.1", BRIDGE_PORT),
-        ("127.0.0.1", VISITOR_PORT),
-        *(("127.0.0.1", port) for port in reserved_ports),
-    }
+    taken = _reserved(reserved_ports)
     ports_by_name: dict[str, list[int]] = {}
     for peer in peers:
         ports = ports_by_name.setdefault(peer.name, [])
@@ -271,32 +272,42 @@ def bind_addresses(
 
     addresses: dict[str, str] = {}
     for name, ports in ports_by_name.items():
-        for index in range(1, 256):
-            host = f"127.0.0.{index}"
-            if all((host, port) not in taken for port in ports):
-                break
-        else:
-            raise ValueError(f"no loopback address can route peer {name!r}")
+        host = _free_address(name, ports, taken)
         taken.update((host, port) for port in ports)
         addresses[name] = host
     return addresses
 
 
+def _reserved(reserved_ports: Collection[int]) -> set[tuple[str, int]]:
+    return {
+        ("127.0.0.1", BRIDGE_PORT),
+        ("127.0.0.1", VISITOR_PORT),
+        *(("127.0.0.1", port) for port in reserved_ports),
+    }
+
+
+def _free_address(name: str, ports: Collection[int], taken: Collection[tuple[str, int]]) -> str:
+    for index in range(1, 256):
+        host = f"127.0.0.{index}"
+        if all((host, port) not in taken for port in ports):
+            return host
+    raise ValueError(f"no loopback address can route peer {name!r}")
+
+
 def hosts_text(
-    peers: Sequence[Peer],
+    addresses: Mapping[str, str],
     base: str,
     *,
     local_aliases: Collection[str] = (),
-    reserved_ports: Collection[int] = (),
 ) -> str:
-    """*base* — the substrate's ``/etc/hosts`` — plus a line per peer.
+    """*base* — the substrate's ``/etc/hosts`` — plus a line per peer name, at the
+    loopback address its bridge listens on (see :func:`bind_addresses`).
 
     Names resolve for what runs in the workspace's *mount* namespace, which
     is its sessions. Anything joining only the network namespace (the Harbor
     verifier does, to reach a service the agent started) still reaches a peer
     at its address, but not by its name.
     """
-    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
     lines = "".join(
         [
             *(f"127.0.0.1\t{name}\n" for name in local_aliases),
@@ -308,10 +319,9 @@ def hosts_text(
 
 def proxy_environment(
     port: int,
-    peers: Sequence[Peer] = (),
+    addresses: Mapping[str, str],
     *,
     local_aliases: Collection[str] = (),
-    reserved_ports: Collection[int] = (),
     token: str | None = None,
 ) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
@@ -325,7 +335,6 @@ def proxy_environment(
     """
     credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
     url = f"http://{credentials}127.0.0.1:{port}"
-    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
     bypass = ",".join(
         dict.fromkeys(["127.0.0.1", "localhost", *local_aliases, *addresses, *addresses.values()])
     )
@@ -803,20 +812,32 @@ class Egress:
         self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
         self.peers = tuple(peers)
-        self.local_aliases = tuple(local_aliases)
         self.reserved_ports = frozenset(reserved_ports)
+        self.local_aliases = tuple(local_aliases)
         self.token = token
+        #: The loopback address of every name ever served. The bridge binds a
+        #: listener once and never takes it down, so a name keeps its address,
+        #: and no peer moves when another comes or goes.
+        self._hosts = bind_addresses(self.peers, reserved_ports=reserved_ports)
+        #: The socket behind each bridge listener. By position rather than by
+        #: name: a peer's name comes from the task, and a task does not get to
+        #: choose paths in here.
+        self._listeners = {
+            (self._hosts[peer.name], peer.port): self.socket_dir / f"peer-{index}.sock"
+            for index, peer in enumerate(self.peers)
+        }
         self._servers: list[tuple[_UnixServer, Path]] = []
+        self._peer_servers: dict[Peer, tuple[_UnixServer, Path]] = {}
 
     @property
     def socket_path(self) -> Path:
         """The proxy's socket — the way out to the hosts policy allows."""
         return self.socket_dir / "egress.sock"
 
-    def _peer_socket(self, index: int) -> Path:
-        # By position rather than by name: a peer's name comes from the task,
-        # and a task does not get to choose paths in here.
-        return self.socket_dir / f"peer-{index}.sock"
+    @property
+    def addresses(self) -> dict[str, str]:
+        """Which loopback address each peer served now answers on in the workspace."""
+        return {peer.name: self._hosts[peer.name] for peer in self.peers}
 
     def start(self) -> None:
         """Serve the policy, and each declared peer, on a socket. Idempotent."""
@@ -832,29 +853,57 @@ class Egress:
                     {"allowed": self.allowed, "token": self.token},
                 ),
             )
-        for index, peer in enumerate(self.peers):
-            self._serve(
-                self._peer_socket(index),
-                type("_PeerForward", (_Forward,), {"target": peer.address}),
-            )
+        for peer in self.peers:
+            self._serve_peer(peer)
 
-    def _serve(self, path: Path, handler: type[socketserver.BaseRequestHandler]) -> None:
+    def add_peer(self, peer: Peer) -> tuple[str, int, str] | None:
+        """Serve *peer* beside the running ones. Returns the listener the bridge
+        must bind for it, or None when one from an earlier peer at the same
+        address is bound already and now reaches this one."""
+        if any(candidate.address == peer.address for candidate in self.peers):
+            raise ValueError(f"peer {peer.name}:{peer.port} is served already")
+        if peer.name not in self._hosts:
+            taken = _reserved(self.reserved_ports) | set(self._listeners)
+            self._hosts[peer.name] = _free_address(peer.name, [peer.port], taken)
+        listener = (self._hosts[peer.name], peer.port)
+        bound = listener in self._listeners
+        if not bound:
+            self._listeners[listener] = self.socket_dir / f"peer-{len(self._listeners)}.sock"
+        self.peers = (*self.peers, peer)
+        path = self._serve_peer(peer)
+        return None if bound else (*listener, str(path))
+
+    def remove_peer(self, peer: Peer) -> None:
+        """Stop serving *peer*: its bridge listener stays bound, and closes whatever
+        connects to it, since there is no longer anything behind it."""
+        server, path = self._peer_servers.pop(peer)
+        self._servers.remove((server, path))
+        _close(server, path)
+        self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
+
+    def _serve_peer(self, peer: Peer) -> Path:
+        path = self._listeners[self._hosts[peer.name], peer.port]
+        self._peer_servers[peer] = self._serve(
+            path, type("_PeerForward", (_Forward,), {"target": peer.address})
+        )
+        return path
+
+    def _serve(
+        self, path: Path, handler: type[socketserver.BaseRequestHandler]
+    ) -> tuple[_UnixServer, Path]:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
         server = _UnixServer(str(path), handler)
         os.chmod(path, 0o600)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self._servers.append((server, path))
+        return server, path
 
     def _bridge_spec(self, port: int) -> list[tuple[str, int, str]]:
         """Where each route out is offered inside the workspace."""
-        addresses = bind_addresses(self.peers, reserved_ports=self.reserved_ports)
         return [
             *([("127.0.0.1", port, str(self.socket_path))] if self.allowed else []),
-            *(
-                (addresses[peer.name], peer.port, str(self._peer_socket(index)))
-                for index, peer in enumerate(self.peers)
-            ),
+            *((host, peer_port, str(path)) for (host, peer_port), path in self._listeners.items()),
         ]
 
     def bridge_command(
@@ -880,9 +929,8 @@ class Egress:
         return (
             proxy_environment(
                 port,
-                self.peers,
+                self.addresses,
                 local_aliases=self.local_aliases,
-                reserved_ports=self.reserved_ports,
                 token=self.token,
             )
             if self.allowed
@@ -892,11 +940,16 @@ class Egress:
     def stop(self) -> None:
         """Take the routes away."""
         for server, path in self._servers:
-            server.shutdown()
-            server.server_close()
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(path)
+            _close(server, path)
         self._servers = []
+        self._peer_servers = {}
+
+
+def _close(server: _UnixServer, path: Path) -> None:
+    server.shutdown()
+    server.server_close()
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
 
 
 __all__ = [

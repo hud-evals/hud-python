@@ -11,7 +11,7 @@ from typing import Any
 
 from hud.environment import Environment, load_environment
 from hud.environment.server import TaskRunner
-from hud.eval import Taskset
+from hud.eval import Task, Taskset
 from hud.utils.naming import normalize_environment_name
 
 ALLOWED_PROTOCOLS = ("ssh", "mcp")
@@ -118,6 +118,8 @@ async def export(
                     f"only {'/'.join(ALLOWED_PROTOCOLS)} are convertible.",
                 )
 
+        # Every task is checked before any is written, so a refused export leaves no folders.
+        planned: list[tuple[Task, Environment, str]] = []
         for task in tasks:
             env = authored[task.env]
             if task.id not in env.tasks:
@@ -139,7 +141,9 @@ async def export(
                     f"directory {slug!r}; give them distinct slugs"
                 )
             claimed[slug] = declared
+            planned.append((task, env, slug))
 
+        for task, env, slug in planned:
             task_dir = out / slug
             tests_dir = task_dir / "tests"
             tests_dir.mkdir(parents=True, exist_ok=True)

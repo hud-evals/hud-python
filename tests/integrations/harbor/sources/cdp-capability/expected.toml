@@ -1,0 +1,3 @@
+# Harbor cannot carry a CDP capability.
+base = "demo"
+refusal = { type = "ValueError", message = "declares non-Harbor capabilities ['cdp", started = true }

@@ -10,17 +10,21 @@ import math
 import ssl
 import time
 import warnings
-from typing import Any
+from typing import Any, TypeVar, overload
 
 import httpx
+from pydantic import TypeAdapter
 
 from hud.utils.exceptions import (
     HudAuthenticationError,
     HudDeprecationWarning,
     HudNetworkError,
+    HudReplyError,
     HudRequestError,
     HudTimeoutError,
 )
+
+T = TypeVar("T")
 
 # Set up logger
 logger = logging.getLogger("hud.http")
@@ -135,13 +139,20 @@ def _warn_if_deprecated(method: str, response: httpx.Response) -> None:
     )
 
 
-def _response_payload(response: httpx.Response) -> Any:
-    """Decode JSON, treating 204 / empty bodies as an empty object."""
-    if response.status_code == 204 or not response.content:
-        return {}
-    return response.json()
+def _parse_reply(response: httpx.Response, reply: type[T]) -> T:
+    """The body as ``reply``, a 204 or empty body read as an empty object."""
+    try:
+        payload = {} if response.status_code == 204 or not response.content else response.json()
+        return TypeAdapter(reply).validate_python(payload)
+    except ValueError as e:
+        raise HudReplyError(
+            f"The HUD API sent a reply hud cannot read from {response.url}: {e}",
+            url=str(response.url),
+            status_code=response.status_code,
+        ) from e
 
 
+@overload
 async def make_request(
     method: str,
     url: str,
@@ -150,7 +161,32 @@ async def make_request(
     max_retries: int = 4,
     retry_delay: float = 2.0,
     client: httpx.AsyncClient | None = None,
-) -> dict[str, Any]:
+    *,
+    reply: type[T],
+) -> T: ...
+@overload
+async def make_request(
+    method: str,
+    url: str,
+    json: Any | None = None,
+    api_key: str | None = None,
+    max_retries: int = 4,
+    retry_delay: float = 2.0,
+    client: httpx.AsyncClient | None = None,
+    *,
+    reply: None = None,
+) -> None: ...
+async def make_request(
+    method: str,
+    url: str,
+    json: Any | None = None,
+    api_key: str | None = None,
+    max_retries: int = 4,
+    retry_delay: float = 2.0,
+    client: httpx.AsyncClient | None = None,
+    *,
+    reply: type[T] | None = None,
+) -> T | None:
     """
     Make an asynchronous HTTP request to the HUD API.
 
@@ -161,15 +197,16 @@ async def make_request(
         api_key: API key for authentication
         max_retries: Maximum number of retries
         retry_delay: Delay between retries
-        *,
         client: Optional custom httpx.AsyncClient
+        reply: The type the response body is read as; None discards the body
 
     Returns:
-        dict: JSON response from the server
+        The response body as ``reply``, or None without one.
 
     Raises:
         HudAuthenticationError: If API key is missing or invalid.
         HudRequestError: If the request fails with a non-retryable status code.
+        HudReplyError: If the response body is not a ``reply``.
         HudNetworkError: If there are network-related issues.
         HudTimeoutError: If the request times out.
     """
@@ -199,8 +236,6 @@ async def make_request(
 
                 _warn_if_deprecated(method, response)
                 response.raise_for_status()
-                result = _response_payload(response)
-                return result
             except httpx.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
             except httpx.HTTPStatusError as e:
@@ -214,12 +249,15 @@ async def make_request(
                 )
             except Exception as e:
                 raise HudRequestError(f"Unexpected error: {e!s}") from None
+            else:
+                return None if reply is None else _parse_reply(response, reply)
         raise HudRequestError(f"Request failed after {max_retries} retries with unknown error")
     finally:
         if should_close_client:
             await client.aclose()
 
 
+@overload
 def make_request_sync(
     method: str,
     url: str,
@@ -229,7 +267,31 @@ def make_request_sync(
     retry_delay: float = 2.0,
     *,
     client: httpx.Client | None = None,
-) -> dict[str, Any]:
+    reply: type[T],
+) -> T: ...
+@overload
+def make_request_sync(
+    method: str,
+    url: str,
+    json: Any | None = None,
+    api_key: str | None = None,
+    max_retries: int = 4,
+    retry_delay: float = 2.0,
+    *,
+    client: httpx.Client | None = None,
+    reply: None = None,
+) -> None: ...
+def make_request_sync(
+    method: str,
+    url: str,
+    json: Any | None = None,
+    api_key: str | None = None,
+    max_retries: int = 4,
+    retry_delay: float = 2.0,
+    *,
+    client: httpx.Client | None = None,
+    reply: type[T] | None = None,
+) -> T | None:
     """
     Make a synchronous HTTP request to the HUD API.
 
@@ -241,13 +303,15 @@ def make_request_sync(
         max_retries: Maximum number of retries
         retry_delay: Delay between retries
         client: Optional custom httpx.Client
+        reply: The type the response body is read as; None discards the body
 
     Returns:
-        dict: JSON response from the server
+        The response body as ``reply``, or None without one.
 
     Raises:
         HudAuthenticationError: If API key is missing or invalid.
         HudRequestError: If the request fails with a non-retryable status code.
+        HudReplyError: If the response body is not a ``reply``.
         HudNetworkError: If there are network-related issues.
         HudTimeoutError: If the request times out.
     """
@@ -277,8 +341,6 @@ def make_request_sync(
 
                 _warn_if_deprecated(method, response)
                 response.raise_for_status()
-                result = _response_payload(response)
-                return result
             except httpx.TimeoutException as e:
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
             except httpx.HTTPStatusError as e:
@@ -290,6 +352,8 @@ def make_request_sync(
                 time.sleep(_retry_delay(attempt, max_retries, retry_delay, url, f"{kind}: {e}"))
             except Exception as e:
                 raise HudRequestError(f"Unexpected error: {e!s}") from None
+            else:
+                return None if reply is None else _parse_reply(response, reply)
         raise HudRequestError(f"Request failed after {max_retries} retries with unknown error")
     finally:
         if should_close_client:

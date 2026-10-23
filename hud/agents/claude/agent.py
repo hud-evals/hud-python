@@ -45,6 +45,7 @@ from hud.utils import gateway
 from .images import image_source
 from .tools.coding import ClaudeBashTool, ClaudeTextEditorTool
 from .tools.computer import ClaudeComputerTool
+from .tools.hosted import ClaudeToolSearchTool
 from .tools.mcp_proxy import ClaudeMCPProxyTool
 
 if TYPE_CHECKING:
@@ -208,17 +209,16 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             if citation_doc is not None:
                 sibling_docs.append(citation_doc)
 
-        tool_result_msg = BetaMessageParam(
-            role="user",
-            content=[
-                BetaToolResultBlockParam(
-                    type="tool_result",
-                    tool_use_id=tool_use_id,
-                    content=claude_blocks,
-                    is_error=bool(result.isError) or image_error,
-                ),
-            ],
+        tool_result = BetaToolResultBlockParam(
+            type="tool_result",
+            tool_use_id=tool_use_id,
+            content=claude_blocks,
+            is_error=bool(result.isError) or image_error,
         )
+        if call.provider_name is not None:
+            # A toolset member's result names the family its tool_use came from.
+            tool_result["toolset_name"] = call.name
+        tool_result_msg = BetaMessageParam(role="user", content=[tool_result])
         if sibling_docs:
             return [tool_result_msg, BetaMessageParam(role="user", content=sibling_docs)]
         return tool_result_msg
@@ -311,7 +311,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         )
         betas: list[str] | Omit = list(required_betas) if required_betas else Omit()
         tool_choice = BetaToolChoiceAutoParam(type="auto", disable_parallel_tool_use=True)
-        tools = cast("list[BetaToolUnionParam]", list(state.params))
+        tools = self._defer_for_tool_search(cast("list[BetaToolUnionParam]", list(state.params)))
         system = system_prompt if system_prompt is not None else Omit()
         is_bedrock = isinstance(self.anthropic_client, AsyncAnthropicBedrock)
 
@@ -388,6 +388,27 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
 
         return self.message_to_agent_step(response, citations_enabled=citations_enabled)
 
+    def _defer_for_tool_search(self, tools: list[BetaToolUnionParam]) -> list[BetaToolUnionParam]:
+        """Defer custom tools to tool search once there are more than its threshold."""
+        search = next(
+            (
+                hosted
+                for hosted in self.config.hosted_tools
+                if isinstance(hosted, ClaudeToolSearchTool)
+                and hosted.supports_model(self.config.model)
+            ),
+            None,
+        )
+        custom = [tool for tool in tools if "type" not in tool or tool["type"] == "custom"]
+        if search is None or len(custom) <= search.threshold:
+            return tools
+        return [
+            cast("BetaToolUnionParam", {**tool, "defer_loading": True})
+            if "type" not in tool or tool["type"] == "custom"
+            else tool
+            for tool in tools
+        ]
+
     @staticmethod
     def _prune_tool_result_images(messages: list[BetaMessageParam], limit: int) -> None:
         retained = 0
@@ -440,16 +461,24 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         for block in response.content:
             match block.type:
                 case "tool_use":
-                    result.tool_calls.append(
-                        MCPToolCall(
-                            id=block.id,
-                            name=block.name,
-                            arguments=dict(block.input) if block.input else {},
-                            _meta=mcp_types.RequestParams.Meta.model_validate(
-                                {"citations_enabled": citations_enabled},
-                            ),
-                        )
+                    arguments = dict(block.input) if block.input else {}
+                    meta = mcp_types.RequestParams.Meta.model_validate(
+                        {"citations_enabled": citations_enabled},
                     )
+                    if block.toolset_name is None:
+                        call = MCPToolCall(
+                            id=block.id, name=block.name, arguments=arguments, _meta=meta
+                        )
+                    else:
+                        # A toolset member is one action of the family's tool.
+                        call = MCPToolCall(
+                            id=block.id,
+                            name=block.toolset_name,
+                            arguments={"action": block.name, **arguments},
+                            provider_name=block.name,
+                            _meta=meta,
+                        )
+                    result.tool_calls.append(call)
                     result.done = False
                 case "text":
                     text_parts.append(block.text)

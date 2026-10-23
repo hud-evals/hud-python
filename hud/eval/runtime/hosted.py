@@ -8,10 +8,7 @@ import uuid
 import warnings
 from typing import TYPE_CHECKING, Any
 
-from hud.capabilities.mcp import get_mcp_trace_id
-from hud.eval.run import Grade, Run, validate_rollout_timeouts
-from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.span import normalize_trace_id
+from hud.eval.run import Grade, Run, parent_trace, validate_rollout_timeouts
 from hud.types import AgentType, Step
 from hud.utils.platform import PlatformClient
 
@@ -73,16 +70,9 @@ class HostedRuntime:
         local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex
-        parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
-        if parent_trace_id is not None and normalize_trace_id(
-            parent_trace_id
-        ) == normalize_trace_id(trace_id):
-            parent_trace_id = None
-        if parent_trace_id is not None:
-            try:
-                parent_trace_id = str(uuid.UUID(parent_trace_id))
-            except ValueError:
-                parent_trace_id = None
+        parent = parent_trace(trace_id)
+        # The SDK's hex ids travel as canonical UUID strings.
+        parent_trace_id = str(parent) if parent is not None else None
         timeout = self.run_timeout if rollout_timeout is None else rollout_timeout
         validate_rollout_timeouts(
             task,
@@ -151,8 +141,6 @@ class HostedRuntime:
             )
         spec = {"type": agent_type.value, "config": {**agent.dump(), **(task.agent_config or {})}}
         platform = PlatformClient.from_settings()
-        if not platform.api_key:
-            raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
         payload: dict[str, Any] = {
             # The SDK's hex ids travel as canonical UUID strings.
             "trace_id": str(uuid.UUID(trace_id)),
@@ -211,8 +199,13 @@ class HostedRuntime:
         return run
 
     async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> dict[str, Any]:
+        task = asyncio.current_task()
         while True:
-            state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
+            # httpx can swallow a cancellation that lands mid-request, which
+            # would leave a timed-out or cancelled rollout polling forever.
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError
+            state = await platform.aget(f"/trace/{trace_id}", dict[str, Any])
             if state.get("status") in _TERMINAL_TRACE_STATUSES:
                 return state
             await asyncio.sleep(self.poll_interval)

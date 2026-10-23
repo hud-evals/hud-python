@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from pydantic import BaseModel, TypeAdapter, field_validator
+
 from hud.utils.exceptions import HudRequestError
 
 from .task import Task
@@ -21,6 +23,52 @@ if TYPE_CHECKING:
     from hud.utils.platform import PlatformClient
 
     from .taskset import Taskset
+
+
+class TasksetRecord(BaseModel):
+    """A taskset as ``GET /tasksets/{id}`` and ``POST /tasksets`` return it."""
+
+    id: uuid.UUID
+    name: str
+    project_id: uuid.UUID | None = None
+    can_edit: bool = False
+
+
+class TaskUploadResult(BaseModel):
+    """What ``POST /tasks/upload`` did."""
+
+    taskset_id: uuid.UUID
+    tasks_created: int
+    tasks_updated: int
+
+
+class _TasksetName(BaseModel):
+    taskset_id: str
+    name: str
+
+
+class _TasksetExport(BaseModel):
+    name: str
+    tasks: list[Task]
+
+    @field_validator("tasks", mode="before")
+    @classmethod
+    def _as_rows(cls, records: Any) -> list[dict[str, Any]]:
+        """Map each platform export record onto the portable row shape."""
+        return [
+            {
+                "env": record.get("env"),
+                "id": record.get("scenario") or "",
+                "args": record.get("args") or {},
+                "slug": record.get("name"),
+                "validation": record.get("validation"),
+                "agent_config": record.get("agent_config"),
+                "columns": record.get("columns"),
+                "runtime_config": record.get("runtime_config"),
+                "verifier": record.get("verifier"),
+            }
+            for record in TypeAdapter(list[dict[str, Any]]).validate_python(records)
+        ]
 
 
 @dataclass(slots=True)
@@ -87,12 +135,12 @@ def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, 
         pass
 
     try:
-        data = platform.get(f"/tasksets/by-name/{quote(name_or_id, safe='')}")
+        found = platform.get(f"/tasksets/by-name/{quote(name_or_id, safe='')}", _TasksetName)
     except HudRequestError as e:
         if e.status_code == 404:
             return "", name_or_id
         raise
-    return str(data.get("taskset_id", "")), str(data.get("name", name_or_id))
+    return found.taskset_id, found.name
 
 
 def fetch_taskset_tasks(
@@ -101,34 +149,12 @@ def fetch_taskset_tasks(
 ) -> tuple[str | None, list[Task]]:
     """Fetch a platform taskset's export, mapped to ``(display_name, [Task])``."""
     try:
-        data = platform.get(f"/tasksets/{taskset_id}/export")
+        export = platform.get(f"/tasksets/{taskset_id}/export", _TasksetExport)
     except HudRequestError as e:
         if e.status_code == 404:
             return None, []
         raise
-    display = data.get("name")
-    taskset_name = display if isinstance(display, str) else None
-    records = data.get("tasks")
-    if not isinstance(records, list):
-        return taskset_name, []
-    return taskset_name, [_record_to_task(r) for r in records if isinstance(r, dict)]
-
-
-def _record_to_task(record: dict[str, Any]) -> Task:
-    """Map one platform export record onto the portable row shape."""
-    return Task.model_validate(
-        {
-            "env": record.get("env"),
-            "id": record.get("scenario") or "",
-            "args": record.get("args") or {},
-            "slug": record.get("name"),
-            "validation": record.get("validation"),
-            "agent_config": record.get("agent_config"),
-            "columns": record.get("columns"),
-            "runtime_config": record.get("runtime_config"),
-            "verifier": record.get("verifier"),
-        }
-    )
+    return export.name, export.tasks
 
 
 # ─── upload ─────────────────────────────────────────────────────────────
@@ -141,7 +167,7 @@ def upload_taskset(
     *,
     project_id: str | None = None,
     taskset_id: str | None = None,
-) -> dict[str, Any]:
+) -> TaskUploadResult:
     """Upload tasks to a platform taskset, creating it if needed."""
     payload: dict[str, Any] = {
         "taskset_name": name,
@@ -151,8 +177,7 @@ def upload_taskset(
         payload["project_id"] = project_id
     if taskset_id:
         payload["taskset_id"] = taskset_id
-    data = platform.post("/tasks/upload", json=payload)
-    return data if isinstance(data, dict) else {}
+    return platform.post("/tasks/upload", TaskUploadResult, json=payload)
 
 
 def task_upload_payload(task: Task) -> dict[str, Any]:
@@ -171,12 +196,9 @@ def task_upload_payload(task: Task) -> dict[str, Any]:
 
 
 def _task_signature(task: Task) -> str:
-    sig_data = task.model_dump(
-        mode="json",
-        exclude_none=True,
-        exclude={"env", "id", "slug"},
-    )
-    return f"{task.id}|" + json.dumps(
+    # The slug keys the row; everything else, its env included, is what it runs.
+    sig_data = task.model_dump(mode="json", exclude_none=True, exclude={"slug"})
+    return json.dumps(
         sig_data,
         sort_keys=True,
         default=str,

@@ -9,12 +9,15 @@ import sys
 import tarfile
 import tempfile
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
+from hud.clients import DEFAULT_READY_TIMEOUT
+from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
@@ -80,6 +83,42 @@ async def _docker_deadline(
     finally:
         expiry.cancel()
         await asyncio.gather(expiry, return_exceptions=True)
+
+
+async def _wait_serving(container: str, name: str, seconds: float) -> None:
+    """Return once the env in *container* announces its port; raise if it exits first."""
+    logs = await create_process_group_exec(
+        "docker",
+        "logs",
+        "--follow",
+        container,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    assert logs.stdout is not None
+    tail: deque[str] = deque(maxlen=40)
+    try:
+        async with asyncio.timeout(seconds):
+            while True:
+                try:
+                    line = await logs.stdout.readline()
+                except ValueError:
+                    # Longer than the reader's limit, so not the announcement.
+                    continue
+                if not line:
+                    break
+                text = line.decode("utf-8", "replace").rstrip()
+                if text.startswith(PORT_ANNOUNCEMENT):
+                    return
+                tail.append(text)
+            # The log follow ends when the container stops.
+            code, _ = await _docker("wait", container)
+    except TimeoutError:
+        raise TimeoutError(f"{name} did not serve within {seconds:.0f}s") from None
+    finally:
+        await logs.terminate()
+    output = "\n".join(tail).strip() or "(no output)"
+    raise RuntimeError(f"{name} exited with code {code.strip()} before serving:\n{output}")
 
 
 @asynccontextmanager
@@ -236,38 +275,30 @@ class DockerRuntime:
                                 None if startup_deadline is None else startup_deadline - loop.time()
                             ),
                         )
-                    if resources is not None and resources.storage_mb is not None:
-                        free_disk, _ = await _docker(
-                            *command, "exec", "-T", "main", "df", "-Pk", "/"
+                    out, _ = await _docker(*command, "ps", "--all", "--quiet", "main")
+                    container = out.strip()
+                    async with _docker_output(*command, "logs", "--follow", "--no-color"):
+                        await _wait_serving(
+                            container,
+                            "Compose main service",
+                            DEFAULT_READY_TIMEOUT
+                            if startup_deadline is None
+                            else startup_deadline - loop.time(),
                         )
-                        _require_free_disk(free_disk, resources.storage_mb)
-                    mapping, _ = await _docker(*command, "port", port_service, str(self.port))
-                    if not mapping.strip():
-                        logs_out, logs_err = await _docker(
-                            *command, "logs", "--tail", "40", port_service, check=False
-                        )
-                        raise RuntimeError(
-                            f"Compose {port_service} service exited before serving "
-                            f"port {self.port}:\n"
-                            f"{(logs_err or logs_out).strip()}"
-                        )
-                    host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-                    container, _ = await _docker(*command, "ps", "--quiet", "main")
-                    async with (
-                        _docker_output(
-                            *command,
-                            "logs",
-                            "--follow",
-                            "--no-color",
-                        ),
-                        _docker_deadline(run_timeout, teardown),
-                    ):
-                        yield DockerEndpoint(
-                            f"tcp://127.0.0.1:{host_port}",
-                            params=params,
-                            config=config if config.model_dump(exclude_none=True) else None,
-                            container=container.strip(),
-                        )
+                        if resources is not None and resources.storage_mb is not None:
+                            free_disk, _ = await _docker(
+                                *command, "exec", "-T", "main", "df", "-Pk", "/"
+                            )
+                            _require_free_disk(free_disk, resources.storage_mb)
+                        mapping, _ = await _docker(*command, "port", port_service, str(self.port))
+                        host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
+                        async with _docker_deadline(run_timeout, teardown):
+                            yield DockerEndpoint(
+                                f"tcp://127.0.0.1:{host_port}",
+                                params=params,
+                                config=config if config.model_dump(exclude_none=True) else None,
+                                container=container,
+                            )
                 finally:
                     await _docker(*teardown, check=False)
             return
@@ -322,31 +353,24 @@ class DockerRuntime:
             )
             container = out.strip()
             teardown = ("rm", "--force", container)
-            if resources is not None and resources.storage_mb is not None:
-                free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
-                _require_free_disk(free_disk, resources.storage_mb)
-            mapping, _ = await _docker("port", container, str(self.port))
-            if not mapping.strip():
-                logs_out, logs_err = await _docker("logs", "--tail", "40", container, check=False)
-                raise RuntimeError(
-                    f"container for image {config.image!r} exited before serving port "
-                    f"{self.port}:\n{(logs_err or logs_out).strip()}",
-                )
-            host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-            async with (
-                _docker_output(
-                    "logs",
-                    "--follow",
+            async with _docker_output("logs", "--follow", container):
+                await _wait_serving(
                     container,
-                ),
-                _docker_deadline(run_timeout, teardown),
-            ):
-                yield DockerEndpoint(
-                    f"tcp://127.0.0.1:{host_port}",
-                    params=params,
-                    config=config,
-                    container=container,
+                    f"container for image {config.image!r}",
+                    DEFAULT_READY_TIMEOUT if startup_timeout is None else startup_timeout,
                 )
+                if resources is not None and resources.storage_mb is not None:
+                    free_disk, _ = await _docker("exec", container, "df", "-Pk", "/")
+                    _require_free_disk(free_disk, resources.storage_mb)
+                mapping, _ = await _docker("port", container, str(self.port))
+                host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
+                async with _docker_deadline(run_timeout, teardown):
+                    yield DockerEndpoint(
+                        f"tcp://127.0.0.1:{host_port}",
+                        params=params,
+                        config=config,
+                        container=container,
+                    )
         finally:
             # check=False: teardown must not shadow the run's own error, and
             # rm -f only fails when the daemon itself is broken.

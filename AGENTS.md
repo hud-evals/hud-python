@@ -16,7 +16,7 @@ adding local workarounds.
 - `CONTRIBUTING.md` for setup, test, lint, and type-check commands.
 - `pyproject.toml` for supported Python versions, dependencies, optional extras,
   ruff, ty, pytest, and coverage configuration.
-- Source files and colocated tests for exact behavior. Trust code and tests over
+- Source files and their tests for exact behavior. Trust code and tests over
   stale prose.
 - `cookbooks/` for runnable end-to-end examples (each is its own uv project).
 
@@ -31,6 +31,8 @@ inventory of current incidents.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
+- `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture environments
+  and fakes for what CI cannot reach.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.
 
 ## Working Style
@@ -53,14 +55,14 @@ Use the commands in `CONTRIBUTING.md` as the source of truth. Common commands:
 
 ```bash
 uv sync --extra dev
-uv run pytest -q
 uv run ruff format . --check
 uv run ruff check .
 uv run --extra dev --extra train ty check
+uv run pytest -n auto
 ```
 
-The shared pre-push hook lives in `.githooks/pre-push`, but agents should not
-change local git config unless explicitly asked.
+Locally, ruff and ty are the loop; CI runs the test suite. Run the tests you
+touched, and leave the full suite and the `e2e` lanes to CI.
 
 Tests run on Python 3.11 and 3.12 in CI. `pyproject.toml` currently supports
 Python `>=3.11, <3.13`.
@@ -119,27 +121,17 @@ Python `>=3.11, <3.13`.
 - Use `TYPE_CHECKING` imports for type-only imports that would otherwise add
   runtime dependency cost or cycles.
 
-## Testing Expectations
+## Testing
 
-- Add or update focused tests for behavior changes. Put tests near the module
-  they cover, following the existing `*/tests/` layout.
-- Test behavior and contracts, not private implementation details.
-- Regression tests should fail on the old behavior through the normal lifecycle
-  or public boundary. Do not manually seed private state such as internal maps,
-  caches, cursors, or prepared containers just to prove a changed line.
-- If a bug involves internal state, reach it through real setup and execution:
-  construction, configuration, preparation, run loop, provider response, tool
-  execution, or public API call.
-- Do not add hooks, helper methods, or abstraction layers only to make tests
-  easier. If a test needs that, reconsider the behavior boundary instead.
-- Test names should describe the observable behavior or contract, not the
-  private mechanism.
-- Mock external services, provider APIs, network, Docker, browser, and filesystem
-  boundaries as needed. Do not mock core logic just to make a test easy.
-- Mark tests that require `HUD_API_KEY`, network access, or deployed services as
-  integration tests.
-- Run the narrowest relevant tests first, then broader checks when the blast
-  radius is shared or user-facing.
+Write a test only when it would catch a break a user would notice.
+
+- Drive the SDK as a user does (CLI, public API) and assert what they see:
+  reward, status, errors, files, exit codes, and what the HUD platform records.
+  Not prompt text, rendered output or argv.
+- Fake only what CI cannot run (HUD services, model providers, Docker). Never
+  touch `hud` internals; ruff's SLF001 enforces this.
+- A change needs no test by default. Add one when a fix could plausibly regress; it
+  must fail with the fix reverted.
 
 ## Operational Debugging
 

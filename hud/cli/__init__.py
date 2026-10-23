@@ -32,6 +32,11 @@ if TYPE_CHECKING:
 CONFIG_PATH = Path(".hud") / "config.json"
 
 
+class _Identity(BaseModel):
+    user_id: UUID
+    team_id: UUID
+
+
 class AuthScope(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -41,7 +46,7 @@ class AuthScope(BaseModel):
 
     @classmethod
     def resolve(cls, platform: PlatformClient) -> AuthScope:
-        identity = platform.get("/auth/me")
+        identity = platform.get("/auth/me", _Identity)
         url = urlsplit(platform.api_url)
         if url.scheme not in {"http", "https"} or not url.hostname:
             raise ValueError("HUD API URL must be an HTTP origin")
@@ -49,8 +54,8 @@ class AuthScope(BaseModel):
         port = "" if url.port in (None, default_port) else f":{url.port}"
         return cls(
             origin=f"{url.scheme}://{url.hostname}{port}",
-            user_id=identity["user_id"],
-            team_id=identity["team_id"],
+            user_id=identity.user_id,
+            team_id=identity.team_id,
         )
 
 

@@ -1,0 +1,18 @@
+# An image Docker cannot resolve is reported on its task, naming what failed.
+findings = [
+  ["broken", "harbor.invalid.image"],
+  ["missing-sidecar-image", "harbor.invalid.image"],
+  ["verifier-on-arm", "harbor.invalid.image"],
+]
+
+# Words each task's finding messages contain. Linux daemons name only the
+# registry they could not reach, so the finding names the service.
+[mentions]
+broken = ["registry.invalid/missing"]
+missing-sidecar-image = ["cache", "registry.invalid"]
+verifier-on-arm = ["--platform linux/amd64"]
+
+# Words the messages contain exactly when the Docker daemon is not amd64: a
+# verifier that cannot build there says how to adapt for one platform.
+[mentions_off_amd64]
+verifier-on-arm = ["DOCKER_DEFAULT_PLATFORM=linux/amd64"]
