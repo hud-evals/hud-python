@@ -50,8 +50,10 @@ async def run_pytest(variant: int = 0) -> tuple[int, int]:
     """Run the variant's own tests against the agent's `calc.py`.
 
     The agent works in the same directory as the tests, so grading restores
-    `test_calc.py`, drops any pytest configuration the agent added, and reads the
-    outcome from a JUnit report written outside the workspace, never from stdout.
+    `test_calc.py`, drops any pytest configuration the agent added, runs Python
+    with `-P` so a `pytest.py` in the workspace can't replace pytest, and reads
+    the outcome from a JUnit report written outside the workspace, never from
+    stdout.
     """
     _, tests, _ = bugs.build(variant)
     (WORKSPACE / "test_calc.py").write_text(tests)
@@ -64,6 +66,7 @@ async def run_pytest(variant: int = 0) -> tuple[int, int]:
         report = Path(directory) / "report.xml"
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
+            "-P",
             "-m",
             "pytest",
             "-q",
