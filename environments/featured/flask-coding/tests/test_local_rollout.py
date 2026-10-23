@@ -104,7 +104,7 @@ async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading
     assert (repo / "fix.py").exists()
 
 
-async def test_missing_junit_report_is_grading_error(
+async def test_missing_junit_report_is_a_graded_failure(
     fixture_repo,
     tmp_path,
     monkeypatch,
@@ -128,10 +128,13 @@ async def test_missing_junit_report_is_grading_error(
     await task.asend(None)
     result = await task.asend("done")
 
+    # The hidden tests ran against the agent's code and produced no report: that run
+    # failed, and it must count as 0 rather than be excluded from the job's mean reward.
     assert result.reward == 0.0
-    assert result.isError is True
-    assert result.content == "test command did not write JUnit XML"
-    assert result.info["exit_code"] == 0
+    assert result.isError is False
+    [tests] = result.subscores
+    assert tests.info["report_error"] == "test command did not write JUnit XML"
+    assert tests.info["exit_code"] == 0
 
 
 async def test_untouched_baseline_gets_regression_credit(fixture_repo, isolated_workspace, monkeypatch):
