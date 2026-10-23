@@ -17,6 +17,8 @@ import uuid
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
 
 from hud.agents.base import Agent
 from hud.agents.claude import ClaudeCLIAgent, ClaudeCLIConfig
@@ -1050,3 +1052,37 @@ async def test_splice_websocket_propagates_relay_errors() -> None:
             cast("asyncio.StreamWriter", _Writer()),
             _WebSocket(),
         )
+
+
+@pytest.mark.asyncio
+async def test_splice_websocket_treats_normal_close_as_clean_end() -> None:
+    class _Reader:
+        def __init__(self) -> None:
+            self.reads = [b"payload", b""]
+
+        async def read(self, _limit: int) -> bytes:
+            return self.reads.pop(0)
+
+    class _Writer:
+        def write(self, _data: bytes) -> None:
+            pass
+
+        async def drain(self) -> None:
+            pass
+
+    class _WebSocket:
+        async def send(self, _data: bytes) -> None:
+            raise ConnectionClosedOK(Close(1000, ""), Close(1000, ""), True)
+
+        def __aiter__(self) -> _WebSocket:
+            return self
+
+        async def __anext__(self) -> bytes:
+            await asyncio.sleep(60.0)
+            raise StopAsyncIteration
+
+    await _splice_websocket(
+        cast("asyncio.StreamReader", _Reader()),
+        cast("asyncio.StreamWriter", _Writer()),
+        _WebSocket(),
+    )

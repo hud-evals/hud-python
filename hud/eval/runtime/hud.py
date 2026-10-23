@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from websockets.exceptions import ConnectionClosedOK
 
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id
@@ -242,5 +243,5 @@ async def _splice_websocket(
         await asyncio.gather(*tasks, return_exceptions=True)
 
     for result in done_results:
-        if isinstance(result, BaseException):
+        if isinstance(result, BaseException) and not isinstance(result, ConnectionClosedOK):
             raise result
