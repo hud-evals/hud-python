@@ -571,7 +571,9 @@ class Workspace:
         #: substrate's network: the services are already at those addresses.
         self.peers: tuple[Peer, ...] = tuple(peers)
         #: Peers removed while a sandbox ran; that sandbox keeps them until it is discarded.
-        self._retired_peers: list[Peer] = []
+        #: Where each peer name answers while a sandbox runs: its bridge bound
+        #: them there at start, so they hold until it is discarded.
+        self._pinned_addresses: dict[str, str] | None = None
         self._process_connections: dict[str, Peer] = {}
         self.local_aliases = frozenset(local_aliases)
         self.ports = frozenset(ports)
@@ -665,9 +667,8 @@ class Workspace:
                 # reaches them at those addresses, so they stay out of its proxy.
                 yield proxy_environment(
                     VISITOR_PORT,
-                    self.peers,
+                    self.addresses,
                     local_aliases=self.local_aliases,
-                    reserved_ports=self.ports,
                     token=token,
                 )
             finally:
@@ -693,20 +694,25 @@ class Workspace:
             self._hosts_path = self._write_hosts()
 
     def remove_peer(self, peer: Peer) -> None:
-        """Remove a substrate service, from the next sandbox if one is running now.
-
-        A running sandbox resolved its peers when it started, so it keeps this one
-        until :meth:`discard_sandbox`; the next sandbox starts without it.
-        """
-        if self._sandbox is not None:
-            self._retired_peers.append(peer)
-            return
-        self._drop_peers([peer])
-
-    def _drop_peers(self, peers: Sequence[Peer]) -> None:
-        self.peers = tuple(candidate for candidate in self.peers if candidate not in peers)
+        """Remove a substrate service, from a running sandbox too: its name stops
+        resolving and its address stops answering, while every other peer keeps
+        the address it was bound at."""
+        self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
+        if self._egress is not None and peer in self._egress.peers:
+            self._egress.remove_peer(peer)
+        if self._pinned_addresses is not None and all(
+            candidate.name != peer.name for candidate in self.peers
+        ):
+            del self._pinned_addresses[peer.name]
         if self._hosts_path is not None:
             self._hosts_path = self._write_hosts()
+
+    @property
+    def addresses(self) -> dict[str, str]:
+        """Which loopback address each peer name answers on inside the workspace."""
+        if self._pinned_addresses is not None:
+            return self._pinned_addresses
+        return bind_addresses(self.peers, reserved_ports=self.ports)
 
     @property
     def supports_process_connections(self) -> bool:
@@ -1351,6 +1357,7 @@ class Workspace:
         bwrap = self._bwrap
         assert bwrap is not None
         try:
+            self._pinned_addresses = bind_addresses(self.peers, reserved_ports=self.ports)
             if self.owns_netns:
                 self._egress = Egress(
                     self._credentials_dir(),
@@ -1508,9 +1515,7 @@ class Workspace:
             self._egress.stop()
             self._egress = None
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
-        if self._retired_peers:
-            self._drop_peers(self._retired_peers)
-            self._retired_peers.clear()
+        self._pinned_addresses = None
         if sandbox is None or sandbox.returncode is not None:
             return
         sandbox.kill()
@@ -1644,10 +1649,9 @@ class Workspace:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             hosts_text(
-                self.peers,
+                self.addresses,
                 substrate.read_text() if substrate.is_file() else "",
                 local_aliases=sorted(local_aliases),
-                reserved_ports=self.ports,
             ),
             encoding="utf-8",
         )
@@ -1729,7 +1733,7 @@ class Workspace:
         return names
 
     def _process_connection_targets(self, names: Sequence[str]) -> frozenset[tuple[str, int]]:
-        addresses = bind_addresses(self.peers, reserved_ports=self.ports)
+        addresses = self.addresses
         return frozenset(
             (addresses[peer.name], peer.port)
             for name in names
