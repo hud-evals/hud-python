@@ -126,9 +126,12 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         return RunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> BetaMessageParam:
-        return BetaMessageParam(
-            role="assistant" if role == "assistant" else "user",
-            content=[BetaTextBlockParam(type="text", text=text)],
+        return cast(
+            "BetaMessageParam",
+            {
+                "role": "assistant" if role == "assistant" else "user",
+                "content": [BetaTextBlockParam(type="text", text=text)],
+            },
         )
 
     def _format_result(
@@ -208,9 +211,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             if citation_doc is not None:
                 sibling_docs.append(citation_doc)
 
-        tool_result_msg = BetaMessageParam(
-            role="user",
-            content=[
+        tool_result_msg: BetaMessageParam = {
+            "role": "user",
+            "content": [
                 BetaToolResultBlockParam(
                     type="tool_result",
                     tool_use_id=tool_use_id,
@@ -218,9 +221,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     is_error=bool(result.isError) or image_error,
                 ),
             ],
-        )
+        }
         if sibling_docs:
-            return [tool_result_msg, BetaMessageParam(role="user", content=sibling_docs)]
+            return [tool_result_msg, {"role": "user", "content": sibling_docs}]
         return tool_result_msg
 
     # ─── Anthropic call ───────────────────────────────────────────────
@@ -345,7 +348,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     )
 
                 state.messages.append(
-                    BetaMessageParam(role="assistant", content=response.content),
+                    {"role": "assistant", "content": response.content},
                 )
                 break
 
@@ -365,9 +368,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     payload = "" if idx == -1 else message[idx + len(marker) :].strip()
                     wrapped = json.dumps({"INVALID_JSON": payload}, ensure_ascii=True)
                     state.messages.append(
-                        BetaMessageParam(
-                            role="user",
-                            content=[
+                        {
+                            "role": "user",
+                            "content": [
                                 BetaTextBlockParam(
                                     type="text",
                                     text=(
@@ -377,7 +380,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                                     ),
                                 )
                             ],
-                        )
+                        }
                     )
                     continue
 
