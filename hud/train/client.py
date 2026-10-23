@@ -174,8 +174,9 @@ class TrainingClient(BaseTrainingClient):
         )
         # exclude_none so optional fields a (possibly older) server doesn't know
         # yet — e.g. a null prompt_chunks/trace_id — aren't sent and rejected.
-        data = await self._post("forward-backward", request.model_dump(exclude_none=True))
-        return ForwardBackwardResult.model_validate(data)
+        return await self._post(
+            "forward-backward", request.model_dump(exclude_none=True), ForwardBackwardResult
+        )
 
     async def forward(
         self,
@@ -198,8 +199,7 @@ class TrainingClient(BaseTrainingClient):
             group_size=group_size,
             reward_scale=reward_scale,
         )
-        data = await self._post("forward", request.model_dump(exclude_none=True))
-        return ForwardResult.model_validate(data)
+        return await self._post("forward", request.model_dump(exclude_none=True), ForwardResult)
 
     async def backward(
         self,
@@ -215,8 +215,7 @@ class TrainingClient(BaseTrainingClient):
         :attr:`ForwardResult.data` from the matching :meth:`forward`.
         """
         request = BackwardRequest(forward_id=forward_id, weights=weights, metrics=metrics or {})
-        data = await self._post("backward", request.model_dump())
-        return ForwardBackwardResult.model_validate(data)
+        return await self._post("backward", request.model_dump(), ForwardBackwardResult)
 
     async def forward_backward_custom(
         self,

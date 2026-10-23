@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 import typer
+from pydantic import AliasPath, BaseModel, ConfigDict, Field
 
 from hud.cli import (
     CLI,
@@ -29,21 +30,13 @@ PROJECT_OPTION_HELP = (
 )
 
 
-@dataclass(frozen=True)
-class Project:
-    id: str
-    name: str
-    is_default: bool
-    can_create: bool
+class Project(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-    @classmethod
-    def from_record(cls, data: dict[str, Any]) -> Project:
-        return cls(
-            id=str(data["id"]),
-            name=data["name"],
-            is_default=bool(data.get("is_default")),
-            can_create=bool(data.get("capabilities", {}).get("create")),
-        )
+    id: uuid.UUID
+    name: str
+    is_default: bool = False
+    can_create: bool = Field(default=False, validation_alias=AliasPath("capabilities", "create"))
 
     @classmethod
     def resolve(cls, platform: PlatformClient, ref: str) -> Project:
@@ -53,13 +46,13 @@ class Project:
         ``My Project`` and ``my-project`` resolve to the same row.
         """
         try:
-            project_id = str(uuid.UUID(ref))
+            project_id = uuid.UUID(ref)
         except ValueError:
             project_id = None
         if project_id is None:
             name = normalize_environment_name(ref, default="")
-            data = platform.get("/projects", params={"search": name, "limit": 500})
-            matches = [cls.from_record(item) for item in data["items"] if item["name"] == name]
+            found = platform.get("/projects", _ProjectPage, params={"search": name, "limit": 500})
+            matches = [project for project in found.items if project.name == name]
             if not matches:
                 raise CliError(
                     "not_found",
@@ -71,14 +64,19 @@ class Project:
                 raise CliError(
                     "usage",
                     f"{len(matches)} Projects are named {name!r}; pass an ID instead: "
-                    + ", ".join(project.id for project in matches),
+                    + ", ".join(str(project.id) for project in matches),
                     input={"project": ref},
                 )
             return matches[0]
         try:
-            return cls.from_record(platform.get(f"/projects/{project_id}"))
+            return platform.get(f"/projects/{project_id}", cls)
         except HudRequestError as exc:
             raise CliError.from_http(exc, resource="Project", input={"project": ref}) from exc
+
+
+class _ProjectPage(BaseModel):
+    items: list[Project]
+    total: int
 
 
 @dataclass(frozen=True)
@@ -92,7 +90,7 @@ class Placement:
     @property
     def project_id(self) -> str | None:
         """The id to send to the platform, or None to accept the team default."""
-        return self.project.id if self.project else None
+        return str(self.project.id) if self.project else None
 
     @property
     def label(self) -> str:
@@ -120,7 +118,7 @@ class Placement:
                 error="permission_denied",
                 message="You do not have permission to create environments or tasksets in "
                 f"project '{self.project.name}'",
-                input={"project": self.project.id},
+                input={"project": str(self.project.id)},
             )
 
 
@@ -142,17 +140,18 @@ def list_command(
     platform = PlatformClient.from_settings()
     projects: list[Project] = []
     while True:
-        data = platform.get("/projects", params={"limit": 500, "offset": len(projects)})
-        page = [Project.from_record(item) for item in data["items"]]
-        projects.extend(page)
-        if len(projects) >= data["total"]:
+        page = platform.get(
+            "/projects", _ProjectPage, params={"limit": 500, "offset": len(projects)}
+        )
+        projects.extend(page.items)
+        if len(projects) >= page.total:
             break
-        if not page:
-            raise ValueError("Projects API returned an empty page before the reported total")
+        if not page.items:
+            raise HudRequestError("Projects API returned an empty page before the reported total")
     if quiet:
         for project in projects:
             typer.echo(project.id)
-        return [asdict(project) for project in projects]
+        return [project.model_dump(mode="json") for project in projects]
     console = HUDConsole()
     for project in projects:
         tags = " (default)" if project.is_default else ""
@@ -160,7 +159,7 @@ def list_command(
         console.info(f"{project.name}  {project.id}{tags}")
     if not projects:
         console.info("No projects found")
-    return [asdict(project) for project in projects]
+    return [project.model_dump(mode="json") for project in projects]
 
 
 @project_app.command("create")
@@ -198,11 +197,11 @@ def create_command(
     if state is not None:
         state.load()  # a config written under other credentials fails before we create anything
     CLI.confirm_or_abort(f"Create Project {name}?", yes=yes, default=True)
-    created = Project.from_record(platform.post("/projects", json=payload))
+    created = platform.post("/projects", Project, json=payload)
     if state is not None:
         state.update(DirectoryLink(project_id=created.id))
     HUDConsole().success(f"Created Project: {created.name} ({created.id})")
-    return asdict(created)
+    return created.model_dump(mode="json")
 
 
 @project_app.command("use")
@@ -229,7 +228,7 @@ def use_command(
     HUDConsole().success(
         f"{'Would use' if dry_run else 'Using'} Project: {project.name} ({project.id})"
     )
-    return {**asdict(project), "dry_run": dry_run}
+    return {**project.model_dump(mode="json"), "dry_run": dry_run}
 
 
 @project_app.callback(invoke_without_command=True)
@@ -243,12 +242,12 @@ def project_callback(
         return
     platform = PlatformClient.from_settings()
     # Projects are feature-gated per team; surface that before reading the directory.
-    platform.get("/projects", params={"limit": 1})
+    platform.get("/projects", _ProjectPage, params={"limit": 1})
     state = DirectoryState(AuthScope.resolve(platform), directory)
     placement = Placement.resolve(platform, state.load(), flag=None)
     HUDConsole().info(f"Project: {placement.label}")
     return {
-        "project": asdict(placement.project) if placement.project else None,
+        "project": placement.project.model_dump(mode="json") if placement.project else None,
         "source": placement.source,
         "label": placement.label,
     }

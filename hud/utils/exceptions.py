@@ -166,6 +166,14 @@ class HudRequestError(HudException):
         )
 
 
+class HudReplyError(HudRequestError):
+    """The HUD API answered a request with a body this client cannot read."""
+
+    def __init__(self, message: str, *, url: str, status_code: int) -> None:
+        self.url = url
+        super().__init__(message, status_code)
+
+
 class HudAuthenticationError(HudException):
     """Missing or invalid HUD API key."""
 

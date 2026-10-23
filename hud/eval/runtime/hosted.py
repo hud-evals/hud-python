@@ -205,7 +205,7 @@ class HostedRuntime:
             # would leave a timed-out or cancelled rollout polling forever.
             if task is not None and task.cancelling():
                 raise asyncio.CancelledError
-            state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
+            state = await platform.aget(f"/trace/{trace_id}", dict[str, Any])
             if state.get("status") in _TERMINAL_TRACE_STATUSES:
                 return state
             await asyncio.sleep(self.poll_interval)

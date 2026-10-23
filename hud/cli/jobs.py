@@ -15,8 +15,10 @@ from typing import Any
 from uuid import UUID
 
 import typer
+from pydantic import BaseModel, ConfigDict, with_config
 from rich.panel import Panel
 from rich.table import Table
+from typing_extensions import TypedDict
 
 from hud.cli import (
     CLI,
@@ -30,6 +32,15 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
+
+
+@with_config(ConfigDict(extra="allow"))
+class _Row(TypedDict):
+    id: str
+
+
+class _Page(BaseModel):
+    items: list[_Row]
 
 
 class _JobsGroup(CLIGroup):
@@ -67,7 +78,7 @@ def list_command(
         hud jobs list --quiet | xargs -n1 hud jobs get
         hud jobs list -n 50[/not dim]
     """
-    items = PlatformClient.from_settings().get("/jobs", params={"limit": limit})["items"]
+    items = PlatformClient.from_settings().get("/jobs", _Page, params={"limit": limit}).items
     if quiet:
         for job in items:
             typer.echo(job["id"])
@@ -116,10 +127,9 @@ def get_command(
     client = PlatformClient.from_settings()
     job_id = str(UUID(job_id))
     try:
-        data = client.get(f"/jobs/{job_id}/traces", params={"limit": limit})
+        items = client.get(f"/jobs/{job_id}/traces", _Page, params={"limit": limit}).items
     except HudRequestError as exc:
         raise CliError.from_http(exc, resource="Job", input={"job_id": job_id}) from exc
-    items = data["items"]
     if quiet:
         for trace in items:
             typer.echo(trace["id"])
@@ -222,7 +232,7 @@ def cancel_job_command(
                 "This will cancel ALL your active jobs. Continue?", yes=yes, default=False
             )
             hud_console.info("Cancelling all active jobs...")
-            result = platform.post("/rollouts/cancel_user_jobs", json={})
+            result = platform.post("/rollouts/cancel_user_jobs", dict[str, Any], json={})
             jobs_cancelled = result.get("jobs_cancelled", 0)
             if jobs_cancelled == 0:
                 hud_console.info("No active jobs found.")
@@ -239,7 +249,7 @@ def cancel_job_command(
             )
             hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
             result = platform.post(
-                "/rollouts/cancel", json={"job_id": job_id, "trace_id": trace_id}
+                "/rollouts/cancel", dict[str, Any], json={"job_id": job_id, "trace_id": trace_id}
             )
             if result.get("status") == "accepted":
                 hud_console.success("Task cancellation requested.")
@@ -248,7 +258,7 @@ def cancel_job_command(
         else:
             CLI.confirm_or_abort(f"Cancel all tasks in job {job_id}?", yes=yes, default=False)
             hud_console.info(f"Cancelling job {job_id}...")
-            result = platform.post("/rollouts/cancel_job", json={"job_id": job_id})
+            result = platform.post("/rollouts/cancel_job", dict[str, Any], json={"job_id": job_id})
             cancelled = result.get("cancelled", 0)
             if cancelled == 0:
                 hud_console.warning(f"No active tasks found for job {job_id}")

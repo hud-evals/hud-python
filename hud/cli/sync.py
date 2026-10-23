@@ -5,12 +5,12 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
 import typer
+from pydantic import BaseModel, ConfigDict
 from typer.core import TyperGroup
 
 from hud.cli import (
@@ -23,7 +23,7 @@ from hud.cli import (
 )
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.eval import Taskset
-from hud.eval.sync import diff, resolve_taskset_id, upload_taskset
+from hud.eval.sync import TasksetRecord, diff, resolve_taskset_id, upload_taskset
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
@@ -31,18 +31,11 @@ from hud.utils.naming import normalize_environment_name
 from hud.utils.platform import PlatformClient
 
 
-@dataclass(frozen=True)
-class RegistryEnvironment:
-    id: str
-    name: str
-    version: str = ""
+class RegistryEnvironment(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-    @classmethod
-    def from_record(cls, data: dict[str, Any]) -> RegistryEnvironment:
-        version = (data.get("latest_build") or {}).get("version")
-        return cls(
-            id=data["id"], name=data["name"], version="" if version is None else str(version)
-        )
+    id: UUID
+    name: str
 
     @classmethod
     def resolve(cls, platform: PlatformClient, ref: str) -> RegistryEnvironment:
@@ -53,8 +46,8 @@ class RegistryEnvironment:
             registry_id = None
         if registry_id is None:
             name = normalize_environment_name(ref, default="")
-            data = platform.get("/registry", params={"search": name, "limit": 500})
-            matches = [cls.from_record(item) for item in data["items"] if item["name"] == name]
+            found = platform.get("/registry", _RegistryPage, params={"search": name, "limit": 500})
+            matches = [env for env in found.items if env.name == name]
             if not matches:
                 raise CliError(
                     "not_found",
@@ -66,12 +59,12 @@ class RegistryEnvironment:
                 raise CliError(
                     "usage",
                     f"{len(matches)} environments are named {name!r}; pass an ID instead: "
-                    + ", ".join(env.id for env in matches),
+                    + ", ".join(str(env.id) for env in matches),
                     input={"environment": ref},
                 )
             return matches[0]
         try:
-            return cls.from_record(platform.get(f"/registry/{registry_id}"))
+            return platform.get(f"/registry/{registry_id}", cls)
         except HudRequestError as exc:
             if exc.status_code != 404:
                 raise
@@ -80,6 +73,11 @@ class RegistryEnvironment:
                 f"Environment {registry_id} is inaccessible or deleted.",
                 suggestion="Run 'hud sync env <name-or-id>' to link an accessible environment.",
             ) from exc
+
+
+class _RegistryPage(BaseModel):
+    items: list[RegistryEnvironment]
+    total: int
 
 
 sync_app = CLI(
@@ -236,9 +234,9 @@ def sync_tasks_command(
     # never for a stored id.
     taskset_uuid, display = resolve_taskset_id(platform, target_ref)
     if taskset_uuid:
-        record = platform.get(f"/tasksets/{taskset_uuid}")
+        record = platform.get(f"/tasksets/{taskset_uuid}", TasksetRecord)
         remote_taskset = (
-            Taskset(str(record["name"]), [], taskset_id=taskset_uuid)
+            Taskset(record.name, [], taskset_id=taskset_uuid)
             if force
             else Taskset.from_api(taskset_uuid)
         )
@@ -294,22 +292,19 @@ def sync_tasks_command(
     except HudRequestError as exc:
         raise CliError.from_http(exc, input={"taskset": plan.taskset_name}) from exc
 
-    returned_id = result.get("taskset_id")
-    if returned_id and (link_target or (link.taskset_id is None and project is None)):
-        if state.update(DirectoryLink(taskset_id=UUID(returned_id))):
+    if link_target or (link.taskset_id is None and project is None):
+        if state.update(DirectoryLink(taskset_id=result.taskset_id)):
             hud_console.dim_info("Taskset ID saved to:", str(CONFIG_PATH))
-        hud_console.info(f"  {settings.hud_web_url}/tasksets/{returned_id}")
+        hud_console.info(f"  {settings.hud_web_url}/tasksets/{result.taskset_id}")
 
-    created = int(result.get("tasks_created", 0))
-    updated = int(result.get("tasks_updated", 0))
     hud_console.success("Sync complete")
-    hud_console.info(f"  + {created} created, ~ {updated} updated")
+    hud_console.info(f"  + {result.tasks_created} created, ~ {result.tasks_updated} updated")
     return {
         **plan_payload,
         "status": "synced",
-        "tasks_created": created,
-        "tasks_updated": updated,
-        "taskset_id": returned_id,
+        "tasks_created": result.tasks_created,
+        "tasks_updated": result.tasks_updated,
+        "taskset_id": str(result.taskset_id),
     }
 
 
@@ -354,21 +349,23 @@ def sync_env_command(
     platform = PlatformClient.from_settings()
     state = DirectoryState(AuthScope.resolve(platform), Path(directory).resolve())
     link = state.load()
-    linked_id = str(link.registry_id) if link.registry_id else None
 
     if name is None:
         hud_console.info("Fetching your environments...")
         envs: list[RegistryEnvironment] = []
         while True:
-            data = platform.get(
-                "/registry", params={"limit": 500, "offset": len(envs), "sort_by": "date"}
+            page = platform.get(
+                "/registry",
+                _RegistryPage,
+                params={"limit": 500, "offset": len(envs), "sort_by": "date"},
             )
-            page = [RegistryEnvironment.from_record(item) for item in data["items"]]
-            envs.extend(page)
-            if len(envs) >= data["total"]:
+            envs.extend(page.items)
+            if len(envs) >= page.total:
                 break
-            if not page:
-                raise ValueError("Registry API returned an empty page before the reported total")
+            if not page.items:
+                raise HudRequestError(
+                    "Registry API returned an empty page before the reported total"
+                )
         if not envs:
             raise CliError("not_found", "No environments found. Deploy one with 'hud deploy'.")
         selected = cast(
@@ -378,7 +375,7 @@ def sync_env_command(
                 [
                     {
                         "name": f"{env.name} ({env.id})"
-                        + (" (currently linked)" if env.id == linked_id else ""),
+                        + (" (currently linked)" if env.id == link.registry_id else ""),
                         "value": env,
                     }
                     for env in envs
@@ -394,21 +391,21 @@ def sync_env_command(
         return {
             "dry_run": True,
             "action": "link_environment",
-            "id": selected.id,
+            "id": str(selected.id),
             "name": selected.name,
         }
-    if linked_id and linked_id != selected.id:
-        hud_console.warning(f"Currently linked to: {linked_id[:8]}...")
+    if link.registry_id and link.registry_id != selected.id:
+        hud_console.warning(f"Currently linked to: {str(link.registry_id)[:8]}...")
         CLI.confirm_or_abort("Switch to new environment?", yes=yes, default=False)
 
-    changed = state.update(DirectoryLink(registry_id=UUID(selected.id)))
-    hud_console.success(f"Linked to: {selected.name} ({selected.id[:8]}...)")
+    changed = state.update(DirectoryLink(registry_id=selected.id))
+    hud_console.success(f"Linked to: {selected.name} ({str(selected.id)[:8]}...)")
     if changed:
         hud_console.dim_info("Link saved to:", str(CONFIG_PATH))
     return {
         "name": selected.name,
-        "id": selected.id,
-        "short_id": selected.id[:8],
+        "id": str(selected.id),
+        "short_id": str(selected.id)[:8],
         "changed": changed,
     }
 

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import typer
+from pydantic import BaseModel
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
@@ -24,6 +25,10 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
+
+
+class _Events(BaseModel):
+    events: list[dict[str, Any]]
 
 
 class _TraceGroup(CLIGroup):
@@ -112,10 +117,9 @@ def get_command(
     else:
         source = "platform"
         try:
-            data = PlatformClient.from_settings().get(f"/trace/{trace_id}/events")
+            events = PlatformClient.from_settings().get(f"/trace/{trace_id}/events", _Events).events
         except HudRequestError as exc:
             raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
-        events = data["events"]
 
     if not events:
         hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")
