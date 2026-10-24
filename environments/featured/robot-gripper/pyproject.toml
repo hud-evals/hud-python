@@ -10,7 +10,7 @@ dependencies = [
     "hud==0.6.20",  # HUD SDK: Environment, capabilities, hud eval
     "mujoco>=3.2.0",       # rendering, model name lookups, IK
     "numpy>=1.26.0",
-    "Pillow>=10.0.0",      # base64 PNG encode/decode for render()
+    "Pillow>=13.0.0",      # base64 PNG encode/decode for render()
     "warp-lang>=1.13.0",   # Newton's compute backend
     "newton",              # Newton engine (bundled wheel, see below)
     "mujoco-warp>=3.8.0.1",  # Newton's MuJoCo solver backend
