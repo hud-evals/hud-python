@@ -373,7 +373,15 @@ class Taskset:
             # placement is scoped to this call unless already open.
             if isinstance(placement, contextlib.AbstractAsyncContextManager):
                 await stack.enter_async_context(placement)
-            parts = await asyncio.gather(*(_one(t, gid) for t, gid in expanded))
+            pending = [asyncio.create_task(_one(t, gid)) for t, gid in expanded]
+            try:
+                parts = await asyncio.gather(*pending)
+            except asyncio.CancelledError:
+                for task in pending:
+                    if not task.done() and not task.cancelling():
+                        task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise
         job.runs.extend(run for part in parts for run in part)
         # Drain telemetry before returning. The exporter uploads in parallel and
         # flush is completion-based (waits for in-flight uploads, not a fixed

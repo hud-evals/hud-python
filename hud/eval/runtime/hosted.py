@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.eval.runtime")
 
 _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
+_CANCEL_TIMEOUT_SECONDS = 5.0
 
 
 class HostedRuntime:
@@ -35,7 +36,8 @@ class HostedRuntime:
     travels as its registered type plus :meth:`~hud.agents.base.Agent.dump`.
 
     ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
-    A local cancel (Ctrl-C) requests remote cancellation before propagating.
+    A local cancel (Ctrl-C) or deadline waits up to five seconds for remote
+    cancellation before propagating or returning the timeout result.
     """
 
     def __init__(
@@ -53,7 +55,6 @@ class HostedRuntime:
             )
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
-        self._cancellations: set[asyncio.Task[None]] = set()
 
     async def run(
         self,
@@ -115,11 +116,11 @@ class HostedRuntime:
                     )
             run = self._fold(state, trace_id)
         except asyncio.CancelledError:
-            self._cancel_later(trace_id)
+            await self._cancel(trace_id)
             raise
         except TimeoutError:
             assert timeout is not None
-            self._cancel_later(trace_id)
+            await self._cancel(trace_id)
             detail = f"hosted rollout {trace_id} did not finish within {timeout:g}s"
             logger.warning(detail)
             run = Run.failed(detail)
@@ -217,17 +218,13 @@ class HostedRuntime:
                 return state
             await asyncio.sleep(self.poll_interval)
 
-    async def _cancel(self, platform: PlatformClient, trace_id: str) -> None:
+    async def _cancel(self, trace_id: str) -> None:
         # The platform also bounds instances by max runtime; this just releases
         # the lease promptly. Never shadow the caller's outcome.
         try:
-            await platform.apost("/rollouts/cancel", json={"trace_id": trace_id})
+            async with asyncio.timeout(_CANCEL_TIMEOUT_SECONDS):
+                await PlatformClient.from_settings().apost(
+                    "/rollouts/cancel", json={"trace_id": str(uuid.UUID(trace_id))}
+                )
         except Exception as exc:
-            logger.warning("hosted rollout %s cancel failed: %s", trace_id, exc)
-
-    def _cancel_later(self, trace_id: str) -> None:
-        task = asyncio.create_task(
-            self._cancel(PlatformClient.from_settings(), str(uuid.UUID(trace_id)))
-        )
-        self._cancellations.add(task)
-        task.add_done_callback(self._cancellations.discard)
+            logger.warning("hosted rollout %s cancel failed: %r", trace_id, exc)
