@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from hud.agents.base import Agent
+from hud.environment import Environment
+from hud.eval import Run, Taskset
 from hud.graders import (
     BashGrader,
     EvaluationResult,
@@ -193,6 +196,54 @@ class TestNumericMatch:
 
     def test_extracts_first_number(self) -> None:
         assert numeric_match("There are 3 items and 5 left", 3) == 1.0
+
+    @pytest.mark.parametrize(
+        ("answer", "expected"),
+        [
+            ("Result: .5", 0.5),
+            ("Result: -.5", -0.5),
+            ("Result: +.5", 0.5),
+            ("Result: 1e3", 1000),
+            ("Result: -2.5E-2", -0.025),
+            ("Result: +2.5e+2", 250),
+            ("Result: .5e2", 50),
+            ("Result: 5.e-1", 0.5),
+        ],
+    )
+    def test_decimal_and_scientific_notation(self, answer: str, expected: float) -> None:
+        assert numeric_match(answer, expected) == 1.0
+
+    def test_scientific_notation_respects_tolerance_and_first_number(self) -> None:
+        answer = "Result: 1.25e2, then 130"
+        assert numeric_match(answer, 126, tolerance=1) == 1.0
+        assert numeric_match(answer, 126, tolerance=0.5) == 0.0
+        assert numeric_match(answer, 130) == 0.0
+
+    @pytest.mark.parametrize(
+        ("answer", "expected", "truncated"),
+        [(".5", 0.5, 5), ("1e3", 1000, 1), ("-2.5E-2", -0.025, -2.5)],
+    )
+    async def test_rollout_rewards_the_whole_number(
+        self, answer: str, expected: float, truncated: float
+    ) -> None:
+        env = Environment("numeric-grading")
+
+        @env.template()
+        async def numeric(expected: float):
+            response = yield answer
+            yield numeric_match(response, expected)
+
+        class EchoAgent(Agent):
+            async def __call__(self, run: Run) -> None:
+                assert isinstance(run.prompt, str)
+                run.trace.content = run.prompt
+
+        job = await Taskset("numeric-grading", [numeric(expected), numeric(truncated)]).run(
+            EchoAgent()
+        )
+
+        assert [run.reward for run in job.runs] == [1.0, 0.0]
+        assert job.errors == []
 
 
 class TestF1Score:

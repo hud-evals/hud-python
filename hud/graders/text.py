@@ -102,9 +102,9 @@ def numeric_match(
     *,
     tolerance: float = 0.0,
 ) -> float:
-    """1.0 if the first number in the answer matches expected (within tolerance)."""
+    """Match the first signed decimal or scientific-notation number within tolerance."""
     a = str(answer) if not isinstance(answer, str) else answer
-    match = re.search(r"-?\d+\.?\d*", a)
+    match = re.search(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", a)
     if not match:
         return 0.0
 
