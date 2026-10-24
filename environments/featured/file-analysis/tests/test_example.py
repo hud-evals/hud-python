@@ -34,6 +34,26 @@ def test_selected_example_exposes_authoring_controls(task_args):
     assert task_args["attachments"] == []
 
 
+def test_uploads_are_optional_only_for_the_bundled_example():
+    bundled = example.reconcile_supplier_payments.manifest_entry()["args"]
+    assert bundled["required"] == ["prompt", "criteria"]
+    assert bundled["properties"]["attachments"]["default"] == []
+    uploads_only = example.review_files.manifest_entry()["args"]
+    assert "attachments" in uploads_only["required"]
+
+
+async def test_task_without_attachments_stages_the_bundled_records(monkeypatch, tmp_path, task_args):
+    monkeypatch.setattr(example, "WORKSPACE_ROOT", tmp_path)
+    del task_args["attachments"]
+    runner = TaskRunner(example.reconcile_supplier_payments, task_args)
+    try:
+        frame = await runner.start()
+        assert len(list((tmp_path / "files").iterdir())) == 7
+        assert frame["data_files"] == []
+    finally:
+        await runner.cancel()
+
+
 async def test_edited_prompt_and_rubric_grade_the_saved_report(monkeypatch, tmp_path, task_args):
     monkeypatch.setattr(example, "WORKSPACE_ROOT", tmp_path)
     seen = {}

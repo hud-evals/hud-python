@@ -19,6 +19,7 @@ import os
 import shutil
 import stat
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
@@ -76,7 +77,7 @@ class Criterion(StrictModel):
 
 
 Prompt = Annotated[str, Field(json_schema_extra={"x-hud-hint": "prompt"})]
-Attachments = Annotated[list[DataFileRef], Field(json_schema_extra={"x-hud-hint": "data-files"})]
+Attachments = Annotated[Sequence[DataFileRef], Field(json_schema_extra={"x-hud-hint": "data-files"})]
 Criteria = Annotated[list[Criterion], Field(json_schema_extra={"x-hud-hint": "grading"})]
 
 # Model-typed arguments arrive as plain JSON, so the models are applied here.
@@ -196,8 +197,9 @@ async def review_files(
     description="Review the bundled supplier records with an editable prompt, rubric, and optional uploads",
 )
 async def reconcile_supplier_payments(
+    *,
     prompt: Prompt,
-    attachments: Attachments,
+    attachments: Attachments = (),
     criteria: Criteria,
     hud_api_key: str | None = None,
 ):
@@ -209,7 +211,7 @@ async def reconcile_supplier_payments(
 
 async def _review_files(
     prompt: str,
-    attachments: list[DataFileRef],
+    attachments: Sequence[DataFileRef],
     criteria: list[Criterion],
     report_path: str,
     bundled_files: Path | None = None,
