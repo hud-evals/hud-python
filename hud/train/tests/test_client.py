@@ -88,19 +88,6 @@ async def test_training_warns_when_no_group_has_reward_spread(
     assert "no gradient" in caplog.text
 
 
-async def test_training_groups_rewards_by_group_id_not_position(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # An interleaved batch is valid (groups are keyed by group_id), and its
-    # positional slices have spread even when the real groups have none.
-    runs = _grpo_runs(["a", "b", "a", "b"], [1.0, 0.0, 1.0, 0.0])
-
-    with caplog.at_level(logging.WARNING, logger="hud.train.client"):
-        await _forward_backward(runs, monkeypatch)
-
-    assert "no gradient" in caplog.text
-
-
 async def test_training_is_quiet_when_a_group_has_reward_spread(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -109,4 +96,86 @@ async def test_training_is_quiet_when_a_group_has_reward_spread(
     with caplog.at_level(logging.WARNING, logger="hud.train.client"):
         await _forward_backward(runs, monkeypatch)
 
+    assert "no gradient" not in caplog.text
+
+
+@pytest.fixture
+async def grouped_runs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
+    from hud import Environment, Taskset
+    from hud.agents.base import Agent
+    from hud.agents.types import AgentStep, Sample
+    from hud.settings import settings
+
+    monkeypatch.setattr(settings, "telemetry_enabled", False)
+    monkeypatch.setattr(settings, "api_key", None)
+    env = Environment("training-groups")
+
+    @env.template()
+    async def task(name: str, reward: float):
+        yield name
+        yield reward
+
+    class FixedAgent(Agent):
+        async def __call__(self, run: Run) -> None:
+            run.record(
+                AgentStep(
+                    sample=Sample(
+                        prompt_token_ids=[10], output_token_ids=[20], output_logprobs=[-0.1]
+                    )
+                )
+            )
+            run.trace.content = "answer"
+
+    job = await Taskset("groups", [task(name="A", reward=1.0), task(name="B", reward=0.0)]).run(
+        FixedAgent(), group=2
+    )
+    assert not job.errors
+    return job.runs
+
+
+@pytest.mark.parametrize("method", ["forward", "forward_backward"])
+async def test_training_rejects_interleaved_groups_before_http(
+    grouped_runs: list[Run], method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        pytest.fail("interleaved groups must not reach the training service")
+
+    monkeypatch.setattr("hud.train.base.make_request", request)
+    interleaved = [grouped_runs[index] for index in (0, 2, 1, 3)]
+    with pytest.raises(ValueError, match="groups must be contiguous"):
+        await getattr(TrainingClient(_MODEL_ID), method)(interleaved, group_size=2)
+
+
+@pytest.mark.parametrize("method", ["forward", "forward_backward"])
+async def test_training_keeps_contiguous_groups_in_order(
+    grouped_runs: list[Run], method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        inputs = kwargs["json"]["inputs"]
+        assert [item["reward"] for item in inputs] == [1.0, 1.0, 0.0, 0.0]
+        assert [item["trace_id"] for item in inputs] == [run.trace_id for run in grouped_runs]
+        if url.endswith("/forward"):
+            return {"forward_id": "offline", "data": []}
+        return {"metrics": {}, "num_datums": len(inputs)}
+
+    monkeypatch.setattr("hud.train.base.make_request", request)
+    await getattr(TrainingClient(_MODEL_ID), method)(grouped_runs, group_size=2)
+
+
+@pytest.mark.parametrize("method", ["forward", "forward_backward"])
+async def test_training_default_group_checks_the_whole_batch(
+    grouped_runs: list[Run],
+    method: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        assert "group_size" not in kwargs["json"]
+        if url.endswith("/forward"):
+            return {"forward_id": "offline", "data": []}
+        return {"metrics": {}, "num_datums": len(grouped_runs)}
+
+    monkeypatch.setattr("hud.train.base.make_request", request)
+    with caplog.at_level(logging.WARNING, logger="hud.train.client"):
+        await getattr(TrainingClient(_MODEL_ID), method)(grouped_runs)
     assert "no gradient" not in caplog.text
