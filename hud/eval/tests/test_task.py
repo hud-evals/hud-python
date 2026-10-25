@@ -478,6 +478,38 @@ local = Task(env="module-env", id="solve", args={"n": 1}, slug="local")
     assert Taskset.from_module(module)["local"].args == {"n": 1}
 
 
+def test_taskset_from_module_collects_a_task_exposed_under_several_names_once(tmp_path) -> None:
+    module = tmp_path / "shared_tasks.py"
+    module.write_text(
+        """
+from hud import Task, Taskset
+
+task = Task(env="module-env", id="solve", args={"n": 1}, slug="shared")
+tasks = [task]
+taskset = Taskset("shared", tasks)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert list(Taskset.from_module(module).tasks) == ["shared"]
+
+
+def test_taskset_from_module_rejects_distinct_tasks_sharing_a_slug(tmp_path) -> None:
+    module = tmp_path / "clashing_tasks.py"
+    module.write_text(
+        """
+from hud import Task
+
+first = Task(env="module-env", id="solve", args={"n": 1}, slug="clash")
+second = Task(env="module-env", id="solve", args={"n": 2}, slug="clash")
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate task slugs: clash"):
+        Taskset.from_module(module)
+
+
 def test_taskset_from_api_uses_remote_records(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_request(method: str, url: str, **kwargs: object) -> dict[str, object]:
         assert method == "GET"
