@@ -98,10 +98,12 @@ def _proxy_fetch_source(url: str) -> str:
     )
 
 
-def _direct_fetch_source(host: str, port: int) -> str:
+def _direct_fetch_source(host: str, port: int, source: str | None = None) -> str:
+    source_address = None if source is None else (source, 0)
     return (
         "import http.client;"
-        f"connection=http.client.HTTPConnection({host!r},{port},timeout=5);"
+        f"connection=http.client.HTTPConnection({host!r},{port},timeout=5,"
+        f"source_address={source_address!r});"
         "connection.request('GET','/');"
         "print(connection.getresponse().read().decode())"
     )
@@ -261,22 +263,28 @@ async def test_only_bound_process_reaches_controller_connection(tmp_path: Path) 
             child_result = await child.wait()
             assert child_result.returncode == 0
             assert isinstance(child_result.stdout, bytes)
-            assert child_result.stdout.strip() != b"0"
+            assert child_result.stdout.splitlines()[-1] != b"0"
 
-            mapped_fetch = _direct_fetch_source("::ffff:127.0.0.1", connection.port)
-            mapped_child_source = (
-                "import subprocess,sys;"
-                f"result=subprocess.run([sys.executable,'-c',{mapped_fetch!r}]);"
-                "print(result.returncode)"
-            )
-            mapped_child = await ssh.create_process(
-                f"exec {shlex.quote(sys.executable)} -c {shlex.quote(mapped_child_source)}",
-                connections=(connection,),
-            )
-            mapped_child_result = await mapped_child.wait()
-            assert mapped_child_result.returncode == 0
-            assert isinstance(mapped_child_result.stdout, bytes)
-            assert mapped_child_result.stdout.strip() != b"0"
+            for alias, source in (
+                ("::ffff:127.0.0.1", None),
+                ("0.0.0.0", None),
+                ("::ffff:0.0.0.0", None),
+                ("::", "::ffff:127.0.0.1"),
+            ):
+                alias_fetch = _direct_fetch_source(alias, connection.port, source)
+                alias_child_source = (
+                    "import subprocess,sys;"
+                    f"result=subprocess.run([sys.executable,'-c',{alias_fetch!r}]);"
+                    "print(result.returncode)"
+                )
+                alias_child = await ssh.create_process(
+                    f"exec {shlex.quote(sys.executable)} -c {shlex.quote(alias_child_source)}",
+                    connections=(connection,),
+                )
+                alias_child_result = await alias_child.wait()
+                assert alias_child_result.returncode == 0
+                assert isinstance(alias_child_result.stdout, bytes)
+                assert alias_child_result.stdout.splitlines()[-1] != b"0", alias
 
             proxy_child_source = (
                 "import subprocess,sys;"

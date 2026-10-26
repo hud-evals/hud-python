@@ -283,6 +283,22 @@ def _destination(raw: bytes) -> Optional[tuple[str, int]]:
     return None
 
 
+def _refused(
+    target: Optional[tuple[str, int]],
+    trusted: bool,
+    protected: Collection[tuple[str, int]],
+    allowed: Collection[tuple[str, int]],
+) -> bool:
+    if target is None:
+        return False
+    host, port = target
+    if ipaddress.ip_address(host).is_unspecified:
+        reached = [entry for entry in protected if entry[1] == port]
+    else:
+        reached = [target] if target in protected else []
+    return any(not trusted or entry not in allowed for entry in reached)
+
+
 def _emulate_connect(tgid: int, descriptor: int, address: bytes) -> int:
     pidfd = _LIBC.syscall(_PIDFD_OPEN_SYSCALL, tgid, 0)
     if pidfd < 0:
@@ -345,7 +361,7 @@ def _complete_traced_connect(
         try:
             address = _read_process(pid, int(registers.rsi), length)
             target = _destination(address)
-            if target in protected and (process_tgid != trusted_tgid or target not in allowed):
+            if _refused(target, process_tgid == trusted_tgid, protected, allowed):
                 result = -errno.EPERM
             else:
                 result = _emulate_connect(process_tgid, int(registers.rdi), address)
@@ -644,9 +660,7 @@ class ProcessConnectionGuard:
                         address_length,
                     )
                     target = _destination(address)
-                    if target in self.protected and (
-                        process_tgid != trusted_tgid or target not in self.allowed
-                    ):
+                    if _refused(target, process_tgid == trusted_tgid, self.protected, self.allowed):
                         response.error = -errno.EPERM
                     else:
                         result = _emulate_connect(
