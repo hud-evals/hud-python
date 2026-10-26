@@ -6,7 +6,8 @@ We welcome contributions to the HUD SDK! This guide covers how to get started.
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/hud-python` (the repo keeps its historical name; the PyPI package is `hud`)
-3. Install [uv](https://docs.astral.sh/uv/) and set up dev dependencies:
+3. Install [uv](https://docs.astral.sh/uv/) at the version pinned by
+   `[tool.uv].required-version` in `pyproject.toml`, then set up dev dependencies:
    ```bash
    cd hud-python
    uv sync --extra dev
