@@ -54,6 +54,14 @@ def _run_to_input(run: Run) -> TrainInput:
     (remote rollout, resolved server-side)."""
     if run.trace.stop_reason == "timeout":
         raise ValueError("timed-out runs require an explicit training reward")
+    # Same rule as Job.errors: a run without a valid grade carries no verdict,
+    # so its reward is not a training signal.
+    if run.grade.is_error or (run.trace.is_error and not run.grade.raw):
+        detail = (run.grade.content or run.trace.error or "no grade").splitlines()[0]
+        raise ValueError(
+            f"run {run.trace_id} has no valid grade ({detail}); drop its GRPO group "
+            f"(group_id={run.group_id!r}) or pass a TrajectoryPayload with an explicit reward"
+        )
     samples = run.trace.collect(lambda step: step.sample if isinstance(step, AgentStep) else None)
     turns = [
         TrajectorySample(
