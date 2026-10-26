@@ -25,10 +25,10 @@ from hud.agents.openai_compatible.agent import OpenAIChatAgent
 from hud.agents.openai_compatible.tools import BashTool, EditTool, ReadTool, WriteTool
 from hud.agents.tool_agent import RunState
 from hud.agents.tools.base import result_text
-from hud.agents.tools.ssh import bound_shell_output
 from hud.agents.types import OpenAIChatConfig
 from hud.capabilities import Capability, SSHClient
 from hud.types import MCPToolCall
+from hud.utils.process import bound_shell_output
 
 
 class _Completed:

@@ -233,6 +233,17 @@ def test_harbor_phase_behavior(graded: dict[str, Run], task_id: str) -> None:
     assert run.reward == 1.0, f"{task_id} scored {run.reward}; the verifier reported:\n{detail}"
 
 
+def test_verifier_output_reaches_the_evaluation_untruncated(graded: dict[str, Run]) -> None:
+    info = graded["verifier-output"].evaluation.get("info") or {}
+    stdout = info.get("stdout") or ""
+    assert stdout.startswith("verifier report begins\n")
+    assert [line for line in stdout.splitlines() if line.startswith("FAILED ")] == [
+        f"FAILED tests/test_suite.py::test_case_{index} - AssertionError: expected {index}"
+        for index in range(1, 1001)
+    ]
+    assert info.get("stderr") == "verifier report ends\n"
+
+
 def test_separate_verifier_phase_behavior(separately_graded: dict[str, Run]) -> None:
     test_harbor_phase_behavior(separately_graded, "sidecar-reachability")
 

@@ -8,8 +8,9 @@ from typing import Any, cast
 import mcp.types as mcp_types
 
 from hud.agents.tools import SSHTool
-from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH, bound_shell_output
+from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH
 from hud.types import MCPToolResult
+from hud.utils.process import bound_shell_output
 
 from .base import OpenAIToolSpec
 

@@ -22,7 +22,7 @@ from hud.environment.egress import ANY_HOST
 from hud.environment.env import current_session_id
 from hud.graders import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
-from hud.utils.process import ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
 
 if TYPE_CHECKING:
     from hud.environment.namespace import NamespaceProcess
@@ -39,6 +39,9 @@ RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
 DOCKER_SOCKET = Path("/var/run/docker.sock")
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
+# Verifier output is stored inline on the trace's evaluation result, so it
+# stays bounded well below the control-channel frame limit.
+VERIFIER_OUTPUT_LIMIT = 128 * 1024
 
 ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
 
@@ -706,11 +709,12 @@ async def grade_separate(
 
 
 def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
-    info: dict[str, Any] = {
-        "exit_code": execution.returncode,
-        "stdout": execution.stdout.decode("utf-8", "replace")[-4000:],
-        "stderr": execution.stderr.decode("utf-8", "replace")[-4000:],
-    }
+    stdout, stderr = bound_shell_output(
+        execution.stdout.decode("utf-8", "replace"),
+        execution.stderr.decode("utf-8", "replace"),
+        VERIFIER_OUTPUT_LIMIT,
+    )
+    info: dict[str, Any] = {"exit_code": execution.returncode, "stdout": stdout, "stderr": stderr}
     if execution.timed_out:
         info["verifier_timeout_sec"] = timeout_sec
         return EvaluationResult(
