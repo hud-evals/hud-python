@@ -79,6 +79,10 @@ _UNSEARCHED_DIRS = {
 _REGISTRY_RUNTIMES = ("hud", "modal")
 """Default runtimes a registry accepts (the platform's ``RequestedRuntimeProvider``)."""
 
+HARBOR_TASK_FILE = "task.toml"
+"""Marks a Harbor task folder. One that declares no ``Environment(...)`` deploys as it is into
+the HUD environment ``harbor:<folder name>``, which HUD adapts the folder into when it builds."""
+
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
     """Compile one ``.dockerignore`` glob: ``*`` is one segment, ``**`` is any depth."""
@@ -239,9 +243,16 @@ async def deploy_command(
     build. Compose and other run settings belong in ``--runtime-config`` or on
     the task, not inferred from filenames.
 
+    A Harbor task folder (one holding ``task.toml`` and no ``Environment(...)``)
+    deploys as it is into the environment named after the folder, the one
+    ``hud harbor import`` imports it into; HUD adapts and builds it on Modal.
+    It takes no ``--name``, ``--registry-id``, ``--runtime-config``,
+    ``--build-arg``, ``--secret``, or ``--runtime`` other than ``modal``.
+
     [not dim]Examples:
         hud deploy
         hud deploy --name judge
+        hud deploy tasks/hello-world
         hud deploy --yes --json
         hud deploy --dry-run --json[/not dim]
     """
@@ -283,13 +294,35 @@ async def deploy_command(
             if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
                 names.add(name_node.value)
     found = ", ".join(sorted(names))
-    if not names:
+    harbor_folder = not names and source.is_dir() and (source / HARBOR_TASK_FILE).is_file()
+    if harbor_folder:
+        refused = [
+            flag
+            for flag, given in (
+                ("--name", name is not None),
+                ("--registry-id", registry_id is not None),
+                ("--runtime-config", runtime_config is not None),
+                ("--build-arg", bool(build_args)),
+                ("--secret", bool(secrets)),
+                ("--runtime", runtime is not None and runtime.lower() != "modal"),
+            )
+            if given
+        ]
+        if refused:
+            raise CliError(
+                "usage",
+                f"A Harbor task folder deploys without {', '.join(refused)}.",
+                suggestion="HUD builds a Harbor task folder on Modal from the folder itself.",
+                input={"directory": directory},
+            )
+        name = source.name
+    elif not names:
         raise CliError(
             "usage",
             f"No environment found in {source}.",
             suggestion="Declare the environment with Environment(name=...) in a .py file.",
         )
-    if name is not None:
+    elif name is not None:
         if name not in names:
             raise ValueError(f"No environment named {name!r} in {source}. Found: {found}.")
     elif len(names) > 1:
@@ -480,6 +513,21 @@ async def deploy_command(
             response.raise_for_status()
         hud_console.success(f"Upload complete [{time.time() - started:.1f}s]")
 
+        if harbor_folder:
+            hud_console.progress_message("Registering the Harbor task folder...")
+            registered = await platform.apost(
+                "/builds/register",
+                _Build,
+                json={
+                    "build_id": upload["build_id"],
+                    "name": name,
+                    "external_id": f"harbor:{name}",
+                    **({"project_id": placement.project_id} if placement.project_id else {}),
+                },
+            )
+            target: dict[str, str] = {"registry_id": str(registered.registry_id)}
+        else:
+            target = {"name": name}
         optional: dict[str, Any] = {
             "registry_id": registry_id,
             "project_id": placement.project_id,
@@ -497,7 +545,7 @@ async def deploy_command(
             json={
                 "source": "direct",
                 "build_id": upload["build_id"],
-                "name": name,
+                **target,
                 "no_cache": no_cache,
                 **{key: value for key, value in optional.items() if value},
             },
@@ -505,7 +553,7 @@ async def deploy_command(
         hud_console.success(f"Build triggered [{time.time() - started:.1f}s]")
         build_id = build.id
         built_registry_id = build.registry_id
-        if registry_id is None and project is None:
+        if registry_id is None and project is None and not harbor_folder:
             state.update(DirectoryLink(registry_id=built_registry_id))
         hud_console.info(f"Build ID: {build_id}")
         hud_console.info("")

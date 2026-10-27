@@ -180,8 +180,31 @@ command; `--json` returns the import and the full report for scripts.
 creates, the report, reruns, and limits. The web app's **Import from Harbor** takes the
 same zip, and the taskset's **Imports** tab lists the same imports.
 
-Imported tasks are for browsing and comparing runs; HUD cannot run them. To run Harbor
-tasks on HUD, [adapt](#adapt-harbor-tasks) and deploy them.
+Imported tasks are for browsing and comparing runs until their environments are built. To run
+them on HUD, [deploy their task folders](#run-harbor-tasks-on-hud).
+
+## Run Harbor tasks on HUD
+
+Import the task folders, deploy each one, then run the taskset:
+
+```bash
+hud harbor import ./tasks --taskset my-benchmark
+hud deploy ./tasks/hello-world
+hud eval my-benchmark claude
+```
+
+`hud deploy` on a Harbor task folder (one holding `task.toml` and no `Environment(...)`) uploads
+the folder as it is into the environment named after the folder, the one `hud harbor import`
+imported it into. HUD adapts the folder with this adapter and builds the result on Modal; the
+environment keeps the folder as its source. Once built, the environment's tasks run the adapted
+task, keeping the Harbor environment and verifier, on any model and from the web app or
+`hud eval`. A folder the adapter cannot adapt fails the build with the adapter's findings, and
+the tasks keep running what they ran before.
+
+The deploy takes `--env`, `--env-file`, `--project`, and `--no-cache`, refuses `--name`,
+`--registry-id`, `--runtime-config`, `--build-arg`, `--secret`, and a `--runtime` other than
+`modal`, and does not link the folder. Deploy each task folder on its own; to package a whole
+dataset yourself instead, [adapt it](#adapt-harbor-tasks) and deploy the generated environments.
 
 ## Export HUD tasks to Harbor
 

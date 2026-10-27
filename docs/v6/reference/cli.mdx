@@ -105,6 +105,17 @@ hud deploy --project <name-or-id>
 
 `--env` / `--env-file` upsert onto the registry's existing secrets. Omitting them on a rebuild keeps whatever is already stored. A first deploy that finds a local `.env` prompts once for that invocation (or needs `--env-file` / `--no-env` when stdin is not a TTY).
 
+A Harbor task folder (one holding `task.toml` and no `Environment(...)`) deploys as it is into the
+environment named after the folder, the one `hud harbor import` imports it into. HUD adapts the
+folder and builds it on Modal; once built, the environment's tasks run the adapted task. The
+deploy refuses `--name`, `--registry-id`, `--runtime-config`, `--build-arg`, `--secret`, and a
+`--runtime` other than `modal`, and does not link the folder. See
+[Run Harbor tasks on HUD](/v6/experimental/harbor#run-harbor-tasks-on-hud).
+
+```bash
+hud deploy tasks/hello-world
+```
+
 ## Evaluate
 
 ### `hud eval`

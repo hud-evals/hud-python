@@ -181,6 +181,65 @@ def test_the_build_decides_the_exit_and_no_context_is_left_behind(
     assert list((tmp_path / "tmp").iterdir()) == []
 
 
+HARBOR_TASK = {
+    "hello-world/task.toml": 'version = "1.0"\n',
+    "hello-world/instruction.md": "Say hello.\n",
+    "hello-world/environment/Dockerfile": "FROM ubuntu:24.04\n",
+    "hello-world/tests/test.sh": "echo 1 > /logs/verifier/reward.txt\n",
+}
+
+
+def test_a_harbor_task_folder_deploys_as_it_is_into_its_imported_environment(
+    builds: FakeServices, hud: Hud
+) -> None:
+    write_files(hud.cwd, HARBOR_TASK)
+    builds.route("api", "POST", "/v2/builds/register", json={"id": BUILD_ID, "registry_id": ENV_ID})
+
+    result = hud("deploy", "hello-world", "--no-env", "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    (register,) = builds.bodies("api", "POST", "/v2/builds/register")
+    assert {key: register[key] for key in ("build_id", "name", "external_id")} == {
+        "build_id": BUILD_ID,
+        "name": "hello-world",
+        "external_id": "harbor:hello-world",
+    }
+    trigger = triggered(builds)
+    assert (trigger["registry_id"], trigger["build_id"], "name" in trigger) == (
+        ENV_ID,
+        BUILD_ID,
+        False,
+    )
+    assert {"task.toml", "instruction.md", "environment/Dockerfile", "tests/test.sh"} <= uploaded(
+        builds
+    )
+    assert not (hud.cwd / "hello-world" / ".hud").exists()
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ("--name", "greet"),
+        ("--registry-id", ENV_ID),
+        ("--runtime-config", "runtime.json"),
+        ("--build-arg", "A=1"),
+        ("--secret", "id=TOKEN,env=TOKEN"),
+        ("--runtime", "hud"),
+    ],
+    ids=lambda flags: flags[0],
+)
+def test_a_harbor_task_folder_takes_no_build_configuration(
+    flags: tuple[str, str], signed_in: FakeServices, hud: Hud
+) -> None:
+    write_files(hud.cwd, HARBOR_TASK)
+
+    result = hud("deploy", "hello-world", *flags, "--yes", "--json")
+
+    assert (result.exit_code, result.json["error"]) == (2, "usage"), result
+    assert flags[0] in result.json["message"]
+    assert signed_in.requests("api", "POST") == []
+
+
 @pytest.mark.parametrize(
     "files",
     [{}, {"a.py": 'a = Environment("a")\n', "b.py": 'b = Environment("b")\n'}],
