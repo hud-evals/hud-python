@@ -89,9 +89,10 @@ def _check_groups(
     group_size: int | None,
 ) -> None:
     """Validate the batch's GRPO group structure client-side, before the round
-    trip. Groups are keyed by ``group_id`` when every item is a ``Run`` carrying
-    one, positional slices of ``group_size`` otherwise. An incomplete group is an
-    error: its advantage baseline is skewed. A batch where no group has any
+    trip. The service groups contiguous slices of ``group_size`` (the whole batch
+    when ``None``); when every item is a ``Run`` carrying a ``group_id``, each
+    slice must be exactly one of those groups. An incomplete or interleaved group
+    is an error: its advantage baseline is skewed. A batch where no group has any
     reward spread only warns: every advantage normalizes to zero, which is a
     legitimate sampling outcome for one batch but makes a later ``optim_step``
     fail confusingly when it is the whole accumulation. Rewards are only visible
@@ -110,20 +111,22 @@ def _check_groups(
         counts = Counter(run_group_ids)
         if incomplete := [group_id for group_id, count in counts.items() if count != group_size]:
             raise ValueError(f"incomplete GRPO groups: {incomplete}")
+        if any(
+            len(set(run_group_ids[start : start + group_size])) != 1
+            for start in range(0, n, group_size)
+        ):
+            raise ValueError(
+                f"GRPO groups must be contiguous: the service groups every {group_size} "
+                "consecutive trajectories, so keep runs with the same group_id together"
+            )
 
     inline = [item for item in trajectories if not isinstance(item, str)]
     if len(inline) != n or n < 2:
         return
-    if keyed:
-        buckets: dict[object, list[float]] = {}
-        for group_id, item in zip(run_group_ids, inline, strict=True):
-            buckets.setdefault(group_id, []).append(item.reward)
-        reward_groups = list(buckets.values())
-    else:
-        size = group_size or n
-        reward_groups = [
-            [item.reward for item in inline[start : start + size]] for start in range(0, n, size)
-        ]
+    size = group_size or n
+    reward_groups = [
+        [item.reward for item in inline[start : start + size]] for start in range(0, n, size)
+    ]
     if all(len(set(group)) == 1 for group in reward_groups):
         logger.warning(
             "no GRPO group has any reward spread, so every advantage normalizes to "
