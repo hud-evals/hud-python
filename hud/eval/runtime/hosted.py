@@ -185,21 +185,19 @@ class HostedRuntime:
         if error:
             run.record(Step(source="system", error=error))
         reward = state.get("reward")
-        ungraded_failure = run.trace.status in ("error", "cancelled") and reward is None
         grade_error = error or None
-        if ungraded_failure and grade_error is None:
-            grade_error = (
-                "rollout was cancelled before grading"
-                if run.trace.status == "cancelled"
-                else "rollout failed before grading"
-            )
+        if reward is None and grade_error is None:
+            grade_error = {
+                "cancelled": "rollout was cancelled before grading",
+                "error": "rollout failed before grading",
+            }.get(run.trace.status, "rollout finished without a grade")
         evaluation_result = state.get("evaluation_result")
         run.grade = (
             Grade.from_dict(evaluation_result)
             if evaluation_result is not None
             else Grade(
                 reward=reward if reward is not None else 0.0,
-                is_error=ungraded_failure,
+                is_error=reward is None,
                 content=grade_error,
                 raw={"score": reward} if reward is not None else {},
             )
