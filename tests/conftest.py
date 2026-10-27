@@ -24,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -413,13 +414,15 @@ def modal_image(sdk_wheel: Path) -> Callable[[str], Any]:
 
 @pytest.fixture
 def modal_account(hud_env: HudEnv) -> HudEnv:
-    """Let Modal find the real account the developer or CI configured."""
-    home = REAL_ENVIRONMENT.get("HOME", "")
-    hud_env.set(
-        MODAL_CONFIG_PATH=str(Path(home) / ".modal.toml"),
-        MODAL_TOKEN_ID=REAL_ENVIRONMENT.get("MODAL_TOKEN_ID"),
-        MODAL_TOKEN_SECRET=REAL_ENVIRONMENT.get("MODAL_TOKEN_SECRET"),
-    )
+    """Let Modal find the real account the developer or CI configured. Modal reads its
+    config file once, when first imported, so a file's active profile goes in as variables."""
+    token_id = REAL_ENVIRONMENT.get("MODAL_TOKEN_ID")
+    token_secret = REAL_ENVIRONMENT.get("MODAL_TOKEN_SECRET")
+    if token_id is None:
+        config = tomllib.loads((Path(REAL_ENVIRONMENT["HOME"]) / ".modal.toml").read_text())
+        profile = next(profile for profile in config.values() if profile.get("active"))
+        token_id, token_secret = profile["token_id"], profile["token_secret"]
+    hud_env.set(MODAL_TOKEN_ID=token_id, MODAL_TOKEN_SECRET=token_secret)
     return hud_env
 
 
