@@ -48,12 +48,8 @@ async def cua_task(
     prompt: Annotated[str, Field(json_schema_extra={"x-hud-hint": "prompt"})],
     bash_checks: list[dict[str, Any]] | None = None,
     grading_criteria: list[str] | None = None,
-    hud_api_key: str | None = None,
 ):
-    """Run a computer-use task with shell checks, an LLM judge, or both.
-
-    Declaring ``hud_api_key`` opts hosted rollouts into container-level HUD_API_KEY injection.
-    """
+    """Run a computer-use task with shell checks, an LLM judge, or both."""
     global _task_started
 
     if not bash_checks and not grading_criteria:

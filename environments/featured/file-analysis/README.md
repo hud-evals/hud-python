@@ -14,6 +14,10 @@ The environment provides:
 - file tracking for the agent's report
 - criteria-based grading with an LLM judge
 
+Staging uploaded files and the LLM judge call the HUD API with `HUD_API_KEY` from
+the environment. For hosted runs, add an API key as a personal secret in
+**Settings → Secrets**; for local runs, set it before starting the environment.
+
 Deploy from this directory with:
 
 ```bash

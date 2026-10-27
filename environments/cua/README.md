@@ -66,7 +66,7 @@ _my_task.slug = "my-task-slug"
 | Knob | Type | How it scores |
 |------|------|---------------|
 | `bash_checks` | `list[{name, command, weight}]` | shell command run in the container (the desktop the agent drove), scored by exit code |
-| `grading_criteria` | `list[str]` | rubric strings judged by an LLM (needs `HUD_API_KEY`) |
+| `grading_criteria` | `list[str]` | rubric strings judged by an LLM (needs `HUD_API_KEY`; on hosted runs, add it as a personal secret) |
 
 Each task's score is a weighted average of its checks, so it always stays in `[0, 1]`. When a task has
 both bash checks and a judge, the bash checks together are worth half the score and the judge the other

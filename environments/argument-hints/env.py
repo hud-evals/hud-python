@@ -166,12 +166,8 @@ async def review_files(
     prompt: Prompt,
     attachments: Attachments,
     criteria: Criteria,
-    hud_api_key: str | None = None,
 ):
-    """Answer a prompt about uploaded files, graded by weighted criteria.
-
-    Declaring ``hud_api_key`` opts hosted rollouts into container-level HUD_API_KEY injection.
-    """
+    """Answer a prompt about uploaded files, graded by weighted criteria."""
     refs = _ATTACHMENTS.validate_python(attachments)
     rows = _CRITERIA.validate_python(criteria)
 

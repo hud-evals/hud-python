@@ -35,7 +35,7 @@ async def test_the_manifest_publishes_the_screen_and_a_prompt_box(desktop):
     assert screens == [f"rfb://127.0.0.1:{desktop}"]
     arguments = template["args"]
     assert arguments["properties"]["prompt"]["x-hud-hint"] == "prompt"
-    assert "hud_api_key" in arguments["properties"]
+    assert "hud_api_key" not in arguments["properties"]
     assert arguments["required"] == ["prompt"]
 
 
@@ -49,11 +49,6 @@ async def test_the_manifest_publishes_the_screen_and_a_prompt_box(desktop):
             id="negative-weight",
         ),
         pytest.param({"grading_criteria": ["Anything."]}, "HUD_API_KEY is required", id="judge-without-key"),
-        pytest.param(
-            {"grading_criteria": ["Anything."], "hud_api_key": "task-key"},
-            "HUD_API_KEY is required",
-            id="a-task-key-is-not-the-runtime-key",
-        ),
     ],
 )
 async def test_a_misconfigured_task_fails_before_the_agent_sees_a_prompt(arguments, message):
@@ -94,7 +89,7 @@ async def test_a_misconfigured_task_fails_before_the_agent_sees_a_prompt(argumen
 )
 async def test_the_grade_weighs_named_checks_and_the_judge(arguments, score, weights, monkeypatch, judge):
     monkeypatch.setenv("HUD_API_KEY", "runtime-key")
-    row = cua_task(prompt="Say hello.", hud_api_key="task-key", **arguments)
+    row = cua_task(prompt="Say hello.", **arguments)
     async with served(row) as client:
         started = await client.start_task(row.id, row.args)
         grade = await client.grade({"answer": "hello"})
