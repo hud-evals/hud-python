@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import signal
+import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -329,3 +331,33 @@ def test_eval_runs_each_row_where_its_placement_says(
     assert document["mean_reward"] == (0.5 if hosted else 1.0)
     assert len(signed_in.requests("api", "POST", "/v2/rollouts/submit")) == hosted
     assert [request.prompt for request in gateway.requests()] == ([] if hosted else ["solve 0"])
+
+
+# ─── interruption ───────────────────────────────────────────────────────
+
+
+def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(
+    hud: Hud, signed_in: FakeServices, tasks: Path
+) -> None:
+    signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
+    signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "running"})
+    signed_in.route("api", "POST", "/v2/rollouts/cancel", json={"status": "accepted"})
+    process = hud.start("eval", "tasks.py", *SCRIPTED, "--remote", "--group-size", "3", "--yes")
+
+    deadline = time.monotonic() + 60
+    while len(signed_in.requests("api", "GET", "/v2/trace/{id}")) < 3:
+        assert process.poll() is None, process.communicate()
+        assert time.monotonic() < deadline, "hud eval never polled its rollouts"
+        time.sleep(0.05)
+    process.send_signal(signal.SIGINT)
+    process.communicate(timeout=30)
+
+    submitted = {
+        body["trace_id"] for body in signed_in.bodies("api", "POST", "/v2/rollouts/submit")
+    }
+    cancelled = [
+        body["trace_id"] for body in signed_in.bodies("api", "POST", "/v2/rollouts/cancel")
+    ]
+    assert process.returncode == 130
+    assert len(submitted) == 3
+    assert sorted(cancelled) == sorted(submitted)
