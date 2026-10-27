@@ -118,4 +118,4 @@ jobs:
       - name: Run LeRobot scenarios
         run: >-
           uv run --python 3.12 --all-extras --with 'lerobot[dataset]'
-          pytest -m "e2e and lerobot" -n 4 --timeout 600 --durations 20
+          python -m pytest -m "e2e and lerobot" -n 4 --timeout 600 --durations 20
