@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import math
 import secrets
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -184,14 +185,20 @@ class TaskRunner:
                     f"task {self.task.id!r} graded with a dict missing a numeric "
                     f"'score' (keys: {sorted(evaluation)})"
                 )
-            return cast("dict[str, Any]", _jsonable(evaluation))
-        if isinstance(evaluation, EvaluationResult):
+            frame = cast("dict[str, Any]", _jsonable(evaluation))
+        elif isinstance(evaluation, EvaluationResult):
             # Forward the full grade frame so metadata (info/content/done/isError/
             # subscores) survives; the wire names the score "score", the model "reward".
             frame = evaluation.model_dump(mode="json")
             frame["score"] = frame.pop("reward")
-            return frame
-        return {"score": _score_value(evaluation)}
+        else:
+            frame = {"score": _score_value(evaluation)}
+        if not math.isfinite(frame["score"]):
+            raise ValueError(
+                f"task {self.task.id!r} graded with a non-finite score ({frame['score']!r}): "
+                "yield a finite number"
+            )
+        return frame
 
     async def cancel(self) -> None:
         if self._gen is not None:
