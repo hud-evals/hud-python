@@ -570,5 +570,5 @@ def eval_command(
             for run in job.runs
         ],
     }
-    # A low reward is a result; a run without a valid grade is a failure.
-    return Result(result) if errors else result
+    # Errored runs among graded ones still leave a measurement; none graded leaves nothing.
+    return Result(result) if len(errors) == len(job.runs) > 0 else result

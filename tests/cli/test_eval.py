@@ -61,23 +61,28 @@ def run(hud: Hud, *argv: str) -> Any:
 
 
 @pytest.mark.parametrize(
-    ("grade", "exit_code", "rewards", "errors"),
+    ("grade", "selection", "exit_code", "rewards", "errors"),
     [
-        pytest.param("0.0", 0, [1.0, 0.0], [False, False], id="a-low-reward-is-not-an-error"),
+        pytest.param(
+            "0.0", ["--all"], 0, [1.0, 0.0], [False, False], id="a-low-reward-is-not-an-error"
+        ),
         pytest.param(
             '{"score": 0.0, "isError": True, "content": "grader unavailable"}',
-            1,
+            ["--all"],
+            0,
             [1.0, 0.0],
             [False, True],
             id="a-grade-error",
         ),
-        pytest.param("1 / 0", 1, [1.0, 0.0], [False, True], id="a-grader-crash"),
+        pytest.param("1 / 0", ["--all"], 0, [1.0, 0.0], [False, True], id="a-grader-crash"),
+        pytest.param("1 / 0", ["--task-ids", "1"], 1, [0.0], [True], id="no-run-graded"),
     ],
 )
-def test_eval_reports_every_run_and_fails_when_one_errored(
+def test_eval_reports_every_run_and_fails_when_none_was_graded(
     hud: Hud,
     gateway: Models,
     grade: str,
+    selection: list[str],
     exit_code: int,
     rewards: list[float],
     errors: list[bool],
@@ -90,7 +95,7 @@ def test_eval_reports_every_run_and_fails_when_one_errored(
         "tasks = [solve(n=0), solve(n=1)]\n"
     )
 
-    result = hud("eval", "tasks.py", *SCRIPTED, "--all", "--yes", "--json")
+    result = hud("eval", "tasks.py", *SCRIPTED, *selection, "--yes", "--json")
 
     assert result.exit_code == exit_code, result
     runs = sorted(result.json["runs"], key=lambda run: run["is_error"])
