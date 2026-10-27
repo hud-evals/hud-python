@@ -109,20 +109,21 @@ class Taskset:
     def to_file(self, path: str | Path) -> Path:
         """Write this taskset's portable rows to JSON or JSONL."""
         target = Path(path)
+        if target.suffix not in (".json", ".jsonl"):
+            raise ValueError(
+                f"unsupported taskset export format: {target.suffix}; use .json or .jsonl"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
-        suffix = target.suffix.lower()
         # Compact rows: unset metadata is omitted (defaults restore it on load).
         context = {"base_path": target.parent.resolve()}
         data = [task.model_dump(mode="json", exclude_none=True, context=context) for task in self]
 
-        if suffix == ".json":
+        if target.suffix == ".json":
             target.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
-            return target
-        if suffix == ".jsonl":
+        else:
             lines = (json.dumps(entry, default=str) for entry in data)
             target.write_text("\n".join(lines) + ("\n" if data else ""), encoding="utf-8")
-            return target
-        raise ValueError(f"unsupported taskset export format: {suffix}; use .json or .jsonl")
+        return target
 
     @staticmethod
     def _scan_tasks(module: Any) -> list[Task]:
