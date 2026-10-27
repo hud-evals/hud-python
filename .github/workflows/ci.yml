@@ -78,7 +78,6 @@ jobs:
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # Harbor's scenarios run nightly, in the Live workflow.
       - name: Run Docker scenarios
         run: >-
           uv run --python 3.12 --all-extras
@@ -89,6 +88,8 @@ jobs:
     name: Sandbox
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +108,7 @@ jobs:
           --security-opt apparmor=unconfined
           --volume "$PWD:/src" --workdir /src
           --env UV_PROJECT_ENVIRONMENT=/opt/venv
+          --env HUD_API_KEY
           python:3.12-bookworm
           sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client >/dev/null
           && pip install -q "uv>=0.12.2"

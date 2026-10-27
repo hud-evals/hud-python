@@ -132,7 +132,6 @@ async def test_a_template_runs_from_init_to_a_graded_rollout(
 
 
 def ci_data_file(template: str) -> str | None:
-    """The shared CI attachment a live run of ``template`` reads, if it takes one."""
     if template not in TAKES_DATA_FILES:
         return None
     data_file = REAL_ENVIRONMENT.get("HUD_CI_DATA_FILE_ID")

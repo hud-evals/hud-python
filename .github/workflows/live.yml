@@ -47,31 +47,15 @@ jobs:
       - name: Install the agent CLIs
         run: npm install --global @anthropic-ai/claude-code @openai/codex
 
+      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
+      # Codex's bubblewrap sandbox needs them.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Run live scenarios
         run: >-
           uv run --python 3.12 --all-extras
           pytest -m "e2e and live and not hosted and not sandbox" -n 4 --timeout 1200 --durations 20
-
-      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
-      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
-      - name: Allow unprivileged user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
-      # A sandboxed environment needs root and bubblewrap, so its live scenarios run
-      # in the same container as the Sandbox job's.
-      - name: Run sandboxed live scenarios in a container
-        run: >-
-          docker run --rm
-          --security-opt seccomp=hud/eval/docker-seccomp.json
-          --security-opt systempaths=unconfined
-          --security-opt apparmor=unconfined
-          --volume "$PWD:/src" --workdir /src
-          --env UV_PROJECT_ENVIRONMENT=/opt/venv
-          --env HUD_API_KEY
-          python:3.12-bookworm
-          sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client >/dev/null
-          && pip install -q "uv>=0.12.2"
-          && uv run --all-extras pytest -m "e2e and live and sandbox and not hosted" --timeout 1200'
 
   modal:
     name: Modal
@@ -82,7 +66,6 @@ jobs:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
     steps:
-      # The scenarios skip themselves without a token; here that would pass with nothing run.
       - name: Require a Modal token
         run: >-
           test -n "$MODAL_TOKEN_ID" -a -n "$MODAL_TOKEN_SECRET"
