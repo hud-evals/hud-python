@@ -318,27 +318,38 @@ async def test_the_sandbox_keeps_every_id_the_container_has(tmp_path: Path) -> N
                 "allowed_hosts": {"pypi.org"},
                 "shell_uid": 1000,
             },
-            ["127.0.0.1\tmain", "127.0.0.2\tdb", f"127.0.0.1\t{socket.gethostname()}"],
+            [("127.0.0.1", "main"), ("127.0.0.2", "db"), ("127.0.0.1", socket.gethostname())],
             [],
             id="peers-and-aliases-resolve-for-any-identity",
         ),
-        pytest.param({"allowed_hosts": set()}, ["localhost"], [], id="localhost-without-peers"),
+        pytest.param(
+            {"allowed_hosts": set()}, [("127.0.0.1", "localhost")], [], id="localhost-without-peers"
+        ),
         pytest.param(
             {"peers": [Peer("db", 5432)], "network": True},
             [],
-            ["\tdb"],
+            [("127.0.0.2", "db")],
             id="the-substrates-hosts-where-the-network-is-shared",
         ),
     ],
 )
 async def test_a_declared_peer_is_a_name_sessions_resolve(
-    tmp_path: Path, options: dict[str, Any], present: list[str], absent: list[str]
+    tmp_path: Path,
+    options: dict[str, Any],
+    present: list[tuple[str, str]],
+    absent: list[tuple[str, str]],
 ) -> None:
     async with shell(tmp_path / "root", require_isolation=True, **options) as (_, client):
         hosts = str((await client.run("cat /etc/hosts", check=True)).stdout)
 
-    assert [line for line in present if line not in hosts] == []
-    assert [line for line in absent if line in hosts] == []
+    resolves = {
+        (fields[0], name)
+        for line in hosts.splitlines()
+        if (fields := line.split("#", 1)[0].split())
+        for name in fields[1:]
+    }
+    assert [entry for entry in present if entry not in resolves] == []
+    assert [entry for entry in absent if entry in resolves] == []
 
 
 FAKE_BWRAP = """#!/bin/sh
