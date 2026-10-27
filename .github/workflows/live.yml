@@ -62,6 +62,7 @@ jobs:
     name: Modal
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    environment: pre-release
     timeout-minutes: 45
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
