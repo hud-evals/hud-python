@@ -415,13 +415,16 @@ def modal_image(sdk_wheel: Path) -> Callable[[str], Any]:
 @pytest.fixture
 def modal_account(hud_env: HudEnv) -> HudEnv:
     """Let Modal find the real account the developer or CI configured. Modal reads its
-    config file once, when first imported, so a file's active profile goes in as variables."""
+    config file once, when first imported, so the file's profile goes in as variables, chosen
+    as Modal chooses it: MODAL_PROFILE, else the active profile, else "default"."""
     token_id = REAL_ENVIRONMENT.get("MODAL_TOKEN_ID")
     token_secret = REAL_ENVIRONMENT.get("MODAL_TOKEN_SECRET")
     if token_id is None:
         config = tomllib.loads((Path(REAL_ENVIRONMENT["HOME"]) / ".modal.toml").read_text())
-        profile = next(profile for profile in config.values() if profile.get("active"))
-        token_id, token_secret = profile["token_id"], profile["token_secret"]
+        name = REAL_ENVIRONMENT.get("MODAL_PROFILE") or next(
+            (name for name, profile in config.items() if profile.get("active")), "default"
+        )
+        token_id, token_secret = config[name]["token_id"], config[name]["token_secret"]
     hud_env.set(MODAL_TOKEN_ID=token_id, MODAL_TOKEN_SECRET=token_secret)
     return hud_env
 
