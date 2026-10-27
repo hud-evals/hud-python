@@ -35,19 +35,13 @@ class GatewayProviderInfo(BaseModel):
 class GatewayModelInfo(BaseModel):
     id: str
     name: str | None = None
-    model_name: str | None = None
+    model_name: str
     sdk_agent_type: str | None = None
     is_trainable: bool = False
     provider: GatewayProviderInfo = Field(default_factory=GatewayProviderInfo)
     created_at: datetime | None = None
     released_at: datetime | None = None
     deprecated_at: datetime | None = None
-
-    @property
-    def request_name(self) -> str:
-        """The model name a request for this entry carries: its provider model name, else its
-        catalog id. A display name or slug a caller typed is not one the gateway routes."""
-        return self.model_name or self.id
 
     @property
     def recency(self) -> datetime:
@@ -213,7 +207,7 @@ def resolve_gateway_model(model: str, platform: PlatformClient | None = None) ->
             entry.id,
             entry.name,
             entry.model_name,
-            (entry.model_name or "").rsplit("/", 1)[-1],
+            entry.model_name.rsplit("/", 1)[-1],
         )
         if name
     ]

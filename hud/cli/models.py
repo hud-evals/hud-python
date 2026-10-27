@@ -60,7 +60,7 @@ def list_models(
     rows = [model.model_dump() for model in models]
     if quiet:
         for model in models:
-            typer.echo(model.request_name)
+            typer.echo(model.model_name)
         return rows
     if not models:
         hud_console.stdout.print("[yellow]No models found[/yellow]")
@@ -79,7 +79,7 @@ def list_models(
     for model in models:
         table.add_row(
             model.name or model.id,
-            model.request_name,
+            model.model_name,
             model.id,
             model.provider.name or "-",
             model.sdk_agent_type or "-",
@@ -143,7 +143,7 @@ def fork_model(
         if exc.status_code == 409 and if_not_exists:
             existing = resolve_gateway_model(name)
             hud_console.stdout.print(
-                f"[yellow]Model already exists[/yellow] [cyan]{existing.model_name or name}[/cyan]"
+                f"[yellow]Model already exists[/yellow] [cyan]{existing.model_name}[/cyan]"
             )
             hud_console.stdout.print(f"[dim]id: {existing.id}[/dim]")
             return {**existing.model_dump(), "existed": True}
