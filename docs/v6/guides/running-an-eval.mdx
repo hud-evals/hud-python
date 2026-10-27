@@ -7,7 +7,7 @@ mode: "wide"
 
 
 This guide outlines how to run an evaluation: pointing an agent at tasks, choosing where each rollout
-runs, and reading the reward. The `hud eval` command is the centra tool for evals: it drives
+runs, and reading the reward. The `hud eval` command is the central tool for evals: it drives
 every eval and works the same whether your environment is deployed or a local `env.py`. Every rollout
 traces to your [platform](https://hud.ai).
 
@@ -38,11 +38,11 @@ and launch - no CLI required. See [evaluations on the platform](/platform/evalua
 
 ### Choosing an agent
 
-The agent name (`claude`, `openai`, `gemini`) selects a provider harness and routes calls through the
-[HUD gateway](/v6/reference/agents), where one `HUD_API_KEY` covers every provider. The `claude_cli` and
-`codex_cli` harnesses instead run an installed CLI inside the environment; pass `--gateway` to route
-their model calls through HUD. Switching models is a single flag, and `hud models list` shows every
-model the gateway knows.
+The agent name (`claude`, `openai`, `gemini`) selects a provider harness. It calls the provider with
+its own key when one is set, and otherwise the [HUD gateway](/v6/reference/agents) with `HUD_API_KEY`;
+`--gateway` forces the gateway. The `claude_cli` and `codex_cli` harnesses run an installed CLI inside
+the environment; `--gateway` routes their model calls through HUD too. Switching models is a single
+flag, and `hud models list` shows every model the gateway knows.
 
 ```bash
 hud eval "My Taskset" claude --model claude-haiku-4-5   # a cheaper model for fast iteration
@@ -74,15 +74,16 @@ control. Both take a [runtime](/v6/reference/runtime), the one argument that dec
 runs. The environment definition never changes - only the runtime does.
 
 <Note>
-With a `HUD_API_KEY` set, local runs still trace to the [platform](https://hud.ai). Without one, they
-run and grade entirely on your machine with no platform calls.
+Where the environment runs is separate from how the agent reaches its model. A local run needs no
+`HUD_API_KEY`, but the `claude`, `openai` and `gemini` agents need a provider key or `HUD_API_KEY`.
+With `HUD_API_KEY` set, local runs also trace to the [platform](https://hud.ai). To check a task without
+a model, run it with an [agent that returns a fixed answer](/v6/advanced/extending#the-agent-seam).
 </Note>
 
 ### With `hud eval`
 
-`hud eval` spawns the env subprocess for you, so a purely local run needs no `hud serve`, no Docker, and
-no API key. Point it at your task source, pass an agent name, and set `--runtime` when you want a rollout
-to run somewhere other than your machine.
+`hud eval` starts the environment for you, so a local run needs no `hud serve` or Docker. Point it at
+your task source and set `--runtime` to choose where the environment runs.
 
 <div className="guide-row">
 <div className="guide-main">
@@ -97,10 +98,10 @@ full flag set.
 <p className="aside-label">terminal</p>
 
 ```bash
-hud eval tasks.py claude               # first task, one rollout
-hud eval tasks.py claude --all         # every task
-hud eval tasks.py claude --group 3     # 3 rollouts per task
-hud eval tasks.py claude --runtime hud # on hosted infra
+hud eval tasks.py claude                  # first task, one rollout
+hud eval tasks.py claude --all            # every task
+hud eval tasks.py claude --all --group 3  # 3 rollouts per task
+hud eval tasks.py claude --runtime hud    # hosted env, local agent loop
 ```
 
 </div>
@@ -111,6 +112,9 @@ hud eval tasks.py claude --runtime hud # on hosted infra
 When you want programmatic control - looping over agents, feeding a training pipeline, routing tasks to
 different infra - call `Taskset.run` directly and hand it a [runtime](/v6/reference/runtime) object. This
 is the same eval `hud eval` runs, written out in Python.
+
+`create_agent` always uses the gateway and needs `HUD_API_KEY`; to call a provider directly,
+[construct its agent](/v6/reference/agents#provider-agents).
 
 ```python run.py
 import asyncio
