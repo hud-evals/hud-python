@@ -10,7 +10,7 @@ from pathlib import Path
 
 from hud import Environment
 
-ROOT = Path(tempfile.gettempdir()) / f"hud-fixture-secret-{os.getpid()}"
+ROOT = Path(tempfile.gettempdir()) / f"hud-fixture-note-{os.getpid()}"
 
 env = Environment("secret")
 env.workspace(ROOT, guest_path=str(ROOT))
@@ -24,8 +24,8 @@ async def remove_workspace() -> None:
 @env.template(id="read-secret")
 async def read_secret():
     token = secrets.token_hex(8)
-    (ROOT / "secret.txt").write_text(token, encoding="utf-8")
-    answer = yield f"Read the file {ROOT / 'secret.txt'} and reply with its contents only."
+    (ROOT / "note.txt").write_text(token, encoding="utf-8")
+    answer = yield f"Read the file {ROOT / 'note.txt'} and reply with its contents only."
     yield 1.0 if (answer or "").strip() == token else 0.0
 
 
