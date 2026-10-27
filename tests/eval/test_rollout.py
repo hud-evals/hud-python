@@ -129,7 +129,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
         pytest.param(
             {"score": True},
             0.0,
-            None,
+            "not graded",
             "error",
             "'score'",
             id="a-boolean-score",
@@ -137,7 +137,7 @@ async def test_the_agent_holds_its_connections_only_while_it_runs(tmp_path: Path
         pytest.param(
             {"done": True},
             0.0,
-            None,
+            "not graded",
             "error",
             "'score'",
             id="a-frame-without-a-score",

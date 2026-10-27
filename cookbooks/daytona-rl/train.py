@@ -131,10 +131,17 @@ async def main(
             )
             rollout_s = time.perf_counter() - t0
             batch = session.runs[batch_start:]
+            failed = {id(r) for r in session.errors}
+            trainable = [
+                r
+                for i in range(0, len(batch), group)
+                if not any(id(g) in failed for g in batch[i : i + group])
+                for r in batch[i : i + group]
+            ]
 
-            samples = _samples(batch)
+            samples = _samples(trainable)
             rewards = [r.reward or 0.0 for r in batch]
-            errored = sum(1 for r in batch if r.trace.is_error)
+            errored = sum(1 for r in batch if id(r) in failed)
             solved = sum(1 for r in rewards if r > 0)
             row = {
                 "step": step,
@@ -163,8 +170,8 @@ async def main(
             # optim_step, so send the batch in group-aligned chunks.
             t1 = time.perf_counter()
             loss_sum, datums = 0.0, 0
-            for i in range(0, len(batch), chunk):
-                part = batch[i : i + chunk]
+            for i in range(0, len(trainable), chunk):
+                part = trainable[i : i + chunk]
                 fb = await trainer.forward_backward(
                     part, loss_fn="importance_sampling", group_size=group
                 )
@@ -172,9 +179,9 @@ async def main(
                 datums += fb.num_datums
             row["loss"] = round(loss_sum, 4)
             row["datums"] = datums
-            row["chunks"] = -(-len(batch) // chunk)
+            row["chunks"] = -(-len(trainable) // chunk)
 
-            if len({round(r, 6) for r in rewards}) == 1:
+            if len({round(r.reward or 0.0, 6) for r in trainable}) == 1:
                 row["train_s"] = round(time.perf_counter() - t1, 1)
                 row["optim_step"] = None
                 print(f"  no reward spread in batch — skipping optim_step", flush=True)

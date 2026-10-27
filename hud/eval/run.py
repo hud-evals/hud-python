@@ -207,6 +207,11 @@ class Grade:
             raw=raw,
         )
 
+    @classmethod
+    def ungraded(cls) -> Grade:
+        """The grade of a run that has not been graded."""
+        return cls(is_error=True, content="not graded")
+
 
 class Run:
     """Live handle for one task: the task lifecycle plus the agent's ``Trace``.
@@ -242,8 +247,8 @@ class Run:
         #: a robot slot token, a per-episode url — refining the manifest's
         #: env-lifetime bindings. Empty when the env published none.
         self.bindings: dict[str, dict[str, Any]] = {}
-        #: The structured grading result (all-default until graded on exit).
-        self.grade = Grade()
+        #: The structured grading result; :meth:`Grade.ungraded` until graded.
+        self.grade = Grade.ungraded()
         self.trace = Trace()
         #: Batch this run belongs to (set by the runner); platform job + GRPO group.
         self.job_id: str | None = None
@@ -630,7 +635,7 @@ async def rollout(
                         actor_session_id = actor_client.manifest.session_id
                         # The verifier is authoritative. Once its phase begins,
                         # an actor-side grade must not survive a verifier failure.
-                        live.grade = Grade()
+                        live.grade = Grade.ungraded()
                     if shared_verifier:
                         assert verifier is not None
                         _phase = "verifying"
