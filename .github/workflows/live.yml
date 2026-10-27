@@ -65,7 +65,7 @@ jobs:
     environment: pre-release
     timeout-minutes: 45
     env:
-      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_ID: ${{ vars.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
     steps:
       - name: Require a Modal token
