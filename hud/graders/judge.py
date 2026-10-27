@@ -77,7 +77,7 @@ class LLMJudgeGrader(Grader):
         answer: str | Any = "",
         criteria: list[str | tuple[str, float]] | None = None,
         question: str = "",
-        model: str = "claude-haiku-4-5",
+        model: str = "claude-sonnet-5-5",
         **kwargs: Any,
     ) -> SubScore:
         """Evaluate ``answer`` against ``criteria`` via parallel LLM judgments."""

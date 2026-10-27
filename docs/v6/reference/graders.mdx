@@ -89,9 +89,11 @@ result = await LLMJudgeGrader.grade(
     answer=answer,
     criteria=["Correct", ("Well-reasoned", 2.0)],
     question=prompt,
-    model="claude-haiku-4-5",
+    model="claude-sonnet-5-5",
 )
 ```
+
+The default model is `claude-sonnet-5-5`. Pass `model` to use a different judge.
 
 `criteria` items are strings, or `(requirement, weight)` tuples. A negative weight marks an error to
 avoid: the criterion scores as a penalty, MET when the answer actually makes the mistake.
