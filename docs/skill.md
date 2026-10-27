@@ -162,8 +162,8 @@ resources (ports, file handles) are not released otherwise.
 Once `hud eval env.py model` passes locally, two commands push it to the platform:
 
 ```bash
-hud deploy .                     # package and deploy the environment (gives it a platform id)
-hud sync tasks my-taskset env.py # upload tasks from env.py to the "my-taskset" taskset (name first, source second)
+hud deploy . --yes                     # package and deploy the environment (gives it a platform id)
+hud sync tasks my-taskset env.py --yes # upload tasks from env.py to the "my-taskset" taskset (name first, source second)
 ```
 
 Then run at scale across models with `group=` for reward spread:
@@ -184,7 +184,7 @@ Cite [Deploy](/v6/reference/runtime), [Models](/v6/reference/agents), [Training]
 
 ## Training scenarios
 
-Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug>`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training](/v6/run/training) and [reference: Training](/v6/reference/training).
+Training drives a **trainable model** (fork one: `hud models fork <base> --name <slug> --yes`); a `TrainingClient` targets that slug and advances its weights in place. Mark rollouts for training with `return_token_ids` so the gateway records tokens + logprobs. Pick the loop by scenario — all cite [Training](/v6/run/training) and [reference: Training](/v6/reference/training).
 
 **Standard managed loop.** Roll out a batch with `group=` for within-group spread, hand the `Run`s to `step` (one `forward_backward` + one `optim_step`), repeat.
 
@@ -224,7 +224,7 @@ Get the opponent's tokens from the gateway call with `extra_body={"return_token_
 **Reset when the objective changes.** If you edit the reward or the environment mid-run, the current head encodes the *old* objective — continuing from it trains a contaminated policy, and the next steps mostly undo the old shaping. Roll the head back to a checkpoint from before the change (or fork a fresh model):
 
 ```python
-await trainer.set_head(checkpoint_id)  # or: hud models head <slug> --set <id>
+await trainer.set_head(checkpoint_id)  # or: hud models head <slug> --set <id> --yes
 ```
 
 **Custom loss / primitives.** Author the loss yourself (e.g. double-sided IS) with `forward_backward_custom` — the service returns per-token tensors, your torch function makes the gradients (needs `pip install 'hud[train]'`). Drop to `forward_backward` + `optim_step` directly when you want the `forward_backward` metrics or gradient accumulation (`num_substeps`) in between; `step` is just the two chained.

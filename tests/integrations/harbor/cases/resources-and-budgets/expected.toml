@@ -1,0 +1,13 @@
+# Each task carries its own resources, limits and agent budget.
+[task.gpu]
+placement = { resources = { cpu = 4.0, memory_mb = 8192, storage_mb = 32768, gpu = { count = 2, type = ["H100"] } } }
+
+[task.windows-tpu]
+placement = { resources = { os = "windows", tpu = { type = "v5", topology = "2x2" } } }
+
+[task.budget]
+placement = { limits = { startup_timeout_s = 901 } }
+agent_config = { timeout_seconds = 28800.0 }
+
+[task.cpu-only]
+placement = {}

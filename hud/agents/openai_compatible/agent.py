@@ -189,9 +189,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
         if not reasoning:
             raw_reasoning = getattr(message, "reasoning", None)
             reasoning = raw_reasoning if isinstance(raw_reasoning, str) else None
-        for field_name in ("reasoning_content", "reasoning", "reasoning_details"):
-            if value := getattr(message, field_name, None):
-                assistant_message[field_name] = value
         if function_calls:
             assistant_message["tool_calls"] = recorded_calls
         messages.append(cast("ChatCompletionMessageParam", assistant_message))

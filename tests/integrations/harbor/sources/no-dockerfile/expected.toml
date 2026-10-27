@@ -1,0 +1,2 @@
+# Without a Dockerfile there is no image to rebuild, so nothing is started.
+refusal = { type = "FileNotFoundError", message = "no Dockerfile(.hud) next to", started = false }

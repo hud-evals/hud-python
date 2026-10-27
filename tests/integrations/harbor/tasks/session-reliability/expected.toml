@@ -1,0 +1,3 @@
+# The solution runs in 40 separate SSH sessions.
+base = "agent-answer"
+repeat = 40

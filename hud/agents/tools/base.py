@@ -16,12 +16,15 @@ import hashlib
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
 import mcp.types as mcp_types
 
 from hud.capabilities import CapabilityClient
 from hud.types import MCPToolResult
+
+if TYPE_CHECKING:
+    from hud.agents.types import ToolAgentConfig
 
 ClientT = TypeVar("ClientT", bound=CapabilityClient)
 _PROVIDER_TOOL_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
@@ -83,6 +86,12 @@ class AgentTool(ABC, Generic[ClientT]):
     def __init__(self, *, spec: AgentToolSpec, client: ClientT) -> None:
         self.spec = spec
         self.client: ClientT = client
+
+    @classmethod
+    def from_config(cls, *, spec: AgentToolSpec, client: ClientT, config: ToolAgentConfig) -> Self:
+        """This tool as an agent with *config* runs it; a tool reads what it needs from it."""
+        del config
+        return cls(spec=spec, client=client)
 
     @property
     def provider_name(self) -> str:

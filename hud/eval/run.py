@@ -107,28 +107,50 @@ def validate_rollout_timeouts(
     return agent_timeout
 
 
-def _prompt_message(item: Any) -> mcp_types.PromptMessage:
+def parent_trace(trace_id: str) -> uuid.UUID | None:
+    """The trace a rollout of ``trace_id`` runs inside: the ambient trace, when it is
+    another one. The platform keys traces by UUID, so an ambient id that is not one
+    names no trace it holds, and the rollout has no parent. A caller sends it in the
+    form it sends the rollout's own trace id: hex locally, canonical when hosted."""
+    ambient = get_current_trace_id() or get_mcp_trace_id()
+    if ambient is None or normalize_trace_id(ambient) == normalize_trace_id(trace_id):
+        return None
+    try:
+        return uuid.UUID(ambient)
+    except ValueError:
+        return None
+
+
+def _prompt_messages(item: Any) -> list[mcp_types.PromptMessage]:
     """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
 
     Turns are env-authored: chat-style dicts (plain-string content wrapped as
     text, roles outside MCP's user/assistant vocabulary such as ``system``
     coerced to ``user``), already-built ``PromptMessage``s, or anything else
-    stringified. Coercion may be lossy — prompt context is what the agent is
-    given, and the verbatim payload stays on the setup ``task`` step's result.
+    stringified. A ``PromptMessage`` holds one content block, so a turn whose
+    content is a list of blocks becomes one message per block. Coercion may be
+    lossy — prompt context is what the agent is given, and the verbatim
+    payload stays on the setup ``task`` step's result.
     """
     if isinstance(item, mcp_types.PromptMessage):
-        return item
+        return [item]
     if not isinstance(item, dict):
         item = {"content": str(item)}
     raw_role = item.get("role")
     role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
     content = item.get("content")
     if isinstance(content, str):
-        return mcp_types.PromptMessage(
-            role=role,
-            content=mcp_types.TextContent(type="text", text=content),
-        )
-    return mcp_types.PromptMessage.model_validate({**item, "role": role})
+        return [
+            mcp_types.PromptMessage(
+                role=role,
+                content=mcp_types.TextContent(type="text", text=content),
+            )
+        ]
+    blocks = content if isinstance(content, list) else [content]
+    return [
+        mcp_types.PromptMessage.model_validate({**item, "role": role, "content": block})
+        for block in blocks
+    ]
 
 
 def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -280,11 +302,11 @@ class Run:
 
         The structured form agents consume and the opening ``user`` step
         records: a text prompt (or none) is one user turn; chat-style lists
-        map turn by turn.
+        map turn by turn, a turn of several blocks to one message per block.
         """
         if self.prompt is None or isinstance(self.prompt, str):
-            return [_prompt_message({"content": self.prompt or ""})]
-        return [_prompt_message(item) for item in self.prompt]
+            return _prompt_messages({"content": self.prompt or ""})
+        return [message for item in self.prompt for message in _prompt_messages(item)]
 
     @property
     def prompt_text(self) -> str:
@@ -395,7 +417,8 @@ class Run:
         runtime, partial trace) with the error recorded on the trace.
         """
         run = cls(None, "", {})
-        run.trace = Trace(status="error", steps=[Step(source="system", error=error)])
+        run.trace.status = "error"
+        run.record(Step(source="system", error=error))
         return run
 
 
@@ -498,11 +521,8 @@ async def rollout(
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
-    parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
-    if parent_trace_id is not None and normalize_trace_id(parent_trace_id) == normalize_trace_id(
-        trace_id
-    ):
-        parent_trace_id = None
+    parent = parent_trace(trace_id)
+    parent_trace_id = parent.hex if parent is not None else None
     # Report the model the agent will sample so the platform attributes the
     # trace to it on enter. Only LLM tool agents carry an inference-model slug
     # (``config.model``); robot/other agents have none. Local import avoids an
@@ -521,6 +541,7 @@ async def rollout(
             parent_trace_id=parent_trace_id,
         )
         run: Run | None = None
+        cancellation: asyncio.CancelledError | None = None
         _phase = "provisioning"
         rollout_expired = False
 
@@ -679,21 +700,27 @@ async def rollout(
                         run.trace.status = "error"
                         run.record(Step(source="system", error=detail))
                     run.trace.stop_reason = "timeout"
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancel:
             if client is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(client.cancel(), timeout=2.0)
                 client.abort()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
-            raise
+            cancellation = cancel
+            if run is None:
+                run = Run.failed(f"[{_phase}] cancelled")
+            run.trace.status = "cancelled"
         except Exception as exc:
             # format_exception_only keeps __notes__ — a provider attaches what
             # only it can see there, like the sandbox's env output on a failed
             # handshake — where str(exc) would drop them.
             detail = "".join(traceback.format_exception_only(exc)).strip()
             if run is None:
-                logger.warning("rollout failed before launch (%s): %s", _phase, detail)
+                # No run exists yet, so this log is the only place the traceback survives.
+                logger.warning(
+                    "rollout failed before launch (%s): %s", _phase, detail, exc_info=True
+                )
                 run = Run.failed(f"[{_phase}] {detail}")
             else:
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
@@ -705,6 +732,11 @@ async def rollout(
         run.job_id = job_id
         run.group_id = group_id
         run.slug = task.slug
+        if cancellation is not None:
+            # The platform still closes the trace; a hung report must not hold the cancel.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(trace_exit(run), timeout=5.0)
+            raise cancellation
         await trace_exit(run)
     return run
 

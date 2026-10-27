@@ -39,6 +39,10 @@ class ComposeUnboundVariableError(ValueError):
     """A Compose variable depends on values outside the packaged project."""
 
 
+class ComposeUnsupportedError(ValueError):
+    """A Compose document uses a feature the serialized project contract excludes."""
+
+
 def _interpolate_compose_value(
     value: str,
     environment: Mapping[str, str],
@@ -357,7 +361,9 @@ class ComposeConfig(BaseModel):
                 isinstance(service, dict) and "extends" in service for service in services.values()
             )
         ):
-            raise ValueError("remote adaptation does not support Compose include or extends")
+            raise ComposeUnsupportedError(
+                "remote adaptation does not support Compose include or extends"
+            )
         return cls.model_validate(document)
 
     def with_project_directory(self, directory: str) -> ComposeConfig:

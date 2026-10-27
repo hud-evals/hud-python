@@ -8,10 +8,13 @@ from typing import Any
 from uuid import UUID
 
 import typer
+from mcp.types import TextContent
+from pydantic import BaseModel
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
+from hud.agents.types import AgentStep, ToolStep
 from hud.cli import (
     CLI,
     CliError,
@@ -24,6 +27,10 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
+
+
+class _Events(BaseModel):
+    events: list[dict[str, Any]]
 
 
 class _TraceGroup(CLIGroup):
@@ -82,40 +89,40 @@ def get_command(
             if attrs.get("hud.schema") != "hud.step.v1" or not isinstance(payload, dict):
                 continue
             if payload.get("source") == "agent":
+                step = AgentStep.model_validate(payload)
                 events.append(
                     {
                         "kind": "agent_message",
-                        "text": payload.get("content"),
-                        "reasoning": payload.get("reasoning"),
-                        "tool_calls": payload.get("tool_calls") or [],
-                        "error": payload.get("error"),
+                        "text": step.content,
+                        "reasoning": step.reasoning,
+                        "tool_calls": [call.model_dump(mode="json") for call in step.tool_calls],
+                        "error": step.error,
                     }
                 )
             elif payload.get("source") == "tool":
-                for msg in payload.get("messages", []):
-                    if msg.get("role") != "tool":
-                        continue
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        content = "\n".join(
-                            part.get("text", "")
-                            for part in content
-                            if isinstance(part, dict) and part.get("type") == "text"
-                        )
-                    events.append(
-                        {
-                            "kind": "tool_call",
-                            "tool_name": msg.get("name") or msg.get("tool_call_id"),
-                            "result_text": str(content),
-                        }
-                    )
+                tool = ToolStep.model_validate(payload)
+                result = tool.result
+                text = "\n".join(
+                    block.text
+                    for block in (result.content if result is not None else [])
+                    if isinstance(block, TextContent)
+                )
+                events.append(
+                    {
+                        "kind": "tool_call",
+                        "tool_name": tool.call.name if tool.call is not None else None,
+                        "arguments": tool.call.arguments if tool.call is not None else {},
+                        "result_text": text,
+                        "error": tool.error
+                        or (text if result is not None and result.isError else None),
+                    }
+                )
     else:
         source = "platform"
         try:
-            data = PlatformClient.from_settings().get(f"/trace/{trace_id}/events")
+            events = PlatformClient.from_settings().get(f"/trace/{trace_id}/events", _Events).events
         except HudRequestError as exc:
             raise CliError.from_http(exc, resource="Trace", input={"trace_id": trace_id}) from exc
-        events = data["events"]
 
     if not events:
         hud_console.stdout.print("[yellow]No events found for this trace.[/yellow]")

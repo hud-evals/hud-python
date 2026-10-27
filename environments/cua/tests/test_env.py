@@ -1,138 +1,115 @@
-"""Offline tests for the CUA environment grader composition.
+"""The CUA environment, served the way HUD serves it and driven over its control channel.
 
-These do NOT touch the virtual desktop (rfb is Linux-only); they drive the @env.template
-generator directly and exercise its configuration and grader composition with deterministic shell
-commands. The end-to-end desktop run is a `hud eval ... --runtime hud` rollout.
+Each test starts a fresh environment process, starts a task with the arguments a
+task row carries, and grades an answer: what a rollout does, without an agent.
 """
 
-from unittest.mock import AsyncMock
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
+from hud import SubprocessRuntime, Task, connect
+from hud.clients import HudProtocolError
 
-import env as M
-import tasks
+from env import cua_task
 
-GEN = M.cua_task.func
-
-
-@pytest.fixture(autouse=True)
-def fresh_substrate(monkeypatch):
-    monkeypatch.setattr(M, "_task_started", False)
+ENV_SOURCE = Path(__file__).resolve().parent.parent / "env.py"
+PASS = {"name": "ok", "command": "true", "weight": 1.0}
 
 
-class TestGrading:
-    async def test_missing_graders_fails_before_prompt(self):
-        gen = GEN(prompt="p")
-        with pytest.raises(ValueError, match="at least one grader"):
-            await gen.asend(None)
-
-    async def test_bash_check_passes(self):
-        gen = GEN(prompt="p", bash_checks=[{"name": "ok", "command": "true", "weight": 1.0}])
-        await gen.asend(None)
-        assert (await gen.asend("a")).reward == 1.0
-
-    async def test_bash_check_fails(self):
-        gen = GEN(prompt="p", bash_checks=[{"name": "no", "command": "false", "weight": 1.0}])
-        await gen.asend(None)
-        assert (await gen.asend("a")).reward == 0.0
-
-    async def test_negative_bash_weight_fails_before_prompt(self):
-        gen = GEN(prompt="p", bash_checks=[{"name": "no", "command": "false", "weight": -1.0}])
-        with pytest.raises(ValueError, match="nonnegative"):
-            await gen.asend(None)
-
-    @pytest.mark.parametrize("hud_api_key", [None, "task-key"])
-    async def test_no_runtime_key_judge_fails_before_prompt(self, monkeypatch, hud_api_key):
-        monkeypatch.setattr(M.settings, "api_key", "", raising=False)
-        gen = GEN(prompt="p", grading_criteria=["anything"], hud_api_key=hud_api_key)
-        with pytest.raises(RuntimeError, match="HUD_API_KEY"):
-            await gen.asend(None)
-
-    async def test_weights_normalize_across_bash_and_judge(self, monkeypatch):
-        monkeypatch.setattr(M.settings, "api_key", "key", raising=False)
-        monkeypatch.setattr(
-            M.LLMJudgeGrader,
-            "grade",
-            AsyncMock(return_value=M.SubScore(name="llm_judge", value=1.0, weight=0.5)),
-        )
-        gen = GEN(
-            prompt="p",
-            bash_checks=[{"name": "ok", "command": "true", "weight": 0.3}],
-            grading_criteria=["x"],
-        )
-        await gen.asend(None)
-        result = await gen.asend("answer")
-        assert result.reward == 1.0
-        weights = {subscore.name: subscore.weight for subscore in result.subscores}
-        assert weights == {"ok": 0.5, "llm_judge": 0.5}
-
-    async def test_second_task_requires_fresh_substrate(self):
-        first = GEN(prompt="first", bash_checks=[{"name": "ok", "command": "true"}])
-        await first.asend(None)
-
-        second = GEN(prompt="second", bash_checks=[{"name": "ok", "command": "true"}])
-        with pytest.raises(RuntimeError, match="one task per substrate"):
-            await second.asend(None)
-
-        await first.aclose()
-
-    async def test_named_bash_subscores_preserved(self):
-        gen = GEN(
-            prompt="p",
-            bash_checks=[
-                {"name": "alpha", "command": "true", "weight": 0.4},
-                {"name": "beta", "command": "true", "weight": 0.6},
-            ],
-        )
-        await gen.asend(None)
-        result = await gen.asend("a")
-        names = {s.name for s in result.subscores}
-        assert {"alpha", "beta"} <= names
-        assert result.reward == 1.0
+@asynccontextmanager
+async def served(row: Task):
+    """A fresh environment process serving ``row``, and a client connected to it."""
+    async with SubprocessRuntime(ENV_SOURCE)(row) as runtime, connect(runtime) as client:
+        yield client
 
 
-def test_create_document_requires_exact_contents():
-    command = tasks._create_document.args["bash_checks"][1]["command"]
-    assert command == "cmp -s /home/ubuntu/Desktop/hello.txt <(printf 'Hello from HUD!\\n')"
+async def test_the_manifest_publishes_the_screen_and_a_prompt_box(desktop):
+    row = cua_task(prompt="p", bash_checks=[PASS])
+    async with served(row) as client:
+        (template,) = await client.list_tasks()
+        screens = [binding.url for binding in client.manifest.bindings if binding.name == "screen"]
+
+    assert screens == [f"rfb://127.0.0.1:{desktop}"]
+    arguments = template["args"]
+    assert arguments["properties"]["prompt"]["x-hud-hint"] == "prompt"
+    assert "hud_api_key" in arguments["properties"]
+    assert arguments["required"] == ["prompt"]
 
 
-def test_open_website_requires_wikipedia_page():
-    check = tasks._open_website.args["bash_checks"][0]
-    assert check == {
-        "name": "visited_wikipedia",
-        "command": (
-            "curl -fsS http://127.0.0.1:9222/json/list "
-            "| jq -e 'any(.[]; .url == \"https://www.wikipedia.org/\")' >/dev/null"
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        pytest.param({}, "at least one grader", id="no-graders"),
+        pytest.param(
+            {"bash_checks": [{"name": "no", "command": "false", "weight": -1.0}]},
+            "nonnegative",
+            id="negative-weight",
         ),
-        "weight": 1.0,
-    }
+        pytest.param({"grading_criteria": ["Anything."]}, "HUD_API_KEY is required", id="judge-without-key"),
+        pytest.param(
+            {"grading_criteria": ["Anything."], "hud_api_key": "task-key"},
+            "HUD_API_KEY is required",
+            id="a-task-key-is-not-the-runtime-key",
+        ),
+    ],
+)
+async def test_a_misconfigured_task_fails_before_the_agent_sees_a_prompt(arguments, message):
+    row = cua_task(prompt="p", **arguments)
+    async with served(row) as client:
+        with pytest.raises(HudProtocolError) as failure:
+            await client.start_task(row.id, row.args)
+
+    assert message in failure.value.message
 
 
-def test_shannon_research_requires_exact_file_and_open_pages():
-    assert tasks._shannon_research.args["bash_checks"] == [
-        {
-            "name": "file_contents",
-            "command": (
-                "cmp -s /home/ubuntu/Desktop/shannon.txt "
-                "<(printf 'born: 1916\\nphd: Massachusetts Institute of Technology\\n"
-                "city: Cambridge, Massachusetts\\n')"
-            ),
-            "weight": 1.0,
-        },
-        {
-            "name": "research_pages_open",
-            "command": (
-                "curl -fsS http://127.0.0.1:9222/json/list | jq -e "
-                "--arg shannon https://en.wikipedia.org/wiki/Claude_Shannon "
-                "--arg mit https://en.wikipedia.org/wiki/Massachusetts_Institute_of_Technology "
-                "'map(.url) | contains([$shannon, $mit])' >/dev/null"
-            ),
-            "weight": 1.0,
-        },
-    ]
+@pytest.mark.parametrize(
+    ("arguments", "score", "weights"),
+    [
+        pytest.param({"bash_checks": [PASS]}, 1.0, {"ok": 1.0}, id="passing-check"),
+        pytest.param({"bash_checks": [{"name": "no", "command": "false"}]}, 0.0, {"no": 1.0}, id="failing-check"),
+        pytest.param(
+            {
+                "bash_checks": [
+                    {"name": "alpha", "command": "true", "weight": 0.4},
+                    {"name": "beta", "command": "false", "weight": 0.6},
+                ]
+            },
+            0.4,
+            {"alpha": 0.4, "beta": 0.6},
+            id="weighted-checks",
+        ),
+        pytest.param(
+            {
+                "bash_checks": [{"name": "ok", "command": "true", "weight": 0.3}],
+                "grading_criteria": ["Says hello."],
+            },
+            1.0,
+            {"ok": 0.5, "llm_judge": 0.5},
+            id="checks-and-judge-split-the-score",
+        ),
+    ],
+)
+async def test_the_grade_weighs_named_checks_and_the_judge(arguments, score, weights, monkeypatch, judge):
+    monkeypatch.setenv("HUD_API_KEY", "runtime-key")
+    row = cua_task(prompt="Say hello.", hud_api_key="task-key", **arguments)
+    async with served(row) as client:
+        started = await client.start_task(row.id, row.args)
+        grade = await client.grade({"answer": "hello"})
+
+    assert started["prompt"].endswith("Say hello.")
+    assert grade["score"] == pytest.approx(score)
+    assert {sub["name"]: sub["weight"] for sub in grade["subscores"]} == pytest.approx(weights)
+    assert {authorization for authorization, _ in judge.requests} <= {"Bearer runtime-key"}
 
 
-def test_platform_args_declared():
-    args = M.cua_task.manifest_entry()["args"]["properties"]
-    assert args["prompt"]["x-hud-hint"] == "prompt"
-    assert "hud_api_key" in args
+async def test_a_desktop_serves_one_task():
+    row = cua_task(prompt="first", bash_checks=[PASS])
+    async with served(row) as client:
+        await client.start_task(row.id, row.args)
+        with pytest.raises(HudProtocolError) as failure:
+            await client.start_task(row.id, {**row.args, "prompt": "second"})
+
+    assert "one task per substrate" in failure.value.message

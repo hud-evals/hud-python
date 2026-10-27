@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from mcp.types import PromptMessage, TextContent
 
-from hud.agents.types import EvaluationResult
 from hud.environment import Environment
+from hud.graders import EvaluationResult
 
 env = Environment(name="chat")
 

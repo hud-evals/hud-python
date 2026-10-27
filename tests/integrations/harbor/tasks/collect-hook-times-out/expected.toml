@@ -1,0 +1,3 @@
+base = "collect-hook-fails"
+reward = 0.0
+error = "collect hook on 'main' timed out after 1s"

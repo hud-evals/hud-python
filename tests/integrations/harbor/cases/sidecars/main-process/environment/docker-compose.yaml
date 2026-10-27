@@ -1,0 +1,13 @@
+services:
+  main:
+    user: 1001:1002
+    entrypoint: [/compose-init]
+    working_dir: /compose-work
+    environment: {FROM_COMPOSE: "yes"}
+    expose: [8080]
+    healthcheck:
+      test: [CMD-SHELL, curl -f http://localhost:8080/health]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 1s

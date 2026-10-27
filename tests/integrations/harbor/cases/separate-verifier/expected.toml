@@ -1,0 +1,13 @@
+# A separate verifier runs as its own row with its own placement.
+[task.placement]
+placement = { resources = { cpu = 2.0, memory_mb = 2048 }, limits = { startup_timeout_s = 600 } }
+"verifier.runtime_config" = { resources = { cpu = 4.0, memory_mb = 1024, gpu = { count = 1, type = ["T4"] } }, limits = { startup_timeout_s = 1200 } }
+service_access = true
+"task.collect" = [{ service = "redis", command = "redis-cli save", timeout_sec = 10.0 }]
+
+# A verifier placed like its actor, or not placed at all, carries no placement of its own.
+[task.plain]
+"verifier.runtime_config" = false
+
+[task.same-placement]
+"verifier.runtime_config" = false

@@ -316,7 +316,8 @@ async def _terminate_process_group(
     term_deadline = loop.time() + term_timeout + settle_time
     try:
         os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    # macOS answers EPERM, not ESRCH, for a group whose leader exited but is not yet reaped.
+    except (ProcessLookupError, PermissionError):
         if proc.returncode is None:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(proc.wait(), term_timeout)

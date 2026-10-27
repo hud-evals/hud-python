@@ -16,6 +16,7 @@ import mcp.types as mcp_types
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
+from hud.agents.tools.rfb import keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import MCPToolResult
 
@@ -23,6 +24,7 @@ from .base import ClaudeToolSpec, is_anthropic_model
 
 if TYPE_CHECKING:
     from anthropic.types.beta import (
+        BetaComputerToolset20260801Param,
         BetaToolComputerUse20250124Param,
         BetaToolComputerUse20251124Param,
         BetaToolUnionParam,
@@ -33,51 +35,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ─── Anthropic → X11 keysym translation ─────────────────────────────
-#
-# Claude emits keys in the xdotool / Anthropic vocabulary (``Return``,
-# ``Page_Down``, ``Control_L``, ``cmd``, etc.). asyncvnc's keysymdef table
-# accepts X11 names directly and already aliases common short forms (``Cmd``,
-# ``Alt``, ``Ctrl``, ``Super``, ``Shift``, ``Backspace``, ``Del``, ``Esc``).
-# This map covers the residual Anthropic-specific spellings.
-
-_ANTHROPIC_TO_X11: dict[str, str] = {
-    "alt": "Alt_L",
-    "ctrl": "Control_L",
-    "shift": "Shift_L",
-    "meta": "Super_L",
-    "super": "Super_L",
-    "win": "Super_L",
-    "cmd": "Super_L",
-    "command": "Super_L",
-    "option": "Alt_L",
-    "enter": "Return",
-    "return": "Return",
-    "esc": "Escape",
-    "del": "Delete",
-    "pageup": "Page_Up",
-    "pagedown": "Page_Down",
-    "arrowup": "Up",
-    "arrowdown": "Down",
-    "arrowleft": "Left",
-    "arrowright": "Right",
-    "space": "space",
-    "backspace": "BackSpace",
-    "capslock": "Caps_Lock",
-    "printscreen": "Print",
-}
-
-
-def _translate_key(token: str) -> str:
-    if "+" in token:
-        return "+".join(_translate_key(part) for part in token.split("+"))
-    return _ANTHROPIC_TO_X11.get(token.lower(), token)
-
-
 def _split_keys(text: str | None) -> list[str]:
     if not text:
         return []
-    return [_translate_key(part.strip()) for part in text.split("+") if part.strip()]
+    return [keysym(part.strip()) for part in text.split("+") if part.strip()]
 
 
 def _hold_keys(text: str | None) -> list[str] | None:
@@ -87,6 +48,9 @@ def _hold_keys(text: str | None) -> list[str] | None:
 
 # ─── Claude tool specs (per-model gating) ───────────────────────────
 
+#: Current Claude models take the computer toolset; only the older models listed in
+#: ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
+COMPUTER_TOOLSET_SPEC = ClaudeToolSpec(api_type="computer_toolset_20260801", api_name="computer")
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
     ClaudeToolSpec(
@@ -94,6 +58,7 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
         api_name="computer",
         beta="computer-use-2025-11-24",
         supported_models=(
+            "*claude-opus-4-5*",
             "*claude-opus-4-6*",
             "*claude-sonnet-4-6*",
             "*claude-opus-4-7*",
@@ -104,15 +69,22 @@ CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
         api_type="computer_20250124",
         api_name="computer",
         beta="computer-use-2025-01-24",
+        # Claude Opus 4 and Sonnet 4 go by bare, ``-0`` alias, dated, and Vertex ``@`` ids.
         supported_models=(
             "*claude-sonnet-4-5*",
             "*claude-haiku-4-5*",
+            "*claude-opus-4-1*",
+            "*claude-opus-4",
+            "*claude-opus-4-0*",
+            "*claude-opus-4-2025*",
+            "*claude-opus-4@*",
+            "*claude-sonnet-4",
+            "*claude-sonnet-4-0*",
+            "*claude-sonnet-4-2025*",
+            "*claude-sonnet-4@*",
         ),
     ),
 )
-
-# Fallback for unknown Claude models — use the latest version.
-_DEFAULT_COMPUTER_SPEC = CLAUDE_COMPUTER_SPECS[0]
 
 GENERIC_COMPUTER_SPEC = ClaudeToolSpec(
     api_type="function",
@@ -207,11 +179,24 @@ class ClaudeComputerTool(RFBTool):
         for candidate in CLAUDE_COMPUTER_SPECS:
             if candidate.supports_model(model):
                 return candidate
-        return _DEFAULT_COMPUTER_SPEC
+        return COMPUTER_TOOLSET_SPEC
+
+    @property
+    def is_toolset(self) -> bool:
+        """Whether the model calls this tool as the computer toolset, one tool per action."""
+        return self.spec.api_type == COMPUTER_TOOLSET_SPEC.api_type
 
     def to_params(
         self,
-    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param | BetaToolUnionParam:
+    ) -> (
+        BetaComputerToolset20260801Param
+        | BetaToolComputerUse20250124Param
+        | BetaToolComputerUse20251124Param
+        | BetaToolUnionParam
+    ):
+        if self.is_toolset:
+            # The model calls each member as its own tool and sizes clicks from screenshots.
+            return cast("BetaComputerToolset20260801Param", {"type": "computer_toolset_20260801"})
         if self.spec.api_type == "function":
             return cast(
                 "BetaToolUnionParam",
@@ -473,4 +458,9 @@ def _crop_png(
     return buf.getvalue(), encoding.mime_type
 
 
-__all__ = ["CLAUDE_COMPUTER_SPECS", "GENERIC_COMPUTER_SPEC", "ClaudeComputerTool"]
+__all__ = [
+    "CLAUDE_COMPUTER_SPECS",
+    "COMPUTER_TOOLSET_SPEC",
+    "GENERIC_COMPUTER_SPEC",
+    "ClaudeComputerTool",
+]

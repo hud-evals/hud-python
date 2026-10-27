@@ -1,0 +1,3 @@
+# A prebuilt image is the base of main and of the verifier, without a build of its own.
+[task.task-a]
+services = ["main"]

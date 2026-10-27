@@ -1,0 +1,3 @@
+[verifier]
+user = "ghost"
+timeout_sec = 30

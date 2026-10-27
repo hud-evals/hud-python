@@ -13,9 +13,10 @@ import asyncio
 import base64
 import re
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Self
 
 import mcp.types as mcp_types
+from asyncvnc import key_codes
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
 from hud.capabilities import RFBClient
@@ -25,6 +26,8 @@ from hud.types import MCPToolResult
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterable
 
+    from hud.agents.types import ToolAgentConfig
+
 
 #: VNC button index (asyncvnc uses 0 = left, 1 = middle, 2 = right, 3 = wheel-up, 4 = wheel-down).
 Button = Literal["left", "middle", "right"]
@@ -33,6 +36,47 @@ _DEFAULT_SCREENSHOT_ENCODING = PngScreenshotEncoding()
 #: Keysym names for control characters missing from asyncvnc's char keymap.
 _KEY_FOR_CHAR: dict[str, str] = {"\n": "Return", "\r": "Return", "\t": "Tab"}
 _KEY_CHAR_SPLIT = re.compile(r"([\n\r\t])")
+
+#: Models name keys the way xdotool or a browser does (``ctrl``, ``Enter``, ``ArrowUp``,
+#: ``cmd``); the display takes X11 keysyms. Names not listed, such as letters, ``F5`` or
+#: ``Page_Down``, are keysyms already. Environments run Linux, so ``meta`` and ``cmd``
+#: are the Super key.
+_KEYSYMS: dict[str, str] = {
+    "alt": "Alt_L",
+    "option": "Alt_L",
+    "ctrl": "Control_L",
+    "control": "Control_L",
+    "shift": "Shift_L",
+    "meta": "Super_L",
+    "super": "Super_L",
+    "win": "Super_L",
+    "cmd": "Super_L",
+    "command": "Super_L",
+    "enter": "Return",
+    "return": "Return",
+    "esc": "Escape",
+    "escape": "Escape",
+    "tab": "Tab",
+    "space": "space",
+    "backspace": "BackSpace",
+    "del": "Delete",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageup": "Page_Up",
+    "pagedown": "Page_Down",
+    "arrowup": "Up",
+    "arrowdown": "Down",
+    "arrowleft": "Left",
+    "arrowright": "Right",
+    "capslock": "Caps_Lock",
+    "printscreen": "Print",
+}
+
+
+def keysym(name: str) -> str:
+    """The X11 keysym for a key as a model names it."""
+    return _KEYSYMS.get(name.lower(), name)
 
 
 class RFBTool(AgentTool[RFBClient]):
@@ -49,6 +93,12 @@ class RFBTool(AgentTool[RFBClient]):
     ) -> None:
         super().__init__(spec=spec, client=client)
         self.screenshot_encoding = screenshot_encoding
+
+    @classmethod
+    def from_config(
+        cls, *, spec: AgentToolSpec, client: RFBClient, config: ToolAgentConfig
+    ) -> Self:
+        return cls(spec=spec, client=client, screenshot_encoding=config.screenshot_encoding)
 
     # ─── geometry ────────────────────────────────────────────────────
 
@@ -195,6 +245,14 @@ class RFBTool(AgentTool[RFBClient]):
             self.client.conn.keyboard.press(*key_list)
         await self.client.drain()
 
+    async def key_down(self, key: str) -> None:
+        """Press ``key`` without releasing it (paired with a later :meth:`key_up`)."""
+        await self._send_key(key, down=True)
+
+    async def key_up(self, key: str) -> None:
+        """Release ``key`` (paired with a prior :meth:`key_down`)."""
+        await self._send_key(key, down=False)
+
     async def hold_key(self, key: str, *, duration_ms: int) -> None:
         """Hold a single key for ``duration_ms`` then release."""
         with self.client.conn.keyboard.hold(key):
@@ -225,6 +283,13 @@ class RFBTool(AgentTool[RFBClient]):
         )
         await self.client.drain()
 
+    async def _send_key(self, key: str, *, down: bool) -> None:
+        """Emit one RFB ``KeyEvent`` (msg type 4); asyncvnc only presses and releases together."""
+        self.client.conn.writer.write(
+            b"\x04" + bytes([down]) + b"\x00\x00" + key_codes[key].to_bytes(4, "big")
+        )
+        await self.client.drain()
+
     @asynccontextmanager
     async def _with_keys(self, keys: Iterable[str] | None) -> AsyncIterator[None]:
         if not keys:
@@ -234,4 +299,4 @@ class RFBTool(AgentTool[RFBClient]):
             yield
 
 
-__all__ = ["Button", "RFBTool"]
+__all__ = ["Button", "RFBTool", "keysym"]

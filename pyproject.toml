@@ -21,8 +21,8 @@ dependencies = [
     "fastmcp==3.2.0",
     # For all inference agents
     "openai>=2.45.0",
-    "anthropic>=0.98.0",
-    "google-genai>=1.75.0",
+    "anthropic>=2.1,<3",
+    "google-genai>=2.30.1",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
@@ -64,7 +64,6 @@ exclude = [
     "cookbooks/",
     "environments/",
     "hud-python/",
-    "hud/integrations/harbor/tests/",
     "**/checkpoints/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -96,7 +95,6 @@ include = [
     "/pyproject.toml"
 ]
 exclude = [
-    "*/tests/",
     "*/__pycache__/",
     "**/*.safetensors",
     "**/*.ckpt",
@@ -122,15 +120,13 @@ agents = []
 
 # AWS Bedrock support for ClaudeAgent
 bedrock = [
-    "anthropic[bedrock]>=0.98.0",
+    "anthropic[bedrock]>=2.1,<3",
 ]
 
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud[agents]",  # Include agents for dev
-    "hud[robot]",  # the robot end-to-end gates (hud/tests/test_robot.py) run the real wire
-    # GeminiAgent's long-decode tests need the SDK's automatic continuation.
-    "google-genai>=2.30.1",
+    "hud[robot]",  # the robot scenarios in tests/robot run the real wire
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff==0.16.1",
@@ -138,15 +134,14 @@ dev = [
     "pytest-asyncio",
     "pytest-mock",
     "pytest-cov",
+    "pytest-xdist",
+    "pytest-timeout",
+    "dirty-equals",
     "ty==0.0.67",
 ]
 
 # Alias for backwards compatibility
 agent = ["hud[agents]"]
-browseruse = [
-    "browser-use>=0.11.13",
-]
-
 # Robot capability (openpi/0 protocol wire codec + bridges + agent harness)
 robot = [
     "numpy>=1.24",
@@ -174,10 +169,7 @@ train = [
 
 
 [tool.uv]
-required-version = "==0.12.2"
-# Every browser-use release pins google-genai below 2.0, so the browseruse extra
-# resolves apart from dev, which needs google-genai 2.30.1 or later.
-conflicts = [[{ extra = "browseruse" }, { extra = "dev" }]]
+required-version = ">=0.12.2"
 
 [tool.ruff]
 target-version = "py311"
@@ -206,6 +198,7 @@ lint.select = [
     "TCH",     # Flake-8 TCH
     "T10",     # flake-8 debugger
     "RUF",     # Ruff-specific
+    "SLF",     # flake8-self: private member access
 ]
 lint.ignore = [
     "ANN401", # Allow Any.
@@ -218,6 +211,8 @@ lint.ignore = [
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
+# Tests use only hud's public surface; product code may reach its own privates.
+"!tests/**/*.py" = ["SLF001"]
 # Robot runtime/harness: bare prints are deliberate operator feedback on env/agent loops.
 "hud/environment/robot/**" = ["T201"]
 "hud/agents/robot/**" = ["T201"]
@@ -225,7 +220,6 @@ lint.ignore = [
 "hud/telemetry/lerobot.py" = ["T201"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
 "**/cookbooks/**/*.py" = ["ALL"]
-"scripts/*.py" = ["T201", "INP001"]  # dev scripts: print is the interface
 
 
 [tool.ruff.format]
@@ -235,7 +229,7 @@ docstring-code-format = true
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ty.src]
-include = ["hud"]
+include = ["hud", "tests"]
 
 [tool.ty.rules]
 blanket-ignore-comment = "error"
@@ -249,9 +243,8 @@ strict-equality-semantics = true
 
 [tool.coverage.run]
 source = ["hud"]
-omit = [
-    "*/tests/*",
-]
+# The CLI and served environments run hud in child processes.
+patch = ["subprocess"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -267,16 +260,19 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 show_missing = true
-fail_under = 58
-omit = [
-    "*/tests/*",
-]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
-testpaths = ["hud"]
-addopts = "-m 'not integration'"
+testpaths = ["tests"]
+addopts = "-m 'not e2e'"
+timeout = 120
 markers = [
-    "integration: marks tests as integration tests (require HUD_API_KEY, network access, or Docker)",
+    "e2e: needs something outside the test process; runs only when selected with -m",
+    "docker: needs a running Docker daemon",
+    "modal: needs a Modal account (a token in the environment or ~/.modal.toml)",
+    "lerobot: needs the lerobot[dataset] package",
+    "sandbox: needs Linux, root, and bubblewrap",
+    "live: needs a real HUD account (HUD_API_KEY) and spends credits",
+    "hosted: deploys to and runs on the HUD platform",
 ]

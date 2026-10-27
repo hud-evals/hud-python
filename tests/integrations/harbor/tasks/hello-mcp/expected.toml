@@ -1,0 +1,2 @@
+# The host side opens the sidecar's MCP server through the control channel.
+capability_probe = { name = "mcp-server", tools = ["get_secret"] }

@@ -1,0 +1,3 @@
+# Symlinks in a task stay links in its project.
+[task.task-a]
+links = { "compose-project/environment/Dockerfile.link" = "Dockerfile", "compose-project/tests/task-a/host-file" = "/etc/hostname" }

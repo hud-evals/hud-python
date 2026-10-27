@@ -1,0 +1,2 @@
+[environment]
+docker_image = "golang:1.23-alpine"
