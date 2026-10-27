@@ -80,7 +80,7 @@ class Taskset:
         placement is an execution-time concern (``run(agent, runtime=...)``).
         """
         source = Path(path)
-        if source.suffix in {".json", ".jsonl"}:
+        if source.suffix.lower() in {".json", ".jsonl"}:
             return cls(source.stem, cls._load_tasks_json(source))
         if source.suffix == ".py" or source.is_dir():
             return cls.from_module(source)
@@ -146,7 +146,7 @@ class Taskset:
         from .task import Task
 
         text = path.read_text(encoding="utf-8")
-        if path.suffix == ".jsonl":
+        if path.suffix.lower() == ".jsonl":
             entries = [json.loads(line) for line in text.splitlines() if line.strip()]
         else:
             data = json.loads(text)

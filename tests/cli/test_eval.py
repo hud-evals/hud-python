@@ -305,6 +305,22 @@ def test_eval_runs_a_projects_rows_in_the_environments_they_name(
     assert (document["run_count"], document["mean_reward"], document["error_count"]) == outcome
 
 
+@pytest.mark.parametrize("suffix", [".JSON", ".JSONL"])
+def test_eval_discovers_a_data_file_with_an_uppercase_extension(
+    hud: Hud, gateway: Models, suffix: str
+) -> None:
+    (hud.cwd / "env.py").write_text(ENV + SOLVE)
+    (hud.cwd / f"tasks{suffix}").write_text(json.dumps({"env": "local-test", "id": "solve"}))
+    (hud.cwd / ".hud_eval.toml").write_text(
+        '[eval]\nagent = "openai_compatible"\nmodel = "scripted"\n'
+    )
+
+    result = hud("eval", "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    assert (result.json["run_count"], result.json["mean_reward"]) == (1, 1.0)
+
+
 # ─── planning and refusals ──────────────────────────────────────────────
 
 

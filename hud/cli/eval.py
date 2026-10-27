@@ -313,7 +313,7 @@ def eval_command(
         names = sorted(
             path.name
             for path in Path.cwd().iterdir()
-            if path.suffix in (".json", ".jsonl") and not path.name.startswith(".")
+            if path.suffix.lower() in (".json", ".jsonl") and not path.name.startswith(".")
         )
         if not names:
             raise FileNotFoundError("No task JSON or JSONL files found in current directory")

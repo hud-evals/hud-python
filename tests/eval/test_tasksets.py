@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from tests.fixtures.services import FakeServices
 
 
-@pytest.mark.parametrize("suffix", [".json", ".jsonl"])
+@pytest.mark.parametrize("suffix", [".json", ".jsonl", ".JSON", ".JSONL", ".JsOnL"])
 def test_a_taskset_written_to_a_data_file_reads_back_row_for_row(
     suffix: str, tmp_path: Path
 ) -> None:
