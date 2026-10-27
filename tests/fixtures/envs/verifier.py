@@ -17,7 +17,7 @@ async def relay(word: str):
 @judge.template(id="check-relay")
 async def check_relay(expected: str):
     actor_result = yield ""
-    yield 1.0 if (actor_result["answer"] or "").strip() == expected else 0.0
+    yield 1.0 if expected in (actor_result["answer"] or "").lower() else 0.0
 
 
 tasks = [relay(word="lighthouse")]

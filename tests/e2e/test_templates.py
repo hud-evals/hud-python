@@ -131,6 +131,15 @@ async def test_a_template_runs_from_init_to_a_graded_rollout(
     assert_lifecycle(steps(run["trace_id"]), data_file)
 
 
+def ci_data_file(template: str) -> str | None:
+    """The shared CI attachment a live run of ``template`` reads, if it takes one."""
+    if template not in TAKES_DATA_FILES:
+        return None
+    data_file = REAL_ENVIRONMENT.get("HUD_CI_DATA_FILE_ID")
+    assert data_file, "HUD_CI_DATA_FILE_ID must name the shared CI attachment"
+    return data_file
+
+
 @pytest.mark.e2e
 @pytest.mark.live
 @pytest.mark.timeout(1800)
@@ -144,9 +153,7 @@ async def test_a_template_runs_against_a_real_model_through_the_gateway(
     sdk_wheel: Path,
     tmp_path: Path,
 ) -> None:
-    data_file = (
-        REAL_ENVIRONMENT.get("HUD_CI_DATA_FILE_ID") if template in TAKES_DATA_FILES else None
-    )
+    data_file = ci_data_file(template)
 
     run = await init_and_evaluate(
         hud,
@@ -173,10 +180,7 @@ async def test_a_template_runs_against_a_real_model_through_the_gateway(
 def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
     template: str, live: HudEnv, hud: Hud, uv: Uv, sdk_wheel: Path, tmp_path: Path
 ) -> None:
-    data_file = None
-    if template in TAKES_DATA_FILES:
-        data_file = REAL_ENVIRONMENT.get("HUD_CI_DATA_FILE_ID")
-        assert data_file, "HUD_CI_DATA_FILE_ID must name the shared CI attachment"
+    data_file = ci_data_file(template)
     traces = Path(REAL_ENVIRONMENT.get("HUD_E2E_TRACE_DIR") or tmp_path / "traces") / template
     # A stable directory name keeps every run deploying to the same environment.
     project = generate(hud, template, tmp_path / f"ci-{template}", wheel=sdk_wheel, uv=uv)
