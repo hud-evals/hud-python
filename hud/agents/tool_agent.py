@@ -14,7 +14,6 @@ from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
-from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
 from hud.capabilities import MCPClient
@@ -150,7 +149,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                         tools[tool.provider_name] = tool
                         params.append(tool.to_params())
                 else:
-                    tool = tool_cls(spec=spec, client=client, **self._tool_options(tool_cls))
+                    tool = tool_cls.from_config(spec=spec, client=client, config=self.config)
                     tools[tool.provider_name] = tool
                     params.append(tool.to_params())
 
@@ -161,12 +160,6 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         )
 
         return tools, params
-
-    def _tool_options(self, tool_cls: type[AgentTool[Any]]) -> dict[str, Any]:
-        """Constructor options this agent's config sets on a tool beyond its spec and client."""
-        if issubclass(tool_cls, RFBTool):
-            return {"screenshot_encoding": self.config.screenshot_encoding}
-        return {}
 
     async def _loop(
         self,

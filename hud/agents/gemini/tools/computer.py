@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from google.genai import types as genai_types
 
 from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
 from hud.agents.tools.rfb import keysym
+from hud.agents.types import GeminiConfig
 
 from .base import GeminiToolSpec
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from hud.agents.tools.base import AgentToolSpec
+    from hud.agents.types import ToolAgentConfig
     from hud.capabilities import RFBClient
     from hud.capabilities.rfb import ScreenshotEncoding
     from hud.types import MCPToolResult
@@ -79,6 +81,18 @@ class GeminiComputerTool(RFBTool):
         #: function of the same name.
         self.actions = frozenset(PREDEFINED_COMPUTER_USE_FUNCTIONS) - frozenset(
             excluded_predefined_functions
+        )
+
+    @classmethod
+    def from_config(
+        cls, *, spec: AgentToolSpec, client: RFBClient, config: ToolAgentConfig
+    ) -> Self:
+        assert isinstance(config, GeminiConfig)
+        return cls(
+            spec=spec,
+            client=client,
+            screenshot_encoding=config.screenshot_encoding,
+            excluded_predefined_functions=config.excluded_predefined_functions,
         )
 
     @classmethod

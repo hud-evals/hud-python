@@ -13,7 +13,7 @@ import asyncio
 import base64
 import re
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Self
 
 import mcp.types as mcp_types
 from asyncvnc import key_codes
@@ -25,6 +25,8 @@ from hud.types import MCPToolResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterable
+
+    from hud.agents.types import ToolAgentConfig
 
 
 #: VNC button index (asyncvnc uses 0 = left, 1 = middle, 2 = right, 3 = wheel-up, 4 = wheel-down).
@@ -91,6 +93,12 @@ class RFBTool(AgentTool[RFBClient]):
     ) -> None:
         super().__init__(spec=spec, client=client)
         self.screenshot_encoding = screenshot_encoding
+
+    @classmethod
+    def from_config(
+        cls, *, spec: AgentToolSpec, client: RFBClient, config: ToolAgentConfig
+    ) -> Self:
+        return cls(spec=spec, client=client, screenshot_encoding=config.screenshot_encoding)
 
     # ─── geometry ────────────────────────────────────────────────────
 
