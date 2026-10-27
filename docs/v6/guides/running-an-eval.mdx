@@ -38,12 +38,11 @@ and launch - no CLI required. See [evaluations on the platform](/platform/evalua
 
 ### Choosing an agent
 
-The agent name (`claude`, `openai`, `gemini`) selects a provider harness. With a `HUD_API_KEY`, calls
-use the [HUD gateway](/v6/reference/agents) when no provider key is set. Pass `--gateway` to force
-gateway routing when both keys are set. The `claude_cli` and `codex_cli` harnesses instead run an
-installed CLI inside the environment; pass `--gateway` to route
-their model calls through HUD. Switching models is a single flag, and `hud models list` shows every
-model the gateway knows.
+The agent name (`claude`, `openai`, `gemini`) selects a provider harness. It calls the provider with
+its own key when one is set, and otherwise the [HUD gateway](/v6/reference/agents) with `HUD_API_KEY`;
+`--gateway` forces the gateway. The `claude_cli` and `codex_cli` harnesses run an installed CLI inside
+the environment; `--gateway` routes their model calls through HUD too. Switching models is a single
+flag, and `hud models list` shows every model the gateway knows.
 
 ```bash
 hud eval "My Taskset" claude --model claude-haiku-4-5   # a cheaper model for fast iteration
@@ -75,19 +74,16 @@ control. Both take a [runtime](/v6/reference/runtime), the one argument that dec
 runs. The environment definition never changes - only the runtime does.
 
 <Note>
-Environment placement and model access are separate. Local execution needs no `HUD_API_KEY`, but
-the built-in `claude`, `openai`, and `gemini` agents still need a provider key or `HUD_API_KEY` for
-inference. With `HUD_API_KEY` configured and telemetry enabled, local runs also trace to the
-[platform](https://hud.ai). A [fixed-answer agent](#check-execution-without-model-access) can run and
-grade locally without either key.
+Where the environment runs is separate from how the agent reaches its model. A local run needs no
+`HUD_API_KEY`, but the `claude`, `openai` and `gemini` agents need a provider key or `HUD_API_KEY`.
+With `HUD_API_KEY` set, local runs also trace to the [platform](https://hud.ai). To check a task without
+a model, run it with an [agent that returns a fixed answer](/v6/advanced/extending#the-agent-seam).
 </Note>
 
 ### With `hud eval`
 
-`hud eval` spawns the env subprocess for you, so a source-based local run needs no `hud serve` or
-Docker. Configure `ANTHROPIC_API_KEY` for `claude`, `OPENAI_API_KEY` for `openai`, or `GEMINI_API_KEY`
-for `gemini`, or use `HUD_API_KEY` for gateway access. Point the command at your task source and
-set `--runtime` to choose where the environment runs.
+`hud eval` starts the environment for you, so a local run needs no `hud serve` or Docker. Point it at
+your task source and set `--runtime` to choose where the environment runs.
 
 <div className="guide-row">
 <div className="guide-main">
@@ -104,7 +100,7 @@ full flag set.
 ```bash
 hud eval tasks.py claude                  # first task, one rollout
 hud eval tasks.py claude --all            # every task
-hud eval tasks.py claude --all --group 3   # 3 rollouts per task
+hud eval tasks.py claude --all --group 3  # 3 rollouts per task
 hud eval tasks.py claude --runtime hud    # hosted env, local agent loop
 ```
 
@@ -117,8 +113,8 @@ When you want programmatic control - looping over agents, feeding a training pip
 different infra - call `Taskset.run` directly and hand it a [runtime](/v6/reference/runtime) object. This
 is the same eval `hud eval` runs, written out in Python.
 
-This example uses `create_agent`, which requires `HUD_API_KEY` and always routes through the gateway.
-For direct provider access, [construct the provider agent](/v6/reference/agents#provider-agents).
+`create_agent` always uses the gateway and needs `HUD_API_KEY`; to call a provider directly,
+[construct its agent](/v6/reference/agents#provider-agents).
 
 ```python run.py
 import asyncio
@@ -148,45 +144,6 @@ change to `env.py` or the tasks:
 | `Runtime("tcp://host:port")` | A substrate you started yourself |
 
 The [runtime reference](/v6/reference/runtime) covers each constructor and how to bring your own.
-
-### Check execution without model access
-
-Use a fixed answer to check task startup, answer submission, and grading before connecting a model.
-In a Python environment with `hud` installed, save this as `check_eval.py`:
-
-```python check_eval.py
-import asyncio
-
-from hud import Environment
-from hud.agents.base import Agent
-from hud.eval import Run
-
-env = Environment("letter-count")
-
-
-@env.template()
-async def count_letter():
-    answer = yield "How many 'r's are in 'strawberry'? Reply with just the number."
-    yield 1.0 if (answer or "").strip() == "3" else 0.0
-
-
-class FixedAnswerAgent(Agent):
-    async def __call__(self, run: Run) -> None:
-        run.trace.content = "3"
-
-
-async def main():
-    job = await count_letter().run(FixedAnswerAgent())
-    print(job.reward)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-Run `python check_eval.py`. It prints `1.0`. Change the fixed answer to `"2"` and run it again to
-see `0.0`. The task runs in this process using its live environment. No model call is made, and
-with no `HUD_API_KEY` configured, no platform call is made.
 
 ### Serving an environment directly
 
