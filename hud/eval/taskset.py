@@ -91,8 +91,10 @@ class Taskset:
         from hud.utils.modules import iter_modules
 
         path = Path(source).resolve()
-        found = [task for module in iter_modules(path) for task in cls._scan_tasks(module)]
-        return cls(path.stem if path.is_file() else path.name, found)
+        found = {
+            id(task): task for module in iter_modules(path) for task in cls._scan_tasks(module)
+        }
+        return cls(path.stem if path.is_file() else path.name, found.values())
 
     @classmethod
     def from_api(cls, name: str) -> Taskset:

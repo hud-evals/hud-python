@@ -458,24 +458,23 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         for block in response.content:
             match block.type:
                 case "tool_use":
-                    arguments = dict(block.input) if block.input else {}
-                    meta = mcp_types.RequestParams.Meta.model_validate(
-                        {"citations_enabled": citations_enabled},
-                    )
-                    if block.toolset_name is None:
-                        call = MCPToolCall(
-                            id=block.id, name=block.name, arguments=arguments, _meta=meta
-                        )
-                    else:
+                    arguments: dict[str, object] | str = dict(block.input) if block.input else {}
+                    if block.toolset_name is not None:
                         # A toolset member is one action of the family's tool.
-                        call = MCPToolCall(
+                        arguments = {"action": block.name, **arguments}
+                    if response.stop_reason == "max_tokens" and block is response.content[-1]:
+                        arguments = json.dumps(arguments)
+                    result.tool_calls.append(
+                        MCPToolCall(
                             id=block.id,
-                            name=block.toolset_name,
-                            arguments={"action": block.name, **arguments},
-                            provider_name=block.name,
-                            _meta=meta,
+                            name=block.toolset_name or block.name,
+                            arguments=arguments,
+                            provider_name=None if block.toolset_name is None else block.name,
+                            _meta=mcp_types.RequestParams.Meta.model_validate(
+                                {"citations_enabled": citations_enabled},
+                            ),
                         )
-                    result.tool_calls.append(call)
+                    )
                     result.done = False
                 case "text":
                     text_parts.append(block.text)

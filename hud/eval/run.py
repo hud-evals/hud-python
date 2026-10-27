@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -194,8 +195,14 @@ class Grade:
     def from_dict(cls, data: dict[str, Any]) -> Grade:
         """Parse the wire grade frame (canonical keys: the server guarantees them)."""
         score = data.get("score")
-        if isinstance(score, bool) or not isinstance(score, (int, float)):
-            raise HudProtocolError(-32603, "tasks.grade: result must include a numeric 'score'")
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(score)
+        ):
+            raise HudProtocolError(
+                -32603, f"tasks.grade: result must include a finite numeric 'score', got {score!r}"
+            )
         raw_info = data.get("info")
         raw = dict(data)
         return cls(
@@ -206,6 +213,11 @@ class Grade:
             is_error=bool(data.get("isError", False)),
             raw=raw,
         )
+
+    @classmethod
+    def ungraded(cls) -> Grade:
+        """The grade of a run that has not been graded."""
+        return cls(is_error=True, content="not graded")
 
 
 class Run:
@@ -242,8 +254,8 @@ class Run:
         #: a robot slot token, a per-episode url — refining the manifest's
         #: env-lifetime bindings. Empty when the env published none.
         self.bindings: dict[str, dict[str, Any]] = {}
-        #: The structured grading result (all-default until graded on exit).
-        self.grade = Grade()
+        #: The structured grading result; :meth:`Grade.ungraded` until graded.
+        self.grade = Grade.ungraded()
         self.trace = Trace()
         #: Batch this run belongs to (set by the runner); platform job + GRPO group.
         self.job_id: str | None = None
@@ -501,9 +513,9 @@ async def rollout(
     ``cleanup``) so
     callers can tell where the failure landed without reading the trace.
 
-    ``rollout_timeout`` bounds execution through grading. A timeout aborts the
-    control transport, lets provider teardown finish in the background, and
-    returns an errored run immediately.
+    ``rollout_timeout`` bounds execution through grading. A timeout cancels the
+    env's task, lets provider teardown finish in the background, and returns an
+    errored run.
     """
     from .runtime.core import resolve_runtime_config
 
@@ -630,7 +642,7 @@ async def rollout(
                         actor_session_id = actor_client.manifest.session_id
                         # The verifier is authoritative. Once its phase begins,
                         # an actor-side grade must not survive a verifier failure.
-                        live.grade = Grade()
+                        live.grade = Grade.ungraded()
                     if shared_verifier:
                         assert verifier is not None
                         _phase = "verifying"
@@ -670,41 +682,31 @@ async def rollout(
 
         driver = asyncio.create_task(_drive())
         try:
-            if rollout_timeout is None:
+            # Unlike awaiting it, asyncio.wait leaves the driver running if this task is cancelled.
+            done, _ = await asyncio.wait({driver}, timeout=rollout_timeout)
+            if done:
                 await driver
             else:
-                done, _ = await asyncio.wait({driver}, timeout=rollout_timeout)
-                if done:
-                    await driver
-                else:
-                    rollout_expired = True
-                    phase = _phase
-                    if run is not None:
-                        run.trace.stop_reason = "timeout"
-                    if client is not None:
-                        # Cancel before abort so env teardown frees robot slots;
-                        # a bare abort parks the session and would leak claims.
-                        # Bound cancel: a live-but-silent peer would otherwise hang
-                        # forever inside read_frame and never reach abort.
-                        with contextlib.suppress(Exception):
-                            await asyncio.wait_for(client.cancel(), timeout=2.0)
-                        client.abort()
-                    if phase not in {"actor cleanup", "cleanup"}:
-                        driver.cancel()
-                    driver.add_done_callback(_consume_task_result)
-                    detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
-                    logger.warning(detail)
-                    if run is None:
-                        run = Run.failed(detail)
-                    else:
-                        run.trace.status = "error"
-                        run.record(Step(source="system", error=detail))
+                rollout_expired = True
+                phase = _phase
+                if run is not None:
                     run.trace.stop_reason = "timeout"
+                if client is not None:
+                    await client._abandon_task()
+                if phase not in {"actor cleanup", "cleanup"}:
+                    driver.cancel()
+                driver.add_done_callback(_consume_task_result)
+                detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
+                logger.warning(detail)
+                if run is None:
+                    run = Run.failed(detail)
+                else:
+                    run.trace.status = "error"
+                    run.record(Step(source="system", error=detail))
+                run.trace.stop_reason = "timeout"
         except asyncio.CancelledError as cancel:
             if client is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(client.cancel(), timeout=2.0)
-                client.abort()
+                await client._abandon_task()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
             cancellation = cancel

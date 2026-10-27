@@ -1,0 +1,4 @@
+# The first failure of a long verifier report stays on the evaluation.
+base = "agent-answer"
+reward = 0.0
+error = "FAILED tests/test_outputs.py::test_answer"

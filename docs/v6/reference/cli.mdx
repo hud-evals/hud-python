@@ -154,7 +154,8 @@ own environment must include an image or Compose configuration.
 error, a grader exception, or a failure before grading), and `0` otherwise,
 whatever the rewards. With `--json`, the result document is printed either way:
 `error_count` and each run's `is_error` mark the errored runs, and `mean_reward`
-excludes them.
+excludes them. A run that failed mid-run, such as on a model provider error or a
+timeout, is still graded when it can be; its `trace_error` says what failed.
 
 | Option | Description |
 |--------|-------------|

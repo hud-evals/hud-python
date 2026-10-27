@@ -124,7 +124,11 @@ async def main():
         start = len(session.runs)
         await taskset.run(agent, runtime=LocalRuntime("env.py"), job=session)
         batch = session.runs[start:]                          # this step's rollouts
-        failed_groups = {run.group_id for run in batch if run.trace.is_error}
+        failed_groups = {
+            run.group_id
+            for run in batch
+            if run.trace.stop_reason == "timeout" or run.grade.is_error
+        }
         trainable = [run for run in batch if run.group_id not in failed_groups]
         if trainable:
             await trainer.step(trainable, learning_rate=1e-5, group_size=8)
@@ -140,8 +144,8 @@ asyncio.run(main())
 
 By default, HUD trains with **GRPO**, which scores each rollout relative to its group: its advantage is
 `reward - group_mean`. A rollout counts as good only next to its siblings on the same task.
-Timeouts are execution failures. Drop every sibling with the same `group_id`, as above, or assign an
-explicit timeout reward with `TrajectoryPayload`; never train a partial GRPO group accidentally.
+Timed-out runs and runs whose grade is an error carry no reward signal. Drop their whole `group_id`, as
+above, or give them an explicit reward with `TrajectoryPayload`.
 
 So if every rollout in a group earns the **same** reward, every advantage is zero and nothing moves -
 however high the average looks. That is why each task runs as a group (`group=8`) and why your tasks must

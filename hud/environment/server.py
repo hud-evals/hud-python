@@ -17,8 +17,8 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import math
 import secrets
-import signal
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
@@ -28,6 +28,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.capabilities import Connection
 from hud.graders.results import EvaluationResult
+from hud.utils.process import run_until_terminated
 
 from .egress import WorkspaceRoute
 from .env import Answer, current_session_id
@@ -184,14 +185,20 @@ class TaskRunner:
                     f"task {self.task.id!r} graded with a dict missing a numeric "
                     f"'score' (keys: {sorted(evaluation)})"
                 )
-            return cast("dict[str, Any]", _jsonable(evaluation))
-        if isinstance(evaluation, EvaluationResult):
+            frame = cast("dict[str, Any]", _jsonable(evaluation))
+        elif isinstance(evaluation, EvaluationResult):
             # Forward the full grade frame so metadata (info/content/done/isError/
             # subscores) survives; the wire names the score "score", the model "reward".
             frame = evaluation.model_dump(mode="json")
             frame["score"] = frame.pop("reward")
-            return frame
-        return {"score": _score_value(evaluation)}
+        else:
+            frame = {"score": _score_value(evaluation)}
+        if not math.isfinite(frame["score"]):
+            raise ValueError(
+                f"task {self.task.id!r} graded with a non-finite score ({frame['score']!r}): "
+                "yield a finite number"
+            )
+        return frame
 
     async def cancel(self) -> None:
         if self._gen is not None:
@@ -647,38 +654,6 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         await env.stop()
 
 
-async def serve_until_terminated(env: Environment, host: str = "127.0.0.1", port: int = 0) -> None:
-    """``serve`` as a process's main task: SIGTERM stops it cleanly and it returns.
-
-    SIGTERM (a container stop, the spawn provider's teardown) ends serving the
-    way cancellation does, so shutdown hooks run and backing daemons don't
-    orphan. The handler is process-wide, so only entry points that own the
-    process call this.
-    """
-    main_task = asyncio.current_task()
-    assert main_task is not None
-    loop = asyncio.get_running_loop()
-    terminated = False
-
-    def terminate() -> None:
-        nonlocal terminated
-        terminated = True
-        main_task.cancel()
-
-    # Signal handlers are not available on Windows loops.
-    with contextlib.suppress(NotImplementedError):
-        loop.add_signal_handler(signal.SIGTERM, terminate)
-    try:
-        await serve(env, host, port)
-    except asyncio.CancelledError:
-        if not terminated:
-            raise
-        main_task.uncancel()
-    finally:
-        with contextlib.suppress(NotImplementedError):
-            loop.remove_signal_handler(signal.SIGTERM)
-
-
 def main() -> None:
     from hud.environment import load_environment
 
@@ -690,9 +665,7 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
-    asyncio.run(
-        serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
-    )
+    run_until_terminated(serve(load_environment(args.path, name=args.env), args.host, args.port))
 
 
 if __name__ == "__main__":

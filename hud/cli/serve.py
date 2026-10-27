@@ -6,7 +6,6 @@ so agents can connect to it.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 import typer
@@ -14,8 +13,9 @@ from rich.markup import escape
 
 from hud.cli import parse_key_value
 from hud.environment import load_environment
-from hud.environment.server import serve_until_terminated
+from hud.environment.server import serve
 from hud.utils.hud_console import HUDConsole
+from hud.utils.process import run_until_terminated
 
 hud_console = HUDConsole()
 
@@ -69,6 +69,6 @@ def serve_command(
     )
     hud_console.hint("Press Ctrl+C to stop.")
     try:
-        asyncio.run(serve_until_terminated(env, host, port))
+        run_until_terminated(serve(env, host, port))
     except KeyboardInterrupt:
         hud_console.info("Stopped.")

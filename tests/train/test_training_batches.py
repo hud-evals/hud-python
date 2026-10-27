@@ -179,3 +179,13 @@ async def test_groups_split_across_tasks_are_refused(trainer: FakeServices) -> N
             [runs[0], runs[2], runs[4], runs[5]], group_size=2
         )
     assert trainer.requests("rl") == []
+
+
+async def test_interleaved_groups_are_refused(trainer: FakeServices) -> None:
+    ok, ok_again, no, no_again = await answered(ScriptedAgent("ok"), "ok", "no")
+
+    with pytest.raises(ValueError, match="GRPO groups must be contiguous"):
+        await TrainingClient("owner/model").forward_backward(
+            [ok, no, ok_again, no_again], group_size=2
+        )
+    assert trainer.requests("rl") == []

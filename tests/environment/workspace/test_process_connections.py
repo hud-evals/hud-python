@@ -89,6 +89,29 @@ def threaded_fetch(url: str) -> str:
     )
 
 
+def direct_fetch(host: str, port: int, source_address: str = "None") -> str:
+    """Fetch ``port`` on ``host`` directly, from ``source_address`` (Python source)."""
+    return (
+        "import http.client,socket;"
+        f"c=http.client.HTTPConnection({host},{port},timeout=5,source_address={source_address});"
+        "c.request('GET','/');print(c.getresponse().read().decode())"
+    )
+
+
+MSG_FASTOPEN = 0x20000000
+
+
+def fast_open_fetch(send: str, host: str, port: int) -> str:
+    """Fetch ``host:port`` over a socket that ``send`` opens with TCP Fast Open."""
+    return (
+        "import socket;"
+        f"address=(socket.gethostbyname({host!r}),{port});"
+        "request=b'GET / HTTP/1.1\\r\\nHost: relay\\r\\nConnection: close\\r\\n\\r\\n';"
+        f"s=socket.socket();{send};"
+        "print(s.recv(65536).decode())"
+    )
+
+
 def in_a_child(source: str) -> str:
     """Run ``source`` in a child process; print the child's exit status."""
     return (
@@ -195,14 +218,26 @@ IO_URING_DENIED = (
 async def test_only_the_bound_session_process_reaches_a_controller_connection(
     tmp_path: Path,
 ) -> None:
-    with upstream() as (protected, protected_seen), upstream() as (ordinary, ordinary_seen):
+    with (
+        upstream() as (protected, protected_seen),
+        upstream() as (neighbouring, neighbouring_seen),
+        upstream() as (ordinary, ordinary_seen),
+    ):
         connection = Connection(
             name="inference",
             capability="ssh",
             url=f"http://127.0.0.1:{protected}",
             headers={"Authorization": "Bearer scoped-runtime-token"},
         )
+        # Two relays on one port listen on different loopback addresses.
+        neighbour = Connection(
+            name="neighbour",
+            capability="ssh",
+            url=f"http://127.0.0.1:{neighbouring}",
+            headers={"Authorization": "Bearer neighbour-runtime-token"},
+        )
         url = connection.client_url
+        relay = f"socket.gethostbyname({connection.host!r})"
         env = Environment("process-connection")
         env.workspace(
             tmp_path / "root",
@@ -217,11 +252,7 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
             "bound-thread": (threaded_fetch(url), True),
             "bound-descendant": (in_a_child(fetch(url)), True),
             "bound-descendant-by-mapped-address": (
-                in_a_child(
-                    "import http.client;"
-                    f"c=http.client.HTTPConnection('::ffff:127.0.0.1',{connection.port},timeout=5);"
-                    "c.request('GET','/');print(c.getresponse().read().decode())"
-                ),
+                in_a_child(direct_fetch(f"'::ffff:'+{relay}", connection.port)),
                 True,
             ),
             "bound-descendant-through-the-proxy": (
@@ -236,11 +267,34 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
             "bound-io-uring": (IO_URING_DENIED, True),
             "bound-ordinary-peer": (fetch("http://ordinary.hud.invalid"), True),
             "unbound-ordinary-peer": (fetch("http://ordinary.hud.invalid"), False),
+            "unbound-by-unspecified-address": (direct_fetch("'0.0.0.0'", connection.port), False),
+            "unbound-by-unspecified-address-from-the-relay-address": (
+                direct_fetch("'0.0.0.0'", connection.port, f"({relay},0)"),
+                False,
+            ),
+            "unbound-by-unspecified-ipv6-address-from-the-mapped-relay-address": (
+                direct_fetch("'::'", connection.port, f"('::ffff:'+{relay},0)"),
+                False,
+            ),
+            "unbound-by-fast-open-sendto": (
+                fast_open_fetch(
+                    f"s.sendto(request,{MSG_FASTOPEN},address)", connection.host, connection.port
+                ),
+                False,
+            ),
+            "unbound-by-fast-open-sendmsg": (
+                fast_open_fetch(
+                    f"s.sendmsg([request],[],{MSG_FASTOPEN},address)",
+                    connection.host,
+                    connection.port,
+                ),
+                False,
+            ),
         }
         results: dict[str, tuple[int | None, str]] = {}
         async with (
             LocalRuntime(env)(Task(env=env.name, id="test")) as runtime,
-            connect(runtime, connections=(connection,)) as client,
+            connect(runtime, connections=(connection, neighbour)) as client,
         ):
             ssh = cast("SSHClient", await client.open("ssh"))
             advertised = ssh.capability.params["process_connections"]
@@ -252,18 +306,27 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
                 results[case] = (completed.returncode, cast("bytes", completed.stdout).decode())
 
     assert advertised is True
-    assert results["unbound"][0] != 0
+    for case in (
+        "unbound",
+        "unbound-by-unspecified-address",
+        "unbound-by-unspecified-address-from-the-relay-address",
+        "unbound-by-unspecified-ipv6-address-from-the-mapped-relay-address",
+        "unbound-by-fast-open-sendto",
+        "unbound-by-fast-open-sendmsg",
+    ):
+        assert results[case][0] != 0, case
     assert results["bound"] == results["bound-thread"] == (0, "ok\n")
     for case in (
         "bound-descendant",
         "bound-descendant-by-mapped-address",
         "bound-descendant-through-the-proxy",
     ):
-        assert results[case][0] == 0 and results[case][1].strip() != "0", case
+        assert results[case][0] == 0 and results[case][1].splitlines()[-1] != "0", case
     assert results["bound-io-uring"][0] == 0
     assert results["bound-ordinary-peer"] == results["unbound-ordinary-peer"] == (0, "ok\n")
-    assert set(protected_seen) == {"Bearer scoped-runtime-token"}
-    assert set(ordinary_seen) == {"Bearer visible"}
+    assert protected_seen == ["Bearer scoped-runtime-token"] * 2
+    assert neighbouring_seen == []
+    assert ordinary_seen == ["Bearer visible"] * 2
 
 
 @pytest.mark.e2e

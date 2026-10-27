@@ -73,6 +73,36 @@ async def test_a_call_cut_off_mid_arguments_is_refused_and_the_model_can_reissue
     )
 
 
+async def test_a_claude_call_cut_off_by_max_tokens_is_refused_and_the_model_can_reissue_it(
+    models: Models, tmp_path: Path
+) -> None:
+    root = tmp_path / "ws"
+    cut_off = {
+        "type": "tool_use",
+        "id": "toolu_cut",
+        "name": "bash",
+        "input": '{"command": "touch cut", "restart": fa',
+    }
+    models.script(
+        [
+            Turn(native=(cut_off,), truncated=True),
+            call("bash", command="touch fixed"),
+            Turn(text="done"),
+        ]
+    )
+
+    task = workspace_task(root)
+    (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model="claude-sonnet-4-6")))).runs
+
+    (cut_failed, _), (reissued_failed, _) = tool_results(run)
+    assert (run.trace.status, run.trace.stop_reason) == ("completed", "done")
+    assert (cut_failed, reissued_failed, sorted(path.name for path in root.iterdir())) == (
+        True,
+        False,
+        ["fixed"],
+    )
+
+
 @pytest.mark.parametrize(
     ("calls", "status"),
     [

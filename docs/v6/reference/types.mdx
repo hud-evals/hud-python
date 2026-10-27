@@ -24,7 +24,7 @@ The live handle for one task - the lifecycle plus the agent's `Trace`. You get t
 | `run.prompt_messages` | `list[PromptMessage]` | The prompt as normalized user/assistant turns - what agents consume. |
 | `run.prompt_text` | `str` | The prompt flattened to plain text, for string-only backends. |
 | `run.trace` | `Trace` | The trajectory the agent fills. **The answer is `run.trace.content`.** |
-| `run.grade` | `Grade` | Structured grade result. |
+| `run.grade` | `Grade` | Structured grade result; an error until the run is graded. |
 | `run.reward` | `float` | The graded reward (`grade.reward`, set on exit). |
 | `run.evaluation` | `dict` | `grade.raw`, with each `subscores` entry reduced to its summary. |
 | `run.runtime` | `str \| None` | Control-channel url the run executed against (the placement record). |
@@ -47,7 +47,7 @@ Structured result from grading one run, parsed from the wire grade frame
 | `done` | `bool` | Whether the task is complete. |
 | `content` | `str \| None` | Human-readable grade content. |
 | `info` | `dict` | Extra metadata. |
-| `is_error` | `bool` | Whether grading failed. |
+| `is_error` | `bool` | Whether grading failed or never happened. |
 | `raw` | `dict` | The full original frame. |
 
 ## `Job`
@@ -64,7 +64,7 @@ run reports under a job, so even a single `task.run` returns a job of one. You g
 | `group` | `int` | Rollouts per task. |
 | `taskset_id` | `str \| None` | Platform taskset id when the job runs a synced taskset (`Taskset.from_api`), else `None`. |
 | `reward` | `float` | Property: mean reward across graded runs, excluding `errors` (`0.0` when none were graded). |
-| `errors` | `list[Run]` | Property: runs without a valid grade: a grading error, or a failed trace with no grade. A run that timed out or raised still counts when its environment returned a grade. |
+| `errors` | `list[Run]` | Property: runs whose `grade.is_error` is true. |
 | `results` | `dict[str, list[Run]]` | Property: runs grouped by task slug - the alignment-safe alternative to `zip(tasks, runs)`, list-valued since `group > 1` gives several runs per task. |
 
 ```python

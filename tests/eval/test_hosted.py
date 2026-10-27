@@ -131,6 +131,14 @@ async def test_a_hosted_rollout_submits_the_row_and_its_agent_then_polls_to_its_
             id="cancelled-before-grading",
         ),
         pytest.param(
+            {"status": "completed"},
+            0.0,
+            "completed",
+            None,
+            False,
+            id="completed-without-a-reward",
+        ),
+        pytest.param(
             {"status": "completed", "evaluation_result": {"score": "high"}},
             0.0,
             "error",

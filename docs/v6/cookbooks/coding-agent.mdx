@@ -97,8 +97,9 @@ _fix_parser.slug = "fix-parser"
 tasks = [_fix_parser]
 ```
 
-`test_command` runs from the repository root and must write JUnit XML to `{junit_path}`. The default
-reward is the fraction of selected tests that pass; set `binary=True` to require every selected test.
+`test_command` runs from the repository root and must write JUnit XML to `{junit_path}`; a run that
+times out or leaves no readable report scores 0. The default reward is the fraction of selected tests
+that pass; set `binary=True` to require every selected test.
 
 ## Adapt it to another repository
 
