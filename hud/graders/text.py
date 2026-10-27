@@ -104,16 +104,11 @@ def numeric_match(
 ) -> float:
     """1.0 if the first number in the answer matches expected (within tolerance)."""
     a = str(answer) if not isinstance(answer, str) else answer
-    match = re.search(r"-?\d+\.?\d*", a)
+    match = re.search(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", a)
     if not match:
         return 0.0
 
-    try:
-        found = float(match.group())
-    except ValueError:
-        return 0.0
-
-    return 1.0 if abs(found - expected) <= tolerance else 0.0
+    return 1.0 if abs(float(match.group()) - expected) <= tolerance else 0.0
 
 
 def _tokenize(text: str) -> list[str]:
