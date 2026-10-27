@@ -108,6 +108,18 @@ def test_eval_reports_every_run_and_fails_when_none_was_graded(
     assert result.json["error_count"] == sum(errors)
 
 
+def test_eval_grades_a_run_whose_model_failed_and_reports_the_failure(
+    hud: Hud, models: Models, signed_in: FakeServices, tasks: Path
+) -> None:
+    models.script([Turn(fail=Reply(status=400, json={"error": {"message": "model unavailable"}}))])
+
+    document = run(hud, "tasks.py", *SCRIPTED)
+
+    (failed,) = document["runs"]
+    assert (failed["reward"], failed["is_error"], document["error_count"]) == (0.0, False, 0)
+    assert "model unavailable" in failed["trace_error"]
+
+
 @pytest.mark.parametrize(
     ("argv", "prompts"),
     [

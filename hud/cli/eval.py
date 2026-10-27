@@ -533,6 +533,11 @@ def eval_command(
         hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
         if errors:
             hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
+        failed_mid_run = sum(run.trace.is_error and not run.grade.is_error for run in job.runs)
+        if failed_mid_run:
+            hud_console.print(
+                f"  [dim]Failed mid-run, graded:[/dim] [yellow]{failed_mid_run}[/yellow]"
+            )
         if len(job.runs) <= 50:
             details = Table(title="Details", show_header=True, header_style="bold")
             details.add_column("#", style="dim", justify="right", width=4)
@@ -565,6 +570,7 @@ def eval_command(
                 "slug": run.slug,
                 "reward": run.reward,
                 "is_error": id(run) in errors,
+                "trace_error": run.trace.error if run.trace.is_error else None,
                 "trace_id": run.trace_id,
             }
             for run in job.runs
