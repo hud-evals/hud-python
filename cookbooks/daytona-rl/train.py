@@ -132,6 +132,7 @@ async def main(
             rollout_s = time.perf_counter() - t0
             batch = session.runs[batch_start:]
             failed = {id(r) for r in session.errors}
+            failed |= {id(r) for r in batch if r.trace.stop_reason == "timeout"}
             trainable = [
                 r
                 for i in range(0, len(batch), group)
