@@ -22,7 +22,7 @@ from hud.environment.egress import ANY_HOST
 from hud.environment.env import current_session_id
 from hud.graders import EvaluationResult
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
-from hud.utils.process import ProcessResult, create_process_group_exec
+from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
 
 if TYPE_CHECKING:
     from hud.environment.namespace import NamespaceProcess
@@ -706,11 +706,11 @@ async def grade_separate(
 
 
 def evaluation(execution: ProcessResult, timeout_sec: float) -> EvaluationResult:
-    info: dict[str, Any] = {
-        "exit_code": execution.returncode,
-        "stdout": execution.stdout.decode("utf-8", "replace")[-4000:],
-        "stderr": execution.stderr.decode("utf-8", "replace")[-4000:],
-    }
+    stdout, stderr = (
+        bound_shell_output(stream.decode("utf-8", "replace"), "", 4000)[0]
+        for stream in (execution.stdout, execution.stderr)
+    )
+    info: dict[str, Any] = {"exit_code": execution.returncode, "stdout": stdout, "stderr": stderr}
     if execution.timed_out:
         info["verifier_timeout_sec"] = timeout_sec
         return EvaluationResult(

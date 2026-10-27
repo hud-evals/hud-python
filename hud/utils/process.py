@@ -26,6 +26,7 @@ T = TypeVar("T")
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
 OUTPUT_DRAIN_TIMEOUT = 1.0
+TRUNCATION_MARKER = "[truncated]"
 
 
 def output_writer(
@@ -95,6 +96,31 @@ async def finish_output(*tasks: asyncio.Task[None]) -> None:
     for task in pending:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def bound_shell_output(stdout: str, stderr: str, limit: int) -> tuple[str, str]:
+    """Fit both streams into ``limit`` characters, keeping the head and tail around a marker."""
+    if len(stdout) + len(stderr) <= limit:
+        return stdout, stderr
+
+    marker = TRUNCATION_MARKER[:limit]
+    available = limit - len(marker)
+    prefix_length = (available + 1) // 2
+    suffix_length = available // 2
+
+    stdout_prefix = stdout[:prefix_length]
+    stderr_prefix = stderr[: max(0, prefix_length - len(stdout))]
+    stderr_suffix = stderr[-suffix_length:] if suffix_length else ""
+    stdout_suffix_length = max(0, suffix_length - len(stderr))
+    stdout_suffix = stdout[-stdout_suffix_length:] if stdout_suffix_length else ""
+
+    if len(stdout_prefix) + len(stdout_suffix) < len(stdout):
+        stdout = stdout_prefix + marker + stdout_suffix
+        stderr = stderr_prefix + stderr_suffix
+    else:
+        stdout = stdout_prefix + stdout_suffix
+        stderr = stderr_prefix + marker + stderr_suffix
+    return stdout, stderr
 
 
 class _OutputProtocol(asyncio.StreamReaderProtocol):
