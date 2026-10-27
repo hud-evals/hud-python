@@ -110,6 +110,31 @@ async def test_exporting_a_source_writes_the_folders_its_case_expects(
     assert names(markers) == ["initialized", "stopped"]
 
 
+@pytest.mark.parametrize(
+    ("case", "suffix"),
+    [("json-nested-slug", ".JSON"), ("jsonl", ".JSONL"), ("jsonl", ".JsOnL")],
+)
+async def test_exporting_a_mixed_case_data_file_uses_its_sibling_environment(
+    case: str, suffix: str, tmp_path: Path, markers: Path
+) -> None:
+    spec = read_expected(SOURCES / case)
+    source = tmp_path / "source"
+    assemble_case(SOURCES / case, source)
+    data = (source / spec["export"]).rename(source / f"tasks{suffix}")
+
+    created = await export(str(data), tmp_path / "out")
+
+    assert sorted(task_dir.name for task_dir in created) == sorted(spec["folders"])
+    for task_dir in created:
+        task = tomllib.loads((task_dir / "task.toml").read_text("utf-8"))
+        expected = spec["folders"][task_dir.name]
+        assert task["metadata"]["hud_task"] == expected["task"]
+        assert json.loads(task["metadata"]["hud_args"]) == expected["args"]
+        assert (task_dir / "environment" / "env.py").is_file()
+        assert not (task_dir / "environment" / data.name).exists()
+    assert names(markers) == ["initialized", "stopped"]
+
+
 def docker(*args: str, timeout: float = 600) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False

@@ -71,7 +71,7 @@ async def export(
     await asyncio.to_thread(out.mkdir, parents=True, exist_ok=True)
     tasks = list(Taskset.from_file(src))
 
-    scan = source_dir if src.suffix in (".json", ".jsonl") else src
+    scan = source_dir if src.suffix.lower() in (".json", ".jsonl") else src
     authored = {
         name: load_environment(scan, name=name)
         for name in dict.fromkeys(task.env for task in tasks)
@@ -183,7 +183,7 @@ async def export(
                 shutil.rmtree(env_out)
             shutil.copytree(source_dir, env_out, ignore=ignore_export, symlinks=True)
 
-            if src.is_file() and src.suffix in (".json", ".jsonl"):
+            if src.is_file() and src.suffix.lower() in (".json", ".jsonl"):
                 copied_taskset = env_out / src.name
                 if copied_taskset.is_file():
                     copied_taskset.unlink()
