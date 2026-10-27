@@ -52,23 +52,31 @@ def parse_junit(path: Path) -> list[JUnitCase]:
     return cases
 
 
+def node_ids(nodeids: list[str] | None) -> list[str]:
+    return [nodeid.replace("::", ".") for nodeid in nodeids or []]
+
+
+def check_selection(fail_to_pass: list[str] | None, pass_to_pass: list[str] | None) -> None:
+    f2p = node_ids(fail_to_pass)
+    p2p = node_ids(pass_to_pass)
+    if len(set(f2p)) != len(f2p) or len(set(p2p)) != len(p2p):
+        raise ValueError("test node IDs must be unique")
+    if overlap := set(f2p) & set(p2p):
+        raise ValueError(f"test node IDs cannot be in both groups: {sorted(overlap)}")
+    if (fail_to_pass is not None or pass_to_pass is not None) and not f2p + p2p:
+        raise ValueError("at least one scored test node ID is required")
+
+
 def score_tests(
     cases: list[JUnitCase],
     fail_to_pass: list[str] | None,
     pass_to_pass: list[str] | None,
     binary: bool,
 ) -> SubScore:
-    f2p = [nodeid.replace("::", ".") for nodeid in fail_to_pass or []]
-    p2p = [nodeid.replace("::", ".") for nodeid in pass_to_pass or []]
-    if len(set(f2p)) != len(f2p) or len(set(p2p)) != len(p2p):
-        raise ValueError("test node IDs must be unique")
-    if overlap := set(f2p) & set(p2p):
-        raise ValueError(f"test node IDs cannot be in both groups: {sorted(overlap)}")
-
+    f2p = node_ids(fail_to_pass)
+    p2p = node_ids(pass_to_pass)
     selected = fail_to_pass is not None or pass_to_pass is not None
     expected = f2p + p2p if selected else [case.nodeid for case in cases if not case.skipped]
-    if selected and not expected:
-        raise ValueError("at least one scored test node ID is required")
 
     reported = [case.nodeid for case in cases]
     if len(set(reported)) != len(reported):

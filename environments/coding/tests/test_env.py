@@ -121,15 +121,15 @@ async def test_hidden_tests_grade_the_agents_repository(
     assert git(repo, "config", "--get", "filter.agent.clean").returncode == 1
 
 
-async def test_a_command_without_a_junit_report_is_a_grading_error(repo):
+async def test_a_run_without_a_junit_report_scores_zero(repo):
     row = widget_task(test_command="true {junit_path}")
     async with served(row) as client:
         await client.start_task(row.id, row.args)
         grade = await client.grade({"answer": "done"})
 
-    assert grade["isError"] is True
-    assert grade["content"] == "test command did not write JUnit XML"
+    assert not grade["isError"], grade
     assert grade["score"] == 0.0
+    assert grade["subscores"][0]["info"]["error"] == "test command did not write JUnit XML"
 
 
 @pytest.mark.parametrize("test_path", ["tests/test_widget.py", "/test_widget.py", ".."])

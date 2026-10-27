@@ -16,7 +16,7 @@ from hud.graders import EvaluationResult, combine
 from hud.settings import settings
 from pydantic import Field
 
-from grader import grade_tests
+from grader import check_selection, grade_tests
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +164,6 @@ async def _grade(
         pass_to_pass=pass_to_pass,
         binary=binary,
     )
-    if error := (test_result.info or {}).get("error"):
-        return EvaluationResult(content=str(error), info=test_result.info or {}, isError=True)
     return await combine(test_result)
 
 
@@ -183,6 +181,7 @@ async def coding_task(
     path = Path(test_path)
     if path.is_absolute() or len(path.parts) != 1 or path.name in {"", ".", ".."}:
         raise ValueError("test_path must be a top-level file or directory")
+    check_selection(fail_to_pass, pass_to_pass)
 
     await _setup(base_ref)
     try:
