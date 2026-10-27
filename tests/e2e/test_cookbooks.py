@@ -5,7 +5,7 @@ them silently: a moved import path, a renamed export. Every ``hud`` name a
 cookbook imports must exist; every cookbook module must import, unless a
 third-party package it needs is not installed; and the cookbooks whose README
 runs them with no outside account complete one capped rollout with a scripted
-model. Nightly, through the ``e2e`` marker.
+model. CI's Cookbooks job runs them, through the ``e2e`` marker.
 """
 
 from __future__ import annotations
