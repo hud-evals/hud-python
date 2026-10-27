@@ -316,7 +316,7 @@ def real_modal_token() -> tuple[str, str] | None:
     resolved = subprocess.run(
         [sys.executable, "-c", reads],
         env=REAL_ENVIRONMENT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
         check=True,
     )
@@ -466,8 +466,10 @@ def _docker_available() -> bool:
     return probe.returncode == 0
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Skip selected ``e2e`` tests whose daemon, sandbox, or credentials are missing."""
+    """Skip selected ``e2e`` tests whose daemon, sandbox, or credentials are missing. Runs
+    after ``-m`` deselects, so only what a run selected is probed."""
     del config
     checks = {
         "docker": (_docker_available, "needs a running Docker daemon"),
