@@ -78,10 +78,12 @@ jobs:
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # Harbor's scenarios run nightly, in the Live workflow.
       - name: Run Docker scenarios
         run: >-
           uv run --python 3.12 --all-extras
-          pytest -m "e2e and docker" -n 4 --timeout 1800 --durations 20
+          pytest -m "e2e and docker" --ignore tests/integrations/harbor
+          -n 4 --timeout 1800 --durations 20
 
   sandbox:
     name: Sandbox

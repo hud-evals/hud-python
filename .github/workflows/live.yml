@@ -71,6 +71,27 @@ jobs:
           uv run --python 3.12 --all-extras
           pytest -m "e2e and modal" -n 4 --timeout 1200 --durations 20
 
+  harbor:
+    name: Harbor
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
+      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Run Harbor scenarios
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest -m "e2e and docker" tests/integrations/harbor -n 4 --timeout 1800 --durations 20
+
   lerobot:
     name: LeRobot
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
