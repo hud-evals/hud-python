@@ -317,7 +317,10 @@ async def test_a_rollout_cancelled_on_an_env_served_elsewhere_closes_its_task_th
         await eventually(lambda: events == ["prompted", "task closed"])
 
 
-async def test_a_rollout_timed_out_on_an_env_served_elsewhere_closes_its_task_there() -> None:
+@pytest.mark.parametrize(("template", "placed"), [("wait", True), ("slow_start", False)])
+async def test_a_rollout_timed_out_on_an_env_served_elsewhere_closes_its_task_there(
+    template: str, placed: bool
+) -> None:
     events = []
     env = Environment("served")
 
@@ -329,15 +332,26 @@ async def test_a_rollout_timed_out_on_an_env_served_elsewhere_closes_its_task_th
         finally:
             events.append("task closed")
 
+    @env.template()
+    async def slow_start():
+        try:
+            await asyncio.sleep(30)
+            yield "never"
+            yield 1.0
+        finally:
+            events.append("task closed")
+
     class Waits(Agent):
         async def __call__(self, run: Run) -> None:
             await asyncio.sleep(30)
 
-    async with LocalRuntime(env)(wait()) as served:
-        job = await wait().run(Waits(), runtime=Runtime(served.url), rollout_timeout=0.3)
+    task = Task(env="served", id=template)
+    async with LocalRuntime(env)(task) as served:
+        job = await task.run(Waits(), runtime=Runtime(served.url), rollout_timeout=0.3)
 
         await eventually(lambda: events == ["task closed"])
-    assert (job.runs[0].trace.stop_reason, job.runs[0].runtime) == ("timeout", served.url)
+    run = job.runs[0]
+    assert (run.trace.stop_reason, run.runtime) == ("timeout", served.url if placed else None)
 
 
 async def test_the_rollout_timeout_ends_a_run_still_being_provisioned() -> None:

@@ -506,9 +506,9 @@ async def rollout(
     ``cleanup``) so
     callers can tell where the failure landed without reading the trace.
 
-    ``rollout_timeout`` bounds execution through grading. A timeout aborts the
-    control transport, lets provider teardown finish in the background, and
-    returns an errored run immediately.
+    ``rollout_timeout`` bounds execution through grading. A timeout cancels the
+    env's task, lets provider teardown finish in the background, and returns an
+    errored run.
     """
     from .runtime.core import resolve_runtime_config
 
@@ -675,41 +675,31 @@ async def rollout(
 
         driver = asyncio.create_task(_drive())
         try:
-            if rollout_timeout is None:
+            # Unlike awaiting it, asyncio.wait leaves the driver running if this task is cancelled.
+            done, _ = await asyncio.wait({driver}, timeout=rollout_timeout)
+            if done:
                 await driver
             else:
-                done, _ = await asyncio.wait({driver}, timeout=rollout_timeout)
-                if done:
-                    await driver
-                else:
-                    rollout_expired = True
-                    phase = _phase
-                    if run is not None:
-                        run.trace.stop_reason = "timeout"
-                    if client is not None:
-                        # Cancel before abort so env teardown frees robot slots;
-                        # a bare abort parks the session and would leak claims.
-                        # Bound cancel: a live-but-silent peer would otherwise hang
-                        # forever inside read_frame and never reach abort.
-                        with contextlib.suppress(Exception):
-                            await asyncio.wait_for(client.cancel(), timeout=2.0)
-                        client.abort()
-                    if phase not in {"actor cleanup", "cleanup"}:
-                        driver.cancel()
-                    driver.add_done_callback(_consume_task_result)
-                    detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
-                    logger.warning(detail)
-                    if run is None:
-                        run = Run.failed(detail)
-                    else:
-                        run.trace.status = "error"
-                        run.record(Step(source="system", error=detail))
+                rollout_expired = True
+                phase = _phase
+                if run is not None:
                     run.trace.stop_reason = "timeout"
+                if client is not None:
+                    await client._abandon_task()
+                if phase not in {"actor cleanup", "cleanup"}:
+                    driver.cancel()
+                driver.add_done_callback(_consume_task_result)
+                detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
+                logger.warning(detail)
+                if run is None:
+                    run = Run.failed(detail)
+                else:
+                    run.trace.status = "error"
+                    run.record(Step(source="system", error=detail))
+                run.trace.stop_reason = "timeout"
         except asyncio.CancelledError as cancel:
             if client is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(client.cancel(), timeout=2.0)
-                client.abort()
+                await client._abandon_task()
             driver.cancel()
             driver.add_done_callback(_consume_task_result)
             cancellation = cancel

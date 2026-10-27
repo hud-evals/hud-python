@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
 _CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
+_ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
 _CAPABILITY_CONNECT_ATTEMPTS = 3
 _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
 #: How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
@@ -344,6 +345,22 @@ class HudClient:
 
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
+
+    async def _abandon_task(self) -> None:
+        """Cancel the task, even mid-call, wait briefly for its teardown, then abort."""
+        frame = encode_frame(
+            {"jsonrpc": "2.0", "id": next(self._ids), "method": "tasks.cancel", "params": {}},
+            max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+        )
+        try:
+            with contextlib.suppress(Exception):
+                async with asyncio.timeout(_ABANDON_REPLY_TIMEOUT_SECONDS):
+                    self._writer.write(frame)
+                    await self._writer.drain()
+                    async with self._call_lock:
+                        await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+        finally:
+            self.abort()
 
     # ─── JSON-RPC plumbing ────────────────────────────────────────────
 

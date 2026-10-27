@@ -66,12 +66,13 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 | `tasks.list` | Registered task metadata for introspection and validation. |
 | `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
 | `tasks.grade` | The selected task's evaluation, including numeric `score`. |
-| `tasks.cancel` | Cancels and removes the session's suspended task. |
+| `tasks.cancel` | Interrupts a running `tasks.start` or `tasks.grade`, then cancels and removes the session's task. |
 | `bye` | Cancels the task and ends the session. |
 
 Each request and response is one newline-delimited JSON frame. Calls on a
 `HudClient` are serialized, and reply ids must match the corresponding request.
-A malformed or unknown call receives a JSON-RPC error frame.
+A malformed or unknown call receives a JSON-RPC error frame. A rollout that gives
+up on its task sends `tasks.cancel` at once, even while another call is in flight.
 
 Control requests and responses support up to **16 MiB (16,777,216 bytes)** of
 encoded JSON, including the JSON-RPC wrapper and escaped strings, excluding the
