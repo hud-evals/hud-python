@@ -44,6 +44,12 @@ class GatewayModelInfo(BaseModel):
     deprecated_at: datetime | None = None
 
     @property
+    def request_name(self) -> str:
+        """The model name a request for this entry carries: its provider model name, else its
+        catalog id. A display name or slug a caller typed is not one the gateway routes."""
+        return self.model_name or self.id
+
+    @property
     def recency(self) -> datetime:
         """Sort key for "newest first": the model's release, else when it joined the catalog."""
         return self.released_at or self.created_at or datetime.min.replace(tzinfo=UTC)

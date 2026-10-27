@@ -250,7 +250,7 @@ def eval_command(
     elif agent is not None:
         entry = resolve_gateway_model(agent)
         overrides["agent_type"] = AgentType(entry.sdk_agent_type)
-        overrides.setdefault("model", entry.model_name or agent)
+        overrides.setdefault("model", entry.request_name)
     if task_ids is not None:
         overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
     if config:

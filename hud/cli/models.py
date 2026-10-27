@@ -60,7 +60,7 @@ def list_models(
     rows = [model.model_dump() for model in models]
     if quiet:
         for model in models:
-            typer.echo(model.model_name or model.id)
+            typer.echo(model.request_name)
         return rows
     if not models:
         hud_console.stdout.print("[yellow]No models found[/yellow]")
@@ -79,7 +79,7 @@ def list_models(
     for model in models:
         table.add_row(
             model.name or model.id,
-            model.model_name or model.id,
+            model.request_name,
             model.id,
             model.provider.name or "-",
             model.sdk_agent_type or "-",
