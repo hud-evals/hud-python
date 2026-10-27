@@ -233,7 +233,7 @@ def test_the_environment_image_identity_follows_only_what_the_image_contains(
 def test_a_name_names_the_generated_environment(tmp_path: Path, hud_env: HudEnv) -> None:
     dataset = load_case("plain-image", tmp_path, hud_env)
 
-    result = harbor.adapt(dataset, hud_requirement="hud", name="greet-2")
+    result = harbor.adapt(dataset / "task-a", hud_requirement="hud", name="greet-2")
 
     assert result.failures == ()
     (row,) = result.taskset
@@ -246,11 +246,11 @@ def test_a_name_names_the_generated_environment(tmp_path: Path, hud_env: HudEnv)
     assert compose["services"]["main"]["image"].startswith("hud-harbor:greet-2-")
 
 
-def test_a_name_applies_to_one_environment(tmp_path: Path, hud_env: HudEnv) -> None:
-    dataset = load_case("dataset-grouping", tmp_path, hud_env)
+def test_a_name_applies_to_one_task_folder(tmp_path: Path, hud_env: HudEnv) -> None:
+    dataset = load_case("plain-image", tmp_path, hud_env)
 
-    with pytest.raises(ValueError, match="adapts into 3 environments"):
-        harbor.adapt(dataset, name="grouping")
+    with pytest.raises(ValueError, match="applies to one Harbor task folder"):
+        harbor.adapt(dataset, name="greet")
 
 
 @pytest.mark.parametrize("name", ["Greet", "greet task", "", "-greet"])
@@ -260,7 +260,7 @@ def test_a_name_is_a_normalized_environment_name(
     dataset = load_case("plain-image", tmp_path, hud_env)
 
     with pytest.raises(ValueError, match="not a normalized environment name"):
-        harbor.adapt(dataset, name=name)
+        harbor.adapt(dataset / "task-a", name=name)
 
 
 @pytest.mark.e2e

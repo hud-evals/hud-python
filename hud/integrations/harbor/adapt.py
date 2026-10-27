@@ -419,7 +419,7 @@ def adapt(
     ``hud_requirement`` installs the controller each image serves; it defaults to
     this ``hud`` release so the controller matches the adapter that configured it.
     ``name`` names the generated environment instead of ``<dataset>-<digest>``;
-    the adapted tasks must then share one environment.
+    ``path`` must then be one task folder.
     """
     if name is not None and normalize_environment_name(name) != name:
         raise ValueError(f"environment name {name!r} is not a normalized environment name")
@@ -427,6 +427,8 @@ def adapt(
     if (root / "task.toml").is_file():
         task_dirs = [root]
         dataset = root.parent
+    elif name is not None:
+        raise ValueError(f"name {name!r} applies to one Harbor task folder; {path} is not one")
     elif root.is_dir():
         task_dirs = sorted(child for child in root.iterdir() if (child / "task.toml").is_file())
         dataset = root
@@ -471,10 +473,6 @@ def adapt(
             [],
         ).append(task)
 
-    if name is not None and len(grouped) > 1:
-        raise ValueError(
-            f"{path} adapts into {len(grouped)} environments; name {name!r} applies to one"
-        )
     if grouped:
         require_docker()
     rows = []
