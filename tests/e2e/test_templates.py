@@ -185,7 +185,7 @@ def test_a_deployed_template_runs_on_hud_and_its_trace_reads_back(
     # A stable directory name keeps every run deploying to the same environment.
     project = generate(hud, template, tmp_path / f"ci-{template}", wheel=sdk_wheel, uv=uv)
     project.bundle_sdk_into_image()
-    deployed = project.hud("deploy", "--no-env", timeout=1800)
+    deployed = project.hud("deploy", "--no-env", "--yes", timeout=1800)
     assert deployed.exit_code == 0, deployed
     project.write_rows(data_file)
     live.set(HUD_TELEMETRY_ENABLED="1", HUD_TELEMETRY_LOCAL_DIR=str(traces))
