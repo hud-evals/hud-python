@@ -195,6 +195,9 @@ VERDICTS = {
     "fenced": '```json\n{"criterion_status": "UNMET", "explanation": "no source"}\n```',
     "prose": "Verdict: UNMET, although the word MET appears here.",
     "prose-met": "The criterion is MET.",
+    "prose-not-met": "Criterion status: NOT MET",
+    "no-verdict": "I'm sorry, something went wrong.",
+    "unknown-status": '{"criterion_status": "MAYBE", "explanation": "unsure"}',
 }
 
 
@@ -223,14 +226,29 @@ VERDICTS = {
             1.0,
             [("invents facts", -1.0, 0.0, VERDICTS["prose"])],
         ),
+        (
+            [["names Paris", 1.0]],
+            {"names Paris": "prose-not-met"},
+            0.0,
+            [("names Paris", 1.0, 0.0, VERDICTS["prose-not-met"])],
+        ),
+        ([["names Paris", 1.0]], {"names Paris": "no-verdict"}, 0.0, None),
+        ([["names Paris", 1.0]], {"names Paris": "unknown-status"}, 0.0, None),
     ],
-    ids=["json-fenced-and-prose-verdicts", "a-penalty-that-is-met", "a-penalty-that-is-not-met"],
+    ids=[
+        "json-fenced-and-prose-verdicts",
+        "a-penalty-that-is-met",
+        "a-penalty-that-is-not-met",
+        "not-met-in-prose",
+        "a-reply-without-a-verdict-is-a-grading-error",
+        "an-unknown-status-is-a-grading-error",
+    ],
 )
 async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
     criteria: list[list[Any]],
     verdicts: dict[str, str],
     reward: float,
-    children: list[tuple[str, float, float, str]],
+    children: list[tuple[str, float, float, str]] | None,
     models: Models,
     hud_env: HudEnv,
 ) -> None:
@@ -254,11 +272,13 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
         )
         yield await combine(judged)
 
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
+    job = await check().run(ScriptedAgent(ANSWER))
 
-    (judge,) = run.grade.raw["subscores"]
-    assert run.reward == pytest.approx(reward)
-    assert [
-        (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
-    ] == children
+    (run,) = job.runs
+    assert (run.reward, run in job.errors) == (pytest.approx(reward), children is None)
+    if children is not None:
+        (judge,) = run.grade.raw["subscores"]
+        assert [
+            (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
+        ] == children
     assert [request.credential for request in models.requests()] == ["k"] * len(criteria)
