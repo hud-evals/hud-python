@@ -44,7 +44,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
-      # The CLI agents' live scenarios run the real Claude Code and Codex CLIs.
       - name: Install the agent CLIs
         run: npm install --global @anthropic-ai/claude-code @openai/codex
 
@@ -55,8 +54,6 @@ jobs:
 
   modal:
     name: Modal
-    # Runs real Modal sandboxes on the account in MODAL_TOKEN_ID / MODAL_TOKEN_SECRET;
-    # without them the scenarios skip themselves.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -76,8 +73,6 @@ jobs:
 
   lerobot:
     name: LeRobot
-    # Records robot rollouts with the real lerobot package (and torch), which no
-    # extra installs.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30

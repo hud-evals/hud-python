@@ -36,8 +36,6 @@ jobs:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
         run: test -n "$HUD_API_KEY"
 
-      # hud init, install this checkout's SDK, deploy, run one rollout on the HUD
-      # runtime with a live model, check its lifecycle, and read the trace back.
       - name: Deploy and run the template on HUD
         env:
           HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
