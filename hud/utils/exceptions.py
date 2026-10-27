@@ -7,7 +7,6 @@ displays alongside the error.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
@@ -27,8 +26,6 @@ from hud.utils.hints import (
     TOOL_NOT_FOUND,
     Hint,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class HudException(Exception):
@@ -68,9 +65,11 @@ class HudRequestError(HudException):
         response_json: dict[str, Any] | None = None,
         response_headers: dict[str, str] | None = None,
         *,
+        url: str | None = None,
         hints: list[Hint] | None = None,
     ) -> None:
         self.status_code = status_code
+        self.url = url
         self.response_text = response_text
         self.response_headers = response_headers
         if hints is None:
@@ -110,6 +109,9 @@ class HudRequestError(HudException):
 
     def __str__(self) -> str:
         parts = [self.message]
+
+        if self.url:
+            parts.append(f"URL: {self.url}")
 
         if self.status_code:
             parts.append(f"Status: {self.status_code}")
@@ -160,23 +162,18 @@ class HudRequestError(HudException):
         # Add context if provided
         if context:
             message = f"{context}: {message}"
-
-        # Log the error details
-        logger.error(
-            "HTTP error from HUD SDK: %s | URL: %s | Status: %s | Response: %s%s",
-            message,
-            response.url,
-            status_code,
-            response_text[:500],
-            "..." if len(response_text) > 500 else "",
-        )
         return cls(
             message=message,
             status_code=status_code,
             response_text=response_text,
             response_json=response_json,
             response_headers=response_headers,
+            url=str(response.url),
         )
+
+
+class HudReplyError(HudRequestError):
+    """The HUD API answered a request with a body this client cannot read."""
 
 
 class HudAuthenticationError(HudException):

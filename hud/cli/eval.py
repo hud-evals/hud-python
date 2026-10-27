@@ -5,7 +5,6 @@ Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
@@ -21,7 +20,7 @@ from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlCons
 from rich import box
 from rich.table import Table
 
-from hud.cli import CLI, CliError, parse_key_value
+from hud.cli import CLI, CliError, Result, parse_key_value
 from hud.eval import (
     DaytonaRuntime,
     DockerRuntime,
@@ -37,6 +36,7 @@ from hud.types import AgentType
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+from hud.utils.process import run_until_terminated
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -196,7 +196,7 @@ def eval_command(
         "--remote",
         help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
-) -> dict[str, Any]:
+) -> dict[str, Any] | Result:
     """Run evaluation on datasets or individual tasks with agents.
 
     A tasks file (tasks.py, a directory, or JSON/JSONL beside its env source) runs
@@ -250,7 +250,7 @@ def eval_command(
     elif agent is not None:
         entry = resolve_gateway_model(agent)
         overrides["agent_type"] = AgentType(entry.sdk_agent_type)
-        overrides.setdefault("model", entry.model_name or agent)
+        overrides.setdefault("model", entry.model_name)
     if task_ids is not None:
         overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
     if config:
@@ -299,7 +299,7 @@ def eval_command(
             "action": "eval",
             "source": cfg.source,
             "agent": agent_type.value,
-            "model": cfg.model,
+            "model": cfg.model or cfg.agent_config.get(agent_type.value, {}).get("model"),
             "runtime": planned,
             "remote": planned is Placement.HOSTED,
             "all": cfg.all,
@@ -513,7 +513,7 @@ def eval_command(
     agent_instance = agent_type.cls.load(agent_kwargs)
 
     started = time.monotonic()
-    job = asyncio.run(
+    job = run_until_terminated(
         taskset.run(
             agent_instance,
             runtime=placement,
@@ -525,14 +525,19 @@ def eval_command(
     if job.runs and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"{settings.hud_web_url}/jobs/{UUID(job.id)}")
 
+    errors = set(map(id, job.errors))
     if job.runs:
-        errors = set(map(id, job.errors))
         hud_console.print(f"\n[bold]'{cfg.source}' Results[/bold]")
         hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
         hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
         hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
         if errors:
             hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
+        failed_mid_run = sum(run.trace.is_error and not run.grade.is_error for run in job.runs)
+        if failed_mid_run:
+            hud_console.print(
+                f"  [dim]Failed mid-run, graded:[/dim] [yellow]{failed_mid_run}[/yellow]"
+            )
         if len(job.runs) <= 50:
             details = Table(title="Details", show_header=True, header_style="bold")
             details.add_column("#", style="dim", justify="right", width=4)
@@ -552,21 +557,24 @@ def eval_command(
             hud_console.print(details)
         hud_console.print()
 
-    return {
+    result = {
         "job_id": job.id,
         "source": cfg.source,
         "run_count": len(job.runs),
         "mean_reward": job.reward,
-        "error_count": len(job.errors),
+        "error_count": len(errors),
         "elapsed_seconds": elapsed,
         "runs": [
             {
                 "task_id": run.task_id,
                 "slug": run.slug,
                 "reward": run.reward,
-                "is_error": run.trace.is_error,
+                "is_error": id(run) in errors,
+                "trace_error": run.trace.error if run.trace.is_error else None,
                 "trace_id": run.trace_id,
             }
             for run in job.runs
         ],
     }
+    # Errored runs among graded ones still leave a measurement; none graded leaves nothing.
+    return Result(result) if len(errors) == len(job.runs) else result

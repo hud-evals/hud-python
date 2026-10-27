@@ -26,7 +26,7 @@ List, get, create, and status commands accept `--json`. JSON is written to **std
 | `1` | Failure |
 | `2` | Usage error (bad arguments, or a prompt needed in a non-interactive terminal) |
 
-Use `--dry-run` to preview supported commands without performing the action or prompting. Pass `--yes` / `-y` to skip confirmation where supported; a required prompt exits `2` in a non-interactive terminal. For deployment, select local secrets with `--env-file` or skip them with `--no-env`.
+Every command that changes platform state takes `--dry-run`, which previews the action without sending or writing anything, and asks for confirmation before it acts. Pass `--yes` / `-y` to skip the confirmation; without it, the command exits `2` in a non-interactive terminal. For deployment, select local secrets with `--env-file` or skip them with `--no-env`.
 
 If the HUD API deprecates a route that `hud` calls, `hud` prints a warning to stderr with the route's sunset date and replacement. Upgrade `hud` when you see one. SDK code receives it as `hud.utils.exceptions.HudDeprecationWarning`, a `FutureWarning`.
 
@@ -101,6 +101,7 @@ hud deploy --project <name-or-id>
 | `--runtime-config` | JSON `RuntimeConfig` to persist as the registry default (compose, resources, limits). Must set at least one field. |
 | `--json` | Structured result on stdout. |
 | `--dry-run` | Print the deploy plan without uploading or prompting. A first deploy with an unresolved `.env` reports `dotenv_pending`. |
+| `--yes`, `-y` | Skip the deploy confirmation (required when stdin is not a TTY). |
 
 `--env` / `--env-file` upsert onto the registry's existing secrets. Omitting them on a rebuild keeps whatever is already stored. A first deploy that finds a local `.env` prompts once for that invocation (or needs `--env-file` / `--no-env` when stdin is not a TTY).
 
@@ -148,6 +149,13 @@ them locally, pass `--runtime local`; each task and any verifier running in its
 own environment must include an image or Compose configuration.
 
 **Single-task runs** show step-by-step progress (step number + tool calls). Multi-task batches are silent unless `--verbose` is passed.
+
+`hud eval` exits `1` when no run ended with a valid grade (each hit a grading
+error, a grader exception, or a failure before grading), and `0` otherwise,
+whatever the rewards. With `--json`, the result document is printed either way:
+`error_count` and each run's `is_error` mark the errored runs, and `mean_reward`
+excludes them. A run that failed mid-run, such as on a model provider error or a
+timeout, is still graded when it can be; its `trace_error` says what failed.
 
 | Option | Description |
 |--------|-------------|
@@ -235,7 +243,7 @@ hud project use browser-evals -C ./my-env
 |-------------------|-------------|
 | `hud project [--directory PATH]` | Show where new resources from a directory will be created. `-C` is an alias. |
 | `hud project list` | List visible Projects, marking the team default and read-only entries. |
-| `hud project create <name>` | Create and pin a Project. Accepts `--description`, `--directory`/`-C`, and `--no-use`. |
+| `hud project create <name>` | Create and pin a Project. Accepts `--description`, `--directory`/`-C`, `--no-use`, `--dry-run`, and `--yes`. |
 | `hud project use <name-or-id>` | Pin a directory to an existing writable Project. Names are normalized (`My Project` = `my-project`). Accepts `--directory`/`-C`. |
 
 #### Project selection
@@ -299,7 +307,7 @@ hud harbor import ./jobs/2026-10-02__09-00                        # into the dir
 hud harbor import bundle.zip --taskset tb2 --no-wait --json       # a prepared zip; return at once
 hud harbor imports --taskset tb2                                  # past imports
 hud harbor report <import-id> --wait                              # follow one, then show its report
-hud harbor cancel <import-id>
+hud harbor cancel <import-id> --yes
 ```
 
 `hud harbor import` zips the folders, uploads the zip, imports it into the taskset, and prints what became of each task, job, and trial. `--taskset` takes a name or ID; a name
@@ -338,8 +346,8 @@ every one. The checks decide what the IDs are: trace-level checks take
 completed trace IDs, task-level checks take task IDs. Trace-level and
 task-level checks can't be mixed in one run. Where a check's current result is
 completed or still running, it is kept rather than run again; pass
-`--overwrite` to run it anyway. Pass `--no-wait` to return after launch, or
-`--json` for machine-readable output. Exit code `1` means a check did not pass
+`--overwrite` to run it anyway. Pass `--no-wait` to return after launch, `--yes`
+to skip the confirmation, or `--json` for machine-readable output. Exit code `1` means a check did not pass
 or the SDK could not complete the command.
 
 `hud qa results` prints the result in effect for every check on the given
@@ -392,9 +400,9 @@ without an API call.
 |---------|-------------|
 | `hud set KEY=VALUE` | Persist credentials/vars to `~/.hud/.env`. |
 | `hud models list` | List gateway models (`--json`, `--quiet`). |
-| `hud models fork <model> --name <slug>` | Fork a trainable model (`--json`, `--dry-run`, `--if-not-exists`). |
+| `hud models fork <model> --name <slug>` | Fork a trainable model (`--json`, `--dry-run`, `--yes`, `--if-not-exists`). |
 | `hud models checkpoints <model>` | List a model's checkpoint tree. |
-| `hud models head <model> [--set <checkpoint-id>]` | Show - or set - a model's active checkpoint. |
+| `hud models head <model> [--set <checkpoint-id>]` | Show - or set - a model's active checkpoint (`--dry-run`, `--yes` with `--set`). |
 | `hud jobs cancel` | Cancel a running job (`--yes`, `--dry-run`, `--json`). |
 | `hud version` | Show the CLI version (`--json`). |
 

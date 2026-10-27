@@ -74,7 +74,8 @@ Advantages are group-relative (GRPO-style) when `group_size` is set, normalized 
 **groups** of that size; `None` treats the whole batch as one group. The `loss_fn` selects the
 policy-gradient objective applied on top, defaulting to `importance_sampling` (not GRPO itself). The
 batch must divide evenly into groups - `forward_backward` rejects a partial final group before spending
-a forward pass. `num_substeps` splits the batch for gradient accumulation.
+a forward pass - and runs that share a `group_id` must be adjacent, as in `job.runs`. `num_substeps`
+splits the batch for gradient accumulation.
 
 ## Inputs
 
@@ -88,8 +89,9 @@ The methods accept `str | Run | TrajectoryPayload`, mixed freely. A `Run` is con
 inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id`
 (remote rollout). Build a `TrajectoryPayload` yourself when the tokens didn't come from a `Run` at all -
 e.g. an opponent move sampled inside the environment during self-play, trained with its own reward.
-Timed-out runs are rejected unless you provide an explicit `TrajectoryPayload` reward. With GRPO,
-exclude the entire `group_id`, not only the failed rollout, so the group baseline remains valid.
+Timed-out runs and runs whose `grade.is_error` is true are rejected unless you provide an explicit
+`TrajectoryPayload` reward. With GRPO, exclude the entire `group_id`, not only the failed
+rollout, so the group baseline remains valid.
 
 | Type | Fields |
 |------|--------|

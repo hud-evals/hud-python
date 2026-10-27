@@ -1,0 +1,17 @@
+# Export starts the task to read its prompt, so only the image breaks setup. An image
+# whose task setup fails never runs the agent's command; the same image, its setup
+# working, does.
+base = "demo"
+
+[folders.solve-4080368a]
+task = "solve"
+args = { n = 2, prompt = "what's next?" }
+prompt = "solve 2: what's next?"
+
+[[folders.solve-4080368a.run]]
+env = {}
+succeeds = false
+
+[[folders.solve-4080368a.run]]
+env = { BREAK_SETUP = "" }
+succeeds = true

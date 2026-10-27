@@ -1,0 +1,10 @@
+# A verifier credential is resolved only when grading needs it.
+base = "verifier-credentials-shared"
+[[case]]
+name = "missing"
+reward = 0.0
+error = "HARBOR_VERIFIER_KEY"
+
+[[case]]
+name = "provided"
+runtime.env_vars = { HARBOR_VERIFIER_KEY = "judge-value" }

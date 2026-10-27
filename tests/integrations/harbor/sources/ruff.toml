@@ -1,0 +1,5 @@
+# Each directory here is a user's source tree that export reads, not a package.
+extend = "../../../../pyproject.toml"
+
+[lint.extend-per-file-ignores]
+"*.py" = ["INP001"]

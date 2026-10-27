@@ -1,0 +1,6 @@
+[environment.env]
+JUDGE_KEY = "${HARBOR_JUDGE_KEY}"
+MODEL = "${HARBOR_JUDGE_MODEL:-gpt-4o}"
+
+[verifier.env]
+VERIFIER_KEY = "${HARBOR_JUDGE_KEY}"

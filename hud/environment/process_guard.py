@@ -23,7 +23,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NoReturn, Optional, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, NoReturn, Optional, cast
 
 if sys.platform == "linux":
     import fcntl
@@ -42,7 +42,12 @@ _SECCOMP_RET_ALLOW = 0x7FFF0000
 
 _BPF_LD_W_ABS = 0x20
 _BPF_JMP_JEQ_K = 0x15
+_BPF_JMP_JGE_K = 0x35
+_BPF_JMP_JSET_K = 0x45
 _BPF_RET_K = 0x06
+_SECCOMP_DATA_ARGS = 16
+_X32_SYSCALL_BIT = 0x40000000
+_MSG_FASTOPEN = 0x20000000
 
 _SECCOMP_IOCTL_NOTIF_RECV = 0xC0502100
 _SECCOMP_IOCTL_NOTIF_SEND = 0xC0182101
@@ -148,40 +153,61 @@ class _UserRegsStruct(ctypes.Structure):
     ]
 
 
-def _architecture() -> tuple[int, int, int, int, int]:
+class _Architecture(NamedTuple):
+    audit_arch: int
+    seccomp: int
+    connect: int
+    io_uring_setup: int
+    io_uring_enter: int
+    sendto: int
+    sendmsg: int
+    sendmmsg: int
+
+
+def _architecture() -> _Architecture:
     machine = platform.machine()
     if machine == "x86_64":
-        return 0xC000003E, 317, 42, 425, 426
+        return _Architecture(0xC000003E, 317, 42, 425, 426, 44, 46, 307)
     if machine in {"aarch64", "arm64"}:
-        return 0xC00000B7, 277, 203, 425, 426
+        return _Architecture(0xC00000B7, 277, 203, 425, 426, 206, 211, 269)
     raise RuntimeError(f"process-bound connections do not support {machine!r}")
 
 
 def _connect_filter(connect_action: int) -> tuple[_SockFprog, object]:
-    audit_arch, _, connect_syscall, io_uring_setup, io_uring_enter = _architecture()
-    instructions = (_SockFilter * 11)(
+    arch = _architecture()
+    instructions = (_SockFilter * 20)(
         _SockFilter(_BPF_LD_W_ABS, 0, 0, 4),
-        _SockFilter(_BPF_JMP_JEQ_K, 1, 0, audit_arch),
+        _SockFilter(_BPF_JMP_JEQ_K, 1, 0, arch.audit_arch),
         _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_KILL_PROCESS),
         _SockFilter(_BPF_LD_W_ABS, 0, 0, 0),
-        _SockFilter(_BPF_JMP_JEQ_K, 0, 1, connect_syscall),
+        # x32 syscalls share x86_64's audit arch; only this bit tells them apart.
+        _SockFilter(_BPF_JMP_JGE_K, 0, 1, _X32_SYSCALL_BIT),
+        _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_ERRNO | errno.ENOSYS),
+        _SockFilter(_BPF_JMP_JEQ_K, 0, 1, arch.connect),
         _SockFilter(_BPF_RET_K, 0, 0, connect_action),
-        _SockFilter(_BPF_JMP_JEQ_K, 0, 1, io_uring_setup),
-        _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_ERRNO | errno.EPERM),
-        _SockFilter(_BPF_JMP_JEQ_K, 0, 1, io_uring_enter),
-        _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_ERRNO | errno.EPERM),
+        _SockFilter(_BPF_JMP_JEQ_K, 9, 0, arch.io_uring_setup),
+        _SockFilter(_BPF_JMP_JEQ_K, 8, 0, arch.io_uring_enter),
+        _SockFilter(_BPF_JMP_JEQ_K, 4, 0, arch.sendmsg),
+        _SockFilter(_BPF_JMP_JEQ_K, 1, 0, arch.sendto),
+        _SockFilter(_BPF_JMP_JEQ_K, 0, 4, arch.sendmmsg),
+        # sendto and sendmmsg take their flags fourth, sendmsg third.
+        _SockFilter(_BPF_LD_W_ABS, 0, 0, _SECCOMP_DATA_ARGS + 8 * 3),
+        _SockFilter(_BPF_JMP_JSET_K, 4, 2, _MSG_FASTOPEN),
+        _SockFilter(_BPF_LD_W_ABS, 0, 0, _SECCOMP_DATA_ARGS + 8 * 2),
+        _SockFilter(_BPF_JMP_JSET_K, 2, 0, _MSG_FASTOPEN),
         _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_ALLOW),
+        _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_ERRNO | errno.EPERM),
+        _SockFilter(_BPF_RET_K, 0, 0, _SECCOMP_RET_ERRNO | errno.EOPNOTSUPP),
     )
     return _SockFprog(len(instructions), instructions), instructions
 
 
 def _install_connect_listener() -> int:
-    _, seccomp_syscall, _, _, _ = _architecture()
     program, instructions = _connect_filter(_SECCOMP_RET_USER_NOTIF)
     if _LIBC.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         raise OSError(ctypes.get_errno(), "prctl(PR_SET_NO_NEW_PRIVS)")
     listener = _LIBC.syscall(
-        seccomp_syscall,
+        _architecture().seccomp,
         _SECCOMP_SET_MODE_FILTER,
         _SECCOMP_FILTER_FLAG_NEW_LISTENER,
         ctypes.byref(program),
@@ -193,12 +219,11 @@ def _install_connect_listener() -> int:
 
 
 def _install_connect_trace() -> None:
-    _, seccomp_syscall, _, _, _ = _architecture()
     program, instructions = _connect_filter(_SECCOMP_RET_TRACE)
     if _LIBC.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         raise OSError(ctypes.get_errno(), "prctl(PR_SET_NO_NEW_PRIVS)")
     result = _LIBC.syscall(
-        seccomp_syscall,
+        _architecture().seccomp,
         _SECCOMP_SET_MODE_FILTER,
         0,
         ctypes.byref(program),
@@ -283,6 +308,23 @@ def _destination(raw: bytes) -> Optional[tuple[str, int]]:
     return None
 
 
+def _refused(
+    target: Optional[tuple[str, int]],
+    trusted: bool,
+    protected: Collection[tuple[str, int]],
+    allowed: Collection[tuple[str, int]],
+) -> bool:
+    if target is None:
+        return False
+    host, port = target
+    # Linux delivers a connect to an unspecified address to a loopback listener on its port.
+    if ipaddress.ip_address(host).is_unspecified:
+        reached = [entry for entry in protected if entry[1] == port]
+    else:
+        reached = [target] if target in protected else []
+    return any(not trusted or entry not in allowed for entry in reached)
+
+
 def _emulate_connect(tgid: int, descriptor: int, address: bytes) -> int:
     pidfd = _LIBC.syscall(_PIDFD_OPEN_SYSCALL, tgid, 0)
     if pidfd < 0:
@@ -345,7 +387,7 @@ def _complete_traced_connect(
         try:
             address = _read_process(pid, int(registers.rsi), length)
             target = _destination(address)
-            if target in protected and (process_tgid != trusted_tgid or target not in allowed):
+            if _refused(target, process_tgid == trusted_tgid, protected, allowed):
                 result = -errno.EPERM
             else:
                 result = _emulate_connect(process_tgid, int(registers.rdi), address)
@@ -644,9 +686,7 @@ class ProcessConnectionGuard:
                         address_length,
                     )
                     target = _destination(address)
-                    if target in self.protected and (
-                        process_tgid != trusted_tgid or target not in self.allowed
-                    ):
+                    if _refused(target, process_tgid == trusted_tgid, self.protected, self.allowed):
                         response.error = -errno.EPERM
                     else:
                         result = _emulate_connect(

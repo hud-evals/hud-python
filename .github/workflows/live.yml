@@ -1,0 +1,121 @@
+name: Live
+
+on:
+  pull_request:
+    paths:
+      - "hud/**"
+      - "tests/**"
+      - "environments/**"
+      - "pyproject.toml"
+      - ".github/workflows/live.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Live
+    # Secrets are not available to pull requests from forks or Dependabot.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
+      HUD_CI_DATA_FILE_ID: ${{ vars.HUD_CI_DATA_FILE_ID }}
+    steps:
+      # The scenarios skip themselves without a key; here that would pass with nothing run.
+      - name: Require a HUD key
+        run: test -n "$HUD_API_KEY" || { echo "::error::HUD_API_KEY is not set"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Install the agent CLIs
+        run: npm install --global @anthropic-ai/claude-code @openai/codex
+
+      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
+      # Codex's bubblewrap sandbox needs them.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Run live scenarios
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest -m "e2e and live and not hosted and not sandbox" -n 4 --timeout 1200 --durations 20
+
+  modal:
+    name: Modal
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: pre-release
+    timeout-minutes: 45
+    env:
+      MODAL_TOKEN_ID: ${{ vars.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Require a Modal token
+        run: >-
+          test -n "$MODAL_TOKEN_ID" -a -n "$MODAL_TOKEN_SECRET"
+          || { echo "::error::MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Run Modal scenarios
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest -m "e2e and modal" -n 4 --timeout 1200 --durations 20
+
+  harbor:
+    name: Harbor
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
+      # environments' bubblewrap sandboxes need them, as they have on HUD's hosts.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Run Harbor scenarios
+        run: >-
+          uv run --python 3.12 --all-extras
+          pytest -m "e2e and docker" tests/integrations/harbor -n 4 --timeout 1800 --durations 20
+
+  lerobot:
+    name: LeRobot
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Run LeRobot scenarios
+        run: >-
+          uv run --python 3.12 --all-extras --with 'lerobot[dataset]'
+          python -m pytest -m "e2e and lerobot" -n 4 --timeout 600 --durations 20

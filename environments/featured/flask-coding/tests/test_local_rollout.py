@@ -104,7 +104,7 @@ async def test_agent_fix_scores_one(fixture_repo, tmp_path, monkeypatch, grading
     assert (repo / "fix.py").exists()
 
 
-async def test_missing_junit_report_is_grading_error(
+async def test_missing_junit_report_scores_zero(
     fixture_repo,
     tmp_path,
     monkeypatch,
@@ -129,9 +129,10 @@ async def test_missing_junit_report_is_grading_error(
     result = await task.asend("done")
 
     assert result.reward == 0.0
-    assert result.isError is True
-    assert result.content == "test command did not write JUnit XML"
-    assert result.info["exit_code"] == 0
+    assert result.isError is False
+    [tests] = result.subscores
+    assert tests.info["error"] == "test command did not write JUnit XML"
+    assert tests.info["exit_code"] == 0
 
 
 async def test_untouched_baseline_gets_regression_credit(fixture_repo, isolated_workspace, monkeypatch):

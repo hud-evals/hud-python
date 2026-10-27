@@ -6,22 +6,30 @@ import asyncio
 import logging
 import uuid
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NotRequired, cast
 
-from hud.capabilities.mcp import get_mcp_trace_id
-from hud.eval.run import Grade, Run, validate_rollout_timeouts
-from hud.telemetry.context import get_current_trace_id
-from hud.telemetry.span import normalize_trace_id
+from typing_extensions import TypedDict
+
+from hud.eval.run import Grade, Run, parent_trace, validate_rollout_timeouts
 from hud.types import AgentType, Step
 from hud.utils.platform import PlatformClient
 
 if TYPE_CHECKING:
     from hud.agents.base import Agent
     from hud.eval.task import Task
+    from hud.types import TraceStatus
 
 logger = logging.getLogger("hud.eval.runtime")
 
 _TERMINAL_TRACE_STATUSES = frozenset({"completed", "error", "cancelled"})
+_CANCEL_TIMEOUT_SECONDS = 5.0
+
+
+class _TraceState(TypedDict):
+    status: str
+    error: NotRequired[str | None]
+    reward: NotRequired[float | None]
+    evaluation_result: NotRequired[dict[str, Any] | None]
 
 
 class HostedRuntime:
@@ -35,7 +43,9 @@ class HostedRuntime:
     travels as its registered type plus :meth:`~hud.agents.base.Agent.dump`.
 
     ``run_timeout`` is a deprecated constructor alias for ``rollout_timeout``.
-    A local cancel (Ctrl-C) requests remote cancellation before propagating.
+    A local cancel (Ctrl-C) or a deadline waits up to five seconds for the
+    platform to accept the remote cancellation before propagating or returning
+    the timeout.
     """
 
     def __init__(
@@ -53,7 +63,6 @@ class HostedRuntime:
             )
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
-        self._cancellations: set[asyncio.Task[None]] = set()
 
     async def run(
         self,
@@ -73,16 +82,8 @@ class HostedRuntime:
         local cancel propagate after requesting remote cancellation.
         """
         trace_id = trace_id or uuid.uuid4().hex
-        parent_trace_id = get_current_trace_id() or get_mcp_trace_id()
-        if parent_trace_id is not None and normalize_trace_id(
-            parent_trace_id
-        ) == normalize_trace_id(trace_id):
-            parent_trace_id = None
-        if parent_trace_id is not None:
-            try:
-                parent_trace_id = str(uuid.UUID(parent_trace_id))
-            except ValueError:
-                parent_trace_id = None
+        parent = parent_trace(trace_id)
+        parent_trace_id = str(parent) if parent is not None else None
         timeout = self.run_timeout if rollout_timeout is None else rollout_timeout
         validate_rollout_timeouts(
             task,
@@ -115,11 +116,11 @@ class HostedRuntime:
                     )
             run = self._fold(state, trace_id)
         except asyncio.CancelledError:
-            self._cancel_later(trace_id)
+            await self._cancel(trace_id)
             raise
         except TimeoutError:
             assert timeout is not None
-            self._cancel_later(trace_id)
+            await self._cancel(trace_id)
             detail = f"hosted rollout {trace_id} did not finish within {timeout:g}s"
             logger.warning(detail)
             run = Run.failed(detail)
@@ -142,7 +143,7 @@ class HostedRuntime:
         group_id: str | None,
         trace_id: str,
         parent_trace_id: str | None,
-    ) -> dict[str, Any]:
+    ) -> _TraceState:
         agent_type = AgentType.of(agent)
         if agent_type is None:
             raise ValueError(
@@ -151,8 +152,6 @@ class HostedRuntime:
             )
         spec = {"type": agent_type.value, "config": {**agent.dump(), **(task.agent_config or {})}}
         platform = PlatformClient.from_settings()
-        if not platform.api_key:
-            raise RuntimeError("HUD-hosted execution requires HUD_API_KEY")
         payload: dict[str, Any] = {
             # The SDK's hex ids travel as canonical UUID strings.
             "trace_id": str(uuid.UUID(trace_id)),
@@ -177,57 +176,55 @@ class HostedRuntime:
         return await self._await_terminal(platform, payload["trace_id"])
 
     @staticmethod
-    def _fold(state: dict[str, Any], trace_id: str) -> Run:
+    def _fold(state: _TraceState, trace_id: str) -> Run:
         """Build the local view of a remotely-executed rollout from its trace state."""
         run = Run(None, "", {})
-        # The poll loop only returns terminal states, so the status is one of
-        # the trace vocabulary; anything else would be a platform bug.
-        status = state.get("status")
-        run.trace.status = status if status in ("completed", "error", "cancelled") else "error"
+        # The poll loop only returns terminal states.
+        run.trace.status = cast("TraceStatus", state["status"])
         error = state.get("error")
         if error:
-            run.record(Step(source="system", error=str(error)))
+            run.record(Step(source="system", error=error))
         reward = state.get("reward")
-        ungraded_failure = run.trace.status in ("error", "cancelled") and reward is None
-        grade_error = str(error) if error else None
-        if ungraded_failure and grade_error is None:
-            grade_error = (
-                "rollout was cancelled before grading"
-                if run.trace.status == "cancelled"
-                else "rollout failed before grading"
-            )
+        grade_error = error or None
+        if reward is None and grade_error is None:
+            grade_error = {
+                "cancelled": "rollout was cancelled before grading",
+                "error": "rollout failed before grading",
+            }.get(run.trace.status, "rollout finished without a grade")
         evaluation_result = state.get("evaluation_result")
         run.grade = (
             Grade.from_dict(evaluation_result)
             if evaluation_result is not None
             else Grade(
-                reward=float(reward) if reward is not None else 0.0,
-                is_error=ungraded_failure,
+                reward=reward if reward is not None else 0.0,
+                is_error=reward is None,
                 content=grade_error,
-                raw={"score": float(reward)} if reward is not None else {},
+                raw={"score": reward} if reward is not None else {},
             )
         )
         run._runtime = f"hud://trace/{trace_id}"
         return run
 
-    async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> dict[str, Any]:
+    async def _await_terminal(self, platform: PlatformClient, trace_id: str) -> _TraceState:
+        task = asyncio.current_task()
         while True:
-            state: dict[str, Any] = await platform.aget(f"/trace/{trace_id}")
-            if state.get("status") in _TERMINAL_TRACE_STATUSES:
+            # httpx can swallow a cancellation that lands mid-request, which
+            # would leave a timed-out or cancelled rollout polling forever.
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError
+            state = await platform.aget(f"/trace/{trace_id}", _TraceState)
+            if state["status"] in _TERMINAL_TRACE_STATUSES:
                 return state
             await asyncio.sleep(self.poll_interval)
 
-    async def _cancel(self, platform: PlatformClient, trace_id: str) -> None:
+    @staticmethod
+    async def _cancel(trace_id: str) -> None:
         # The platform also bounds instances by max runtime; this just releases
         # the lease promptly. Never shadow the caller's outcome.
         try:
-            await platform.apost("/rollouts/cancel", json={"trace_id": trace_id})
+            async with asyncio.timeout(_CANCEL_TIMEOUT_SECONDS):
+                await PlatformClient.from_settings().apost(
+                    "/rollouts/cancel", json={"trace_id": str(uuid.UUID(trace_id))}
+                )
         except Exception as exc:
             logger.warning("hosted rollout %s cancel failed: %s", trace_id, exc)
-
-    def _cancel_later(self, trace_id: str) -> None:
-        task = asyncio.create_task(
-            self._cancel(PlatformClient.from_settings(), str(uuid.UUID(trace_id)))
-        )
-        self._cancellations.add(task)
-        task.add_done_callback(self._cancellations.discard)

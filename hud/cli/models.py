@@ -6,8 +6,10 @@ import asyncio
 from typing import Any
 
 import typer
+from pydantic import ConfigDict, with_config
 from rich.panel import Panel
 from rich.table import Table
+from typing_extensions import TypedDict
 
 from hud.cli import (
     CLI,
@@ -21,6 +23,13 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
 
 hud_console = HUDConsole()
+
+
+@with_config(ConfigDict(extra="allow"))
+class _Forked(TypedDict):
+    id: str
+    model_name: str
+
 
 models_app = CLI(
     name="models",
@@ -51,7 +60,7 @@ def list_models(
     rows = [model.model_dump() for model in models]
     if quiet:
         for model in models:
-            typer.echo(model.model_name or model.id)
+            typer.echo(model.model_name)
         return rows
     if not models:
         hud_console.stdout.print("[yellow]No models found[/yellow]")
@@ -70,7 +79,7 @@ def list_models(
     for model in models:
         table.add_row(
             model.name or model.id,
-            model.model_name or model.id,
+            model.model_name,
             model.id,
             model.provider.name or "-",
             model.sdk_agent_type or "-",
@@ -95,6 +104,12 @@ def fork_model(
         "--if-not-exists",
         help="If a model with this name already exists, print it and exit 0.",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Create a team-owned trainable model derived from an existing one.
 
@@ -104,7 +119,7 @@ def fork_model(
 
     [not dim]Examples:
         hud models fork claude-sonnet-4-6 --name my-sonnet
-        hud models fork claude-sonnet-4-6 --name my-sonnet --json
+        hud models fork claude-sonnet-4-6 --name my-sonnet --yes --json
         hud models fork claude-sonnet-4-6 --name my-sonnet --if-not-exists
         hud models fork claude-sonnet-4-6 --name my-sonnet --dry-run --json[/not dim]
     """
@@ -118,16 +133,17 @@ def fork_model(
             "if_not_exists": if_not_exists,
         }
 
+    CLI.confirm_or_abort(f"Fork {source} as {name}?", yes=yes, default=True)
     source_id = resolve_gateway_model(source).id
     try:
         model = PlatformClient.from_settings().post(
-            "/models/fork", json={"source_model_id": source_id, "name": name}
+            "/models/fork", _Forked, json={"source_model_id": source_id, "name": name}
         )
     except HudRequestError as exc:
         if exc.status_code == 409 and if_not_exists:
             existing = resolve_gateway_model(name)
             hud_console.stdout.print(
-                f"[yellow]Model already exists[/yellow] [cyan]{existing.model_name or name}[/cyan]"
+                f"[yellow]Model already exists[/yellow] [cyan]{existing.model_name}[/cyan]"
             )
             hud_console.stdout.print(f"[dim]id: {existing.id}[/dim]")
             return {**existing.model_dump(), "existed": True}
@@ -213,6 +229,12 @@ def show_head(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Show — or with ``--set``, change — the model's active checkpoint (the
     weights the gateway serves now).
@@ -220,6 +242,7 @@ def show_head(
     [not dim]Examples:
         hud models head <model>
         hud models head <model> --json
+        hud models head <model> --set <checkpoint-id> --yes
         hud models head <model> --set <checkpoint-id> --dry-run --json[/not dim]
     """
     model_id = resolve_gateway_model(model).id
@@ -236,6 +259,7 @@ def show_head(
                 "model_id": model_id,
                 "checkpoint_id": set_to,
             }
+        CLI.confirm_or_abort(f"Serve checkpoint {set_to} as the head of {model}?", yes=yes)
         asyncio.run(client.set_head(set_to))
         hud_console.stdout.print(f"[green]Head set to[/green] [cyan]{set_to}[/cyan]")
         hud_console.stdout.print(f"[dim]View: {view}[/dim]")

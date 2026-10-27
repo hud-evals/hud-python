@@ -8,12 +8,23 @@ payloads live with the feature that owns them (tasksets, builds, registry, ...).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Generic, TypeVar, overload
 from urllib.parse import urlencode
+
+from pydantic import BaseModel
 
 from hud.settings import settings
 from hud.utils.exceptions import HudAuthenticationError
 from hud.utils.requests import make_request, make_request_sync
+
+T = TypeVar("T")
+
+
+class Page(BaseModel, Generic[T]):
+    """One page of a HUD API listing."""
+
+    items: list[T]
+    total: int
 
 
 @dataclass(frozen=True)
@@ -22,7 +33,9 @@ class PlatformClient:
 
     Raises :class:`hud.utils.exceptions.HudRequestError` (with ``status_code``
     and ``response_json``) on HTTP errors and retries transient failures.
-    Responses are decoded JSON; callers own the payload shape.
+    A call that names a reply type gets the body as that type, and a body that is
+    not one raises :class:`hud.utils.exceptions.HudReplyError`; a call that names
+    none gets the decoded JSON.
 
     ``api_url`` is the bare origin (``https://api.hud.ai``); ``api_prefix``
     (``/v2``) is prepended to every path so feature modules pass version-free
@@ -52,23 +65,49 @@ class PlatformClient:
             url += "?" + urlencode(params, doseq=True)
         return url
 
-    def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        return make_request_sync("GET", self.url(path, params), api_key=self.api_key)
+    @overload
+    def get(self, path: str, reply: type[T], *, params: dict[str, Any] | None = None) -> T: ...
+    @overload
+    def get(
+        self, path: str, reply: None = None, *, params: dict[str, Any] | None = None
+    ) -> Any: ...
+    def get(
+        self, path: str, reply: type[T] | None = None, *, params: dict[str, Any] | None = None
+    ) -> Any:
+        return make_request_sync("GET", self.url(path, params), api_key=self.api_key, reply=reply)
 
-    def post(self, path: str, *, json: Any | None = None) -> Any:
-        return make_request_sync("POST", self.url(path), json=json, api_key=self.api_key)
-
-    def put(self, path: str, *, json: Any | None = None) -> Any:
-        return make_request_sync("PUT", self.url(path), json=json, api_key=self.api_key)
-
-    def patch(self, path: str, *, json: Any | None = None) -> Any:
-        return make_request_sync("PATCH", self.url(path), json=json, api_key=self.api_key)
+    @overload
+    def post(self, path: str, reply: type[T], *, json: Any | None = None) -> T: ...
+    @overload
+    def post(self, path: str, reply: None = None, *, json: Any | None = None) -> Any: ...
+    def post(self, path: str, reply: type[T] | None = None, *, json: Any | None = None) -> Any:
+        return make_request_sync(
+            "POST", self.url(path), json=json, api_key=self.api_key, reply=reply
+        )
 
     def delete(self, path: str) -> Any:
         return make_request_sync("DELETE", self.url(path), api_key=self.api_key)
 
-    async def aget(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        return await make_request("GET", self.url(path, params), api_key=self.api_key)
+    @overload
+    async def aget(
+        self, path: str, reply: type[T], *, params: dict[str, Any] | None = None
+    ) -> T: ...
+    @overload
+    async def aget(
+        self, path: str, reply: None = None, *, params: dict[str, Any] | None = None
+    ) -> Any: ...
+    async def aget(
+        self, path: str, reply: type[T] | None = None, *, params: dict[str, Any] | None = None
+    ) -> Any:
+        return await make_request("GET", self.url(path, params), api_key=self.api_key, reply=reply)
 
-    async def apost(self, path: str, *, json: Any | None = None) -> Any:
-        return await make_request("POST", self.url(path), json=json, api_key=self.api_key)
+    @overload
+    async def apost(self, path: str, reply: type[T], *, json: Any | None = None) -> T: ...
+    @overload
+    async def apost(self, path: str, reply: None = None, *, json: Any | None = None) -> Any: ...
+    async def apost(
+        self, path: str, reply: type[T] | None = None, *, json: Any | None = None
+    ) -> Any:
+        return await make_request(
+            "POST", self.url(path), json=json, api_key=self.api_key, reply=reply
+        )

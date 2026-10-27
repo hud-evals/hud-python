@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+# A whole uppercase MET; an UN or NOT prefix ("not" in any case) makes it UNMET.
+_VERDICT = re.compile(r"\b(UN[_-]?|(?i:not)[\s_-]+)?MET\b")
 
 _SYSTEM_PROMPT = """You evaluate a response against a single criterion and decide \
 whether the thing the criterion describes is present in the response.
@@ -77,7 +81,7 @@ class LLMJudgeGrader(Grader):
         answer: str | Any = "",
         criteria: list[str | tuple[str, float]] | None = None,
         question: str = "",
-        model: str = "claude-haiku-4-5",
+        model: str = "claude-sonnet-5-5",
         **kwargs: Any,
     ) -> SubScore:
         """Evaluate ``answer`` against ``criteria`` via parallel LLM judgments."""
@@ -140,19 +144,25 @@ def _user_prompt(criterion: _Criterion, answer: str, question: str) -> str:
 
 
 def _parse_verdict(content: str) -> tuple[bool, str]:
-    """Extract ``(met, explanation)`` from the judge's JSON reply, tolerantly."""
+    """Extract ``(met, explanation)`` from the judge's reply; raise if it has no verdict."""
     text = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
         try:
             data = json.loads(text[start : end + 1])
-            status = str(data.get("criterion_status", "")).upper()
-            return status == "MET", str(data.get("explanation", ""))
-        except (ValueError, AttributeError):
+        except ValueError:
             logger.debug("LLMJudgeGrader: unparseable judge reply: %s", text[:200])
-    # Fallback: scan for a verdict token (UNMET contains MET, so test it first).
-    upper = text.upper()
-    return ("UNMET" not in upper and "MET" in upper), text[:200]
+        else:
+            status = str(data.get("criterion_status")).upper()
+            if status not in ("MET", "UNMET"):
+                raise ValueError(
+                    f"LLMJudgeGrader: judge reply has no MET/UNMET criterion_status: {text[:200]!r}"
+                )
+            return status == "MET", str(data.get("explanation", ""))
+    negations = _VERDICT.findall(text)
+    if not negations:
+        raise ValueError(f"LLMJudgeGrader: judge reply has no MET/UNMET verdict: {text[:200]!r}")
+    return not any(negations), text[:200]
 
 
 def _rubric_value(subscores: list[SubScore]) -> float:

@@ -91,8 +91,10 @@ class Taskset:
         from hud.utils.modules import iter_modules
 
         path = Path(source).resolve()
-        found = [task for module in iter_modules(path) for task in cls._scan_tasks(module)]
-        return cls(path.stem if path.is_file() else path.name, found)
+        found = {
+            id(task): task for module in iter_modules(path) for task in cls._scan_tasks(module)
+        }
+        return cls(path.stem if path.is_file() else path.name, found.values())
 
     @classmethod
     def from_api(cls, name: str) -> Taskset:
@@ -164,16 +166,21 @@ class Taskset:
 
     @staticmethod
     def _index_by_slug(tasks: list[Task]) -> dict[str, Task]:
-        by_slug: dict[str, Task] = {}
-        duplicates: set[str] = set()
+        rows: dict[str, list[Task]] = {}
         for task in tasks:
-            slug = task.slug
-            if slug in by_slug:
-                duplicates.add(slug)
-            by_slug[slug] = task
+            rows.setdefault(task.slug, []).append(task)
+        duplicates = [
+            f"{slug} ({', '.join(f'{task.env}/{task.id}' for task in same)})"
+            for slug, same in sorted(rows.items())
+            if len(same) > 1
+        ]
         if duplicates:
-            raise ValueError(f"duplicate task slugs: {', '.join(sorted(duplicates))}")
-        return by_slug
+            # The default slug leaves out the env, so the same template and args in
+            # two envs collide.
+            raise ValueError(
+                f"duplicate task slugs: {'; '.join(duplicates)}. Give each row its own slug="
+            )
+        return {slug: same[0] for slug, same in rows.items()}
 
     def __len__(self) -> int:
         return len(self.tasks)

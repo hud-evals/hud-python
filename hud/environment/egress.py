@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from hud.capabilities import Connection
 
@@ -283,20 +283,19 @@ def bind_addresses(
 
 
 def hosts_text(
-    peers: Sequence[Peer],
+    addresses: Mapping[str, str],
     base: str,
     *,
     local_aliases: Collection[str] = (),
-    reserved_ports: Collection[int] = (),
 ) -> str:
-    """*base* — the substrate's ``/etc/hosts`` — plus a line per peer.
+    """*base* — the substrate's ``/etc/hosts`` — plus a line per peer name, at the
+    loopback address its bridge listens on (see :func:`bind_addresses`).
 
     Names resolve for what runs in the workspace's *mount* namespace, which
     is its sessions. Anything joining only the network namespace (the Harbor
     verifier does, to reach a service the agent started) still reaches a peer
     at its address, but not by its name.
     """
-    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
     lines = "".join(
         [
             *(f"127.0.0.1\t{name}\n" for name in local_aliases),
@@ -308,10 +307,9 @@ def hosts_text(
 
 def proxy_environment(
     port: int,
-    peers: Sequence[Peer] = (),
+    addresses: Mapping[str, str],
     *,
     local_aliases: Collection[str] = (),
-    reserved_ports: Collection[int] = (),
     token: str | None = None,
 ) -> dict[str, str]:
     """Proxy variables for a process on a workspace's loopback.
@@ -325,7 +323,6 @@ def proxy_environment(
     """
     credentials = f"hud:{urllib.parse.quote(token, safe='')}@" if token else ""
     url = f"http://{credentials}127.0.0.1:{port}"
-    addresses = bind_addresses(peers, reserved_ports=reserved_ports)
     bypass = ",".join(
         dict.fromkeys(["127.0.0.1", "localhost", *local_aliases, *addresses, *addresses.values()])
     )
@@ -586,9 +583,44 @@ class _Forward(socketserver.BaseRequestHandler):
             _relay(self.request, upstream)
 
 
+class _Severable(socketserver.TCPServer):
+    """A stream server whose ``server_close`` also cuts the connections it accepted,
+    so taking a route away ends the ones already open on it, not only new ones."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._open: set[socket.socket] = set()
+        self._open_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def get_request(self) -> tuple[socket.socket, Any]:
+        request, address = super().get_request()
+        with self._open_lock:
+            self._open.add(request)
+        return request, address
+
+    def shutdown_request(self, request: socket.socket | tuple[bytes, socket.socket]) -> None:
+        assert isinstance(request, socket.socket)
+        # Untracked before it closes, so server_close never shuts down a
+        # descriptor that has since been reused.
+        with self._open_lock:
+            self._open.discard(request)
+        super().shutdown_request(request)
+
+    def server_close(self) -> None:
+        super().server_close()
+        with self._open_lock:
+            for request in self._open:
+                with contextlib.suppress(OSError):
+                    request.shutdown(socket.SHUT_RDWR)
+
+
+class _RelayServer(_Severable, ThreadingHTTPServer):
+    daemon_threads = True
+
+
 if sys.platform != "win32":  # the sockets this serves on have no Windows analogue
 
-    class _UnixServer(socketserver.ThreadingUnixStreamServer):
+    class _UnixServer(_Severable, socketserver.ThreadingUnixStreamServer):
         daemon_threads = True
         request_queue_size = socket.SOMAXCONN
 
@@ -759,8 +791,7 @@ class ConnectionRelay:
             (_ConnectionProxy,),
             {"binding": connection},
         )
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        self._server.daemon_threads = True
+        self._server = _RelayServer(("127.0.0.1", 0), handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property
@@ -803,10 +834,18 @@ class Egress:
         self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
         self.peers = tuple(peers)
+        # Fixed for the bridge's life, since it binds them once: removing a peer
+        # moves no other.
+        self._addresses = bind_addresses(self.peers, reserved_ports=reserved_ports)
         self.local_aliases = tuple(local_aliases)
-        self.reserved_ports = frozenset(reserved_ports)
         self.token = token
         self._servers: list[tuple[_UnixServer, Path]] = []
+        self._peer_servers: dict[Peer, tuple[_UnixServer, Path]] = {}
+
+    @property
+    def addresses(self) -> Mapping[str, str]:
+        """Which loopback address each peer name answers on in the workspace."""
+        return self._addresses
 
     @property
     def socket_path(self) -> Path:
@@ -833,22 +872,36 @@ class Egress:
                 ),
             )
         for index, peer in enumerate(self.peers):
-            self._serve(
+            self._peer_servers[peer] = self._serve(
                 self._peer_socket(index),
                 type("_PeerForward", (_Forward,), {"target": peer.address}),
             )
 
-    def _serve(self, path: Path, handler: type[socketserver.BaseRequestHandler]) -> None:
+    def remove_peer(self, peer: Peer) -> None:
+        """Stop serving *peer*, and end the connections open to it: its bridge
+        listener stays bound, and closes whatever connects to it, since there is no
+        longer anything behind it."""
+        server, path = self._peer_servers.pop(peer)
+        self._servers.remove((server, path))
+        _close(server, path)
+        self.peers = tuple(candidate for candidate in self.peers if candidate != peer)
+        if all(candidate.name != peer.name for candidate in self.peers):
+            del self._addresses[peer.name]
+
+    def _serve(
+        self, path: Path, handler: type[socketserver.BaseRequestHandler]
+    ) -> tuple[_UnixServer, Path]:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
         server = _UnixServer(str(path), handler)
         os.chmod(path, 0o600)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self._servers.append((server, path))
+        return server, path
 
     def _bridge_spec(self, port: int) -> list[tuple[str, int, str]]:
         """Where each route out is offered inside the workspace."""
-        addresses = bind_addresses(self.peers, reserved_ports=self.reserved_ports)
+        addresses = self._addresses
         return [
             *([("127.0.0.1", port, str(self.socket_path))] if self.allowed else []),
             *(
@@ -880,9 +933,8 @@ class Egress:
         return (
             proxy_environment(
                 port,
-                self.peers,
+                self.addresses,
                 local_aliases=self.local_aliases,
-                reserved_ports=self.reserved_ports,
                 token=self.token,
             )
             if self.allowed
@@ -892,11 +944,16 @@ class Egress:
     def stop(self) -> None:
         """Take the routes away."""
         for server, path in self._servers:
-            server.shutdown()
-            server.server_close()
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(path)
+            _close(server, path)
         self._servers = []
+        self._peer_servers = {}
+
+
+def _close(server: _UnixServer, path: Path) -> None:
+    server.shutdown()
+    server.server_close()
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
 
 
 __all__ = [

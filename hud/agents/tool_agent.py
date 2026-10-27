@@ -14,10 +14,9 @@ from hud.agents.base import Agent
 from hud.agents.misc import auto_respond
 from hud.agents.tools.base import AgentTool, provider_tool_name
 from hud.agents.tools.mcp import MCPTool
-from hud.agents.tools.rfb import RFBTool
 from hud.agents.tools.ssh import SSHInfrastructureErrorResult, SSHTool
 from hud.agents.types import AgentStep, ToolStep
-from hud.capabilities import MCPClient, RFBClient
+from hud.capabilities import MCPClient
 from hud.capabilities.ssh import SSHConnectionError
 from hud.types import MCPToolCall, MCPToolResult, Step, StopCondition
 from hud.utils.time import now_iso
@@ -150,15 +149,7 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
                         tools[tool.provider_name] = tool
                         params.append(tool.to_params())
                 else:
-                    if issubclass(tool_cls, RFBTool):
-                        assert isinstance(client, RFBClient)
-                        tool = tool_cls(
-                            spec=spec,
-                            client=client,
-                            screenshot_encoding=self.config.screenshot_encoding,
-                        )
-                    else:
-                        tool = tool_cls(spec=spec, client=client)
+                    tool = tool_cls.from_config(spec=spec, client=client, config=self.config)
                     tools[tool.provider_name] = tool
                     params.append(tool.to_params())
 

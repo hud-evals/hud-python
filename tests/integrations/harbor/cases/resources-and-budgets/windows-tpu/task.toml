@@ -1,0 +1,3 @@
+[environment]
+os = "windows"
+tpu = { type = "v5", topology = "2x2" }

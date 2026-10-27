@@ -26,6 +26,9 @@ async def docker(*args: str, check: bool = True, deadline: float | None = None) 
     except TimeoutError:
         await group.terminate()
         raise RuntimeError(f"docker {' '.join(args)} timed out after {deadline:.0f}s") from None
+    except asyncio.CancelledError:
+        await group.terminate()
+        raise
     if check and process.returncode != 0:
         detail = err.decode("utf-8", "replace").strip() or out.decode("utf-8", "replace").strip()
         raise RuntimeError(f"docker {' '.join(args)} failed ({process.returncode}): {detail}")

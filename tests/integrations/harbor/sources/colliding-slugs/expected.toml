@@ -1,0 +1,4 @@
+# Two slugs naming one directory; neither folder is written.
+base = "demo"
+export = "tasks.jsonl"
+refusal = { type = "ValueError", message = "both name the export directory 'suite-fix'", started = true }

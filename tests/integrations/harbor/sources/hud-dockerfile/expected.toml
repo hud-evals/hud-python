@@ -1,0 +1,7 @@
+# A Dockerfile.hud is exported in place of the plain Dockerfile.
+base = "demo"
+
+[folders.solve-4080368a]
+task = "solve"
+args = { n = 2, prompt = "what's next?" }
+prompt = "solve 2: what's next?"

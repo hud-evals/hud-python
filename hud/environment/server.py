@@ -17,8 +17,8 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import math
 import secrets
-import signal
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
@@ -28,6 +28,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from hud.capabilities import Connection
 from hud.graders.results import EvaluationResult
+from hud.utils.process import run_until_terminated
 
 from .egress import WorkspaceRoute
 from .env import Answer, current_session_id
@@ -184,14 +185,20 @@ class TaskRunner:
                     f"task {self.task.id!r} graded with a dict missing a numeric "
                     f"'score' (keys: {sorted(evaluation)})"
                 )
-            return cast("dict[str, Any]", _jsonable(evaluation))
-        if isinstance(evaluation, EvaluationResult):
+            frame = cast("dict[str, Any]", _jsonable(evaluation))
+        elif isinstance(evaluation, EvaluationResult):
             # Forward the full grade frame so metadata (info/content/done/isError/
             # subscores) survives; the wire names the score "score", the model "reward".
             frame = evaluation.model_dump(mode="json")
             frame["score"] = frame.pop("reward")
-            return frame
-        return {"score": _score_value(evaluation)}
+        else:
+            frame = {"score": _score_value(evaluation)}
+        if not math.isfinite(frame["score"]):
+            raise ValueError(
+                f"task {self.task.id!r} graded with a non-finite score ({frame['score']!r}): "
+                "yield a finite number"
+            )
+        return frame
 
     async def cancel(self) -> None:
         if self._gen is not None:
@@ -317,142 +324,200 @@ class _ControlChannel:
         writer: asyncio.StreamWriter,
     ) -> None:
         """One control session: JSON-RPC dispatch for the connection's lifetime."""
-        env = self.env
-        session_id = "sess-" + secrets.token_hex(4)
-        self._live.add(session_id)
-        session_token = current_session_id.set(session_id)
+        await _Session(self, writer).run(first, reader)
 
-        async def reply_to(msg_id: int | str | None, result: dict[str, Any]) -> None:
-            if msg_id is not None:
-                await send_frame(writer, reply(msg_id, result), max_bytes=CONTROL_FRAME_LIMIT_BYTES)
 
-        async def error_to(msg_id: int | str | None, code: int, message: str) -> None:
-            if msg_id is not None:
-                await _send_control_error(writer, msg_id, code, message)
+class _Session:
+    """One control connection: the session it speaks for, and the task call it runs.
 
+    tasks.start and tasks.grade run the task's own code, which can take as long as it
+    likes; they run beside the read loop so a cancel or a bye still reaches them. A
+    hang-up lets a start finish and park for resume, and ends a grade, whose result
+    nobody is left to receive.
+    """
+
+    def __init__(self, channel: _ControlChannel, writer: asyncio.StreamWriter) -> None:
+        self.channel = channel
+        self.env = channel.env
+        self.writer = writer
+        self.id = "sess-" + secrets.token_hex(4)
+        channel._live.add(self.id)
+        self._token = current_session_id.set(self.id)
+        self._work: asyncio.Task[None] | None = None
+        self._work_id: int | str | None = None
+        self._work_method = ""
+
+    async def run(self, first: dict[str, Any], reader: asyncio.StreamReader) -> None:
+        frames = aiter(_frames(first, reader))
+        next_frame: asyncio.Future[dict[str, Any]] = asyncio.ensure_future(anext(frames))
         try:
-            async for msg in _frames(first, reader):
-                method = msg.get("method", "")
-                params = msg.get("params") or {}
-                msg_id = msg.get("id")
-
+            while True:
+                waiting: set[asyncio.Future[Any]] = {next_frame}
+                if self._work is not None:
+                    waiting.add(self._work)
+                done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+                if self._work is not None and self._work in done:
+                    # A failure that escaped the handler ends the session.
+                    finished, self._work = self._work, None
+                    finished.result()
+                if next_frame not in done:
+                    continue
                 try:
-                    if method == "hello":
-                        requested = params.get("session_id")
-                        if requested is not None and requested != session_id:
-                            if not isinstance(requested, str):
-                                await error_to(
-                                    msg_id, -32602, "hello: 'session_id' must be a string"
-                                )
-                                continue
-                            if requested in self._live:
-                                await error_to(
-                                    msg_id, -32600, f"session {requested!r} has a live connection"
-                                )
-                                continue
-                            if requested not in self._runners:
-                                await error_to(msg_id, -32600, f"unknown session: {requested!r}")
-                                continue
-                            # Resume: this connection becomes the parked session.
-                            self._live.discard(session_id)
-                            session_id = requested
-                            self._live.add(session_id)
-                            current_session_id.reset(session_token)
-                            session_token = current_session_id.set(session_id)
-                        raw_routes = params.get("workspace_routes", [])
-                        if not isinstance(raw_routes, list):
-                            await error_to(
-                                msg_id, -32602, "hello: 'workspace_routes' must be a list"
-                            )
-                            continue
-                        try:
-                            workspace_routes = [
-                                WorkspaceRoute.from_wire(route) for route in raw_routes
-                            ]
-                        except ValueError as exc:
-                            await error_to(msg_id, -32602, f"hello: {exc}")
-                            continue
-                        raw_connections = params.get("connections", [])
-                        if not isinstance(raw_connections, list):
-                            await error_to(msg_id, -32602, "hello: 'connections' must be a list")
-                            continue
-                        try:
-                            connections = [
-                                Connection.from_wire(connection) for connection in raw_connections
-                            ]
-                        except ValueError as exc:
-                            await error_to(msg_id, -32602, f"hello: {exc}")
-                            continue
-                        env.bind_connections(connections, session=session_id)
-                        env.bind_workspace_routes(workspace_routes, session=session_id)
-                        # env.start() ran before serving, so hook-published
-                        # capabilities (e.g. a workspace's ssh address) are
-                        # already concrete here.
-                        bindings = [c.to_manifest() for c in env.capabilities]
-                        await reply_to(
-                            msg_id,
-                            {
-                                "session_id": session_id,
-                                "env": {"name": env.name, "version": env.version},
-                                "bindings": bindings,
-                            },
-                        )
-
-                    elif method == "tasks.list":
-                        await reply_to(
-                            msg_id,
-                            {"tasks": [t.manifest_entry() for t in env.tasks.values()]},
-                        )
-
-                    elif method == "tasks.start":
-                        task_id = params.get("id")
-                        if not isinstance(task_id, str):
-                            await error_to(msg_id, -32602, "tasks.start: 'id' must be a string")
-                            continue
-                        args = params.get("args") or {}
-                        if not isinstance(args, dict):
-                            await error_to(msg_id, -32602, "tasks.start: 'args' must be an object")
-                            continue
-                        try:
-                            prompt = await self.start(session_id, task_id, args)
-                        except KeyError:
-                            await error_to(msg_id, -32602, f"unknown task: {task_id!r}")
-                            continue
-                        try:
-                            await reply_to(msg_id, prompt)
-                        except FrameTooLargeError:
-                            await self.cancel(session_id)
-                            raise
-
-                    elif method == "tasks.grade":
-                        try:
-                            evaluation = await self.grade(session_id, params)
-                        except _NoTaskInProgress as exc:
-                            await error_to(msg_id, -32600, str(exc))
-                            continue
-                        await reply_to(msg_id, evaluation)
-
-                    elif method == "tasks.cancel":
-                        await self.cancel(session_id)
-                        await reply_to(msg_id, {"cancelled": True})
-
-                    elif method == "bye":
-                        await self.cancel(session_id)
-                        await reply_to(msg_id, {"goodbye": True})
-                        return
-
-                    else:
-                        await error_to(msg_id, -32601, f"method not found: {method}")
-
-                except Exception as exc:
-                    LOGGER.exception("error handling %s", method)
-                    await error_to(msg_id, -32000, str(exc))
+                    msg = next_frame.result()
+                except StopAsyncIteration:
+                    if self._work is not None and self._work_method == "tasks.start":
+                        starting, self._work = self._work, None
+                        await starting
+                    return
+                next_frame = asyncio.ensure_future(anext(frames))
+                if not await self._receive(msg):
+                    return
         finally:
-            self._live.discard(session_id)
+            next_frame.cancel()
+            await self._stop_work()
+            self.channel._live.discard(self.id)
             # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
             # teardown (callers that abort must cancel first — see rollout timeout).
-            self._release_if_idle(session_id)
-            current_session_id.reset(session_token)
+            self.channel._release_if_idle(self.id)
+            current_session_id.reset(self._token)
+
+    async def _receive(self, msg: dict[str, Any]) -> bool:
+        """Act on one frame; False once the peer has said goodbye."""
+        method = msg.get("method", "")
+        msg_id = msg.get("id")
+        if method in ("tasks.cancel", "bye"):
+            if self._work is not None:
+                await self._stop_work()
+                await self._error(self._work_id, -32000, f"{method} interrupted the task")
+            await self.channel.cancel(self.id)
+            if method == "bye":
+                await self._reply(msg_id, {"goodbye": True})
+                return False
+            await self._reply(msg_id, {"cancelled": True})
+        elif self._work is not None:
+            await self._error(msg_id, -32600, f"{method}: a task call is still running")
+        elif method in ("tasks.start", "tasks.grade"):
+            self._work = asyncio.create_task(self._handle(msg))
+            self._work_id, self._work_method = msg_id, method
+        else:
+            await self._handle(msg)
+        return True
+
+    async def _stop_work(self) -> None:
+        if self._work is None:
+            return
+        stopping, self._work = self._work, None
+        stopping.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stopping
+
+    async def _reply(self, msg_id: int | str | None, result: dict[str, Any]) -> None:
+        if msg_id is not None:
+            await send_frame(
+                self.writer, reply(msg_id, result), max_bytes=CONTROL_FRAME_LIMIT_BYTES
+            )
+
+    async def _error(self, msg_id: int | str | None, code: int, message: str) -> None:
+        if msg_id is not None:
+            await _send_control_error(self.writer, msg_id, code, message)
+
+    async def _handle(self, msg: dict[str, Any]) -> None:
+        method = msg.get("method", "")
+        params = msg.get("params") or {}
+        msg_id = msg.get("id")
+        try:
+            match method:
+                case "hello":
+                    await self._hello(msg_id, params)
+                case "tasks.list":
+                    await self._reply(
+                        msg_id, {"tasks": [t.manifest_entry() for t in self.env.tasks.values()]}
+                    )
+                case "tasks.start":
+                    await self._start(msg_id, params)
+                case "tasks.grade":
+                    try:
+                        evaluation = await self.channel.grade(self.id, params)
+                    except _NoTaskInProgress as exc:
+                        await self._error(msg_id, -32600, str(exc))
+                        return
+                    await self._reply(msg_id, evaluation)
+                case _:
+                    await self._error(msg_id, -32601, f"method not found: {method}")
+        except Exception as exc:
+            LOGGER.exception("error handling %s", method)
+            await self._error(msg_id, -32000, str(exc))
+
+    async def _hello(self, msg_id: int | str | None, params: dict[str, Any]) -> None:
+        requested = params.get("session_id")
+        if requested is not None and requested != self.id:
+            if not isinstance(requested, str):
+                await self._error(msg_id, -32602, "hello: 'session_id' must be a string")
+                return
+            if requested in self.channel._live:
+                await self._error(msg_id, -32600, f"session {requested!r} has a live connection")
+                return
+            if requested not in self.channel._runners:
+                await self._error(msg_id, -32600, f"unknown session: {requested!r}")
+                return
+            # Resume: this connection becomes the parked session.
+            self.channel._live.discard(self.id)
+            self.id = requested
+            self.channel._live.add(self.id)
+            current_session_id.reset(self._token)
+            self._token = current_session_id.set(self.id)
+        raw_routes = params.get("workspace_routes", [])
+        if not isinstance(raw_routes, list):
+            await self._error(msg_id, -32602, "hello: 'workspace_routes' must be a list")
+            return
+        try:
+            workspace_routes = [WorkspaceRoute.from_wire(route) for route in raw_routes]
+        except ValueError as exc:
+            await self._error(msg_id, -32602, f"hello: {exc}")
+            return
+        raw_connections = params.get("connections", [])
+        if not isinstance(raw_connections, list):
+            await self._error(msg_id, -32602, "hello: 'connections' must be a list")
+            return
+        try:
+            connections = [Connection.from_wire(connection) for connection in raw_connections]
+        except ValueError as exc:
+            await self._error(msg_id, -32602, f"hello: {exc}")
+            return
+        self.env.bind_connections(connections, session=self.id)
+        self.env.bind_workspace_routes(workspace_routes, session=self.id)
+        # env.start() ran before serving, so hook-published capabilities (e.g. a
+        # workspace's ssh address) are already concrete here.
+        bindings = [c.to_manifest() for c in self.env.capabilities]
+        await self._reply(
+            msg_id,
+            {
+                "session_id": self.id,
+                "env": {"name": self.env.name, "version": self.env.version},
+                "bindings": bindings,
+            },
+        )
+
+    async def _start(self, msg_id: int | str | None, params: dict[str, Any]) -> None:
+        task_id = params.get("id")
+        if not isinstance(task_id, str):
+            await self._error(msg_id, -32602, "tasks.start: 'id' must be a string")
+            return
+        args = params.get("args")
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            await self._error(msg_id, -32602, "tasks.start: 'args' must be an object")
+            return
+        if task_id not in self.env.tasks:
+            await self._error(msg_id, -32602, f"unknown task: {task_id!r}")
+            return
+        prompt = await self.channel.start(self.id, task_id, args)
+        try:
+            await self._reply(msg_id, prompt)
+        except FrameTooLargeError:
+            await self.channel.cancel(self.id)
+            raise
 
 
 async def _send_control_error(
@@ -580,23 +645,13 @@ async def serve(env: Environment, host: str = "127.0.0.1", port: int = 0) -> Non
         server = await bind(env, host, port)
         port_line = f"{PORT_ANNOUNCEMENT}{server.sockets[0].getsockname()[1]}"
         print(port_line, flush=True)  # noqa: T201 - the spawn provider reads this from stdout
-        async with server:
-            await server.serve_forever()
+        # The bound server is already accepting. Not serve_forever(): cancelling it
+        # waits for open connections to close, and only _shutdown() closes them.
+        await asyncio.Event().wait()
     finally:
         if server is not None:
             await _shutdown(server)
         await env.stop()
-
-
-async def _serve_until_terminated(env: Environment, host: str, port: int) -> None:
-    main_task = asyncio.current_task()
-    assert main_task is not None
-    # SIGTERM (the spawn provider's teardown) cancels serving so env.stop()
-    # runs and backing daemons don't orphan. Not available on Windows loops.
-    with contextlib.suppress(NotImplementedError):
-        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
-    with contextlib.suppress(asyncio.CancelledError):
-        await serve(env, host, port)
 
 
 def main() -> None:
@@ -610,9 +665,7 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = ephemeral).")
     args = parser.parse_args()
-    asyncio.run(
-        _serve_until_terminated(load_environment(args.path, name=args.env), args.host, args.port)
-    )
+    run_until_terminated(serve(load_environment(args.path, name=args.env), args.host, args.port))
 
 
 if __name__ == "__main__":

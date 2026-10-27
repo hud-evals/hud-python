@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from grader import JUnitCase, grade_tests, parse_junit, score_tests
+from grader import JUnitCase, check_selection, grade_tests, parse_junit, score_tests
 
 
 def test_scoring_tracks_fail_to_pass_and_pass_to_pass(tmp_path: Path):
@@ -77,7 +77,7 @@ def test_scoring_rejects_empty_or_duplicate_ids():
     case = JUnitCase("tests.test_widget.test_duplicate", passed=True, skipped=False)
 
     with pytest.raises(ValueError, match="at least one"):
-        score_tests([case], [], [], binary=False)
+        check_selection([], [])
     with pytest.raises(ValueError, match="JUnit test case IDs"):
         score_tests([case, case], None, None, binary=False)
 

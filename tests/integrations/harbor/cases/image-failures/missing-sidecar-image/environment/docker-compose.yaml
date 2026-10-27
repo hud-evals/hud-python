@@ -1,0 +1,3 @@
+services:
+  cache:
+    image: registry.invalid/cache:1

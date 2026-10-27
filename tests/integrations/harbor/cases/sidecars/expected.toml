@@ -1,0 +1,3 @@
+# Sidecars keep their settings and their order around main.
+[task.implicit-main]
+services = ["cache", "hud-base", "main", "redis", "seed", "worker"]

@@ -1,0 +1,8 @@
+# A JSON taskset row's nested slug names its folder.
+base = "demo"
+export = "tasks.json"
+
+[folders.suite-fix]
+task = "solve"
+args = { n = 3 }
+prompt = "solve 3: "

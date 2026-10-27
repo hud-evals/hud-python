@@ -13,6 +13,7 @@ build/
 !docs/v6/build/
 *.egg-info/
 uv.lock
+!tests/integrations/harbor/cases/**/.env
 
 # Media files
 *.jpg

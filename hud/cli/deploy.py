@@ -14,7 +14,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
@@ -22,9 +22,12 @@ import httpx
 import typer
 import websockets
 from dotenv import dotenv_values
+from pydantic import BaseModel, ConfigDict, with_config
+from typing_extensions import TypedDict
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from hud.cli import (
+    CLI,
     AuthScope,
     CliError,
     DirectoryLink,
@@ -33,6 +36,7 @@ from hud.cli import (
     parse_key_value,
 )
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
+from hud.cli.sync import RegistryEnvironment
 from hud.eval.runtime import RuntimeConfig
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
@@ -104,6 +108,38 @@ def _dockerignore_re(pattern: str) -> re.Pattern[str]:
         i += 1
     out.append(r"\Z")
     return re.compile("".join(out))
+
+
+class _BuildUpload(TypedDict):
+    build_id: str
+    upload_url: str
+
+
+class _Build(BaseModel):
+    id: str
+    registry_id: UUID
+
+
+@with_config(ConfigDict(extra="allow"))
+class _ManifestTask(TypedDict):
+    id: str
+
+
+@with_config(ConfigDict(extra="allow"))
+class _ManifestCapability(TypedDict):
+    name: str
+
+
+@with_config(ConfigDict(extra="allow"))
+class _Manifest(TypedDict):
+    tasks: NotRequired[list[_ManifestTask] | None]
+    capabilities: NotRequired[list[_ManifestCapability] | None]
+
+
+@with_config(ConfigDict(extra="allow"))
+class _BuildStatus(TypedDict):
+    status: str
+    manifest: NotRequired[_Manifest | None]
 
 
 @dataclass(frozen=True)
@@ -186,6 +222,12 @@ async def deploy_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompts (required in non-interactive terminals).",
+    ),
 ) -> Any:
     """Deploy HUD environment to the platform.
 
@@ -200,6 +242,7 @@ async def deploy_command(
     [not dim]Examples:
         hud deploy
         hud deploy --name judge
+        hud deploy --yes --json
         hud deploy --dry-run --json[/not dim]
     """
     platform = PlatformClient.from_settings()
@@ -255,7 +298,7 @@ async def deploy_command(
         name = names.pop()
     if registry_id is not None:
         try:
-            registered = platform.get(f"/registry/{registry_id}")["name"]
+            registered = platform.get(f"/registry/{registry_id}", RegistryEnvironment).name
         except HudRequestError as exc:
             raise CliError.from_http(
                 exc, resource="Environment", input={"registry_id": registry_id}
@@ -380,6 +423,7 @@ async def deploy_command(
             )
         )
 
+    CLI.confirm_or_abort(f"Deploy {name}?", yes=yes, default=True)
     hud_console.progress_message("Creating build context tarball...")
     dockerignore = env_dir / ".dockerignore"
     rules: list[tuple[re.Pattern[str], bool, bool]] = []
@@ -420,7 +464,7 @@ async def deploy_command(
     try:
         hud_console.progress_message("Getting upload URL...")
         started = time.time()
-        upload = await platform.apost("/builds/upload-url")
+        upload = await platform.apost("/builds/upload-url", _BuildUpload)
         hud_console.success(f"Got upload URL [{time.time() - started:.1f}s]")
         hud_console.info(f"Build ID: {upload['build_id']}")
 
@@ -447,8 +491,9 @@ async def deploy_command(
         }
         hud_console.progress_message("Triggering build...")
         started = time.time()
-        data = await platform.apost(
+        build = await platform.apost(
             "/builds/trigger",
+            _Build,
             json={
                 "source": "direct",
                 "build_id": upload["build_id"],
@@ -458,10 +503,10 @@ async def deploy_command(
             },
         )
         hud_console.success(f"Build triggered [{time.time() - started:.1f}s]")
-        build_id: str = data["id"]
-        built_registry_id: str = data["registry_id"]
+        build_id = build.id
+        built_registry_id = build.registry_id
         if registry_id is None and project is None:
-            state.update(DirectoryLink(registry_id=UUID(built_registry_id)))
+            state.update(DirectoryLink(registry_id=built_registry_id))
         hud_console.info(f"Build ID: {build_id}")
         hud_console.info("")
 
@@ -509,10 +554,10 @@ async def deploy_command(
         except (OSError, WebSocketException) as e:
             hud_console.warning(f"Log stream unavailable: {e}")
 
-        status = await platform.aget(f"/builds/{build_id}/status")
-        while status.get("status") in {"IN_PROGRESS", "MIGRATING", "CANCELLING"}:
+        status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
+        while status["status"] in {"IN_PROGRESS", "MIGRATING", "CANCELLING"}:
             await asyncio.sleep(5)
-            status = await platform.aget(f"/builds/{build_id}/status")
+            status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
 
         manifest = status.get("manifest") or {}
         tasks = [task["id"] for task in manifest.get("tasks") or []]
@@ -522,10 +567,10 @@ async def deploy_command(
             "Status": status["status"],
             "Version": status.get("version") or "unknown",
         }
-        if status.get("uri"):
-            summary["Image"] = status["uri"]
-        if status.get("error_message"):
-            summary["Error"] = status["error_message"]
+        if uri := status.get("uri"):
+            summary["Image"] = uri
+        if error_message := status.get("error_message"):
+            summary["Error"] = error_message
         if tasks:
             summary["Tasks"] = ", ".join(tasks)
         if capabilities:
@@ -535,10 +580,10 @@ async def deploy_command(
         hud_console.link(f"{settings.hud_web_url}/environments/{built_registry_id}")
         result = _DeployResult(
             success=status["status"] == "SUCCEEDED",
-            details=status,
+            details=dict(status),
             name=name,
             build_id=build_id,
-            registry_id=built_registry_id,
+            registry_id=str(built_registry_id),
             status=status["status"],
         )
     finally:

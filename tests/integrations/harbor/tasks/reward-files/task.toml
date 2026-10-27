@@ -1,0 +1,5 @@
+[verifier]
+timeout_sec = 30
+
+[verifier.env]
+SHAPE = "${REWARD_SHAPE}"

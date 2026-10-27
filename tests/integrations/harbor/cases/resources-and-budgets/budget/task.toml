@@ -1,0 +1,5 @@
+[environment]
+build_timeout_sec = 900.5
+
+[agent]
+timeout_sec = 28800
