@@ -17,6 +17,7 @@ they skip themselves when what they need is missing.
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib.util
 import inspect
 import json
@@ -24,7 +25,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -303,6 +303,27 @@ def real_hud_api_key() -> str | None:
     return dotenv_values(Path(home) / ".hud" / ".env").get("HUD_API_KEY")
 
 
+@functools.cache
+def real_modal_token() -> tuple[str, str] | None:
+    """The token Modal resolves from the real environment and config file, asked of Modal
+    in a process of its own so the tests' isolated home never reaches it."""
+    if importlib.util.find_spec("modal") is None:
+        return None
+    reads = (
+        "import json; from modal.config import config; "
+        "print(json.dumps([config.get('token_id'), config.get('token_secret')]))"
+    )
+    resolved = subprocess.run(
+        [sys.executable, "-c", reads],
+        env=REAL_ENVIRONMENT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    token_id, token_secret = json.loads(resolved.stdout)
+    return (token_id, token_secret) if token_id and token_secret else None
+
+
 @pytest.fixture(autouse=True)
 def hud_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> HudEnv:
     """The SDK's configuration for this test; change it with ``hud_env.set(...)``."""
@@ -414,18 +435,11 @@ def modal_image(sdk_wheel: Path) -> Callable[[str], Any]:
 
 @pytest.fixture
 def modal_account(hud_env: HudEnv) -> HudEnv:
-    """Let Modal find the real account the developer or CI configured. Modal reads its
-    config file once, when first imported, so the file's profile goes in as variables, chosen
-    as Modal chooses it: MODAL_PROFILE, else the active profile, else "default"."""
-    token_id = REAL_ENVIRONMENT.get("MODAL_TOKEN_ID")
-    token_secret = REAL_ENVIRONMENT.get("MODAL_TOKEN_SECRET")
-    if token_id is None:
-        config = tomllib.loads((Path(REAL_ENVIRONMENT["HOME"]) / ".modal.toml").read_text())
-        name = REAL_ENVIRONMENT.get("MODAL_PROFILE") or next(
-            (name for name, profile in config.items() if profile.get("active")), "default"
-        )
-        token_id, token_secret = config[name]["token_id"], config[name]["token_secret"]
-    hud_env.set(MODAL_TOKEN_ID=token_id, MODAL_TOKEN_SECRET=token_secret)
+    """Hand Modal the real account the developer or CI configured. Modal reads its config
+    file once, when first imported, so the token goes in as variables."""
+    token = real_modal_token()
+    assert token is not None
+    hud_env.set(MODAL_TOKEN_ID=token[0], MODAL_TOKEN_SECRET=token[1])
     return hud_env
 
 
@@ -462,13 +476,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             "needs Linux, root, and bubblewrap",
         ),
         "live": (lambda: real_hud_api_key() is not None, "needs HUD_API_KEY"),
-        "modal": (
-            lambda: (
-                "MODAL_TOKEN_ID" in REAL_ENVIRONMENT
-                or (Path(REAL_ENVIRONMENT.get("HOME", "")) / ".modal.toml").is_file()
-            ),
-            "needs a Modal account",
-        ),
+        "modal": (lambda: real_modal_token() is not None, "needs a Modal account"),
         "lerobot": (
             lambda: importlib.util.find_spec("lerobot") is not None,
             "needs lerobot[dataset]",
