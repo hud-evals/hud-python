@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import time
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ import pytest
 
 from tests.conftest import write_files
 from tests.fixtures.models import Turn
+from tests.fixtures.services import Reply
 
 from .conftest import API_KEY
 
@@ -361,3 +363,43 @@ def test_interrupting_a_hosted_eval_cancels_every_rollout_on_the_platform(
     assert process.returncode == 130
     assert len(submitted) == 3
     assert sorted(cancelled) == sorted(submitted)
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_terminating_eval_tears_down_the_environments_it_spawned(
+    hud: Hud, models: Models, signed_in: FakeServices
+) -> None:
+    pids = hud.cwd / "env.pids"
+    (hud.cwd / "tasks.py").write_text(
+        f"import os\n{TASKS_PY}\n\n@env.initialize\nasync def record_pid() -> None:\n"
+        f"    with open({str(pids)!r}, 'a') as out:\n"
+        "        out.write(f'{os.getpid()}\\n')\n"
+    )
+    models.script([Turn(fail=Reply(json={}, delay=600))])
+    process = hud.start("eval", "tasks.py", *SCRIPTED, "--group-size", "2", "--yes")
+
+    try:
+        deadline = time.monotonic() + 60
+        while len(models.requests()) < 2:
+            assert process.poll() is None, process.communicate()
+            assert time.monotonic() < deadline, "hud eval never reached the model"
+            time.sleep(0.05)
+        process.send_signal(signal.SIGTERM)
+        process.communicate(timeout=30)
+    finally:
+        process.kill()
+        spawned = [int(pid) for pid in pids.read_text().split()] if pids.exists() else []
+        running = [pid for pid in spawned if alive(pid)]
+        for pid in running:
+            os.kill(pid, signal.SIGKILL)
+
+    assert len(spawned) == 2
+    assert running == []
+    assert process.returncode == 128 + signal.SIGTERM

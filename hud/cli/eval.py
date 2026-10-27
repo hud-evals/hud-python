@@ -5,7 +5,6 @@ Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
@@ -37,6 +36,7 @@ from hud.types import AgentType
 from hud.utils.gateway import list_gateway_models, resolve_gateway_model
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient
+from hud.utils.process import run_until_terminated
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -513,7 +513,7 @@ def eval_command(
     agent_instance = agent_type.cls.load(agent_kwargs)
 
     started = time.monotonic()
-    job = asyncio.run(
+    job = run_until_terminated(
         taskset.run(
             agent_instance,
             runtime=placement,

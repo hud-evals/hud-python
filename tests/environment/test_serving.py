@@ -83,23 +83,31 @@ async def announced_port(process: asyncio.subprocess.Process) -> int:
 
 
 @pytest.mark.parametrize(
-    ("command", "served_name", "stop", "grading"),
+    ("command", "served_name", "stop", "grading", "exit_code"),
     [
-        pytest.param([*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, False, id="hud-serve"),
         pytest.param(
-            [*SERVER, "stalls.py"], "stalls", signal.SIGTERM, True, id="server-while-grading"
+            [*HUD_SERVE, "env:env"], "from-env-py", signal.SIGINT, False, 0, id="hud-serve"
+        ),
+        pytest.param(
+            [*SERVER, "stalls.py"], "stalls", signal.SIGTERM, True, 143, id="server-while-grading"
         ),
         pytest.param(
             [*HUD_SERVE, "stalls:env"],
             "stalls",
             signal.SIGTERM,
             True,
+            143,
             id="hud-serve-while-grading",
         ),
     ],
 )
 async def test_a_serving_process_announces_its_port_and_runs_shutdown_hooks_on_a_signal(
-    tree: Path, command: list[str], served_name: str, stop: signal.Signals, grading: bool
+    tree: Path,
+    command: list[str],
+    served_name: str,
+    stop: signal.Signals,
+    grading: bool,
+    exit_code: int,
 ) -> None:
     process = await asyncio.create_subprocess_exec(
         *command,
@@ -123,7 +131,7 @@ async def test_a_serving_process_announces_its_port_and_runs_shutdown_hooks_on_a
             await process.wait()
 
     assert hello["result"]["env"]["name"] == served_name
-    assert code == 0
+    assert code == exit_code
     assert [name for name in os.listdir(tree) if name.startswith("stopped-")] == [
         f"stopped-{served_name}"
     ]

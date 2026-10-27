@@ -1,4 +1,4 @@
-"""Managed subprocess helpers."""
+"""Managed subprocess helpers, and running a coroutine as this process's main task."""
 
 from __future__ import annotations
 
@@ -12,15 +12,17 @@ import os
 import signal
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if sys.platform != "win32":
     import fcntl
     import termios
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterable, Callable
+    from collections.abc import AsyncIterable, Callable, Coroutine
     from typing import TextIO
+
+T = TypeVar("T")
 
 _PROCESS_EXIT_POLL_INTERVAL = 0.05
 OUTPUT_DRAIN_TIMEOUT = 1.0
@@ -356,3 +358,38 @@ async def _wait_for_process_group_exit(process_group: int, max_wait: float) -> b
         if loop.time() >= deadline:
             return False
         await asyncio.sleep(min(_PROCESS_EXIT_POLL_INTERVAL, deadline - loop.time()))
+
+
+def run_until_terminated(main: Coroutine[Any, Any, T]) -> T:
+    """``asyncio.run(main)``, where SIGTERM cancels *main* like Ctrl-C and exits 143.
+
+    Only entry points that own the process call this: the handler is process-wide.
+    """
+    terminated = False
+
+    async def run() -> T:
+        task = asyncio.current_task()
+        assert task is not None
+        loop = asyncio.get_running_loop()
+
+        def terminate() -> None:
+            nonlocal terminated
+            if not terminated:
+                terminated = True
+                task.cancel()
+
+        # Signal handlers are not available on Windows loops.
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(signal.SIGTERM, terminate)
+        try:
+            return await main
+        finally:
+            with contextlib.suppress(NotImplementedError):
+                loop.remove_signal_handler(signal.SIGTERM)
+
+    try:
+        return asyncio.run(run())
+    except asyncio.CancelledError:
+        if not terminated:
+            raise
+        raise SystemExit(128 + signal.SIGTERM) from None

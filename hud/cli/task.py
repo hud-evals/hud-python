@@ -11,7 +11,6 @@ runs against the already-served control channel instead.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from contextlib import nullcontext
 from pathlib import Path
@@ -26,6 +25,7 @@ from hud.cli import (
 from hud.clients import HudProtocolError, connect
 from hud.eval import Taskset
 from hud.eval.runtime import Runtime, SubprocessRuntime
+from hud.utils.process import run_until_terminated
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -151,7 +151,7 @@ def start_command(
         async with placement as runtime, connect(runtime) as client:
             return await client.start_task(task_id, task_args)
 
-    result = asyncio.run(_run())
+    result = run_until_terminated(_run())
     prompt = result.get("prompt", result)
     typer.echo(prompt if isinstance(prompt, str) else json.dumps(prompt, default=str))
     return result
@@ -208,6 +208,6 @@ def grade_command(
                 await client.start_task(task_id, task_args)
                 return await client.grade({"answer": answer_text})
 
-    result = asyncio.run(_run())
+    result = run_until_terminated(_run())
     typer.echo(json.dumps(result.get("score", result), default=str))
     return result
