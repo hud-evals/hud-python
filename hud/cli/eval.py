@@ -571,4 +571,4 @@ def eval_command(
         ],
     }
     # Errored runs among graded ones still leave a measurement; none graded leaves nothing.
-    return Result(result) if len(errors) == len(job.runs) > 0 else result
+    return Result(result) if len(errors) == len(job.runs) else result
