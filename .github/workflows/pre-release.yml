@@ -53,3 +53,8 @@ jobs:
           name: example-traces-${{ matrix.template }}
           path: ${{ runner.temp }}/traces/${{ matrix.template }}
           retention-days: 7
+
+  live:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/live.yml
+    secrets: inherit
