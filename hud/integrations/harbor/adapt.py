@@ -412,12 +412,17 @@ def adapt(
     path: str | Path,
     *,
     hud_requirement: str = f"hud=={__version__}",
+    name: str | None = None,
 ) -> AdaptResult:
     """Resolve Harbor images and package tasks as conventional Compose projects.
 
     ``hud_requirement`` installs the controller each image serves; it defaults to
     this ``hud`` release so the controller matches the adapter that configured it.
+    ``name`` names the generated environment instead of ``<dataset>-<digest>``;
+    the adapted tasks must then share one environment.
     """
+    if name is not None and normalize_environment_name(name) != name:
+        raise ValueError(f"environment name {name!r} is not a normalized environment name")
     root = Path(path).resolve()
     if (root / "task.toml").is_file():
         task_dirs = [root]
@@ -466,13 +471,17 @@ def adapt(
             [],
         ).append(task)
 
+    if name is not None and len(grouped) > 1:
+        raise ValueError(
+            f"{path} adapts into {len(grouped)} environments; name {name!r} applies to one"
+        )
     if grouped:
         require_docker()
     rows = []
     base_name = normalize_environment_name(dataset.name, default="harbor")
     for group_key, group in sorted(grouped.items()):
         digest = hashlib.sha256("\0".join(group_key).encode()).hexdigest()[:12]
-        name = f"{base_name}-{digest}"
+        environment_name = name or f"{base_name}-{digest}"
         source = group[0]
         environment = source.config.environment
         compose = source.compose.model_copy(deep=True)
@@ -522,7 +531,9 @@ def adapt(
         verifier_image = base_image
         if separate:
             verifier_dockerfile = source.path / "tests" / "Dockerfile"
-            verifier_image = f"hud-harbor-verifier:{name}-{_tree_hash(verifier_dockerfile.parent)}"
+            verifier_image = (
+                f"hud-harbor-verifier:{environment_name}-{_tree_hash(verifier_dockerfile.parent)}"
+            )
 
         peers: list[Peer] = []
         peer_services: set[str] = set()
@@ -568,7 +579,7 @@ def adapt(
                 Peer(service_name, port, target=(service_name, port))
                 for port in sorted(service_ports)
             )
-        context = dataset / ".hud-adapt" / name
+        context = dataset / ".hud-adapt" / environment_name
         if context.exists():
             shutil.rmtree(context)
         project = context / "compose-project"
@@ -581,7 +592,7 @@ def adapt(
         (context / "env.py").write_text(
             f'"""Deploy identity for this project; the image serves {CONTROLLER_MODULE}."""\n\n'
             "from hud import Environment\n\n"
-            f"env = Environment({name!r})\n",
+            f"env = Environment({environment_name!r})\n",
             encoding="utf-8",
             newline="\n",
         )
@@ -619,7 +630,7 @@ def adapt(
         agent_phase = source.config.agent
         verifier_phase = source.config.verifier
         controller_config = ControllerConfig(
-            name=name,
+            name=environment_name,
             mounts=workspace_mounts,
             workdir=workdir,
             image_user=image_user,
@@ -674,7 +685,7 @@ def adapt(
             requirement = f"{CONTROLLER_ROOT}/packages/{wheel.name}"
 
         tag = hashlib.sha256(f"{_tree_hash(payload)}\0{requirement}".encode()).hexdigest()[:16]
-        image = f"hud-harbor:{name}-{tag}"
+        image = f"hud-harbor:{environment_name}-{tag}"
         group_service_access = any(
             item.service != "main"
             for task in group
@@ -810,7 +821,7 @@ def adapt(
             if config.task.keywords:
                 columns.setdefault("keywords", config.task.keywords)
             row = Task(
-                env=name,
+                env=environment_name,
                 id="run",
                 args={
                     "instruction": task.instruction,
@@ -834,7 +845,7 @@ def adapt(
                 ),
                 verifier=(
                     Task(
-                        env=name,
+                        env=environment_name,
                         id="verify",
                         args={"task": task_config},
                         slug=f"{task.path.name}:verify",

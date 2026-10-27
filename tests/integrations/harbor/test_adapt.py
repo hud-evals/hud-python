@@ -230,6 +230,41 @@ def test_the_environment_image_identity_follows_only_what_the_image_contains(
 
 @pytest.mark.e2e
 @pytest.mark.docker
+def test_a_name_names_the_generated_environment(tmp_path: Path, hud_env: HudEnv) -> None:
+    dataset = load_case("plain-image", tmp_path, hud_env)
+
+    result = harbor.adapt(dataset, hud_requirement="hud", name="greet-2")
+
+    assert result.failures == ()
+    (row,) = result.taskset
+    assert row.env == "greet-2"
+    project = dataset / ".hud-adapt" / "greet-2"
+    assert "Environment('greet-2')" in (project / "env.py").read_text("utf-8")
+    payload = project / "compose-project" / "main"
+    assert json.loads((payload / "config.json").read_text("utf-8"))["name"] == "greet-2"
+    compose = json.loads((project / "compose.yaml").read_text("utf-8"))
+    assert compose["services"]["main"]["image"].startswith("hud-harbor:greet-2-")
+
+
+def test_a_name_applies_to_one_environment(tmp_path: Path, hud_env: HudEnv) -> None:
+    dataset = load_case("dataset-grouping", tmp_path, hud_env)
+
+    with pytest.raises(ValueError, match="adapts into 3 environments"):
+        harbor.adapt(dataset, name="grouping")
+
+
+@pytest.mark.parametrize("name", ["Greet", "greet task", "", "-greet"])
+def test_a_name_is_a_normalized_environment_name(
+    name: str, tmp_path: Path, hud_env: HudEnv
+) -> None:
+    dataset = load_case("plain-image", tmp_path, hud_env)
+
+    with pytest.raises(ValueError, match="not a normalized environment name"):
+        harbor.adapt(dataset, name=name)
+
+
+@pytest.mark.e2e
+@pytest.mark.docker
 def test_another_hud_release_rebuilds_the_image_from_the_index(
     tmp_path: Path, hud_env: HudEnv
 ) -> None:

@@ -71,8 +71,10 @@ the Compose model with `scale: 0` and feed the `main` build through named
 [Compose environments](/v6/experimental/compose).
 
 Tasks with identical environment and phase configuration share one generated
-environment. A task with a verifier environment forms its own group because its
-verifier image and artifact contract are task-specific.
+environment, named `<dataset>-<digest>`. A task with a verifier environment forms
+its own group because its verifier image and artifact contract are task-specific.
+Pass `name` to name the environment yourself, for example to deploy it into an
+existing HUD environment; the tasks must then share one environment.
 
 ### Run locally
 
