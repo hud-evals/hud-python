@@ -87,7 +87,7 @@ jobs:
   sandbox:
     name: Sandbox
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
     steps:
