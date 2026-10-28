@@ -8,13 +8,13 @@ inference gateway directly.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from ._parallel import resolve_grades
 from .base import Grader
 from .results import SubScore
 
@@ -112,7 +112,8 @@ class LLMJudgeGrader(Grader):
                 info={"reason": reason},
             )
 
-        verdicts = list(await asyncio.gather(*(_judge(c) for c in parsed)))
+        async with client:
+            verdicts = await resolve_grades(*(_judge(c) for c in parsed))
         return SubScore(
             name=cls.name,
             value=_rubric_value(verdicts),

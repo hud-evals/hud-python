@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import warnings
 from typing import TYPE_CHECKING
 
+from ._parallel import resolve_grades
 from .results import EvaluationResult, SubScore
 
 if TYPE_CHECKING:
@@ -94,7 +94,7 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
     - ``SubScore`` objects (used immediately)
     - Awaitables returning ``SubScore`` (e.g. ``Grader.grade()``)
 
-    All awaitables run concurrently via ``asyncio.gather``. Positive weights
+    Awaitables run concurrently; a failure cancels and drains the others. Positive weights
     are normalized to sum to ``1.0``; negative weights are penalties.
 
     Example::
@@ -120,7 +120,7 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
             raise TypeError(f"Expected SubScore or Awaitable[SubScore], got {type(item).__name__}")
 
     if pending:
-        results = await asyncio.gather(*(aw for _, aw in pending))
+        results = await resolve_grades(*(aw for _, aw in pending))
         for (slot, _), result in zip(pending, results, strict=True):
             resolved[slot] = result
 
