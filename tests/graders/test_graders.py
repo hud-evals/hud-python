@@ -4,7 +4,9 @@ evaluation show the result."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -18,18 +20,171 @@ from hud.graders import (
     SubScore,
     combine,
 )
+from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from tests.conftest import HudEnv
     from tests.fixtures.models import ModelRequest, Models
+    from tests.fixtures.services import FakeServices, Request
 
 ANSWER = "Paris is the capital."
 
 
 def leaf(name: str, weight: float, value: float) -> dict[str, Any]:
     return {"name": name, "weight": weight, "value": value, "children": None}
+
+
+@pytest.mark.parametrize("cleanup_raises", [False, True])
+async def test_a_failed_grader_stops_its_siblings_before_the_environment_shuts_down(
+    cleanup_raises: bool,
+) -> None:
+    env = Environment("graders")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    events = []
+
+    class Waits(Grader):
+        @classmethod
+        async def compute_score(cls, **kwargs: Any) -> SubScore:
+            started.set()
+            try:
+                await release.wait()
+                return SubScore(name="waiting", value=1.0)
+            finally:
+                await asyncio.sleep(0)
+                events.append("grader stopped")
+                if cleanup_raises:
+                    raise RuntimeError("cleanup failed")
+
+    class Fails(Grader):
+        @classmethod
+        async def compute_score(cls, **kwargs: Any) -> SubScore:
+            await started.wait()
+            raise ValueError("grader failed")
+
+    @env.shutdown
+    async def down() -> None:
+        events.append("environment stopped")
+
+    @env.template()
+    async def check():
+        yield "go"
+        yield await combine(Waits.grade(weight=0.5), Fails.grade(weight=0.5))
+
+    try:
+        job = await check().run(ScriptedAgent(ANSWER))
+        (run,) = job.runs
+        assert (run.trace.status, job.errors) == ("error", [run])
+        assert "grader failed" in (run.trace.error or "")
+        assert events == ["grader stopped", "environment stopped"]
+    finally:
+        release.set()
+        await eventually(lambda: "grader stopped" in events)
+
+
+@pytest.mark.parametrize("stop", ["caller", "caller-twice", "child"])
+async def test_cancelling_parallel_grading_waits_for_a_prestarted_graders_cleanup(
+    stop: str,
+) -> None:
+    started = asyncio.Event()
+    cleaning_up = asyncio.Event()
+    release = asyncio.Event()
+    future = asyncio.get_running_loop().create_future()
+
+    async def wait() -> SubScore:
+        started.set()
+        try:
+            return await future
+        finally:
+            cleaning_up.set()
+            await release.wait()
+
+    grader = asyncio.create_task(wait())
+
+    async def quick() -> SubScore:
+        await started.wait()
+        if stop == "child":
+            raise asyncio.CancelledError
+        return await asyncio.get_running_loop().create_future()
+
+    combined = asyncio.create_task(combine(quick(), grader))
+    try:
+        await started.wait()
+        if stop != "child":
+            combined.cancel()
+        await cleaning_up.wait()
+        if stop == "caller-twice":
+            combined.cancel()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(combined), timeout=0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await combined
+        assert grader.cancelled() and future.cancelled()
+    finally:
+        release.set()
+        combined.cancel()
+        await asyncio.gather(combined, return_exceptions=True)
+
+
+async def test_a_grader_coroutine_used_twice_runs_once_and_contributes_twice() -> None:
+    completed = []
+
+    async def score() -> SubScore:
+        await asyncio.sleep(0)
+        completed.append("scored")
+        return SubScore(name="shared", value=0.75, weight=0.5)
+
+    grade = score()
+    result = await combine(grade, grade)
+
+    assert completed == ["scored"]
+    assert result.reward == 0.75
+    assert result.subscores is not None
+    assert [(s.value, s.weight) for s in result.subscores] == [(0.75, 0.5)] * 2
+
+
+async def test_a_failed_judgment_closes_the_other_criterion_requests(
+    services: FakeServices, hud_env: HudEnv
+) -> None:
+    hud_env.set(HUD_API_KEY="k")
+    started = threading.Event()
+    stopped = threading.Event()
+    release = threading.Event()
+
+    async def unfinished_response() -> AsyncIterator[bytes]:
+        try:
+            yield b'{"id":'
+            started.set()
+            await eventually(release.is_set)
+            yield b'"unused"}'
+        finally:
+            stopped.set()
+
+    async def respond(request: Request) -> Reply:
+        if "waiting criterion" in json.dumps(request.json):
+            return Reply(stream=unfinished_response(), content_type="application/json")
+        await eventually(started.is_set)
+        return Reply(json={"choices": [{"message": {"content": "no verdict"}}]})
+
+    services.route("gateway", "POST", "/chat/completions", handler=respond)
+
+    try:
+        with pytest.raises(ValueError, match="verdict"):
+            await LLMJudgeGrader.grade(
+                weight=1.0,
+                answer=ANSWER,
+                criteria=["waiting criterion", "failing criterion"],
+            )
+        await eventually(stopped.is_set, within=2.0)
+    finally:
+        release.set()
+        await eventually(stopped.is_set)
 
 
 async def test_repeated_graders_are_named_apart_and_weighted_into_the_reward() -> None:

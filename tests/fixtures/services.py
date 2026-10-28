@@ -28,7 +28,7 @@ from starlette.responses import Response, StreamingResponse
 from starlette.routing import Route, WebSocketRoute
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncIterable, Awaitable, Callable, Iterable
 
     from starlette.requests import Request as StarletteRequest
     from starlette.websockets import WebSocket
@@ -76,7 +76,7 @@ class Reply:
     body: bytes | str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     content_type: str | None = None
-    stream: Iterable[bytes] | None = None
+    stream: Iterable[bytes] | AsyncIterable[bytes] | None = None
     delay: float = 0.0
 
 
@@ -242,7 +242,7 @@ class FakeServices:
             await asyncio.sleep(reply.delay)
         if reply.stream is not None:
             return StreamingResponse(
-                _chunks(reply.stream),
+                reply.stream,
                 status_code=reply.status,
                 headers=reply.headers,
                 media_type=reply.content_type or "text/event-stream",
@@ -293,8 +293,3 @@ class _Sequence:
         del request
         with self._lock:
             return self._replies.pop(0) if len(self._replies) > 1 else self._replies[0]
-
-
-async def _chunks(stream: Iterable[bytes]) -> AsyncIterator[bytes]:
-    for chunk in stream:
-        yield chunk
