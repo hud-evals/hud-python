@@ -31,7 +31,6 @@ def row(attachments: list[dict] | None = None, criteria: list[dict] | None = Non
         prompt="Name three primes.",
         attachments=attachments or [],
         criteria=CRITERIA if criteria is None else criteria,
-        hud_api_key="task-key",
     )
 
 
@@ -52,9 +51,7 @@ async def test_every_editable_argument_declares_its_hint():
         "prompt": "prompt",
         "attachments": "data-files",
         "criteria": "grading",
-        "hud_api_key": None,
     }
-    assert "hud_api_key" not in arguments["required"]
     # The console resolves the attachment reference through $defs.
     assert arguments["properties"]["attachments"]["items"]["$ref"] == "#/$defs/DataFileRef"
     assert "file_id" in arguments["$defs"]["DataFileRef"]["properties"]
@@ -193,7 +190,7 @@ async def test_concurrent_sessions_grade_with_the_runtime_key(rejected, platform
     platform.rejected_answers = rejected
     platform.judging = threading.Barrier(2)
     first = row(criteria=[{"requirement": "An answer is present.", "weight": 1}])
-    second = first.model_copy(update={"args": {**first.args, "hud_api_key": "second-key"}})
+    second = first.model_copy(update={"args": {**first.args, "prompt": "Name two primes."}})
 
     async with (
         SubprocessRuntime(ENV_SOURCE)(first) as runtime,

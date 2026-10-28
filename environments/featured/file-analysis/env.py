@@ -182,12 +182,8 @@ async def review_files(
     attachments: Attachments,
     criteria: Criteria,
     report_path: str = "reconciliation-report.md",
-    hud_api_key: str | None = None,
 ):
-    """Answer a prompt about uploaded files, graded by weighted criteria.
-
-    Declaring ``hud_api_key`` opts hosted rollouts into container-level HUD_API_KEY injection.
-    """
+    """Answer a prompt about uploaded files, graded by weighted criteria."""
     async for result in _review_files(prompt, attachments, criteria, report_path):
         yield result
 
@@ -201,7 +197,6 @@ async def reconcile_supplier_payments(
     prompt: Prompt,
     attachments: Attachments = (),
     criteria: Criteria,
-    hud_api_key: str | None = None,
 ):
     """Review the sample records plus optional uploads using the author's prompt and rubric."""
     source = Path(__file__).resolve().parent
