@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,11 +14,16 @@ if TYPE_CHECKING:
 
 async def resolve_grades(*items: Awaitable[SubScore]) -> list[SubScore]:
     """Resolve grades in order, cancelling and draining siblings on failure."""
-    pending = [asyncio.ensure_future(item) for item in items]
+    pending = {item: asyncio.ensure_future(item) for item in dict.fromkeys(items)}
+    batch = asyncio.gather(*(pending[item] for item in items))
     try:
-        return list(await asyncio.gather(*pending))
+        return list(await asyncio.shield(batch))
     except BaseException:
-        for future in pending:
+        for future in pending.values():
             future.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        cleanup = asyncio.gather(*pending.values(), batch, return_exceptions=True)
+        # Repeated cancellation must not interrupt a grader's cleanup.
+        while not cleanup.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.shield(cleanup)
         raise

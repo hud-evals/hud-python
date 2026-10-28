@@ -87,7 +87,10 @@ async def test_a_failed_grader_stops_its_siblings_before_the_environment_shuts_d
         await eventually(lambda: "grader stopped" in events)
 
 
-async def test_cancelling_parallel_grading_waits_for_a_prestarted_graders_cleanup() -> None:
+@pytest.mark.parametrize("stop", ["caller", "caller-twice", "child"])
+async def test_cancelling_parallel_grading_waits_for_a_prestarted_graders_cleanup(
+    stop: str,
+) -> None:
     started = asyncio.Event()
     cleaning_up = asyncio.Event()
     release = asyncio.Event()
@@ -102,12 +105,23 @@ async def test_cancelling_parallel_grading_waits_for_a_prestarted_graders_cleanu
             await release.wait()
 
     grader = asyncio.create_task(wait())
-    combined = asyncio.create_task(combine(grader))
+
+    async def quick() -> SubScore:
+        await started.wait()
+        if stop == "child":
+            raise asyncio.CancelledError
+        return await asyncio.get_running_loop().create_future()
+
+    combined = asyncio.create_task(combine(quick(), grader))
     try:
         await started.wait()
-        combined.cancel()
+        if stop != "child":
+            combined.cancel()
         await cleaning_up.wait()
-        assert not combined.done()
+        if stop == "caller-twice":
+            combined.cancel()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(combined), timeout=0.05)
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await combined
@@ -116,6 +130,23 @@ async def test_cancelling_parallel_grading_waits_for_a_prestarted_graders_cleanu
         release.set()
         combined.cancel()
         await asyncio.gather(combined, return_exceptions=True)
+
+
+async def test_a_grader_coroutine_used_twice_runs_once_and_contributes_twice() -> None:
+    completed = []
+
+    async def score() -> SubScore:
+        await asyncio.sleep(0)
+        completed.append("scored")
+        return SubScore(name="shared", value=0.75, weight=0.5)
+
+    grade = score()
+    result = await combine(grade, grade)
+
+    assert completed == ["scored"]
+    assert result.reward == 0.75
+    assert result.subscores is not None
+    assert [(s.value, s.weight) for s in result.subscores] == [(0.75, 0.5)] * 2
 
 
 async def test_a_failed_judgment_closes_the_other_criterion_requests(
