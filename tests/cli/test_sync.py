@@ -213,6 +213,48 @@ def test_an_exported_taskset_reads_back_as_the_same_tasks(
     ]
 
 
+@pytest.mark.parametrize("reference", [TASKSET_ID, "demo"], ids=["id", "name"])
+def test_export_refuses_a_missing_taskset_without_overwriting_the_file(
+    reference: str, platform: FakeServices, hud: Hud
+) -> None:
+    platform.route(
+        "api", "GET", "/v2/tasksets/by-name/demo", json={"taskset_id": TASKSET_ID, "name": "demo"}
+    )
+    platform.route(
+        "api", "GET", f"/v2/tasksets/{TASKSET_ID}/export", status=404, json={"detail": "No"}
+    )
+    target = hud.cwd / "tasks.json"
+    target.write_text("original data\n", encoding="utf-8")
+
+    result = hud("sync", "tasks", reference, "--export", "tasks.json", "--json")
+
+    assert result.exit_code != 0, result
+    assert target.read_text(encoding="utf-8") == "original data\n"
+
+
+def test_export_accepts_an_existing_empty_taskset(platform: FakeServices, hud: Hud) -> None:
+    holding(platform, TASKSET_ID, "demo", [])
+
+    result = hud("sync", "tasks", "demo", "--export", "tasks.json", "--json")
+
+    assert result.exit_code == 0, result
+    assert json.loads((hud.cwd / "tasks.json").read_text(encoding="utf-8")) == []
+
+
+def test_sync_does_not_upload_when_the_remote_export_is_missing(
+    platform: FakeServices, hud: Hud
+) -> None:
+    holding(platform, TASKSET_ID, "demo", [])
+    platform.route(
+        "api", "GET", f"/v2/tasksets/{TASKSET_ID}/export", status=404, json={"detail": "No"}
+    )
+
+    result = hud("sync", "tasks", "demo", "tasks.py", "--yes", "--json")
+
+    assert result.exit_code != 0, result
+    assert uploads(platform) == []
+
+
 @pytest.mark.parametrize(
     "ref", ["browser_anchor", ENV_ID], ids=["by-name-across-separators", "by-id"]
 )

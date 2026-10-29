@@ -148,14 +148,9 @@ def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, 
 def fetch_taskset_tasks(
     platform: PlatformClient,
     taskset_id: str,
-) -> tuple[str | None, list[Task]]:
+) -> tuple[str, list[Task]]:
     """Fetch a platform taskset's export, mapped to ``(display_name, [Task])``."""
-    try:
-        export = platform.get(f"/tasksets/{taskset_id}/export", _TasksetExport)
-    except HudRequestError as e:
-        if e.status_code == 404:
-            return None, []
-        raise
+    export = platform.get(f"/tasksets/{taskset_id}/export", _TasksetExport)
     return export.name, export.tasks
 
 
