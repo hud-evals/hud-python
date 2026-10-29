@@ -157,7 +157,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             )
             result_content = [TextContent(type="text", text=f"Error: {error_msg}")]
 
-        citations_enabled = bool((call.meta or {}).get("citations_enabled", False))
+        citations_enabled = call.citations_enabled
         claude_blocks: list[ClaudeToolResultContent] = []
         sibling_docs: list[BetaRequestDocumentBlockParam] = []
 
@@ -475,7 +475,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                             name=block.toolset_name or block.name,
                             arguments=arguments,
                             provider_name=None if block.toolset_name is None else block.name,
-                            meta={"citations_enabled": citations_enabled},
+                            citations_enabled=citations_enabled,
                         )
                     )
                     result.done = False

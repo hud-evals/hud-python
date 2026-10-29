@@ -22,17 +22,9 @@ import contextlib
 import json
 import uuid
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
-from pydantic import (
-    AliasChoices,
-    AnyUrl,
-    BaseModel,
-    ConfigDict,
-    Field,
-    SerializeAsAny,
-    model_validator,
-)
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -162,49 +154,22 @@ class AgentType(StrEnum):
 # schema (``mimeType``, ``isError``, ``structuredContent``), which is the wire
 # format the platform stores; MCP clients and servers convert at their boundary.
 
-Role: TypeAlias = Literal["user", "assistant"]
-
-
-#: MCP's ``_meta``: read from ``_meta`` or from ``meta``, the name a recorded step dumps it
-#: under, and written back as ``_meta`` when dumped by alias.
-_Meta: TypeAlias = Annotated[
-    dict[str, Any] | None,
-    Field(validation_alias=AliasChoices("_meta", "meta"), serialization_alias="_meta"),
-]
-
-
-class Annotations(BaseModel):
-    audience: list[Role] | None = None
-    priority: float | None = Field(default=None, ge=0.0, le=1.0)
-
 
 class TextContent(BaseModel):
     type: Literal["text"]
     text: str
-    annotations: Annotations | None = None
-    meta: _Meta = None
 
 
 class ImageContent(BaseModel):
     type: Literal["image"]
     data: str
     mimeType: str
-    annotations: Annotations | None = None
-    meta: _Meta = None
 
 
 class AudioContent(BaseModel):
     type: Literal["audio"]
     data: str
     mimeType: str
-    annotations: Annotations | None = None
-    meta: _Meta = None
-
-
-class Icon(BaseModel):
-    src: str
-    mimeType: str | None = None
-    sizes: list[str] | None = None
 
 
 class ResourceLink(BaseModel):
@@ -215,30 +180,23 @@ class ResourceLink(BaseModel):
     description: str | None = None
     mimeType: str | None = None
     size: int | None = None
-    icons: list[Icon] | None = None
-    annotations: Annotations | None = None
-    meta: _Meta = None
 
 
 class TextResourceContents(BaseModel):
     uri: AnyUrl
     mimeType: str | None = None
-    meta: _Meta = None
     text: str
 
 
 class BlobResourceContents(BaseModel):
     uri: AnyUrl
     mimeType: str | None = None
-    meta: _Meta = None
     blob: str
 
 
 class EmbeddedResource(BaseModel):
     type: Literal["resource"]
     resource: TextResourceContents | BlobResourceContents
-    annotations: Annotations | None = None
-    meta: _Meta = None
 
 
 ContentBlock: TypeAlias = (
@@ -247,36 +205,21 @@ ContentBlock: TypeAlias = (
 
 
 class PromptMessage(BaseModel):
-    role: Role
+    role: Literal["user", "assistant"]
     content: ContentBlock
-
-
-class ToolAnnotations(BaseModel):
-    title: str | None = None
-    readOnlyHint: bool | None = None
-    destructiveHint: bool | None = None
-    idempotentHint: bool | None = None
-    openWorldHint: bool | None = None
 
 
 class Tool(BaseModel):
     """A tool an environment offers the agent."""
 
     name: str
-    title: str | None = None
     description: str | None = None
     inputSchema: dict[str, Any]
-    outputSchema: dict[str, Any] | None = None
-    icons: list[Icon] | None = None
-    annotations: ToolAnnotations | None = None
-    meta: _Meta = None
-    execution: dict[str, Any] | None = None
 
 
 class ToolCall(BaseModel):
     """A tool call."""
 
-    meta: _Meta = None
     name: str
     #: Widened to admit the raw provider string when it didn't parse as JSON;
     #: a str is never executed — dispatch answers it with an error result.
@@ -284,6 +227,8 @@ class ToolCall(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
     annotation: str | None = None  # Optional explanation of why this action is taken
     provider_name: str | None = None  # Original provider tool name when it differs from MCP name
+    #: Whether the call's text and PDF results go back to Claude as citable documents.
+    citations_enabled: bool = False
 
     def __str__(self) -> str:
         """Format tool call as plain text."""
@@ -316,7 +261,6 @@ class ToolCall(BaseModel):
 class ToolResult(BaseModel):
     """A tool result with optional call_id for correlation."""
 
-    meta: _Meta = None
     content: list[ContentBlock]
     structuredContent: dict[str, Any] | None = None
     isError: bool = False
@@ -559,18 +503,15 @@ class Trace(BaseModel):
 __all__ = [
     "STEP_SCHEMA",
     "AgentType",
-    "Annotations",
     "AudioContent",
     "BlobResourceContents",
     "ContentBlock",
     "EmbeddedResource",
-    "Icon",
     "ImageContent",
     "JsonObject",
     "JsonValue",
     "PromptMessage",
     "ResourceLink",
-    "Role",
     "Step",
     "StepSource",
     "StopCondition",
@@ -579,7 +520,6 @@ __all__ = [
     "TextContent",
     "TextResourceContents",
     "Tool",
-    "ToolAnnotations",
     "ToolCall",
     "ToolResult",
     "Trace",
