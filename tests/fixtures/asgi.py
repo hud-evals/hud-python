@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal
 
 import uvicorn
+from sse_starlette.sse import AppStatus
 
 from hud.capabilities import Capability
 from tests.conftest import eventually
@@ -16,6 +17,10 @@ if TYPE_CHECKING:
 
     from fastmcp import FastMCP
     from starlette.types import ASGIApp
+
+# sse-starlette ends every event stream in the process once it sees a uvicorn server
+# stop, and these servers stop while the process goes on serving others.
+AppStatus.disable_automatic_graceful_drain()
 
 
 @asynccontextmanager
