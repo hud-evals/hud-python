@@ -88,13 +88,38 @@ class _Report(
 
 
 @dataclass(frozen=True)
-class _Target:
+class ImportTarget:
     """The taskset an import writes to."""
 
     name: str
     # None for a taskset the import creates, in ``placement``.
     id: str | None
     placement: Placement | None = None
+
+
+@dataclass(frozen=True)
+class PackedBundle:
+    """A bundle to import into ``target``, held to the format's size limit."""
+
+    target: ImportTarget
+    path: Path
+    # None for a zip given as it is.
+    file_count: int | None
+    size: int
+
+    def plan(self) -> dict[str, Any]:
+        return {
+            "taskset": {
+                "id": self.target.id,
+                "name": self.target.name,
+                "created": self.target.id is None,
+            },
+            "bundle": {
+                "filename": self.path.name,
+                "files": self.file_count,
+                "size_bytes": self.size,
+            },
+        }
 
 
 @harbor_app.command("import")
@@ -149,55 +174,26 @@ def import_command(
         hud harbor import bundle.zip -t tb2 --no-wait --json
         hud harbor import ./tasks --dry-run[/not dim]
     """
-    archive = _given_archive(paths)
     platform = PlatformClient.from_settings()
     state = DirectoryState(AuthScope.resolve(platform))
     link = state.load()
-    import_format = _import_format(platform)
-    default_name = archive.stem if archive else paths[0].resolve().name
-    target = _resolve_target(platform, link, taskset=taskset, project=project, name=default_name)
 
     with tempfile.TemporaryDirectory(prefix="hud-harbor-") as workdir:
-        if archive is None:
-            bundle = Path(workdir) / f"{target.name}.zip"
-            hud_console.progress_message("Packing the bundle...")
-            file_count: int | None = pack_bundle(paths, bundle)
-        else:
-            bundle, file_count = archive, None
-        size = bundle.stat().st_size
-        if size > import_format.max_input_bytes:
-            raise CliError(
-                "usage",
-                f"The bundle is {decimal(size)}; a Harbor import takes at most "
-                f"{decimal(import_format.max_input_bytes)}.",
-                suggestion=(
-                    "Split the folders across several imports into the same taskset; job "
-                    "runs link to tasks imported earlier."
-                ),
-            )
-        plan = {
-            "taskset": {"id": target.id, "name": target.name, "created": target.id is None},
-            "bundle": {"filename": bundle.name, "files": file_count, "size_bytes": size},
-        }
-        _print_plan(target, bundle, file_count, size)
+        bundle = pack_import(
+            platform, link, paths, taskset=taskset, project=project, workdir=Path(workdir)
+        )
+        plan = bundle.plan()
         if dry_run:
             hud_console.info("\n  --dry-run: nothing was uploaded")
             return {**plan, "dry_run": True}
 
         CLI.confirm_or_abort("Start the import?", yes=yes, default=False)
-        if target.id is None:
-            target = _create_taskset(platform, target)
-            plan["taskset"]["id"] = target.id
-            hud_console.success(f"Created taskset {target.name}")
-        assert target.id is not None
+        taskset_id = ensure_taskset(platform, bundle.target)
+        plan["taskset"]["id"] = taskset_id
         if link_target:
-            state.update(DirectoryLink(taskset_id=uuid.UUID(target.id)))
-        file_id = _upload(platform, bundle)
+            state.update(DirectoryLink(taskset_id=uuid.UUID(taskset_id)))
+        imported = upload_and_start(platform, bundle.path, taskset_id)
 
-    imported = imports.start_import(
-        platform, format=IMPORT_FORMAT, file_id=file_id, taskset_id=target.id
-    )
-    hud_console.success(f"Started import {imported.id}")
     if not wait:
         hud_console.hint(f"Follow it with: hud harbor report {imported.id} --wait")
         return {**plan, "import": imported.model_dump(mode="json"), "report": None}
@@ -315,6 +311,82 @@ def cancel_command(
     return imported.model_dump(mode="json")
 
 
+def pack_import(
+    platform: PlatformClient,
+    link: DirectoryLink,
+    paths: list[Path],
+    *,
+    taskset: str | None,
+    project: str | None,
+    workdir: Path,
+) -> PackedBundle:
+    """Resolve the taskset and zip ``paths`` into ``workdir``, or take the one zip given.
+
+    Prints the plan. Nothing is created or uploaded.
+    """
+    archive = _given_archive(paths)
+    import_format = _import_format(platform)
+    default_name = archive.stem if archive else paths[0].resolve().name
+    target = _resolve_target(platform, link, taskset=taskset, project=project, name=default_name)
+    if archive is None:
+        path = workdir / f"{target.name}.zip"
+        hud_console.progress_message("Packing the bundle...")
+        file_count: int | None = pack_bundle(paths, path)
+    else:
+        path, file_count = archive, None
+    size = path.stat().st_size
+    if size > import_format.max_input_bytes:
+        raise CliError(
+            "usage",
+            f"The bundle is {decimal(size)}; a Harbor import takes at most "
+            f"{decimal(import_format.max_input_bytes)}.",
+            suggestion=(
+                "Split the folders across several imports into the same taskset; job "
+                "runs link to tasks imported earlier."
+            ),
+        )
+    bundle = PackedBundle(target=target, path=path, file_count=file_count, size=size)
+    _print_plan(bundle)
+    return bundle
+
+
+def ensure_taskset(platform: PlatformClient, target: ImportTarget) -> str:
+    """The ID of the target taskset, created first when the import creates it."""
+    if target.id is not None:
+        return target.id
+    assert target.placement is not None
+    record = platform.post(
+        "/tasksets",
+        TasksetRecord,
+        json={"name": target.name, "project_id": target.placement.project_id},
+    )
+    hud_console.success(f"Created taskset {record.name}")
+    return str(record.id)
+
+
+def upload_and_start(platform: PlatformClient, bundle: Path, taskset_id: str) -> imports.Import:
+    """Upload the bundle and start importing it into the taskset."""
+    file_id = _upload(platform, bundle)
+    imported = imports.start_import(
+        platform, format=IMPORT_FORMAT, file_id=file_id, taskset_id=taskset_id
+    )
+    hud_console.success(f"Started import {imported.id}")
+    return imported
+
+
+def follow_import(
+    platform: PlatformClient, imported: imports.Import
+) -> tuple[imports.Import, ImportReport | None]:
+    """Follow the import until it ends, then print its report and outcome."""
+    if not imported.ended:
+        imported = _follow(platform, imported.id)
+    report = _read_report(platform, imported)
+    if report is not None:
+        _print_report(report)
+    _print_outcome(imported)
+    return imported, report
+
+
 def _import_format(platform: PlatformClient) -> imports.ImportFormat:
     try:
         formats = imports.list_formats(platform)
@@ -388,7 +460,7 @@ def _resolve_target(
     taskset: str | None,
     project: str | None,
     name: str,
-) -> _Target:
+) -> ImportTarget:
     """The taskset named by ``--taskset``, the directory, or ``name``.
 
     An ID has to name an existing taskset; a name with no taskset is created.
@@ -406,7 +478,7 @@ def _resolve_target(
             )
         placement = Placement.resolve(platform, link, flag=project)
         placement.require_writable()
-        return _Target(name=ref, id=None, placement=placement)
+        return ImportTarget(name=ref, id=None, placement=placement)
 
     if not record.can_edit:
         raise CliError(
@@ -421,26 +493,18 @@ def _resolve_target(
             "taskset this command creates.",
             input={"taskset": given, "project": project},
         )
-    return _Target(name=record.name, id=str(record.id))
+    return ImportTarget(name=record.name, id=str(record.id))
 
 
-def _print_plan(target: _Target, bundle: Path, file_count: int | None, size: int) -> None:
+def _print_plan(bundle: PackedBundle) -> None:
+    target = bundle.target
     if target.placement is not None:
         taskset = f"{target.name} (new, in {target.placement.label})"
     else:
         taskset = f"{target.name} ({target.id})"
-    contents = f"{file_count} files, {decimal(size)}" if file_count is not None else decimal(size)
-    hud_console.key_value_table({"Taskset": taskset, "Bundle": f"{bundle.name} ({contents})"})
-
-
-def _create_taskset(platform: PlatformClient, target: _Target) -> _Target:
-    assert target.placement is not None
-    record = platform.post(
-        "/tasksets",
-        TasksetRecord,
-        json={"name": target.name, "project_id": target.placement.project_id},
-    )
-    return _Target(name=record.name, id=str(record.id))
+    size = decimal(bundle.size)
+    contents = f"{bundle.file_count} files, {size}" if bundle.file_count is not None else size
+    hud_console.key_value_table({"Taskset": taskset, "Bundle": f"{bundle.path.name} ({contents})"})
 
 
 def _upload(platform: PlatformClient, bundle: Path) -> str:
@@ -482,12 +546,7 @@ def _get_import(platform: PlatformClient, import_id: str) -> imports.Import:
 
 def _conclude(platform: PlatformClient, imported: imports.Import, plan: dict[str, Any]) -> Any:
     """Follow the import until it ends, then show its report; one that did not complete fails."""
-    if not imported.ended:
-        imported = _follow(platform, imported.id)
-    report = _read_report(platform, imported)
-    if report is not None:
-        _print_report(report)
-    _print_outcome(imported)
+    imported, report = follow_import(platform, imported)
     payload = {
         **plan,
         "import": imported.model_dump(mode="json"),
