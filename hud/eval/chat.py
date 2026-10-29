@@ -22,6 +22,7 @@ history is the public ``messages`` list — persist and restore it directly.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
@@ -75,6 +76,9 @@ class Chat:
     3. Drives the agent over it through the rollout engine
     4. Appends the assistant response to history
     5. Returns the Trace
+
+    Concurrent sends on one chat run in order. Direct changes to ``messages``
+    are not synchronized; make them between sends.
     """
 
     def __init__(
@@ -104,6 +108,7 @@ class Chat:
         self._agent = agent
         self._runtime = runtime
         self.messages: list[dict[str, Any]] = []
+        self._send_lock = asyncio.Lock()
         #: The conversation's job — every turn's run reports under it
         #: (started on the first ``send``).
         self.job: Job | None = None
@@ -117,42 +122,43 @@ class Chat:
         Returns:
             Trace with the agent's response in ``trace.content``
         """
-        blocks = _content_to_blocks(message)
+        async with self._send_lock:
+            blocks = _content_to_blocks(message)
 
-        # Build PromptMessage-compatible content (single block dict or block list)
-        content_data = _blocks_to_message_content(blocks)
+            # Build PromptMessage-compatible content (single block dict or block list)
+            content_data = _blocks_to_message_content(blocks)
 
-        self.messages.append({"role": "user", "content": content_data})
+            self.messages.append({"role": "user", "content": content_data})
 
-        # Rebuild the task with the running conversation as the ``messages`` arg,
-        # then drive the agent through the rollout engine (the chat task yields
-        # these messages as the prompt; see the messages input modality).
-        task = self._task.model_copy(
-            update={"args": {**self._task.args, "messages": list(self.messages)}},
-        )
-        if self._runtime is None:
-            raise RuntimeError(
-                "Chat needs a runtime to converse against — pass an env placement: "
-                'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
-                "Runtime(url) (a served substrate), or HUDRuntime() (your deployed env)."
+            # Rebuild the task with the running conversation as the ``messages`` arg,
+            # then drive the agent through the rollout engine (the chat task yields
+            # these messages as the prompt; see the messages input modality).
+            task = self._task.model_copy(
+                update={"args": {**self._task.args, "messages": list(self.messages)}},
             )
-        if self.job is None:  # one job spans the whole conversation
-            self.job = await Job.start(self._task.id)
-        run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
-        self.job.runs.append(run)
-        result = run.trace
-        if result.is_error:
-            # Don't record the failed turn as an assistant message.
-            raise RuntimeError(result.error or "chat turn failed")
+            if self._runtime is None:
+                raise RuntimeError(
+                    "Chat needs a runtime to converse against — pass an env placement: "
+                    'LocalRuntime("env.py") (a source file), LocalRuntime(env) (a live env), '
+                    "Runtime(url) (a served substrate), or HUDRuntime() (your deployed env)."
+                )
+            if self.job is None:  # one job spans the whole conversation
+                self.job = await Job.start(self._task.id)
+            run = await rollout(task, self._agent, runtime=self._runtime, job_id=self.job.id)
+            self.job.runs.append(run)
+            result = run.trace
+            if result.is_error:
+                # Don't record the failed turn as an assistant message.
+                raise RuntimeError(result.error or "chat turn failed")
 
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": {"type": "text", "text": result.content or ""},
-        }
-        citations = result.final(lambda s: s.citations if isinstance(s, AgentStep) else None)
-        if citations:
-            assistant_msg["citations"] = [
-                c.model_dump(mode="json", exclude_none=True) for c in citations
-            ]
-        self.messages.append(assistant_msg)
-        return result
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": {"type": "text", "text": result.content or ""},
+            }
+            citations = result.final(lambda s: s.citations if isinstance(s, AgentStep) else None)
+            if citations:
+                assistant_msg["citations"] = [
+                    c.model_dump(mode="json", exclude_none=True) for c in citations
+                ]
+            self.messages.append(assistant_msg)
+            return result
