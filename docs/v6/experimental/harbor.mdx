@@ -72,7 +72,8 @@ the Compose model with `scale: 0` and feed the `main` build through named
 
 Tasks with identical environment and phase configuration share one generated
 environment. A task with a verifier environment forms its own group because its
-verifier image and artifact contract are task-specific.
+verifier image and artifact contract are task-specific. Pass `name` to name the
+environment of a single task folder.
 
 ### Run locally
 
