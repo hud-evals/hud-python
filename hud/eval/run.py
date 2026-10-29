@@ -147,8 +147,7 @@ def _prompt_messages(item: Any) -> list[PromptMessage]:
         ]
     blocks = content if isinstance(content, list) else [content]
     return [
-        PromptMessage.model_validate({**item, "role": role, "content": block})
-        for block in blocks
+        PromptMessage.model_validate({**item, "role": role, "content": block}) for block in blocks
     ]
 
 

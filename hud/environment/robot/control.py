@@ -881,7 +881,7 @@ class DirectControl:
         for camera in self._cameras:
             content.append(TextContent(type="text", text=f"camera {camera}:"))
             content.append(
-                ImageContent(type="image", data=_png(data[camera]), mimeType="image/png")
+                ImageContent(type="image", data=_png(data[camera]), mime_type="image/png")
             )
         return content
 
