@@ -49,8 +49,9 @@ async def collect_code(length: int = 4):
         'Call next_digit until it returns "done", then reply with every digit it returned, '
         "in order, as one string."
     )
-    # A real model may wrap the code in prose; the digits it gives are what count.
-    yield 1.0 if re.sub(r"\D", "", answer) == "".join(code) and revealed == code else 0.0
+    # A real model may wrap the code in prose, and often lists the digits before giving the
+    # code whole, so the code has to appear among the digits it gives.
+    yield 1.0 if "".join(code) in re.sub(r"\D", "", answer) and revealed == code else 0.0
 
 
 tasks = [collect_code()]
