@@ -62,4 +62,6 @@ async def test_a_real_model_takes_each_fixture_to_its_reward(
     (run,) = job.runs
     # Chat Completions has no computer use, so the screen pays it nothing.
     pays = 0.0 if (kind, fixture) == (AgentType.OPENAI_COMPATIBLE, "screen") else 1.0
-    assert (run.reward, run.trace.error) == (pays, None), f"answered {run.trace.content!r}"
+    assert (run.reward, run.trace.error) == (pays, None), (
+        f"answered {run.trace.content!r}, stopped {run.trace.stop_reason!r}"
+    )
