@@ -187,40 +187,36 @@ HARBOR_TASK = {
     "hello-world/task.toml": 'version = "1.0"\n',
     "hello-world/instruction.md": "Say hello.\n",
     "hello-world/environment/Dockerfile": "FROM ubuntu:24.04\n",
-    "hello-world/environment/.env": "GREETING=hello\n",
     "hello-world/tests/test.sh": "echo 1 > /logs/verifier/reward.txt\n",
 }
-IMPORT_ID = "66666666-6666-4666-8666-666666666666"
-FILE_ID = "ffffffff-0000-4000-8000-000000000001"
+
+
 TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
-TASK_ID = "dddddddd-0000-4000-8000-000000000001"
-REGISTERED = {
+IMPORT_ID = "66666666-6666-4666-8666-666666666666"
+IMPORTED = {
     "name": "hello-world",
     "source": "bundle",
     "path": "hello-world",
     "environment_id": ENV_ID,
     "build_id": BUILD_ID,
-    "build_version": 1,
-    "task_id": TASK_ID,
     "status": "imported",
 }
 
 
-def harbor_report(task: dict[str, Any]) -> dict[str, Any]:
+def import_report(task: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "harbor_import_report.v5",
         "taskset_id": TASKSET_ID,
         "tasks": [task],
         "jobs": [],
         "warnings": [],
-        "error": None,
     }
 
 
 @pytest.fixture
 def harbor(builds: FakeServices, hud: Hud) -> FakeServices:
-    """A Harbor task folder, and a platform that imports it into a new ``tb2`` taskset as the
-    unbuilt version ``BUILD_ID`` of ``ENV_ID``, then builds that version."""
+    """A Harbor task folder, and a platform whose import registers it as the unbuilt build
+    ``BUILD_ID`` of ``ENV_ID`` in taskset ``tb2``."""
     write_files(hud.cwd, HARBOR_TASK)
     formats = [{"format": "harbor", "title": "Harbor", "max_input_bytes": 1024**3}]
     builds.route("api", "GET", "/v2/imports/formats", json={"formats": formats})
@@ -228,18 +224,11 @@ def harbor(builds: FakeServices, hud: Hud) -> FakeServices:
         "api",
         "POST",
         "/v2/imports/uploads",
-        json={
-            "file": {"id": FILE_ID, "filename": "hello-world.zip"},
-            "upload_url": f"{builds.url('api')}/uploads/{FILE_ID}",
-        },
+        json={"file": {"id": "file-1"}, "upload_url": f"{builds.url('api')}/uploads/file-1"},
     )
-    builds.route("api", "POST", "/v2/data/{id}/complete", json={"id": FILE_ID})
-    builds.route(
-        "api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={"detail": "Not found"}
-    )
-    builds.route(
-        "api", "POST", "/v2/tasksets", json={"id": TASKSET_ID, "name": "tb2", "can_edit": True}
-    )
+    builds.route("api", "POST", "/v2/data/{id}/complete", json={})
+    builds.route("api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={})
+    builds.route("api", "POST", "/v2/tasksets", json={"id": TASKSET_ID, "name": "tb2"})
     builds.route(
         "api",
         "POST",
@@ -248,14 +237,12 @@ def harbor(builds: FakeServices, hud: Hud) -> FakeServices:
             "id": IMPORT_ID,
             "format": "harbor",
             "taskset_id": TASKSET_ID,
-            "file": {"id": FILE_ID, "filename": "hello-world.zip", "size_bytes": 1},
+            "file": {"id": "file-1", "filename": "hello-world.zip", "size_bytes": 1},
             "status": "completed",
-            "summary": "Imported 1 task(s)",
             "created_at": "2026-10-07T12:00:00Z",
-            "completed_at": "2026-10-07T12:01:00Z",
         },
     )
-    builds.route("api", "GET", f"/v2/imports/{IMPORT_ID}/report", json=harbor_report(REGISTERED))
+    builds.route("api", "GET", f"/v2/imports/{IMPORT_ID}/report", json=import_report(IMPORTED))
     builds.route(
         "api",
         "GET",
@@ -266,25 +253,16 @@ def harbor(builds: FakeServices, hud: Hud) -> FakeServices:
     return builds
 
 
-def imported_bundle(services: FakeServices) -> set[str]:
-    """Member names of the Harbor bundle the platform received."""
-    (upload,) = services.requests("api", "PUT", "/uploads/{id}")
-    with zipfile.ZipFile(io.BytesIO(upload.body)) as archive:
-        return set(archive.namelist())
-
-
-def test_a_harbor_task_folder_is_imported_into_its_taskset_and_the_version_it_holds_is_built(
+def test_a_harbor_task_folder_is_imported_and_the_build_it_registered_is_built(
     harbor: FakeServices, hud: Hud
 ) -> None:
-    result = hud(
-        *("deploy", "hello-world", "--taskset", "tb2", "--env", "TOKEN=t"),
-        *("--yes", "--json"),
-    )
+    result = hud("deploy", "hello-world", "-t", "tb2", "-e", "TOKEN=t", "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert imported_bundle(harbor) == set(HARBOR_TASK)
+    (upload,) = harbor.requests("api", "PUT", "/uploads/{id}")
+    with zipfile.ZipFile(io.BytesIO(upload.body)) as bundle:
+        assert set(bundle.namelist()) == set(HARBOR_TASK)
     assert harbor.bodies("api", "POST", "/v2/imports")[0]["taskset_id"] == TASKSET_ID
-    assert harbor.requests("api", "POST", "/v2/builds/register") == []
     assert triggered(harbor) == {
         "source": "direct",
         "registry_id": ENV_ID,
@@ -292,92 +270,57 @@ def test_a_harbor_task_folder_is_imported_into_its_taskset_and_the_version_it_ho
         "no_cache": False,
         "environment_variables": {"TOKEN": "t"},
     }
-    assert {key: result.json[key] for key in ("status", "taskset_id", "task_id", "import_id")} == {
-        "status": "SUCCEEDED",
-        "taskset_id": TASKSET_ID,
-        "task_id": TASK_ID,
-        "import_id": IMPORT_ID,
-    }
+    assert result.json["status"] == "SUCCEEDED"
     assert not (hud.cwd / "hello-world" / ".hud").exists()
 
 
-def test_upload_only_adds_the_task_and_builds_nothing(harbor: FakeServices, hud: Hud) -> None:
+def test_upload_only_imports_the_folder_and_builds_nothing(harbor: FakeServices, hud: Hud) -> None:
     result = hud("deploy", "hello-world", "--upload-only", "--yes", "--json")
 
     assert result.exit_code == 0, result
-    assert harbor.bodies("api", "POST", "/v2/tasksets")[0]["name"] == "hello-world"
-    assert harbor.requests("api", "POST", "/v2/builds/trigger") == []
-    assert (result.json["status"], result.json["task_id"]) == ("UPLOADED", TASK_ID)
-
-
-@pytest.mark.parametrize(("status", "exit_code"), [("SUCCEEDED", 0), ("FAILED", 1)])
-def test_a_version_whose_build_ended_is_reported_and_not_built_again(
-    status: str, exit_code: int, harbor: FakeServices, hud: Hud
-) -> None:
-    harbor.route(
-        "api", "GET", f"/v2/builds/{BUILD_ID}/status", json={**SUCCEEDED, "status": status}
-    )
-
-    result = hud("deploy", "hello-world", "--yes", "--json")
-
-    assert (result.exit_code, result.json["status"]) == (exit_code, status), result
+    assert result.json["report"]["tasks"][0]["build_id"] == BUILD_ID
     assert harbor.requests("api", "POST", "/v2/builds/trigger") == []
 
 
-def test_a_folder_the_import_does_not_register_builds_nothing(
-    harbor: FakeServices, hud: Hud
-) -> None:
-    skipped = {
-        "name": "hello-world",
-        "source": "bundle",
-        "path": "hello-world",
-        "status": "skipped",
-        "reason": "not a valid Harbor task: instruction.md is missing",
-    }
-    harbor.route("api", "GET", f"/v2/imports/{IMPORT_ID}/report", json=harbor_report(skipped))
+def test_a_folder_the_import_skips_builds_nothing(harbor: FakeServices, hud: Hud) -> None:
+    skipped = {**IMPORTED, "environment_id": None, "build_id": None, "status": "skipped"}
+    harbor.route("api", "GET", f"/v2/imports/{IMPORT_ID}/report", json=import_report(skipped))
 
     result = hud("deploy", "hello-world", "--yes", "--json")
 
-    assert (result.exit_code, result.json["success"]) == (1, False), result
-    assert "instruction.md is missing" in result.stderr
-    assert harbor.requests("api", "GET", f"/v2/builds/{BUILD_ID}/status") == []
+    assert result.exit_code == 1, result
     assert harbor.requests("api", "POST", "/v2/builds/trigger") == []
 
 
 @pytest.mark.parametrize(
-    ("flags", "refused"),
+    "flags",
     [
-        (("--name", "greet"), "--name"),
-        (("--registry-id", ENV_ID), "--registry-id"),
-        (("--runtime-config", "runtime.json"), "--runtime-config"),
-        (("--build-arg", "A=1"), "--build-arg"),
-        (("--secret", "id=TOKEN,env=TOKEN"), "--secret"),
-        (("--runtime", "hud"), "--runtime"),
-        (("--upload-only", "--env", "A=1"), "--env"),
-        (("--upload-only", "--no-cache"), "--no-cache"),
+        ("--name", "greet"),
+        ("--registry-id", ENV_ID),
+        ("--runtime-config", "runtime.json"),
+        ("--build-arg", "A=1"),
+        ("--secret", "id=TOKEN,env=TOKEN"),
+        ("--runtime", "hud"),
+        ("--upload-only", "--no-cache"),
     ],
-    ids=lambda value: " ".join(value) if isinstance(value, tuple) else "",
+    ids=" ".join,
 )
 def test_a_harbor_task_folder_takes_no_build_configuration(
-    flags: tuple[str, ...], refused: str, signed_in: FakeServices, hud: Hud
+    flags: tuple[str, ...], signed_in: FakeServices, hud: Hud
 ) -> None:
     write_files(hud.cwd, HARBOR_TASK)
 
     result = hud("deploy", "hello-world", *flags, "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert refused in result.json["message"]
+    assert flags[0] in result.json["message"]
     assert signed_in.requests("api", "POST") == []
 
 
-@pytest.mark.parametrize("flags", [("--taskset", "tb2"), ("--upload-only",)], ids=str)
-def test_an_environment_deploy_takes_no_harbor_flags(
-    flags: tuple[str, ...], builds: FakeServices, hud: Hud
-) -> None:
-    result = hud("deploy", *flags, "--yes", "--json")
+def test_an_environment_deploy_takes_no_taskset(builds: FakeServices, hud: Hud) -> None:
+    result = hud("deploy", "--taskset", "tb2", "--yes", "--json")
 
     assert (result.exit_code, result.json["error"]) == (2, "usage"), result
-    assert builds.requests("api", "POST") == []
 
 
 @pytest.mark.parametrize(

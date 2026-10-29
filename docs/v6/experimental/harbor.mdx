@@ -192,27 +192,23 @@ hud deploy ./tasks/hello-world --taskset my-benchmark
 hud eval my-benchmark claude
 ```
 
-`hud deploy` on a Harbor task folder (one holding `task.toml` and no `Environment(...)`) runs a
-Harbor import of that folder into the taskset, exactly as `hud harbor import` would, and follows
-it: the folder becomes a task of the taskset and a version of the environment named after the
-folder, which keeps the folder as its source. The deploy then builds that version: HUD adapts the
-folder with this adapter and builds the result on Modal. Once built, the task runs the adapted
-task, keeping the Harbor environment and verifier, on any model and from the web app or
-`hud eval`. A folder the adapter cannot adapt fails the build with the adapter's findings.
+`hud deploy` on a Harbor task folder (one holding `task.toml` and no `Environment(...)`) runs
+`hud harbor import` on that folder, so `--taskset` and `--project` work as they do there: the
+folder becomes a task of the taskset and a version of the environment named after the folder.
+The deploy then builds that version: HUD adapts the folder with this adapter and builds the result
+on Modal. Once built, the task runs the adapted task, keeping the Harbor environment and verifier,
+on any model and from the web app or `hud eval`. A folder the adapter cannot adapt fails the build
+with the adapter's findings.
 
-Deploying unchanged content again registers no new version: the deploy follows the version that holds
-it if it is building, and reports it without building again if its build has ended. Changed
-content becomes a new version, which the task moves to and runs once that version is built.
-`--upload-only` stops after the import, leaving the version unbuilt; deploy the folder again to
-build it. Tasks imported earlier with `hud harbor import` are the same tasks, so deploying their
-folders into the same taskset builds them.
+Unchanged content imports as the version that already holds it, so deploying it again shows that
+version's build instead of building again. Changed content becomes a new version, which the task
+moves to and runs once that version is built. `--upload-only` stops after the import; deploy the
+folder again to build it.
 
-`--taskset` defaults to the current directory's taskset, then a taskset named after the folder,
-and `--project` places a taskset the deploy creates. The deploy takes `--env`, `--env-file`, and
-`--no-cache` for the build, refuses `--name`, `--registry-id`, `--runtime-config`,
-`--build-arg`, `--secret`, and a `--runtime` other than `modal`, and does not link the folder.
-Deploy each task folder on its own; to package a whole dataset yourself instead,
-[adapt it](#adapt-harbor-tasks) and deploy the generated environments.
+The deploy takes `--env`, `--env-file`, and `--no-cache` for the build, refuses `--name`,
+`--registry-id`, `--runtime-config`, `--build-arg`, `--secret`, and a `--runtime` other than
+`modal`, and does not link the folder. Deploy each task folder on its own; to package a whole
+dataset yourself instead, [adapt it](#adapt-harbor-tasks) and deploy the generated environments.
 
 ## Export HUD tasks to Harbor
 
