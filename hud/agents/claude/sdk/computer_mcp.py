@@ -20,12 +20,11 @@ from typing import TYPE_CHECKING, Any
 import asyncssh
 import fastmcp
 import mcp.types as mcp_types
-from fastmcp.exceptions import ToolError
 from pydantic import TypeAdapter
 
 from hud.agents.claude.tools.computer import ClaudeComputerTool
 from hud.agents.cli import WINDOWS_SHELLS
-from hud.agents.tools.base import AgentToolSpec, result_text
+from hud.agents.tools.base import AgentToolSpec
 from hud.capabilities import Capability
 from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
 
@@ -39,7 +38,6 @@ SCREENSHOT_ENCODING_ENV = "HUD_SCREENSHOT_ENCODING"
 _PROCESS_CLOSE_TIMEOUT_S = 5.0
 _BRIDGE_READY_TIMEOUT_S = 5.0
 _REMOTE_TMP = PurePosixPath("/") / "tmp"
-_MCP_CONTENT = TypeAdapter(list[mcp_types.ContentBlock])
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +63,7 @@ def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding)
         duration: float | None = None,
         repeat: int | None = None,
         region: list[int] | None = None,
-    ) -> list[Any]:
+    ) -> mcp_types.CallToolResult:
         """Control a remote screen — screenshot, click, type, key, scroll, move, drag, wait, zoom.
 
         Actions: screenshot, left_click, right_click, middle_click, double_click,
@@ -90,13 +88,8 @@ def create_computer_mcp(rfb: RFBClient, screenshot_encoding: ScreenshotEncoding)
             if value is not None
         }
         result = await tool.execute(arguments)
-        if result.isError:
-            raise ToolError(result_text(result) or "computer action failed")
-        return _MCP_CONTENT.validate_python(
-            [
-                block.model_dump(mode="json", by_alias=True, exclude_none=True)
-                for block in result.content
-            ]
+        return mcp_types.CallToolResult.model_validate(
+            result.model_dump(mode="json", by_alias=True, exclude_none=True, exclude={"call_id"})
         )
 
     return mcp

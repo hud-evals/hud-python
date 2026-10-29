@@ -18,9 +18,6 @@ from fastmcp.exceptions import ToolError
 from mcp.shared.exceptions import MCPError
 
 from hud.capabilities import Capability, MCPClient
-from hud.capabilities.mcp import get_mcp_trace_id
-from hud.telemetry.context import set_trace_context
-from hud.types import TextContent
 from tests.clients.conftest import relayed
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server, serve_asgi
@@ -272,22 +269,3 @@ async def test_a_cancelled_and_a_timed_out_tool_call_end_and_the_next_one_runs()
             await client.close()
 
     assert added.structuredContent == {"result": 5}
-
-
-async def test_a_tool_call_carries_the_callers_trace_id_to_the_server() -> None:
-    server = FastMCP("probe")
-
-    @server.tool
-    def whoami() -> str:
-        """The trace id the call arrived with."""
-        return get_mcp_trace_id() or ""
-
-    async with mcp_server(server) as capability:
-        client = await MCPClient.connect(capability)
-        try:
-            with set_trace_context("child-trace"):
-                result = await client.call_tool("whoami", {})
-        finally:
-            await client.close()
-
-    assert result.content == [TextContent(type="text", text="child-trace")]

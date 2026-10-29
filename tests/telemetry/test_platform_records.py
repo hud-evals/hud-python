@@ -11,17 +11,20 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import pytest
+from fastmcp import FastMCP
 
 from hud import Environment
 from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
+from hud.capabilities import MCPClient
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
+from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import checked
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from hud.eval import Run
     from tests.conftest import HudEnv
@@ -203,17 +206,46 @@ AMBIENTS = [("a" * 32, "a" * 32), (str(uuid.UUID(TRACE_ID)), None)]
 AMBIENT_IDS = ["another-trace-is-the-parent", "its-own-trace-is-not-its-parent"]
 
 
+async def start_in_process(ambient: str, start: Callable[[], Awaitable[None]]) -> None:
+    with set_trace_context(ambient):
+        await start()
+
+
+async def start_from_an_mcp_tool(ambient: str, start: Callable[[], Awaitable[None]]) -> None:
+    server = FastMCP("starter")
+
+    @server.tool
+    async def start_rollout() -> str:
+        """Start the rollout."""
+        await start()
+        return "started"
+
+    async with mcp_server(server) as capability:
+        client = await MCPClient.connect(capability)
+        try:
+            with set_trace_context(ambient):
+                await client.call_tool("start_rollout", {})
+        finally:
+            await client.close()
+
+
+@pytest.mark.parametrize("started", [start_in_process, start_from_an_mcp_tool])
 @pytest.mark.parametrize(("ambient", "parent"), AMBIENTS, ids=AMBIENT_IDS)
 async def test_the_trace_record_names_the_parent_trace(
-    ambient: str, parent: str | None, reporting: FakeServices
+    started: Callable[[str, Callable[[], Awaitable[None]]], Awaitable[None]],
+    ambient: str,
+    parent: str | None,
+    reporting: FakeServices,
 ) -> None:
-    with set_trace_context(ambient):
+    async def start() -> None:
         await rollout(
             Task(env="checked", id="check"),
             ScriptedAgent("yes"),
             runtime=LocalRuntime(checked()),
             trace_id=TRACE_ID,
         )
+
+    await started(ambient, start)
 
     (entered,) = reporting.bodies("api", "POST", "/v2/trace/{id}/enter")
     assert entered.get("parent_trace_id") == parent

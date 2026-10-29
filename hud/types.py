@@ -22,9 +22,17 @@ import contextlib
 import json
 import uuid
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from pydantic import (
+    AliasChoices,
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    model_validator,
+)
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -157,45 +165,49 @@ class AgentType(StrEnum):
 Role: TypeAlias = Literal["user", "assistant"]
 
 
-class _WireModel(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+#: MCP's ``_meta``: read from ``_meta`` or from ``meta``, the name a recorded step dumps it
+#: under, and written back as ``_meta`` when dumped by alias.
+_Meta: TypeAlias = Annotated[
+    dict[str, Any] | None,
+    Field(validation_alias=AliasChoices("_meta", "meta"), serialization_alias="_meta"),
+]
 
 
-class Annotations(_WireModel):
+class Annotations(BaseModel):
     audience: list[Role] | None = None
     priority: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
-class TextContent(_WireModel):
+class TextContent(BaseModel):
     type: Literal["text"]
     text: str
     annotations: Annotations | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
 
 
-class ImageContent(_WireModel):
+class ImageContent(BaseModel):
     type: Literal["image"]
     data: str
     mimeType: str
     annotations: Annotations | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
 
 
-class AudioContent(_WireModel):
+class AudioContent(BaseModel):
     type: Literal["audio"]
     data: str
     mimeType: str
     annotations: Annotations | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
 
 
-class Icon(_WireModel):
+class Icon(BaseModel):
     src: str
     mimeType: str | None = None
     sizes: list[str] | None = None
 
 
-class ResourceLink(_WireModel):
+class ResourceLink(BaseModel):
     type: Literal["resource_link"]
     name: str
     title: str | None = None
@@ -205,28 +217,28 @@ class ResourceLink(_WireModel):
     size: int | None = None
     icons: list[Icon] | None = None
     annotations: Annotations | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
 
 
-class TextResourceContents(_WireModel):
+class TextResourceContents(BaseModel):
     uri: AnyUrl
     mimeType: str | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
     text: str
 
 
-class BlobResourceContents(_WireModel):
+class BlobResourceContents(BaseModel):
     uri: AnyUrl
     mimeType: str | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
     blob: str
 
 
-class EmbeddedResource(_WireModel):
+class EmbeddedResource(BaseModel):
     type: Literal["resource"]
     resource: TextResourceContents | BlobResourceContents
     annotations: Annotations | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
 
 
 ContentBlock: TypeAlias = (
@@ -234,12 +246,12 @@ ContentBlock: TypeAlias = (
 )
 
 
-class PromptMessage(_WireModel):
+class PromptMessage(BaseModel):
     role: Role
     content: ContentBlock
 
 
-class ToolAnnotations(_WireModel):
+class ToolAnnotations(BaseModel):
     title: str | None = None
     readOnlyHint: bool | None = None
     destructiveHint: bool | None = None
@@ -247,7 +259,7 @@ class ToolAnnotations(_WireModel):
     openWorldHint: bool | None = None
 
 
-class Tool(_WireModel):
+class Tool(BaseModel):
     """A tool an environment offers the agent."""
 
     name: str
@@ -257,14 +269,14 @@ class Tool(_WireModel):
     outputSchema: dict[str, Any] | None = None
     icons: list[Icon] | None = None
     annotations: ToolAnnotations | None = None
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
     execution: dict[str, Any] | None = None
 
 
-class ToolCall(_WireModel):
+class ToolCall(BaseModel):
     """A tool call."""
 
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
     name: str
     #: Widened to admit the raw provider string when it didn't parse as JSON;
     #: a str is never executed — dispatch answers it with an error result.
@@ -301,10 +313,10 @@ class ToolCall(_WireModel):
         return s
 
 
-class ToolResult(_WireModel):
+class ToolResult(BaseModel):
     """A tool result with optional call_id for correlation."""
 
-    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+    meta: _Meta = None
     content: list[ContentBlock]
     structuredContent: dict[str, Any] | None = None
     isError: bool = False
