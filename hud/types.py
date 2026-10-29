@@ -176,7 +176,6 @@ _Meta: TypeAlias = Annotated[
 class Annotations(BaseModel):
     audience: list[Role] | None = None
     priority: float | None = Field(default=None, ge=0.0, le=1.0)
-    lastModified: str | None = None
 
 
 class TextContent(BaseModel):
@@ -206,7 +205,6 @@ class Icon(BaseModel):
     src: str
     mimeType: str | None = None
     sizes: list[str] | None = None
-    theme: Literal["light", "dark"] | None = None
 
 
 class ResourceLink(BaseModel):
