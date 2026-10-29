@@ -26,7 +26,9 @@ async def read_secret():
     token = secrets.token_hex(8)
     (ROOT / "note.txt").write_text(token, encoding="utf-8")
     answer = yield f"Read the file {ROOT / 'note.txt'} and reply with its contents only."
-    yield 1.0 if (answer or "").strip() == token else 0.0
+    # A real model may wrap the token, even in the shell output's own format; the
+    # token it gives is what counts.
+    yield 1.0 if token in (answer or "") else 0.0
 
 
 tasks = [read_secret()]
