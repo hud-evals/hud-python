@@ -341,7 +341,8 @@ replaced with the running conversation on every `send`; pass `runtime=` to place
 ### Managing history
 
 The conversation history **is** the public `chat.messages` list - persist it, restore it, or reset it
-directly:
+directly. Concurrent sends on the same chat run in order; separate chats can run independently.
+Change `chat.messages` directly only between sends, since those changes are not synchronized:
 
 | Operation | Description |
 |-----------|-------------|
