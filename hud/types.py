@@ -150,9 +150,6 @@ class AgentType(StrEnum):
 # -----------------------------------------------------------------------------
 # Content and tool calls
 # -----------------------------------------------------------------------------
-# The shapes HUD records in traces. Field names keep MCP's original camelCase
-# schema (``mimeType``, ``isError``, ``structuredContent``), which is the wire
-# format the platform stores; MCP clients and servers convert at their boundary.
 
 
 class TextContent(BaseModel):
@@ -218,15 +215,13 @@ class Tool(BaseModel):
 
 
 class ToolCall(BaseModel):
-    """A tool call."""
-
     name: str
-    #: Widened to admit the raw provider string when it didn't parse as JSON;
-    #: a str is never executed — dispatch answers it with an error result.
+    #: A str is the provider's raw arguments that didn't parse as JSON; it is never executed.
     arguments: dict[str, Any] | str | None = None
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
-    annotation: str | None = None  # Optional explanation of why this action is taken
-    provider_name: str | None = None  # Original provider tool name when it differs from MCP name
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    annotation: str | None = None
+    #: The provider's own name for the tool, when it differs from ``name``.
+    provider_name: str | None = None
     #: Whether the call's text and PDF results go back to Claude as citable documents.
     citations_enabled: bool = False
 
@@ -259,12 +254,10 @@ class ToolCall(BaseModel):
 
 
 class ToolResult(BaseModel):
-    """A tool result with optional call_id for correlation."""
-
     content: list[ContentBlock]
     structuredContent: dict[str, Any] | None = None
     isError: bool = False
-    call_id: str | None = None  # For correlating with provider-specific tool call IDs
+    call_id: str | None = None
 
     def _get_content_summary(self) -> str:
         """Extract a summary of the content."""
