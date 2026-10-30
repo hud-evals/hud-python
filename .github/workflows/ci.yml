@@ -39,6 +39,11 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --all-extras pytest -n auto
 
+      # Not in the root testpaths: the cookbook's top-level `env` and `bugs`
+      # modules would shadow same-named modules other tests load.
+      - name: Run daytona-rl grader tests
+        run: uv run --python ${{ matrix.python-version }} --all-extras --no-extra browseruse pytest cookbooks/daytona-rl/tests
+
   lint-ruff:
     runs-on: ubuntu-latest
     steps:
