@@ -21,7 +21,6 @@ from tests.fixtures.envs import HERE, source
 if TYPE_CHECKING:
     from tests.conftest import HudEnv
 
-#: The cheapest current model the gateway serves each family that answers every fixture.
 MODELS = {
     AgentType.CLAUDE: "claude-haiku-5-5",
     AgentType.OPENAI: "gpt-6-luna",
