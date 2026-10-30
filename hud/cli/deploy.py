@@ -35,9 +35,11 @@ from hud.cli import (
     Result,
     parse_key_value,
 )
+from hud.cli.harbor import import_command
 from hud.cli.project import PROJECT_OPTION_HELP, Placement
 from hud.cli.sync import RegistryEnvironment
 from hud.eval.runtime import RuntimeConfig
+from hud.integrations.harbor.importing import ImportReport
 from hud.settings import settings
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
@@ -78,6 +80,10 @@ _UNSEARCHED_DIRS = {
 
 _REGISTRY_RUNTIMES = ("hud", "modal")
 """Default runtimes a registry accepts (the platform's ``RequestedRuntimeProvider``)."""
+
+HARBOR_TASK_FILE = "task.toml"
+"""Marks a Harbor task folder. One that declares no ``Environment(...)`` deploys through
+``hud harbor import``, which registers it as a version of the HUD environment it imports into."""
 
 
 def _dockerignore_re(pattern: str) -> re.Pattern[str]:
@@ -219,6 +225,17 @@ async def deploy_command(
         "--runtime-config",
         help="Path to a JSON RuntimeConfig for hosted runs",
     ),
+    taskset: str | None = typer.Option(
+        None,
+        "--taskset",
+        "-t",
+        help="Harbor task folder only: taskset to import it into (see hud harbor import).",
+    ),
+    upload_only: bool = typer.Option(
+        False,
+        "--upload-only",
+        help="Harbor task folder only: import it without building it.",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the planned action without making changes."
     ),
@@ -239,9 +256,17 @@ async def deploy_command(
     build. Compose and other run settings belong in ``--runtime-config`` or on
     the task, not inferred from filenames.
 
+    A Harbor task folder (one holding ``task.toml`` and no ``Environment(...)``)
+    is imported into ``--taskset`` with ``hud harbor import``, then HUD adapts
+    and builds the version the import registered on Modal. ``--upload-only``
+    stops after the import. It takes no ``--name``, ``--registry-id``,
+    ``--runtime-config``, ``--build-arg``, ``--secret``, or ``--runtime``
+    other than ``modal``.
+
     [not dim]Examples:
         hud deploy
         hud deploy --name judge
+        hud deploy tasks/hello-world --taskset tb2
         hud deploy --yes --json
         hud deploy --dry-run --json[/not dim]
     """
@@ -283,13 +308,47 @@ async def deploy_command(
             if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str):
                 names.add(name_node.value)
     found = ", ".join(sorted(names))
-    if not names:
+    harbor_folder = not names and source.is_dir() and (source / HARBOR_TASK_FILE).is_file()
+    if harbor_folder:
+        refused = [
+            flag
+            for flag, given in (
+                ("--name", name is not None),
+                ("--registry-id", registry_id is not None),
+                ("--runtime-config", runtime_config is not None),
+                ("--build-arg", bool(build_args)),
+                ("--secret", bool(secrets)),
+                ("--runtime", runtime is not None and runtime.lower() != "modal"),
+            )
+            if given
+        ]
+        if refused:
+            raise CliError(
+                "usage",
+                f"A Harbor task folder deploys without {', '.join(refused)}.",
+                suggestion="HUD builds a Harbor task folder on Modal from the folder itself.",
+                input={"directory": directory},
+            )
+        if upload_only and (env or env_file is not None or no_cache):
+            raise CliError(
+                "usage",
+                "--upload-only builds nothing, so it takes no --env, --env-file, or --no-cache.",
+                input={"directory": directory},
+            )
+        name = source.name
+    elif taskset is not None or upload_only:
+        raise CliError(
+            "usage",
+            "--taskset and --upload-only deploy a Harbor task folder only.",
+            input={"directory": directory},
+        )
+    elif not names:
         raise CliError(
             "usage",
             f"No environment found in {source}.",
             suggestion="Declare the environment with Environment(name=...) in a .py file.",
         )
-    if name is not None:
+    elif name is not None:
         if name not in names:
             raise ValueError(f"No environment named {name!r} in {source}. Found: {found}.")
     elif len(names) > 1:
@@ -402,6 +461,18 @@ async def deploy_command(
         else:
             raise ValueError(f"Invalid --secret format: {secret_spec} (need env= or src=)")
 
+    if harbor_folder:
+        return await _deploy_harbor_folder(
+            platform,
+            source,
+            taskset=taskset,
+            project=project,
+            env_vars=env_vars,
+            no_cache=no_cache,
+            upload_only=upload_only,
+            dry_run=dry_run,
+            yes=yes,
+        )
     if not dotenv_pending and not no_env and env_file is None and (env_dir / ".env").is_file():
         hud_console.dim_info("Registry secrets:", "kept. Pass --env-file .env to upsert.")
     if dry_run:
@@ -503,90 +574,149 @@ async def deploy_command(
             },
         )
         hud_console.success(f"Build triggered [{time.time() - started:.1f}s]")
-        build_id = build.id
-        built_registry_id = build.registry_id
         if registry_id is None and project is None:
-            state.update(DirectoryLink(registry_id=built_registry_id))
-        hud_console.info(f"Build ID: {build_id}")
-        hud_console.info("")
-
-        hud_console.section_title("Build Logs")
-        http_url = platform.url(f"/builds/{build_id}/logs", params={"api_key": platform.api_key})
-        parts = urlsplit(http_url)
-        ws_url = urlunsplit(
-            (
-                "wss" if parts.scheme == "https" else "ws",
-                parts.netloc,
-                parts.path,
-                parts.query,
-                parts.fragment,
-            )
-        )
-        try:
-            hud_console.info("Connecting to build logs stream...")
-            async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as websocket:
-                async for message in websocket:
-                    frame = json.loads(message)
-                    match frame["type"]:
-                        case "status":
-                            hud_console.info(frame["message"])
-                        case "status_update" if frame.get("status") != "IN_PROGRESS":
-                            hud_console.info(f"Build status: {frame.get('status', '')}")
-                        case "log" if frame.get("message"):
-                            timestamp_ms = frame.get("timestamp")
-                            prefix = (
-                                f"[{datetime.fromtimestamp(timestamp_ms / 1000):%H:%M:%S}] "
-                                if timestamp_ms is not None
-                                else ""
-                            )
-                            hud_console.info(f"{prefix}{frame['message'].rstrip()}")
-                        case "complete":
-                            hud_console.info(frame["message"])
-                            break
-                        case "error":
-                            hud_console.error(f"Build error: {frame['error']}")
-                            break
-        except ConnectionClosed as e:
-            if e.code == 4003:
-                hud_console.error(f"Access denied: {e.reason}")
-            else:
-                hud_console.warning(f"Log stream closed: {e.reason}")
-        except (OSError, WebSocketException) as e:
-            hud_console.warning(f"Log stream unavailable: {e}")
-
-        status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
-        while status["status"] in {"IN_PROGRESS", "MIGRATING", "CANCELLING"}:
-            await asyncio.sleep(5)
-            status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
-
-        manifest = status.get("manifest") or {}
-        tasks = [task["id"] for task in manifest.get("tasks") or []]
-        capabilities = [capability["name"] for capability in manifest.get("capabilities") or []]
-        summary: dict[str, str | int | float] = {
-            "Environment": name,
-            "Status": status["status"],
-            "Version": status.get("version") or "unknown",
-        }
-        if uri := status.get("uri"):
-            summary["Image"] = uri
-        if error_message := status.get("error_message"):
-            summary["Error"] = error_message
-        if tasks:
-            summary["Tasks"] = ", ".join(tasks)
-        if capabilities:
-            summary["Capabilities"] = ", ".join(capabilities)
-        hud_console.section_title("Build")
-        hud_console.key_value_table(summary)
-        hud_console.link(f"{settings.hud_web_url}/environments/{built_registry_id}")
-        result = _DeployResult(
-            success=status["status"] == "SUCCEEDED",
-            details=dict(status),
-            name=name,
-            build_id=build_id,
-            registry_id=str(built_registry_id),
-            status=status["status"],
-        )
+            state.update(DirectoryLink(registry_id=build.registry_id))
+        return await _follow_build(platform, name, build.id, str(build.registry_id))
     finally:
         tarball.unlink(missing_ok=True)  # noqa: ASYNC240
+
+
+async def _deploy_harbor_folder(
+    platform: PlatformClient,
+    folder: Path,
+    *,
+    taskset: str | None,
+    project: str | None,
+    env_vars: dict[str, str],
+    no_cache: bool,
+    upload_only: bool,
+    dry_run: bool,
+    yes: bool,
+) -> Any:
+    """Import ``folder`` with ``hud harbor import``, then build the version the import registered.
+
+    Unchanged content imports as the version that already holds it, which is followed and not
+    triggered again.
+    """
+    imported = import_command(
+        [folder],
+        taskset=taskset,
+        project=project,
+        link_target=False,
+        wait=True,
+        yes=yes,
+        dry_run=dry_run,
+    )
+    if dry_run or isinstance(imported, Result):
+        return imported
+    report = imported["report"]
+    tasks = ImportReport.model_validate(report).tasks if report else []
+    task = next((task for task in tasks if task.path == folder.name), None)
+    if task is None or task.build_id is None or task.environment_id is None:
+        hud_console.error(f"The import did not register {folder.name}; nothing was built.")
+        return Result(imported)
+    if upload_only:
+        return imported
+
+    status = await platform.aget(f"/builds/{task.build_id}/status", _BuildStatus)
+    if status["status"] == "UPLOADED":
+        await platform.apost(
+            "/builds/trigger",
+            _Build,
+            json={
+                "source": "direct",
+                "registry_id": task.environment_id,
+                "build_id": task.build_id,
+                "no_cache": no_cache,
+                **({"environment_variables": env_vars} if env_vars else {}),
+            },
+        )
+        hud_console.success("Build triggered")
+    return await _follow_build(platform, folder.name, task.build_id, task.environment_id)
+
+
+async def _follow_build(
+    platform: PlatformClient, name: str, build_id: str, registry_id: str
+) -> Any:
+    """Stream the build's log, wait for it to end, and return the deploy's result."""
+    hud_console.info(f"Build ID: {build_id}")
+    hud_console.info("")
+
+    hud_console.section_title("Build Logs")
+    http_url = platform.url(f"/builds/{build_id}/logs", params={"api_key": platform.api_key})
+    parts = urlsplit(http_url)
+    ws_url = urlunsplit(
+        (
+            "wss" if parts.scheme == "https" else "ws",
+            parts.netloc,
+            parts.path,
+            parts.query,
+            parts.fragment,
+        )
+    )
+    try:
+        hud_console.info("Connecting to build logs stream...")
+        async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as websocket:
+            async for message in websocket:
+                frame = json.loads(message)
+                match frame["type"]:
+                    case "status":
+                        hud_console.info(frame["message"])
+                    case "status_update" if frame.get("status") != "IN_PROGRESS":
+                        hud_console.info(f"Build status: {frame.get('status', '')}")
+                    case "log" if frame.get("message"):
+                        timestamp_ms = frame.get("timestamp")
+                        prefix = (
+                            f"[{datetime.fromtimestamp(timestamp_ms / 1000):%H:%M:%S}] "
+                            if timestamp_ms is not None
+                            else ""
+                        )
+                        hud_console.info(f"{prefix}{frame['message'].rstrip()}")
+                    case "complete":
+                        hud_console.info(frame["message"])
+                        break
+                    case "error":
+                        hud_console.error(f"Build error: {frame['error']}")
+                        break
+    except ConnectionClosed as e:
+        if e.code == 4003:
+            hud_console.error(f"Access denied: {e.reason}")
+        else:
+            hud_console.warning(f"Log stream closed: {e.reason}")
+    except (OSError, WebSocketException) as e:
+        hud_console.warning(f"Log stream unavailable: {e}")
+
+    status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
+    while status["status"] in {"IN_PROGRESS", "FINALIZING", "MIGRATING", "CANCELLING"}:
+        await asyncio.sleep(5)
+        status = await platform.aget(f"/builds/{build_id}/status", _BuildStatus)
+
+    manifest = status.get("manifest") or {}
+    tasks = [task["id"] for task in manifest.get("tasks") or []]
+    capabilities = [capability["name"] for capability in manifest.get("capabilities") or []]
+    summary: dict[str, str | int | float] = {
+        "Environment": name,
+        "Status": status["status"],
+        "Version": status.get("version") or "unknown",
+    }
+    if uri := status.get("uri"):
+        summary["Image"] = uri
+    if error_message := status.get("error_message"):
+        summary["Error"] = error_message
+    if tasks:
+        summary["Tasks"] = ", ".join(tasks)
+    if capabilities:
+        summary["Capabilities"] = ", ".join(capabilities)
+    hud_console.section_title("Build")
+    hud_console.key_value_table(summary)
+    hud_console.link(f"{settings.hud_web_url}/environments/{registry_id}")
+    result = _DeployResult(
+        success=status["status"] == "SUCCEEDED",
+        details=dict(status),
+        name=name,
+        build_id=build_id,
+        registry_id=registry_id,
+        status=status["status"],
+    )
     payload = asdict(result)
     return Result(payload) if not result.success else payload

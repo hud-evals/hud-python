@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from tests.conftest import write_files
+from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -179,6 +180,91 @@ def test_the_build_decides_the_exit_and_no_context_is_left_behind(
     assert (result.exit_code, result.json["success"]) == (exit_code, exit_code == 0), result
     assert logged in result.stderr
     assert list((tmp_path / "tmp").iterdir()) == []
+
+
+TASKSET_ID = "eeeeeeee-0000-4000-8000-000000000001"
+IMPORT_ID = "66666666-6666-4666-8666-666666666666"
+
+
+@pytest.fixture
+def harbor(builds: FakeServices, hud: Hud) -> FakeServices:
+    """A Harbor task folder, and a platform whose import registers it as the unbuilt build
+    ``BUILD_ID`` of ``ENV_ID``."""
+    write_files(hud.cwd, {"hello-world/task.toml": 'version = "1.0"\n'})
+    formats = [{"format": "harbor", "title": "Harbor", "max_input_bytes": 1024**3}]
+    builds.route("api", "GET", "/v2/imports/formats", json={"formats": formats})
+    builds.route(
+        "api",
+        "POST",
+        "/v2/imports/uploads",
+        json={"file": {"id": "file-1"}, "upload_url": f"{builds.url('api')}/uploads/file-1"},
+    )
+    builds.route("api", "POST", "/v2/data/{id}/complete", json={})
+    builds.route("api", "GET", "/v2/tasksets/by-name/{name}", status=404, json={})
+    builds.route("api", "POST", "/v2/tasksets", json={"id": TASKSET_ID, "name": "tb2"})
+    builds.route(
+        "api",
+        "POST",
+        "/v2/imports",
+        json={
+            "id": IMPORT_ID,
+            "format": "harbor",
+            "taskset_id": TASKSET_ID,
+            "file": {"id": "file-1", "filename": "hello-world.zip", "size_bytes": 1},
+            "status": "completed",
+            "created_at": "2026-10-07T12:00:00Z",
+        },
+    )
+    task = {
+        "name": "hello-world",
+        "source": "bundle",
+        "path": "hello-world",
+        "environment_id": ENV_ID,
+        "build_id": BUILD_ID,
+        "status": "imported",
+    }
+    builds.route(
+        "api",
+        "GET",
+        f"/v2/imports/{IMPORT_ID}/report",
+        json={
+            "schema_version": "harbor_import_report.v5",
+            "taskset_id": TASKSET_ID,
+            "tasks": [task],
+            "jobs": [],
+            "warnings": [],
+        },
+    )
+    builds.route(
+        "api",
+        "GET",
+        f"/v2/builds/{BUILD_ID}/status",
+        Reply(json={"status": "UPLOADED"}),
+        Reply(json=SUCCEEDED),
+    )
+    return builds
+
+
+def test_a_harbor_task_folder_is_imported_and_the_build_it_registered_is_built(
+    harbor: FakeServices, hud: Hud
+) -> None:
+    result = hud("deploy", "hello-world", "-e", "TOKEN=t", "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    assert triggered(harbor) == {
+        "source": "direct",
+        "registry_id": ENV_ID,
+        "build_id": BUILD_ID,
+        "no_cache": False,
+        "environment_variables": {"TOKEN": "t"},
+    }
+
+
+def test_upload_only_imports_the_folder_and_builds_nothing(harbor: FakeServices, hud: Hud) -> None:
+    result = hud("deploy", "hello-world", "--upload-only", "--yes", "--json")
+
+    assert result.exit_code == 0, result
+    assert harbor.requests("api", "POST", "/v2/builds/trigger") == []
 
 
 @pytest.mark.parametrize(

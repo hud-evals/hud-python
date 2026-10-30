@@ -181,8 +181,18 @@ command; `--json` returns the import and the full report for scripts.
 creates, the report, reruns, and limits. The web app's **Import from Harbor** takes the
 same zip, and the taskset's **Imports** tab lists the same imports.
 
-Imported tasks are for browsing and comparing runs; HUD cannot run them. To run Harbor
-tasks on HUD, [adapt](#adapt-harbor-tasks) and deploy them.
+To run imported tasks on HUD, [deploy their task folders](#run-harbor-tasks-on-hud).
+
+## Run Harbor tasks on HUD
+
+```bash
+hud deploy ./tasks/hello-world --taskset my-benchmark
+hud eval my-benchmark claude
+```
+
+`hud deploy` on a Harbor task folder imports it with `hud harbor import`, then HUD adapts it with
+this adapter and builds it on Modal. Once built, its task runs on any model. `--upload-only`
+imports the folder without building it.
 
 ## Export HUD tasks to Harbor
 
