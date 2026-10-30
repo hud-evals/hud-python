@@ -17,6 +17,8 @@ from hud.graders import (
     LLMJudgeGrader,
     SubScore,
     combine,
+    exact_match,
+    f1_score,
 )
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn
@@ -282,3 +284,45 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
             (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
         ] == children
     assert [request.credential for request in models.requests()] == ["k"] * len(criteria)
+
+
+@pytest.mark.parametrize(
+    ("answer", "exact", "f1"),
+    [
+        ("A", 1.0, 1.0),
+        ("(A)", 1.0, 1.0),
+        ("The answer is A.", 0.0, 0.5),
+        ("", 0.0, 0.0),
+        ("...", 0.0, 0.0),
+        ("The", 0.0, 0.0),
+        ("B", 0.0, 0.0),
+    ],
+    ids=[
+        "the-letter",
+        "the-letter-in-parentheses",
+        "the-letter-ending-a-sentence",
+        "an-empty-answer",
+        "punctuation-only",
+        "an-article-alone",
+        "another-letter",
+    ],
+)
+async def test_normalized_comparisons_keep_the_multiple_choice_letter_a(
+    answer: str, exact: float, f1: float
+) -> None:
+    env = Environment("graders")
+
+    @env.template()
+    async def check():
+        given = yield "Which option is correct? Reply with the letter."
+        yield await combine(
+            SubScore(name="exact", value=exact_match(given, "A"), weight=0.5),
+            SubScore(name="f1", value=f1_score(given, "A"), weight=0.5),
+        )
+
+    (run,) = (await check().run(ScriptedAgent(answer))).runs
+
+    assert {s["name"]: s["value"] for s in run.evaluation["subscores"]} == {
+        "exact": exact,
+        "f1": pytest.approx(f1),
+    }

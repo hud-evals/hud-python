@@ -10,7 +10,7 @@ import re
 from collections import Counter
 from typing import Any
 
-_ARTICLES_RE = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b(?=\s+\w)", re.IGNORECASE)
 _WHITESPACE_RE = re.compile(r"\s+")
 _PUNCTUATION_RE = re.compile(r"[^\w\s]")
 
@@ -20,6 +20,9 @@ def normalize(text: str | Any) -> str:
 
     Useful as a building block before comparing agent answers to reference
     strings. Removes noise that shouldn't affect whether an answer is correct.
+
+    An article is stripped only when a word follows it, so a multiple-choice
+    ``"A"`` stays ``"a"``.
 
     Example::
 

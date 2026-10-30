@@ -49,7 +49,7 @@ Each returns a `float` (`0.0`-`1.0`) you can yield directly or wrap in a `SubSco
 | `contains_all` | `contains_all(answer, substrings, *, case_sensitive=False)` | `1.0` if all present |
 | `numeric_match` | `numeric_match(answer, expected, *, tolerance=0.0)` | `1.0` if first number matches |
 | `f1_score` | `f1_score(answer, reference)` | token-level F1 |
-| `normalize` | `normalize(text) -> str` | lowercased, punctuation/articles stripped |
+| `normalize` | `normalize(text) -> str` | lowercased, punctuation stripped, articles before a word stripped |
 
 ```python
 @env.template()
