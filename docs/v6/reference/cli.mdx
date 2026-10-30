@@ -99,7 +99,7 @@ hud deploy --project <name-or-id>
 | `--project` | One-command Project override by name or ID. Falls back to the directory Project, `HUD_DEFAULT_PROJECT`, then the team default. |
 | `--runtime` | Persist a registry default runtime for tasks that do not specify one: `hud` or `modal`. |
 | `--runtime-config` | JSON `RuntimeConfig` to persist as the registry default (compose, resources, limits). Must set at least one field. |
-| `--taskset`, `-t` | Harbor task folder only: taskset to import it into, as for [`hud harbor import`](#hud-harbor). |
+| `--taskset`, `-t` | Harbor task folder only: taskset to import it into. |
 | `--upload-only` | Harbor task folder only: import it without building it. |
 | `--json` | Structured result on stdout. |
 | `--dry-run` | Print the deploy plan without uploading or prompting. A first deploy with an unresolved `.env` reports `dotenv_pending`. |
@@ -107,19 +107,8 @@ hud deploy --project <name-or-id>
 
 `--env` / `--env-file` upsert onto the registry's existing secrets. Omitting them on a rebuild keeps whatever is already stored. A first deploy that finds a local `.env` prompts once for that invocation (or needs `--env-file` / `--no-env` when stdin is not a TTY).
 
-A Harbor task folder (one holding `task.toml` and no `Environment(...)`) is imported into the
-taskset with `hud harbor import`: the folder becomes a task of the taskset and a version of the
-environment named after the folder. HUD then adapts that version and builds it on Modal, and the
-task runs the adapted task. `--upload-only` stops after the import. The deploy
-refuses `--name`, `--registry-id`, `--runtime-config`, `--build-arg`, `--secret`, and a
-`--runtime` other than `modal`; with `--upload-only` it also refuses `--env`, `--env-file`, and
-`--no-cache`. It does not link the folder. See
-[Run Harbor tasks on HUD](/v6/experimental/harbor#run-harbor-tasks-on-hud).
-
-```bash
-hud deploy tasks/hello-world --taskset tb2
-hud deploy tasks/hello-world --taskset tb2 --upload-only
-```
+A Harbor task folder (one holding `task.toml`) is imported with `hud harbor import`, then built
+on Modal. See [Run Harbor tasks on HUD](/v6/experimental/harbor#run-harbor-tasks-on-hud).
 
 ## Evaluate
 

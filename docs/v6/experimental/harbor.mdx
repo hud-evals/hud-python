@@ -180,35 +180,18 @@ command; `--json` returns the import and the full report for scripts.
 creates, the report, reruns, and limits. The web app's **Import from Harbor** takes the
 same zip, and the taskset's **Imports** tab lists the same imports.
 
-Imported tasks are for browsing and comparing runs until their environments are built. To run
-them on HUD, [deploy their task folders](#run-harbor-tasks-on-hud).
+To run imported tasks on HUD, [deploy their task folders](#run-harbor-tasks-on-hud).
 
 ## Run Harbor tasks on HUD
-
-Deploy each task folder into a taskset, then run the taskset:
 
 ```bash
 hud deploy ./tasks/hello-world --taskset my-benchmark
 hud eval my-benchmark claude
 ```
 
-`hud deploy` on a Harbor task folder (one holding `task.toml` and no `Environment(...)`) runs
-`hud harbor import` on that folder, so `--taskset` and `--project` work as they do there: the
-folder becomes a task of the taskset and a version of the environment named after the folder.
-The deploy then builds that version: HUD adapts the folder with this adapter and builds the result
-on Modal. Once built, the task runs the adapted task, keeping the Harbor environment and verifier,
-on any model and from the web app or `hud eval`. A folder the adapter cannot adapt fails the build
-with the adapter's findings.
-
-Unchanged content imports as the version that already holds it, so deploying it again shows that
-version's build instead of building again. Changed content becomes a new version, which the task
-moves to and runs once that version is built. `--upload-only` stops after the import; deploy the
-folder again to build it.
-
-The deploy takes `--env`, `--env-file`, and `--no-cache` for the build, refuses `--name`,
-`--registry-id`, `--runtime-config`, `--build-arg`, `--secret`, and a `--runtime` other than
-`modal`, and does not link the folder. Deploy each task folder on its own; to package a whole
-dataset yourself instead, [adapt it](#adapt-harbor-tasks) and deploy the generated environments.
+`hud deploy` on a Harbor task folder imports it with `hud harbor import`, then HUD adapts it with
+this adapter and builds it on Modal. Once built, its task runs on any model. `--upload-only`
+imports the folder without building it.
 
 ## Export HUD tasks to Harbor
 
