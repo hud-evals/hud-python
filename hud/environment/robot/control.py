@@ -65,6 +65,7 @@ from hud.environment.robot.orientation import (
     slerp,
     wrap_angle,
     xyzw_to_euler,
+    xyzw_to_matrix,
 )
 from hud.telemetry.exporter import flush
 from hud.telemetry.robot import TraceRecorder
@@ -355,6 +356,7 @@ class DirectControl:
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._obs_space = observations
         self._cameras = [n for n, f in observations.items() if f.get("type") == "rgb"]
+        self._mounts = _mounts(observations)
         self._states = {
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
         }
@@ -530,7 +532,7 @@ class DirectControl:
         return (
             f"{motion} {hold}{rotation} {done}, with the camera frames and the pose. It stops "
             f"at {self.timeout:g} s if the motion has not finished.{self._budget}{annotation} "
-            f"{self.notes}"
+            f"{self._mounts}{self.notes}"
         ).strip()
 
     def _addressable(self) -> tuple[dict[str, _Axis], list[str]]:
@@ -950,6 +952,40 @@ def _standard_name(name: str) -> str | None:
     if standard is None or side is None:
         return standard
     return f"{side[1]}_arm.{standard}"
+
+
+def _mounts(observations: dict[str, dict[str, Any]]) -> str:
+    """Where each sensor with a contract ``transform`` sits, and where each camera looks.
+
+    A camera's frame is the optical one: +z out of the lens, +x image right, +y image down.
+    """
+    mounts = []
+    for name, feature in observations.items():
+        transform = feature.get("transform")
+        if transform is None:
+            continue
+        parent = transform["parent"]
+        where = (
+            "fixed in the world" if parent == "world" else f"mounted on {parent} (moves with it)"
+        )
+        text = f"{name} is {where} at {_vector(transform['translation'])} m"
+        if feature.get("type") in IMAGE_TYPES:
+            rotation = xyzw_to_matrix(np.asarray(transform["rotation"], dtype=np.float64))
+            text += (
+                f", looking along {_vector(rotation[:, 2])} with image up along "
+                f"{_vector(-rotation[:, 1])}"
+            )
+            if (fovy := feature.get("intrinsics", {}).get("fovy")) is not None:
+                text += f", {fovy:g} degrees of vertical field of view"
+        mounts.append(f"{text}.")
+    if not mounts:
+        return ""
+    return f"Sensors, in their parent frame: {' '.join(mounts)} "
+
+
+def _vector(values: Iterable[float]) -> str:
+    # Adding 0.0 turns a rounded -0.0 into 0.0.
+    return "(" + ", ".join(f"{round(float(v), 2) + 0.0:.2f}" for v in values) + ")"
 
 
 def _object(properties: dict[str, Any]) -> dict[str, Any]:
