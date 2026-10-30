@@ -12,11 +12,17 @@ from typing import Any
 
 _ARTICLES_RE = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _WHITESPACE_RE = re.compile(r"\s+")
-_PUNCTUATION_RE = re.compile(r"[^\w\s]")
+# Punctuation, except a minus sign that starts a number.
+_PUNCTUATION_RE = re.compile(r"[^\w\s-]|(?<=\w)-|-(?!\d)")
+_NUMBER_RE = re.compile(
+    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+)
 
 
 def normalize(text: str | Any) -> str:
     """Normalize text for comparison: lowercase, strip punctuation and articles.
+
+    A minus sign that starts a number is kept, so ``"-42"`` stays distinct from ``"42"``.
 
     Useful as a building block before comparing agent answers to reference
     strings. Removes noise that shouldn't affect whether an answer is correct.
@@ -102,13 +108,16 @@ def numeric_match(
     *,
     tolerance: float = 0.0,
 ) -> float:
-    """1.0 if the first number in the answer matches expected (within tolerance)."""
+    """1.0 if the first number in the answer matches expected (within tolerance).
+
+    Comma thousands separators are part of the number: ``"1,234"`` reads as 1234.
+    """
     a = str(answer) if not isinstance(answer, str) else answer
-    match = re.search(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", a)
+    match = _NUMBER_RE.search(a)
     if not match:
         return 0.0
 
-    return 1.0 if abs(float(match.group()) - expected) <= tolerance else 0.0
+    return 1.0 if abs(float(match.group().replace(",", "")) - expected) <= tolerance else 0.0
 
 
 def _tokenize(text: str) -> list[str]:

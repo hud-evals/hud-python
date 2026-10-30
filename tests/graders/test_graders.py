@@ -17,6 +17,9 @@ from hud.graders import (
     LLMJudgeGrader,
     SubScore,
     combine,
+    exact_match,
+    f1_score,
+    numeric_match,
 )
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.models import Turn
@@ -282,3 +285,89 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
             (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
         ] == children
     assert [request.credential for request in models.requests()] == ["k"] * len(criteria)
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected", "reward"),
+    [
+        ("1,234", 1234, 1.0),
+        ("1,234", 1, 0.0),
+        ("The total is $12,500.", 12500, 1.0),
+        ("3,000,000", 3_000_000, 1.0),
+        ("-1,234.5", -1234.5, 1.0),
+        ("1234", 1234, 1.0),
+        ("-42", -42, 1.0),
+        ("3.14", 3.14, 1.0),
+        (".5", 0.5, 1.0),
+        ("1e3", 1000, 1.0),
+        ("1, 2, 3", 1, 1.0),
+        ("1,2,3", 1, 1.0),
+    ],
+    ids=[
+        "thousands-separator",
+        "thousands-separator-is-not-its-first-group",
+        "thousands-separator-in-a-sentence",
+        "several-thousands-separators",
+        "negative-decimal-with-a-separator",
+        "plain-integer",
+        "negative-integer",
+        "decimal",
+        "leading-dot-decimal",
+        "exponent",
+        "list-with-spaces-reads-its-first-item",
+        "list-without-spaces-reads-its-first-item",
+    ],
+)
+async def test_numeric_match_reads_the_first_number_whole(
+    answer: str, expected: float, reward: float
+) -> None:
+    env = Environment("graders")
+
+    @env.template()
+    async def check():
+        given = yield "How much?"
+        yield numeric_match(given, expected)
+
+    (run,) = (await check().run(ScriptedAgent(answer))).runs
+
+    assert run.reward == reward
+
+
+@pytest.mark.parametrize(
+    ("answer", "reference", "exact", "f1"),
+    [
+        ("-42", "42", 0.0, 0.0),
+        ("x = -1", "x = 1", 0.0, 0.5),
+        ("-3.5", "3.5", 0.0, 0.5),
+        ("The answer is -42!", "answer is -42", 1.0, 1.0),
+        ("well-known", "well known", 1.0, 1.0),
+        ("pages 10-12", "pages 10 12", 1.0, 1.0),
+    ],
+    ids=[
+        "a-negative-is-not-its-positive",
+        "a-sign-after-punctuation",
+        "a-negative-decimal",
+        "a-negative-answer-matches-itself",
+        "a-hyphen-between-words-is-punctuation",
+        "a-hyphen-between-numbers-is-punctuation",
+    ],
+)
+async def test_normalized_comparisons_keep_a_numbers_minus_sign(
+    answer: str, reference: str, exact: float, f1: float
+) -> None:
+    env = Environment("graders")
+
+    @env.template()
+    async def check():
+        given = yield "Answer."
+        yield await combine(
+            SubScore(name="exact", value=exact_match(given, reference), weight=0.5),
+            SubScore(name="f1", value=f1_score(given, reference), weight=0.5),
+        )
+
+    (run,) = (await check().run(ScriptedAgent(answer))).runs
+
+    assert {s["name"]: s["value"] for s in run.evaluation["subscores"]} == {
+        "exact": exact,
+        "f1": pytest.approx(f1),
+    }
