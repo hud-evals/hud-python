@@ -10,7 +10,7 @@ here fails at collection.
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,21 +21,14 @@ from tests.fixtures.envs import HERE, source
 if TYPE_CHECKING:
     from tests.conftest import HudEnv
 
-#: Each family's config: the cheapest current model the gateway serves it. OpenRouter
-#: spreads DeepSeek across providers, some of which reply empty or garbled, so it is held
-#: to one that answers.
-CONFIGS: dict[AgentType, dict[str, Any]] = {
-    AgentType.CLAUDE: {"model": "claude-haiku-5-5"},
-    AgentType.OPENAI: {"model": "gpt-6-luna"},
-    AgentType.GEMINI: {"model": "gemini-3.8-flash"},
-    AgentType.OPENAI_COMPATIBLE: {
-        "model": "deepseek/deepseek-v4.1-flash",
-        "completion_kwargs": {
-            "extra_body": {"provider": {"only": ["Together"], "allow_fallbacks": False}}
-        },
-    },
-    AgentType.CLAUDE_CLI: {"model": "claude-haiku-5-5"},
-    AgentType.CODEX_CLI: {"model": "gpt-6-luna"},
+#: The cheapest current model the gateway serves each family that answers every fixture.
+MODELS = {
+    AgentType.CLAUDE: "claude-haiku-5-5",
+    AgentType.OPENAI: "gpt-6-luna",
+    AgentType.GEMINI: "gemini-3.8-flash",
+    AgentType.OPENAI_COMPATIBLE: "grok-4.6",
+    AgentType.CLAUDE_CLI: "claude-haiku-5-5",
+    AgentType.CODEX_CLI: "gpt-6-luna",
 }
 
 FIXTURES = sorted(
@@ -49,7 +42,7 @@ FIXTURES = sorted(
 )
 
 CELLS = [
-    pytest.param(kind, CONFIGS[kind], fixture, id=f"{kind}-{fixture}")
+    pytest.param(kind, MODELS[kind], fixture, id=f"{kind}-{fixture}")
     for kind in AgentType
     for fixture in (["workspace"] if kind.is_cli else FIXTURES)
 ]
@@ -57,12 +50,12 @@ CELLS = [
 
 @pytest.mark.e2e
 @pytest.mark.live
-@pytest.mark.parametrize(("kind", "config", "fixture"), CELLS)
+@pytest.mark.parametrize(("kind", "model", "fixture"), CELLS)
 async def test_a_real_model_takes_each_fixture_to_its_reward(
-    kind: AgentType, config: dict[str, Any], fixture: str, live: HudEnv
+    kind: AgentType, model: str, fixture: str, live: HudEnv
 ) -> None:
     path = source(fixture)
-    agent = kind.cls(kind.config_cls(**config))
+    agent = kind.cls(kind.config_cls(model=model))
 
     job = await Taskset.from_file(path).run(agent, runtime=LocalRuntime(path))
 
