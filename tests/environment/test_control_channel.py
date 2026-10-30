@@ -122,6 +122,42 @@ async def test_ending_a_sessions_task_closes_its_template(
     assert (answered["result"], closed) == (reply, ["closed first"])
 
 
+@pytest.mark.parametrize(
+    ("method", "params", "reply"),
+    [
+        ("tasks.cancel", None, {"cancelled": True}),
+        ("bye", None, {"goodbye": True}),
+        ("tasks.grade", {"answer": "x"}, {"score": 1.0}),
+    ],
+    ids=["cancel", "bye", "grade"],
+)
+async def test_a_template_failing_to_close_is_logged_and_its_session_still_ends(
+    method: str,
+    params: dict[str, Any] | None,
+    reply: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    env = Environment("leaky")
+
+    @env.template()
+    async def hold():
+        try:
+            yield "holding"
+            yield 1.0
+        finally:
+            raise RuntimeError("simulator would not stop")
+
+    async with LocalRuntime(env)(Task(env="leaky", id="x")) as runtime, wire(runtime.url) as peer:
+        await peer.call("tasks.start", {"id": "hold"})
+        answered = await peer.call(method, params)
+
+    assert answered["result"] == reply
+    (record,) = [r for r in caplog.records if "'hold'" in r.getMessage()]
+    assert record.levelname == "WARNING"
+    assert record.exc_info is not None
+    assert "simulator would not stop" in str(record.exc_info[1])
+
+
 def stalled(events: list[str]) -> Environment:
     env = Environment("stalled")
 

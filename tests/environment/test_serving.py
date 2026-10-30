@@ -10,6 +10,7 @@ signal, even with a session still grading.
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import signal
 import sys
@@ -166,3 +167,39 @@ async def test_initialize_hooks_finish_before_hello_and_shutdown_hooks_run_in_re
 
     assert seen_at_hello == ["first up", "second up"]
     assert log == ["first up", "second up", "second down", "first down"]
+
+
+async def stop_recorder(reason: str) -> None:
+    raise RuntimeError(reason)
+
+
+@pytest.mark.parametrize("wrap", [False, True], ids=["function", "partial"])
+async def test_a_failing_shutdown_hook_is_logged_and_the_rest_still_run(
+    wrap: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    env = Environment("leaky")
+    log: list[str] = []
+
+    @env.shutdown
+    async def release_simulator() -> None:
+        log.append("simulator released")
+
+    if wrap:
+        env.shutdown(functools.partial(stop_recorder, "recorder would not stop"))
+    else:
+
+        @env.shutdown
+        async def stop_recorder_now() -> None:
+            await stop_recorder("recorder would not stop")
+
+    async with (
+        LocalRuntime(env)(Task(env=env.name, id="scenario")) as runtime,
+        connect(runtime),
+    ):
+        pass
+
+    assert log == ["simulator released"]
+    (record,) = [r for r in caplog.records if "stop_recorder" in r.getMessage()]
+    assert record.levelname == "WARNING"
+    assert record.exc_info is not None
+    assert "recorder would not stop" in str(record.exc_info[1])

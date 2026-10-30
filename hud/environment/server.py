@@ -203,13 +203,17 @@ class TaskRunner:
 
     async def cancel(self) -> None:
         if self._gen is not None:
-            with contextlib.suppress(Exception):
+            try:
                 await self._gen.aclose()
+            except Exception:
+                LOGGER.warning("task %r failed while closing", self.task.id, exc_info=True)
             self._gen = None
         # Session ended (cancel / bye / post-grade) — run teardown hooks.
         for hook in self.task.env._on_task_teardown:
-            with contextlib.suppress(Exception):
+            try:
                 await hook()
+            except Exception:
+                LOGGER.warning("task %r teardown hook %r failed", self.task.id, hook, exc_info=True)
 
 
 # ─── wire protocol ───────────────────────────────────────────────────────

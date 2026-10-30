@@ -7,9 +7,9 @@ puts a declaration on the wire lives in :mod:`hud.environment.server`.
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import inspect
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, Protocol, TypeVar, cast
@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+LOGGER = logging.getLogger("hud.environment")
 
 #: Control-session id for the running accept/cancel task (robot slot claims key on it).
 current_session_id: ContextVar[str | None] = ContextVar("hud_current_session_id", default=None)
@@ -373,8 +375,10 @@ class Environment:
     async def stop(self) -> None:
         """Run ``@env.shutdown`` hooks in reverse order (best-effort)."""
         for hook in reversed(self._on_stop):
-            with contextlib.suppress(Exception):
+            try:
                 await hook()
+            except Exception:
+                LOGGER.warning("@env.shutdown hook %r failed", hook, exc_info=True)
         for workspace, peer, _sessions in reversed(self._workspace_routes.values()):
             if peer is not None:
                 workspace.remove_peer(peer)

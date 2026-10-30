@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
+from hud.clients import connect
 from hud.environment.robot import DirectControl
 from hud.eval import LocalRuntime, Task, rollout
 
@@ -384,3 +385,36 @@ async def test_the_time_limit_is_spent_by_played_ticks_and_ends_the_episode(
     assert ("The episode has ended" in replies[-1]) == bool(says)
     assert len(sim.actions) == ticks
     assert sim.state[0] == pytest.approx(x)
+
+
+class StuckRecorder(DirectControl):
+    """A control whose open episode cannot be closed, e.g. a recorder that will not flush.
+
+    ``reset`` also ends the previous episode, which on a fresh slot has nothing to close.
+    """
+
+    ended = 0
+
+    async def end_episode(self) -> None:
+        self.ended += 1
+        if self.ended > 1:
+            raise RuntimeError("recorder would not close")
+
+
+async def test_a_slot_release_that_fails_is_logged_and_the_session_still_ends(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async with (
+        arm_env(Arm(REACH), StuckRecorder()) as env,
+        LocalRuntime(env)(Task(env="arm", id="reach")) as runtime,
+        connect(runtime) as client,
+    ):
+        await client.start_task("reach")
+        await client.cancel()
+        cancelled = True
+
+    assert cancelled
+    (record,) = [r for r in caplog.records if "release_claim" in r.getMessage()]
+    assert record.levelname == "WARNING"
+    assert record.exc_info is not None
+    assert "recorder would not close" in str(record.exc_info[1])
