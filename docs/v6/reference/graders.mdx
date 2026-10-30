@@ -47,9 +47,9 @@ Each returns a `float` (`0.0`-`1.0`) you can yield directly or wrap in a `SubSco
 | `contains` | `contains(answer, substring, *, case_sensitive=False)` | `1.0` if substring present |
 | `contains_any` | `contains_any(answer, substrings, *, case_sensitive=False)` | `1.0` if any present |
 | `contains_all` | `contains_all(answer, substrings, *, case_sensitive=False)` | `1.0` if all present |
-| `numeric_match` | `numeric_match(answer, expected, *, tolerance=0.0)` | `1.0` if first number matches |
+| `numeric_match` | `numeric_match(answer, expected, *, tolerance=0.0)` | `1.0` if first number matches (`"1,234"` reads as `1234`) |
 | `f1_score` | `f1_score(answer, reference)` | token-level F1 |
-| `normalize` | `normalize(text) -> str` | lowercased, punctuation/articles stripped |
+| `normalize` | `normalize(text) -> str` | lowercased, punctuation/articles stripped; a number's minus sign is kept |
 
 ```python
 @env.template()
