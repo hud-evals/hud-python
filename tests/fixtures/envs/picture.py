@@ -29,7 +29,7 @@ def look() -> list[mcp_types.ContentBlock]:
     buffer = io.BytesIO()
     Image.new("RGB", (9000, 600), shown[-1]).save(buffer, format="PNG")
     data = base64.b64encode(buffer.getvalue()).decode()
-    return [mcp_types.ImageContent(type="image", data=data, mimeType="image/png")]
+    return [mcp_types.ImageContent(type="image", data=data, mime_type="image/png")]
 
 
 env = Environment("picture")

@@ -6,7 +6,6 @@ import json
 import logging
 from typing import TYPE_CHECKING, cast
 
-import mcp.types as types
 from openai.types.responses import (
     ResponseFunctionCallOutputItemListParam,
     ResponseInputFileContentParam,
@@ -15,17 +14,18 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_input_param import FunctionCallOutput, ResponseInputItemParam
 
+from hud import types
 from hud.agents.tools.base import AgentToolSpec
 
 if TYPE_CHECKING:
-    from hud.types import MCPToolCall, MCPToolResult
+    from hud.types import ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 
 OpenAIToolSpec = AgentToolSpec
 
 
-def format_openai_result(call: MCPToolCall, result: MCPToolResult) -> ResponseInputItemParam | None:
+def format_openai_result(call: ToolCall, result: ToolResult) -> ResponseInputItemParam | None:
     """Format a generic tool result for the OpenAI Responses API."""
     if not call.id:
         logger.warning("Tool '%s' missing call_id; skipping output.", call.name)

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from hud.capabilities import MCPClient
     from hud.eval import Provider
     from hud.eval.run import Run
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
 
 
 @asynccontextmanager
@@ -212,7 +212,7 @@ class ScriptedLLM(Agent):
         self.tools: set[str] = set()
         self.schemas: dict[str, dict[str, Any]] = {}
         self.descriptions: dict[str, str] = {}
-        self.results: list[MCPToolResult] = []
+        self.results: list[ToolResult] = []
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))

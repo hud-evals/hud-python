@@ -8,18 +8,17 @@ differs between providers.
 from __future__ import annotations
 
 import asyncssh
-import mcp.types as mcp_types
 
 from hud.agents.tools.base import AgentTool, tool_err, tool_ok
 from hud.agents.tools.file_view import view_file
 from hud.capabilities import SSHClient
-from hud.types import MCPToolResult
+from hud.types import TextContent, ToolResult
 from hud.utils.process import bound_shell_output
 
 MAX_SHELL_OUTPUT_LENGTH = 10 * 1024 * 1024
 
 
-class SSHInfrastructureErrorResult(MCPToolResult):
+class SSHInfrastructureErrorResult(ToolResult):
     """Internal marker for SSH failures which count toward the circuit breaker."""
 
 
@@ -38,7 +37,7 @@ class SSHTool(AgentTool[SSHClient]):
 
     # ─── action helpers ───────────────────────────────────────────────
 
-    async def bash(self, command: str) -> MCPToolResult:
+    async def bash(self, command: str) -> ToolResult:
         """Run a shell command. Returns combined stdout/stderr + exit code."""
         completed = await self.client.run(command, check=False)
         stdout = completed.stdout if isinstance(completed.stdout, str) else ""
@@ -48,19 +47,19 @@ class SSHTool(AgentTool[SSHClient]):
         if stderr:
             body += f"\nstderr:\n{stderr}"
         body += f"\n(exit {completed.returncode})"
-        return MCPToolResult(
-            content=[mcp_types.TextContent(type="text", text=body)],
+        return ToolResult(
+            content=[TextContent(type="text", text=body)],
             isError=completed.returncode != 0,
         )
 
-    async def file_read(self, path: str) -> MCPToolResult:
+    async def file_read(self, path: str) -> ToolResult:
         """Read a text file through SSH exec."""
         try:
             return tool_ok(await self.client.read_text(path))
         except asyncssh.ProcessError as e:
             return tool_err(_remote_error(e))
 
-    async def file_view(self, path: str) -> MCPToolResult:
+    async def file_view(self, path: str) -> ToolResult:
         """Read a file as text or image content through SSH exec."""
         try:
             data = await self.client.read_bytes(path)
@@ -68,7 +67,7 @@ class SSHTool(AgentTool[SSHClient]):
             return tool_err(_remote_error(e))
         return view_file(data)
 
-    async def file_write(self, path: str, content: str) -> MCPToolResult:
+    async def file_write(self, path: str, content: str) -> ToolResult:
         """Write a text file through SSH exec."""
         try:
             await self.client.write_text(path, content)
@@ -76,7 +75,7 @@ class SSHTool(AgentTool[SSHClient]):
             return tool_err(_remote_error(e))
         return tool_ok(f"wrote {len(content.encode('utf-8'))} bytes to {path}")
 
-    async def file_list(self, path: str = "/") -> MCPToolResult:
+    async def file_list(self, path: str = "/") -> ToolResult:
         """List directory entries through SSH exec."""
         try:
             names = await self.client.listdir(path)

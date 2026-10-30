@@ -1,10 +1,9 @@
 """``MCPClient`` against FastMCP servers and scripted gateway faults.
 
 Tool calls go to a FastMCP server over each HTTP transport, or to a scripted
-streamable-HTTP server on the fake services, whose ``tools/call`` answers come
-from a script: a transient gateway status, a body that is not JSON, or a dropped
-connection. Every call resolves:
-with a result once a transient error clears, or with a transport error.
+streamable-HTTP server on the fake services that answers ``tools/call`` with a fault:
+a gateway status, a body that is not JSON, a dropped connection, or a response that
+never comes. Every faulted call fails with an error, once, instead of hanging.
 """
 
 from __future__ import annotations
@@ -12,10 +11,11 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal
 
+import httpx2
 import pytest
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 
 from hud.capabilities import Capability, MCPClient
 from tests.clients.conftest import relayed
@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from tests.conftest import HudEnv
     from tests.fixtures.services import FakeServices, Request
 
 
@@ -101,7 +100,7 @@ async def test_an_auth_token_rides_every_request_and_is_needed_where_the_server_
         finally:
             await client.close()
         authorized = set(seen)
-        with pytest.raises(McpError, match="HTTPStatusError"):
+        with pytest.raises(MCPError):
             await MCPClient.connect(Capability.mcp(url=url))
 
     assert added.structuredContent == {"result": 5}
@@ -120,10 +119,10 @@ def result(request: Request, body: dict[str, Any]) -> Reply:
 
 
 class ScriptedMCPServer:
-    """A streamable-HTTP MCP server whose ``tools/call`` answers come from a script."""
+    """A streamable-HTTP MCP server that answers ``tools/call`` with a scripted reply."""
 
-    def __init__(self, services: FakeServices, calls: list[Callable[[Request], Reply]]) -> None:
-        self.calls = calls
+    def __init__(self, services: FakeServices, answer: Callable[[Request], Reply]) -> None:
+        self.answer = answer
         self.url = f"{services.url('runtime')}/mcp"
         services.route("runtime", "POST", "/mcp", handler=self.post)
         services.route("runtime", "GET", "/mcp", Reply(status=405))
@@ -132,6 +131,9 @@ class ScriptedMCPServer:
 
     def post(self, request: Request) -> Reply:
         method = request.json.get("method")
+        if method == "server/discover":
+            error = {"code": -32601, "message": "Method not found"}
+            return Reply(json={"jsonrpc": "2.0", "id": request.json["id"], "error": error})
         if method == "initialize":
             reply = result(
                 request,
@@ -148,8 +150,7 @@ class ScriptedMCPServer:
         if method == "tools/list":
             tool = {"name": "count", "inputSchema": {"type": "object"}}
             return result(request, {"tools": [{**tool, "outputSchema": OUTPUT_SCHEMA}]})
-        answer = self.calls.pop(0) if len(self.calls) > 1 else self.calls[0]
-        return answer(request)
+        return self.answer(request)
 
     def attempts(self) -> int:
         return sum(
@@ -163,12 +164,6 @@ class ScriptedMCPServer:
             return await asyncio.wait_for(client.call_tool("count", {}), timeout=30)
         finally:
             await client.close()
-
-
-def counted(request: Request) -> Reply:
-    return result(
-        request, {"content": [{"type": "text", "text": "3"}], "structuredContent": {"n": 3}}
-    )
 
 
 def status(code: int) -> Callable[[Request], Reply]:
@@ -190,38 +185,41 @@ def dropped(request: Request) -> Reply:
     return Reply(stream=chunks(), content_type="application/json")
 
 
-async def test_a_tool_call_succeeds_after_a_transient_503(services: FakeServices) -> None:
-    server = ScriptedMCPServer(services, [status(503), counted])
+def cut_short(request: Request) -> Reply:
+    del request
 
-    called = await server.call()
+    def chunks() -> Iterator[bytes]:
+        yield b'event: message\ndata: {"jsonrpc": "2.0", '
+        raise ConnectionResetError("server went away")
 
-    assert (called.isError, called.structuredContent) == (False, {"n": 3})
-    assert server.attempts() == 2
+    return Reply(stream=chunks(), content_type="text/event-stream")
+
+
+def unanswered(request: Request) -> Reply:
+    del request
+    return Reply(stream=iter([b": keep-alive\n\n"]), content_type="text/event-stream")
 
 
 @pytest.mark.parametrize(
-    ("calls", "attempts"),
+    "answer",
     [
-        pytest.param([status(503)], 3, id="503-until-the-deadline"),
-        pytest.param([unparseable], 1, id="unparseable-json"),
-        pytest.param([dropped], 1, id="connection-dropped"),
+        pytest.param(status(503), id="gateway-503"),
+        pytest.param(unparseable, id="unparseable-json"),
+        pytest.param(dropped, id="connection-dropped"),
+        pytest.param(cut_short, id="event-stream-cut-short"),
+        pytest.param(unanswered, id="event-stream-ends-unanswered"),
+        pytest.param(status(202), id="request-only-accepted"),
     ],
 )
-async def test_a_failing_tool_call_resolves_with_a_transport_error(
-    services: FakeServices,
-    hud_env: HudEnv,
-    calls: list[Callable[[Request], Reply]],
-    attempts: int,
+async def test_a_failing_tool_call_fails_once_instead_of_hanging(
+    services: FakeServices, answer: Callable[[Request], Reply]
 ) -> None:
-    hud_env.set(HUD_CLIENT_TIMEOUT="1")
-    server = ScriptedMCPServer(services, calls)
+    server = ScriptedMCPServer(services, answer)
 
-    with pytest.raises(McpError) as raised:
+    with pytest.raises((MCPError, httpx2.TransportError)):
         await server.call()
 
-    assert raised.value.error.code == -32000
-    assert raised.value.error.message.startswith("Transport error")
-    assert server.attempts() == attempts
+    assert server.attempts() == 1
 
 
 async def test_a_tool_call_after_the_connection_drops_reconnects() -> None:

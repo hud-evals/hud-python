@@ -5,11 +5,9 @@ from __future__ import annotations
 import shlex
 from typing import Any, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.tools import SSHTool
 from hud.agents.tools.ssh import MAX_SHELL_OUTPUT_LENGTH
-from hud.types import MCPToolResult
+from hud.types import TextContent, ToolResult
 from hud.utils.process import bound_shell_output
 
 from .base import OpenAIToolSpec
@@ -33,7 +31,7 @@ class OpenAIShellTool(SSHTool):
         # are dicts at runtime, and the param type isn't present in all SDK versions).
         return {"type": "shell", "environment": {"type": "local"}}
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         requested_limit = arguments.get("max_output_length")
         if requested_limit is None:
             max_output_length = MAX_SHELL_OUTPUT_LENGTH
@@ -51,7 +49,7 @@ class OpenAIShellTool(SSHTool):
         else:
             max_output_length = min(requested_limit, MAX_SHELL_OUTPUT_LENGTH)
 
-        def invalid_commands_result() -> MCPToolResult:
+        def invalid_commands_result() -> ToolResult:
             text = "commands must be a list of strings"
             return _shell_result(
                 [text],
@@ -111,10 +109,10 @@ def _shell_result(
     *,
     is_error: bool = False,
     structured: dict[str, Any] | None = None,
-) -> MCPToolResult:
+) -> ToolResult:
     payload = {"provider_tool": "shell", **(structured or {})}
-    return MCPToolResult(
-        content=[mcp_types.TextContent(type="text", text=text) for text in texts if text],
+    return ToolResult(
+        content=[TextContent(type="text", text=text) for text in texts if text],
         isError=is_error,
         structuredContent=payload,
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.tools import SSHTool
-from hud.types import MCPToolResult
+from hud.types import ToolResult
 
 from .base import GeminiToolSpec
 from .coding import required_str, tool_decl
@@ -40,7 +40,7 @@ class GeminiReadTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = required_str(arguments, "file_path")
         result = await self.file_read(path)
         if result.isError:
@@ -48,16 +48,15 @@ class GeminiReadTool(SSHTool):
         start = arguments.get("start_line")
         end = arguments.get("end_line")
         if isinstance(start, int) and start > 0:
-            import mcp.types as mcp_types
-
             from hud.agents.tools.base import result_text
+            from hud.types import TextContent
 
             lines = result_text(result).splitlines(keepends=True)
             offset = start - 1
             limit = (end - start + 1) if isinstance(end, int) and end >= start else len(lines)
             sliced = lines[offset : offset + limit]
-            return MCPToolResult(
-                content=[mcp_types.TextContent(type="text", text="".join(sliced))],
+            return ToolResult(
+                content=[TextContent(type="text", text="".join(sliced))],
             )
         return result
 
@@ -83,7 +82,7 @@ class GeminiSearchTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         include = arguments.get("include_pattern")
@@ -113,7 +112,7 @@ class GeminiGlobTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         pattern = required_str(arguments, "pattern")
         dir_path = arguments.get("dir_path") or "."
         cmd = f"find {_shell_quote(str(dir_path))} -name {_shell_quote(pattern)}"
@@ -139,7 +138,7 @@ class GeminiListTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.file_list(required_str(arguments, "dir_path"))
 
 

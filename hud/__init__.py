@@ -5,8 +5,6 @@ tools for building, evaluating, and training AI agents.
 
 from __future__ import annotations
 
-# Apply patches to third-party libraries early, before other imports
-from . import patches as _patches  # noqa: F401
 from .capabilities import Connection
 from .clients import connect
 from .environment import Environment

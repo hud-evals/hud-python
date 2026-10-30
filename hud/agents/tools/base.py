@@ -5,7 +5,7 @@ type. Capability bases (``SSHTool``, ``MCPTool``, ``RFBTool``) bind the
 generic and add per-protocol helpers. Provider subclasses declare
 ``default_spec(model)`` and implement ``to_params`` + ``execute``.
 
-Result formatting (turning a ``MCPToolResult`` into a provider message) lives
+Result formatting (turning a ``ToolResult`` into a provider message) lives
 on the agent, not on the tool — the agent owns that wire shape.
 """
 
@@ -18,10 +18,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
-import mcp.types as mcp_types
-
 from hud.capabilities import CapabilityClient
-from hud.types import MCPToolResult
+from hud.types import TextContent, ToolResult
 
 if TYPE_CHECKING:
     from hud.agents.types import ToolAgentConfig
@@ -39,21 +37,19 @@ def provider_tool_name(name: str) -> str:
     return f"{prefix}_{digest}"
 
 
-def tool_ok(text: str) -> MCPToolResult:
-    """Build a success MCPToolResult with one text block."""
-    return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)])
+def tool_ok(text: str) -> ToolResult:
+    """Build a success ToolResult with one text block."""
+    return ToolResult(content=[TextContent(type="text", text=text)])
 
 
-def tool_err(text: str) -> MCPToolResult:
-    """Build an error MCPToolResult with one text block."""
-    return MCPToolResult(content=[mcp_types.TextContent(type="text", text=text)], isError=True)
+def tool_err(text: str) -> ToolResult:
+    """Build an error ToolResult with one text block."""
+    return ToolResult(content=[TextContent(type="text", text=text)], isError=True)
 
 
-def result_text(result: MCPToolResult) -> str:
-    """Extract concatenated text from a MCPToolResult's TextContent blocks."""
-    return "".join(
-        block.text for block in result.content if isinstance(block, mcp_types.TextContent)
-    )
+def result_text(result: ToolResult) -> str:
+    """Extract concatenated text from a ToolResult's TextContent blocks."""
+    return "".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
 @dataclass(frozen=True)
@@ -105,7 +101,7 @@ class AgentTool(ABC, Generic[ClientT]):
         return None
 
     @abstractmethod
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult: ...
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult: ...
 
     @abstractmethod
     def to_params(self) -> Any: ...

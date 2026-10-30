@@ -7,6 +7,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
+import mcp.types as mcp_types
 import pytest
 
 from hud import Environment
@@ -62,6 +63,22 @@ if TYPE_CHECKING:
             [("user", "what is this?"), ("user", None)],
             "what is this?",
             id="a-turn-of-several-blocks-is-one-message-per-block",
+        ),
+        pytest.param(
+            [
+                mcp_types.PromptMessage(
+                    role="assistant", content=mcp_types.TextContent(type="text", text="hi")
+                ),
+                mcp_types.PromptMessage(
+                    role="user",
+                    content=mcp_types.ImageContent(
+                        type="image", data="aW1n", mime_type="image/png"
+                    ),
+                ),
+            ],
+            [("assistant", "hi"), ("user", None)],
+            "hi",
+            id="mcp-prompt-messages-keep-their-roles-and-content",
         ),
     ],
 )

@@ -24,9 +24,7 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
-import mcp.types as types
-from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
@@ -149,15 +147,83 @@ class AgentType(StrEnum):
         return None
 
 
-class MCPToolCall(CallToolRequestParams):
-    """A tool call."""
+# -----------------------------------------------------------------------------
+# Content and tool calls
+# -----------------------------------------------------------------------------
 
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
-    annotation: str | None = None  # Optional explanation of why this action is taken
-    provider_name: str | None = None  # Original provider tool name when it differs from MCP name
-    #: Widened to admit the raw provider string when it didn't parse as JSON;
-    #: a str is never executed — dispatch answers it with an error result.
+
+class TextContent(BaseModel):
+    type: Literal["text"]
+    text: str
+
+
+class ImageContent(BaseModel):
+    type: Literal["image"]
+    data: str
+    mimeType: str
+
+
+class AudioContent(BaseModel):
+    type: Literal["audio"]
+    data: str
+    mimeType: str
+
+
+class ResourceLink(BaseModel):
+    type: Literal["resource_link"]
+    name: str
+    title: str | None = None
+    uri: AnyUrl
+    description: str | None = None
+    mimeType: str | None = None
+    size: int | None = None
+
+
+class TextResourceContents(BaseModel):
+    uri: AnyUrl
+    mimeType: str | None = None
+    text: str
+
+
+class BlobResourceContents(BaseModel):
+    uri: AnyUrl
+    mimeType: str | None = None
+    blob: str
+
+
+class EmbeddedResource(BaseModel):
+    type: Literal["resource"]
+    resource: TextResourceContents | BlobResourceContents
+
+
+ContentBlock: TypeAlias = (
+    TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource
+)
+
+
+class PromptMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: ContentBlock
+
+
+class Tool(BaseModel):
+    """A tool an environment offers the agent."""
+
+    name: str
+    description: str | None = None
+    inputSchema: dict[str, Any]
+
+
+class ToolCall(BaseModel):
+    name: str
+    #: A str is the provider's raw arguments that didn't parse as JSON; it is never executed.
     arguments: dict[str, Any] | str | None = None
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    annotation: str | None = None
+    #: The provider's own name for the tool, when it differs from ``name``.
+    provider_name: str | None = None
+    #: Whether the call's text and PDF results go back to Claude as citable documents.
+    citations_enabled: bool = False
 
     def __str__(self) -> str:
         """Format tool call as plain text."""
@@ -187,10 +253,11 @@ class MCPToolCall(CallToolRequestParams):
         return s
 
 
-class MCPToolResult(CallToolResult):
-    """A tool result with optional call_id for correlation."""
-
-    call_id: str | None = None  # For correlating with provider-specific tool call IDs
+class ToolResult(BaseModel):
+    content: list[ContentBlock]
+    structuredContent: dict[str, Any] | None = None
+    isError: bool = False
+    call_id: str | None = None
 
     def _get_content_summary(self) -> str:
         """Extract a summary of the content."""
@@ -198,13 +265,13 @@ class MCPToolResult(CallToolResult):
         content_summary = ""
         if self.content:
             for block in self.content:
-                if isinstance(block, types.TextContent):
+                if isinstance(block, TextContent):
                     # Get first line or truncate
                     text = block.text.strip()
                     first_line = text.split("\n")[0] if "\n" in text else text
                     content_summary = first_line
                     break
-                elif isinstance(block, types.ImageContent):
+                elif isinstance(block, ImageContent):
                     content_summary = "📷 Image"
                     break
 
@@ -280,7 +347,7 @@ class Step(BaseModel):
     step_id: int | None = None
     source: StepSource
 
-    messages: list[types.PromptMessage] = Field(default_factory=list[types.PromptMessage])
+    messages: list[PromptMessage] = Field(default_factory=list[PromptMessage])
     task_call: TaskCall | None = None
 
     error: str | None = None
@@ -429,15 +496,25 @@ class Trace(BaseModel):
 __all__ = [
     "STEP_SCHEMA",
     "AgentType",
+    "AudioContent",
+    "BlobResourceContents",
+    "ContentBlock",
+    "EmbeddedResource",
+    "ImageContent",
     "JsonObject",
     "JsonValue",
-    "MCPToolCall",
-    "MCPToolResult",
+    "PromptMessage",
+    "ResourceLink",
     "Step",
     "StepSource",
     "StopCondition",
     "StopReason",
     "TaskCall",
+    "TextContent",
+    "TextResourceContents",
+    "Tool",
+    "ToolCall",
+    "ToolResult",
     "Trace",
     "TraceStatus",
 ]

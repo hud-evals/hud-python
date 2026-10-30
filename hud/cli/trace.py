@@ -8,7 +8,6 @@ from typing import Any
 from uuid import UUID
 
 import typer
-from mcp.types import TextContent
 from pydantic import BaseModel
 from rich.panel import Panel
 from rich.rule import Rule
@@ -22,6 +21,7 @@ from hud.cli import (
 )
 from hud.settings import settings
 from hud.telemetry.span import normalize_trace_id
+from hud.types import TextContent
 from hud.utils.exceptions import HudRequestError
 from hud.utils.hud_console import HUDConsole
 from hud.utils.platform import PlatformClient

@@ -26,10 +26,12 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
-from mcp.types import ContentBlock, TextContent
-
 from hud.agents.types import AgentStep
-from hud.types import Trace  # noqa: TC001 - used as return type
+from hud.types import (
+    ContentBlock,
+    TextContent,
+    Trace,
+)
 
 from .job import Job
 from .run import rollout

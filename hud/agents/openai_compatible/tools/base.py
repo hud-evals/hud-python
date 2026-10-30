@@ -4,22 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-import mcp.types as mcp_types
-
 from hud.agents.tools.base import AgentToolSpec
 from hud.agents.tools.base import provider_tool_name as openai_compatible_tool_name
+from hud.types import ImageContent, TextContent, Tool
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
-    from hud.types import MCPToolCall, MCPToolResult
+    from hud.types import ToolCall, ToolResult
 
 OpenAICompatibleToolParam: TypeAlias = "ChatCompletionToolParam"
 
 
 def format_chat_result(
-    call: MCPToolCall,
-    result: MCPToolResult,
+    call: ToolCall,
+    result: ToolResult,
 ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam]:
     """Format a tool result for OpenAI-compatible chat completions."""
     text_parts: list[str] = []
@@ -42,9 +41,9 @@ def format_chat_result(
                         "image_url": {"url": f"data:{mime_type};base64,{data}"},
                     }
                 )
-        elif isinstance(item, mcp_types.TextContent):
+        elif isinstance(item, TextContent):
             text_parts.append(item.text)
-        elif isinstance(item, mcp_types.ImageContent):
+        elif isinstance(item, ImageContent):
             image_parts.append(
                 {
                     "type": "image_url",
@@ -127,7 +126,7 @@ def _sanitize_schema_for_openai(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def openai_compatible_tool_param(
-    tool: mcp_types.Tool,
+    tool: Tool,
     *,
     name: str | None = None,
 ) -> OpenAICompatibleToolParam:

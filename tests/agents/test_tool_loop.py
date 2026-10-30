@@ -16,10 +16,10 @@ from urllib.parse import urlsplit
 
 import pytest
 from fastmcp import FastMCP
-from mcp.types import TextContent
 
 from hud.agents import ClaudeAgent, OpenAIChatAgent
 from hud.agents.types import ClaudeConfig, OpenAIChatConfig, ToolStep
+from hud.types import TextContent
 from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import workspace_task
 from tests.fixtures.models import Turn, call

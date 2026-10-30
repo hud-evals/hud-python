@@ -29,14 +29,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
-import mcp.types as mcp_types
-
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients import HudProtocolError, connect
 from hud.graders.results import SubScore
 from hud.telemetry.context import get_current_trace_id, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import Step, TaskCall, Trace
+from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.time import now_iso
 
 from .file_tracking import file_tracking_observer
@@ -122,18 +120,18 @@ def parent_trace(trace_id: str) -> uuid.UUID | None:
         return None
 
 
-def _prompt_messages(item: Any) -> list[mcp_types.PromptMessage]:
-    """Coerce one wire prompt turn onto MCP's ``PromptMessage`` vocabulary.
+def _prompt_messages(item: Any) -> list[PromptMessage]:
+    """Coerce one wire prompt turn onto the ``PromptMessage`` vocabulary.
 
     Turns are env-authored: chat-style dicts (plain-string content wrapped as
-    text, roles outside MCP's user/assistant vocabulary such as ``system``
+    text, roles outside the user/assistant vocabulary such as ``system``
     coerced to ``user``), already-built ``PromptMessage``s, or anything else
     stringified. A ``PromptMessage`` holds one content block, so a turn whose
     content is a list of blocks becomes one message per block. Coercion may be
     lossy — prompt context is what the agent is given, and the verbatim
     payload stays on the setup ``task`` step's result.
     """
-    if isinstance(item, mcp_types.PromptMessage):
+    if isinstance(item, PromptMessage):
         return [item]
     if not isinstance(item, dict):
         item = {"content": str(item)}
@@ -142,15 +140,14 @@ def _prompt_messages(item: Any) -> list[mcp_types.PromptMessage]:
     content = item.get("content")
     if isinstance(content, str):
         return [
-            mcp_types.PromptMessage(
+            PromptMessage(
                 role=role,
-                content=mcp_types.TextContent(type="text", text=content),
+                content=TextContent(type="text", text=content),
             )
         ]
     blocks = content if isinstance(content, list) else [content]
     return [
-        mcp_types.PromptMessage.model_validate({**item, "role": role, "content": block})
-        for block in blocks
+        PromptMessage.model_validate({**item, "role": role, "content": block}) for block in blocks
     ]
 
 
@@ -309,7 +306,7 @@ class Run:
         return self._runtime
 
     @property
-    def prompt_messages(self) -> list[mcp_types.PromptMessage]:
+    def prompt_messages(self) -> list[PromptMessage]:
         """The prompt as normalized ``PromptMessage`` turns.
 
         The structured form agents consume and the opening ``user`` step
@@ -331,7 +328,7 @@ class Run:
         return "\n\n".join(
             message.content.text
             for message in self.prompt_messages
-            if isinstance(message.content, mcp_types.TextContent) and message.content.text
+            if isinstance(message.content, TextContent) and message.content.text
         )
 
     def record(self, step: Step) -> None:

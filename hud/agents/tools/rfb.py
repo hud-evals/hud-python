@@ -15,13 +15,12 @@ import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, Self
 
-import mcp.types as mcp_types
 from asyncvnc import key_codes
 
 from hud.agents.tools.base import AgentTool, AgentToolSpec
 from hud.capabilities import RFBClient
 from hud.capabilities.rfb import PngScreenshotEncoding, ScreenshotEncoding
-from hud.types import MCPToolResult
+from hud.types import ImageContent, ToolResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterable
@@ -112,12 +111,12 @@ class RFBTool(AgentTool[RFBClient]):
 
     # ─── framebuffer ─────────────────────────────────────────────────
 
-    async def screenshot(self) -> MCPToolResult:
+    async def screenshot(self) -> ToolResult:
         """Capture a screenshot and return it as a single ``ImageContent`` block."""
         screenshot, mime_type = await self.client.screenshot_png(self.screenshot_encoding)
-        return MCPToolResult(
+        return ToolResult(
             content=[
-                mcp_types.ImageContent(
+                ImageContent(
                     type="image",
                     mimeType=mime_type,
                     data=base64.b64encode(screenshot).decode("ascii"),

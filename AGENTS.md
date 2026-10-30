@@ -30,7 +30,6 @@ inventory of current incidents.
   connected by `hud/capabilities/` and `hud/clients/`.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
-- `hud/_legacy.py` and `hud/patches/` quarantine v5 compatibility.
 - `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture environments
   and fakes for what CI cannot reach.
 - `cookbooks/` contains standalone runnable examples outside the `hud` package.

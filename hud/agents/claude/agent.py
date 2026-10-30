@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, cast
 
 import httpx
 import httpx2
-import mcp.types as mcp_types
 from anthropic import (
     APIConnectionError,
     APIStatusError,
@@ -39,7 +38,15 @@ from PIL import Image
 
 from hud.agents.tool_agent import RunState, ToolAgent
 from hud.agents.types import AgentStep, Citation, ClaudeConfig, Usage
-from hud.types import MCPToolCall, MCPToolResult
+from hud.types import (
+    BlobResourceContents,
+    EmbeddedResource,
+    ImageContent,
+    PromptMessage,
+    TextContent,
+    ToolCall,
+    ToolResult,
+)
 from hud.utils import gateway
 
 from .images import image_source
@@ -121,9 +128,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
 
     # ─── ToolAgent hooks ──────────────────────────────────────────────
 
-    async def _initialize_state(
-        self, *, prompt: list[mcp_types.PromptMessage]
-    ) -> RunState[BetaMessageParam]:
+    async def _initialize_state(self, *, prompt: list[PromptMessage]) -> RunState[BetaMessageParam]:
         return RunState(messages=self._initial_messages(prompt))
 
     def _format_message(self, role: str, text: str) -> BetaMessageParam:
@@ -134,8 +139,8 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
 
     def _format_result(
         self,
-        call: MCPToolCall,
-        result: MCPToolResult,
+        call: ToolCall,
+        result: ToolResult,
         state: RunState[BetaMessageParam],
     ) -> BetaMessageParam | list[BetaMessageParam] | None:
         tool_use_id = call.id
@@ -147,19 +152,19 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
         image_error = False
         if result.isError:
             error_msg = next(
-                (c.text for c in result.content if isinstance(c, mcp_types.TextContent)),
+                (c.text for c in result.content if isinstance(c, TextContent)),
                 "Tool execution failed",
             )
-            result_content = [mcp_types.TextContent(type="text", text=f"Error: {error_msg}")]
+            result_content = [TextContent(type="text", text=f"Error: {error_msg}")]
 
-        citations_enabled = bool(getattr(call.meta, "citations_enabled", False))
+        citations_enabled = call.citations_enabled
         claude_blocks: list[ClaudeToolResultContent] = []
         sibling_docs: list[BetaRequestDocumentBlockParam] = []
 
         for content in result_content:
             citation_doc: BetaRequestDocumentBlockParam | None = None
             match content:
-                case mcp_types.TextContent():
+                case TextContent():
                     block = BetaTextBlockParam(type="text", text=content.text)
                     if citations_enabled and not result.isError:
                         citation_doc = BetaRequestDocumentBlockParam(
@@ -172,7 +177,7 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                             title=call.name,
                             citations={"enabled": True},
                         )
-                case mcp_types.ImageContent():
+                case ImageContent():
                     try:
                         block = BetaImageBlockParam(
                             type="image",
@@ -184,8 +189,8 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     except (ValueError, OSError, Image.DecompressionBombError) as exc:
                         image_error = True
                         block = BetaTextBlockParam(type="text", text=f"Cannot view image: {exc}")
-                case mcp_types.EmbeddedResource(
-                    resource=mcp_types.BlobResourceContents(mimeType="application/pdf") as resource,
+                case EmbeddedResource(
+                    resource=BlobResourceContents(mimeType="application/pdf") as resource,
                 ):
                     block = BetaRequestDocumentBlockParam(
                         type="document",
@@ -465,14 +470,12 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
                     if response.stop_reason == "max_tokens" and block is response.content[-1]:
                         arguments = json.dumps(arguments)
                     result.tool_calls.append(
-                        MCPToolCall(
+                        ToolCall(
                             id=block.id,
                             name=block.toolset_name or block.name,
                             arguments=arguments,
                             provider_name=None if block.toolset_name is None else block.name,
-                            _meta=mcp_types.RequestParams.Meta.model_validate(
-                                {"citations_enabled": citations_enabled},
-                            ),
+                            citations_enabled=citations_enabled,
                         )
                     )
                     result.done = False

@@ -13,7 +13,7 @@ from hud.agents.tools.base import result_text, tool_err
 from .base import GeminiToolSpec
 
 if TYPE_CHECKING:
-    from hud.types import MCPToolResult
+    from hud.types import ToolResult
 
 GEMINI_SHELL_SPEC = GeminiToolSpec(api_type="run_shell_command", api_name="run_shell_command")
 GEMINI_EDIT_SPEC = GeminiToolSpec(api_type="replace", api_name="replace")
@@ -56,7 +56,7 @@ class GeminiShellTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         command = arguments.get("command")
         if not isinstance(command, str) or not command:
             raise ValueError("command is required")
@@ -91,7 +91,7 @@ class GeminiEditTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         file_path = required_str(arguments, "file_path")
         old_string = arguments.get("old_string", "")
         new_string = arguments.get("new_string", "")
@@ -126,7 +126,7 @@ class GeminiWriteTool(SSHTool):
     def to_params(self) -> genai_types.Tool:
         return tool_decl(self.name, self.description, self.parameters)
 
-    async def execute(self, arguments: dict[str, Any]) -> MCPToolResult:
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         return await self.file_write(
             required_str(arguments, "file_path"),
             arguments.get("content") or "",

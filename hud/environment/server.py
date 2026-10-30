@@ -73,9 +73,10 @@ def _jsonable(value: Any) -> Any:
     The prompt frame may carry rich objects — most importantly a list of
     ``PromptMessage`` (chat-style message prompts) — which must become plain
     dicts/lists before the JSON-RPC framing layer (``json.dumps``) ships them.
+    Models dump by alias, so MCP's models keep their wire names (``mimeType``).
     """
     if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
+        return value.model_dump(mode="json", by_alias=True)
     if isinstance(value, dict):
         return {k: _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

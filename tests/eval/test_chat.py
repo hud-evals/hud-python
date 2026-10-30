@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from mcp.types import ImageContent, TextContent
 
 from hud import Environment
 from hud.agents.base import Agent
 from hud.eval import Chat, LocalRuntime, Task
+from hud.types import ImageContent, TextContent
 
 if TYPE_CHECKING:
     from hud.eval import Run

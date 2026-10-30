@@ -170,16 +170,6 @@ class Settings(BaseSettings):
         validation_alias="HUD_FILE_TRACKING_INTERVAL",
     )
 
-    client_timeout: int = Field(
-        default=600,
-        ge=0,
-        description=(
-            "Global timeout in seconds for MCP requests "
-            "(per-attempt timeout is configured separately; 0 uses default)"
-        ),
-        validation_alias="HUD_CLIENT_TIMEOUT",
-    )
-
     @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:
