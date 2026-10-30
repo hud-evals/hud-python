@@ -534,7 +534,7 @@ platform, so a real contract should always set them:
 
 A sensor's pose is part of the scene, so a bridge that knows it should publish it: a `transform`
 on any observation, plus `intrinsics` on a camera. A VLA has learned its views and ignores them; an
-LLM has not, and reads them in the direct-control tool description:
+LLM has not, and reads them through direct control. A fixed camera takes a static pose:
 
 ```json
 "observation/scene": {
@@ -544,6 +544,14 @@ LLM has not, and reads them in the direct-control tool description:
   "transform": {"parent": "world", "translation": [1.1, -0.45, 0.8], "rotation": [0.8139, 0.4265, -0.1831, -0.3495]},
   "intrinsics": {"fovy": 55}
 }
+```
+
+A sensor that moves (a wrist or head camera) takes a live one: the bridge reports its current
+world-frame pose as an observation each tick, which every reply restates:
+
+```json
+"observation/wrist": {"role": "observation", "type": "rgb", "transform": {"pose": "observation/wrist_pose"}, "intrinsics": {"fovy": 75}},
+"observation/wrist_pose": {"role": "observation", "names": ["x", "y", "z", "qx", "qy", "qz", "qw"]}
 ```
 
 Feature keys are openpi flat slash-paths and must match *verbatim* the keys your bridge returns from
@@ -564,7 +572,7 @@ Feature keys are openpi flat slash-paths and must match *verbatim* the keys your
 | `names` | feature | Per-element labels; what the trace viewer uses to label state/action slices. |
 | `stats` | feature | Per-element `mean` / `std` / `min` / `max` for a custom adapter. The stock LeRobot path uses the checkpoint's own normalization, so you can omit it. [Direct control](#direct-control) bounds the action by `limits` `min` / `max`, else by these. |
 | `state_type` / `state_representation` / `frame` | feature | Closed-symbol embodiment metadata (EEF vs joint, quaternion vs axis-angle, world vs base frame). Descriptive. |
-| `transform` | observation | Where the sensor is mounted: `parent` frame (`world`, or a link it moves with, such as `hand`), `translation` (m) and `rotation` (xyzw quaternion) in that frame. A camera's frame is the optical one: +z out of the lens, +x image right, +y image down. [Direct control](#direct-control) describes it to the model. |
+| `transform` | observation | Where the sensor is. Static: `parent` frame (`world`, or a link it is fixed to), `translation` (m) and `rotation` (xyzw quaternion) in that frame. Live, for a sensor that moves: `pose`, the name of an observation carrying its current world-frame `[x, y, z, qx, qy, qz, qw]`. A camera's frame is the optical one: +z out of the lens, +x image right, +y image down. [Direct control](#direct-control) describes it to the model, a live pose in every reply. |
 | `intrinsics` | image observation | Lens: `fovy` (degrees, vertical field of view). With `shape`, enough to map a pixel to a ray. |
 
 The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per

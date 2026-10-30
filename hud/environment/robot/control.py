@@ -357,8 +357,17 @@ class DirectControl:
         self._obs_space = observations
         self._cameras = [n for n, f in observations.items() if f.get("type") == "rgb"]
         self._mounts = _mounts(observations)
+        # A live transform names the observation carrying its sensor's current pose; that
+        # vector is reported as the sensor's pose in every reply, not as state.
+        self._live = {
+            n: f["transform"]["pose"]
+            for n, f in observations.items()
+            if "pose" in f.get("transform", {})
+        }
         self._states = {
-            n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
+            n: f.get("names")
+            for n, f in observations.items()
+            if f.get("type") not in IMAGE_TYPES and n not in self._live.values()
         }
         self._fingers = [
             (name, key, column)
@@ -879,6 +888,10 @@ class DirectControl:
             lines.append("The time limit is reached.")
         if obs["terminated"]:
             lines.append("The episode has ended; stop calling tools.")
+        for sensor, key in self._live.items():
+            pose = np.asarray(data[key], dtype=np.float64).reshape(-1)
+            view = _view(self._obs_space[sensor], pose[:3], pose[3:7])
+            lines.append(f"{sensor} is now {view} in the world frame.")
         content: Content = [TextContent(type="text", text="\n".join(lines))]
         for camera in self._cameras:
             content.append(TextContent(type="text", text=f"camera {camera}:"))
@@ -957,30 +970,40 @@ def _standard_name(name: str) -> str | None:
 def _mounts(observations: dict[str, dict[str, Any]]) -> str:
     """Where each sensor with a contract ``transform`` sits, and where each camera looks.
 
-    A camera's frame is the optical one: +z out of the lens, +x image right, +y image down.
+    A static transform is a pose in its parent frame. A live one names the observation
+    carrying the sensor's current world-frame pose, which every reply reports.
     """
     mounts = []
     for name, feature in observations.items():
         transform = feature.get("transform")
         if transform is None:
             continue
-        parent = transform["parent"]
-        where = (
-            "fixed in the world" if parent == "world" else f"mounted on {parent} (moves with it)"
-        )
-        text = f"{name} is {where} at {_vector(transform['translation'])} m"
-        if feature.get("type") in IMAGE_TYPES:
-            rotation = xyzw_to_matrix(np.asarray(transform["rotation"], dtype=np.float64))
-            text += (
-                f", looking along {_vector(rotation[:, 2])} with image up along "
-                f"{_vector(-rotation[:, 1])}"
-            )
-            if (fovy := feature.get("intrinsics", {}).get("fovy")) is not None:
-                text += f", {fovy:g} degrees of vertical field of view"
+        if "pose" in transform:
+            text = f"{name} moves with the robot; every reply says where it is"
+        else:
+            parent = transform["parent"]
+            where = "fixed in the world" if parent == "world" else f"mounted on {parent}"
+            view = _view(feature, transform["translation"], transform["rotation"])
+            text = f"{name} is {where}, {view} in that frame"
+        if (fovy := feature.get("intrinsics", {}).get("fovy")) is not None:
+            text += f", with {fovy:g} degrees of vertical field of view"
         mounts.append(f"{text}.")
     if not mounts:
         return ""
-    return f"Sensors, in their parent frame: {' '.join(mounts)} "
+    return f"Sensors: {' '.join(mounts)} "
+
+
+def _view(feature: dict[str, Any], translation: Iterable[float], xyzw: Iterable[float]) -> str:
+    """A sensor pose in words; a camera's frame is the optical one (+z out of the lens,
+    +x image right, +y image down)."""
+    text = f"at {_vector(translation)} m"
+    if feature.get("type") in IMAGE_TYPES:
+        rotation = xyzw_to_matrix(np.asarray(list(xyzw), dtype=np.float64))
+        text += (
+            f", looking along {_vector(rotation[:, 2])} with image up along "
+            f"{_vector(-rotation[:, 1])}"
+        )
+    return text
 
 
 def _vector(values: Iterable[float]) -> str:
