@@ -41,11 +41,15 @@ REACH = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
 
 
 async def drive(
-    sim: Arm, control: DirectControl, *calls: tuple[str, dict[str, Any]]
+    sim: Arm,
+    control: DirectControl,
+    *calls: tuple[str, dict[str, Any]],
+    max_ticks: int | None = None,
 ) -> tuple[ScriptedLLM, Run]:
     agent = ScriptedLLM(*calls)
     async with arm_env(sim, control) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+        task = Task(env="arm", id="reach", args={"max_ticks": max_ticks})
+        run = await rollout(task, agent, runtime=LocalRuntime(env))
     return agent, run
 
 
@@ -328,10 +332,10 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
 
 
 @pytest.mark.parametrize(
-    ("limit", "calls", "openings", "says", "ticks", "x"),
+    ("max_ticks", "calls", "openings", "says", "ticks", "x"),
     [
         pytest.param(
-            10.0,
+            100,
             [move("move_to", x=0.2), look(1.0)],
             [
                 "Played 26 steps (2.6 s). Time remaining: 7.4 s.",
@@ -343,7 +347,7 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
             id="every-reply-reports-the-time-left",
         ),
         pytest.param(
-            2.0,
+            20,
             [move("move_to", x=0.5), move("move_to", x=0.1)],
             [
                 "Played 20 steps (2.0 s). Time remaining: 0.0 s.",
@@ -361,7 +365,7 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
     ],
 )
 async def test_the_time_limit_is_spent_by_played_ticks_and_ends_the_episode(
-    limit: float,
+    max_ticks: int,
     calls: list[tuple[str, dict[str, Any]]],
     openings: list[str],
     says: tuple[str, ...],
@@ -370,10 +374,11 @@ async def test_the_time_limit_is_spent_by_played_ticks_and_ends_the_episode(
 ) -> None:
     sim = Arm(REACH, done=reached)
 
-    agent, _ = await drive(sim, DirectControl(time_limit=limit), *calls)
+    agent, _ = await drive(sim, DirectControl(), *calls, max_ticks=max_ticks)
 
+    seconds = max_ticks / 10  # the contract's control rate is 10 Hz
     for description in agent.descriptions.values():
-        assert f"You have {limit:g} seconds of simulated time." in description
+        assert f"You have {seconds:g} seconds of simulated time." in description
     replies = agent.replies()
     assert [reply[: len(opening)] for reply, opening in zip(replies, openings, strict=True)] == (
         openings
@@ -384,3 +389,33 @@ async def test_the_time_limit_is_spent_by_played_ticks_and_ends_the_episode(
     assert ("The episode has ended" in replies[-1]) == bool(says)
     assert len(sim.actions) == ticks
     assert sim.state[0] == pytest.approx(x)
+
+
+async def test_each_episode_has_its_own_tick_limit_and_budget() -> None:
+    sim = Arm(REACH, done=reached)
+    control = DirectControl()
+    limited = ScriptedLLM(move("move_to", x=0.5))
+    unbounded = ScriptedLLM(move("move_to", x=0.5))
+
+    async with arm_env(sim, control) as env:
+        runtime = LocalRuntime(env)
+        await rollout(Task(env="arm", id="reach", args={"max_ticks": 20}), limited, runtime=runtime)
+        cut = len(sim.actions)
+        await rollout(Task(env="arm", id="reach"), unbounded, runtime=runtime)
+
+    assert cut == 20
+    assert all("simulated time" in text for text in limited.descriptions.values())
+    assert not any("simulated time" in text for text in unbounded.descriptions.values())
+    assert "The episode has ended" in limited.replies()[0]
+    assert "The episode has ended" not in unbounded.replies()[0]
+    assert len(sim.actions) > 20
+
+
+async def test_a_tick_limit_must_be_positive() -> None:
+    sim = Arm(REACH, done=reached)
+
+    agent, run = await drive(sim, DirectControl(), look(), max_ticks=0)
+
+    assert run.trace.status == "error"
+    assert "max_ticks must be a positive number of ticks" in (run.trace.error or "")
+    assert agent.results == []

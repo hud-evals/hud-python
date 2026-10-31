@@ -20,6 +20,7 @@ import logging
 import math
 import secrets
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 from weakref import WeakKeyDictionary
@@ -152,10 +153,19 @@ def _score_value(result: Any) -> float:
 class TaskRunner:
     """Holds one task's suspended generator between ``tasks.start`` and ``tasks.grade``."""
 
-    def __init__(self, task: _TaskFactory[Any], args: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        task: _TaskFactory[Any],
+        args: dict[str, Any] | None = None,
+        call_id: str | None = None,
+    ) -> None:
         self.task = task
         self._args = args or {}
         self._gen: AsyncGenerator[Any, Any] | None = None
+        #: The client's id for the ``tasks.start`` call that made this runner.
+        self.call_id = call_id
+        #: The start itself, set by the control channel, so a retried call can join it.
+        self.started: asyncio.Task[dict[str, Any]] | None = None
 
         # Fail fast on bad args (TypeError before any side-effects run).
         try:
@@ -221,6 +231,12 @@ class _NoTaskInProgress(RuntimeError):
     pass
 
 
+def _consume_failure(task: asyncio.Task[Any]) -> None:
+    """Mark a call's failure as seen: its caller may be gone, and a retry reads it off the task."""
+    if not task.cancelled():
+        task.exception()
+
+
 async def _frames(
     first: dict[str, Any],
     reader: asyncio.StreamReader,
@@ -238,11 +254,16 @@ class _ControlChannel:
     Owns what the declaration must not: runtime state — one suspended task per
     session, keyed by session id (scoped to this server; two servers for one
     env never share). A session's ``start`` replaces its own runner, ``grade``
-    consumes it, ``cancel`` clears it. A connection drop parks the session's
-    runner in place; a later connection grades it by resuming the session
-    (``hello`` with its id) or, when exactly one session is parked, by a plain
-    ``tasks.grade`` — the split start/grade flow (e.g. ``hud task grade`` or
-    harbor's verifier reconnecting to grade) with no parking handoff to manage.
+    consumes it, ``cancel`` clears it. A start or grade belongs to its session, not
+    to the connection that sent it: a connection drop leaves it running, and a later
+    connection that resumes the session and sends the same call (a ``tasks.start``
+    with the same ``call_id``, a ``tasks.grade``) collects its outcome instead of
+    running it again. The grade is kept until the session's next start, cancel or bye.
+    A connection drop parks the session's runner in place; a later connection grades
+    it by resuming the session (``hello`` with its id) or, when exactly one session is
+    parked, by a plain ``tasks.grade`` — the split start/grade flow (e.g.
+    ``hud task grade`` or harbor's verifier reconnecting to grade) with no parking
+    handoff to manage.
     """
 
     def __init__(self, env: Environment) -> None:
@@ -250,31 +271,59 @@ class _ControlChannel:
         #: Suspended tasks by session id. An entry whose session has no live
         #: connection is parked, awaiting a resume (or adoption) to grade.
         self._runners: dict[str, TaskRunner] = {}
-        self._live: set[str] = set()
+        #: The grade each session ran or is running, for a resumed session to collect.
+        self._grades: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        #: The connection currently driving each session.
+        self._live: dict[str, asyncio.StreamWriter] = {}
 
-    async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    def knows(self, session_id: str) -> bool:
+        return session_id in self._live or session_id in self._runners or session_id in self._grades
+
+    async def start(
+        self, session_id: str, task_id: str, args: dict[str, Any], call_id: str | None
+    ) -> dict[str, Any]:
+        current = self._runners.get(session_id)
+        if call_id is not None and current is not None and current.call_id == call_id:
+            assert current.started is not None
+            return await asyncio.shield(current.started)
         await self._cancel_runner(session_id)
-        runner = TaskRunner(self.env.tasks[task_id], args)
+        runner = TaskRunner(self.env.tasks[task_id], args, call_id)
         self._runners[session_id] = runner
+        runner.started = asyncio.create_task(self._run_start(session_id, runner))
+        runner.started.add_done_callback(_consume_failure)
+        return await asyncio.shield(runner.started)
+
+    async def _run_start(self, session_id: str, runner: TaskRunner) -> dict[str, Any]:
         try:
             return await runner.start()
         except BaseException:
-            self._runners.pop(session_id, None)
+            if self._runners.get(session_id) is runner:
+                del self._runners[session_id]
             await runner.cancel()
             raise
 
     async def grade(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        runner = self._runners.pop(session_id, None)
-        claim_sid = session_id
-        if runner is None:
-            # Blind adopt: free the parked session's robot claim, not this connection's.
-            claim_sid, runner = self._adopt_parked()
-        token = current_session_id.set(claim_sid)
-        try:
-            return await runner.grade(payload)
-        finally:
-            current_session_id.reset(token)
-            self._release_if_idle(claim_sid)
+        graded = self._grades.get(session_id)
+        if graded is None:
+            runner = self._runners.pop(session_id, None)
+            claim_sid = session_id
+            if runner is None:
+                # Blind adopt: free the parked session's robot claim, not this connection's.
+                claim_sid, runner = self._adopt_parked()
+            graded = asyncio.create_task(self._run_grade(claim_sid, runner, payload))
+            graded.add_done_callback(partial(self._grade_ended, claim_sid))
+            self._grades[session_id] = graded
+        return await asyncio.shield(graded)
+
+    async def _run_grade(
+        self, claim_sid: str, runner: TaskRunner, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        current_session_id.set(claim_sid)
+        return await runner.grade(payload)
+
+    def _grade_ended(self, claim_sid: str, graded: asyncio.Task[dict[str, Any]]) -> None:
+        _consume_failure(graded)
+        self._release_if_idle(claim_sid)
 
     def _adopt_parked(self) -> tuple[str, TaskRunner]:
         """Claim the parked session iff unambiguous — the blind-reconnect grade path."""
@@ -290,8 +339,16 @@ class _ControlChannel:
         return sid, self._runners.pop(sid)
 
     async def _cancel_runner(self, session_id: str) -> None:
+        graded = self._grades.pop(session_id, None)
         runner = self._runners.pop(session_id, None)
+        if graded is not None:
+            graded.cancel()
+            await asyncio.gather(graded, return_exceptions=True)
         if runner is None:
+            return
+        if runner.started is not None and not runner.started.done():
+            runner.started.cancel()
+            await asyncio.gather(runner.started, return_exceptions=True)
             return
         # Bind session id so teardown hooks (robot slot release) free the right claim.
         token = current_session_id.set(session_id)
@@ -307,15 +364,21 @@ class _ControlChannel:
     def _release_if_idle(self, session_id: str) -> None:
         """Release a session's controller connections and routes once nothing can use them.
 
-        A live control connection or a parked task (awaiting resume or grade) keeps
-        them; otherwise they are released so a later session inherits neither.
+        A live control connection, a parked task (awaiting resume or grade) or a
+        grade still running keeps them; otherwise they are released so a later
+        session inherits neither.
         """
-        if session_id not in self._live and session_id not in self._runners:
+        graded = self._grades.get(session_id)
+        if (
+            session_id not in self._live
+            and session_id not in self._runners
+            and (graded is None or graded.done())
+        ):
             self.env.release_session(session_id)
 
     async def cancel_all(self) -> None:
         """Tear down every suspended/live task (server shutdown)."""
-        for session_id in list(self._runners):
+        for session_id in {*self._runners, *self._grades}:
             await self.cancel(session_id)
 
     async def session(
@@ -333,8 +396,8 @@ class _Session:
 
     tasks.start and tasks.grade run the task's own code, which can take as long as it
     likes; they run beside the read loop so a cancel or a bye still reaches them. A
-    hang-up lets a start finish and park for resume, and ends a grade, whose result
-    nobody is left to receive.
+    hang-up leaves a start or a grade running on the channel, for a resumed session to
+    collect; only a cancel, a bye or a restart of the session ends one.
     """
 
     def __init__(self, channel: _ControlChannel, writer: asyncio.StreamWriter) -> None:
@@ -342,7 +405,7 @@ class _Session:
         self.env = channel.env
         self.writer = writer
         self.id = "sess-" + secrets.token_hex(4)
-        channel._live.add(self.id)
+        channel._live[self.id] = writer
         self._token = current_session_id.set(self.id)
         self._work: asyncio.Task[None] | None = None
         self._work_id: int | str | None = None
@@ -376,7 +439,7 @@ class _Session:
         finally:
             next_frame.cancel()
             await self._stop_work()
-            self.channel._live.discard(self.id)
+            self._leave_live()
             # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
             # teardown (callers that abort must cancel first — see rollout timeout).
             self.channel._release_if_idle(self.id)
@@ -403,6 +466,11 @@ class _Session:
         else:
             await self._handle(msg)
         return True
+
+    def _leave_live(self) -> None:
+        """Stop speaking for ``self.id`` unless a takeover already gave it to another connection."""
+        if self.channel._live.get(self.id) is self.writer:
+            del self.channel._live[self.id]
 
     async def _stop_work(self) -> None:
         if self._work is None:
@@ -455,16 +523,20 @@ class _Session:
             if not isinstance(requested, str):
                 await self._error(msg_id, -32602, "hello: 'session_id' must be a string")
                 return
-            if requested in self.channel._live:
+            if requested in self.channel._live and params.get("takeover") is not True:
                 await self._error(msg_id, -32600, f"session {requested!r} has a live connection")
                 return
-            if requested not in self.channel._runners:
+            if not self.channel.knows(requested):
                 await self._error(msg_id, -32600, f"unknown session: {requested!r}")
                 return
-            # Resume: this connection becomes the parked session.
-            self.channel._live.discard(self.id)
+            # Resume: this connection becomes the session. A takeover replaces the
+            # connection the client has given up on, which may be half-open and never
+            # report its own close.
+            self._leave_live()
+            if (stale := self.channel._live.pop(requested, None)) is not None:
+                stale.close()
             self.id = requested
-            self.channel._live.add(self.id)
+            self.channel._live[self.id] = self.writer
             current_session_id.reset(self._token)
             self._token = current_session_id.set(self.id)
         raw_routes = params.get("workspace_routes", [])
@@ -513,7 +585,11 @@ class _Session:
         if task_id not in self.env.tasks:
             await self._error(msg_id, -32602, f"unknown task: {task_id!r}")
             return
-        prompt = await self.channel.start(self.id, task_id, args)
+        call_id = params.get("call_id")
+        if call_id is not None and not isinstance(call_id, str):
+            await self._error(msg_id, -32602, "tasks.start: 'call_id' must be a string")
+            return
+        prompt = await self.channel.start(self.id, task_id, args, call_id)
         try:
             await self._reply(msg_id, prompt)
         except FrameTooLargeError:

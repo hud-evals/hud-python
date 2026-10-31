@@ -1,6 +1,7 @@
 """The control channel as a peer speaks it: a task's typed start and answer, how a
 session's template is torn down, a request at the frame limit, sessions that drop and
-resume, and capability streams tunneled through its port."""
+resume (a start or grade left running is collected by the resumed session), and capability
+streams tunneled through its port."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from hud.environment import (
     Environment,
 )
 from hud.eval import LocalRuntime, Task
+from tests.conftest import eventually
 from tests.environment.conftest import FRAME_LIMIT, encode, wire
 
 if TYPE_CHECKING:
@@ -137,20 +139,91 @@ def stalled(events: list[str]) -> Environment:
     return env
 
 
-@pytest.mark.parametrize("ending", ["cancel", "hang-up"])
-async def test_a_grade_still_running_ends_with_its_session(ending: str) -> None:
+async def test_a_cancel_ends_a_grade_still_running() -> None:
     events: list[str] = []
-    async with LocalRuntime(stalled(events))(Task(env="stalled", id="stall")) as runtime:
-        async with wire(runtime.url) as peer:
-            await peer.call("tasks.start", {"id": "stall"})
-            await peer.send("tasks.grade", {"answer": "x"})
-            if ending == "cancel":
-                await peer.call("tasks.cancel")
-            else:
-                await peer.hang_up()
+    async with (
+        LocalRuntime(stalled(events))(Task(env="stalled", id="stall")) as runtime,
+        wire(runtime.url) as peer,
+    ):
+        await peer.call("tasks.start", {"id": "stall"})
+        await peer.send("tasks.grade", {"answer": "x"})
+        await peer.call("tasks.cancel")
         closed = list(events)
 
     assert closed == ["closed"]
+
+
+def gated(runs: list[str], gate: asyncio.Event) -> Environment:
+    """A task whose start and grade each wait on ``gate`` until it is released."""
+    env = Environment("gated")
+
+    @env.template()
+    async def work():
+        runs.append("start")
+        await gate.wait()
+        yield "go"
+        runs.append("grade")
+        await gate.wait()
+        yield 1.0
+
+    return env
+
+
+async def test_a_grade_running_when_its_connection_hangs_up_is_collected_on_resume() -> None:
+    runs: list[str] = []
+    gate = asyncio.Event()
+    async with LocalRuntime(gated(runs, gate))(Task(env="gated", id="work")) as runtime:
+        async with wire(runtime.url) as a:
+            session = (await a.call("hello", {}))["result"]["session_id"]
+            gate.set()
+            await a.call("tasks.start", {"id": "work"})
+            gate.clear()
+            await a.send("tasks.grade", {"answer": "x"})
+            await eventually(lambda: runs == ["start", "grade"])
+            await a.hang_up()
+        async with wire(runtime.url) as b:
+            await b.call("hello", {"session_id": session})
+            await b.send("tasks.grade", {"answer": "x"})
+            gate.set()
+            collected = await b.read()
+
+    assert collected is not None
+    assert (collected["result"], runs) == ({"score": 1.0}, ["start", "grade"])
+
+
+async def test_a_start_resent_with_its_call_id_joins_the_start_instead_of_repeating_it() -> None:
+    runs: list[str] = []
+    gate = asyncio.Event()
+    async with LocalRuntime(gated(runs, gate))(Task(env="gated", id="work")) as runtime:
+        async with wire(runtime.url) as a:
+            session = (await a.call("hello", {}))["result"]["session_id"]
+            await a.send("tasks.start", {"id": "work", "call_id": "c1"})
+            await eventually(lambda: runs == ["start"])
+            await a.close()
+        async with wire(runtime.url) as b:
+            await b.call("hello", {"session_id": session, "takeover": True})
+            await b.send("tasks.start", {"id": "work", "call_id": "c1"})
+            gate.set()
+            joined = await b.read()
+
+    assert joined is not None
+    assert (joined["result"], runs) == ({"prompt": "go"}, ["start"])
+
+
+async def test_a_takeover_hello_replaces_the_live_connection_of_a_session() -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        session = (await a.call("hello", {}))["result"]["session_id"]
+        await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
+        taken = await b.call("hello", {"session_id": session, "takeover": True})
+        replaced = await a.read()
+        graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert (taken["result"]["session_id"], replaced) == (session, None)
+    assert graded["result"]["tag"] == "a"
 
 
 def start_of_size(size: int) -> dict[str, Any]:
