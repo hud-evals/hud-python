@@ -1,6 +1,6 @@
 """The control channel as a peer speaks it: a task's typed start and answer, how a
 session's template is torn down, a request at the frame limit, sessions that drop and
-resume (a start or grade left running is collected by the resumed session), and capability
+resume (a grade left running is collected by the resumed session), and capability
 streams tunneled through its port."""
 
 from __future__ import annotations
@@ -189,25 +189,6 @@ async def test_a_grade_running_when_its_connection_hangs_up_is_collected_on_resu
 
     assert collected is not None
     assert (collected["result"], runs) == ({"score": 1.0}, ["start", "grade"])
-
-
-async def test_a_start_resent_with_its_call_id_joins_the_start_instead_of_repeating_it() -> None:
-    runs: list[str] = []
-    gate = asyncio.Event()
-    async with LocalRuntime(gated(runs, gate))(Task(env="gated", id="work")) as runtime:
-        async with wire(runtime.url) as a:
-            session = (await a.call("hello", {}))["result"]["session_id"]
-            await a.send("tasks.start", {"id": "work", "call_id": "c1"})
-            await eventually(lambda: runs == ["start"])
-            await a.close()
-        async with wire(runtime.url) as b:
-            await b.call("hello", {"session_id": session, "takeover": True})
-            await b.send("tasks.start", {"id": "work", "call_id": "c1"})
-            gate.set()
-            joined = await b.read()
-
-    assert joined is not None
-    assert (joined["result"], runs) == ({"prompt": "go"}, ["start"])
 
 
 async def test_a_takeover_hello_replaces_the_live_connection_of_a_session() -> None:

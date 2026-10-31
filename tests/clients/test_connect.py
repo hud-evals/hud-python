@@ -158,7 +158,7 @@ async def test_a_heartbeat_the_env_never_answers_is_redialed_as_a_takeover_of_th
 async def test_a_control_channel_that_stays_down_fails_the_rollout_with_the_last_error(
     hud_env: HudEnv,
 ) -> None:
-    hud_env.set(HUD_CONTROL_HEARTBEAT_INTERVAL="0.05", HUD_CONTROL_OUTAGE_BUDGET="0.5")
+    hud_env.set(HUD_CONTROL_HEARTBEAT_INTERVAL="0.05", HUD_CONTROL_OUTAGE_BUDGET="1.5")
 
     async with control_peer(
         [Action("answer", result=HELLO), Action("hang_up")], [Action("hang_up")]

@@ -179,18 +179,18 @@ class Settings(BaseSettings):
     )
 
     control_heartbeat_timeout: float = Field(
-        default=60.0,
+        default=30.0,
         gt=0,
-        description="Seconds a heartbeat reply, or the dial of a replacement control or "
-        "tunnel connection, may take before the attempt counts as failed and is retried. "
+        description="Seconds a heartbeat reply, or the dial of a replacement control "
+        "connection, may take before the attempt counts as failed and is retried. "
         "A liveness bound for a blackholed connection, not a latency target.",
         validation_alias="HUD_CONTROL_HEARTBEAT_TIMEOUT",
     )
 
     control_outage_budget: float = Field(
-        default=600.0,
+        default=300.0,
         gt=0,
-        description="Seconds the control channel or a capability tunnel may stay unreachable "
+        description="Seconds the control channel may stay unreachable "
         "while the client redials, before the call or rollout fails with the last error.",
         validation_alias="HUD_CONTROL_OUTAGE_BUDGET",
     )
