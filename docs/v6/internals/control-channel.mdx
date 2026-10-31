@@ -62,7 +62,7 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 
 | Method | Result |
 | --- | --- |
-| `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session. |
+| `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session; `takeover` also replaces that session's live connection. |
 | `tasks.list` | Registered task metadata for introspection and validation. |
 | `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
 | `tasks.grade` | The selected task's evaluation, including numeric `score`. |
@@ -139,6 +139,16 @@ connection reaches the same runner in either of two ways:
 Zero parked runners produces `no task in progress`; multiple parked runners
 produce an ambiguity error that names their session ids. This is the channel
 mechanism behind split `hud task start` and `hud task grade` invocations.
+
+## A connection that drops
+
+`HudClient` sends a `hello` heartbeat every 120 seconds while the agent runs, and
+`tasks.grade` sends one first. A heartbeat that finds the connection dropped or silent
+for 30 seconds redials and resumes the session with `hello {session_id, takeover: true}`.
+`takeover` makes the env close the session's old connection, which it may not have
+noticed is dead. After 5 minutes without a working connection the run fails with a
+`TimeoutError` naming the last error. `tasks.start` and `tasks.grade` are not re-sent:
+a drop during one fails the call, and a hang-up ends a running grade.
 
 ## Capability streams
 

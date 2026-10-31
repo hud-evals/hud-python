@@ -44,7 +44,10 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger("hud.clients")
 _CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
-_CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
+_CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
+#: How long the heartbeat redials a lost control connection before the run fails.
+_CONTROL_OUTAGE_BUDGET_SECONDS = 300.0
+_REDIAL_DELAY_SECONDS = 1.0
 _ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
 _CAPABILITY_CONNECT_ATTEMPTS = 3
 _CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
@@ -264,14 +267,17 @@ class HudClient:
         self, connections: Sequence[Connection], *, reply_timeout: float | None = None
     ) -> None:
         """Bind *connections* to this session in place of the ones it holds."""
+        await self._call("hello", self._attach_params(connections), reply_timeout=reply_timeout)
+        self.connections = tuple(connections)
+
+    def _attach_params(self, connections: Sequence[Connection]) -> dict[str, Any]:
         assert self.manifest is not None
         params: dict[str, Any] = {"session_id": self.manifest.session_id}
         if self.workspace_routes:
             params["workspace_routes"] = [route.to_wire() for route in self.workspace_routes]
         if connections:
             params["connections"] = [connection.to_wire() for connection in connections]
-        await self._call("hello", params, reply_timeout=reply_timeout)
-        self.connections = tuple(connections)
+        return params
 
     # ─── capability access ────────────────────────────────────────────
     #
@@ -354,8 +360,73 @@ class HudClient:
         return await self._call("tasks.start", {"id": task_id, "args": args or {}})
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``)."""
+        """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``).
+
+        The control connection is checked first, so one that dropped while the agent ran
+        is replaced before grading. The grade itself is not re-sent.
+        """
+        await self.heartbeat()
         return await self._call("tasks.grade", payload)
+
+    async def heartbeat(self) -> None:
+        """Send ``hello`` for this session, replacing the control connection if it has failed.
+
+        A failed or silent connection is redialed until ``_CONTROL_OUTAGE_BUDGET_SECONDS``
+        have passed, then the run fails with a ``TimeoutError`` naming the last error.
+        """
+        try:
+            await self.bind(self.connections, reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS)
+            return
+        except (EOFError, OSError, TimeoutError) as exc:
+            error = exc
+        loop = asyncio.get_running_loop()
+        down_since = loop.time()
+        while (down_for := loop.time() - down_since) < _CONTROL_OUTAGE_BUDGET_SECONDS:
+            LOGGER.warning("control link down for %.0fs, redialing: %r", down_for, error)
+            try:
+                async with self._call_lock:
+                    await self._redial()
+            except (EOFError, OSError, TimeoutError) as exc:
+                error = exc
+                await asyncio.sleep(_REDIAL_DELAY_SECONDS)
+            else:
+                LOGGER.warning("control link restored after %.0fs", loop.time() - down_since)
+                return
+        raise TimeoutError(
+            f"control connection down for {_CONTROL_OUTAGE_BUDGET_SECONDS:g}s; "
+            f"last error: {error!r}"
+        ) from error
+
+    async def _redial(self) -> None:
+        """Replace the control connection with one that takes over this session.
+
+        Forwarders and tunnels dial the env themselves, and the env keeps the session's task
+        parked across the drop. ``takeover`` makes it drop the old connection, which it may
+        not have noticed is dead.
+        """
+        assert self._endpoint is not None
+        params = {**self._attach_params(self.connections), "takeover": True}
+        async with asyncio.timeout(_CONTROL_HEARTBEAT_TIMEOUT_SECONDS):
+            reader, writer = await asyncio.open_connection(*self._endpoint)
+            try:
+                await send_frame(
+                    writer,
+                    {"jsonrpc": "2.0", "id": next(self._ids), "method": "hello", "params": params},
+                    max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+                )
+                reply = await read_frame(reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                if reply is None:
+                    raise EOFError("env closed connection during 'hello'")
+                if "error" in reply:
+                    err = reply["error"]
+                    raise HudProtocolError(
+                        int(err.get("code", -32000)), str(err.get("message", ""))
+                    )
+            except BaseException:
+                writer.close()
+                raise
+        self._writer.close()
+        self._reader, self._writer = reader, writer
 
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
@@ -368,10 +439,17 @@ class HudClient:
         )
         try:
             with contextlib.suppress(Exception):
-                async with asyncio.timeout(_ABANDON_REPLY_TIMEOUT_SECONDS):
-                    self._writer.write(frame)
-                    await self._writer.drain()
+                async with asyncio.timeout(
+                    _CONTROL_HEARTBEAT_TIMEOUT_SECONDS + _ABANDON_REPLY_TIMEOUT_SECONDS
+                ):
+                    writer = self._writer
+                    with contextlib.suppress(ConnectionError):
+                        writer.write(frame)
+                        await writer.drain()
                     async with self._call_lock:
+                        if self._writer is not writer:
+                            self._writer.write(frame)
+                            await self._writer.drain()
                         await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
         finally:
             self.abort()
@@ -418,7 +496,7 @@ class HudClient:
             except HudProtocolError:
                 raise
             except BaseException:
-                self.abort()
+                self._writer.close()
                 raise
 
 
@@ -520,9 +598,7 @@ async def connect(
         while True:
             await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
             try:
-                await client.bind(
-                    client.connections, reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS
-                )
+                await client.heartbeat()
             except HudProtocolError as exc:
                 LOGGER.warning("control heartbeat failed: %s", exc)
                 return

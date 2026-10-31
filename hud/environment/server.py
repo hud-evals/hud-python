@@ -250,7 +250,8 @@ class _ControlChannel:
         #: Suspended tasks by session id. An entry whose session has no live
         #: connection is parked, awaiting a resume (or adoption) to grade.
         self._runners: dict[str, TaskRunner] = {}
-        self._live: set[str] = set()
+        #: The connection currently driving each session.
+        self._live: dict[str, asyncio.StreamWriter] = {}
 
     async def start(self, session_id: str, task_id: str, args: dict[str, Any]) -> dict[str, Any]:
         await self._cancel_runner(session_id)
@@ -342,7 +343,7 @@ class _Session:
         self.env = channel.env
         self.writer = writer
         self.id = "sess-" + secrets.token_hex(4)
-        channel._live.add(self.id)
+        channel._live[self.id] = writer
         self._token = current_session_id.set(self.id)
         self._work: asyncio.Task[None] | None = None
         self._work_id: int | str | None = None
@@ -376,7 +377,7 @@ class _Session:
         finally:
             next_frame.cancel()
             await self._stop_work()
-            self.channel._live.discard(self.id)
+            self._leave_live()
             # Task stays parked for resume/grade; robot slots free on cancel/bye/grade
             # teardown (callers that abort must cancel first — see rollout timeout).
             self.channel._release_if_idle(self.id)
@@ -403,6 +404,11 @@ class _Session:
         else:
             await self._handle(msg)
         return True
+
+    def _leave_live(self) -> None:
+        """Stop speaking for ``self.id`` unless a takeover already gave it to another connection."""
+        if self.channel._live.get(self.id) is self.writer:
+            del self.channel._live[self.id]
 
     async def _stop_work(self) -> None:
         if self._work is None:
@@ -455,16 +461,19 @@ class _Session:
             if not isinstance(requested, str):
                 await self._error(msg_id, -32602, "hello: 'session_id' must be a string")
                 return
-            if requested in self.channel._live:
+            if requested in self.channel._live and params.get("takeover") is not True:
                 await self._error(msg_id, -32600, f"session {requested!r} has a live connection")
                 return
-            if requested not in self.channel._runners:
+            if requested not in self.channel._live and requested not in self.channel._runners:
                 await self._error(msg_id, -32600, f"unknown session: {requested!r}")
                 return
-            # Resume: this connection becomes the parked session.
-            self.channel._live.discard(self.id)
+            # Resume: this connection becomes the session. A takeover replaces the
+            # connection the client has given up on, which may be half-open.
+            self._leave_live()
+            if (stale := self.channel._live.pop(requested, None)) is not None:
+                stale.close()
             self.id = requested
-            self.channel._live.add(self.id)
+            self.channel._live[self.id] = self.writer
             current_session_id.reset(self._token)
             self._token = current_session_id.set(self.id)
         raw_routes = params.get("workspace_routes", [])

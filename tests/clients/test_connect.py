@@ -1,9 +1,5 @@
 """The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a
-scripted peer that answers each connection and records every frame it receives.
-
-Not covered: the 120 s control heartbeat. Its interval is a module constant with no
-public knob, and waiting it out has no place in the default lane.
-"""
+scripted peer that answers each connection and records every frame it receives."""
 
 from __future__ import annotations
 
@@ -13,9 +9,11 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from hud.clients import connect
+from hud.capabilities import Connection
+from hud.clients import client, connect
 from hud.eval.runtime import Runtime
 from tests.clients.conftest import Action, control_peer
+from tests.conftest import eventually
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 BINDINGS = [
@@ -134,3 +132,77 @@ async def test_a_stream_the_env_refuses_ends_the_local_connection() -> None:
         writer.close()
 
     assert received == b""
+
+
+async def test_a_heartbeat_the_env_never_answers_is_redialed_as_a_takeover_of_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(client, "_CONTROL_HEARTBEAT_TIMEOUT_SECONDS", 0.3)
+    answer = Action("answer", result=HELLO)
+
+    async with (
+        control_peer([answer, Action("hold")], [answer] * 100) as peer,
+        connect(Runtime(peer.url)),
+    ):
+        await eventually(lambda: peer.accepted == 2)
+        resumed = [
+            hello["params"] for hello in peer.requests("hello") if hello["params"].get("takeover")
+        ]
+
+    assert resumed[0] == {"session_id": "s-1", "takeover": True}
+
+
+async def test_a_takeover_keeps_the_connections_the_session_had_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client, "_CONTROL_HEARTBEAT_TIMEOUT_SECONDS", 0.3)
+    answer = Action("answer", result=HELLO)
+    inference = Connection(
+        name="inference", capability="ssh", url="http://127.0.0.1:9", headers={"Authorization": "x"}
+    )
+
+    async with (
+        control_peer([answer, answer, Action("hold")], [answer]) as peer,
+        connect(Runtime(peer.url)) as hud,
+    ):
+        await hud.bind((inference,))
+        await hud.heartbeat()
+        (takeover,) = [
+            hello["params"] for hello in peer.requests("hello") if hello["params"].get("takeover")
+        ]
+
+    assert takeover["connections"] == [inference.to_wire()]
+
+
+async def test_a_control_channel_that_stays_down_fails_the_rollout_with_the_last_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(client, "_CONTROL_OUTAGE_BUDGET_SECONDS", 1.5)
+
+    async with control_peer(
+        [Action("answer", result=HELLO), Action("hang_up")], [Action("hang_up")]
+    ) as peer:
+        with pytest.raises(TimeoutError, match="env closed connection during 'hello'"):
+            async with connect(Runtime(peer.url)):
+                await asyncio.sleep(30)
+
+    assert peer.accepted > 2
+
+
+async def test_a_cancel_during_an_outage_does_not_wait_for_the_redials_to_give_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client, "_CONTROL_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(client, "_CONTROL_OUTAGE_BUDGET_SECONDS", 60)
+
+    async with (
+        control_peer(
+            [Action("answer", result=HELLO), Action("hang_up")], [Action("hang_up")]
+        ) as peer,
+        connect(Runtime(peer.url)) as hud,
+    ):
+        await eventually(lambda: peer.accepted > 2)
+        with pytest.raises((EOFError, ConnectionError)):
+            await asyncio.wait_for(hud.cancel(), 5)

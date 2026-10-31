@@ -153,6 +153,26 @@ async def test_a_grade_still_running_ends_with_its_session(ending: str) -> None:
     assert closed == ["closed"]
 
 
+@pytest.mark.parametrize("started_by", ["old-connection", "new-connection"])
+async def test_a_takeover_hello_replaces_the_live_connection_of_a_session(started_by: str) -> None:
+    async with (
+        LocalRuntime(tagged())(Task(env="sessions", id="echo")) as runtime,
+        wire(runtime.url) as a,
+        wire(runtime.url) as b,
+    ):
+        session = (await a.call("hello", {}))["result"]["session_id"]
+        if started_by == "old-connection":
+            await a.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
+        taken = await b.call("hello", {"session_id": session, "takeover": True})
+        replaced = await a.read()
+        if started_by == "new-connection":
+            await b.call("tasks.start", {"id": "echo", "args": {"tag": "a"}})
+        graded = await b.call("tasks.grade", {"answer": "x"})
+
+    assert (taken["result"]["session_id"], replaced) == (session, None)
+    assert graded["result"]["tag"] == "a"
+
+
 def start_of_size(size: int) -> dict[str, Any]:
     """A ``tasks.start`` frame for ``echo`` of exactly ``size`` bytes, without its newline."""
     frame: dict[str, Any] = {
