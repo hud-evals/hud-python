@@ -26,12 +26,10 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" --jq .permission)
-          case "$permission" in
-            admin|maintain|write)
-              echo "$AUTHOR has $permission access; no accepted issue required."
-              exit 0
-              ;;
-          esac
+          if [ "$permission" = admin ] || [ "$permission" = write ]; then
+            echo "$AUTHOR has $permission access; no accepted issue required."
+            exit 0
+          fi
 
           issues=$(printf '%s' "$PR_BODY" \
             | grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?):? +#[0-9]+' \

@@ -83,15 +83,10 @@ uv run --extra dev --extra train ty check  # Type checking
 
 ## Pull Request Process
 
-Pull requests from outside the maintainer team must fix an accepted issue:
-
-1. Open an issue describing the bug or change, or find an existing one.
-2. Wait for a maintainer to label it `accepted`.
-3. Open your pull request with `Fixes #<issue>` in the description.
-
-Pull requests that do not reference an `accepted` issue are closed automatically.
-
-Then:
+Pull requests from outside the maintainer team must fix an issue a maintainer has
+labelled `accepted`; others are closed automatically. Open an issue describing the
+change (or find an existing one), wait for the label, then put `Fixes #<issue>` in
+your pull request description.
 
 1. **Branch naming**: `feature/description` or `fix/issue-number`
 2. **Commits**: Use clear, descriptive messages
