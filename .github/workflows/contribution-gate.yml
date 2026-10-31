@@ -1,0 +1,50 @@
+name: Contribution gate
+
+# Pull requests from people without write access must close an issue that a
+# maintainer has labelled `accepted`. Anything else is closed with a pointer to
+# CONTRIBUTING.md. This runs on pull_request_target and never checks out the PR.
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: read
+  pull-requests: write
+
+jobs:
+  require-accepted-issue:
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close PRs that do not fix an accepted issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACCEPTED_LABEL: accepted
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" --jq .permission)
+          case "$permission" in
+            admin|maintain|write)
+              echo "$AUTHOR has $permission access; no accepted issue required."
+              exit 0
+              ;;
+          esac
+
+          issues=$(printf '%s' "$PR_BODY" \
+            | grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?):? +#[0-9]+' \
+            | grep -oE '[0-9]+$' || true)
+          for issue in $issues; do
+            if gh api "repos/$GITHUB_REPOSITORY/issues/$issue" \
+                --jq 'select(.pull_request == null) | .labels[].name' \
+                | grep -qx "$ACCEPTED_LABEL"; then
+              echo "Fixes accepted issue #$issue."
+              exit 0
+            fi
+          done
+
+          gh pr close "$PR_URL" --comment "Thanks for the contribution! Outside pull requests need to fix an issue a maintainer has labelled \`$ACCEPTED_LABEL\`, so we can agree on the change before anyone writes code.
+
+          Open an issue describing the change (or find an existing one), wait for a maintainer to label it \`$ACCEPTED_LABEL\`, then open a new pull request whose description says \`Fixes #<issue>\`. See [CONTRIBUTING.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CONTRIBUTING.md#pull-request-process)."
