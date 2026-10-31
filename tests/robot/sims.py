@@ -128,6 +128,9 @@ class Arm(RobotBridge):
         self.actions: list[NDArray[np.float64]] = []
 
     def reset(self, **task_args: Any) -> str:
+        assert not task_args, (
+            f"max_ticks and other direct-control args are not sim args: {task_args}"
+        )
         self.state = self.home.copy()
         self.actions.clear()
         return "move x to 0.5, then close the gripper"
@@ -254,8 +257,8 @@ async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncIterator[Env
     async with sim_env(sim, "arm", control=control) as (env, endpoint):
 
         @env.template()
-        async def reach() -> AsyncGenerator[Any, Any]:
-            ep = await endpoint.reset()
+        async def reach(max_ticks: int | None = None) -> AsyncGenerator[Any, Any]:
+            ep = await endpoint.reset(max_ticks=max_ticks)
             yield {"prompt": ep["prompt"]}
             yield await endpoint.result()
 

@@ -621,7 +621,7 @@ There is no `observe` tool. Every call returns the camera frames and the pose it
 `wait` lets `duration` sim seconds pass (`null` observes for one tick) while the robot holds. Each
 call is its own short connection on the `robot` wire, so the sim holds still while the model
 thinks. A call also takes a required `note`: what the model sees and why it chose the motion. The
-episode ends when the model stops calling tools, the sim terminates, or `time_limit` runs out;
+episode ends when the model stops calling tools, the sim terminates, or the task's `max_ticks` runs out;
 later calls play nothing and say so. The template grades it as usual.
 
 An absolute move plays its setpoints, then holds the goal until the arm (and, after a gripper
@@ -654,9 +654,16 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `timeout` | `30` | Cap, in seconds, on one call. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. A custom reference is taken not to read the gripper, so gripper offsets are not reported. |
 | `speed` | `0.1` | Fraction of each dimension's range (a rotation: of a full turn) an absolute move travels per second. |
-| `time_limit` | none | The episode's budget in sim seconds of control ticks played. Replies report the time remaining. |
 | `use_annotation` | `True` | Ask for a `note` on every call. |
 | `use_wait` | `True` | Serve the `wait` tool. |
+
+A task bounds its episode by passing a `max_ticks` arg (control ticks played) on to
+`endpoint.reset(max_ticks=...)`; omit it for an unbounded episode. The bridge counts the ticks its
+slot plays, whether a model's tool calls or a policy's streamed actions play them, and sets
+`terminated` on the observation once the cap is spent. The sim's own `reset` never sees `max_ticks`
+and needs no cap of its own. The result gains `max_ticks`, and `ended_by: "max_ticks"` when the cap
+ended the episode. Direct control also states the budget in its tool descriptions and the time
+remaining in replies. Time passes only while the robot moves or waits.
 
 <Note>
 Direct control claims the sim's sole slot, so it serves single-env sims. Scale out with more
