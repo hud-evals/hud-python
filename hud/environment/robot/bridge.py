@@ -59,6 +59,12 @@ class _Slot:
     idle: bool = False  # not a barrier participant (disconnected / terminated)
     # Touched this episode; after release stays unreclaimable until the next global reset.
     used: bool = False
+    max_ticks: int | None = None  # this episode's cap; None is unbounded
+    ticks: int = 0  # steps this slot's actions have played this episode
+
+    @property
+    def capped(self) -> bool:
+        return self.max_ticks is not None and self.ticks >= self.max_ticks
 
 
 @dataclass
@@ -96,9 +102,10 @@ class _SlotRegistry:
     def claimed(self) -> list[_Slot]:
         return [s for s in self.slots if s.token is not None]
 
-    def claim(self, slot: _Slot) -> str:
+    def claim(self, slot: _Slot, max_ticks: int | None) -> str:
         token = f"slot-{slot.index}-{secrets.token_hex(4)}"
         slot.token = token
+        slot.max_ticks, slot.ticks = max_ticks, 0
         slot.used = True
         slot.action = None
         slot.idle = False
@@ -179,8 +186,12 @@ class RobotBridge(ABC):
         self._sim_q.put((lambda: fn(*args, **kwargs), fut))
         return await asyncio.wrap_future(fut)
 
-    async def _claim_episode(self, **kwargs: Any) -> dict[str, Any]:
-        """Control-plane reset: global sim reset when all free, else claim a free slot."""
+    async def _claim_episode(self, max_ticks: int | None = None, **kwargs: Any) -> dict[str, Any]:
+        """Control-plane reset: global sim reset when all free, else claim a free slot.
+
+        ``max_ticks`` is the episode's cap, enforced here for every client of the wire;
+        the sim's ``reset`` never sees it.
+        """
         if self._registry.all_free:
             self.total_reward = 0.0
             self.success = False
@@ -205,7 +216,7 @@ class RobotBridge(ABC):
             # Fail fast — endpoint.reset retries outside its lock so peers can still result.
             if slot is None:
                 raise RuntimeError(f"all {self.num_envs} slots are claimed")
-        token = self._registry.claim(slot)
+        token = self._registry.claim(slot, max_ticks)
         return {"prompt": self.task_description, "token": token}
 
     async def _release_episode(self, token: str | None) -> dict[str, Any]:
@@ -218,7 +229,10 @@ class RobotBridge(ABC):
         grade = (await self._run_on_sim(self.result_slots))[slot.index]
         self._registry.release(slot)
         self._action_event.set()  # wake barrier (release clears slot.ws before WS finally)
-        return grade
+        if slot.max_ticks is None:
+            return grade
+        ended = {"ended_by": "max_ticks"} if slot.capped else {}
+        return {**grade, "max_ticks": slot.max_ticks, **ended}
 
     @abstractmethod
     def reset(self, **kwargs: Any) -> str:
@@ -425,6 +439,7 @@ class RobotBridge(ABC):
                         await s.ws.close()
                 continue
             for s in acting:
+                s.ticks += 1
                 await self._send_slot_observation(s, batch)
 
     async def _send_slot_observation(
@@ -437,7 +452,7 @@ class RobotBridge(ABC):
             return
         data, terminated = batch
         i = slot.index
-        slot_terminated = bool(np.asarray(terminated).reshape(-1)[i])
+        slot_terminated = bool(np.asarray(terminated).reshape(-1)[i]) or slot.capped
         # Slice the [N, ...] batch down to this slot's scalar row.
         msg = {
             **{
