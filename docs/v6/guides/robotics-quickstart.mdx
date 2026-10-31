@@ -1,0 +1,164 @@
+---
+title: "Robotics quickstart"
+description: "Run a robot environment and a policy end to end on your machine: a toy simulator, a scripted policy, and a graded rollout, in three small files."
+icon: "robot"
+tag: "Beta"
+---
+
+<Note>
+The `robot` capability is in **beta**. See the [Robots reference](/v6/advanced/robots) for status.
+</Note>
+
+This page runs a complete robotics rollout with no GPU, simulator install, or model download. The
+"robot" is a point on a line that must reach `x = 1`; the "policy" always nudges it right. The
+shapes are the real ones, so swapping in a real simulator and a real policy later changes the
+contents, not the structure.
+
+Three terms first:
+
+- A **tick** is one control step of the simulator. The **control rate** is ticks per second.
+- A **bridge** is the class you write around a simulator. HUD serves it over a WebSocket.
+- A **contract** is a JSON description of the observations and actions, published in the
+  environment's manifest. The agent wires itself from it.
+
+Install the robot extra:
+
+<CodeGroup>
+```bash uv
+uv add 'hud[robot]'
+```
+```bash pip
+pip install 'hud[robot]'
+```
+</CodeGroup>
+
+## 1. The simulator
+
+`toy_sim.py` implements the three bridge hooks. Observations and actions always carry a leading
+dimension `N`, one row per simulator copy; here `N` is 1.
+
+```python toy_sim.py
+import numpy as np
+
+from hud.environment.robot import RobotBridge
+
+CONTRACT = {
+    "control_rate": 10,
+    "features": {
+        "observation/state": {"role": "observation", "names": ["x"]},
+        "action": {"role": "action", "names": ["dx"]},
+    },
+}
+
+
+class ToySim(RobotBridge):
+    def __init__(self) -> None:
+        super().__init__()
+        self.contract = CONTRACT
+        self.x = 0.0
+
+    def reset(self, **task_args) -> str:
+        self.x = 0.0
+        self.success = False
+        return "Move the point to x = 1."  # the task prompt
+
+    def step(self, action: np.ndarray) -> None:  # action: [N, A]
+        self.x += float(action[0, 0])
+        self.success = self.x >= 1.0
+
+    def get_observation(self):
+        state = np.array([[self.x]], dtype=np.float32)
+        return {"observation/state": state}, np.array([self.success])  # (data, terminated)
+```
+
+## 2. The environment
+
+`env.py` starts the simulator in its own process, publishes the `robot` capability, and declares one
+task. The task yields twice: the prompt first, then the grade.
+
+```python env.py
+from hud import Environment
+from hud.environment.robot import RobotEndpoint
+from toy_sim import ToySim
+
+env = Environment(name="toy")
+endpoint = RobotEndpoint(ToySim()).attach(env)
+
+
+@env.initialize
+async def up():
+    await endpoint.start()
+    for capability in await endpoint.capabilities():
+        env.add_capability(capability)
+
+
+@env.shutdown
+async def down():
+    await endpoint.stop()
+
+
+@env.template()
+async def reach():
+    ep = await endpoint.reset()
+    yield {"prompt": ep["prompt"]}
+    yield await endpoint.result()
+```
+
+## 3. The policy and the run
+
+A `RobotAgent` needs a `Model` (runs the policy) and an `Adapter` (turns an observation into the
+model's input). `infer` takes a batch with a leading dimension `N` and returns `[N, T, A]`: for each
+rollout, a chunk of `T` ticks of `A`-dimensional actions.
+
+```python run.py
+import asyncio
+
+import numpy as np
+
+from hud.agents.robot import Adapter, Model, RobotAgent
+from hud.eval import LocalRuntime, Task, Taskset
+
+
+class StepRight(Model):
+    def infer(self, batch):
+        return np.full((len(batch["state"]), 1, 1), 0.1, dtype=np.float32)
+
+
+class StateAdapter(Adapter):
+    def adapt_observation(self, obs, prompt):
+        return {"state": np.asarray(obs["data"][self.state_key], dtype=np.float32)}
+
+
+class ToyAgent(RobotAgent):
+    max_steps = 50  # cap on ticks per episode
+
+    def __init__(self):
+        super().__init__()
+        self.model = StepRight()
+        self.adapter = StateAdapter()
+
+
+async def main():
+    taskset = Taskset("toy", [Task(env="toy", id="reach")])
+    job = await taskset.run(ToyAgent(), runtime=LocalRuntime("env.py"))
+    print([run.reward for run in job.runs])
+
+
+asyncio.run(main())
+```
+
+Run it from the folder holding the three files:
+
+```bash
+python run.py
+```
+
+The agent moves the point ten ticks, the sim reports success, and the script prints `[1.0]`. Set
+`HUD_API_KEY` and each episode is also recorded on [hud.ai](https://hud.ai).
+
+## Next steps
+
+- Wrap a gym-style simulator instead of writing a bridge: [Gym-style envs](/v6/advanced/robots#gym-style-envs).
+- Drive the same simulator with a tool-calling LLM: [Direct control](/v6/advanced/robots#direct-control).
+- Run a real checkpoint against LIBERO in Docker: [Robot benchmark](/v6/cookbooks/robot-benchmark).
+- Add cameras and per-element labels to the contract: [Contract](/v6/advanced/robots#contract).
