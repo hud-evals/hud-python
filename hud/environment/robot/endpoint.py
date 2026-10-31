@@ -276,7 +276,11 @@ class RobotEndpoint:
         return capabilities
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
-        """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
+        """Claim a slot for a new episode; return ``{"prompt", "token"}``.
+
+        A ``max_ticks`` task arg also limits the episode's direct controls to that many
+        played ticks; without it they are unbounded.
+        """
         while True:
             try:
                 ep = await self._call("reset", task_args)
@@ -290,6 +294,8 @@ class RobotEndpoint:
             if session_id is not None and isinstance(token, str):
                 self._claims[session_id] = token
             await self._end_direct_episodes()
+            for control in self._direct_controls:
+                control.begin_episode(task_args.get("max_ticks"))
             return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:

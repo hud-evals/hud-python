@@ -254,8 +254,8 @@ async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncIterator[Env
     async with sim_env(sim, "arm", control=control) as (env, endpoint):
 
         @env.template()
-        async def reach() -> AsyncGenerator[Any, Any]:
-            ep = await endpoint.reset()
+        async def reach(max_ticks: int | None = None) -> AsyncGenerator[Any, Any]:
+            ep = await endpoint.reset(max_ticks=max_ticks)
             yield {"prompt": ep["prompt"]}
             yield await endpoint.result()
 

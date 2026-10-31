@@ -222,8 +222,6 @@ class DirectControl:
       the verdict.
     - ``notes`` - embodiment facts the model needs (frames, units, gripper
       polarity), appended to the motion tool's description.
-    - ``time_limit`` - the episode's budget in sim seconds (default: none). Spending it
-      ends the episode as sim termination does.
     - ``use_annotation`` - ask the model for a ``note`` on every call (default).
     - ``use_wait`` - serve the ``wait`` tool (default).
     """
@@ -240,14 +238,11 @@ class DirectControl:
         timeout: float = DEFAULT_TIMEOUT_S,
         reference: Callable[[dict[str, NDArray[Any]]], NDArray[Any]] | None = None,
         notes: str = "",
-        time_limit: float | None = None,
         use_annotation: bool = True,
         use_wait: bool = True,
     ) -> None:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError(f"timeout must be positive seconds, got {timeout}")
-        if time_limit is not None and (not math.isfinite(time_limit) or time_limit <= 0):
-            raise ValueError(f"time_limit must be positive seconds, got {time_limit}")
         unknown = sorted(set(tolerance or {}) - set(_LEVER_M))
         if unknown:
             raise ValueError(f"tolerance keys {unknown} are not quantities {sorted(_LEVER_M)}")
@@ -267,17 +262,10 @@ class DirectControl:
         self.reference = reference
         self._reads_grip = reference is None
         self.notes = notes
-        self.time_limit = time_limit
         self.use_annotation = use_annotation
         self.use_wait = use_wait
-        # Appended to the motion and wait tool descriptions when a limit is enforced.
-        self._budget = (
-            f" You have {time_limit:g} seconds of simulated time. Time passes only while the "
-            f"robot {'moves or waits' if use_wait else 'moves'}; thinking is free. When it runs "
-            "out the episode ends and is graded as it stands."
-            if time_limit is not None
-            else ""
-        )
+        self._limit_ticks: int | None = None  # this episode's budget; None is unbounded
+        self._described: list[tuple[Tool, str]] = []  # each served tool, less its budget text
         self._lock = asyncio.Lock()  # a slot takes one wire connection at a time
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
         self._elapsed = 0  # ticks this episode has played
@@ -328,9 +316,6 @@ class DirectControl:
             math.ceil(_SETTLE_S * self._rate), 2 * self._window + self._grace_ticks
         )
         self._max_ticks = max(1, math.ceil(self.timeout * self._rate))
-        self._limit_ticks = (
-            None if self.time_limit is None else max(1, math.ceil(self.time_limit * self._rate))
-        )
         # Per-tick limit: a speed-paced share of the range, or the per-step box for deltas.
         self._step = (
             self.speed * (self._high - self._low) / self._rate
@@ -382,9 +367,7 @@ class DirectControl:
         server = FastMCP(name=self.name)
         self._bind_tools(server)
         if self.use_wait:
-            server.add_tool(
-                self._make_tool(self.wait, "wait", _WAIT + self._budget, {"duration": _DURATION})
-            )
+            server.add_tool(self._make_tool(self.wait, "wait", _WAIT, {"duration": _DURATION}))
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -409,6 +392,30 @@ class DirectControl:
             await self._serving
         self._serving = None
         self._capability = None
+
+    def begin_episode(self, max_ticks: int | None) -> None:
+        """Start an episode that ends once *max_ticks* ticks have played (``None``: no limit).
+
+        Spending the limit ends the episode as sim termination does. The previous episode's
+        time is cleared, and the served tools' descriptions state this episode's budget.
+        """
+        if max_ticks is not None and max_ticks < 1:
+            raise ValueError(f"max_ticks must be a positive number of ticks, got {max_ticks}")
+        self._limit_ticks = max_ticks
+        self._elapsed = 0
+        for tool, description in self._described:
+            tool.description = description + self._budget
+
+    @property
+    def _budget(self) -> str:
+        """Appended to the motion and wait tool descriptions while the episode is limited."""
+        if self._limit_ticks is None:
+            return ""
+        return (
+            f" You have {self._limit_ticks / self._rate:g} seconds of simulated time. Time "
+            f"passes only while the robot {'moves or waits' if self.use_wait else 'moves'}; "
+            "thinking is free. When it runs out the episode ends and is graded as it stands."
+        )
 
     async def end_episode(self) -> None:
         """Clear the last absolute target and time spent, and close the episode's trace telemetry.
@@ -443,9 +450,14 @@ class DirectControl:
         """A tool whose strict-mode schema requires every property; ``note`` joins if annotating."""
         if self.use_annotation:
             properties = {**properties, "note": {"type": "string", "description": _NOTE}}
-        return _SchemaTool(
-            name=name, description=description, parameters=_object(properties), fn=fn
+        tool = _SchemaTool(
+            name=name,
+            description=description + self._budget,
+            parameters=_object(properties),
+            fn=fn,
         )
+        self._described.append((tool, description))
+        return tool
 
     # The one tool body; registered under the control kind's tool name (move_to, move_by, ...).
     async def move(
@@ -529,7 +541,7 @@ class DirectControl:
         )
         return (
             f"{motion} {hold}{rotation} {done}, with the camera frames and the pose. It stops "
-            f"at {self.timeout:g} s if the motion has not finished.{self._budget}{annotation} "
+            f"at {self.timeout:g} s if the motion has not finished.{annotation} "
             f"{self.notes}"
         ).strip()
 
