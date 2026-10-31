@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .client import (
     DEFAULT_READY_TIMEOUT,
+    ControlTimeoutError,
     HudClient,
     HudProtocolError,
     Manifest,
@@ -13,6 +14,7 @@ from .client import (
 
 __all__ = [
     "DEFAULT_READY_TIMEOUT",
+    "ControlTimeoutError",
     "HudClient",
     "HudProtocolError",
     "Manifest",

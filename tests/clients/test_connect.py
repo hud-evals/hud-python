@@ -1,14 +1,11 @@
 """The control channel's client side: ``hud.clients.connect`` and ``HudClient`` against a
-scripted peer that answers each connection and records every frame it receives.
-
-Not covered: the 120 s control heartbeat. Its interval is a module constant with no
-public knob, and waiting it out has no place in the default lane.
-"""
+scripted peer that answers each connection and records every frame it receives."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import pytest
@@ -16,6 +13,10 @@ import pytest
 from hud.clients import connect
 from hud.eval.runtime import Runtime
 from tests.clients.conftest import Action, control_peer
+from tests.conftest import eventually
+
+if TYPE_CHECKING:
+    from tests.conftest import HudEnv
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}
 BINDINGS = [
@@ -134,3 +135,36 @@ async def test_a_stream_the_env_refuses_ends_the_local_connection() -> None:
         writer.close()
 
     assert received == b""
+
+
+async def test_a_heartbeat_the_env_never_answers_is_redialed_as_a_takeover_of_the_session(
+    hud_env: HudEnv,
+) -> None:
+    hud_env.set(HUD_CONTROL_HEARTBEAT_INTERVAL="0.05", HUD_CONTROL_HEARTBEAT_TIMEOUT="0.3")
+    answer = Action("answer", result=HELLO)
+
+    async with (
+        control_peer([answer, Action("hold")], [answer] * 100) as peer,
+        connect(Runtime(peer.url)),
+    ):
+        await eventually(lambda: peer.accepted == 2)
+        resumed = [
+            hello["params"] for hello in peer.requests("hello") if hello["params"].get("takeover")
+        ]
+
+    assert resumed[0] == {"session_id": "s-1", "takeover": True}
+
+
+async def test_a_control_channel_that_stays_down_fails_the_rollout_with_the_last_error(
+    hud_env: HudEnv,
+) -> None:
+    hud_env.set(HUD_CONTROL_HEARTBEAT_INTERVAL="0.05", HUD_CONTROL_OUTAGE_BUDGET="0.5")
+
+    async with control_peer(
+        [Action("answer", result=HELLO), Action("hang_up")], [Action("hang_up")]
+    ) as peer:
+        with pytest.raises(EOFError, match="env closed connection during 'hello'"):
+            async with connect(Runtime(peer.url)):
+                await asyncio.sleep(30)
+
+    assert peer.accepted > 2

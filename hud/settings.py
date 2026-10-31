@@ -170,6 +170,31 @@ class Settings(BaseSettings):
         validation_alias="HUD_FILE_TRACKING_INTERVAL",
     )
 
+    control_heartbeat_interval: float = Field(
+        default=120.0,
+        gt=0,
+        description="Seconds between control-channel heartbeats. Each one proves the "
+        "control connection is alive and redials it when it is not.",
+        validation_alias="HUD_CONTROL_HEARTBEAT_INTERVAL",
+    )
+
+    control_heartbeat_timeout: float = Field(
+        default=60.0,
+        gt=0,
+        description="Seconds a heartbeat reply, or the dial of a replacement control or "
+        "tunnel connection, may take before the attempt counts as failed and is retried. "
+        "A liveness bound for a blackholed connection, not a latency target.",
+        validation_alias="HUD_CONTROL_HEARTBEAT_TIMEOUT",
+    )
+
+    control_outage_budget: float = Field(
+        default=600.0,
+        gt=0,
+        description="Seconds the control channel or a capability tunnel may stay unreachable "
+        "while the client redials, before the call or rollout fails with the last error.",
+        validation_alias="HUD_CONTROL_OUTAGE_BUDGET",
+    )
+
     @property
     def span_dir(self) -> str | None:
         if self.telemetry_local_dir:

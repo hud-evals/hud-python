@@ -13,6 +13,7 @@ import contextlib
 import itertools
 import logging
 import math
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
@@ -35,6 +36,7 @@ from hud.environment.utils import (
     send_frame,
     splice,
 )
+from hud.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -43,11 +45,10 @@ if TYPE_CHECKING:
     from hud.eval.runtime import Runtime
 
 LOGGER = logging.getLogger("hud.clients")
-_CONTROL_HEARTBEAT_INTERVAL_SECONDS = 120.0
-_CONTROL_HEARTBEAT_TIMEOUT_SECONDS = 5.0
 _ABANDON_REPLY_TIMEOUT_SECONDS = 2.0
 _CAPABILITY_CONNECT_ATTEMPTS = 3
-_CAPABILITY_CONNECT_BASE_DELAY_SECONDS = 0.25
+_RETRY_BASE_DELAY_SECONDS = 0.25
+_RETRY_MAX_DELAY_SECONDS = 10.0
 #: How long a client waits for a freshly provisioned env to serve when nothing sets a limit.
 DEFAULT_READY_TIMEOUT = 240.0
 
@@ -55,6 +56,10 @@ DEFAULT_READY_TIMEOUT = 240.0
 _CLIENT_REGISTRY: dict[str, type[CapabilityClient]] = {
     cls.protocol: cls for cls in (SSHClient, RFBClient, MCPClient, CDPClient)
 }
+
+
+def _retry_delay(attempt: int) -> float:
+    return min(_RETRY_BASE_DELAY_SECONDS * 2**attempt, _RETRY_MAX_DELAY_SECONDS)
 
 
 async def _connect_capability(
@@ -67,8 +72,12 @@ async def _connect_capability(
         except ConnectionError:
             if attempt + 1 == _CAPABILITY_CONNECT_ATTEMPTS:
                 raise
-            await asyncio.sleep(_CAPABILITY_CONNECT_BASE_DELAY_SECONDS * 2**attempt)
+            await asyncio.sleep(_retry_delay(attempt))
     raise RuntimeError("capability connect attempts must be positive")
+
+
+class ControlTimeoutError(TimeoutError):
+    """Raised when the env does not answer a control request within its liveness deadline."""
 
 
 class HudProtocolError(RuntimeError):
@@ -78,6 +87,57 @@ class HudProtocolError(RuntimeError):
         super().__init__(f"hud rpc error {code}: {message}")
         self.code = code
         self.message = message
+
+
+async def _dial_tunnel(
+    host: str, port: int, capability: str
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    async with asyncio.timeout(settings.control_heartbeat_timeout):
+        reader, writer = await asyncio.open_connection(host, port)
+        try:
+            await send_frame(
+                writer,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tunnel.open",
+                    "params": {"capability": capability},
+                },
+                max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+            )
+            opened = await read_frame(reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+            if opened is None:
+                raise EOFError("env closed the connection during 'tunnel.open'")
+            if "error" in opened:
+                err = opened["error"]
+                raise HudProtocolError(int(err.get("code", -32000)), str(err.get("message", "")))
+        except BaseException:
+            writer.close()
+            raise
+    return reader, writer
+
+
+async def _open_tunnel(
+    host: str, port: int, capability: str
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Open one capability stream, redialing for up to ``control_outage_budget``.
+
+    Nothing of the local connection is read until the env confirms the stream, so a
+    failed attempt never delivered a byte and redialing is safe. An error reply from the
+    env is final.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + settings.control_outage_budget
+    attempt = 0
+    while True:
+        try:
+            return await _dial_tunnel(host, port, capability)
+        except (OSError, EOFError, TimeoutError) as exc:
+            if loop.time() >= deadline:
+                raise
+            LOGGER.warning("tunnel %r to %s:%d not open, retrying: %r", capability, host, port, exc)
+        await asyncio.sleep(_retry_delay(attempt))
+        attempt += 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +190,11 @@ class HudClient:
         self._ids = itertools.count(1)
         self._call_lock = asyncio.Lock()
         self._closed = False
+        self._aborted = False
+        #: The control connection failed; the next resuming call redials first.
+        self._down = False
+        #: ``hello`` params that attach a connection to this session (routes, connections).
+        self._attach: dict[str, Any] = {}
         self.manifest: Manifest | None = None
         self._routes: dict[str, str] = {}
         self._opened: dict[str, CapabilityClient] = {}
@@ -158,6 +223,7 @@ class HudClient:
 
     def abort(self) -> None:
         """Close the transport immediately without waiting for the peer."""
+        self._aborted = True
         for forwarder in self._forwarders:
             forwarder.close()
         for tunnel in list(self._tunnels):
@@ -179,11 +245,12 @@ class HudClient:
         task, e.g. one a prior connection started — instead of minting a
         fresh session.
         """
-        params: dict[str, Any] = {}
+        self._attach = {}
         if workspace_routes:
-            params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
+            self._attach["workspace_routes"] = [route.to_wire() for route in workspace_routes]
         if connections:
-            params["connections"] = [connection.to_wire() for connection in connections]
+            self._attach["connections"] = [connection.to_wire() for connection in connections]
+        params = dict(self._attach)
         if session_id is not None:
             params["session_id"] = session_id
         result = await self._call("hello", params)
@@ -212,30 +279,11 @@ class HudClient:
                 self._tunnels.add(task)
                 try:
                     try:
-                        up_reader, up_writer = await asyncio.open_connection(host, port)
-                    except OSError as exc:
+                        up_reader, up_writer = await _open_tunnel(host, port, capability.name)
+                    except (OSError, EOFError, TimeoutError, HudProtocolError) as exc:
                         LOGGER.warning(
-                            "tunnel peer %s:%d connection failed: %s",
-                            host,
-                            port,
-                            exc,
+                            "tunnel %r to %s:%d failed: %r", capability.name, host, port, exc
                         )
-                        writer.close()
-                        return
-                    await send_frame(
-                        up_writer,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 1,
-                            "method": "tunnel.open",
-                            "params": {"capability": capability.name},
-                        },
-                        max_bytes=CONTROL_FRAME_LIMIT_BYTES,
-                    )
-                    opened = await read_frame(up_reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
-                    if opened is None or "error" in opened:
-                        LOGGER.warning("tunnel.open %r refused: %s", capability.name, opened)
-                        up_writer.close()
                         writer.close()
                         return
                     await splice((reader, writer), (up_reader, up_writer))
@@ -336,12 +384,32 @@ class HudClient:
         task_id: str,
         args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start a task; returns the first yield (``{"prompt": ...}``)."""
-        return await self._call("tasks.start", {"id": task_id, "args": args or {}})
+        """Start a task; returns the first yield (``{"prompt": ...}``).
+
+        Survives a dropped control connection: the call is re-sent on the redialed
+        connection under the same ``call_id``, so the env joins the start it already
+        has instead of starting the task again.
+        """
+        return await self._call_resuming(
+            "tasks.start", {"id": task_id, "args": args or {}, "call_id": uuid.uuid4().hex}
+        )
 
     async def grade(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``)."""
-        return await self._call("tasks.grade", payload)
+        """Send ``tasks.grade``; returns the evaluation dict (``{"score": ...}``).
+
+        Survives a dropped control connection: the env keeps the grade it is running
+        for the session, so the re-sent call collects it instead of grading twice.
+        """
+        return await self._call_resuming("tasks.grade", payload)
+
+    async def heartbeat(self) -> None:
+        """Re-send ``hello`` for this session, redialing the control connection if it is down."""
+        assert self.manifest is not None
+        await self._call_resuming(
+            "hello",
+            {**self._attach, "session_id": self.manifest.session_id},
+            reply_timeout=settings.control_heartbeat_timeout,
+        )
 
     async def cancel(self) -> None:
         await self._call("tasks.cancel", {})
@@ -372,40 +440,130 @@ class HudClient:
         reply_timeout: float | None = None,
     ) -> dict[str, Any]:
         async with self._call_lock:
-            msg_id = next(self._ids)
-            frame = encode_frame(
-                {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
-                max_bytes=CONTROL_FRAME_LIMIT_BYTES,
-            )
-            try:
-                async with asyncio.timeout(reply_timeout):
-                    self._writer.write(frame)
-                    await self._writer.drain()
-                    reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
-                    if reply is None:
-                        raise EOFError(f"env closed connection during {method!r}")
-                    if reply.get("id") != msg_id:
-                        self.abort()
-                        if reply.get("id") is not None or "error" not in reply:
-                            raise HudProtocolError(
-                                -32603,
-                                f"{method!r}: reply id did not match request",
-                            )
-                    if "error" in reply:
-                        err = reply["error"]
-                        raise HudProtocolError(
-                            int(err.get("code", -32000)),
-                            str(err.get("message", "")),
+            return await self._exchange(method, params, reply_timeout)
+
+    async def _call_resuming(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        reply_timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Call a method the env answers idempotently for a session, across lost connections.
+
+        A failed or silent control connection is replaced by a redialed one that resumes
+        the session, and the call is sent again. Gives up with the last error once the
+        control channel has been down for ``control_outage_budget``.
+        """
+        loop = asyncio.get_running_loop()
+        outage_started: float | None = None
+        attempt = 0
+        async with self._call_lock:
+            while True:
+                try:
+                    if self._down:
+                        await self._redial()
+                    result = await self._exchange(method, params, reply_timeout)
+                except (EOFError, OSError, TimeoutError) as exc:
+                    now = loop.time()
+                    outage_started = now if outage_started is None else outage_started
+                    if (
+                        self._aborted
+                        or self._endpoint is None
+                        or self.manifest is None
+                        or now - outage_started >= settings.control_outage_budget
+                    ):
+                        raise
+                    LOGGER.warning(
+                        "control link down for %.0fs during %r, redialing: %r",
+                        now - outage_started,
+                        method,
+                        exc,
+                    )
+                else:
+                    if outage_started is not None:
+                        LOGGER.warning(
+                            "control link restored after %.0fs", loop.time() - outage_started
                         )
-                    result = reply.get("result")
-                    if not isinstance(result, dict):
-                        raise HudProtocolError(-32603, f"{method!r}: result was not an object")
                     return result
-            except HudProtocolError:
-                raise
-            except BaseException:
-                self.abort()
-                raise
+                await asyncio.sleep(_retry_delay(attempt))
+                attempt += 1
+
+    async def _redial(self) -> None:
+        """Open a fresh control connection and resume this session on it.
+
+        Only the control connection is replaced: forwarders and tunnels dial the env
+        themselves, and the env keeps the session's task parked across the drop.
+        ``takeover`` tells the env to drop the old connection, which it may not have
+        noticed is dead.
+        """
+        assert self._endpoint is not None and self.manifest is not None
+        timeout = settings.control_heartbeat_timeout
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(*self._endpoint), timeout
+            )
+        except TimeoutError:
+            raise ControlTimeoutError(
+                f"env did not accept a control connection within {timeout:g}s"
+            ) from None
+        try:
+            await self._exchange(
+                "hello",
+                {**self._attach, "session_id": self.manifest.session_id, "takeover": True},
+                timeout,
+            )
+        except HudProtocolError:
+            self._writer.close()
+            raise
+        self._down = False
+
+    async def _exchange(
+        self,
+        method: str,
+        params: dict[str, Any],
+        reply_timeout: float | None,
+    ) -> dict[str, Any]:
+        msg_id = next(self._ids)
+        frame = encode_frame(
+            {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params},
+            max_bytes=CONTROL_FRAME_LIMIT_BYTES,
+        )
+        deadline = asyncio.timeout(reply_timeout)
+        try:
+            async with deadline:
+                self._writer.write(frame)
+                await self._writer.drain()
+                reply = await read_frame(self._reader, max_bytes=CONTROL_FRAME_LIMIT_BYTES)
+                if reply is None:
+                    raise EOFError(f"env closed connection during {method!r}")
+                if reply.get("id") != msg_id:
+                    self.abort()
+                    if reply.get("id") is not None or "error" not in reply:
+                        raise HudProtocolError(
+                            -32603,
+                            f"{method!r}: reply id did not match request",
+                        )
+                if "error" in reply:
+                    err = reply["error"]
+                    raise HudProtocolError(
+                        int(err.get("code", -32000)),
+                        str(err.get("message", "")),
+                    )
+                result = reply.get("result")
+                if not isinstance(result, dict):
+                    raise HudProtocolError(-32603, f"{method!r}: result was not an object")
+                return result
+        except HudProtocolError:
+            raise
+        except BaseException as exc:
+            self._down = True
+            self._writer.close()
+            if isinstance(exc, TimeoutError) and deadline.expired():
+                raise ControlTimeoutError(
+                    f"env did not reply to {method!r} within {reply_timeout:g}s"
+                ) from None
+            raise
 
 
 # ─── module-level entry points ────────────────────────────────────────
@@ -507,19 +665,9 @@ async def connect(
     async def heartbeat() -> None:
         nonlocal heartbeat_error
         while True:
-            await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
-            assert client.manifest is not None
+            await asyncio.sleep(settings.control_heartbeat_interval)
             try:
-                params: dict[str, Any] = {"session_id": client.manifest.session_id}
-                if workspace_routes:
-                    params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
-                if connections:
-                    params["connections"] = [connection.to_wire() for connection in connections]
-                await client._call(
-                    "hello",
-                    params,
-                    reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS,
-                )
+                await client.heartbeat()
             except HudProtocolError as exc:
                 LOGGER.warning("control heartbeat failed: %s", exc)
                 return
@@ -545,6 +693,7 @@ async def connect(
 
 __all__ = [
     "DEFAULT_READY_TIMEOUT",
+    "ControlTimeoutError",
     "HudClient",
     "HudProtocolError",
     "Manifest",

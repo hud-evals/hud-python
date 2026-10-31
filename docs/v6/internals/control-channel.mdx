@@ -62,10 +62,10 @@ A control session speaks JSON-RPC 2.0 for the connection's lifetime:
 
 | Method | Result |
 | --- | --- |
-| `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session. |
+| `hello` | Session id, environment name/version, and capability `bindings`. An optional `session_id` resumes a parked session; `takeover` also replaces that session's live connection. |
 | `tasks.list` | Registered task metadata for introspection and validation. |
-| `tasks.start` | The selected task's first yield, normalized to a prompt frame. |
-| `tasks.grade` | The selected task's evaluation, including numeric `score`. |
+| `tasks.start` | The selected task's first yield, normalized to a prompt frame. An optional `call_id` makes a re-sent start join the one already running. |
+| `tasks.grade` | The selected task's evaluation, including numeric `score`. A re-sent grade collects the one already running or finished. |
 | `tasks.cancel` | Interrupts a running `tasks.start` or `tasks.grade`, then cancels and removes the session's task. |
 | `bye` | Cancels the task and ends the session. |
 
@@ -111,22 +111,25 @@ owns one suspended `TaskRunner` per session id. A session's `tasks.start`
 replaces its runner, `tasks.grade` consumes it, and `tasks.cancel` removes it.
 
 ```python hud/environment/server.py · _ControlChannel
-async def start(self, session_id, task_id, args):
-    await self.cancel(session_id)
-    runner = TaskRunner(self.env.tasks[task_id], args)
+async def start(self, session_id, task_id, args, call_id):
+    current = self._runners.get(session_id)
+    if call_id is not None and current is not None and current.call_id == call_id:
+        return await asyncio.shield(current.started)
+    await self._cancel_runner(session_id)
+    runner = TaskRunner(self.env.tasks[task_id], args, call_id)
     self._runners[session_id] = runner
-    try:
-        return await runner.start()
-    except BaseException:
-        self._runners.pop(session_id, None)
-        await runner.cancel()
-        raise
+    runner.started = asyncio.create_task(self._run_start(session_id, runner))
+    return await asyncio.shield(runner.started)
 
 async def grade(self, session_id, payload):
-    runner = self._runners.pop(session_id, None)
-    if runner is None:
-        _, runner = self._adopt_parked()
-    return await runner.grade(payload)
+    graded = self._grades.get(session_id)
+    if graded is None:
+        runner = self._runners.pop(session_id, None)
+        if runner is None:
+            _, runner = self._adopt_parked()
+        graded = asyncio.create_task(self._run_grade(runner, payload))
+        self._grades[session_id] = graded
+    return await asyncio.shield(graded)
 ```
 
 The runner lives on the channel rather than the socket. A dropped connection
@@ -139,6 +142,25 @@ connection reaches the same runner in either of two ways:
 Zero parked runners produces `no task in progress`; multiple parked runners
 produce an ambiguity error that names their session ids. This is the channel
 mechanism behind split `hud task start` and `hud task grade` invocations.
+
+## A connection that drops
+
+A `tasks.start` or `tasks.grade` keeps running on the channel when the connection
+that sent it goes away; only `tasks.cancel`, `bye`, or a new start for the session
+ends it. `HudClient` uses this to survive a lost connection. It sends a `hello`
+heartbeat every `HUD_CONTROL_HEARTBEAT_INTERVAL` seconds (120), and a heartbeat,
+`tasks.start` or `tasks.grade` that meets a dropped or silent connection redials,
+resumes its session with `hello {session_id, takeover: true}`, and sends the call
+again. `takeover` makes the env close the session's old connection, which it may
+not have noticed is dead. The re-sent start carries the `call_id` of the first, and
+the re-sent grade finds the grade the session already holds, so neither runs twice.
+The client gives up with the last error after `HUD_CONTROL_OUTAGE_BUDGET` seconds
+(600) without a working connection; one attempt waits at most
+`HUD_CONTROL_HEARTBEAT_TIMEOUT` seconds (60) for a reply or a dial.
+
+A capability stream is redialed the same way until the env confirms it with
+`tunnel.open`. Nothing of the local connection is read before that reply, so a
+failed attempt delivered nothing and is safe to repeat.
 
 ## Capability streams
 
