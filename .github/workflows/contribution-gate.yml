@@ -48,4 +48,4 @@ jobs:
             exit 0
           fi
 
-          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Thanks for the contribution! Outside pull requests must fix an issue a maintainer has labelled \`actionable\`; see [CONTRIBUTING.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CONTRIBUTING.md#pull-request-process)."
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Outside pull requests must fix an \`actionable\` issue; see [CONTRIBUTING.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CONTRIBUTING.md#pull-request-process)."

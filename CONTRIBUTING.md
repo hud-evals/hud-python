@@ -83,12 +83,9 @@ uv run --extra dev --extra train ty check  # Type checking
 
 ## Pull Request Process
 
-Pull requests from outside the maintainer team must fix an issue a maintainer has
-labelled `actionable`, meaning we want the change and will review a PR for it.
-Open an issue describing the change (or find an existing one), wait for the label,
-then put `Fixes #<issue>` in your pull request description. Pull requests without
-one are closed automatically when they are opened or marked ready for review, so
-open a draft if you still need to link the issue.
+Outside pull requests must fix an issue a maintainer has labelled `actionable`, or
+they are closed automatically. Open or find an issue, wait for the label, then put
+`Fixes #<issue>` in your pull request description.
 
 1. **Branch naming**: `feature/description` or `fix/issue-number`
 2. **Commits**: Use clear, descriptive messages
