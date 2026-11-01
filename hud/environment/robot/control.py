@@ -699,13 +699,15 @@ class DirectControl:
     async def _record(self, obs: dict[str, Any]) -> None:
         """Stream one tick's state and camera frames to the trace."""
         if (recorder := self._recorder) is not None:
-            async with self._recording:
-                if recorder is self._recorder:  # the episode may have ended while waiting
-                    # Off the loop: a lossless encoder blocks while its queue drains.
-                    await asyncio.to_thread(
-                        recorder.record_observation, obs["data"], tick=self._tick
-                    )
-                    self._tick += 1
+            # Shielded: a cancelled move must not release the lock while the thread still writes.
+            await asyncio.shield(self._record_tick(recorder, obs))
+
+    async def _record_tick(self, recorder: TraceRecorder, obs: dict[str, Any]) -> None:
+        async with self._recording:
+            if recorder is self._recorder:  # the episode may have ended while waiting
+                # Off the loop: a lossless encoder blocks while its queue drains.
+                await asyncio.to_thread(recorder.record_observation, obs["data"], tick=self._tick)
+                self._tick += 1
 
     def _start(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         """Where a move begins: the commanded target (the reference on an episode's first
