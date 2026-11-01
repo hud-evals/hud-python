@@ -21,6 +21,9 @@ from hud.types import Tool, ToolResult
 from .base import Capability, CapabilityClient
 
 _TRACE_ID_META_KEY = "hud/trace-id"
+# One SSE event carries a whole tool result. The SDK's 1 MiB default rejects a result with a few
+# camera frames; 64 MiB fits several 4K PNGs and still bounds what a server can make us buffer.
+_MAX_SSE_EVENT_BYTES = 64 * 1024 * 1024
 
 
 def get_mcp_trace_id() -> str | None:
@@ -64,7 +67,9 @@ class MCPClient(CapabilityClient):
         if transport == "sse":
             client: fastmcp.Client[Any] = fastmcp.Client(SSETransport(cap.url, auth=auth))
         elif transport == "streamable-http":
-            client = fastmcp.Client(StreamableHttpTransport(cap.url, auth=auth))
+            client = fastmcp.Client(
+                StreamableHttpTransport(cap.url, auth=auth, max_sse_event_size=_MAX_SSE_EVENT_BYTES)
+            )
         else:
             client = fastmcp.Client(cap.url, auth=auth)
         stack = AsyncExitStack()

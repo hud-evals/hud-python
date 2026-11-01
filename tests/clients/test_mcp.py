@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import httpx2
 import pytest
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.utilities.types import Image
 from mcp.shared.exceptions import MCPError
 
 from hud.capabilities import Capability, MCPClient
+from hud.types import ImageContent
 from tests.clients.conftest import relayed
 from tests.conftest import eventually
 from tests.fixtures.asgi import mcp_server, serve_asgi
@@ -38,6 +40,12 @@ def tools() -> FastMCP:
     def add(a: int, b: int) -> int:
         """Add two numbers."""
         return a + b
+
+    @server.tool
+    async def frames(ctx: Context) -> Image:
+        """Notify first, so the reply streams as one SSE event, then return over a megabyte."""
+        await ctx.info("rendering")
+        return Image(data=bytes(2 * 1024 * 1024), format="png")
 
     @server.tool
     def refuse() -> str:
@@ -70,6 +78,19 @@ async def test_tool_calls_return_canonical_results_over_each_transport(
     assert [block.model_dump(include={"type", "text"}) for block in refused.content] == [
         {"type": "text", "text": "not today"}
     ]
+
+
+async def test_a_tool_result_larger_than_a_megabyte_arrives_whole() -> None:
+    async with serve_asgi(tools().http_app(path="/mcp")) as port:
+        client = await MCPClient.connect(Capability.mcp(url=f"http://127.0.0.1:{port}/mcp"))
+        try:
+            result = await client.call_tool("frames", {})
+        finally:
+            await client.close()
+
+    (image,) = result.content
+    assert isinstance(image, ImageContent)
+    assert (result.isError, len(image.data)) == (False, 2 * 1024 * 1024 * 4 // 3 + 2)
 
 
 def bearer_only(app: ASGIApp, token: str, seen: list[str]) -> ASGIApp:
