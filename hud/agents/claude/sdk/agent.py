@@ -99,7 +99,6 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
 
             env: dict[str, str] = {
                 "ANTHROPIC_MODEL": self.config.model,
-                "ANTHROPIC_SMALL_FAST_MODEL": self.config.model,
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                 "DISABLE_AUTOUPDATER": "1",
                 "IS_SANDBOX": "1",
@@ -113,11 +112,11 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                     )
                 if endpoint.gateway:
                     env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-                    # Alias every model tier so background requests never bypass the gateway.
-                    env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
-                    env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
-                    env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
-                    env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
+            # PowerShell's environment ignores case.
+            taken = {key.casefold() for key in env}
+            if clash := sorted(key for key in self.config.env if key.casefold() in taken):
+                raise ValueError(f"the agent sets {', '.join(clash)} itself")
+            env.update(self.config.env)
 
             args = [
                 "--verbose",

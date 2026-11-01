@@ -9,10 +9,11 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import ValidationError
 
 from hud.agents import ClaudeCLIAgent, CodexCLIAgent
 from hud.agents.base import Agent
-from hud.agents.types import ToolStep
+from hud.agents.types import ClaudeCLIConfig, ToolStep
 from hud.capabilities import Capability
 from hud.environment import Environment
 from hud.environment.egress import ANY_HOST
@@ -315,6 +316,38 @@ async def test_a_sandboxed_workspace_that_cannot_relay_is_refused_the_model_key(
     run = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(env))
 
     assert "isn't given the agent's model key" in (run.trace.error or "")
+
+
+async def test_claude_code_runs_with_the_variables_its_config_adds(tmp_path: Path) -> None:
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(env={"ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku"}))
+
+    await rollout(task(), agent, runtime=LocalRuntime(task.env))
+
+    (capture,) = stub.captures()
+    assert capture["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "haiku"
+
+
+def test_claude_code_config_refuses_a_variable_name_no_shell_can_assign() -> None:
+    with pytest.raises(ValidationError, match="HTTP-PROXY"):
+        ClaudeCLIConfig(env={"HTTP-PROXY": "http://proxy"})
+
+
+@pytest.mark.parametrize("variable", ["ANTHROPIC_API_KEY", "anthropic_api_key"])
+async def test_claude_code_refuses_config_variables_the_agent_sets(
+    variable: str, tmp_path: Path
+) -> None:
+    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(env={variable: "key"}))
+
+    (run,) = (await task().run(agent)).runs
+
+    assert variable in (run.trace.error or "")
+    assert stub.captures() == []
 
 
 @pytest.mark.parametrize(
