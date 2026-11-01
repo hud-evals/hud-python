@@ -22,7 +22,7 @@ from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import ComposeConfig, DockerBindMount
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import Runtime, RuntimeConfig, validate_session_id, with_hud_api_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -175,6 +175,7 @@ class DockerRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        env_vars = with_hud_api_key("DockerRuntime", self.env_vars)
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
         run_timeout = config.limits.run_timeout_s if config.limits is not None else None
@@ -226,7 +227,7 @@ class DockerRuntime:
                 seccomp=_DOCKER_SECCOMP_PROFILE,
                 service_socket=service_socket,
                 bind_mounts=self.bind_mounts,
-                env_vars=self.env_vars,
+                env_vars=env_vars,
                 cpu=resources.cpu if resources is not None else None,
                 memory_mb=resources.memory_mb if resources is not None else None,
                 gpu_count=(
@@ -325,7 +326,7 @@ class DockerRuntime:
                 resource_args.extend(("--gpus", str(resources.gpu.count)))
 
         env_args: list[str] = []
-        for key, value in self.env_vars.items():
+        for key, value in env_vars.items():
             env_args.extend(("--env", f"{key}={value}"))
         mount_args: list[str] = []
         for mount in self.bind_mounts:

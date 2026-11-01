@@ -28,6 +28,10 @@ await taskset.run(agent, runtime=LocalRuntime("env.py"))   # serve env.py locall
 | `HUDRuntime()` | A HUD-hosted env, leased by name and tunneled | Local agent loop against a deployed env |
 | `HostedRuntime()` | The whole rollout managed by HUD | Agent and env execute remotely together |
 
+`DockerRuntime`, `ModalRuntime` and `DaytonaRuntime` pass `HUD_API_KEY` into the container or sandbox
+while telemetry is on, so the env can report spans (an `env_vars` entry of that name wins). With no key,
+acquiring them fails before anything starts unless `HUD_TELEMETRY_ENABLED=false`.
+
 Most runtimes are on the top-level package (`from hud import LocalRuntime, DockerRuntime, HUDRuntime,
 HostedRuntime, Runtime`); `ModalRuntime` and `DaytonaRuntime` import from `hud.eval`.
 

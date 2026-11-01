@@ -92,8 +92,9 @@ async def test_an_image_row_runs_in_a_confined_container_that_is_removed_after(
 @pytest.mark.e2e
 @pytest.mark.docker
 async def test_the_rows_settings_win_over_the_providers_and_reach_the_container(
-    fixture_image: Callable[[str], str], tmp_path: Path
+    fixture_image: Callable[[str], str], tmp_path: Path, hud_env: HudEnv
 ) -> None:
+    hud_env.set(HUD_API_KEY="k", HUD_TELEMETRY_ENABLED="1")
     (tmp_path / "data").mkdir()
     _, flags = labelled()
     provider = DockerRuntime(
@@ -119,7 +120,7 @@ async def test_the_rows_settings_win_over_the_providers_and_reach_the_container(
     (data,) = [mount for mount in held["Mounts"] if mount["Destination"] == "/data"]
     assert run.reward == 1.0
     assert (held["HostConfig"]["NanoCpus"], held["HostConfig"]["Memory"]) == (10**9, 512 * 2**20)
-    assert "MODE=eval" in held["Config"]["Env"]
+    assert {"MODE=eval", "HUD_API_KEY=k"} <= set(held["Config"]["Env"])
     assert data["RW"] is False
 
 

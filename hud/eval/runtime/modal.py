@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from hud.utils.process import finish_output, stream_output
 
 from .compose import ComposeConfig
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import Runtime, RuntimeConfig, validate_session_id, with_hud_api_key
 from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
@@ -181,6 +181,7 @@ class ModalRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        env_vars = with_hud_api_key("ModalRuntime", self.env_vars)
         import modal
 
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
@@ -259,8 +260,8 @@ class ModalRuntime:
                 sandbox_kwargs["cpu"] = resources.cpu
             if resources is not None and resources.memory_mb is not None:
                 sandbox_kwargs["memory"] = resources.memory_mb
-            if self.env_vars:
-                sandbox_kwargs["env"] = self.env_vars
+            if env_vars:
+                sandbox_kwargs["env"] = env_vars
             if self.sandbox_secrets:
                 sandbox_kwargs["secrets"] = self.sandbox_secrets
         if resources is not None and resources.gpu is not None:
@@ -327,7 +328,7 @@ class ModalRuntime:
                     port_service=port_service,
                     seccomp="/hud/docker-seccomp.json",
                     service_socket=("/var/run/docker.sock" if project.service_access else None),
-                    env_vars=self.env_vars,
+                    env_vars=env_vars,
                     cpu=resources.cpu if resources is not None else None,
                     memory_mb=resources.memory_mb if resources is not None else None,
                     gpu_count=(

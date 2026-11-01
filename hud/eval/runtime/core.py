@@ -18,10 +18,12 @@ from pydantic import (
     model_validator,
 )
 
+from hud.settings import settings
+
 from .compose import ComposeProject
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
     from pathlib import Path
 
     from hud.eval.task import Task
@@ -147,6 +149,23 @@ class Provider(Protocol):
 @runtime_checkable
 class _ConfiguredProvider(Protocol):
     runtime_config: RuntimeConfig | None
+
+
+def with_hud_api_key(runtime: str, env_vars: Mapping[str, str]) -> dict[str, str]:
+    """``env_vars`` plus the ``HUD_API_KEY`` the remote environment reports telemetry with.
+
+    Telemetry on with no key would drop every span the environment records without a word,
+    so that fails before anything is created.
+    """
+    env = dict(env_vars)
+    if settings.telemetry_enabled:
+        if not (api_key := env.get("HUD_API_KEY") or settings.api_key):
+            raise RuntimeError(
+                f"{runtime} forwards HUD_API_KEY so the environment can report telemetry, "
+                "but none is set; set HUD_API_KEY or HUD_TELEMETRY_ENABLED=false"
+            )
+        env["HUD_API_KEY"] = api_key
+    return env
 
 
 def validate_session_id(session_id: str) -> None:

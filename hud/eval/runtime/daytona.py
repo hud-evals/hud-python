@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from hud.utils.process import finish_output, output_writer
 
-from .core import Runtime, RuntimeConfig
+from .core import Runtime, RuntimeConfig, with_hud_api_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -111,6 +111,7 @@ class DaytonaRuntime:
 
     @asynccontextmanager
     async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+        env_vars = with_hud_api_key("DaytonaRuntime", {})
         import asyncssh
         from daytona import (
             AsyncDaytona,
@@ -168,6 +169,7 @@ class DaytonaRuntime:
                     image=Image.base(config.image),
                     ephemeral=True,
                     auto_stop_interval=0,
+                    env_vars=env_vars,
                     resources=daytona_resources,
                 )
             else:
@@ -241,6 +243,7 @@ class DaytonaRuntime:
                     snapshot=snapshot_name,
                     ephemeral=True,
                     auto_stop_interval=0,
+                    env_vars=env_vars,
                 )
 
             create_timeout = 120
