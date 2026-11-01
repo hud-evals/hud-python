@@ -25,20 +25,20 @@ jobs:
             exit 0
           fi
 
-          if gh api graphql \
-              -F owner="${GITHUB_REPOSITORY%/*}" -F repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" \
-              -f query='query($owner: String!, $repo: String!, $number: Int!) {
-                repository(owner: $owner, name: $repo) {
-                  pullRequest(number: $number) {
-                    closingIssuesReferences(first: 10) {
-                      nodes { repository { nameWithOwner } labels(first: 50) { nodes { name } } }
-                    }
+          labels=$(gh api graphql \
+            -F owner="${GITHUB_REPOSITORY%/*}" -F repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" \
+            -f query='query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 100) {
+                    nodes { repository { nameWithOwner } labels(first: 100) { nodes { name } } }
                   }
                 }
-              }' \
-              --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]
-                | select(.repository.nameWithOwner == env.GITHUB_REPOSITORY) | .labels.nodes[].name' \
-              | grep -qx actionable; then
+              }
+            }' \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]
+              | select(.repository.nameWithOwner == env.GITHUB_REPOSITORY) | .labels.nodes[].name')
+          if grep -qx actionable <<<"$labels"; then
             echo "Fixes an actionable issue."
             exit 0
           fi
