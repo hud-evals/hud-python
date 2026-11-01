@@ -325,7 +325,6 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 | `ws.tracks_files` | Whether this workspace serves a `filetracking/1` capability. |
 | `ws.ssh_url` / `ws.ssh_host_pubkey` / `ws.ssh_client_key_path` / `ws.ssh_user` | Connection address, host key, client key path, and username. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
-| `ws.bwrap_argv(...)` / `ws.shell_argv(...)` | Build argv for your own subprocess (bwrap'd / per-session shell). |
 
 A `Mount` (`hud.environment`) configures a single bwrap mount, `Mount(kind, src, dst, optional)`, where `kind` is one of `ro`, `rw`, `tmpfs`, `symlink`, `proc`, `dev`.
 

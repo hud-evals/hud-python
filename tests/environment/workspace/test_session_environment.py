@@ -57,6 +57,12 @@ async def dropped_session(root: Path) -> dict[str, str]:
     return await ssh_session(root, require_isolation=True, shell_uid=1000)
 
 
+async def dropped_session_behind_a_policy(root: Path) -> dict[str, str]:
+    return await ssh_session(
+        root, require_isolation=True, shell_uid=1000, allowed_hosts={"pypi.org"}
+    )
+
+
 async def bound_connection_session(root: Path) -> dict[str, str]:
     if not process_connections_supported():
         pytest.skip("process connection guards are unavailable")
@@ -113,6 +119,17 @@ async def isolated_run(root: Path) -> dict[str, str]:
             dropped_session,
             {**TASK_ENV, "ORDINARY": None, "HOME": "/workspace"},
             id="ssh-session-dropped-to-shell-uid",
+            marks=SANDBOX,
+        ),
+        pytest.param(
+            dropped_session_behind_a_policy,
+            {
+                **TASK_ENV,
+                "ORDINARY": None,
+                "HOME": "/workspace",
+                "http_proxy": "http://127.0.0.1:3128",
+            },
+            id="ssh-session-dropped-behind-an-egress-policy",
             marks=SANDBOX,
         ),
         pytest.param(

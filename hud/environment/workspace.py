@@ -1045,17 +1045,10 @@ class Workspace:
             os.set_inheritable(info_write, True)
             os.set_inheritable(block_read, True)
             process = await create_process_group_exec(
-                *self.bwrap_argv(
+                *self._bwrap_argv(
                     payload,
                     cwd=cwd,
-                    env=process_env,
-                    # Same environment the joined branch gives a command (the
-                    # serving process's, less HUD's own): a command must not
-                    # run without the image's PATH — losing the interpreters
-                    # and tools the task installed — merely because it asked
-                    # for an isolated sandbox.
-                    inherit_host_env=True,
-                    inherit_workspace_env=inherit_workspace_env,
+                    env=self._command_env(process_env, inherit_workspace_env=inherit_workspace_env),
                     info_fd=info_write,
                     userns_block_fd=block_read,
                     network=False,
@@ -1114,12 +1107,10 @@ class Workspace:
             else [*self._identity_argv(identity, no_new_privs=no_new_privs), *command]
         )
         return await self._namespace.spawn(
-            self.bwrap_argv(
+            self._bwrap_argv(
                 payload,
                 cwd=cwd,
-                env=process_env,
-                inherit_host_env=True,
-                inherit_workspace_env=inherit_workspace_env,
+                env=self._command_env(process_env, inherit_workspace_env=inherit_workspace_env),
                 network=True,
                 isolate_processes=False,
                 isolate_users=bwrap_identity is not None,
@@ -1135,20 +1126,18 @@ class Workspace:
             scope=scope,
         )
 
-    # ─── argv builders (public — useful if you want your own subprocess) ──
+    # ─── sandbox ──────────────────────────────────────────────────────
 
     @property
     def bwrap_available(self) -> bool:
         return self._bwrap is not None
 
-    def bwrap_argv(
+    def _bwrap_argv(
         self,
         command: list[str] | str,
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
-        inherit_host_env: bool = True,
-        inherit_workspace_env: bool = True,
         info_fd: int | None = None,
         userns_block_fd: int | None = None,
         network: bool | None = None,
@@ -1162,19 +1151,14 @@ class Workspace:
     ) -> list[str]:
         """Argv that runs ``command`` inside bwrap. Raises if bwrap unavailable.
 
-        The payload runs under ``env -i``, so it starts from exactly
-        ``full_env``: with ``inherit_host_env=False`` the host environment
-        (server secrets) is left out and only ``self.env`` + ``env`` reach the
-        sandbox. Every option here is one bubblewrap 0.4 understands —
+        The payload runs under ``env -i``, so it starts from exactly ``env``.
+        Every option here is one bubblewrap 0.4 understands —
         ``--clearenv`` (0.5+) would abort each session on an older bwrap that
         :func:`usable_bwrap` cannot tell apart from a current one.
         """
         if self._bwrap is None:
             raise RuntimeError("bwrap not available on this host")
         target_cwd = cwd if cwd is not None else self._guest_path
-        base_env = _without_harness_config(os.environ) if inherit_host_env else {}
-        workspace_env = self.env if inherit_workspace_env else {}
-        full_env = {**base_env, **workspace_env, **(env or {})}
         owns_netns = self.owns_netns if network is None else not network
         if not isolate_users and (info_fd is not None or userns_block_fd is not None):
             raise ValueError("identity-map descriptors require a fresh user namespace")
@@ -1239,7 +1223,7 @@ class Workspace:
             argv.extend(Mount("ro", src=str(self._hosts_path), dst="/etc/hosts").to_bwrap_args())
         argv.extend(["--chdir", target_cwd])
         argv.append("--")
-        argv.extend(_payload_argv(command, full_env, ctty=tty))
+        argv.extend(_payload_argv(command, env or {}, ctty=tty))
         if staged_pid:
             assert self._bwrap.pid_unshare is not None
             argv = [
@@ -1251,22 +1235,32 @@ class Workspace:
             ]
         return argv
 
-    def _full_env(
-        self,
-        env: Mapping[str, str] | None = None,
-        *,
-        include_workspace_env: bool = True,
+    def _command_env(
+        self, env: Mapping[str, str] | None = None, *, inherit_workspace_env: bool = True
     ) -> dict[str, str]:
-        """The environment a session starts from.
+        """The environment a workspace command starts from: the serving process's, less
+        HUD's own; then the workspace's own, unless left out; then *env*."""
+        workspace_env = self.env if inherit_workspace_env else {}
+        return {**_without_harness_config(os.environ), **workspace_env, **(env or {})}
 
-        Dropped sessions get the minimal one built for the wall; otherwise the
-        serving process's environment carries through, less HUD's own.
+    def _full_env(self, env: Mapping[str, str] | None = None) -> dict[str, str]:
+        """The environment a session starts from, however it is placed.
+
+        A session dropped to ``shell_uid`` starts from a minimal environment
+        built from scratch; any other starts from a command's. Both carry the
+        egress proxy, the workspace network's only route out.
         """
         proxy = self._egress.environment() if self._egress is not None else {}
-        if include_workspace_env and self._drops_privileges():
-            return {**(self._session_env() or {}), **proxy, **(env or {})}
-        workspace_env = self.env if include_workspace_env else {}
-        return {**_without_harness_config(os.environ), **proxy, **workspace_env, **(env or {})}
+        if self._drops_privileges():
+            base = {
+                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+                # The server's HOME (/root) is unreadable by the dropped uid;
+                # the workspace is the one directory guaranteed writable.
+                "HOME": self._guest_path,
+                "TERM": os.environ.get("TERM", "xterm"),
+            }
+            return {**base, **self.env, **proxy, **(env or {})}
+        return self._command_env({**proxy, **(env or {})})
 
     def _identity_argv(
         self,
@@ -1360,8 +1354,9 @@ class Workspace:
                 )
                 self._egress.start()
             staged = bwrap.pid_unshare is not None
-            holder_argv = self.bwrap_argv(
+            holder_argv = self._bwrap_argv(
                 _SANDBOX_HOLDER,
+                env=self._command_env(),
                 network=True,
                 isolate_users=staged,
                 bind_devices=True,
@@ -1518,88 +1513,6 @@ class Workspace:
         if self._namespace is not None:
             await self._namespace.terminate_sessions()
 
-    def shell_argv(
-        self,
-        command: str | None = None,
-        *,
-        cwd: str | None = None,
-        env: Mapping[str, str] | None = None,
-        tty: bool = False,
-    ) -> list[str]:
-        """Per-session shell argv (bwrap'd if available, else host shell).
-
-        With ``shell_uid`` set and the serving process running as root, the
-        whole session is wrapped in ``setpriv`` to drop to that uid.
-
-        ``cwd`` is the one argument the unsandboxed form cannot honour: there
-        is no mount namespace to ``--chdir`` into, so the session runs wherever
-        the caller starts the process — which for a :class:`Workspace` is its
-        root, the same path ``_guest_path`` takes when bwrap is unavailable.
-        """
-        if sys.platform == "win32":
-            if command is not None:
-                return ["cmd.exe", "/c", command]
-            return ["cmd.exe"]
-        if self._bwrap is not None:
-            inner: list[str] | str = ["bash", "-lc", command] if command else ["bash", "-l"]
-            if self._drops_privileges():
-                # Don't let bwrap re-inject host secrets via --setenv; feed it
-                # the same minimal environment as the non-bwrap dropped shell,
-                # keeping explicit per-call overrides.
-                walled_env = {**(self._session_env() or {}), **(env or {})}
-                argv = self.bwrap_argv(
-                    inner, cwd=cwd, env=walled_env, inherit_host_env=False, tty=tty
-                )
-            else:
-                argv = self.bwrap_argv(inner, cwd=cwd, env=env, tty=tty)
-        else:
-            # The same payload the sandboxed forms run. Built here too rather
-            # than left as a bare shell, so that ``env`` and ``tty`` mean the
-            # same thing however the session is placed — and so the session
-            # env reaches the shell only *after* any drop: an LD_PRELOAD in it
-            # must never be in the environment of the root-run setpriv.
-            argv = _payload_argv(command, self._full_env(env), ctty=tty)
-        if self._drops_privileges():
-            argv = [*self._drop_argv(), *argv]
-        return argv
-
-    def session_argv(
-        self,
-        command: str | None = None,
-        *,
-        cwd: str | None = None,
-        env: Mapping[str, str] | None = None,
-        tty: bool = False,
-    ) -> list[str]:
-        """Build a session launched by the namespace host."""
-        if self._bwrap is None:
-            return self.shell_argv(command, cwd=cwd, env=env, tty=tty)
-        target_cwd = cwd if cwd is not None else self._guest_path
-        if self._drops_privileges():
-            session_env = {**(self._session_env() or {}), **(env or {})}
-        else:
-            session_env = self._full_env(env)
-        return [
-            self._bwrap.path,
-            "--cap-drop",
-            "CAP_SYS_ADMIN",
-            "--cap-drop",
-            "CAP_NET_ADMIN",
-            "--cap-drop",
-            "CAP_NET_RAW",
-            "--bind",
-            "/",
-            "/",
-            "--dev-bind",
-            "/dev",
-            "/dev",
-            "--chdir",
-            target_cwd,
-            "--",
-            *self._drop_argv(),
-            *_payload_argv(command, session_env, ctty=tty),
-        ]
-
     # ─── ssh server internals ─────────────────────────────────────────
 
     def _credentials_dir(self) -> Path:
@@ -1683,27 +1596,6 @@ class Workspace:
         auth_path.write_text("\n".join(pub_lines) + "\n", encoding="ascii")
         return auth_path
 
-    def _session_env(self) -> dict[str, str] | None:
-        """Environment the agent's shell session sees.
-
-        When dropping privileges, the child would otherwise inherit the
-        server's full environment — including any secrets the env process
-        holds (the reason ``shell_uid`` exists) — so build a minimal, safe
-        environment from scratch. It reaches the shell only *after* the drop
-        (``env -i`` inside setpriv, or bwrap ``--setenv``). Otherwise preserve
-        the inherited-env behavior, layering ``self.env`` overrides.
-        """
-        if self._drops_privileges():
-            base = {
-                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-                # The server's HOME (/root) is unreadable by the dropped uid;
-                # the workspace is the one directory guaranteed writable.
-                "HOME": self._guest_path,
-                "TERM": os.environ.get("TERM", "xterm"),
-            }
-            return {**base, **self.env}
-        return {**os.environ, **self.env} if self.env else None
-
     def _requested_process_connections(
         self,
         process: asyncssh.SSHServerProcess[bytes],
@@ -1773,11 +1665,9 @@ class Workspace:
                         *shell_command,
                     ],
                 )
-                argv = self.bwrap_argv(
+                argv = self._bwrap_argv(
                     guarded_command,
                     env=self._full_env(session_env),
-                    inherit_host_env=False,
-                    inherit_workspace_env=False,
                     network=True,
                     isolate_processes=False,
                     isolate_users=False,
@@ -1789,11 +1679,33 @@ class Workspace:
                     tty=wants_tty,
                 )
             else:
-                argv = (
-                    self.shell_argv(process.command, env=session_env, tty=wants_tty)
-                    if pid is None
-                    else self.session_argv(process.command, env=session_env, tty=wants_tty)
-                )
+                # The session env reaches the shell only after any drop: an LD_PRELOAD
+                # in it must never be in the environment of the root-run setpriv.
+                argv = [
+                    *self._drop_argv(),
+                    *_payload_argv(process.command, self._full_env(session_env), ctty=wants_tty),
+                ]
+                if pid is not None:
+                    assert self._bwrap is not None
+                    argv = [
+                        self._bwrap.path,
+                        "--cap-drop",
+                        "CAP_SYS_ADMIN",
+                        "--cap-drop",
+                        "CAP_NET_ADMIN",
+                        "--cap-drop",
+                        "CAP_NET_RAW",
+                        "--bind",
+                        "/",
+                        "/",
+                        "--dev-bind",
+                        "/dev",
+                        "/dev",
+                        "--chdir",
+                        self._guest_path,
+                        "--",
+                        *argv,
+                    ]
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
                 # loader variables or server secrets. The inner payload injects
@@ -1802,7 +1714,7 @@ class Workspace:
                     "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
                 }
             else:
-                proc_env = self._session_env()
+                proc_env = self._full_env(session_env)
         except Exception as exc:
             if guard is not None:
                 guard.close()
@@ -1822,13 +1734,9 @@ class Workspace:
             # entirely: the blocking WaitForSingleObject in the worker thread drains
             # the process exit before the Future resolves, leaving no pending events.
             #
-            # Also: shell_argv() used to wrap the SSH command in ["cmd.exe", "/c",
-            # command], but Python's list2cmdline would requote that, leaving a
-            # trailing '"' on the last token. Fixed by splitting process.command
-            # directly with shlex.split so list2cmdline never adds an extra layer.
-            # Additionally, cmd.exe launched via CreateProcess does NOT search the
-            # CWD for batch files (only PATH), so relative .bat paths are resolved
-            # to absolute below.
+            # The command is split into an argv with shlex.split. cmd.exe launched
+            # via CreateProcess does NOT search the CWD for batch files (only PATH),
+            # so relative .bat paths are resolved to absolute below.
             import shlex
             import subprocess as _subprocess
 
