@@ -1,10 +1,5 @@
 name: Contribution gate
 
-# Pull requests from people without write access must close an issue that a
-# maintainer has labelled `actionable`. Anything else is closed with a pointer to
-# CONTRIBUTING.md once it is ready for review. This runs on pull_request_target
-# and never checks out the PR.
-
 on:
   pull_request_target:
     types: [opened, ready_for_review]
