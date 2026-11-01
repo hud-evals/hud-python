@@ -1,0 +1,46 @@
+name: Contribution gate
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+
+permissions:
+  issues: read
+  pull-requests: write
+
+jobs:
+  require-actionable-issue:
+    if: "!github.event.pull_request.draft && github.event.pull_request.user.type != 'Bot'"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close PRs that do not fix an actionable issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$AUTHOR/permission" --jq .permission)
+          if [ "$permission" = admin ] || [ "$permission" = write ]; then
+            echo "$AUTHOR has $permission access; no actionable issue required."
+            exit 0
+          fi
+
+          labels=$(gh api graphql \
+            -F owner="${GITHUB_REPOSITORY%/*}" -F repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" \
+            -f query='query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 100) {
+                    nodes { repository { nameWithOwner } labels(first: 100) { nodes { name } } }
+                  }
+                }
+              }
+            }' \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]
+              | select(.repository.nameWithOwner == env.GITHUB_REPOSITORY) | .labels.nodes[].name')
+          if grep -qx actionable <<<"$labels"; then
+            echo "Fixes an actionable issue."
+            exit 0
+          fi
+
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Outside pull requests must fix an \`actionable\` issue; see [CONTRIBUTING.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CONTRIBUTING.md#pull-request-process)."

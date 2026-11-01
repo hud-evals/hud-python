@@ -83,6 +83,10 @@ uv run --extra dev --extra train ty check  # Type checking
 
 ## Pull Request Process
 
+Outside pull requests must fix an issue a maintainer has labelled `actionable`, or
+they are closed automatically. Open or find an issue, wait for the label, then put
+`Fixes #<issue>` in your pull request description.
+
 1. **Branch naming**: `feature/description` or `fix/issue-number`
 2. **Commits**: Use clear, descriptive messages
 3. **Checks**: All CI checks must pass (ruff, ty, pytest)
