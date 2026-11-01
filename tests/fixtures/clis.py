@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Any
 
 #: Variables the CLI agents set for the process they launch.
-AGENT_VARIABLES = ("ANTHROPIC_", "CLAUDE_", "CODEX_", "DISABLE_", "HUD_", "IS_SANDBOX")
+AGENT_VARIABLES = (
+    "ANTHROPIC_",
+    "CLAUDE_",
+    "CODEX_",
+    "DISABLE_",
+    "HUD_",
+    "INFERENCE_",
+    "IS_SANDBOX",
+)
 
 STUB = """#!{python}
 import json, os, subprocess, sys, time

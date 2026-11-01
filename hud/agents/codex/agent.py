@@ -7,24 +7,21 @@ import logging
 import shlex
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.base import Agent
 from hud.agents.cli import (
-    PROCESS_BOUND_CREDENTIAL,
     WINDOWS_SHELLS,
+    CLIAgent,
+    model_endpoint,
     powershell,
     powershell_quote,
     resolve_executable,
     run_jsonl,
 )
 from hud.agents.types import AgentStep, CodexCLIConfig, ToolStep
-from hud.settings import settings
-from hud.telemetry.context import get_current_trace_id
 from hud.types import Step, TextContent, ToolCall, ToolResult
-from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
 if TYPE_CHECKING:
-    from hud.capabilities import Connection, SSHClient
+    from hud.capabilities import SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
@@ -205,14 +202,16 @@ class CodexEvents:
         )
 
 
-class CodexCLIAgent(Agent[CodexCLIConfig]):
+class CodexCLIAgent(CLIAgent[CodexCLIConfig]):
     """Runs ``codex exec`` over SSH inside the environment workspace."""
 
     config_cls = CodexCLIConfig
+    provider = "openai"
 
     async def __call__(self, run: Run) -> None:
+        endpoint = model_endpoint(run, self.provider, gateway=self.config.gateway)
         ssh = cast("SSHClient", await run.client.open("ssh"))
-        connection: Connection | None = run.connections.get("inference")
+        connection = endpoint.connection if endpoint is not None else None
         executable = await resolve_executable(
             ssh, "codex", _MANAGED_CODEX_PATHS, run.runtime_config
         )
@@ -249,34 +248,23 @@ class CodexCLIAgent(Agent[CodexCLIConfig]):
                 ["-c", f"model_reasoning_effort={json.dumps(self.config.reasoning_effort)}"]
             )
 
-        if connection is not None or routes_to_gateway("openai", gateway=self.config.gateway):
-            if connection is not None:
-                # The relay injects the scoped credential; the process never sees it.
-                base_url, credential_env = connection.client_url, "HUD_CONNECTION_CREDENTIAL"
-                env[credential_env] = PROCESS_BOUND_CREDENTIAL
-            elif settings.api_key:
-                base_url, credential_env = settings.hud_gateway_url, "HUD_API_KEY"
-                env[credential_env] = settings.api_key
-            else:
-                raise ValueError("HUD_API_KEY is required for HUD gateway routing")
+        if endpoint is not None:
+            env["INFERENCE_API_KEY"] = endpoint.key
             overrides = {
-                "model_provider": "hud",
-                "model_providers.hud.name": "HUD",
-                "model_providers.hud.base_url": base_url,
-                "model_providers.hud.env_key": credential_env,
-                "model_providers.hud.wire_api": "responses",
+                "model_provider": "inference",
+                "model_providers.inference.name": "Inference",
+                "model_providers.inference.base_url": endpoint.url,
+                "model_providers.inference.env_key": "INFERENCE_API_KEY",
+                "model_providers.inference.wire_api": "responses",
             }
-            for key, value in overrides.items():
-                args.extend(["-c", f"{key}={json.dumps(value)}"])
-            if connection is None and (trace_id := get_current_trace_id()):
-                args.extend(
-                    [
-                        "-c",
-                        f'model_providers.hud.http_headers={{"Trace-Id"={json.dumps(trace_id)}}}',
-                    ]
+            for name, value in overrides.items():
+                args.extend(["-c", f"{name}={json.dumps(value)}"])
+            if endpoint.headers:
+                pairs = ",".join(
+                    f"{json.dumps(name)}={json.dumps(value)}"
+                    for name, value in endpoint.headers.items()
                 )
-        elif settings.openai_api_key:
-            env["CODEX_API_KEY"] = settings.openai_api_key
+                args.extend(["-c", f"model_providers.inference.http_headers={{{pairs}}}"])
 
         args.append("-")
         # Injected credentials get a throwaway CODEX_HOME; otherwise an ambient login applies.

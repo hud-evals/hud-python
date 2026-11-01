@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.agents import ClaudeCLIAgent, CodexCLIAgent
+from hud.agents.base import Agent
 from hud.agents.types import ToolStep
-from hud.capabilities import Capability, Connection
+from hud.capabilities import Capability
+from hud.environment import Environment
 from hud.environment.egress import ANY_HOST
+from hud.environment.workspace import usable_bwrap
 from hud.eval import LocalRuntime, Shared, rollout
 from hud.types import AgentType
 from tests.fixtures import clis
@@ -23,11 +26,15 @@ from tests.fixtures.screen import fake_screen
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from hud.eval.run import Run
     from tests.conftest import HudEnv
 
 #: (agent type, the executable it launches)
 CLIS = [("claude_cli", "claude"), ("codex_cli", "codex")]
 EVERY_CLI = pytest.mark.parametrize(("agent_type", "cli"), CLIS, ids=[row[0] for row in CLIS])
+UNSANDBOXED = pytest.mark.skipif(
+    usable_bwrap() is not None, reason="this host sandboxes the workspace"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -175,18 +182,63 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: P
     ]
 
 
+@UNSANDBOXED
+@EVERY_CLI
+async def test_without_a_sandbox_the_cli_holds_its_model_key(
+    agent_type: str, cli: str, tmp_path: Path
+) -> None:
+    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
+    stub.install()
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+
+    run = await rollout(
+        task(),
+        AgentType(agent_type).cls(),
+        runtime=LocalRuntime(task.env),
+    )
+
+    (capture,) = stub.captures()
+    assert run.trace.status == "completed"
+    assert "hud-key" in capture["env"].values()
+
+
 @pytest.mark.e2e
 @pytest.mark.sandbox
-async def test_the_cli_reaches_a_process_bound_connection_without_its_credential(
+async def test_in_a_sandbox_the_cli_reaches_its_model_without_its_key(
     tmp_path: Path,
 ) -> None:
-    connection = Connection(
-        name="inference",
-        capability="ssh",
-        url="https://inference.hud.so/v1",
-        headers={"Authorization": "Bearer scoped-runtime-token"},
-    )
     # Inside the workspace, the only host path the sandbox shows besides /usr and /etc.
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    env = Environment("ws")
+    workspace = env.workspace(
+        tmp_path / "ws",
+        guest_path=str(tmp_path / "ws"),
+        env=stub.shell_env(),
+        allowed_hosts={ANY_HOST},
+        require_isolation=True,
+        track_files=False,
+    )
+
+    @env.template()
+    async def task():
+        await workspace.run(["true"])  # the sandbox starts before the agent does
+        yield "Do the task."
+        yield 1.0
+
+    run = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(env))
+
+    (capture,) = stub.captures()
+    assert run.trace.status == "completed"
+    assert capture["env"]["ANTHROPIC_API_KEY"] == "hud-process-bound"
+    assert "hud-key" not in str(capture)
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_cli_rollouts_one_after_another_on_a_shared_sandbox_each_reach_their_model(
+    tmp_path: Path,
+) -> None:
     stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
     task = workspace_task(
@@ -197,18 +249,72 @@ async def test_the_cli_reaches_a_process_bound_connection_without_its_credential
         track_files=False,
     )
 
-    run = await rollout(
-        task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env), connections=(connection,)
+    async with Shared(LocalRuntime(task.env), width=1) as runtime:
+        runs = [await rollout(task(), ClaudeCLIAgent(), runtime=runtime) for _ in range(2)]
+
+    assert [run.trace.status for run in runs] == ["completed", "completed"]
+    assert [capture["env"]["ANTHROPIC_API_KEY"] for capture in stub.captures()] == [
+        "hud-process-bound"
+    ] * 2
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_in_a_sandbox_an_agent_on_its_provider_key_is_refused_rather_than_rerouted(
+    hud_env: HudEnv, tmp_path: Path
+) -> None:
+    hud_env.set(ANTHROPIC_API_KEY="anthropic-key")
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    task = workspace_task(
+        tmp_path / "ws",
+        env=stub.shell_env(),
+        allowed_hosts={ANY_HOST},
+        require_isolation=True,
+        track_files=False,
     )
 
-    (capture,) = stub.captures()
-    assert run.trace.status == "completed"
-    assert (capture["env"]["ANTHROPIC_BASE_URL"], capture["env"]["ANTHROPIC_AUTH_TOKEN"]) == (
-        connection.client_url,
-        "hud-process-bound",
+    run = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env))
+
+    assert "isn't given the agent's model key" in (run.trace.error or "")
+    assert stub.captures() == []
+
+
+class SeesConnections(Agent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen: list[str] | None = None
+
+    async def __call__(self, run: Run) -> None:
+        self.seen = list(run.connections)
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_in_a_sandbox_an_agent_that_runs_no_cli_is_given_no_relay(tmp_path: Path) -> None:
+    task = workspace_task(
+        tmp_path / "ws", allowed_hosts={ANY_HOST}, require_isolation=True, track_files=False
     )
-    assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS"} & capture["env"].keys()
-    assert "scoped-runtime-token" not in str(capture) and "hud-key" not in str(capture)
+    agent = SeesConnections()
+
+    await rollout(task(), agent, runtime=LocalRuntime(task.env))
+
+    assert agent.seen == []
+
+
+async def test_a_sandboxed_workspace_that_cannot_relay_is_refused_the_model_key() -> None:
+    env = Environment(
+        "remote", capabilities=(Capability.ssh(url="ssh://127.0.0.1:1", host_pubkey="key"),)
+    )
+
+    @env.template()
+    async def task():
+        yield "Do the task."
+        yield 1.0
+
+    run = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(env))
+
+    assert "isn't given the agent's model key" in (run.trace.error or "")
 
 
 @pytest.mark.parametrize(
@@ -359,12 +465,6 @@ async def test_how_codex_exits_decides_how_the_run_ends(
 async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
     tmp_path: Path,
 ) -> None:
-    connection = Connection(
-        name="inference",
-        capability="ssh",
-        url="https://inference.hud.so/v1",
-        headers={"Authorization": "Bearer scoped-runtime-token"},
-    )
     stub = clis.Stub(tmp_path / "ws" / ".stub", "codex", stdout=clis.answer("codex", "done"))
     stub.install()
     task = workspace_task(
@@ -375,9 +475,7 @@ async def test_codex_refuses_a_launcher_script_for_a_process_bound_connection(
         track_files=False,
     )
 
-    run = await rollout(
-        task(), CodexCLIAgent(), runtime=LocalRuntime(task.env), connections=(connection,)
-    )
+    run = await rollout(task(), CodexCLIAgent(), runtime=LocalRuntime(task.env))
 
     assert "/codex is a launcher script, but a process-bound inference connection " in (
         run.trace.error or ""

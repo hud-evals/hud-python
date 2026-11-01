@@ -78,8 +78,9 @@ async def bound_connection_session(root: Path) -> dict[str, str]:
     )
     async with (
         LocalRuntime(env)(Task(env=env.name, id="bound")) as runtime,
-        connect(runtime, connections=(connection,)) as client,
+        connect(runtime) as client,
     ):
+        await client.bind((connection,))
         ssh = cast("SSHClient", await client.open("shell"))
         process = await ssh.create_process(SHELL_ENV, connections=(connection,))
         return parsed((await process.wait(check=True)).stdout or b"")

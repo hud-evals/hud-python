@@ -16,26 +16,23 @@ from typing import TYPE_CHECKING, Any, cast
 
 import asyncssh
 
-from hud.agents.base import Agent
 from hud.agents.cli import (
-    PROCESS_BOUND_CREDENTIAL,
     WINDOWS_SHELLS,
+    CLIAgent,
+    model_endpoint,
     powershell,
     powershell_quote,
     resolve_executable,
     run_jsonl,
 )
 from hud.agents.types import ClaudeCLIConfig
-from hud.settings import settings
-from hud.telemetry.context import get_trace_headers
-from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
 from . import computer_mcp
 from .events import ClaudeEvents
 
 if TYPE_CHECKING:
-    from hud.capabilities import Connection, SSHClient
+    from hud.capabilities import SSHClient
     from hud.eval.run import Run
 
 logger = logging.getLogger(__name__)
@@ -50,7 +47,7 @@ _MANAGED_CLAUDE_PATHS = {
 }
 
 
-class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
+class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
     """Runs ``claude`` CLI over SSH inside the env workspace.
 
     Stateless w.r.t. the env: driven by ``await agent(run)``. SSH is opened
@@ -59,14 +56,16 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
     """
 
     config_cls = ClaudeCLIConfig
+    provider = "anthropic"
 
     async def __call__(self, run: Run) -> None:
+        endpoint = model_endpoint(run, self.provider, gateway=self.config.gateway)
         ssh = cast("SSHClient", await run.client.open("ssh"))
         manifest = run.client.manifest
         assert manifest is not None
         shell = ssh.capability.params.get("shell", "bash")
         windows = shell in WINDOWS_SHELLS
-        connection: Connection | None = run.connections.get("inference")
+        connection = endpoint.connection if endpoint is not None else None
         executable = await resolve_executable(
             ssh, "claude", _MANAGED_CLAUDE_PATHS, run.runtime_config
         )
@@ -105,31 +104,20 @@ class ClaudeCLIAgent(Agent[ClaudeCLIConfig]):
                 "DISABLE_AUTOUPDATER": "1",
                 "IS_SANDBOX": "1",
             }
-            if connection is not None or routes_to_gateway(
-                "anthropic", gateway=self.config.gateway
-            ):
-                if connection is not None:
-                    # The relay injects the scoped credential; the process never sees it.
-                    # AUTH_TOKEN sends Authorization: Bearer, the header Codex uses too.
-                    env["ANTHROPIC_BASE_URL"] = connection.client_url
-                    env["ANTHROPIC_AUTH_TOKEN"] = PROCESS_BOUND_CREDENTIAL
-                elif settings.api_key:
-                    env["ANTHROPIC_BASE_URL"] = settings.hud_gateway_url
-                    env["ANTHROPIC_API_KEY"] = settings.api_key
-                else:
-                    raise ValueError("HUD_API_KEY is required for HUD gateway routing")
-                env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-                # Alias every model tier so background requests never bypass the gateway.
-                env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
-                env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
-                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
-                env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
-                if connection is None and (trace_headers := get_trace_headers()):
+            if endpoint is not None:
+                env["ANTHROPIC_BASE_URL"] = endpoint.url
+                env["ANTHROPIC_API_KEY"] = endpoint.key
+                if endpoint.headers:
                     env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
-                        f"{name}: {value}" for name, value in trace_headers.items()
+                        f"{name}: {value}" for name, value in endpoint.headers.items()
                     )
-            elif settings.anthropic_api_key:
-                env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+                if endpoint.gateway:
+                    env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+                    # Alias every model tier so background requests never bypass the gateway.
+                    env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = self.config.model
+                    env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = self.config.model
+                    env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self.config.model
+                    env["CLAUDE_CODE_SUBAGENT_MODEL"] = self.config.model
 
             args = [
                 "--verbose",

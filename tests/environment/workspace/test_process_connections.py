@@ -294,8 +294,9 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
         results: dict[str, tuple[int | None, str]] = {}
         async with (
             LocalRuntime(env)(Task(env=env.name, id="test")) as runtime,
-            connect(runtime, connections=(connection, neighbour)) as client,
+            connect(runtime) as client,
         ):
+            await client.bind((connection, neighbour))
             ssh = cast("SSHClient", await client.open("ssh"))
             advertised = ssh.capability.params["process_connections"]
             for case, (source, bound) in cases.items():
@@ -350,7 +351,8 @@ async def test_a_connection_bound_into_a_running_sandbox_reaches_its_upstream(
             connect(runtime) as first,
         ):
             await cast("SSHClient", await first.open("ssh")).run("true", check=True)
-            async with connect(runtime, connections=(connection,)) as later:
+            async with connect(runtime) as later:
+                await later.bind((connection,))
                 ssh = cast("SSHClient", await later.open("ssh"))
                 process = await ssh.create_process(
                     python(fetch(connection.client_url)), connections=(connection,)
@@ -378,7 +380,8 @@ async def test_a_later_session_cannot_launch_against_a_released_connection(
             tmp_path / "root", allowed_hosts={ANY_HOST}, require_isolation=True, track_files=False
         )
         async with LocalRuntime(env)(Task(env=env.name, id="test")) as runtime:
-            async with connect(runtime, connections=(connection,)) as first:
+            async with connect(runtime) as first:
+                await first.bind((connection,))
                 ssh = cast("SSHClient", await first.open("ssh"))
                 bound = await ssh.create_process(
                     python(fetch(connection.client_url)), connections=(connection,)
@@ -425,10 +428,12 @@ async def resolved_names(client: HudClient) -> list[str]:
 async def a_finished_session_releases_its_connection(env: Environment, root: Path) -> None:
     env.workspace(root, network=False)
     async with LocalRuntime(env)(ECHO) as runtime:
-        async with connect(runtime, connections=[inference("first")]) as first:
+        async with connect(runtime) as first:
+            await first.bind([inference("first")])
             await first.start_task("echo", {"tag": "a"})
             await first.grade({"answer": "x"})
-        async with connect(runtime, connections=[inference("rotated")]) as second:
+        async with connect(runtime) as second:
+            await second.bind([inference("rotated")])
             await second.start_task("echo", {"tag": "b"})
             names = await resolved_names(second)
             assert names.count(inference("rotated").host) == 1
@@ -437,10 +442,11 @@ async def a_finished_session_releases_its_connection(env: Environment, root: Pat
 
 async def a_live_session_keeps_its_connection_name(env: Environment, root: Path) -> None:
     env.workspace(root, network=False)
-    async with LocalRuntime(env)(ECHO) as runtime, connect(runtime, connections=[inference("a")]):
-        with pytest.raises(HudProtocolError, match="bound to another control session"):
-            async with connect(runtime, connections=[inference("b")]):
-                pass
+    async with LocalRuntime(env)(ECHO) as runtime, connect(runtime) as first:
+        await first.bind([inference("a")])
+        async with connect(runtime) as second:
+            with pytest.raises(HudProtocolError, match="bound to another control session"):
+                await second.bind([inference("b")])
 
 
 async def a_finished_session_takes_its_route_with_it(env: Environment, root: Path) -> None:
