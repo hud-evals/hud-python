@@ -1,7 +1,7 @@
-"""smoke - HUD environment with a real coding task graded by pytest.
+"""smoke - HUD environment with a real coding task graded by its tests.
 
 Spine of the HUD x Daytona guide: one shell capability, one buggy repo, one
-pytest grader. Runs identically under LocalRuntime and DaytonaRuntime.
+grader. Runs identically under LocalRuntime and DaytonaRuntime.
 
 Reward is binary — every test passes or the rollout scores zero.
 """
@@ -9,7 +9,8 @@ Reward is binary — every test passes or the rollout scores zero.
 from __future__ import annotations
 
 import asyncio
-import re
+import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -23,8 +24,6 @@ env = Environment(name="smoke")
 WORKSPACE = Path(tempfile.mkdtemp(prefix="calc-", dir="/tmp"))
 ws = env.workspace(WORKSPACE, network=True)
 
-TOTAL_TESTS = bugs.test_count()
-
 
 def seed_bug(variant: int) -> list[str]:
     calc, tests, broken = bugs.build(variant)
@@ -33,22 +32,37 @@ def seed_bug(variant: int) -> list[str]:
     return broken
 
 
-async def run_pytest() -> tuple[int, int]:
+async def calc_passes() -> bool:
+    """Whether the agent's calc.py returns the expected value for every test case.
+
+    `bugs.py` imports calc.py in a separate process and prints what it returned; the
+    comparison runs here.
+    """
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
-        "-m",
-        "pytest",
-        "-q",
-        "--no-header",
-        "-p",
-        "no:cacheprovider",
-        cwd=str(WORKSPACE),
+        "-I",
+        bugs.__file__,
+        str(WORKSPACE / "calc.py"),
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     out, _ = await proc.communicate()
-    match = re.search(r"(\d+) passed", out.decode("utf-8", "replace"))
-    return (int(match.group(1)) if match else 0), TOTAL_TESTS
+    if proc.returncode != 0:
+        return False
+    try:
+        returned = json.loads(out)
+    except json.JSONDecodeError:
+        return False
+    expected = [value for _, _, value in bugs.cases()]
+    return (
+        isinstance(returned, list)
+        and len(returned) == len(expected)
+        and all(
+            isinstance(value, int | float)
+            and math.isclose(value, want, rel_tol=1e-6, abs_tol=1e-12)
+            for value, want in zip(returned, expected, strict=True)
+        )
+    )
 
 
 @env.template(id="fix_calc")
@@ -57,8 +71,7 @@ async def fix_calc(variant: int = 0):
     yield (
         f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
     )
-    passed, total = await run_pytest()
-    yield 1.0 if passed == total else 0.0
+    yield 1.0 if await calc_passes() else 0.0
 
 
 async def test() -> None:

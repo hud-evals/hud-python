@@ -9,6 +9,12 @@ A variant is a deterministic subset of BUGS of size k, k cycling 2/3/4.
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import json
+import sys
+from typing import Any
+
 HEADER = '"""A tiny stats helper."""\n\nfrom collections import Counter\n'
 
 FUNCS: dict[str, dict[str, str]] = {
@@ -20,10 +26,6 @@ def mean(xs):
         "buggy": """
 def mean(xs):
     return sum(xs) // len(xs)
-""",
-        "tests": """
-def test_mean():
-    assert mean([1, 2, 3, 4]) == 2.5
 """,
     },
     "median": {
@@ -41,14 +43,6 @@ def median(xs):
     s = sorted(xs)
     return s[len(s) // 2]
 """,
-        "tests": """
-def test_median_odd():
-    assert median([3, 1, 2]) == 2
-
-
-def test_median_even():
-    assert median([1, 2, 3, 4]) == 2.5
-""",
     },
     "variance": {
         "correct": """
@@ -61,10 +55,6 @@ def variance(xs):
     m = sum(xs) / len(xs)
     return sum((x - m) ** 2 for x in xs) / len(xs)
 """,
-        "tests": """
-def test_variance_is_sample_variance():
-    assert variance([1, 2, 3, 4]) == pytest.approx(1.6666666666666667)
-""",
     },
     "stdev": {
         "correct": """
@@ -76,10 +66,6 @@ def stdev(xs):
 def stdev(xs):
     m = sum(xs) / len(xs)
     return sum(abs(x - m) for x in xs) / len(xs)
-""",
-        "tests": """
-def test_stdev_is_sample_stdev():
-    assert stdev([1, 2, 3, 4]) == pytest.approx(1.2909944487358056)
 """,
     },
     "percentile": {
@@ -98,15 +84,6 @@ def percentile(xs, p):
     s = sorted(xs)
     return s[int(round((len(s) - 1) * p))]
 """,
-        "tests": """
-def test_percentile_interpolates():
-    assert percentile([1, 2, 3, 4], 0.25) == pytest.approx(1.75)
-
-
-def test_percentile_endpoints():
-    assert percentile([1, 2, 3, 4], 0.0) == pytest.approx(1.0)
-    assert percentile([1, 2, 3, 4], 1.0) == pytest.approx(4.0)
-""",
     },
     "mode": {
         "correct": """
@@ -119,10 +96,6 @@ def mode(xs):
 def mode(xs):
     return Counter(xs).most_common(1)[0][0]
 """,
-        "tests": """
-def test_mode_breaks_ties_by_smallest():
-    assert mode([3, 1, 1, 3]) == 1
-""",
     },
     "spread": {
         "correct": """
@@ -132,10 +105,6 @@ def spread(xs):
         "buggy": """
 def spread(xs):
     return max(xs) - min(xs) + 1
-""",
-        "tests": """
-def test_spread():
-    assert spread([1, 2, 3, 4]) == 3
 """,
     },
     "cv": {
@@ -151,11 +120,25 @@ def cv(xs):
     sd = (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
     return m / sd
 """,
-        "tests": """
-def test_cv():
-    assert cv([1, 2, 3, 4]) == pytest.approx(0.5163977794943222)
-""",
     },
+}
+
+# Each function's tests: test name -> calls as (args, expected return value).
+TESTS: dict[str, dict[str, list[tuple[tuple[Any, ...], float]]]] = {
+    "mean": {"test_mean": [(([1, 2, 3, 4],), 2.5)]},
+    "median": {
+        "test_median_odd": [(([3, 1, 2],), 2)],
+        "test_median_even": [(([1, 2, 3, 4],), 2.5)],
+    },
+    "variance": {"test_variance_is_sample_variance": [(([1, 2, 3, 4],), 1.6666666666666667)]},
+    "stdev": {"test_stdev_is_sample_stdev": [(([1, 2, 3, 4],), 1.2909944487358056)]},
+    "percentile": {
+        "test_percentile_interpolates": [(([1, 2, 3, 4], 0.25), 1.75)],
+        "test_percentile_endpoints": [(([1, 2, 3, 4], 0.0), 1.0), (([1, 2, 3, 4], 1.0), 4.0)],
+    },
+    "mode": {"test_mode_breaks_ties_by_smallest": [(([3, 1, 1, 3],), 1)]},
+    "spread": {"test_spread": [(([1, 2, 3, 4],), 3)]},
+    "cv": {"test_cv": [(([1, 2, 3, 4],), 0.5163977794943222)]},
 }
 
 NAMES = list(FUNCS)
@@ -176,14 +159,36 @@ def build(variant: int) -> tuple[str, str, list[str]]:
         "\n" + FUNCS[name]["buggy" if name in broken else "correct"].strip("\n") + "\n"
         for name in NAMES
     )
-    tests = (
-        "import pytest\n\nfrom calc import "
-        + ", ".join(sorted(NAMES))
-        + "\n"
-        + "".join("\n" + FUNCS[name]["tests"].strip("\n") + "\n" for name in NAMES)
-    )
+    tests = "import pytest\n\nfrom calc import " + ", ".join(sorted(NAMES)) + "\n"
+    for name in NAMES:
+        for test, calls in TESTS[name].items():
+            tests += f"\n\ndef {test}():\n" + "".join(
+                f"    assert {name}({', '.join(map(repr, args))}) == pytest.approx({expected!r})\n"
+                for args, expected in calls
+            )
     return calc, tests, broken
 
 
+def cases() -> list[tuple[str, tuple[Any, ...], float]]:
+    """Every call the tests make, as (function, args, expected return value)."""
+    return [
+        (name, args, expected)
+        for name in NAMES
+        for calls in TESTS[name].values()
+        for args, expected in calls
+    ]
+
+
 def test_count() -> int:
-    return sum(f["tests"].count("def test_") for f in FUNCS.values())
+    return sum(len(TESTS[name]) for name in NAMES)
+
+
+if __name__ == "__main__":
+    # `python bugs.py calc.py` prints what calc.py returns for every case, as JSON. Anything
+    # calc.py prints goes to stderr, so stdout carries only the results.
+    spec = importlib.util.spec_from_file_location("calc", sys.argv[1])
+    calc = importlib.util.module_from_spec(spec)
+    with contextlib.redirect_stdout(sys.stderr):
+        spec.loader.exec_module(calc)
+        returned = [getattr(calc, name)(*args) for name, args, _ in cases()]
+    print(json.dumps(returned))
