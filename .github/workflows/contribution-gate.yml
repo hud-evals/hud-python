@@ -2,7 +2,7 @@ name: Contribution gate
 
 on:
   pull_request_target:
-    types: [opened, ready_for_review]
+    types: [opened, reopened]
 
 permissions:
   issues: read
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   require-actionable-issue:
-    if: "!github.event.pull_request.draft && github.event.pull_request.user.type != 'Bot'"
+    if: github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     steps:
       - name: Close PRs that do not fix an actionable issue
