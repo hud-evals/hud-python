@@ -452,7 +452,9 @@ class ClaudeAgent(ToolAgent[BetaMessageParam, ClaudeConfig]):
             done=True,
             model=response.model,
             usage=Usage(
-                prompt_tokens=response.usage.input_tokens,
+                prompt_tokens=response.usage.input_tokens
+                + (response.usage.cache_creation_input_tokens or 0)
+                + (response.usage.cache_read_input_tokens or 0),
                 completion_tokens=response.usage.output_tokens,
                 cached_tokens=response.usage.cache_read_input_tokens,
             ),
