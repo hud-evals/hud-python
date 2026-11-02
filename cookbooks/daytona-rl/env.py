@@ -1,4 +1,4 @@
-"""smoke - HUD environment with a real coding task graded by its tests' expected values.
+"""smoke - HUD environment with a real coding task graded by its tests.
 
 Spine of the HUD x Daytona guide: one shell capability, one buggy repo, one
 grader. Runs identically under LocalRuntime and DaytonaRuntime.
@@ -51,8 +51,7 @@ async def calc_passes() -> bool:
     """Whether the agent's calc.py returns the expected value for every test case.
 
     A separate process imports calc.py alone and reports what it returned; the comparison
-    runs here. Edited tests, pytest config and anything calc.py prints can't change the
-    grade, and printing results is no easier than returning them.
+    runs here.
     """
     calls = json.dumps([[name, args] for name, args, _ in CASES])
     proc = await asyncio.create_subprocess_exec(
