@@ -331,6 +331,38 @@ async def test_only_the_bound_session_process_reaches_a_controller_connection(
 
 @pytest.mark.e2e
 @pytest.mark.sandbox
+async def test_a_connection_bound_into_a_running_sandbox_reaches_its_upstream(
+    tmp_path: Path,
+) -> None:
+    with upstream() as (port, seen):
+        connection = Connection(
+            name="inference",
+            capability="ssh",
+            url=f"http://127.0.0.1:{port}",
+            headers={"Authorization": "Bearer late-token"},
+        )
+        env = Environment("process-connection")
+        env.workspace(
+            tmp_path / "root", allowed_hosts={ANY_HOST}, require_isolation=True, track_files=False
+        )
+        async with (
+            LocalRuntime(env)(Task(env=env.name, id="test")) as runtime,
+            connect(runtime) as first,
+        ):
+            await cast("SSHClient", await first.open("ssh")).run("true", check=True)
+            async with connect(runtime, connections=(connection,)) as later:
+                ssh = cast("SSHClient", await later.open("ssh"))
+                process = await ssh.create_process(
+                    python(fetch(connection.client_url)), connections=(connection,)
+                )
+                completed = await process.wait()
+
+    assert (completed.returncode, cast("bytes", completed.stdout).decode()) == (0, "ok\n")
+    assert seen == ["Bearer late-token"]
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
 async def test_a_later_session_cannot_launch_against_a_released_connection(
     tmp_path: Path,
 ) -> None:

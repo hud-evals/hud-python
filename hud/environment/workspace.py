@@ -622,6 +622,8 @@ class Workspace:
         self._sandbox_init: int | None = None
         self._namespace: NamespaceHost | None = None
         self._bridge: NamespaceProcess | None = None
+        #: The ``(host, port)`` addresses the bridge listens on.
+        self._listening: set[tuple[str, int]] = set()
         # Sessions start concurrently (an agent can issue parallel tool calls),
         # and two that each started a sandbox would not share one.
         self._sandbox_lock = asyncio.Lock()
@@ -681,13 +683,22 @@ class Workspace:
         """
         return not self.network or self.allowed_hosts is not None
 
-    def add_peer(self, peer: Peer, *, first: bool = False) -> None:
-        """Add a substrate service before the workspace accepts sessions."""
-        if self._sandbox is not None:
-            raise RuntimeError("workspace peers must be bound before its sandbox starts")
-        self.peers = (peer, *self.peers) if first else (*self.peers, peer)
-        if self._hosts_path is not None:
-            self._hosts_path = self._write_hosts()
+    async def add_peer(self, peer: Peer, *, first: bool = False) -> None:
+        """Add a substrate service, to a running sandbox too: its address answers and
+        its name resolves before this returns, and every other peer keeps the address
+        it was bound at."""
+        async with self._sandbox_lock:
+            if self._egress is not None:
+                host, port, path = self._egress.add_peer(peer)
+                if (host, port) not in self._listening:
+                    try:
+                        await self._route_out(json.dumps([[host, port, path]]).encode() + b"\n")
+                    except BaseException:
+                        self._egress.remove_peer(peer)
+                        raise
+            self.peers = (peer, *self.peers) if first else (*self.peers, peer)
+            if self._hosts_path is not None:
+                self._hosts_path = self._write_hosts()
 
     def remove_peer(self, peer: Peer) -> None:
         """Remove a substrate service, from a running sandbox too: its name stops
@@ -1461,16 +1472,25 @@ class Workspace:
                     mount_view="host",
                     scope="environment",
                 )
-                self._bridge.stdin.write(config)
-                await self._bridge.stdin.drain()
-                if await asyncio.wait_for(self._bridge.stdout.readline(), 30.0) != b"ready\n":
-                    detail = (await self._bridge.stderr.read(2048)).decode(errors="replace").strip()
-                    raise RuntimeError(detail or "workspace bridge did not become ready")
+                await self._route_out(config)
             self._sandbox_init = pid
             return pid
         except BaseException:
             await self.discard_sandbox()
             raise
+
+    async def _route_out(self, routes: bytes) -> None:
+        """Have the bridge listen on *routes*, one line of its stdin."""
+        assert self._bridge is not None
+        self._bridge.stdin.write(routes)
+        await self._bridge.stdin.drain()
+        reply = await asyncio.wait_for(self._bridge.stdout.readline(), 30.0)
+        if reply != b"ready\n":
+            detail = reply.decode(errors="replace").strip()
+            if not detail:
+                detail = (await self._bridge.stderr.read(2048)).decode(errors="replace").strip()
+            raise RuntimeError(detail or "workspace bridge did not become ready")
+        self._listening.update((host, port) for host, port, _path in json.loads(routes))
 
     async def _sandbox_error(self) -> str:
         """Whatever the sandbox said on the way down, for a failure message."""
@@ -1491,6 +1511,7 @@ class Workspace:
         detached. A later session starts a fresh sandbox.
         """
         bridge, self._bridge = self._bridge, None
+        self._listening = set()
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.terminate()

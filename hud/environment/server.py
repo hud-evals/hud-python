@@ -485,8 +485,8 @@ class _Session:
         except ValueError as exc:
             await self._error(msg_id, -32602, f"hello: {exc}")
             return
-        self.env.bind_connections(connections, session=self.id)
-        self.env.bind_workspace_routes(workspace_routes, session=self.id)
+        await self.env.bind_connections(connections, session=self.id)
+        await self.env.bind_workspace_routes(workspace_routes, session=self.id)
         # env.start() ran before serving, so hook-published capabilities (e.g. a
         # workspace's ssh address) are already concrete here.
         bindings = [c.to_manifest() for c in self.env.capabilities]
