@@ -31,7 +31,7 @@ Three approaches cover grading, in increasing power. Each produces the `float` o
 
 | Approach | When to reach for it | Example |
 |----------|----------------------|---------|
-| **Plain Python** | A reward you compute from the answer | `yield 1.0 if answer.strip() == "3" else 0.0` |
+| **Plain Python** | A reward you compute from the answer | `yield 1.0 if (answer or "").strip() == "3" else 0.0` |
 | **Async grader** | Score a command's exit code or an LLM's judgment of the answer | `yield (await BashGrader.grade(weight=1.0, command="pytest -q")).value` |
 | **Composed** | Weight several graders into one reward, each subscore kept in the trace | `yield await combine(BashGrader.grade(...), LLMJudgeGrader.grade(...))` |
 
@@ -44,7 +44,7 @@ answer is better scored by `LLMJudgeGrader`, and a structured one by `@env.templ
 @env.template()
 async def capital(country: str = "France"):
     answer = yield f"What is the capital of {country}? Reply with the city name only."
-    yield 1.0 if answer.strip().lower() == "paris" else 0.0
+    yield 1.0 if (answer or "").strip().lower() == "paris" else 0.0
 ```
 
 ## `BashGrader`
@@ -104,7 +104,7 @@ async def composed(answer: str = ""):
     yield await combine(
         BashGrader.grade(weight=0.5, command="pytest -q"),
         LLMJudgeGrader.grade(weight=0.3, answer=answer, criteria=["Matches the spec"]),
-        SubScore(name="format", value=1.0 if answer.strip() == "42" else 0.0, weight=0.2),
+        SubScore(name="format", value=1.0 if (answer or "").strip() == "42" else 0.0, weight=0.2),
     )
 ```
 
