@@ -554,6 +554,15 @@ world-frame pose as an observation each tick, which every reply restates:
 "observation/wrist_pose": {"role": "observation", "names": ["x", "y", "z", "qx", "qy", "qz", "qw"]}
 ```
 
+A camera that renders depth names its aligned depth image, metres along the optical axis, so each
+pixel's world point is known exactly rather than found by intersecting its ray with a guessed
+height:
+
+```json
+"observation/wrist": {"role": "observation", "type": "rgb", "transform": {"pose": "observation/wrist_pose"}, "intrinsics": {"fovy": 75}, "depth": "observation/wrist_depth"},
+"observation/wrist_depth": {"role": "observation", "type": "depth", "shape": [256, 256]}
+```
+
 Feature keys are openpi flat slash-paths and must match *verbatim* the keys your bridge returns from
 `get_observation` (`action` is the single action feature). Everything else - `robot_type`, `dtype`,
 `shape`, `stats` - is descriptive and never enforced. Full list in the reference below.
@@ -574,6 +583,7 @@ Feature keys are openpi flat slash-paths and must match *verbatim* the keys your
 | `state_type` / `state_representation` / `frame` | feature | Closed-symbol embodiment metadata (EEF vs joint, quaternion vs axis-angle, world vs base frame). Descriptive. |
 | `transform` | observation | Where the sensor is. Static: `parent` frame (`world`, or a link it is fixed to), `translation` (m) and `rotation` (xyzw quaternion) in that frame. Live, for a sensor that moves: `pose`, the name of an observation carrying its current world-frame `[x, y, z, qx, qy, qz, qw]`. A camera's frame is the optical one: +z out of the lens, +x image right, +y image down. [Direct control](#direct-control) describes it to the model, a live pose in every reply. |
 | `intrinsics` | image observation | Lens: `fovy` (degrees, vertical field of view). With `shape`, enough to map a pixel to a ray. |
+| `depth` | camera observation | The name of its aligned `depth` observation (`[H, W]`, metres along the optical axis). With a located camera, enough to map a pixel to a world point. Depth is not shown to the model or recorded as video. |
 
 The v0 schema is deliberately narrow: **one embodiment, one observation space, one action space per
 contract**. The framework never validates your arrays against `shape` / `dtype`; the full authoring
@@ -678,7 +688,7 @@ A few embodiment facts can't be read off the contract, so the environment states
 | `timeout` | `30` | Cap, in seconds, on one call. |
 | `reference` | the one observation vector as wide as the action | Maps observation data to the current action-space vector, where an episode's first absolute move starts. Later moves start from the last commanded target. A custom reference is taken not to read the gripper, so gripper offsets are not reported. |
 | `speed` | `0.1` | Fraction of each dimension's range (a rotation: of a full turn) an absolute move travels per second. |
-| `time_limit` | none | The episode's budget in sim seconds of control ticks played. Replies report the time remaining. |
+| `time_limit` | none | The episode's budget in sim seconds of control ticks played. The agent is not told it; a reply says when it is reached. |
 | `use_annotation` | `True` | Ask for a `note` on every call. |
 | `use_wait` | `True` | Serve the `wait` tool. |
 
@@ -735,6 +745,98 @@ changes. The control link from `RobotEndpoint` carries only `reset` and `result`
 
 </Accordion>
 
+## Code as Policy
+
+`CodeAsPolicy` serves the same sim as one `run` tool that executes a Python program. The program
+composes motion primitives with ordinary control flow, so loops and checks (retry a missed grasp,
+step until something is seen) run without the model in between. Direct control spends one model
+turn per motion; here one turn can play many.
+
+```python env.py
+from hud.environment.robot import CodeAsPolicy
+
+CodeAsPolicy(notes="Gripper: -1 open, +1 closed.").attach(sim)
+```
+
+The primitives come from the [contract](#contract), as direct control's tools do, and play
+through direct control's motion code, so motions, verdicts, and trace telemetry are identical:
+
+| Primitive | Returns | What it does |
+|-----------|---------|--------------|
+| The control kind's tool (`move_to`, `move_joints`, `move_by`, `walk_by`) | `Moved` | One motion, as the direct-control tool of that name. Dimensions are keyword arguments; `None` holds. `Moved` has `verdict`, `reached`, `pose`, `seconds`, and `ended`. |
+| `wait(seconds)` | `Moved` | Hold the pose, for at most `timeout` seconds. |
+| `observe()` | `Observation` | One control tick; `images[camera]` (H, W, 3 arrays), `state[observation]` (values by name), `pose`, `time_left`, and `cameras[camera]` for each located camera: `ray(u, v)`, `to_world(u, v, z)` (the pixel's ray meets the plane at height `z`), `point(u, v)` (the world point seen there, for a camera with `depth`) and `to_pixel(point)`. |
+| `show(*cameras)` | | Attach these cameras' latest frames to the reply (default: all). |
+| `print`, `np` | | Output that joins the reply, and numpy. |
+| `EpisodeEndedError` | | Raised by every primitive once the episode has ended. |
+
+Names drop the `observation/` prefix (`images["wrist"]`). An env adds its own skills or
+perception with `primitives={"name": fn}`; their docstrings join the tool's description.
+
+The reply lists every primitive the program called with its outcome, what it printed, any error
+as a traceback of the program's own lines, where the robot ended, and each camera's final
+frame. Variables persist across `run` calls within an episode and are cleared on `reset`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `notes`, `dims`, `max_step`, `tolerance`, `timeout`, `reference`, `speed`, `time_limit`, `use_annotation` | as for `DirectControl` | Shape each motion and the episode, as above. |
+| `primitives` | `{}` | Extra functions programs may call, by name. They run in the program's worker thread. |
+| `run_timeout` | `120` | Wall-clock cap on one program, in seconds. |
+
+Each program runs in a worker thread; primitives play on the env's event loop. A program past
+`run_timeout` is stopped at its next line or primitive, and the robot holds; `except Exception`
+does not catch the stop. A single call into native code, such as one long numpy operation or
+`time.sleep`, finishes before the stop takes effect, and until it does a new `run` is refused.
+A program that calls `sys.exit()` gets an error back; the env keeps running. The code
+runs in the env process with the env's permissions. HUD's runtimes sandbox that process, and
+nothing in `CodeAsPolicy` isolates the program further.
+
+## Policy Supervision
+
+`PolicySupervision` puts a policy (a VLA, through the same [`Model`](#the-model) and `Adapter` a
+`RobotAgent` drives) in charge of the motion, and the LLM in charge of the policy. The two run in
+parallel, as on a real robot: from the episode's first call the sim runs in real time whether or
+not the LLM is calling a tool, so its thinking costs time. `run_policy` tells the policy what to
+do, the task or a step of it, and returns at once; the policy keeps acting on it, querying itself
+again after each chunk, until the LLM changes the instruction, stops it, or the episode ends. The
+LLM checks in with `wait`, finds things with `detect`, and can step in and move the arm itself.
+
+```python env.py
+from hud.agents.robot import OpenPIAdapter, RemoteModel
+from hud.environment.robot import PolicySupervision
+
+PolicySupervision(RemoteModel(port=8000), OpenPIAdapter(chunk_size=5)).attach(sim)
+```
+
+| Tool | Served | What it does |
+|------|--------|--------------|
+| `run_policy(instruction)` | always | From now on the policy acts on `instruction`; returns at once. With `instructions`, it is an enum of the ones the policy was trained on. |
+| `stop_policy()` | always | Stop the policy; the arm holds. |
+| `wait(duration)` | always | Let `duration` seconds pass, at most `check_in`, while the policy goes on (or the arm holds), then look. |
+| `detect(camera, prompt)` | with `detector` | Find `prompt` in `camera`'s current frame: each match's score, pixel box and centre (and, for a camera with `depth`, the world point there), with the frame it searched. The robot does not wait. |
+| The control kind's tool (`move_to`, ...) | `use_motion` | Stop the policy and move the arm directly, as in direct control, then hand back with `run_policy`. |
+| `home()` | with `home` | Stop the policy and play the env's planner (a `Planner`, called again until it returns no actions, for at most 30 s of sim time) to bring the arm back to its start pose, so a policy trained from there acts from there again. |
+| `reach(x, y, z)` | with `reach` | Stop the policy and move the gripper to a world point (a `detect` result's, say), keeping its orientation and grip: the env's planner for that point, played until it returns no actions, for at most 30 s of sim time. |
+
+Every reply opens with the ticks played since the last one and says what the policy is doing. A tool's own motion (a takeover, `home`, `reach`) has the arm to itself until it is done.
+
+The adapter's `chunk_size` is how many actions play before the policy is queried again. While it
+computes the next chunk the arm does not move, as with a blocking controller, and the sim never
+runs ahead of real time. The LLM's own motions play at sim speed while its call waits. Motions go
+through direct control's motion code, so trace telemetry is the same as direct control's.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `model`, `adapter` | required | The policy and its translation to and from the contract. |
+| `time_scale` | `1` | Sim seconds per wall second: `1` is real time. |
+| `check_in` | `1` | The longest `wait`, in seconds: how long the LLM can look away while the policy acts, besides its thinking time. |
+| `detector` | none | `detector(image, prompt)` returning matches as `{"label", "score", "box": [u0, v0, u1, v1]}`; serves `detect`. |
+| `use_motion` | `False` | Also serve the contract motion tool, so the model can take over; `run_policy`'s description then says it can hand back. |
+| `home` | none | A planner that brings the arm home; serves the `home` tool. |
+| `reach` | none | `reach([x, y, z])` returning a planner that brings the gripper to that world point; serves the `reach` tool. |
+| `instructions` | any text | The instructions the policy was trained on; `run_policy` accepts only these. |
+| `notes`, `dims`, `max_step`, `tolerance`, `timeout`, `reference`, `speed`, `time_limit`, `use_annotation` | as for `DirectControl` | Shape each motion and the episode, as above. |
+
 ## Recording datasets
 
 Set `agent.save = True` (wire it to a `--save` flag on your runner) to also record every
@@ -772,6 +874,8 @@ to per-episode video), the lone state vector becomes `observation.state`, the ac
 | `RobotEndpoint` | `hud.environment.robot` | Episode bookkeeping + results (`reset` → `{prompt, token}`, `result(token=...)`) |
 | `RobotEndpoint.capabilities(...)` | `hud.environment.robot` | Everything the bridge serves after `start()` (the `openpi/0` wire, plus any extras) |
 | `DirectControl(...).attach(sim)` | `hud.environment.robot` | The `robot` capability as MCP motion tools, for tool-calling LLM agents |
+| `CodeAsPolicy(...).attach(sim)` | `hud.environment.robot` | The `robot` capability as a `run` tool executing Python over motion primitives |
+| `PolicySupervision(model, adapter).attach(sim)` | `hud.environment.robot` | A policy driving the `robot` capability, served as a `run_policy` tool an LLM instructs |
 | `Capability.robot(name, url, contract)` | `hud.capabilities` | Lower-level constructor (usually via `endpoint.capabilities`) |
 | `RobotClient` | `hud.capabilities.robot` | Agent-side wire client (`connect(..., token=)`, `spaces`, `get_observation`, `send_action`) |
 | `RobotAgent` | `hud.agents.robot` | The harness: one open-loop chunk queue per scalar connection |
