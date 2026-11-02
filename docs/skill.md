@@ -415,8 +415,7 @@ grader"), [Graders](/v6/reference/graders).
 
 ## Grading quick reference
 
-- Plain helpers (return float): `exact_match`, `contains`, `numeric_match`,
-  `f1_score` from `hud.graders`.
+- Plain Python: yield a float computed from `answer`.
 - Async graders (return `SubScore`): `BashGrader.grade(weight, command=...)`,
   `LLMJudgeGrader.grade(weight, answer=..., criteria=[...])`.
 - Compose: `await combine(...)` (positive weights normalize to 1.0).
