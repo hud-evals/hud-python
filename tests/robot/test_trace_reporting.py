@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 import av
 import numpy as np
 import pytest
+from mcp.shared.exceptions import MCPError
 
 from hud.agents.base import Agent
 from hud.environment.robot import DirectControl, wrap
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
     from hud.capabilities import MCPClient
     from hud.eval.run import Run
+    from hud.types import ToolResult
     from tests.fixtures.services import FakeServices
 
 
@@ -154,18 +156,21 @@ async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per
 
 
 class AbandonsMidMove(Agent):
-    """Starts a long move, then fails once the sim has stepped ``after`` ticks."""
+    """Starts a move to ``x=0.5``, then fails once ``moving`` is set, leaving the move playing.
+
+    The call stays open until the rollout closes its client, after grading has ended the episode.
+    """
 
     def __init__(self, moving: threading.Event) -> None:
         super().__init__()
         self.moving = moving
+        self.playing: asyncio.Task[ToolResult] | None = None
 
     async def __call__(self, run: Run) -> None:
         client = cast("MCPClient", await run.client.open("control"))
         targets = {"targets": {"x": 0.5, "grip": None}, "note": "move toward the goal"}
-        playing = asyncio.create_task(client.call_tool("move_to", targets))
+        self.playing = asyncio.create_task(client.call_tool("move_to", targets))
         assert await asyncio.to_thread(self.moving.wait, 30)
-        playing.cancel()
         raise RuntimeError("the agent gave up")
 
 
@@ -178,17 +183,22 @@ async def test_ending_the_episode_mid_move_ends_the_recording_with_the_ticks_pla
         return target
 
     sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), follow=announcing)
+    agent = AbandonsMidMove(moving)
 
     async with arm_env(sim, DirectControl(speed=0.001)) as env:
-        run = await rollout(
-            Task(env="arm", id="reach"), AbandonsMidMove(moving), runtime=LocalRuntime(env)
-        )
+        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
+    # The move was still playing when the episode ended: its call ended with the client.
+    assert agent.playing is not None
+    with pytest.raises(MCPError, match="Connection closed"):
+        await agent.playing
     observations, segments = recorded(run)
     ticks = [obs["tick"] for obs in observations]
     assert run.trace.status == "error"
+    # The opening scene and the ticks played until the episode ended, in order. Ticks
+    # the sim plays after that are not recorded.
     assert ticks == list(range(len(ticks)))
-    assert 3 <= len(ticks) < 1 + len(sim.actions)
+    assert 3 <= len(ticks) <= 1 + len(sim.actions)
     assert frames_in(segments) == len(ticks)
 
 
