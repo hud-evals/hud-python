@@ -41,7 +41,7 @@ import io
 import math
 import re
 import socket
-from collections.abc import Callable  # noqa: TC003 - pydantic resolves the field at runtime
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
@@ -148,12 +148,17 @@ _FULL_TURN = 2.0 * math.pi
 Content = list[TextContent | ImageContent]
 
 
+#: The verdict of an arm motion that came to rest within tolerance of its target.
+AT_TARGET = "At the target."
+
 #: Longest ``wait``, in sim seconds.
 MAX_WAIT_S = 100.0
 
 #: One plan: per-tick action rows, the intended goal (``None`` if nothing is being
 #: reached), and the dimensions named.
 Plan = tuple["NDArray[np.float64]", "NDArray[np.float64] | None", set[str]]
+#: Plans a motion from the live observation, as a ``home`` planner or a policy does.
+Planner = Callable[[dict[str, Any]], Plan]
 
 #: Asked of the model on every call (unless ``use_annotation`` is off) so the
 #: transcript records what the model saw and why.
@@ -191,6 +196,19 @@ class _Gap(NamedTuple):
     label: str
     distance: float
     quantity: str
+
+
+@dataclass(frozen=True)
+class _Motion:
+    """How one played plan ended."""
+
+    obs: dict[str, Any]  # the last observation
+    played: int  # ticks played
+    proprio: NDArray[np.float64]  # the pose it ended on, in action space
+    rested: bool
+    gaps: list[_Gap] | None  # each named dimension's distance from the goal; None: no goal
+    goal: NDArray[np.float64] | None
+    ticks_left: int | None  # of the episode's time limit; None: no limit
 
 
 @dataclass(frozen=True)
@@ -271,17 +289,10 @@ class DirectControl:
         self.time_limit = time_limit
         self.use_annotation = use_annotation
         self.use_wait = use_wait
-        # Appended to the motion and wait tool descriptions when a limit is enforced.
-        self._budget = (
-            f" You have {time_limit:g} seconds of simulated time. Time passes only while the "
-            f"robot {'moves or waits' if use_wait else 'moves'}; thinking is free. When it runs "
-            "out the episode ends and is graded as it stands."
-            if time_limit is not None
-            else ""
-        )
         self._lock = asyncio.Lock()  # a slot takes one wire connection at a time
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
         self._elapsed = 0  # ticks this episode has played
+        self._episode = 0  # bumped at each episode's end
         self._serving: asyncio.Task[None] | None = None
         self._capability: Capability | None = None
         self._recorder: TraceRecorder | None = None  # this episode's trace telemetry
@@ -356,6 +367,8 @@ class DirectControl:
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
         self._obs_space = observations
         self._cameras = [n for n, f in observations.items() if f.get("type") == "rgb"]
+        # Depth images place pixels; they are not shown to the model or recorded as video.
+        self._depths = {n for n, f in observations.items() if f.get("type") == "depth"}
         self._mounts = _mounts(observations)
         # A live transform names the observation carrying its sensor's current pose; that
         # vector is reported as the sensor's pose in every reply, not as state.
@@ -393,9 +406,7 @@ class DirectControl:
         server = FastMCP(name=self.name)
         self._bind_tools(server)
         if self.use_wait:
-            server.add_tool(
-                self._make_tool(self.wait, "wait", _WAIT + self._budget, {"duration": _DURATION})
-            )
+            server.add_tool(self._make_tool(self.wait, "wait", _WAIT, {"duration": _DURATION}))
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -426,6 +437,7 @@ class DirectControl:
 
         A move still playing stops recording; the tick being recorded finishes first.
         """
+        self._episode += 1  # a move still playing no longer counts toward this episode
         self._command = None
         self._elapsed = 0
         recorder, self._recorder = self._recorder, None
@@ -540,7 +552,7 @@ class DirectControl:
         )
         return (
             f"{motion} {hold}{rotation} {done}, with the camera frames and the pose. It stops "
-            f"at {self.timeout:g} s if the motion has not finished.{self._budget}{annotation} "
+            f"at {self.timeout:g} s if the motion has not finished.{annotation} "
             f"{self._mounts}{self.notes}"
         ).strip()
 
@@ -579,9 +591,17 @@ class DirectControl:
 
     async def _play(self, plan: Callable[[dict[str, Any]], Plan], note: str) -> Content:
         """Plan against the live observation, play until done, and render the result."""
+        self._require_note(note)
+        return self._render(await self._move(plan))
+
+    def _require_note(self, note: str) -> None:
         # The note stays on the tool call; an empty one is a correctable miss, not a move.
         if self.use_annotation and not note.strip():
             raise ToolError("note must say what you see and why you chose this")
+
+    async def _move(self, plan: Callable[[dict[str, Any]], Plan]) -> _Motion:
+        """Plan against the live observation and play until done."""
+        episode = self._episode
         # One short wire connection per call: the sim is frozen while the model thinks.
         async with self._lock:
             client = await RobotClient.connect(self._robot)
@@ -630,7 +650,7 @@ class DirectControl:
                     played += 1
                     if ticks_left is not None and played >= ticks_left:
                         obs["terminated"] = True
-                    if self._absolute:
+                    if self._absolute and episode == self._episode:
                         # Remember the target so the next call continues from it, not the sim pose.
                         self._command = row.copy()
                     previous, proprio = proprio, self._proprio(obs)
@@ -693,8 +713,9 @@ class DirectControl:
                 gaps = None if goal is None else self._gaps(proprio, goal, named)
             finally:
                 await client.close()
-        self._elapsed += played
-        return self._render(
+        if episode == self._episode:
+            self._elapsed += played
+        return _Motion(
             obs,
             played,
             proprio,
@@ -711,7 +732,9 @@ class DirectControl:
                 if recorder is self._recorder:  # the episode may have ended while waiting
                     # Off the loop: a lossless encoder blocks while its queue drains.
                     await asyncio.to_thread(
-                        recorder.record_observation, obs["data"], tick=self._tick
+                        recorder.record_observation,
+                        {k: v for k, v in obs["data"].items() if k not in self._depths},
+                        tick=self._tick,
                     )
                     self._tick += 1
 
@@ -828,23 +851,12 @@ class DirectControl:
             return np.asarray(obs["data"][key], dtype=np.float64).reshape(-1)
         return np.zeros(0, dtype=np.float64)
 
-    def _render(
-        self,
-        obs: dict[str, Any],
-        played: int,
-        proprio: NDArray[np.float64],
-        *,
-        rested: bool,
-        gaps: list[_Gap] | None,
-        goal: NDArray[np.float64] | None,
-        ticks_left: int | None,
-    ) -> Content:
+    def _render(self, motion: _Motion) -> Content:
+        obs, played, proprio = motion.obs, motion.played, motion.proprio
+        gaps, goal, ticks_left = motion.gaps, motion.goal, motion.ticks_left
         data = obs["data"]
         # Keep this opening line: the trace viewer reads it to place each call on the video.
-        opening = f"Played {played} steps ({played / self._rate:.1f} s)."
-        if ticks_left is not None:
-            opening += f" Time remaining: {ticks_left / self._rate:.1f} s."
-        lines = [opening]
+        lines = [f"Played {played} steps ({played / self._rate:.1f} s)."]
         for key, names in self._states.items():
             vector = np.array(data[key], dtype=np.float64).reshape(-1)
             angles = self._euler_columns[key]
@@ -871,18 +883,9 @@ class DirectControl:
             ranked = sorted(
                 shown, key=lambda gap: gap.distance / self._tolerances[gap.quantity], reverse=True
             )
-            if not rested:
-                verdict = (
-                    "The episode ended before the arm settled."
-                    if obs["terminated"]
-                    else "Ran out of time before settling; the arm was still moving."
-                )
-            elif any(gap.distance > self._tolerances[gap.quantity] for gap in arm):
-                verdict = "Stopped short of the target; the arm is at rest."
-            else:
-                verdict = "At the target."
             lines.append(
-                f"{verdict} Remaining offsets: {', '.join(_offset(gap) for gap in ranked)}."
+                f"{self._verdict(motion)} Remaining offsets: "
+                f"{', '.join(_offset(gap) for gap in ranked)}."
             )
         if ticks_left == 0:
             lines.append("The time limit is reached.")
@@ -899,6 +902,21 @@ class DirectControl:
                 ImageContent(type="image", data=_png(data[camera]), mime_type="image/png")
             )
         return content
+
+    def _verdict(self, motion: _Motion) -> str | None:
+        """Whether an arm motion reached its goal; ``None`` when nothing was being reached."""
+        arm = [gap for gap in motion.gaps or [] if gap.quantity != "grip"]
+        if not arm:
+            return None
+        if not motion.rested:
+            return (
+                "The episode ended before the arm settled."
+                if motion.obs["terminated"]
+                else "Ran out of time before settling; the arm was still moving."
+            )
+        if any(gap.distance > self._tolerances[gap.quantity] for gap in arm):
+            return "Stopped short of the target; the arm is at rest."
+        return AT_TARGET
 
     def _reading(self, vector: NDArray[np.float64]) -> list[tuple[str, float]]:
         euler: dict[int, NDArray[np.float64]] = {}

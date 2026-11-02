@@ -19,6 +19,7 @@ import numpy as np
 from gymnasium.spaces import Box
 
 from hud.agents.base import Agent
+from hud.agents.robot import Adapter, Model
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime
@@ -182,6 +183,28 @@ def fingers(arm: Arm, target: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.concatenate([arm.state[:1], close])
 
 
+class Overhead(Arm):
+    """An arm whose camera looks straight down from 1 m above the world origin (90 degrees of
+    field of view), at a floor its depth image puts 1 m away: pixel (u, v) of the 8 px frame
+    sees the floor point ``((u - 3.5) / 4, (3.5 - v) / 4, 0)``."""
+
+    def __init__(self, contract: dict[str, Any]) -> None:
+        features = dict(contract["features"])
+        features["observation/image"] = {
+            **features["observation/image"],
+            "shape": [8, 8, 3],
+            "intrinsics": {"fovy": 90.0},
+            "transform": {"parent": "world", "translation": [0, 0, 1], "rotation": [1, 0, 0, 0]},
+            "depth": "observation/depth",
+        }
+        features["observation/depth"] = {"role": "observation", "type": "depth", "shape": [8, 8]}
+        super().__init__({**contract, "features": features})
+
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
+        data, done = super().get_observation()
+        return {**data, "observation/depth": np.ones((1, 8, 8), dtype=np.float32)}, done
+
+
 def reached(state: NDArray[np.float64]) -> bool:
     """The default task: hold ``x >= 0.5`` with the gripper closed."""
     return bool(state[0] >= 0.5 and state[1] >= 0.9)
@@ -246,6 +269,21 @@ def move(tool: str, **values: float) -> tuple[str, dict[str, Any]]:
 
 def look(duration: float | None = None) -> tuple[str, dict[str, Any]]:
     return "wait", {"duration": duration, "note": "look"}
+
+
+class Constant(Model):
+    """A policy that always proposes the same chunk of ``[x, grip]`` actions."""
+
+    def __init__(self, chunk: list[list[float]]) -> None:
+        self.chunk = np.asarray(chunk, dtype=np.float64).reshape(-1, 2)
+
+    def infer(self, batch: Any) -> NDArray[np.float64]:
+        return self.chunk[None]  # [N, T, A]
+
+
+class PassThrough(Adapter):
+    def adapt_observation(self, obs: dict[str, Any], prompt: str) -> Any:
+        return obs
 
 
 @asynccontextmanager

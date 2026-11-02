@@ -334,20 +334,20 @@ async def test_reported_angles_wrap_into_pi_and_a_command_past_pi_is_accepted() 
             10.0,
             [move("move_to", x=0.2), look(1.0)],
             [
-                "Played 26 steps (2.6 s). Time remaining: 7.4 s.",
-                "Played 10 steps (1.0 s). Time remaining: 6.4 s.",
+                "Played 26 steps (2.6 s).",
+                "Played 10 steps (1.0 s).",
             ],
             (),
             36,
             0.2,
-            id="every-reply-reports-the-time-left",
+            id="within-the-limit-the-episode-goes-on",
         ),
         pytest.param(
             2.0,
             [move("move_to", x=0.5), move("move_to", x=0.1)],
             [
-                "Played 20 steps (2.0 s). Time remaining: 0.0 s.",
-                "Played 0 steps (0.0 s). Time remaining: 0.0 s.",
+                "Played 20 steps (2.0 s).",
+                "Played 0 steps (0.0 s).",
             ],
             (
                 "The time limit is reached.",
@@ -372,8 +372,6 @@ async def test_the_time_limit_is_spent_by_played_ticks_and_ends_the_episode(
 
     agent, _ = await drive(sim, DirectControl(time_limit=limit), *calls)
 
-    for description in agent.descriptions.values():
-        assert f"You have {limit:g} seconds of simulated time." in description
     replies = agent.replies()
     assert [reply[: len(opening)] for reply, opening in zip(replies, openings, strict=True)] == (
         openings
