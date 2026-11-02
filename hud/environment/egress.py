@@ -122,9 +122,9 @@ BRIDGE_PORT = 3128
 VISITOR_PORT = 3129
 
 #: Run inside the workspace's network namespace, one listener per route out.
-#: Its stdin is ``[[host, port, socket], ...]``; every listener is bound
-#: before it says it is ready, since a session that starts in between finds
-#: the port refused.
+#: Each line of its stdin is ``[[host, port, socket], ...]``; it answers a line
+#: with ``ready`` once every listener in it is bound, since a session that
+#: starts in between finds the port refused, or with ``error`` and the cause.
 _BRIDGE = """
 import asyncio, json, sys
 
@@ -158,12 +158,15 @@ def bridged(path):
     return handle
 
 async def main():
-    servers = [
-        await asyncio.start_server(bridged(path), host, port)
-        for host, port, path in json.loads(sys.stdin.readline())
-    ]
-    print("ready", flush=True)
-    await asyncio.gather(*(server.serve_forever() for server in servers))
+    servers = []
+    while line := await asyncio.to_thread(sys.stdin.readline):
+        try:
+            for host, port, path in json.loads(line):
+                servers.append(await asyncio.start_server(bridged(path), host, port))
+        except OSError as exc:
+            print("error", exc, flush=True)
+        else:
+            print("ready", flush=True)
 
 asyncio.run(main())
 """
@@ -249,13 +252,15 @@ def bind_addresses(
     peers: Sequence[Peer],
     *,
     reserved_ports: Collection[int] = (),
+    placed: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Which loopback address each peer answers on inside the workspace.
 
     ``127.0.0.1`` wherever the port is free, because a task that says
     ``localhost:6379`` means that one. Two peers cannot both hold a port
     there, so the second moves down 127.0.0.0/8 and is reached by its name —
-    which is how a task naming several services addresses them anyway.
+    which is how a task naming several services addresses them anyway. A name
+    in ``placed`` keeps the address it already answers on.
     """
     taken = {
         ("127.0.0.1", BRIDGE_PORT),
@@ -270,7 +275,15 @@ def bind_addresses(
         ports.append(peer.port)
 
     addresses: dict[str, str] = {}
+    for name, host in (placed or {}).items():
+        ports = ports_by_name.get(name, [])
+        if any((host, port) in taken for port in ports):
+            raise ValueError(f"no loopback address can route peer {name!r}")
+        taken.update((host, port) for port in ports)
+        addresses[name] = host
     for name, ports in ports_by_name.items():
+        if name in addresses:
+            continue
         for index in range(1, 256):
             host = f"127.0.0.{index}"
             if all((host, port) not in taken for port in ports):
@@ -834,9 +847,10 @@ class Egress:
         self.socket_dir = Path(socket_dir)
         self.allowed = frozenset(allowed)
         self.peers = tuple(peers)
-        # Fixed for the bridge's life, since it binds them once: removing a peer
+        self._reserved_ports = tuple(reserved_ports)
+        # A peer keeps its address for the bridge's life: adding or removing one
         # moves no other.
-        self._addresses = bind_addresses(self.peers, reserved_ports=reserved_ports)
+        self._addresses = bind_addresses(self.peers, reserved_ports=self._reserved_ports)
         self.local_aliases = tuple(local_aliases)
         self.token = token
         self._servers: list[tuple[_UnixServer, Path]] = []
@@ -852,10 +866,11 @@ class Egress:
         """The proxy's socket — the way out to the hosts policy allows."""
         return self.socket_dir / "egress.sock"
 
-    def _peer_socket(self, index: int) -> Path:
-        # By position rather than by name: a peer's name comes from the task,
-        # and a task does not get to choose paths in here.
-        return self.socket_dir / f"peer-{index}.sock"
+    def _peer_socket(self, peer: Peer) -> Path:
+        # Named for the address the bridge offers it on rather than for the peer: a
+        # peer's name comes from the task, and a task does not get to choose paths
+        # in here. A later peer given the same address answers on the same listener.
+        return self.socket_dir / f"peer-{self._addresses[peer.name]}-{peer.port}.sock"
 
     def start(self) -> None:
         """Serve the policy, and each declared peer, on a socket. Idempotent."""
@@ -871,16 +886,29 @@ class Egress:
                     {"allowed": self.allowed, "token": self.token},
                 ),
             )
-        for index, peer in enumerate(self.peers):
-            self._peer_servers[peer] = self._serve(
-                self._peer_socket(index),
-                type("_PeerForward", (_Forward,), {"target": peer.address}),
-            )
+        for peer in self.peers:
+            self._serve_peer(peer)
+
+    def add_peer(self, peer: Peer) -> tuple[str, int, str]:
+        """Serve *peer* too, at an address no other peer holds; returns the route the
+        bridge offers it on."""
+        self._addresses = bind_addresses(
+            [*self.peers, peer], reserved_ports=self._reserved_ports, placed=self._addresses
+        )
+        self.peers = (*self.peers, peer)
+        return self._addresses[peer.name], peer.port, str(self._serve_peer(peer))
+
+    def _serve_peer(self, peer: Peer) -> Path:
+        server, path = self._serve(
+            self._peer_socket(peer), type("_PeerForward", (_Forward,), {"target": peer.address})
+        )
+        self._peer_servers[peer] = server, path
+        return path
 
     def remove_peer(self, peer: Peer) -> None:
         """Stop serving *peer*, and end the connections open to it: its bridge
-        listener stays bound, and closes whatever connects to it, since there is no
-        longer anything behind it."""
+        listener stays bound, and closes whatever connects to it until another peer
+        is given its address."""
         server, path = self._peer_servers.pop(peer)
         self._servers.remove((server, path))
         _close(server, path)
@@ -905,8 +933,8 @@ class Egress:
         return [
             *([("127.0.0.1", port, str(self.socket_path))] if self.allowed else []),
             *(
-                (addresses[peer.name], peer.port, str(self._peer_socket(index)))
-                for index, peer in enumerate(self.peers)
+                (addresses[peer.name], peer.port, str(path))
+                for peer, (_server, path) in self._peer_servers.items()
             ),
         ]
 

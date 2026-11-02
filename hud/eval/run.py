@@ -29,12 +29,16 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
+from hud.agents.cli import CLIAgent
+from hud.capabilities import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients import HudProtocolError, connect
 from hud.graders.results import SubScore
-from hud.telemetry.context import get_current_trace_id, set_trace_context
+from hud.settings import settings
+from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
 from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
 from .file_tracking import file_tracking_observer
@@ -45,7 +49,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.agents.base import Agent
-    from hud.capabilities import Connection
     from hud.clients.client import HudClient
     from hud.environment import WorkspaceRoute
 
@@ -431,6 +434,38 @@ class Run:
         return run
 
 
+def _gateway_relay(
+    agent: Agent, client: HudClient, connections: Sequence[Connection]
+) -> list[Connection]:
+    """The ``inference`` connection a CLI agent in a sandboxed workspace reaches the HUD
+    gateway through, holding ``HUD_API_KEY`` outside the sandbox.
+
+    Bound for a :class:`~hud.agents.cli.CLIAgent` that routes to the gateway, when the
+    session has one workspace that can bind it and the caller brought no ``inference``
+    connection of its own.
+    """
+    if not isinstance(agent, CLIAgent) or not routes_to_gateway(
+        agent.provider, gateway=agent.config.gateway
+    ):
+        return []
+    assert client.manifest is not None
+    shells = [
+        binding
+        for binding in client.manifest.bindings
+        if binding.protocol.partition("/")[0] == "ssh" and binding.params.get("process_connections")
+    ]
+    if not settings.api_key or len(shells) != 1 or any(c.name == "inference" for c in connections):
+        return []
+    return [
+        Connection(
+            name="inference",
+            capability=shells[0].name,
+            url=settings.hud_gateway_url,
+            headers={"Authorization": f"Bearer {settings.api_key}", **get_trace_headers()},
+        )
+    ]
+
+
 async def _verify(
     run: Run,
     client: HudClient,
@@ -586,19 +621,18 @@ async def rollout(
                     )
                     shared_verifier = True
                 _phase = "starting task"
-                async with connect(
-                    addr,
-                    workspace_routes=workspace_routes,
-                    connections=connections,
-                ) as actor_client:
+                async with connect(addr, workspace_routes=workspace_routes) as actor_client:
                     client = actor_client
+                    bound = [*connections, *_gateway_relay(agent, actor_client, connections)]
+                    if bound:
+                        await actor_client.bind(bound)
                     live = Run(
                         actor_client,
                         task.id,
                         task.args,
                         best_effort_grade=task.verifier is not None,
                         runtime_config=addr.config or actor_runtime_config,
-                        connections=connections,
+                        connections=bound,
                     )
                     live._runtime = addr.url  # the placement record for the receipt
                     async with live:  # start on enter; complete on exit

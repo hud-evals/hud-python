@@ -304,7 +304,8 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 |-----------|------|-------------|
 | `root` | `Path \| str` | Directory served (created at start). |
 | `mounts` | `Sequence[Mount]` | Extra bwrap mounts. Default `()`. |
-| `network` | `bool` | Allow network inside the sandbox. Default `False`. |
+| `network` | `bool` | Allow network inside the sandbox. Default `False`. CLI agents reach their model without it. |
+| `allowed_hosts` | `Collection[str] \| None` | Hosts sessions may reach, through a network of the workspace's own; `{ANY_HOST}` (`hud.environment.egress`) allows any. Unset with `network=True`, sessions share the host's network, and CLI agents in a sandboxed workspace get no model key. Default `None`. |
 | `env` | `Mapping[str, str] \| None` | Environment variables for the sandbox. |
 | `system_mounts` | `Sequence[Mount] \| None` | Override the default system mounts. |
 | `guest_path` | `str` | Path the root mounts at inside the sandbox. Default `"/workspace"`. |
@@ -325,7 +326,6 @@ For a complete repository workspace with hidden-test grading, run `hud init my-c
 | `ws.tracks_files` | Whether this workspace serves a `filetracking/1` capability. |
 | `ws.ssh_url` / `ws.ssh_host_pubkey` / `ws.ssh_client_key_path` / `ws.ssh_user` | Connection address, host key, client key path, and username. |
 | `ws.bwrap_available` | Whether `bwrap` isolation is active. |
-| `ws.bwrap_argv(...)` / `ws.shell_argv(...)` | Build argv for your own subprocess (bwrap'd / per-session shell). |
 
 A `Mount` (`hud.environment`) configures a single bwrap mount, `Mount(kind, src, dst, optional)`, where `kind` is one of `ro`, `rw`, `tmpfs`, `symlink`, `proc`, `dev`.
 

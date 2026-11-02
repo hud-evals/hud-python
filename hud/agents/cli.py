@@ -5,23 +5,78 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import os
 import shlex
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 import asyncssh
+
+from hud.agents.base import Agent, ConfigT_co
+from hud.settings import settings
+from hud.telemetry.context import get_trace_headers
+from hud.utils.gateway import provider_api_key, routes_to_gateway
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from hud.capabilities import Connection, SSHClient
+    from hud.eval.run import Run
     from hud.eval.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
-#: What a CLI is given as its credential on a process-bound connection; the relay
-#: replaces it with the scoped credential, so it never needs to be secret.
-PROCESS_BOUND_CREDENTIAL = "hud-process-bound"
 PROCESS_CLOSE_TIMEOUT_S = 5.0
 _DECLARED_OS = {"darwin": "darwin", "linux": "linux", "macos": "darwin", "windows": "windows"}
+_PROVIDER_URLS = {
+    "anthropic": ("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+    "openai": ("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+}
+
+
+class CLIAgent(Agent[ConfigT_co]):
+    """An agent that runs a coding CLI in the environment's workspace, where the CLI
+    calls its model itself; ``rollout`` relays those calls for it in a sandbox."""
+
+    #: The provider whose API the CLI speaks.
+    provider: ClassVar[str]
+
+
+class ModelEndpoint(NamedTuple):
+    url: str
+    key: str
+    headers: dict[str, str]
+    gateway: bool
+    connection: Connection | None
+
+
+def model_endpoint(run: Run, provider: str, *, gateway: bool) -> ModelEndpoint | None:
+    """Where the CLI in *run* calls its model.
+
+    Through the run's ``inference`` connection when it has one. Otherwise the CLI
+    holds a key, which only a workspace declared unsandboxed (isolation ``none``)
+    is given.
+    """
+    if (connection := run.connections.get("inference")) is not None:
+        return ModelEndpoint(connection.client_url, "hud-process-bound", {}, True, connection)
+    if routes_to_gateway(provider, gateway=gateway):
+        if not settings.api_key:
+            raise ValueError("HUD_API_KEY is required for HUD gateway routing")
+        endpoint = ModelEndpoint(
+            settings.hud_gateway_url, settings.api_key, get_trace_headers(), True, None
+        )
+    elif key := provider_api_key(provider):
+        variable, default = _PROVIDER_URLS[provider]
+        endpoint = ModelEndpoint(os.environ.get(variable) or default, key, {}, False, None)
+    else:
+        return None
+    shell = run.client.binding("ssh")
+    if shell.params.get("isolation") != "none":
+        raise RuntimeError(
+            f"the {shell.name!r} workspace is sandboxed, so it isn't given the agent's model "
+            "key: pass the rollout an 'inference' connection, or give the workspace its own "
+            "network (network=False or allowed_hosts) on a host with a process guard so the "
+            "rollout relays HUD_API_KEY"
+        )
+    return endpoint
 
 
 async def resolve_executable(

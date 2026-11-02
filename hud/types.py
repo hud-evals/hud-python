@@ -58,7 +58,9 @@ class AgentType(StrEnum):
 
     @property
     def is_cli(self) -> bool:
-        return self in (AgentType.CLAUDE_CLI, AgentType.CODEX_CLI)
+        from hud.agents.cli import CLIAgent
+
+        return issubclass(self.cls, CLIAgent)
 
     @property
     def cls(self) -> type[Agent]:

@@ -131,6 +131,8 @@ class HudClient:
         self._call_lock = asyncio.Lock()
         self._closed = False
         self.manifest: Manifest | None = None
+        self.workspace_routes: tuple[WorkspaceRoute, ...] = ()
+        self.connections: tuple[Connection, ...] = ()
         self._routes: dict[str, str] = {}
         self._opened: dict[str, CapabilityClient] = {}
         self._forwarders: list[asyncio.Server] = []
@@ -171,7 +173,6 @@ class HudClient:
         session_id: str | None = None,
         *,
         workspace_routes: Sequence[WorkspaceRoute] = (),
-        connections: Sequence[Connection] = (),
     ) -> Manifest:
         """Send ``hello``; cache and return the parsed ``Manifest``.
 
@@ -182,11 +183,11 @@ class HudClient:
         params: dict[str, Any] = {}
         if workspace_routes:
             params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
-        if connections:
-            params["connections"] = [connection.to_wire() for connection in connections]
         if session_id is not None:
             params["session_id"] = session_id
         result = await self._call("hello", params)
+        self.workspace_routes = tuple(workspace_routes)
+        self.connections = ()
         env = result["env"]
         bindings = [Capability.from_manifest(binding) for binding in result["bindings"]]
         self.manifest = Manifest(
@@ -258,6 +259,19 @@ class HudClient:
                     )
                 )
         return self.manifest
+
+    async def bind(
+        self, connections: Sequence[Connection], *, reply_timeout: float | None = None
+    ) -> None:
+        """Bind *connections* to this session in place of the ones it holds."""
+        assert self.manifest is not None
+        params: dict[str, Any] = {"session_id": self.manifest.session_id}
+        if self.workspace_routes:
+            params["workspace_routes"] = [route.to_wire() for route in self.workspace_routes]
+        if connections:
+            params["connections"] = [connection.to_wire() for connection in connections]
+        await self._call("hello", params, reply_timeout=reply_timeout)
+        self.connections = tuple(connections)
 
     # ─── capability access ────────────────────────────────────────────
     #
@@ -417,7 +431,6 @@ async def _connect_ready(
     *,
     ready_timeout: float,
     workspace_routes: Sequence[WorkspaceRoute],
-    connections: Sequence[Connection],
     interval: float = 0.5,
 ) -> HudClient:
     """Connect and complete ``hello``, retrying until the env is ready.
@@ -441,7 +454,7 @@ async def _connect_ready(
 
         client = HudClient(reader, writer, endpoint=(host, port))
         try:
-            await client.hello(workspace_routes=workspace_routes, connections=connections)
+            await client.hello(workspace_routes=workspace_routes)
         except asyncio.CancelledError:
             client.abort()
             raise
@@ -479,7 +492,6 @@ async def connect(
     *,
     ready_timeout: float = DEFAULT_READY_TIMEOUT,
     workspace_routes: Sequence[WorkspaceRoute] = (),
-    connections: Sequence[Connection] = (),
 ) -> AsyncIterator[HudClient]:
     """Connect a :class:`HudClient` to a provisioned substrate's control channel.
 
@@ -498,7 +510,6 @@ async def connect(
         parts.port or 0,
         ready_timeout=_runtime_ready_timeout(runtime, ready_timeout),
         workspace_routes=workspace_routes,
-        connections=connections,
     )
     owner = asyncio.current_task()
     assert owner is not None
@@ -508,17 +519,9 @@ async def connect(
         nonlocal heartbeat_error
         while True:
             await asyncio.sleep(_CONTROL_HEARTBEAT_INTERVAL_SECONDS)
-            assert client.manifest is not None
             try:
-                params: dict[str, Any] = {"session_id": client.manifest.session_id}
-                if workspace_routes:
-                    params["workspace_routes"] = [route.to_wire() for route in workspace_routes]
-                if connections:
-                    params["connections"] = [connection.to_wire() for connection in connections]
-                await client._call(
-                    "hello",
-                    params,
-                    reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS,
+                await client.bind(
+                    client.connections, reply_timeout=_CONTROL_HEARTBEAT_TIMEOUT_SECONDS
                 )
             except HudProtocolError as exc:
                 LOGGER.warning("control heartbeat failed: %s", exc)

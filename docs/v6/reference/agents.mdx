@@ -66,7 +66,13 @@ Each config lives in `hud.agents.types`. `OpenAIChatAgent` speaks the OpenAI Cha
 points at any compatible server (vLLM, a local model) via `base_url`. `ClaudeCLIAgent` and
 `CodexCLIAgent` run the `claude` and `codex exec` CLIs over an `ssh` capability, against the env's
 filesystem. SSH-only runs support POSIX and Windows workspaces; `ClaudeCLIAgent` computer use over an
-`rfb` capability currently requires a POSIX workspace. Every knob
+`rfb` capability currently requires a POSIX workspace. The CLIs never hold a model key inside a
+sandboxed workspace: they reach their model through the rollout's `inference` connection, which a
+caller can pass in `rollout(connections=...)` and which `rollout` otherwise binds to the gateway with
+`HUD_API_KEY` when the agent routes to the gateway and the workspace has a network of its own;
+an agent on its provider key is refused there rather than rerouted. Only an unsandboxed workspace, whose
+`ssh` capability declares `isolation="none"` as one without `bwrap` does, gives the CLI its key
+directly. Every knob
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 

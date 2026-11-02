@@ -24,6 +24,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StringConstraints,
     field_serializer,
     model_validator,
     with_config,
@@ -56,6 +57,8 @@ _model_alias = AliasChoices("model", "checkpoint_name")
 
 ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+#: A name a shell assignment accepts.
+EnvironmentName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 
 class AgentConfig(BaseModel):
@@ -218,6 +221,10 @@ class ClaudeCLIConfig(AgentConfig):
     max_steps: int = -1
     #: Maps to the CLI's ``--effort``; unset leaves the CLI's own default.
     reasoning_effort: ClaudeEffort | None = None
+    #: Extra variables for the CLI's environment, such as its model tiers. They reach
+    #: the CLI as given, inside the workspace, and travel with the serialized config.
+    #: None may name a variable the agent sets, compared without case.
+    env: dict[EnvironmentName, str] = Field(default_factory=dict)
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     allowed_tools: list[str] = Field(
         default_factory=lambda: [
