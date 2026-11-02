@@ -9,6 +9,10 @@ A variant is a deterministic subset of BUGS of size k, k cycling 2/3/4.
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import json
+import sys
 from typing import Any
 
 HEADER = '"""A tiny stats helper."""\n\nfrom collections import Counter\n'
@@ -177,3 +181,14 @@ def cases() -> list[tuple[str, tuple[Any, ...], float]]:
 
 def test_count() -> int:
     return sum(len(TESTS[name]) for name in NAMES)
+
+
+if __name__ == "__main__":
+    # `python bugs.py calc.py` prints what calc.py returns for every case, as JSON. Anything
+    # calc.py prints goes to stderr, so stdout carries only the results.
+    spec = importlib.util.spec_from_file_location("calc", sys.argv[1])
+    calc = importlib.util.module_from_spec(spec)
+    with contextlib.redirect_stdout(sys.stderr):
+        spec.loader.exec_module(calc)
+        returned = [getattr(calc, name)(*args) for name, args, _ in cases()]
+    print(json.dumps(returned))

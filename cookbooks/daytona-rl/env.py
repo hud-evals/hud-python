@@ -24,21 +24,6 @@ env = Environment(name="smoke")
 WORKSPACE = Path(tempfile.mkdtemp(prefix="calc-", dir="/tmp"))
 ws = env.workspace(WORKSPACE, network=True)
 
-CASES = bugs.cases()
-
-# Imports calc.py and prints what each case's call returns. Anything calc.py prints goes to
-# stderr, so stdout carries only the results.
-CALL_CASES = """
-import contextlib, importlib.util, json, sys
-
-with contextlib.redirect_stdout(sys.stderr):
-    spec = importlib.util.spec_from_file_location("calc", sys.argv[1])
-    calc = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(calc)
-    returned = [getattr(calc, name)(*args) for name, args in json.loads(sys.argv[2])]
-print(json.dumps(returned))
-"""
-
 
 def seed_bug(variant: int) -> list[str]:
     calc, tests, broken = bugs.build(variant)
@@ -50,17 +35,14 @@ def seed_bug(variant: int) -> list[str]:
 async def calc_passes() -> bool:
     """Whether the agent's calc.py returns the expected value for every test case.
 
-    A separate process imports calc.py alone and reports what it returned; the comparison
-    runs here.
+    `bugs.py` imports calc.py in a separate process and prints what it returned; the
+    comparison runs here.
     """
-    calls = json.dumps([[name, args] for name, args, _ in CASES])
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-I",
-        "-c",
-        CALL_CASES,
+        bugs.__file__,
         str(WORKSPACE / "calc.py"),
-        calls,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -71,13 +53,14 @@ async def calc_passes() -> bool:
         returned = json.loads(out)
     except json.JSONDecodeError:
         return False
+    expected = [value for _, _, value in bugs.cases()]
     return (
         isinstance(returned, list)
-        and len(returned) == len(CASES)
+        and len(returned) == len(expected)
         and all(
             isinstance(value, int | float)
-            and math.isclose(value, expected, rel_tol=1e-6, abs_tol=1e-12)
-            for value, (_, _, expected) in zip(returned, CASES, strict=True)
+            and math.isclose(value, want, rel_tol=1e-6, abs_tol=1e-12)
+            for value, want in zip(returned, expected, strict=True)
         )
     )
 
