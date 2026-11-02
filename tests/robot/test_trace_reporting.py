@@ -174,6 +174,17 @@ class AbandonsMidMove(Agent):
         raise RuntimeError("the agent gave up")
 
 
+class StallsAfterThreeTicks(Arm):
+    """An arm that stops reporting observations after its third tick, so a move stalls there.
+
+    The sim plays a whole move in well under a second, so without the stall a move can finish
+    before grading ends the episode.
+    """
+
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]] | None:
+        return None if len(self.actions) >= 3 else super().get_observation()
+
+
 async def test_ending_the_episode_mid_move_ends_the_recording_with_the_ticks_played() -> None:
     moving = threading.Event()
 
@@ -182,7 +193,7 @@ async def test_ending_the_episode_mid_move_ends_the_recording_with_the_ticks_pla
             moving.set()
         return target
 
-    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), follow=announcing)
+    sim = StallsAfterThreeTicks(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), follow=announcing)
     agent = AbandonsMidMove(moving)
 
     async with arm_env(sim, DirectControl(speed=0.001)) as env:

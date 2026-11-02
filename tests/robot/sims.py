@@ -138,7 +138,7 @@ class Arm(RobotBridge):
         self.state = self.follow(self, target)
         self.success = self.done is not None and self.done(self.state)
 
-    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
+    def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]] | None:
         state = self.state if self.reads is None else self.reads(self.state)
         data = {
             "observation/image": np.zeros((1, self.side, self.side, 3), dtype=np.uint8),
