@@ -102,7 +102,7 @@ async def combine(*items: SubScore | Awaitable[SubScore]) -> EvaluationResult:
         yield await combine(
             BashGrader.grade(weight=0.3, command="pytest -q"),
             LLMJudgeGrader.grade(weight=0.4, answer=answer, criteria=[...]),
-            SubScore(name="answer", value=exact_match(answer, "42"), weight=0.3),
+            SubScore(name="answer", value=1.0 if answer.strip() == "42" else 0.0, weight=0.3),
         )
     """
     from collections.abc import Awaitable as _Awaitable

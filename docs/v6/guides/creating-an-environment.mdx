@@ -222,7 +222,7 @@ agent's answer to the count Python computes. You have three options as tasks gro
 
 | Approach | What it does |
 | --- | --- |
-| Plain Python | Compute the answer inline, like above. Comparison helpers (`exact_match`, `numeric_match`, ...) live in `hud.graders`. |
+| Plain Python | Compute the answer inline, like above. |
 | Async graders | `BashGrader` scores a shell command by exit code; `LLMJudgeGrader` scores against rubric criteria. This is how you grade the state the agent left behind - a test passing, a file written. |
 | Composed graders | `combine` runs several at once and weights them into one reward, each subscore visible in the trace. |
 
