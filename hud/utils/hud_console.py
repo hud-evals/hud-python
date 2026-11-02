@@ -377,7 +377,7 @@ class HUDConsole:
         def _cancel(event: Any) -> None:
             event.app.exit(result=None)
 
-        result = question.ask()
+        result = _ask(question)
 
         # No selection (Ctrl+C or Esc) → cancel the command.
         if result is None:
@@ -441,7 +441,15 @@ class HUDConsole:
         """Prompt for a yes/no confirmation; Ctrl+C / EOF answers no."""
         import questionary
 
-        return bool(questionary.confirm(message, default=default, qmark="").ask())
+        return bool(_ask(questionary.confirm(message, default=default, qmark="")))
+
+
+def _ask(question: Any) -> Any:
+    """Run a prompt on its own thread and loop, so async commands can prompt; Ctrl+C is None."""
+    try:
+        return question.application.run(in_thread=True)
+    except KeyboardInterrupt:
+        return None
 
 
 # Global design instance for convenience
