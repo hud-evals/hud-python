@@ -1,7 +1,7 @@
-"""smoke - HUD environment with a real coding task graded by pytest.
+"""smoke - HUD environment with a real coding task graded by its tests' expected values.
 
 Spine of the HUD x Daytona guide: one shell capability, one buggy repo, one
-pytest grader. Runs identically under LocalRuntime and DaytonaRuntime.
+grader. Runs identically under LocalRuntime and DaytonaRuntime.
 
 Reward is binary — every test passes or the rollout scores zero.
 """
@@ -9,7 +9,8 @@ Reward is binary — every test passes or the rollout scores zero.
 from __future__ import annotations
 
 import asyncio
-import re
+import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -23,7 +24,20 @@ env = Environment(name="smoke")
 WORKSPACE = Path(tempfile.mkdtemp(prefix="calc-", dir="/tmp"))
 ws = env.workspace(WORKSPACE, network=True)
 
-TOTAL_TESTS = bugs.test_count()
+CASES = bugs.cases()
+
+# Imports calc.py and prints what each case's call returns. Anything calc.py prints goes to
+# stderr, so stdout carries only the results.
+CALL_CASES = """
+import contextlib, importlib.util, json, sys
+
+with contextlib.redirect_stdout(sys.stderr):
+    spec = importlib.util.spec_from_file_location("calc", sys.argv[1])
+    calc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(calc)
+    returned = [getattr(calc, name)(*args) for name, args in json.loads(sys.argv[2])]
+print(json.dumps(returned))
+"""
 
 
 def seed_bug(variant: int) -> list[str]:
@@ -33,22 +47,40 @@ def seed_bug(variant: int) -> list[str]:
     return broken
 
 
-async def run_pytest() -> tuple[int, int]:
+async def calc_passes() -> bool:
+    """Whether the agent's calc.py returns the expected value for every test case.
+
+    A separate process imports calc.py alone and reports what it returned; the comparison
+    runs here. Edited tests, pytest config and anything calc.py prints can't change the
+    grade, and printing results is no easier than returning them.
+    """
+    calls = json.dumps([[name, args] for name, args, _ in CASES])
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
-        "-m",
-        "pytest",
-        "-q",
-        "--no-header",
-        "-p",
-        "no:cacheprovider",
-        cwd=str(WORKSPACE),
+        "-I",
+        "-c",
+        CALL_CASES,
+        str(WORKSPACE / "calc.py"),
+        calls,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     out, _ = await proc.communicate()
-    match = re.search(r"(\d+) passed", out.decode("utf-8", "replace"))
-    return (int(match.group(1)) if match else 0), TOTAL_TESTS
+    if proc.returncode != 0:
+        return False
+    try:
+        returned = json.loads(out)
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(returned, list)
+        and len(returned) == len(CASES)
+        and all(
+            isinstance(value, int | float)
+            and math.isclose(value, expected, rel_tol=1e-6, abs_tol=1e-12)
+            for value, (_, _, expected) in zip(returned, CASES, strict=True)
+        )
+    )
 
 
 @env.template(id="fix_calc")
@@ -57,8 +89,7 @@ async def fix_calc(variant: int = 0):
     yield (
         f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
     )
-    passed, total = await run_pytest()
-    yield 1.0 if passed == total else 0.0
+    yield 1.0 if await calc_passes() else 0.0
 
 
 async def test() -> None:

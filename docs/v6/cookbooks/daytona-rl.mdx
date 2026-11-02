@@ -12,7 +12,7 @@ Define one coding environment, run it 256 wide on Daytona sandboxes, and train a
 
 ## The environment
 
-One file. A workspace with a shell, a seeded bug in `calc.py`, and a pytest grader that pays 1.0 only when every test passes.
+One file. A workspace with a shell, seeded bugs in `calc.py`, and a grader that pays 1.0 only when every test passes. The grader imports `calc.py` in a separate process and checks what it returns against the tests' expected values, so editing the tests or printing a pass count earns nothing.
 
 ```python
 from hud.environment import Environment
@@ -26,8 +26,7 @@ async def fix_calc(variant: int = 0):
     yield (
         f"`pytest` fails in `{WORKSPACE}`. Fix `calc.py` so it passes. Don't edit `test_calc.py`."
     )
-    passed, total = await run_pytest()
-    yield 1.0 if passed == total else 0.0
+    yield 1.0 if await calc_passes() else 0.0
 ```
 
 Run it locally first, no API key needed:

@@ -4,8 +4,8 @@ Run an agent evaluation where every rollout gets its own fresh
 [Daytona](https://daytona.io) sandbox — then train a model on the graded
 rollouts that same evaluation produced. One `env.py`, no second pipeline.
 
-The task: a small Python file with seeded bugs, graded by whether `pytest`
-passes. Ten GRPO steps at 128 parallel rollouts took a Qwen3.5 4B fork from
+The task: a small Python file with seeded bugs, graded by whether it passes
+its tests. Ten GRPO steps at 128 parallel rollouts took a Qwen3.5 4B fork from
 **35.9% to 81.2%** pass rate on held-out bug variants it never trained on.
 
 ![training curve](bench/train_curve.svg)
@@ -17,7 +17,7 @@ condensed HUD-side walkthrough is
 
 | File | Purpose |
 |------|---------|
-| `env.py` | The environment: a workspace, one task, a pytest grader |
+| `env.py` | The environment: a workspace, one task, a grader |
 | `bugs.py` | 24 deterministic bug variants (4/5/6 broken functions) |
 | `tasks.py` | Task list for `hud eval` |
 | `train.py` | The published 10-step GRPO run |
