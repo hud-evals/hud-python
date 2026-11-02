@@ -1,0 +1,33 @@
+name: Bug report
+description: Report something that went wrong while running HUD.
+labels: [bug]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: What were you doing?
+      description: The environment or taskset, agent, and model you ran, and what you were trying to do.
+    validations:
+      required: true
+  - type: input
+    id: trace
+    attributes:
+      label: Public trace
+      description: |
+        Recommended. Run with `HUD_API_KEY` set, open the trace on hud.ai, and make it public with
+        **Share trace**.
+      placeholder: https://hud.ai/shared/trace/...
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: hud version
+      description: Run `hud version`.
+    validations:
+      required: true

@@ -1,11 +1,28 @@
 # Contributing to HUD
 
-We welcome contributions to the HUD SDK! This guide covers how to get started.
+The most useful contributions come from using HUD: you were building an environment, running an
+eval, or training a model, and something got in the way.
 
-## Quick Start
+## Issues
+
+We act on problems that happened to you while using HUD. A problem that could affect users in
+theory is not enough; tell us how it affected you.
+
+Open a **Bug report** when a run went wrong, or a **Gap** when HUD couldn't do what you needed.
+Describe what you were doing and what the problem cost you. If you can, link a public trace of the
+run: it shows us exactly what happened, and reports with one are much more likely to be acted on.
+When we decide to fix an issue, we label it `actionable`.
+
+## Pull requests
+
+Outside pull requests must fix an `actionable` issue, or they are closed automatically. Put
+`Fixes #<issue>` in the description, keep the change to that issue, and add a test that fails
+without the fix when the fix could regress (see [Writing Tests](#writing-tests)).
+
+## Development Setup
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/hud-python` (the repo keeps its historical name; the PyPI package is `hud`)
+2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/hud-python`
 3. Install [uv](https://docs.astral.sh/uv/) and set up dev dependencies:
    ```bash
    cd hud-python
@@ -81,30 +98,9 @@ uv run --extra dev --extra train ty check  # Type checking
 - Line length limit: 100 characters
 - Follow existing patterns in the codebase
 
-## Pull Request Process
-
-Outside pull requests must fix an issue a maintainer has labelled `actionable`, or
-they are closed automatically. Open or find an issue, wait for the label, then put
-`Fixes #<issue>` in your pull request description.
-
-1. **Branch naming**: `feature/description` or `fix/issue-number`
-2. **Commits**: Use clear, descriptive messages
-3. **Checks**: All CI checks must pass (ruff, ty, pytest)
-4. **Review**: Address feedback promptly
-
-## Releases
-
-1. Set the intended package version on `main`, then manually run the **Pre-release** workflow on `main`.
-2. After it succeeds, tag that exact commit and publish the GitHub release.
-
-The Release workflow requires successful pre-release validation of the tagged commit before
-publishing to PyPI or updating docs. Any commit change, including a version bump, requires a new
-validation run. Publishing the GitHub release itself does not bypass this check.
-
 ## Need Help?
 
-- Check existing issues and PRs
-- Look at similar code in the repository
-- Ask questions in your PR
+Questions about using HUD go to [Discord](https://discord.gg/wkjtmHYYjm). The
+[internals docs](https://docs.hud.ai/v6/internals/walkthrough) follow one full run through the code.
 
 > By contributing, you agree that your contributions will be licensed under the MIT License.

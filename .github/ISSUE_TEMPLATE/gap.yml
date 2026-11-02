@@ -1,0 +1,17 @@
+name: Gap
+description: Report a missing feature or a doc that got in your way.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: What were you building?
+    validations:
+      required: true
+  - type: textarea
+    id: blocker
+    attributes:
+      label: What got in the way?
+      description: The code, command, or doc page you were using, and where it fell short.
+    validations:
+      required: true
