@@ -23,8 +23,7 @@ permissions:
 
 jobs:
   test:
-    # Temporary: the unit suite starts workspace sandboxes too; see the Sandbox job.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
@@ -87,9 +86,7 @@ jobs:
 
   sandbox:
     name: Sandbox
-    # Temporary: Ubuntu 26.04 denies capabilities to everything bwrap runs, which
-    # the workspace sandbox needs for its namespace owner.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}

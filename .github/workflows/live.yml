@@ -30,9 +30,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]')
-    # Temporary: Ubuntu 26.04 denies capabilities to everything bwrap runs, which
-    # the workspace sandbox needs for its namespace owner.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
@@ -88,9 +86,7 @@ jobs:
   harbor:
     name: Harbor
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    # Temporary: Ubuntu 26.04 denies capabilities to everything bwrap runs, which
-    # the workspace sandbox needs for its namespace owner.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
