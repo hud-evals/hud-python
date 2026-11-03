@@ -68,8 +68,14 @@ async def install_identity_map(
     *,
     launcher_pid: int | None = None,
     launcher_depth: int = 0,
+    as_root: bool = False,
 ) -> int:
-    """Map every available host identity into a blocked bwrap user namespace."""
+    """Map every available host identity into a blocked bwrap user namespace.
+
+    Where only the caller's own ids can be mapped, *as_root* maps them to 0
+    inside, so a process that joins the namespace keeps its capabilities
+    across exec.
+    """
     pid = await read_bwrap_pid(info_read)
     if launcher_pid is not None:
         pid = launcher_pid
@@ -78,12 +84,97 @@ async def install_identity_map(
             if len(children) != 1:
                 raise RuntimeError(f"sandbox launcher {pid} has {len(children)} children")
             pid = children[0]
-    await asyncio.to_thread(_map_identities, pid)
+    await asyncio.to_thread(_map_identities, pid, as_root)
     await asyncio.to_thread(os.write, block_write, b"\n")
     return pid
 
 
-def _map_identities(pid: int) -> None:
+async def start_holder(
+    argv: list[str],
+    *,
+    bwrap: str,
+    map_identities: bool,
+    launcher_depth: int,
+    as_root: bool = False,
+) -> tuple[ProcessGroup, int]:
+    """Start a bwrap holder whose payload prints ``ready``; the holder and its child's pid.
+
+    *launcher_depth* counts the processes from the one *argv* starts down to
+    bwrap's child, which is what an identity map is written for.
+    """
+    read_fd, write_fd = os.pipe()
+    block_read = block_write = -1
+    holder: ProcessGroup | None = None
+    try:
+        os.set_inheritable(write_fd, True)
+        argv = list(argv)
+        index = argv.index(bwrap) + 1
+        argv[index:index] = ["--info-fd", str(write_fd)]
+        if map_identities:
+            block_read, block_write = os.pipe()
+            os.set_inheritable(block_read, True)
+            user_index = argv.index("--unshare-user-try")
+            argv[user_index] = "--unshare-user"
+            argv[user_index + 1 : user_index + 1] = [
+                "--userns-block-fd",
+                str(block_read),
+            ]
+        holder = await create_process_group_exec(
+            *argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            pass_fds=(write_fd, *((block_read,) if map_identities else ())),
+        )
+        os.close(write_fd)
+        write_fd = -1
+        if map_identities:
+            os.close(block_read)
+            block_read = -1
+            pid = await install_identity_map(
+                read_fd,
+                block_write,
+                launcher_pid=holder.process.pid,
+                launcher_depth=launcher_depth,
+                as_root=as_root,
+            )
+            os.close(block_write)
+            block_write = -1
+        else:
+            pid = await read_bwrap_pid(read_fd)
+        assert holder.stdout is not None
+        if await asyncio.wait_for(holder.stdout.readline(), 30.0) != b"ready\n":
+            raise RuntimeError(await _holder_error(holder))
+        return holder, pid
+    except BaseException as exc:
+        if holder is not None:
+            with contextlib.suppress(Exception):
+                await holder.terminate()
+            if holder.stderr is not None:
+                with contextlib.suppress(Exception):
+                    detail = (
+                        (await asyncio.wait_for(holder.stderr.read(2048), 1.0))
+                        .decode(errors="replace")
+                        .strip()
+                    )
+                    if detail:
+                        exc.add_note(f"sandbox holder stderr: {detail}")
+        raise
+    finally:
+        os.close(read_fd)
+        for descriptor in (write_fd, block_read, block_write):
+            if descriptor != -1:
+                os.close(descriptor)
+
+
+async def _holder_error(holder: ProcessGroup) -> str:
+    if holder.stderr is None:
+        return "sandbox holder did not become ready"
+    detail = await holder.stderr.read(2048)
+    return detail.decode(errors="replace").strip() or "sandbox holder did not become ready"
+
+
+def _map_identities(pid: int, as_root: bool) -> None:
     proc = Path(f"/proc/{pid}")
     with contextlib.suppress(OSError):
         (proc / "setgroups").write_text("allow")
@@ -99,7 +190,7 @@ def _map_identities(pid: int) -> None:
                 with contextlib.suppress(OSError):
                     (proc / "setgroups").write_text("deny")
             try:
-                (proc / name).write_text(f"{own} {own} 1")
+                (proc / name).write_text(f"{0 if as_root else own} {own} 1")
             except OSError:
                 LOGGER.warning("could not map ids into the sandbox (%s)", name)
 
@@ -347,8 +438,13 @@ class _NamespaceHost:
         try:
             if self.setup_loopback:
                 self._enable_loopback()
-            self.holders["session"] = await self._start_holder()
-            self.holders["environment"] = await self._start_holder()
+            for scope in ("session", "environment"):
+                self.holders[scope] = await start_holder(
+                    self.holder_argv,
+                    bwrap=self.bwrap,
+                    map_identities=self.map_identities,
+                    launcher_depth=self.launcher_depth,
+                )
             with contextlib.suppress(FileNotFoundError):
                 self.socket_path.unlink()
             listener = socket.socket(socket.AF_UNIX)
@@ -417,76 +513,6 @@ class _NamespaceHost:
                 process.stderr.write(f"{type(exc).__name__}: {exc}".encode())
                 process.exit(1)
         await process.wait_closed()
-
-    async def _start_holder(self) -> tuple[ProcessGroup, int]:
-        read_fd, write_fd = os.pipe()
-        block_read = block_write = -1
-        holder: ProcessGroup | None = None
-        try:
-            os.set_inheritable(write_fd, True)
-            argv = list(self.holder_argv)
-            index = argv.index(self.bwrap) + 1
-            argv[index:index] = ["--info-fd", str(write_fd)]
-            if self.map_identities:
-                block_read, block_write = os.pipe()
-                os.set_inheritable(block_read, True)
-                user_index = argv.index("--unshare-user-try")
-                argv[user_index] = "--unshare-user"
-                argv[user_index + 1 : user_index + 1] = [
-                    "--userns-block-fd",
-                    str(block_read),
-                ]
-            holder = await create_process_group_exec(
-                *argv,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                pass_fds=(write_fd, *((block_read,) if self.map_identities else ())),
-            )
-            os.close(write_fd)
-            write_fd = -1
-            if self.map_identities:
-                os.close(block_read)
-                block_read = -1
-                pid = await install_identity_map(
-                    read_fd,
-                    block_write,
-                    launcher_pid=holder.process.pid,
-                    launcher_depth=self.launcher_depth,
-                )
-                os.close(block_write)
-                block_write = -1
-            else:
-                pid = await read_bwrap_pid(read_fd)
-            assert holder.stdout is not None
-            if await asyncio.wait_for(holder.stdout.readline(), 30.0) != b"ready\n":
-                raise RuntimeError(await self._holder_error(holder))
-            return holder, pid
-        except BaseException as exc:
-            if holder is not None:
-                with contextlib.suppress(Exception):
-                    await holder.terminate()
-                if holder.stderr is not None:
-                    with contextlib.suppress(Exception):
-                        detail = (
-                            (await asyncio.wait_for(holder.stderr.read(2048), 1.0))
-                            .decode(errors="replace")
-                            .strip()
-                        )
-                        if detail:
-                            exc.add_note(f"sandbox holder stderr: {detail}")
-            raise
-        finally:
-            os.close(read_fd)
-            for descriptor in (write_fd, block_read, block_write):
-                if descriptor != -1:
-                    os.close(descriptor)
-
-    async def _holder_error(self, holder: ProcessGroup) -> str:
-        if holder.stderr is None:
-            return "sandbox holder did not become ready"
-        detail = await holder.stderr.read(2048)
-        return detail.decode(errors="replace").strip() or "sandbox holder did not become ready"
 
     async def _terminate_sessions(self) -> None:
         sessions, self.sessions = self.sessions, []

@@ -30,7 +30,12 @@ from hud.environment.egress import (
     hosts_text,
     proxy_environment,
 )
-from hud.environment.namespace import NamespaceHost, NamespaceProcess, install_identity_map
+from hud.environment.namespace import (
+    NamespaceHost,
+    NamespaceProcess,
+    install_identity_map,
+    start_holder,
+)
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.utils import forward_output
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
@@ -621,6 +626,7 @@ class Workspace:
         # discard_sandbox(). Its namespaces are what makes a process the agent
         # backgrounds outlive the command that started it.
         self._sandbox: asyncio.subprocess.Process | None = None
+        self._sandbox_userns: ProcessGroup | None = None
         self._sandbox_init: int | None = None
         self._namespace: NamespaceHost | None = None
         self._bridge: NamespaceProcess | None = None
@@ -1383,65 +1389,51 @@ class Workspace:
                 *(("--setup-loopback",) if self.owns_netns else ()),
                 *(value for port in sorted(self.ports) for value in ("--port", str(port))),
             ]
-            if staged:
-                argv = [
-                    *((bwrap.pid_unshare, "--net") if self.owns_netns else ()),
-                    *host_argv,
-                ]
-                self._sandbox = await asyncio.create_subprocess_exec(
-                    *argv,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+            launcher: list[str] = []
+            if not staged:
+                # The owner joins a user namespace bwrap holds rather than running
+                # under bwrap: Ubuntu's AppArmor profile for bwrap strips
+                # capabilities from everything bwrap starts. As root inside, the
+                # owner keeps them across exec.
+                self._sandbox_userns, userns_pid = await start_holder(
+                    [
+                        bwrap.path,
+                        "--die-with-parent",
+                        "--unshare-user-try",
+                        "--bind",
+                        "/",
+                        "/",
+                        "--dev-bind",
+                        "/dev",
+                        "/dev",
+                        "--",
+                        *_SANDBOX_HOLDER,
+                    ],
+                    bwrap=bwrap.path,
+                    map_identities=True,
+                    launcher_depth=1,
+                    as_root=True,
                 )
-            else:
-                read_fd, write_fd = os.pipe()
-                block_read, block_write = os.pipe()
-                argv = [
-                    bwrap.path,
-                    "--die-with-parent",
-                    "--unshare-user",
-                    "--cap-add",
-                    "CAP_SYS_ADMIN",
-                    *(("--cap-add", "CAP_NET_ADMIN") if self.owns_netns else ()),
-                    "--info-fd",
-                    str(write_fd),
-                    "--userns-block-fd",
-                    str(block_read),
-                    "--bind",
-                    "/",
-                    "/",
-                    "--dev-bind",
-                    "/dev",
-                    "/dev",
+                launcher = [
+                    shutil.which("nsenter") or "/usr/bin/nsenter",
+                    "--target",
+                    str(userns_pid),
+                    "--user",
+                    "--preserve-credentials",
                     "--",
                 ]
-                if self.owns_netns:
-                    unshare = shutil.which("unshare")
-                    if unshare is None:
-                        raise RuntimeError("workspace network isolation requires unshare")
-                    argv.extend([unshare, "--net"])
-                argv.extend(host_argv)
-                try:
-                    os.set_inheritable(write_fd, True)
-                    os.set_inheritable(block_read, True)
-                    self._sandbox = await asyncio.create_subprocess_exec(
-                        *argv,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        pass_fds=(write_fd, block_read),
-                    )
-                    os.close(write_fd)
-                    os.close(block_read)
-                    write_fd = block_read = -1
-                    await install_identity_map(read_fd, block_write)
-                finally:
-                    os.close(read_fd)
-                    os.close(block_write)
-                    for stray in (write_fd, block_read):
-                        if stray != -1:
-                            os.close(stray)
+            if self.owns_netns:
+                unshare = shutil.which("unshare")
+                if unshare is None:
+                    raise RuntimeError("workspace network isolation requires unshare")
+                launcher.extend([unshare, "--net"])
+            self._sandbox = await asyncio.create_subprocess_exec(
+                *launcher,
+                *host_argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
             assert self._sandbox.stdin is not None and self._sandbox.stdout is not None
             self._sandbox.stdin.write(
                 json.dumps(
@@ -1525,6 +1517,10 @@ class Workspace:
         if self._egress is not None:
             self._egress.stop()
             self._egress = None
+        userns, self._sandbox_userns = self._sandbox_userns, None
+        if userns is not None:
+            with contextlib.suppress(Exception):
+                await userns.terminate()
         sandbox, self._sandbox, self._sandbox_init = self._sandbox, None, None
         if sandbox is None or sandbox.returncode is not None:
             return
