@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shlex
 import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -47,10 +48,11 @@ class TensorlakeRuntime:
 
     Boots a Firecracker sandbox from a registered Tensorlake *sandbox image*
     (the durable handle, built with ``tl sbx image create`` or
-    ``tensorlake.image.Image.build``), starts the env's control channel inside
-    it, then reaches it over the SDK's TCP tunnel: each connection to an
-    ephemeral local port is relayed into the sandbox over a WebSocket, which
-    is what :func:`hud.clients.connect` dials as ``tcp://``. Yields its
+    ``tensorlake.image.Image.build``) with *command* as its entrypoint, which
+    replaces the image's CMD, then reaches the env's control channel over the
+    SDK's TCP tunnel: each connection to an ephemeral local port is relayed
+    into the sandbox over a WebSocket, which is what
+    :func:`hud.clients.connect` dials as ``tcp://``. Yields its
     :class:`Runtime`, terminates the sandbox on exit.
 
     Pass an image name — ``TensorlakeRuntime("hud-libero-env")`` — or set
@@ -101,7 +103,15 @@ class TensorlakeRuntime:
         if image is None:
             raise ValueError("TensorlakeRuntime requires image_name or runtime_config.image")
 
-        create_kwargs: dict[str, Any] = {"image": image}
+        # The entrypoint replaces the image's CMD, so the env server the tunnel
+        # reaches is this command, not a second server racing it for the port.
+        script = (
+            self.command
+            if self.workdir is None
+            else f"cd {shlex.quote(self.workdir)} && {self.command}"
+        )
+        entrypoint = ["sh", "-c", script]
+        create_kwargs: dict[str, Any] = {"image": image, "entrypoint": entrypoint}
         resources = config.resources
         if resources is not None:
             resources._require_support(
@@ -145,15 +155,21 @@ class TensorlakeRuntime:
                         f"Tensorlake sandbox {pending.sandbox_id} was still pending after "
                         f"{exc.timeout}s ({exc.pending_reason or 'no reason given'})"
                     ) from exc
-                # The image's CMD is not the sandbox's main process, so start the
-                # env server explicitly. connect() retries the handshake, so we
-                # don't poll for readiness here.
-                process = await sandbox.start_process(
-                    "sh", ["-c", self.command], working_dir=self.workdir
-                )
+                # connect() retries the handshake, so we don't poll for readiness here.
+                pids = [
+                    process.pid
+                    for process in await sandbox.list_processes()
+                    if [process.command, *process.args] == entrypoint
+                ]
+                if len(pids) != 1:
+                    raise RuntimeError(
+                        f"Tensorlake sandbox {sandbox.sandbox_id} has {len(pids)} entrypoint "
+                        "processes, expected 1"
+                    )
+                pid = pids[0]
                 tunnel = await sandbox.create_tunnel(self.port, local_port=0)
                 stopped = asyncio.Event()
-                output_task = asyncio.create_task(_follow_output(sandbox, process.pid, stopped))
+                output_task = asyncio.create_task(_follow_output(sandbox, pid, stopped))
                 try:
                     yield Runtime(
                         f"tcp://{tunnel.local_host}:{tunnel.local_port}",
@@ -164,7 +180,7 @@ class TensorlakeRuntime:
                     # Why it died only exists inside the sandbox, and the
                     # sandbox may already be gone.
                     try:
-                        output = await sandbox.get_output(process.pid)
+                        output = await sandbox.get_output(pid)
                     except Exception as log_exc:
                         exc.add_note(f"env output unavailable: {log_exc}")
                     else:

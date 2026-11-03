@@ -235,7 +235,7 @@ TensorlakeRuntime(image_name=None, *, command=None, workdir="/app", port=8765, r
 ```
 
 - **`image_name`** - registered Tensorlake sandbox image to boot from (the durable handle). Register one with `tl sbx image create` or `tensorlake.image.Image.build`; Tensorlake does not accept arbitrary registry references. `runtime_config.image` means the same registered name.
-- **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint).
+- **`command`** - override the serving command (defaults to the scaffolded `hud serve` entrypoint). It runs as the sandbox entrypoint and replaces the image's `CMD`, so only one env server runs.
 - **`workdir`** / **`port`** - guest working directory and in-sandbox serving port. A sandbox process starts in `~`, not the image's `WORKDIR`, so `workdir` defaults to `/app` to match `DaytonaRuntime` and the Daytona cookbook image. `hud init` scaffolds use `WORKDIR /hud`, so pass `workdir="/hud"` for those. The port is reached over the SDK's TCP tunnel, which relays a local ephemeral port into the sandbox.
 
 Resources map onto the sandbox at creation time: `cpu` (fractional allowed), `memory_mb`, `storage_mb` as the root disk, and one GPU type with a count. Both `startup_timeout_s` and `run_timeout_s` are honored; `run_timeout_s` becomes the sandbox lifetime. Without `startup_timeout_s`, the wait for a running sandbox is bounded by the SDK client's request timeout of 300 s. A sandbox still queued for capacity when `startup_timeout_s` or the rollout deadline expires is deleted, since Tensorlake bills a sandbox from creation. Compose input is rejected.

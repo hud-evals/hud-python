@@ -51,18 +51,24 @@ class _FakeTensorlakeTunnel:
 
 
 class _FakeTensorlakeSandbox:
-    def __init__(self, calls: dict[str, Any], sandbox_id: str, *, terminate_fails: bool) -> None:
+    def __init__(
+        self,
+        calls: dict[str, Any],
+        sandbox_id: str,
+        entrypoint: list[str],
+        *,
+        terminate_fails: bool,
+    ) -> None:
         self.sandbox_id = sandbox_id
         self._calls = calls
+        self._entrypoint = entrypoint
         self._terminate_fails = terminate_fails
         self.output_lines = ["ImportError: no module named bugs"]
         calls["sandbox"] = self
 
-    async def start_process(
-        self, command: str, args: list[str], *, working_dir: str | None
-    ) -> SimpleNamespace:
-        self._calls["start_process"] = (command, args, working_dir)
-        return SimpleNamespace(pid=7)
+    async def list_processes(self) -> list[SimpleNamespace]:
+        command, *args = self._entrypoint
+        return [SimpleNamespace(pid=7, command=command, args=args)]
 
     async def create_tunnel(self, remote_port: int, *, local_port: int) -> _FakeTensorlakeTunnel:
         self._calls["tunnel"] = (remote_port, local_port)
@@ -101,7 +107,10 @@ class _FakeTensorlakePendingSandbox:
         if self._client.startup == "never":
             await asyncio.Event().wait()
         return _FakeTensorlakeSandbox(
-            self._client.calls, self.sandbox_id, terminate_fails=self._client.terminate_fails
+            self._client.calls,
+            self.sandbox_id,
+            self._client.created[-1]["entrypoint"],
+            terminate_fails=self._client.terminate_fails,
         )
 
 
@@ -179,15 +188,16 @@ async def test_tensorlake_runtime_config_flows_into_tensorlake_sdk(
             "disk_mb": 10240,
             "gpu": _TensorlakeGpuRequest(count=2, model="H100"),
             "timeout_secs": 600,
+            "entrypoint": [
+                "sh",
+                "-c",
+                "cd /app && "
+                'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765',
+            ],
             "wait": False,
         }
     ]
     assert client.calls["ready_timeout"] == 45
-    assert client.calls["start_process"] == (
-        "sh",
-        ["-c", 'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 8765'],
-        "/app",
-    )
     assert client.calls["tunnel"] == (8765, 0)
     assert client.calls["tunnel_closed"] is True
     assert client.calls["terminated"] == "sandbox-1"
@@ -209,7 +219,7 @@ async def test_tensorlake_task_runtime_config_overlays_provider_defaults(
             image="task-image", resources=RuntimeResources(cpu=2)
         )
 
-    assert client.created == [{"image": "task-image", "cpus": 2, "wait": False}]
+    assert [(spec["image"], spec.get("cpus")) for spec in client.created] == [("task-image", 2)]
 
 
 async def test_tensorlake_boots_a_bare_image_name_with_sdk_defaults(
@@ -220,13 +230,18 @@ async def test_tensorlake_boots_a_bare_image_name_with_sdk_defaults(
     async with TensorlakeRuntime("hud-env", workdir=None, port=9000)(_row()) as runtime:
         assert runtime.config is None
 
-    assert client.created == [{"image": "hud-env", "wait": False}]
+    assert client.created == [
+        {
+            "image": "hud-env",
+            "entrypoint": [
+                "sh",
+                "-c",
+                'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 9000',
+            ],
+            "wait": False,
+        }
+    ]
     assert client.calls["ready_timeout"] is None
-    assert client.calls["start_process"] == (
-        "sh",
-        ["-c", 'PATH="$PWD/.venv/bin:$PATH" hud serve env.py --host 0.0.0.0 --port 9000'],
-        None,
-    )
     assert client.calls["tunnel"] == (9000, 0)
 
 
