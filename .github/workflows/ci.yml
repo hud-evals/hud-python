@@ -36,6 +36,11 @@ jobs:
       - name: Install Python
         run: uv python install ${{ matrix.python-version }}
 
+      # The unit suite drives agents against stub CLIs, which only an unsandboxed
+      # workspace can run; the Sandbox and Live lanes cover sandboxed workspaces.
+      - name: Leave workspaces unsandboxed
+        run: sudo apt-get purge -y bubblewrap
+
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --all-extras pytest -n auto
 

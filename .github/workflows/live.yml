@@ -48,6 +48,13 @@ jobs:
       - name: Install the agent CLIs
         run: npm install --global @anthropic-ai/claude-code @openai/codex
 
+      # A sandboxed workspace's model connection reaches only the process it
+      # launches, so Codex has to be its native binary, not npm's Node launcher.
+      - name: Put Codex's native binary on PATH
+        run: >-
+          ln -sf "$(find "$(npm root -g)/@openai/codex" -path '*/vendor/*/bin/codex' -type f)"
+          "$(command -v codex)"
+
       # Ubuntu 24.04 runners block unprivileged user namespaces through AppArmor;
       # Codex's bubblewrap sandbox needs them.
       - name: Allow unprivileged user namespaces
