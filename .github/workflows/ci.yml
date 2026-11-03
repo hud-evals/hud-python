@@ -23,7 +23,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Temporary: the unit suite starts workspace sandboxes too; see the Sandbox job.
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
