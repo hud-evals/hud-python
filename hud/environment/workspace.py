@@ -30,7 +30,7 @@ from hud.environment.egress import (
     hosts_text,
     proxy_environment,
 )
-from hud.environment.namespace import NamespaceHost, NamespaceProcess, hold_view
+from hud.environment.namespace import NamespaceHost, NamespaceProcess, hold_view, sandbox_tool
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.utils import forward_output
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
@@ -1048,13 +1048,13 @@ class Workspace:
             self._view_argv(
                 cwd=cwd, network=False, mount_hosts=False, isolate_processes=False, mounts=mounts
             ),
-            ["user", "mnt", "net"],
+            ["user", "mnt", "net", "cwd"],
             bwrap=bwrap.path,
             map_identities=True,
         )
         try:
             process = await create_process_group_exec(
-                shutil.which("nsenter") or "/usr/bin/nsenter",
+                sandbox_tool("nsenter"),
                 *join,
                 "--preserve-credentials",
                 "--",
@@ -1358,13 +1358,9 @@ class Workspace:
                     bwrap=bwrap.path,
                     map_identities=True,
                 )
-                nsenter = shutil.which("nsenter") or "/usr/bin/nsenter"
-                launcher = [nsenter, *join, "--preserve-credentials", "--"]
+                launcher = [sandbox_tool("nsenter"), *join, "--preserve-credentials", "--"]
             if self.owns_netns:
-                unshare = shutil.which("unshare")
-                if unshare is None:
-                    raise RuntimeError("workspace network isolation requires unshare")
-                launcher.extend([unshare, "--net"])
+                launcher.extend([sandbox_tool("unshare"), "--net"])
             try:
                 self._sandbox = await asyncio.create_subprocess_exec(
                     *launcher,

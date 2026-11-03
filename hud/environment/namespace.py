@@ -65,7 +65,26 @@ def _child_pids(pid: int) -> list[int]:
         return sorted(children)
 
 
-_NSENTER_OPTIONS = {"user": "--user", "mnt": "--mount", "net": "--net"}
+#: What a process can join from a view: the nsenter option, and the view's /proc entry.
+_JOINS = {
+    "user": ("--user", "ns/user"),
+    "mnt": ("--mount", "ns/mnt"),
+    "net": ("--net", "ns/net"),
+    "cwd": ("--wd", "cwd"),
+}
+
+
+def sandbox_tool(name: Literal["nsenter", "unshare"]) -> str:
+    """The path of a util-linux tool the sandbox runs on; there is no sandbox without it."""
+    path = shutil.which(name)
+    if path is None:
+        raise RuntimeError(f"workspace sandboxes require {name}")
+    return path
+
+
+def _scope_proc_argv() -> list[str]:
+    """A private mount namespace whose /proc is the pid namespace it is entered from."""
+    return [sandbox_tool("unshare"), "--mount", "--propagation", "private", "--mount-proc", "--"]
 
 
 async def start_holder(
@@ -157,7 +176,7 @@ async def _holder_error(holder: ProcessGroup) -> str:
 
 async def hold_view(
     argv: list[str],
-    namespaces: Sequence[Literal["user", "mnt", "net"]],
+    joins: Sequence[Literal["user", "mnt", "net", "cwd"]],
     *,
     bwrap: str,
     map_identities: bool = False,
@@ -167,31 +186,27 @@ async def hold_view(
 
     Payloads join a view rather than run under bwrap: Ubuntu's AppArmor
     profile for bwrap strips capabilities from everything bwrap starts.
-    Returns the nsenter options that join the view's *namespaces* and working
-    directory, and the descriptors they name, which hold the view open until
-    the caller passes them to that nsenter and closes them.
+    Returns the nsenter options that make a process join the view's *joins*,
+    and the descriptors they name, which hold the view open until the caller
+    passes them to that nsenter and closes them.
     """
     holder, pid = await start_holder(
         argv, bwrap=bwrap, map_identities=map_identities, launcher_depth=launcher_depth
     )
     descriptors: list[int] = []
     try:
-        descriptors.extend(
-            os.open(f"/proc/{pid}/{path}", os.O_RDONLY)
-            for path in (*(f"ns/{name}" for name in namespaces), "cwd")
-        )
+        descriptors.extend(os.open(f"/proc/{pid}/{_JOINS[join][1]}", os.O_RDONLY) for join in joins)
     except BaseException:
         for descriptor in descriptors:
             os.close(descriptor)
         raise
     finally:
         await holder.terminate()
-    *joined, cwd = descriptors
     options = [
-        f"{_NSENTER_OPTIONS[name]}=/proc/self/fd/{descriptor}"
-        for name, descriptor in zip(namespaces, joined, strict=True)
+        f"{_JOINS[join][0]}=/proc/self/fd/{descriptor}"
+        for join, descriptor in zip(joins, descriptors, strict=True)
     ]
-    return [*options, f"--wd=/proc/self/fd/{cwd}"], descriptors
+    return options, descriptors
 
 
 def _map_identities(pid: int) -> None:
@@ -561,7 +576,7 @@ class _NamespaceHost:
             raise RuntimeError(f"workspace {scope} holder is not running")
         _, holder_pid = held
         in_scope = [
-            shutil.which("nsenter") or "/usr/bin/nsenter",
+            sandbox_tool("nsenter"),
             "--target",
             str(holder_pid),
             "--pid",
@@ -569,11 +584,6 @@ class _NamespaceHost:
             "--ipc",
             "--preserve-credentials",
         ]
-        unshare = shutil.which("unshare")
-        if unshare is None:
-            raise RuntimeError("trusted workspace commands require unshare")
-        # A private mount namespace whose /proc is the scope's pid namespace.
-        scope_proc = [unshare, "--mount", "--propagation", "private", "--mount-proc", "--"]
         command_prefix: list[str] = []
         view_fds: list[int] = []
         match mount_view:
@@ -581,11 +591,11 @@ class _NamespaceHost:
                 mount = ["--mount", "--wd"]
             case "host":
                 mount = []
-                command_prefix = scope_proc
+                command_prefix = _scope_proc_argv()
             case list():
                 mount, view_fds = await hold_view(
-                    [*in_scope, "--", *scope_proc, *mount_view],
-                    ["mnt"],
+                    [*in_scope, "--", *_scope_proc_argv(), *mount_view],
+                    ["mnt", "cwd"],
                     bwrap=self.bwrap,
                     launcher_depth=2,
                 )
