@@ -13,12 +13,15 @@ import socket
 import struct
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import asyncssh
 
 from hud.environment.utils import forward_output, splice
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import pty
@@ -62,45 +65,21 @@ def _child_pids(pid: int) -> list[int]:
         return sorted(children)
 
 
-async def install_identity_map(
-    info_read: int,
-    block_write: int,
-    *,
-    launcher_pid: int | None = None,
-    launcher_depth: int = 0,
-    as_root: bool = False,
-) -> int:
-    """Map every available host identity into a blocked bwrap user namespace.
-
-    Where only the caller's own ids can be mapped, *as_root* maps them to 0
-    inside, so a process that joins the namespace keeps its capabilities
-    across exec.
-    """
-    pid = await read_bwrap_pid(info_read)
-    if launcher_pid is not None:
-        pid = launcher_pid
-        for _ in range(launcher_depth):
-            children = await asyncio.to_thread(_child_pids, pid)
-            if len(children) != 1:
-                raise RuntimeError(f"sandbox launcher {pid} has {len(children)} children")
-            pid = children[0]
-    await asyncio.to_thread(_map_identities, pid, as_root)
-    await asyncio.to_thread(os.write, block_write, b"\n")
-    return pid
+_NSENTER_OPTIONS = {"user": "--user", "mnt": "--mount", "net": "--net"}
 
 
 async def start_holder(
     argv: list[str],
     *,
     bwrap: str,
-    map_identities: bool,
-    launcher_depth: int,
-    as_root: bool = False,
+    map_identities: bool = False,
+    launcher_depth: int = 0,
 ) -> tuple[ProcessGroup, int]:
     """Start a bwrap holder whose payload prints ``ready``; the holder and its child's pid.
 
     *launcher_depth* counts the processes from the one *argv* starts down to
-    bwrap's child, which is what an identity map is written for.
+    bwrap's child, for a bwrap in a pid namespace of its own whose reported
+    pid means nothing out here; 0 trusts the reported pid.
     """
     read_fd, write_fd = os.pipe()
     block_read = block_write = -1
@@ -131,17 +110,19 @@ async def start_holder(
         if map_identities:
             os.close(block_read)
             block_read = -1
-            pid = await install_identity_map(
-                read_fd,
-                block_write,
-                launcher_pid=holder.process.pid,
-                launcher_depth=launcher_depth,
-                as_root=as_root,
-            )
+        pid = await read_bwrap_pid(read_fd)
+        if launcher_depth:
+            pid = holder.process.pid
+            for _ in range(launcher_depth):
+                children = await asyncio.to_thread(_child_pids, pid)
+                if len(children) != 1:
+                    raise RuntimeError(f"sandbox launcher {pid} has {len(children)} children")
+                pid = children[0]
+        if map_identities:
+            await asyncio.to_thread(_map_identities, pid)
+            await asyncio.to_thread(os.write, block_write, b"\n")
             os.close(block_write)
             block_write = -1
-        else:
-            pid = await read_bwrap_pid(read_fd)
         assert holder.stdout is not None
         if await asyncio.wait_for(holder.stdout.readline(), 30.0) != b"ready\n":
             raise RuntimeError(await _holder_error(holder))
@@ -174,7 +155,52 @@ async def _holder_error(holder: ProcessGroup) -> str:
     return detail.decode(errors="replace").strip() or "sandbox holder did not become ready"
 
 
-def _map_identities(pid: int, as_root: bool) -> None:
+async def hold_view(
+    argv: list[str],
+    namespaces: Sequence[Literal["user", "mnt", "net"]],
+    *,
+    bwrap: str,
+    map_identities: bool = False,
+    launcher_depth: int = 0,
+) -> tuple[list[str], list[int]]:
+    """Build a view with a bwrap holder and keep it open once the holder is gone.
+
+    Payloads join a view rather than run under bwrap: Ubuntu's AppArmor
+    profile for bwrap strips capabilities from everything bwrap starts.
+    Returns the nsenter options that join the view's *namespaces* and working
+    directory, and the descriptors they name, which hold the view open until
+    the caller passes them to that nsenter and closes them.
+    """
+    holder, pid = await start_holder(
+        argv, bwrap=bwrap, map_identities=map_identities, launcher_depth=launcher_depth
+    )
+    descriptors: list[int] = []
+    try:
+        descriptors.extend(
+            os.open(f"/proc/{pid}/{path}", os.O_RDONLY)
+            for path in (*(f"ns/{name}" for name in namespaces), "cwd")
+        )
+    except BaseException:
+        for descriptor in descriptors:
+            os.close(descriptor)
+        raise
+    finally:
+        await holder.terminate()
+    *joined, cwd = descriptors
+    options = [
+        f"{_NSENTER_OPTIONS[name]}=/proc/self/fd/{descriptor}"
+        for name, descriptor in zip(namespaces, joined, strict=True)
+    ]
+    return [*options, f"--wd=/proc/self/fd/{cwd}"], descriptors
+
+
+def _map_identities(pid: int) -> None:
+    """Map the caller's identities into *pid*'s user namespace, as they are.
+
+    Where only its own ids can be mapped, they are mapped to root: everything
+    mapped is a namespace trusted code joins, and only root inside keeps its
+    capabilities across exec.
+    """
     proc = Path(f"/proc/{pid}")
     with contextlib.suppress(OSError):
         (proc / "setgroups").write_text("allow")
@@ -190,7 +216,7 @@ def _map_identities(pid: int, as_root: bool) -> None:
                 with contextlib.suppress(OSError):
                     (proc / "setgroups").write_text("deny")
             try:
-                (proc / name).write_text(f"{0 if as_root else own} {own} 1")
+                (proc / name).write_text(f"0 {own} 1")
             except OSError:
                 LOGGER.warning("could not map ids into the sandbox (%s)", name)
 
@@ -317,8 +343,7 @@ class NamespaceHost:
         *,
         cwd: Path,
         env: dict[str, str],
-        mount_view: Literal["workspace", "host"] = "workspace",
-        identity: int | tuple[int, int] | None = None,
+        mount_view: Literal["workspace", "host"] | list[str] = "workspace",
         tty: bool = False,
         terminal_size: tuple[int, int, int, int] = (80, 24, 0, 0),
         persistent: bool = False,
@@ -332,7 +357,6 @@ class NamespaceHost:
                 "cwd": str(cwd),
                 "env": env,
                 "mount_view": mount_view,
-                "identity": identity,
                 "persistent": persistent,
                 "scope": scope,
                 "session_owned": session_owned,
@@ -512,7 +536,8 @@ class _NamespaceHost:
                 process.exit(await self._spawn(request, process))
         except Exception as exc:
             if not process.channel.is_closing():
-                process.stderr.write(f"{type(exc).__name__}: {exc}".encode())
+                notes = getattr(exc, "__notes__", ())
+                process.stderr.write("\n".join([f"{type(exc).__name__}: {exc}", *notes]).encode())
                 process.exit(1)
         await process.wait_closed()
 
@@ -526,55 +551,47 @@ class _NamespaceHost:
         channel: asyncssh.SSHServerProcess[bytes],
     ) -> int:
         mount_view = request["mount_view"]
-        if mount_view not in ("workspace", "host"):
-            raise ValueError(f"unknown mount view {mount_view!r}")
         scope = request["scope"]
         if scope not in ("session", "environment"):
             raise ValueError(f"unknown process scope {scope!r}")
-        if scope == "environment" and mount_view != "host":
-            raise ValueError("environment processes require the host mount view")
-        identity = request["identity"]
-        identity_argv: tuple[str, ...] = ()
-        if isinstance(identity, int):
-            identity_argv = ("--setgid", str(identity), "--setuid", str(identity))
-        elif identity is not None:
-            uid, gid = map(int, identity)
-            identity_argv = ("--setgid", str(gid), "--setuid", str(uid))
-        command_prefix: list[str] = []
-        if mount_view == "host":
-            unshare = shutil.which("unshare")
-            if unshare is None:
-                raise RuntimeError("trusted workspace commands require unshare")
-            command_prefix = [
-                unshare,
-                "--mount",
-                "--propagation",
-                "private",
-                "--mount-proc",
-                *identity_argv,
-                "--",
-            ]
+        if scope == "environment" and mount_view == "workspace":
+            raise ValueError("environment processes require a mount view of their own")
         held = self.holders.get(scope)
         if held is None:
             raise RuntimeError(f"workspace {scope} holder is not running")
         _, holder_pid = held
-        argv = [
+        in_scope = [
             shutil.which("nsenter") or "/usr/bin/nsenter",
             "--target",
             str(holder_pid),
-            *(("--mount",) if mount_view == "workspace" else ()),
             "--pid",
             "--uts",
             "--ipc",
-            *(
-                ("--preserve-credentials",)
-                if identity is None or mount_view == "host"
-                else identity_argv
-            ),
-            "--",
-            *command_prefix,
-            *request["argv"],
+            "--preserve-credentials",
         ]
+        unshare = shutil.which("unshare")
+        if unshare is None:
+            raise RuntimeError("trusted workspace commands require unshare")
+        # A private mount namespace whose /proc is the scope's pid namespace.
+        scope_proc = [unshare, "--mount", "--propagation", "private", "--mount-proc", "--"]
+        command_prefix: list[str] = []
+        view_fds: list[int] = []
+        match mount_view:
+            case "workspace":
+                mount = ["--mount", "--wd"]
+            case "host":
+                mount = []
+                command_prefix = scope_proc
+            case list():
+                mount, view_fds = await hold_view(
+                    [*in_scope, "--", *scope_proc, *mount_view],
+                    ["mnt"],
+                    bwrap=self.bwrap,
+                    launcher_depth=2,
+                )
+            case _:
+                raise ValueError(f"unknown mount view {mount_view!r}")
+        argv = [*in_scope, *mount, "--", *command_prefix, *request["argv"]]
         process: ProcessGroup | None = None
         outputs: list[ProcessOutput] = []
         output_tasks: list[asyncio.Task[None]] = []
@@ -590,6 +607,7 @@ class _NamespaceHost:
                     stderr=slave_fd,
                     cwd=request["cwd"],
                     env=request["env"],
+                    pass_fds=view_fds,
                 )
                 os.close(slave_fd)
                 slave_fd = -1
@@ -620,7 +638,7 @@ class _NamespaceHost:
                         exc.add_note(f"failed to terminate spawned process: {cleanup_exc}")
                 raise
             finally:
-                for descriptor in (master_fd, slave_fd, stdin_fd, stdout_fd):
+                for descriptor in (master_fd, slave_fd, stdin_fd, stdout_fd, *view_fds):
                     if descriptor != -1:
                         os.close(descriptor)
         else:
@@ -636,6 +654,7 @@ class _NamespaceHost:
                     stderr=stderr_write,
                     cwd=request["cwd"],
                     env=request["env"],
+                    pass_fds=view_fds,
                 )
 
                 os.close(stdout_write)
@@ -672,6 +691,7 @@ class _NamespaceHost:
                     stdout_write,
                     stderr_read,
                     stderr_write,
+                    *view_fds,
                 ):
                     if descriptor != -1:
                         os.close(descriptor)
