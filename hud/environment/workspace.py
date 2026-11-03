@@ -1351,6 +1351,8 @@ class Workspace:
             # Another session may have started it while this one waited.
             if (live := self._live_sandbox_pid()) is not None:
                 return live
+            # A sandbox whose owner died leaves processes and state behind.
+            await self.discard_sandbox()
             return await self._start_sandbox()
 
     def _live_sandbox_pid(self) -> int | None:
