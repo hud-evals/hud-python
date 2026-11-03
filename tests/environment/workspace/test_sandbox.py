@@ -66,7 +66,9 @@ async def test_a_session_runs_as_the_identity_the_workspace_was_given(
         no_new_privs = (await client.run("grep NoNewPrivs /proc/self/status", check=False)).stdout
 
     if expected is None:
-        assert str(identity).split()[0] == str(os.getuid())
+        # Off root, a sandboxed session is root of the sandbox it alone is mapped into.
+        sandboxed = usable_bwrap() is not None
+        assert str(identity).split()[0] == str(0 if sandboxed else os.getuid())
     else:
         assert str(identity).strip() == expected
     if "shell_uid" in options and expected is not None:

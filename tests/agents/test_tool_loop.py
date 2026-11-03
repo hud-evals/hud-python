@@ -8,6 +8,7 @@ on the chat completions agent; what each provider does differently is
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import replace
@@ -183,6 +184,9 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
 ) -> None:
     """Claude's editor reads the file itself, so a fifo blocks it rather than the shell."""
     root = tmp_path / "ws"
+    root.mkdir()
+    # Made here, not by a tool call: a sandbox's first command also pays for starting it.
+    os.mkfifo(root / "pipe")
     edit = call(
         "str_replace_based_edit_tool",
         command="str_replace",
@@ -190,7 +194,7 @@ async def test_a_workspace_tool_blocked_on_its_file_is_cut_off_by_the_tool_timeo
         old_str="a",
         new_str="b",
     )
-    models.script([call("bash", command="mkfifo pipe"), edit, Turn(text="done")])
+    models.script([edit, Turn(text="done")])
 
     task = workspace_task(root)
     (run,) = (
