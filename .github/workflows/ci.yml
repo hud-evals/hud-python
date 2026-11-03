@@ -86,7 +86,9 @@ jobs:
 
   sandbox:
     name: Sandbox
-    runs-on: ubuntu-latest
+    # Temporary: Ubuntu 26.04 denies capabilities to everything bwrap runs, which
+    # the workspace sandbox needs for its namespace owner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
