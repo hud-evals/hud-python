@@ -476,7 +476,9 @@ class _NamespaceHost:
             )
             sys.stdout.write(json.dumps({"holder_pid": self.holders["session"][1]}) + "\n")
             sys.stdout.flush()
-            await asyncio.Event().wait()
+            # The server holds stdin open for as long as it is alive, so a
+            # server that dies without discarding the sandbox still ends it.
+            await asyncio.to_thread(sys.stdin.buffer.read)
         finally:
             if server is not None:
                 server.close()

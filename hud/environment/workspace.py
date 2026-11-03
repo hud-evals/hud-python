@@ -1447,7 +1447,6 @@ class Workspace:
                 + b"\n"
             )
             await self._sandbox.stdin.drain()
-            self._sandbox.stdin.close()
             ready = await asyncio.wait_for(self._sandbox.stdout.readline(), 30.0)
             if not ready:
                 raise RuntimeError(f"the sandbox never became ready: {await self._sandbox_error()}")
