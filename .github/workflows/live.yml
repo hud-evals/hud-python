@@ -88,7 +88,9 @@ jobs:
   harbor:
     name: Harbor
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # Temporary: Ubuntu 26.04 denies capabilities to everything bwrap runs, which
+    # the workspace sandbox needs for its namespace owner.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
