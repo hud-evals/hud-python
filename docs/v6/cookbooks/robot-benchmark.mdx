@@ -121,7 +121,7 @@ job = await Taskset("libero-demo", TASKS).run(agent, runtime=Runtime("tcp://127.
 
 ## Read the trace
 
-With `HUD_API_KEY` set, every episode streams to the platform automatically: the trace viewer plays the camera frames back under a scrubber, with **diamond markers at each step where the policy predicted a fresh action chunk** - scrub between markers to watch a chunk execute, click one to jump to the decision point.
+With `HUD_API_KEY` set, every episode streams to the platform automatically: the trace viewer plays the camera frames back under a scrubber, with **diamond markers at each tick where the policy predicted a fresh action chunk** - scrub between markers to watch a chunk execute, click one to jump to the decision point.
 
 ## See also
 
