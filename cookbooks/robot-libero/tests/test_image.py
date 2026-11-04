@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 TAG = "robot-libero:test"
 
 
-class _OneMove(Agent):
+class OneMove(Agent):
+    """Lowers the gripper once through the `move_to` tool."""
+
     def __init__(self) -> None:
         super().__init__()
         self.result: MCPToolResult | None = None
@@ -36,12 +38,13 @@ class _OneMove(Agent):
 @pytest.mark.e2e
 @pytest.mark.docker
 async def test_the_image_builds_and_plays_a_libero_task() -> None:
+    # The same build the README documents, from the cookbook directory.
     subprocess.run(
         ["docker", "build", "-f", "Dockerfile.hud", "-t", TAG, "."],
-        cwd=Path(__file__).parent,
+        cwd=Path(__file__).parents[1],
         check=True,
     )
-    agent = _OneMove()
+    agent = OneMove()
 
     run = await rollout(
         Task(env="robot-libero", id="libero_spatial", args={"libero_task_id": 0}),
@@ -52,4 +55,4 @@ async def test_the_image_builds_and_plays_a_libero_task() -> None:
     assert agent.result is not None
     assert not agent.result.isError
     assert sum(block.type == "image" for block in agent.result.content) == 2
-    assert not run.grade.is_error
+    assert not run.grade.is_error  # graded; a single move does not solve the task

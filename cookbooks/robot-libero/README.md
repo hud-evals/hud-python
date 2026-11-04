@@ -31,6 +31,10 @@ video and state and action plots.
 | `absolute` (default) | absolute end-effector targets | `move_to` | Tool-calling agents, from the web app or `hud eval` |
 | `delta` | end-effector deltas | none | Policies trained on LIBERO, such as pi0.5 |
 
+There are two contracts, `contracts/ee_abs.json` and `contracts/ee_del.json`, one per mode.
+Absolute targets drive the LLM `move_to` tool; deltas are the action space LIBERO-trained
+policies like pi0.5 expect.
+
 Both modes run at the contract's 10 Hz. Episodes end on success or the simulator's
 1,000-step horizon, including 10 settling steps (990 agent-controlled steps).
 A horizon timeout scores zero.

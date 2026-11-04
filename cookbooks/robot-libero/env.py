@@ -1,4 +1,4 @@
-"""LIBERO tabletop manipulation, served to both policies and tool-calling agents.
+"""The environment: LIBERO tabletop manipulation for both VLA policies and tool-calling agents.
 
 The Franka Panda simulator runs in its own process behind a `RobotBridge` and is published
 as a `robot` capability, so a VLA policy can stream actions to it. In absolute mode the same
@@ -25,64 +25,52 @@ from robosuite.utils.transform_utils import axisangle2quat, mat2quat, quat2axisa
 from bridge import LiberoSimBridge
 
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10", "libero_90")
+CONTRACTS = {"absolute": "ee_abs.json", "delta": "ee_del.json"}
 
+# Control mode: one contract (action space, cameras, rate) per mode.
 CONTROL = os.environ.get("LIBERO_CONTROL", "absolute")
-if CONTROL not in ("absolute", "delta"):
-    raise ValueError(f"LIBERO_CONTROL must be 'absolute' or 'delta', got {CONTROL!r}")
-
-CONTRACT = json.loads(
-    (
-        Path(__file__).parent
-        / "contracts"
-        / ("ee_abs.json" if CONTROL == "absolute" else "ee_del.json")
-    ).read_text()
-)
+if CONTROL not in CONTRACTS:
+    raise ValueError(f"LIBERO_CONTROL must be one of {list(CONTRACTS)}, got {CONTROL!r}")
+CONTRACT = json.loads((Path(__file__).parent / "contracts" / CONTRACTS[CONTROL]).read_text())
 
 env = Environment(name="robot-libero")
 bridge = LiberoSimBridge(
     use_delta=CONTROL == "delta", image_size=CONTRACT["features"]["observation/image"]["shape"][0]
 )
-bridge.contract = CONTRACT
+bridge.contract = CONTRACT  # published on the wire so a policy can configure itself
 endpoint = RobotEndpoint(bridge).attach(env)
 
 
 @env.initialize
-async def _up() -> None:
+async def start_sim() -> None:
     await endpoint.start()
     for capability in await endpoint.capabilities():
         env.add_capability(capability)
 
 
 @env.shutdown
-async def _down() -> None:
+async def stop_sim() -> None:
     await endpoint.stop()
 
 
-# The arm's controller tracks the grip site, whose frame is the observed hand frame turned -90
+# The arm controller tracks the grip site, whose frame is the observed hand frame turned -90
 # degrees about z.
 HAND_TO_GRIP = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
 
 
-def held_pose(data: dict) -> np.ndarray:
-    """The absolute action that holds the observed pose with the gripper open, as a reset leaves it."""
+def hold_pose(data: dict) -> np.ndarray:
+    """The absolute action that keeps the observed pose, gripper open (what a reset leaves)."""
     state = data["observation/state"]
     rotation = quat2axisangle(mat2quat(quat2mat(axisangle2quat(state[3:6])) @ HAND_TO_GRIP))
     return np.concatenate([state[:3], rotation, [-1.0]])
 
 
+# Absolute mode also serves the `move_to` tool, so an LLM can drive the arm directly.
 if CONTROL == "absolute":
     DirectControl(
-        dims=[
-            "target_eef_pos.x",
-            "target_eef_pos.y",
-            "target_eef_pos.z",
-            "target_eef.roll",
-            "target_eef.pitch",
-            "target_eef.yaw",
-            "gripper.open_close",
-        ],
-        reference=held_pose,
-        max_step={"gripper.open_close": 2.0},  # a binary command: switch in one step
+        reference=hold_pose,  # what an unset target dimension keeps
+        max_step={"gripper.open_close": 2.0},  # binary command: switch in one step
+        # Facts the model cannot see in the tool schema.
         notes=(
             "Positions are world-frame meters of the point between the gripper fingers. In "
             "observation/image, +x moves the gripper toward the camera (down the image), +y "
@@ -96,18 +84,20 @@ if CONTROL == "absolute":
     ).attach(endpoint)
 
 
-def _suite_template(suite: str):
+def suite_template(suite: str):
+    """The task template for one LIBERO suite; a task picks a scene and an initial state."""
+
     async def episode(libero_task_id: int, init_state_id: int = 0):
         ep = await endpoint.reset(
             task_suite=suite, task_id=libero_task_id, init_state_id=init_state_id
         )
         yield {"prompt": ep["prompt"]}
-        yield await endpoint.result()
+        yield await endpoint.result()  # graded by LIBERO's own success check
 
     return episode
 
 
 for suite in SUITES:
     env.template(id=suite, description=f"One task of the LIBERO {suite} suite.")(
-        _suite_template(suite)
+        suite_template(suite)
     )
