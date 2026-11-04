@@ -272,7 +272,7 @@ class RobotEndpoint:
                     f"direct control needs robot capability {control.robot!r}; "
                     f"available: {[capability.name for capability in capabilities]}"
                 )
-            capabilities.append(await control.start(robot))
+            capabilities.extend(await control.start(robot))
         return capabilities
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:

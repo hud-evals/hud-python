@@ -1,7 +1,7 @@
 """What a robot run reports: its traces, their outcomes, and every tick as state and video.
 
-Two producers report robot telemetry: ``wrap`` around a vectorized gym env, and
-direct control streaming each played tick of a rollout. Each is run as a user runs it;
+Two producers report robot telemetry: ``wrap`` around a vectorized gym env, and the
+rollout client, recording each tick direct control plays. Each is run as a user runs it;
 the cases assert what the platform recorded and the trace spans it can replay.
 """
 
@@ -21,6 +21,7 @@ import pytest
 from mcp.shared.exceptions import MCPError
 
 from hud.agents.base import Agent
+from hud.agents.robot import Model, RobotAgent
 from hud.environment.robot import DirectControl, wrap
 from hud.eval import LocalRuntime, Task, rollout
 from tests.conftest import ROBOT_STEP_SCHEMA, steps
@@ -226,3 +227,47 @@ async def test_a_camera_the_encoder_cannot_encode_costs_the_video_not_the_rollou
     assert run.reward == 1.0
     assert [obs["tick"] for obs in observations] == list(range(1 + len(sim.actions)))
     assert segments == []
+
+
+async def test_each_rollout_of_a_long_lived_env_records_only_its_own_episode() -> None:
+    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]))
+    played: list[tuple[Run, int]] = []
+
+    async with arm_env(sim, DirectControl()) as env:
+        for x in (0.3, 0.6):
+            agent = ScriptedLLM(move("move_to", x=x))
+            run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+            played.append((run, len(sim.actions)))
+
+    assert played[0][1] != played[1][1]
+    for run, ticks in played:
+        observations, segments = recorded(run)
+        assert [obs["tick"] for obs in observations] == list(range(1 + ticks))
+        assert frames_in(segments) == 1 + ticks
+
+
+class Goal(Model):
+    """Commands the goal pose: ``x = 0.5`` with the gripper closed."""
+
+    def infer(self, batch: Any) -> Any:
+        return np.array([[[0.5, 1.0]]], dtype=np.float32)
+
+
+class Reacher(RobotAgent):
+    max_steps = 5
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.model = Goal()
+
+
+async def test_a_policy_rollout_beside_direct_control_records_each_tick_once() -> None:
+    sim = Arm(contract("ee_abs", [0.0, -1.0], [1.0, 1.0]), done=reached)
+
+    async with arm_env(sim, DirectControl()) as env:
+        run = await rollout(Task(env="arm", id="reach"), Reacher(), runtime=LocalRuntime(env))
+
+    observations, _ = recorded(run)
+    assert run.reward == 1.0
+    # The policy records the ticks it plays; direct control played none.
+    assert [obs["tick"] for obs in observations] == [0, 1]
