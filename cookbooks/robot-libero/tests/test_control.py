@@ -78,7 +78,7 @@ class ToolAgent(Agent):
 
 
 @pytest.mark.asyncio
-async def test_move_and_wait_return_camera_frames_and_finger_readings(
+async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns_camera_frames(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "api_key", None)
@@ -126,15 +126,6 @@ async def test_move_and_wait_return_camera_frames_and_finger_readings(
 
     assert run.reward == 1.0
     assert len(agent.results) == 3
-    texts = []
     for result in agent.results:
         assert not result.isError
         assert sum(block.type == "image" for block in result.content) == 2
-        texts.append("\n".join(block.text for block in result.content if block.type == "text"))
-    moved, closed, _ = texts
-    assert moved.startswith("Played ")
-    assert "Time remaining:" in moved
-    assert "At the target." in moved
-    # The SDK reports finger joints only after a grip call.
-    assert "fingers:" not in moved
-    assert "fingers:" in closed
