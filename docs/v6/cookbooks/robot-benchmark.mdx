@@ -13,7 +13,7 @@ This cookbook runs **pi0.5** against **LIBERO** (a Franka Panda manipulation ben
 
 ## The environment
 
-The env module only declares; it runs no policy of its own. It wires three things together: a **bridge** that drives the simulator, a **`RobotEndpoint`** that exposes the bridge as a capability, and two-yield task templates. This is `demos/inventory/envs/libero/env.py`, abbreviated:
+The env module only declares; it runs no policy of its own. It wires three things together: a **bridge** that drives the simulator, a **`RobotEndpoint`** that exposes the bridge as a capability, and two-yield task templates. This is [`cookbooks/robot-libero/env.py`](https://github.com/hud-evals/hud-python/tree/main/cookbooks/robot-libero), abbreviated:
 
 ```python env.py
 from hud import Environment
@@ -23,7 +23,7 @@ from libero_sim_bridge import LiberoSimBridge
 
 CONTRACT = build_contract({"use_delta": True})  # the env's self-describing obs/action schema
 
-env = Environment(name="libero")
+env = Environment(name="robot-libero")
 bridge = LiberoSimBridge(use_delta=True)
 bridge.contract = CONTRACT  # capabilities() publishes this on the wire
 endpoint = RobotEndpoint(bridge).attach(env)
@@ -46,10 +46,10 @@ async def libero_spatial(libero_task_id: int, init_state_id: int = 0):
     yield await endpoint.result()
 ```
 
-The image's CMD serves it with the standard entry point (`hud serve env.py --host 0.0.0.0 --port 8765`). This env lives in HUD's `demos/` examples tree, a sibling of the `hud-python` SDK; build it from the parent directory that holds **both** `demos/` and `hud-python/` so the image can install the SDK from local source:
+The image's CMD serves it with the standard entry point (`hud serve env:env --host 0.0.0.0 --port 8765`). Policies trained on LIBERO act on end-effector deltas, so the env serves that interface when `LIBERO_CONTROL=delta` is set (the default, `absolute`, serves absolute targets and a `move_to` tool for LLM agents). Build the image from the cookbook directory:
 
 ```bash
-docker build -f demos/inventory/envs/libero/Dockerfile -t hud-libero-env .
+docker build -f Dockerfile.hud -t robot-libero cookbooks/robot-libero
 ```
 
 ## The agent
@@ -82,13 +82,14 @@ class PI05Agent(RobotAgent):
         self.adapter = LeRobotAdapter(model_image_keys=list(policy.config.image_features))
 
 TASKS = [
-    Task(env="libero", id="libero_spatial", args={"libero_task_id": t, "init_state_id": 0})
+    Task(env="robot-libero", id="libero_spatial", args={"libero_task_id": t, "init_state_id": 0})
     for t in range(3)
 ]
 
 async def main():
     job = await Taskset("libero-demo", TASKS).run(
-        PI05Agent(), runtime=DockerRuntime("hud-libero-env"), max_concurrent=1,
+        PI05Agent(), runtime=DockerRuntime("robot-libero", env_vars={"LIBERO_CONTROL": "delta"}),
+        max_concurrent=1,
     )
     rewards = [run.reward for run in job.runs]
     print(f"success_rate={sum(rewards) / len(rewards):.2f}")
@@ -111,7 +112,7 @@ Here `DockerRuntime` sets the placement, and each rollout is self-contained:
 For heavy sims (or sweeps), skip the per-episode boot with one long-lived container:
 
 ```bash
-docker run -d --name libero-env -p 8765:8765 hud-libero-env
+docker run -d --name libero-env -p 8765:8765 -e LIBERO_CONTROL=delta robot-libero
 ```
 
 ```python

@@ -1,0 +1,292 @@
+{
+    "robot_type": "franka_panda_libero",
+    "control_rate": 10,
+    "features": {
+        "observation/image": {
+            "role": "observation",
+            "type": "rgb",
+            "dtype": "image",
+            "shape": [
+                256,
+                256,
+                3
+            ],
+            "names": [
+                "height",
+                "width",
+                "channel"
+            ],
+            "stats": {
+                "mean": [
+                    [
+                        [
+                            0.48068472743034363
+                        ]
+                    ],
+                    [
+                        [
+                            0.4485854208469391
+                        ]
+                    ],
+                    [
+                        [
+                            0.4106878638267517
+                        ]
+                    ]
+                ],
+                "std": [
+                    [
+                        [
+                            0.229267880320549
+                        ]
+                    ],
+                    [
+                        [
+                            0.22267605364322662
+                        ]
+                    ],
+                    [
+                        [
+                            0.21524138748645782
+                        ]
+                    ]
+                ],
+                "min": [
+                    [
+                        [
+                            0.0
+                        ]
+                    ],
+                    [
+                        [
+                            0.0
+                        ]
+                    ],
+                    [
+                        [
+                            0.0
+                        ]
+                    ]
+                ],
+                "max": [
+                    [
+                        [
+                            1.0
+                        ]
+                    ],
+                    [
+                        [
+                            1.0
+                        ]
+                    ],
+                    [
+                        [
+                            1.0
+                        ]
+                    ]
+                ]
+            }
+        },
+        "observation/wrist_image": {
+            "role": "observation",
+            "type": "rgb",
+            "dtype": "image",
+            "shape": [
+                256,
+                256,
+                3
+            ],
+            "names": [
+                "height",
+                "width",
+                "channel"
+            ],
+            "stats": {
+                "mean": [
+                    [
+                        [
+                            0.5057708024978638
+                        ]
+                    ],
+                    [
+                        [
+                            0.46449801325798035
+                        ]
+                    ],
+                    [
+                        [
+                            0.42354270815849304
+                        ]
+                    ]
+                ],
+                "std": [
+                    [
+                        [
+                            0.2672027349472046
+                        ]
+                    ],
+                    [
+                        [
+                            0.25637131929397583
+                        ]
+                    ],
+                    [
+                        [
+                            0.24345873296260834
+                        ]
+                    ]
+                ],
+                "min": [
+                    [
+                        [
+                            0.0
+                        ]
+                    ],
+                    [
+                        [
+                            0.0
+                        ]
+                    ],
+                    [
+                        [
+                            0.0
+                        ]
+                    ]
+                ],
+                "max": [
+                    [
+                        [
+                            1.0
+                        ]
+                    ],
+                    [
+                        [
+                            1.0
+                        ]
+                    ],
+                    [
+                        [
+                            1.0
+                        ]
+                    ]
+                ]
+            }
+        },
+        "observation/state": {
+            "role": "observation",
+            "type": "ee_abs",
+            "dtype": "float32",
+            "shape": [
+                8
+            ],
+            "names": [
+                "robot0_eef_pos.x",
+                "robot0_eef_pos.y",
+                "robot0_eef_pos.z",
+                "robot0_eef_axis_angle.rx",
+                "robot0_eef_axis_angle.ry",
+                "robot0_eef_axis_angle.rz",
+                "robot0_gripper_qpos.finger_joint1",
+                "robot0_gripper_qpos.finger_joint2"
+            ],
+            "stats": {
+                "mean": [
+                    -0.04651879519224167,
+                    0.03440921753644943,
+                    0.7645525336265564,
+                    2.972202777862549,
+                    -0.22047005593776703,
+                    -0.1255796253681183,
+                    0.026914266869425774,
+                    -0.02719070389866829
+                ],
+                "std": [
+                    0.10494378954172134,
+                    0.15176637470722198,
+                    0.3785160183906555,
+                    0.34427398443222046,
+                    0.9069469571113586,
+                    0.3253920078277588,
+                    0.014175914227962494,
+                    0.014058894477784634
+                ],
+                "min": [
+                    -0.4828203022480011,
+                    -0.3255046010017395,
+                    0.008128180168569088,
+                    0.35277295112609863,
+                    -3.641430377960205,
+                    -1.842738389968872,
+                    -0.0013586411951109767,
+                    -0.042040832340717316
+                ],
+                "max": [
+                    0.21031762659549713,
+                    0.39128610491752625,
+                    1.3660105466842651,
+                    3.6714255809783936,
+                    3.560650587081909,
+                    1.386339545249939,
+                    0.04233968257904053,
+                    0.0013633022317662835
+                ]
+            }
+        },
+        "action": {
+            "role": "action",
+            "type": "ee_abs",
+            "dtype": "float32",
+            "shape": [
+                7
+            ],
+            "names": [
+                "target_eef_pos.x",
+                "target_eef_pos.y",
+                "target_eef_pos.z",
+                "target_eef_axis_angle.rx",
+                "target_eef_axis_angle.ry",
+                "target_eef_axis_angle.rz",
+                "gripper.open_close"
+            ],
+            "stats": {
+                "mean": [
+                    -0.04651879519224167,
+                    0.03440921753644943,
+                    0.7645525336265564,
+                    2.972202777862549,
+                    -0.22047005593776703,
+                    -0.1255796253681183,
+                    0.0
+                ],
+                "std": [
+                    0.10494378954172134,
+                    0.15176637470722198,
+                    0.3785160183906555,
+                    0.34427398443222046,
+                    0.9069469571113586,
+                    0.3253920078277588,
+                    1.0
+                ],
+                "min": [
+                    -0.4828203022480011,
+                    -0.3255046010017395,
+                    0.008128180168569088,
+                    0.35277295112609863,
+                    -3.641430377960205,
+                    -1.842738389968872,
+                    -1.0
+                ],
+                "max": [
+                    0.21031762659549713,
+                    0.39128610491752625,
+                    1.3660105466842651,
+                    3.6714255809783936,
+                    3.560650587081909,
+                    1.386339545249939,
+                    1.0
+                ]
+            }
+        }
+    },
+    "comment": "LIBERO benchmark on a single Franka Panda (robosuite/MuJoCo), absolute end-effector control: the action is the absolute target eef pose (position + axis-angle) + gripper (ee_abs); action stats mirror the eef-pose state distribution. State is the absolute eef pose (position + axis-angle from robosuite (x,y,z,w) quat) + gripper finger qpos (ee_abs). Two 256x256 RGB views (agentview, wrist) at 10 Hz. One complete contract per control mode (spec_v0 \u00a75): BENCH_CONTROL=absolute selects this file; the delta sibling (default) is libero_ee_del.json."
+}

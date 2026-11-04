@@ -1,0 +1,19 @@
+[project]
+name = "robot-libero"
+version = "0.1.0"
+description = "LIBERO robot manipulation for policies and tool-calling agents (cookbook)"
+requires-python = ">=3.11,<3.13"
+dependencies = ["hud[robot]==0.6.22"]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: builds the image and runs a rollout; needs Docker",
+    "docker: needs a running Docker daemon",
+]
