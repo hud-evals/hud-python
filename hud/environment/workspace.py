@@ -241,7 +241,7 @@ class Bubblewrap:
 
 
 # Set once the first Workspace probes the substrate (avoid per-instance work).
-_bwrap_usable: Bubblewrap | Literal[False] | None = None
+_bwrap_usable: Bubblewrap | str | None = None
 
 
 def usable_bwrap() -> Bubblewrap | None:
@@ -249,7 +249,7 @@ def usable_bwrap() -> Bubblewrap | None:
     global _bwrap_usable
     if isinstance(_bwrap_usable, Bubblewrap):
         return _bwrap_usable
-    if _bwrap_usable is False:
+    if isinstance(_bwrap_usable, str):
         return None
 
     path = shutil.which("bwrap")
@@ -298,8 +298,9 @@ def usable_bwrap() -> Bubblewrap | None:
             )
         )
 
-    failure = "unknown error"
+    failures: list[str] = []
     for launch, argv in launches:
+        mode = "staged" if launch.pid_unshare else "direct"
         try:
             probe = subprocess.run(
                 argv,
@@ -323,15 +324,16 @@ def usable_bwrap() -> Bubblewrap | None:
                         "the sandbox /tmp is not writable by unprivileged agent sessions."
                     )
                 return _bwrap_usable
-            failure = probe.stderr.decode("utf-8", "replace").strip()[:120]
-        except (OSError, subprocess.SubprocessError):
-            continue
+            detail = probe.stderr.decode("utf-8", "replace").strip()[:120]
+            failures.append(f"{mode} exited with code {probe.returncode}: {detail}")
+        except (OSError, subprocess.SubprocessError) as exc:
+            failures.append(f"{mode}: {type(exc).__name__}: {str(exc)[:120]}")
 
-    _bwrap_usable = False
+    _bwrap_usable = "; ".join(failures)
     LOGGER.warning(
         "bwrap is installed but cannot create an isolated process namespace (%s); "
         "sessions will run WITHOUT isolation.",
-        failure,
+        _bwrap_usable,
     )
     return None
 
@@ -824,11 +826,12 @@ class Workspace:
         Returns only after every published workspace service is accepting clients.
         """
         if self._require_isolation and self._bwrap is None:
+            detail = f" Probe failures: {_bwrap_usable}" if isinstance(_bwrap_usable, str) else ""
             raise RuntimeError(
                 "isolation was required but bwrap cannot sandbox here: install "
                 "bubblewrap and use a container runtime that allows unprivileged "
                 "user namespaces. Refusing to serve sessions that would silently "
-                "run unisolated."
+                f"run unisolated.{detail}"
             )
         try:
             self._prepare_runtime()

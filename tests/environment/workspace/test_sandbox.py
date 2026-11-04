@@ -358,7 +358,7 @@ async def test_a_declared_peer_is_a_name_sessions_resolve(
 
 FAKE_BWRAP = """#!/bin/sh
 for arg in "$@"; do
-  case "$arg" in {refused}) exit 1 ;; esac
+  case "$arg" in {refused}) echo "direct kernel failure" >&2; exit 1 ;; esac
 done
 {succeed}
 """
@@ -369,23 +369,32 @@ import asyncio, sys
 from hud.environment import Workspace
 
 async def main():
-    workspace = Workspace(sys.argv[1])
-    print(workspace.capability().params["isolation"])
-    await workspace.stop()
+    for attempt in range(2):
+        workspace = Workspace(sys.argv[1], require_isolation=True)
+        if attempt == 0:
+            print(workspace.capability().params["isolation"])
+        try:
+            if not workspace.bwrap_available:
+                await workspace.start()
+        except RuntimeError as exc:
+            print(exc)
+        finally:
+            await workspace.stop()
 
 asyncio.run(main())
 """
 
 
 @pytest.mark.parametrize(
-    ("refused", "isolation"),
+    ("refused", "isolation", "staged"),
     [
-        pytest.param("*", "none", id="unusable-install"),
-        pytest.param("--never", "bwrap", id="usable-install"),
+        pytest.param("*", "none", False, id="unusable-install"),
+        pytest.param("--never", "bwrap", False, id="usable-install"),
+        pytest.param("*", "bwrap", True, id="usable-fallback"),
     ],
 )
 def test_a_workspace_publishes_bwrap_isolation_only_when_bubblewrap_works(
-    tmp_path: Path, refused: str, isolation: str
+    tmp_path: Path, refused: str, isolation: str, staged: bool
 ) -> None:
     """An installed bwrap that cannot create namespaces must not be used."""
     tools = tmp_path / "bin"
@@ -393,6 +402,11 @@ def test_a_workspace_publishes_bwrap_isolation_only_when_bubblewrap_works(
     for name, script in {
         "bwrap": FAKE_BWRAP.format(refused=refused, succeed="exit 0"),
         "true": "#!/bin/sh\nexit 0\n",
+        "unshare": (
+            "#!/bin/sh\nexit 0\n"
+            if staged
+            else "#!/bin/sh\necho 'staged namespace failure' >&2\nexit 1\n"
+        ),
     }.items():
         (tools / name).write_text(script)
         (tools / name).chmod(0o755)
@@ -405,4 +419,12 @@ def test_a_workspace_publishes_bwrap_isolation_only_when_bubblewrap_works(
         check=True,
     )
 
-    assert probe.stdout.strip() == isolation
+    published, *errors = probe.stdout.splitlines()
+    assert published == isolation
+    if isolation == "none":
+        assert len(errors) == 2
+        for cause in ("direct kernel failure", "staged namespace failure"):
+            assert cause in probe.stderr
+            assert all(cause in error for error in errors)
+    else:
+        assert errors == []
