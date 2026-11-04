@@ -157,6 +157,7 @@ lint.ignore = [
 "hud/runtime/daytona.py" = ["PLC0415"]
 "hud/runtime/modal.py" = ["PLC0415"]
 "hud/environment/robot/gym.py" = ["PLC0415"]
+"hud/eval/robot_ticks.py" = ["PLC0415"]
 "hud/train/client.py" = ["PLC0415"]
 "hud/utils/gateway.py" = ["PLC0415"]
 "hud/clients/client.py" = ["PLC0415"]

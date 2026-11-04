@@ -25,6 +25,7 @@ from hud.utils.time import now_iso
 
 from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
+from .robot_ticks import record_played_ticks
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -460,7 +461,12 @@ async def rollout(
                         connections=bound,
                     )
                     live.trace.runtime = addr.url
-                    async with live:
+                    # Played ticks are recorded from the start through grading, which ends
+                    # the episode and so its tick streams.
+                    async with contextlib.AsyncExitStack() as played, live:
+                        await played.enter_async_context(
+                            record_played_ticks(actor_client, trace_id)
+                        )
                         run = live  # set once live; earlier failures yield Trace.failed
                         _phase = "agent loop"
                         try:

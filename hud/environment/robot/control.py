@@ -5,8 +5,10 @@ capability beside ``robot``. The action's control kind (``state_type``, else
 ``type``) picks the tool from ``CONTROL_KINDS``; its ``names`` are the addressable
 dimensions and its ``limits`` (else ``stats``) bound them. Each call plays out on
 the wire and answers with the camera frames and the pose it ended on. Single-env
-sims only. Every tick streams to the rollout's trace, which needs ``HUD_API_KEY``
-in the env process.
+sims only. Every tick is also published on a read-only ``ticks/0`` capability
+(``<name>-ticks``): the robot contract, then one msgpack-numpy observation per tick
+from the episode's opening scene, closed when the episode ends. The rollout client
+records it to the trace, so the env needs no ``HUD_API_KEY``.
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import numpy as np
+import websockets
+import websockets.exceptions
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.tools import Tool
@@ -31,8 +35,7 @@ from mcp.types import ImageContent, TextContent
 from PIL import Image
 
 from hud.capabilities.base import Capability
-from hud.capabilities.mcp import get_mcp_trace_id
-from hud.capabilities.robot import RobotClient
+from hud.capabilities.robot import RobotClient, packb
 from hud.environment.robot.orientation import (
     Orientation,
     angular_distance,
@@ -43,14 +46,13 @@ from hud.environment.robot.orientation import (
     wrap_angle,
     xyzw_to_euler,
 )
-from hud.telemetry.exporter import flush
-from hud.telemetry.robot.recorder import TraceRecorder
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from fastmcp.tools import ToolResult
     from numpy.typing import NDArray
+    from websockets.asyncio.server import Server, ServerConnection
 
     from hud.environment.robot.endpoint import RobotEndpoint
 
@@ -117,6 +119,10 @@ IMAGE_TYPES = frozenset({"rgb", "bgr", "gray", "depth"})
 # Safety cap on one call. A full-range move at the default speed lasts 10 s, then
 # settles for at most 3 s.
 DEFAULT_TIMEOUT_S = 30.0
+
+# Played ticks wait for every stream reader; one that takes none for this long is dropped,
+# which ends its video and not the rollout.
+_READER_TIMEOUT_S = 30.0
 
 # One full turn in radians; an absolute orientation travels ``speed`` of it per second.
 _FULL_TURN = 2.0 * math.pi
@@ -246,20 +252,22 @@ class DirectControl:
         self._command: NDArray[np.float64] | None = None  # this episode's last absolute target
         self._elapsed = 0  # ticks this episode has played
         self._serving: asyncio.Task[None] | None = None
-        self._capability: Capability | None = None
-        self._recorder: TraceRecorder | None = None  # this episode's trace telemetry
-        self._tick = 0
-        self._recording = asyncio.Lock()  # one tick is recorded (or the recorder closed) at a time
+        self._ticks: Server | None = None
+        self._capabilities: list[Capability] = []
+        # This episode's tick-stream readers; each episode gets a new set.
+        self._readers: set[ServerConnection] = set()
+        self._opened = False  # whether this episode's opening scene was published
 
     def attach(self, endpoint: RobotEndpoint) -> DirectControl:
         """Register with a robotics endpoint, which owns serving and episode lifecycle."""
         endpoint.add_direct_control(self)
         return self
 
-    async def start(self, robot: Capability) -> Capability:
-        """Serve the tools derived from ``robot``'s contract; return their ``mcp`` capability."""
-        if self._capability is not None:
-            return self._capability
+    async def start(self, robot: Capability) -> list[Capability]:
+        """Serve the tools derived from ``robot``'s contract and the ticks they play; return
+        their ``mcp`` and ``ticks/0`` capabilities."""
+        if self._capabilities:
+            return self._capabilities
         # 1. Read the contract: the action's kind picks the tool, its names are the dimensions.
         self._robot = robot
         contract = robot.params["contract"]
@@ -314,7 +322,6 @@ class DirectControl:
         }
         # 3. Observations: cameras become returned frames, the rest become labeled state text.
         observations = {n: f for n, f in features.items() if f["role"] == "observation"}
-        self._obs_space = observations
         self._cameras = [n for n, f in observations.items() if f.get("type") == "rgb"]
         self._states = {
             n: f.get("names") for n, f in observations.items() if f.get("type") not in IMAGE_TYPES
@@ -356,8 +363,18 @@ class DirectControl:
             )
         )
         await _wait_until_listening(self._serving, port)
-        self._capability = Capability.mcp(name=self.name, url=f"http://127.0.0.1:{port}/mcp")
-        return self._capability
+        # 5. Publish the ticks played on a read-only WebSocket the rollout client records.
+        self._ticks = await websockets.serve(self._read_ticks, "127.0.0.1", 0, ping_interval=None)
+        ticks_port = self._ticks.sockets[0].getsockname()[1]
+        self._capabilities = [
+            Capability.mcp(name=self.name, url=f"http://127.0.0.1:{port}/mcp"),
+            Capability(
+                name=f"{self.name}-ticks",
+                protocol="ticks/0",
+                url=f"ws://127.0.0.1:{ticks_port}",
+            ),
+        ]
+        return self._capabilities
 
     async def stop(self) -> None:
         await self.end_episode()
@@ -367,7 +384,11 @@ class DirectControl:
         with contextlib.suppress(asyncio.CancelledError):
             await self._serving
         self._serving = None
-        self._capability = None
+        if self._ticks is not None:
+            self._ticks.close()
+            await self._ticks.wait_closed()
+            self._ticks = None
+        self._capabilities = []
 
     def begin_episode(self, max_ticks: int | None) -> None:
         """Start an episode capped at ``max_ticks`` ticks (``None``: no limit).
@@ -393,17 +414,35 @@ class DirectControl:
         )
 
     async def end_episode(self) -> None:
-        """Clear the last absolute target and time spent, and close the episode's trace telemetry.
+        """Clear the last absolute target and time spent, and end the episode's tick streams.
 
-        A move still playing stops recording; the tick being recorded finishes first.
+        A move still playing stops publishing; ticks it already sent stay in the streams.
         """
         self._command = None
         self._elapsed = 0
-        recorder, self._recorder = self._recorder, None
-        if recorder is not None:
-            async with self._recording:
-                await asyncio.to_thread(recorder.close)  # flushes the video tails
-                await asyncio.to_thread(flush)
+        self._opened = False
+        readers, self._readers = self._readers, set()
+        await asyncio.gather(*(reader.close() for reader in readers))
+
+    async def _read_ticks(self, reader: ServerConnection) -> None:
+        """One tick-stream reader: the contract, then this episode's ticks until it ends."""
+        readers = self._readers
+        readers.add(reader)
+        try:
+            await reader.send(packb(self._robot.params["contract"]))
+            await reader.wait_closed()
+        finally:
+            readers.discard(reader)
+
+    async def _publish(self, readers: set[ServerConnection], obs: dict[str, Any]) -> None:
+        """Send one played tick to each reader, waiting for each so none misses a tick."""
+        frame = packb(obs["data"])
+        for reader in list(readers):
+            try:
+                await asyncio.wait_for(reader.send(frame), _READER_TIMEOUT_S)
+            except (TimeoutError, websockets.exceptions.ConnectionClosed):
+                readers.discard(reader)
+                await reader.close()
 
     def _bind_tools(self, server: FastMCP) -> None:
         """Register the contract motion tool."""
@@ -559,19 +598,15 @@ class DirectControl:
             raise ToolError("note must say what you see and why you chose this")
         # One short wire connection per call: the sim is frozen while the model thinks.
         async with self._lock:
-            client = await RobotClient.connect(self._robot)
+            # Deflate only costs CPU on this env-local wire.
+            client = await RobotClient.connect(self._robot, compression=None)
+            # This episode's readers: a move outliving its episode never reaches the next one's.
+            readers = self._readers
             try:
                 obs = await client.get_observation()
-                if self._recorder is None and (trace_id := get_mcp_trace_id()) is not None:
-                    self._tick = 0
-                    self._recorder = TraceRecorder(
-                        trace_id=trace_id,
-                        fps=max(1, round(self._rate)),
-                        obs_space=self._obs_space,
-                        sim_clock=True,
-                        keep_every_video_frame=True,
-                    )
-                    await self._record(obs)  # the episode's opening scene
+                if not self._opened:
+                    self._opened = True
+                    await self._publish(readers, obs)
                 rows, goal, named = (
                     (np.zeros((0, len(self._names))), None, set())
                     if obs["terminated"]
@@ -595,7 +630,7 @@ class DirectControl:
                     nonlocal played, obs, proprio
                     await client.send_action(row)
                     obs = await client.get_observation()
-                    await self._record(obs)
+                    await self._publish(readers, obs)
                     played += 1
                     if self._absolute:
                         # Remember the target so the next call continues from it, not the sim pose.
@@ -670,19 +705,6 @@ class DirectControl:
             goal=goal,
             ticks_left=None if self._limit_ticks is None else self._limit_ticks - self._elapsed,
         )
-
-    async def _record(self, obs: dict[str, Any]) -> None:
-        """Stream one tick's state and camera frames to the trace."""
-        if (recorder := self._recorder) is not None:
-            # Shielded: a cancelled move must not release the lock while the thread still writes.
-            await asyncio.shield(self._record_tick(recorder, obs))
-
-    async def _record_tick(self, recorder: TraceRecorder, obs: dict[str, Any]) -> None:
-        async with self._recording:
-            if recorder is self._recorder:  # the episode may have ended while waiting
-                # Off the loop: an encoder that keeps every frame blocks while its queue drains.
-                await asyncio.to_thread(recorder.record_observation, obs["data"], tick=self._tick)
-                self._tick += 1
 
     def _start(self, obs: dict[str, Any]) -> NDArray[np.float64]:
         """Where a move begins: the commanded target for absolute control, else zero.

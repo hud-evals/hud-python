@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Any, ClassVar, Self, cast
+from typing import Any, ClassVar, Literal, Self, cast
 
 import numpy as np
 import websockets
@@ -58,15 +58,28 @@ class RobotClient(CapabilityClient):
         return action, observations
 
     @classmethod
-    async def connect(cls, cap: Capability, *, token: str | None = None) -> Self:
+    async def connect(
+        cls,
+        cap: Capability,
+        *,
+        token: str | None = None,
+        compression: Literal["deflate"] | None = "deflate",
+    ) -> Self:
         """Dial the robot WebSocket; ``token`` claims a sim slot after the metadata frame.
 
         A ``None`` token binds the sole slot of a single-env bridge; vectorized bridges
         need the token from ``endpoint.reset()``. A rejected claim raises here rather
-        than hanging the first ``get_observation``.
+        than hanging the first ``get_observation``. ``compression=None`` sends frames
+        uncompressed, for a wire that never leaves the host.
         """
         # Bounded dial: an undialed claim stalls the bridge's barrier for every peer.
-        ws = await websockets.connect(cap.url, max_size=None, ping_interval=None, open_timeout=30.0)
+        ws = await websockets.connect(
+            cap.url,
+            max_size=None,
+            ping_interval=None,
+            open_timeout=30.0,
+            compression=compression,
+        )
         raw = await ws.recv()
         if isinstance(raw, str):
             raise RuntimeError(f"robot env error on connect:\n{raw}")
