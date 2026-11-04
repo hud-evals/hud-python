@@ -288,5 +288,5 @@
             }
         }
     },
-    "comment": "LIBERO benchmark on a single Franka Panda (robosuite/MuJoCo), delta end-effector control: the action is a 7-DoF OSC_POSE eef delta (position + axis-angle) + gripper (ee_del). State is the absolute eef pose (position + axis-angle from robosuite (x,y,z,w) quat) + gripper finger qpos (ee_abs). Two 256x256 RGB views (agentview, wrist) at 10 Hz. Delta action stats are the physical-intelligence/libero normalization values. One complete contract per control mode (spec_v0 \u00a75): BENCH_CONTROL=delta (the default) selects this file; the absolute sibling is libero_ee_abs.json."
+    "comment": "LIBERO benchmark on a single Franka Panda (robosuite/MuJoCo), delta end-effector control: the action is a 7-DoF OSC_POSE eef delta (position + axis-angle) + gripper (ee_del). State is the absolute eef pose (position + axis-angle from robosuite (x,y,z,w) quat) + gripper finger qpos (ee_abs). Two 256x256 RGB views (agentview, wrist) at 10 Hz. Delta action stats are the physical-intelligence/libero normalization values. One contract per control mode: LIBERO_CONTROL=delta selects this file; the sibling is ee_abs.json."
 }

@@ -288,5 +288,5 @@
             }
         }
     },
-    "comment": "LIBERO benchmark on a single Franka Panda (robosuite/MuJoCo), absolute end-effector control: the action is the absolute target eef pose (position + axis-angle) + gripper (ee_abs); action stats mirror the eef-pose state distribution. State is the absolute eef pose (position + axis-angle from robosuite (x,y,z,w) quat) + gripper finger qpos (ee_abs). Two 256x256 RGB views (agentview, wrist) at 10 Hz. One complete contract per control mode (spec_v0 \u00a75): BENCH_CONTROL=absolute selects this file; the delta sibling (default) is libero_ee_del.json."
+    "comment": "LIBERO benchmark on a single Franka Panda (robosuite/MuJoCo), absolute end-effector control: the action is the absolute target eef pose (position + axis-angle) + gripper (ee_abs); action stats mirror the eef-pose state distribution. State is the absolute eef pose (position + axis-angle from robosuite (x,y,z,w) quat) + gripper finger qpos (ee_abs). Two 256x256 RGB views (agentview, wrist) at 10 Hz. One contract per control mode: LIBERO_CONTROL=absolute selects this file (the default); the sibling is ee_del.json."
 }

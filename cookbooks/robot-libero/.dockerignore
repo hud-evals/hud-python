@@ -8,4 +8,4 @@ __pycache__/
 .hud/
 .hud_eval.toml
 .DS_Store
-test_*.py
+tests/

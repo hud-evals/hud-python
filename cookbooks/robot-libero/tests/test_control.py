@@ -1,4 +1,4 @@
-"""A tool-calling rollout against the cookbook's control profile, without MuJoCo."""
+"""The `move_to` / `wait` tools on the absolute contract, driven by a fake arm (no MuJoCo)."""
 
 from __future__ import annotations
 
@@ -20,10 +20,12 @@ if TYPE_CHECKING:
     from hud.types import MCPToolResult
     from numpy.typing import NDArray
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parents[1]
 
 
-class _Arm(RobotBridge):
+class FakeArm(RobotBridge):
+    """Stands in for the simulator: the action is the pose, a grip closes the fingers to 0.01."""
+
     def __init__(self) -> None:
         super().__init__()
         self.contract = json.loads((ROOT / "contracts" / "ee_abs.json").read_text())
@@ -37,7 +39,7 @@ class _Arm(RobotBridge):
         self.state[:6] = action[0, :6]
         opening = 0.01 if action[0, 6] > 0 else 0.04
         self.state[6:] = opening, -opening
-        self.success = bool(self.state[0] >= 0.09 and opening < 0.03)
+        self.success = bool(self.state[0] >= 0.09 and opening < 0.03)  # moved right, gripped
 
     def get_observation(self) -> tuple[dict[str, NDArray[Any]], bool]:
         frame = np.zeros((1, 256, 256, 3), dtype=np.uint8)
@@ -48,7 +50,9 @@ class _Arm(RobotBridge):
         }, False
 
 
-class _ToolAgent(Agent):
+class ToolAgent(Agent):
+    """Moves right, closes the gripper, then waits; records each tool result."""
+
     def __init__(self) -> None:
         super().__init__()
         self.results: list[MCPToolResult] = []
@@ -59,6 +63,7 @@ class _ToolAgent(Agent):
         assert set(tools) == {"move_to", "wait"}
         names = tools["move_to"].inputSchema["properties"]["targets"]["properties"]
         assert set(names) == {"x", "y", "z", "roll", "pitch", "yaw", "grip"}
+        # A null target keeps that dimension where it is.
         for values in ({"x": 0.1}, {"grip": 1.0}):
             self.results.append(
                 await client.call_tool(
@@ -79,11 +84,12 @@ async def test_move_and_wait_return_camera_frames_and_finger_readings(
     monkeypatch.setattr(settings, "api_key", None)
     monkeypatch.setattr(settings, "telemetry_enabled", False)
     monkeypatch.setattr(settings, "telemetry_local_dir", None)
-    sim = _Arm()
+    sim = FakeArm()
     await sim.start()
     server = await sim.serve_control()
     env = Environment(name="robot-libero")
     endpoint = RobotEndpoint.remote("127.0.0.1", server.sockets[0].getsockname()[1]).attach(env)
+    # Same wiring as env.py's absolute mode, minus the simulator.
     DirectControl(
         reference=lambda data: np.r_[np.asarray(data["observation/state"]).reshape(-1)[:6], -1.0],
         max_step={"gripper.open_close": 2.0},
@@ -91,13 +97,13 @@ async def test_move_and_wait_return_camera_frames_and_finger_readings(
     ).attach(endpoint)
 
     @env.initialize
-    async def _up() -> None:
+    async def start_sim() -> None:
         await endpoint.start()
         for capability in await endpoint.capabilities():
             env.add_capability(capability)
 
     @env.shutdown
-    async def _down() -> None:
+    async def stop_sim() -> None:
         await endpoint.stop()
 
     @env.template()
@@ -106,7 +112,7 @@ async def test_move_and_wait_return_camera_frames_and_finger_readings(
         yield {"prompt": ep["prompt"]}
         yield await endpoint.result()
 
-    agent = _ToolAgent()
+    agent = ToolAgent()
     try:
         run = await rollout(Task(env="robot-libero", id="grasp"), agent, runtime=LocalRuntime(env))
         assert {(cap.name, cap.protocol) for cap in env.capabilities} == {
@@ -125,9 +131,10 @@ async def test_move_and_wait_return_camera_frames_and_finger_readings(
         assert not result.isError
         assert sum(block.type == "image" for block in result.content) == 2
         texts.append("\n".join(block.text for block in result.content if block.type == "text"))
-    moved, closed, waited = texts
+    moved, closed, _ = texts
     assert moved.startswith("Played ")
     assert "Time remaining:" in moved
     assert "At the target." in moved
+    # The SDK reports finger joints only after a grip call.
     assert "fingers:" not in moved
     assert "fingers:" in closed
