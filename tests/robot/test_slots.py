@@ -269,6 +269,27 @@ async def test_a_claim_that_never_dials_holds_the_batch_until_it_joins() -> None
     assert sim.steps == [[1.0, 2.0]]
 
 
+async def test_max_ticks_ends_a_policy_stream_and_is_reported_in_the_result() -> None:
+    sim = Sim()
+
+    async with serving(sim) as (_, endpoint, robot):
+        episode = await endpoint.reset(max_ticks=2)
+        agent = await RobotClient.connect(robot)
+        try:
+            await agent.get_observation()
+            terminated = []
+            for value in (1.0, 2.0):
+                await agent.send_action([value])
+                terminated.append((await agent.get_observation())["terminated"])
+        finally:
+            await agent.close()
+        result = await endpoint.result()
+
+    assert episode["prompt"] == "prompt []"
+    assert terminated == [False, True]
+    assert (result["max_ticks"], result["ended_by"]) == (2, "max_ticks")
+
+
 async def test_a_terminated_slot_is_not_stepped_without_new_actions() -> None:
     sim = Sim(terminal_at=3)
 

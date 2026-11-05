@@ -276,7 +276,15 @@ class RobotEndpoint:
         return capabilities
 
     async def reset(self, **task_args: Any) -> dict[str, Any]:
-        """Claim a slot for a new episode; return ``{"prompt", "token"}``."""
+        """Claim a slot for a new episode; return ``{"prompt", "token"}``.
+
+        ``max_ticks`` ends the episode once that many ticks have played, whoever plays them:
+        the bridge enforces it and reports it in the result, and the sim's ``reset`` never
+        sees it. Without it the episode is unbounded.
+        """
+        max_ticks = task_args.get("max_ticks")
+        if max_ticks is not None and (not isinstance(max_ticks, int) or max_ticks < 1):
+            raise ValueError(f"max_ticks must be a positive integer, got {max_ticks!r}")
         while True:
             try:
                 ep = await self._call("reset", task_args)
@@ -290,6 +298,8 @@ class RobotEndpoint:
             if session_id is not None and isinstance(token, str):
                 self._claims[session_id] = token
             await self._end_direct_episodes()
+            for control in self._direct_controls:
+                control.begin_episode(max_ticks)
             return ep
 
     async def result(self, *, token: str | None = None, **extra: Any) -> dict[str, Any]:
