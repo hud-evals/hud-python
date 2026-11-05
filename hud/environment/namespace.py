@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import socket
 import struct
 import sys
@@ -200,6 +201,19 @@ async def start_holder(
                 os.close(descriptor)
 
 
+async def _end_holder(holder: ProcessGroup, pid: int) -> None:
+    """End a holder by killing its placeholder, *pid*, so bwrap and whatever
+    launched it exit on their own and each process is reaped by its parent.
+
+    Killing the group instead would orphan the placeholder, and a pid 1 that
+    never reaps it, such as a server serving as a container's init, keeps
+    the group alive as a zombie until the group kill's grace period runs out.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+    await holder.wait()
+
+
 async def _holder_error(holder: ProcessGroup) -> str:
     if holder.stderr is None:
         return "sandbox holder did not become ready"
@@ -234,7 +248,7 @@ async def hold_view(
             os.close(descriptor)
         raise
     finally:
-        await holder.terminate()
+        await _end_holder(holder, pid)
     into: list[tuple[str, str]] = [
         (kind, f"/proc/self/fd/{descriptor}")
         for kind, descriptor in zip(kinds, descriptors, strict=True)
@@ -570,7 +584,7 @@ class _NamespaceHost:
                 _port_socket(self.socket_path, port).unlink()
         holders = tuple(self.holders.values())
         self.holders.clear()
-        await asyncio.gather(*(holder.terminate() for holder, _ in holders))
+        await asyncio.gather(*(_end_holder(holder, pid) for holder, pid in holders))
         with contextlib.suppress(FileNotFoundError):
             self.socket_path.unlink()
 
