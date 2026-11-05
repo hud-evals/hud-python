@@ -10,7 +10,8 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from hud.eval import HUDRuntime, LocalRuntime, Task, Taskset
+from hud import Task, Taskset
+from hud.runtime import HUDRuntime, LocalRuntime
 from tests.conftest import eventually
 from tests.eval.conftest import SESSION, SESSIONS, TUNNEL, host_on_runtime
 from tests.fixtures.agents import ScriptedAgent
@@ -32,11 +33,11 @@ async def test_a_reported_run_opens_its_hosted_environment_under_its_trace(
         host_on_runtime(reporting, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
-    (run,) = job.runs
-    assert run.reward == 1.0
-    trace_id = str(uuid.UUID(run.trace_id))
+    (trace,) = job.traces
+    assert trace.reward == 1.0
+    trace_id = str(uuid.UUID(trace.trace_id))
     (entered,) = reporting.requests("api", "POST", "/v2/trace/{id}/enter")
-    assert entered.path == f"/v2/trace/{run.trace_id}/enter"
+    assert entered.path == f"/v2/trace/{trace.trace_id}/enter"
     (created,) = reporting.requests("runtime", "POST", SESSIONS)
     assert (created.bearer, created.json) == ("k", {"environment": "checked", "trace_id": trace_id})
     assert {
@@ -55,7 +56,8 @@ async def test_with_telemetry_off_the_hosted_environment_opens_without_a_trace(
         host_on_runtime(services, served.url)
         job = await Taskset("remote", [row], taskset_id="ts-1").run(ScriptedAgent("yes"))
 
-    assert job.runs[0].reward == 1.0
+    (trace,) = job.traces
+    assert trace.reward == 1.0
     (created,) = services.requests("runtime", "POST", SESSIONS)
     assert created.json == {"environment": "checked"}
     assert services.requests("api", "POST", "/v2/trace/{id}/enter") == []
@@ -76,10 +78,10 @@ async def test_a_refused_session_fails_the_run_with_the_platform_reason(
 
     job = await Task(env="checked", id="check").run(ScriptedAgent("yes"), runtime=HUDRuntime())
 
-    (run,) = job.runs
-    assert run.grade.is_error
-    assert reason in (run.trace.error or "")
-    assert "'checked'" in (run.trace.error or "")
+    (trace,) = job.traces
+    assert trace.grade.is_error
+    assert reason in (trace.error or "")
+    assert "'checked'" in (trace.error or "")
 
 
 async def dropped(websocket: WebSocket, params: dict[str, str]) -> None:
@@ -99,6 +101,6 @@ async def test_a_tunnel_that_keeps_dropping_ends_at_the_deadline_and_releases_th
         ScriptedAgent("yes"), runtime=HUDRuntime(), rollout_timeout=0.5
     )
 
-    assert job.runs[0].trace.stop_reason == "timeout"
-    assert "during starting task" in (job.runs[0].trace.error or "")
+    assert job.traces[0].stop_reason == "timeout"
+    assert "during starting task" in (job.traces[0].error or "")
     await eventually(lambda: len(services.requests("runtime", "DELETE", SESSION)) == 1)

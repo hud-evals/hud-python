@@ -16,9 +16,10 @@ from urllib.parse import urlsplit
 import asyncssh
 import pytest
 
+from hud import Task
 from hud.clients import connect
 from hud.environment import Environment, Workspace
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 from .conftest import shell
 

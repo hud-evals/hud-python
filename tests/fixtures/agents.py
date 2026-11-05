@@ -10,7 +10,7 @@ from hud.agents.base import Agent
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from hud.eval import Run
+    from hud import Run
 
 
 class ScriptedAgent(Agent):

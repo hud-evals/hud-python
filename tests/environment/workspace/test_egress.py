@@ -26,11 +26,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from hud.capabilities import Connection
-from hud.environment import Peer
 from hud.environment.egress import (
     ANY_HOST,
     ConnectionRelay,
     Egress,
+    Peer,
 )
 from tests.conftest import eventually
 

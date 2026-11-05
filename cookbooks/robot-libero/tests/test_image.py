@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from hud.agents.base import Agent
-from hud.eval import DockerRuntime, Task, rollout
+from hud import Task
+from hud.eval.run import rollout
+from hud.runtime import DockerRuntime
 
 if TYPE_CHECKING:
     from hud.capabilities import MCPClient

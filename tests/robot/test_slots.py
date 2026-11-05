@@ -17,12 +17,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
+from hud import Task
 from hud.capabilities import Capability
 from hud.capabilities.robot import RobotClient
 from hud.clients import HudProtocolError, connect
 from hud.environment import Environment
 from hud.environment.robot import RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from hud.eval import Runtime
+    from hud.runtime import Runtime
 
 
 class Sim(RobotBridge):

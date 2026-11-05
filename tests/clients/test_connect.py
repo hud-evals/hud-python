@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from hud.clients import connect
-from hud.eval.runtime import Runtime
+from hud.runtime import Runtime
 from tests.clients.conftest import Action, control_peer
 
 HELLO = {"session_id": "s-1", "env": {"name": "stub", "version": "1.0"}, "bindings": []}

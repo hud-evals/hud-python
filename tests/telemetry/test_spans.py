@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
-from hud.agents.openai_compatible import OpenAIChatAgent
+from hud import Environment, Task, Taskset
+from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import LocalRuntime, Task, Taskset, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from hud.telemetry import flush
 from tests.conftest import spans
 from tests.fixtures.agents import ScriptedAgent
@@ -22,7 +23,7 @@ from tests.fixtures.models import Turn, call
 from tests.fixtures.services import Reply
 
 if TYPE_CHECKING:
-    from hud.eval import Run
+    from hud import Trace
     from tests.conftest import HudEnv
     from tests.fixtures.models import Models
     from tests.fixtures.services import FakeServices
@@ -69,8 +70,8 @@ async def test_spans_are_written_where_the_configuration_says(
 
     job = await Taskset("t", [TASK]).run(ScriptedAgent("ok"), runtime=LocalRuntime(spans_env()))
 
-    (run,) = job.runs
-    written = {name: spans(run.trace_id, path) != [] for name, path in directories.items()}
+    (trace,) = job.traces
+    written = {name: spans(trace.trace_id, path) != [] for name, path in directories.items()}
     assert written == {name: name == written_to for name in directories}
     assert flush(timeout=10)
     assert bool(reporting.requests("telemetry", "POST", UPLOAD)) is uploaded
@@ -106,14 +107,14 @@ async def test_every_rollout_step_is_uploaded_to_its_own_trace(
 
     job = await Taskset("t", [task]).run(agent, runtime=LocalRuntime(upload_env()), group=2)
 
-    assert [run.reward for run in job.runs] == [reward, reward]
+    assert [trace.reward for trace in job.traces] == [reward, reward]
     assert flush(timeout=10)
     uploaded: dict[str, list[dict[str, Any]]] = {}
     for request in reporting.requests("telemetry", "POST", UPLOAD):
         uploaded.setdefault(request.path.split("/")[2].replace("-", ""), []).extend(
             request.json["telemetry"]
         )
-    assert sorted(uploaded) == sorted(str(run.trace_id).replace("-", "") for run in job.runs)
+    assert sorted(uploaded) == sorted(str(trace.trace_id).replace("-", "") for trace in job.traces)
     for trace_id, sent in uploaded.items():
         assert {span["attributes"]["hud.task_run_id"].replace("-", "") for span in sent} == {
             trace_id
@@ -131,11 +132,11 @@ async def test_flush_returns_false_at_its_deadline_while_an_upload_hangs(
 ) -> None:
     reporting.route("telemetry", "POST", UPLOAD, Reply(json={}, delay=2.0))
 
-    run: Run = await rollout(
+    trace: Trace = await rollout(
         Task(env="upload", id="answer"), ScriptedAgent("ok"), runtime=LocalRuntime(upload_env())
     )
 
-    assert run.reward == 1.0
+    assert trace.reward == 1.0
     assert flush(timeout=0.2) is False
     assert flush(timeout=30) is True
     assert reporting.requests("telemetry", "POST", UPLOAD) != []
@@ -150,7 +151,9 @@ def test_spans_still_queued_at_interpreter_exit_are_uploaded(
             """
             import asyncio
             from hud import Environment
-            from hud.eval import LocalRuntime, Task, rollout
+            from hud import Task
+            from hud.eval.run import rollout
+            from hud.runtime import LocalRuntime
             from tests.fixtures.agents import ScriptedAgent
 
             env = Environment("upload")

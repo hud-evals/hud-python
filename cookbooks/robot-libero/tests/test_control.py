@@ -11,7 +11,9 @@ import pytest
 from hud.agents.base import Agent
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task, rollout
+from hud import Task
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from hud.settings import settings
 
 if TYPE_CHECKING:

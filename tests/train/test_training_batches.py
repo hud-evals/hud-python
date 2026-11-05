@@ -8,10 +8,9 @@ import pytest
 import torch
 from dirty_equals import IsStr
 
-from hud import Environment
+from hud import Environment, Taskset, Trace
 from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import Run, Taskset
 from hud.train import DatumTensors, TrainingClient
 from hud.utils.exceptions import HudRequestError
 from tests.fixtures.agents import ScriptedAgent
@@ -61,10 +60,10 @@ async def answer(target: str = "ok"):
     yield 1.0 if reply == target else 0.0
 
 
-async def answered(agent: Agent, *targets: str) -> list[Run]:
-    """Two runs per target of ``agent`` answering "Reply with ok.", graded 1 on the target."""
+async def answered(agent: Agent, *targets: str) -> list[Trace]:
+    """Two traces per target of ``agent`` answering "Reply with ok.", graded 1 on the target."""
     tasks = [answer(target=target) for target in targets or ("ok",)]
-    return (await Taskset("t", tasks).run(agent, group=2, max_concurrent=1)).runs
+    return (await Taskset("t", tasks).run(agent, group=2, max_concurrent=1)).traces
 
 
 def sampled(text: str) -> Turn:
@@ -164,10 +163,10 @@ async def test_a_custom_loss_sends_its_gradients_to_backward(trainer: FakeServic
 async def test_timed_out_runs_need_an_explicit_reward_and_nothing_is_sent(
     trainer: FakeServices,
 ) -> None:
-    runs = (await answer().run(ScriptedAgent("ok", delay=5), rollout_timeout=0.2)).runs
+    traces = (await answer().run(ScriptedAgent("ok", delay=5), rollout_timeout=0.2)).traces
 
     with pytest.raises(ValueError, match="timed-out runs require an explicit training reward"):
-        await TrainingClient("owner/model").forward_backward(runs)
+        await TrainingClient("owner/model").forward_backward(traces)
     assert trainer.requests("rl") == []
 
 
