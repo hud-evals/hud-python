@@ -27,9 +27,9 @@ class Orientation:
     """One rotation block in an absolute end-effector action."""
 
     kind: Kind
-    #: Quat: contract columns of x, y, z, w. Axis-angle and euler: rx, ry, rz.
+    # Quat: contract columns of x, y, z, w. Axis-angle and euler: rx, ry, rz.
     columns: tuple[int, ...]
-    #: Contract columns in name order, so a hold can copy them unchanged.
+    # Contract columns in name order, so a hold can copy them unchanged.
     contract_columns: tuple[int, ...]
     tool_names: tuple[str, str, str]
 
@@ -302,17 +302,3 @@ def _block_at(names: list[str], index: int) -> Orientation | None:
     stem = _tool_stem(names[index])
     columns = (index, index + 1, index + 2)
     return Orientation(kind, columns, columns, (f"{stem}.roll", f"{stem}.pitch", f"{stem}.yaw"))
-
-
-__all__ = [
-    "Orientation",
-    "angular_distance",
-    "euler_columns",
-    "euler_to_xyzw",
-    "find_orientations",
-    "rotvec_to_xyzw",
-    "slerp",
-    "wrap_angle",
-    "xyzw_to_euler",
-    "xyzw_to_rotvec",
-]

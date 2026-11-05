@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from hud.eval import LocalRuntime, Task
+from hud import Task
+from hud.runtime import LocalRuntime
 from hud.telemetry import flush
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
@@ -32,7 +33,7 @@ async def test_a_span_directory_that_cannot_be_created_does_not_fail_the_run(
         ScriptedAgent("yes"), runtime=LocalRuntime(checked())
     )
 
-    assert (job.reward, job.runs[0].trace.status) == (1.0, "completed")
+    assert (job.reward, job.traces[0].status) == (1.0, "completed")
 
 
 async def test_a_telemetry_service_that_is_down_does_not_fail_the_run(
@@ -45,7 +46,7 @@ async def test_a_telemetry_service_that_is_down_does_not_fail_the_run(
     )
     assert flush(timeout=10)
 
-    assert (job.reward, job.runs[0].trace.status) == (1.0, "completed")
+    assert (job.reward, job.traces[0].status) == (1.0, "completed")
 
 
 @pytest.mark.parametrize(
@@ -78,7 +79,7 @@ async def test_a_rejected_report_is_retried_intact_and_never_fails_the_run(
 
     first, *retries = reporting.requests(service, "POST", path)
     warned = any(r.name == "hud.eval.job" and r.levelno == logging.WARNING for r in caplog.records)
-    assert (job.reward, job.runs[0].trace.status) == (1.0, "completed")
+    assert (job.reward, job.traces[0].status) == (1.0, "completed")
     assert retries
     assert retries[-1].json == first.json
     assert warned is gave_up

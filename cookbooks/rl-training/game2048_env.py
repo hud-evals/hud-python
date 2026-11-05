@@ -25,7 +25,7 @@ import time
 from fastmcp import FastMCP
 
 from hud.capabilities import Capability
-from hud.environment import Environment
+from hud import Environment
 from hud.graders import EvaluationResult
 
 _SIZE = 4

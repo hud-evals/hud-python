@@ -18,27 +18,16 @@ if TYPE_CHECKING:
 
 
 from .settings import gemini_agent_settings
-from .tools import (
-    GeminiComputerTool,
-    GeminiEditTool,
-    GeminiGlobTool,
-    GeminiListTool,
-    GeminiMCPProxyTool,
-    GeminiReadTool,
-    GeminiSearchTool,
-    GeminiShellTool,
-    GeminiWriteTool,
-)
+from .tools.coding import GeminiEditTool, GeminiShellTool, GeminiWriteTool
+from .tools.computer import GeminiComputerTool
+from .tools.filesystem import GeminiGlobTool, GeminiListTool, GeminiReadTool, GeminiSearchTool
+from .tools.mcp_proxy import GeminiMCPProxyTool
 
 logger = logging.getLogger(__name__)
 
 
 def _bound_text(text: str, limit: int) -> str:
-    """Keep ``limit`` characters of ``text``, weighted to its tail.
-
-    The kept span is announced so the model can re-run the call scoped to what
-    it needs rather than treating the remainder as absent.
-    """
+    """Keep ``limit`` characters of ``text``, mostly its tail, and tell the model what was cut."""
     if limit <= 0 or len(text) <= limit:
         return text
     head_chars = limit // 5
@@ -88,8 +77,6 @@ class GeminiAgent(ToolAgent[genai_types.Content, GeminiConfig]):
         self.max_recent_turn_with_screenshots = (
             gemini_agent_settings.MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
-
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(
         self, *, prompt: list[PromptMessage]
@@ -327,6 +314,3 @@ def _grounding_citations(grounding_meta: genai_types.GroundingMetadata) -> list[
         if idx not in seen_chunk_indices and source:
             citations.append(Citation(type="grounding", text="", source=source, title=title))
     return citations
-
-
-__all__ = ["GeminiAgent"]

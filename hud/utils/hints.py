@@ -11,17 +11,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Hint:
-    """Structured hint for user guidance.
-
-    Attributes:
-        title: Short title describing the hint.
-        message: Main explanatory message.
-        tips: Optional list of short actionable tips.
-        docs_url: Optional URL for documentation.
-        command_examples: Optional list of command examples to show.
-        code: Optional machine-readable code (e.g., "AUTH_API_KEY_MISSING").
-        context: Optional context tags (e.g., ["auth", "docker", "mcp"]).
-    """
+    """User guidance the CLI renders alongside an error."""
 
     title: str
     message: str
@@ -32,7 +22,6 @@ class Hint:
     context: list[str] | None = None
 
 
-# Common, reusable hints
 HUD_API_KEY_MISSING = Hint(
     title="HUD API key required",
     message="Missing or invalid HUD_API_KEY.",
@@ -61,7 +50,6 @@ RATE_LIMIT_HIT = Hint(
     context=["network"],
 )
 
-# Billing / plan upgrade
 PRO_PLAN_REQUIRED = Hint(
     title="Pro plan required",
     message="This feature requires Pro.",
@@ -158,10 +146,7 @@ MCP_SERVER_ERROR = Hint(
 
 
 def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> None:
-    """Render a collection of hints using the HUD design system if available.
-
-    If design is not provided, this is a no-op to keep library use headless.
-    """
+    """Print ``hints`` on ``design`` (default: the CLI console), skipping any that fail."""
     if not hints:
         return
 
@@ -172,28 +157,23 @@ def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> 
 
             hud_console = default_design
     except Exception:
-        # If design is unavailable (non-CLI contexts), silently skip rendering
         return
 
     for hint in hints:
         try:
-            # Compact rendering - skip title if same as message
             if hint.title and hint.title != hint.message:
                 hud_console.warning(f"{hint.title}: {hint.message}")
             else:
                 hud_console.warning(hint.message)
 
-            # Tips as bullet points
             if hint.tips:
                 for tip in hint.tips:
                     hud_console.info(f"  • {tip}")
 
-            # Only show command examples if provided
             if hint.command_examples:
                 for cmd in hint.command_examples:
                     hud_console.command_example(cmd)
 
-            # Only show docs URL if provided
             if hint.docs_url:
                 hud_console.link(hint.docs_url)
         except Exception:

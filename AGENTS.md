@@ -26,8 +26,9 @@ inventory of current incidents.
 ## Repository Map
 
 - Core flow: `hud/environment/` (spec: capabilities, tasks, serving) →
-  `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
-  connected by `hud/capabilities/` and `hud/clients/`.
+  `hud/eval/` (engine: rollout, jobs) placing work through `hud/runtime/`
+  (providers) → `hud/agents/` (harnesses), connected by `hud/capabilities/`
+  and `hud/clients/`.
 - `hud/cli/` is the Typer surface over the same modules.
 - `hud/integrations/` contains packaged adapters for external task formats.
 - `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture environments
@@ -77,6 +78,10 @@ Python `>=3.11, <3.13`.
 - Delete dead code. Do not keep obsolete paths around "just in case."
 - Keep comments rare and useful. Explain non-obvious intent, not what the next
   line mechanically does.
+- Keep docstrings short: a one-line summary, plus any contract a caller cannot
+  read off the signature. Refer to code as double-backtick literals. Skip
+  Sphinx and reStructuredText markup (`:class:` roles, `#:` comments, `::`
+  blocks); nothing here renders it.
 - Remove AI-generated slop before finishing: unnecessary comments, abnormal
   defensive checks, broad `try` blocks, type bypasses, deep nesting, and thin
   wrappers that do not reduce real complexity.
@@ -119,6 +124,9 @@ Python `>=3.11, <3.13`.
   lazy optional-dependency pattern or a documented circular-import constraint.
 - Use `TYPE_CHECKING` imports for type-only imports that would otherwise add
   runtime dependency cost or cycles.
+- Declare `__all__` only in package `__init__.py` files, where it lists the
+  names the package re-exports. Ordinary modules leave it out; their names
+  without a leading underscore are already public.
 
 ## Testing
 

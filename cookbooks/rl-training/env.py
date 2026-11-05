@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from hud.environment import Environment
+from hud import Environment
 from hud.graders import EvaluationResult
 
 env = Environment(name="arithmetic")

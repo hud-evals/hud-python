@@ -20,17 +20,17 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.eval import (
+from hud import Task
+from hud.eval.run import rollout
+from hud.runtime import (
     ComposeProject,
+    DockerBindMount,
     DockerRuntime,
     RuntimeConfig,
     RuntimeLimits,
     RuntimeResources,
-    Task,
-    rollout,
 )
-from hud.eval.runtime import DockerBindMount
-from hud.eval.runtime.docker import DockerEndpoint
+from hud.runtime.docker import DockerEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 

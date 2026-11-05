@@ -16,16 +16,9 @@ from hud.settings import settings
 from hud.types import ToolCall, ToolResult
 from hud.utils import gateway
 
-from .tools import (
-    BashTool,
-    EditTool,
-    GlobTool,
-    GrepTool,
-    OpenAICompatibleMCPProxyTool,
-    ReadTool,
-    WriteTool,
-)
 from .tools.base import format_chat_result
+from .tools.filesystem import BashTool, EditTool, GlobTool, GrepTool, ReadTool, WriteTool
+from .tools.mcp_proxy import OpenAICompatibleMCPProxyTool
 
 if TYPE_CHECKING:
     from hud.types import PromptMessage
@@ -86,8 +79,6 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             extra_body: dict[str, Any] = dict(self.completion_kwargs.get("extra_body") or {})
             extra_body["checkpoint"] = config.checkpoint
             self.completion_kwargs["extra_body"] = extra_body
-
-    # ─── ToolAgent hooks ──────────────────────────────────────────────
 
     async def _initialize_state(self, *, prompt: list[PromptMessage]) -> OpenAIChatRunState:
         return OpenAIChatRunState(messages=self._initial_messages(prompt))
@@ -234,6 +225,3 @@ class OpenAIChatAgent(ToolAgent[ChatCompletionMessageParam, OpenAIChatConfig]):
             model=response.model,
             usage=usage,
         )
-
-
-__all__ = ["OpenAIChatAgent"]

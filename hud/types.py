@@ -1,20 +1,4 @@
-"""Universal SDK shapes, including the trajectory contract.
-
-The trajectory contract: a ``Trace`` is an ordered collection of ``Step``s,
-and recording a step (:meth:`Trace.record`) ships it to the platform as one
-schema-tagged span. ``Step`` here is the shared skeleton every agent family
-and the run harness speak — ordering, source, timing, error — and the
-harness records its own steps directly (``user`` prompt turns, ``task``
-lifecycle calls, ``system`` errors).
-
-Agent families layer their payloads on top by subclassing :class:`Step` —
-the tool-agent family adds LLM responses and tool calls in
-:mod:`hud.agents.types` under the ``hud.step.v1`` schema; other families
-(e.g. robot) bring their own payload fields under their own ``schema_tag``
-and inherit the transport. The platform's serializer registry dispatches on
-the schema tag, so each family decodes losslessly without this module or the
-telemetry pipe (:mod:`hud.telemetry`) knowing any payload shape.
-"""
+"""Universal SDK shapes, including the trajectory contract."""
 
 from __future__ import annotations
 
@@ -24,8 +8,17 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeAlias, TypeVar, cast
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    SerializeAsAny,
+    model_validator,
+)
 
+from hud.graders.results import SubScore
 from hud.telemetry.context import get_current_trace_id
 from hud.telemetry.exporter import queue_span
 from hud.telemetry.span import (
@@ -135,12 +128,9 @@ class AgentType(StrEnum):
 
     @classmethod
     def of(cls, agent: object) -> AgentType | None:
-        """The registered agent type *agent* is an instance of, or ``None``.
+        """The registered agent type ``agent`` is an instance of, or ``None``.
 
-        Reverse of :attr:`cls`. Agent extras (anthropic, google-genai, ...)
-        may be uninstalled, so importing a type's agent class can fail; that
-        simply means *agent* is not that type. ``None`` means the ``Agent``
-        implementation is not registered for reconstruction.
+        A type whose agent extra isn't installed is skipped.
         """
         for agent_type in cls:
             with contextlib.suppress(ImportError):
@@ -149,9 +139,8 @@ class AgentType(StrEnum):
         return None
 
 
-# -----------------------------------------------------------------------------
-# Content and tool calls
-# -----------------------------------------------------------------------------
+# The shapes traces record keep MCP's camelCase field names (mimeType, isError), the
+# wire format the platform stores; MCP clients and servers convert at their boundary.
 
 
 class TextContent(BaseModel):
@@ -218,17 +207,16 @@ class Tool(BaseModel):
 
 class ToolCall(BaseModel):
     name: str
-    #: A str is the provider's raw arguments that didn't parse as JSON; it is never executed.
+    # A str is the provider's raw arguments that didn't parse as JSON; it is never executed.
     arguments: dict[str, Any] | str | None = None
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     annotation: str | None = None
-    #: The provider's own name for the tool, when it differs from ``name``.
+    # The provider's own name for the tool, when it differs from ``name``.
     provider_name: str | None = None
-    #: Whether the call's text and PDF results go back to Claude as citable documents.
+    # Whether the call's text and PDF results go back to Claude as citable documents.
     citations_enabled: bool = False
 
     def __str__(self) -> str:
-        """Format tool call as plain text."""
         args_str = ""
         if self.arguments:
             try:
@@ -244,7 +232,6 @@ class ToolCall(BaseModel):
         return s
 
     def __rich__(self) -> str:
-        """Rich representation with color formatting."""
         from rich.markup import escape
 
         from hud.utils.hud_console import hud_console
@@ -262,13 +249,10 @@ class ToolResult(BaseModel):
     call_id: str | None = None
 
     def _get_content_summary(self) -> str:
-        """Extract a summary of the content."""
-        # Extract content summary
         content_summary = ""
         if self.content:
             for block in self.content:
                 if isinstance(block, TextContent):
-                    # Get first line or truncate
                     text = block.text.strip()
                     first_line = text.split("\n")[0] if "\n" in text else text
                     content_summary = first_line
@@ -277,7 +261,6 @@ class ToolResult(BaseModel):
                     content_summary = "📷 Image"
                     break
 
-        # Or use structured content if no text content
         if not content_summary and self.structuredContent:
             try:
                 content_summary = json.dumps(self.structuredContent, separators=(",", ":"))
@@ -287,28 +270,21 @@ class ToolResult(BaseModel):
         return content_summary
 
     def __str__(self) -> str:
-        """Format tool result as plain text for compatibility."""
         content_summary = self._get_content_summary()
 
-        # Plain text format with unicode symbols
         if self.isError:
             return f"✗ {content_summary}"
         else:
             return f"✓ {content_summary}"
 
     def __rich__(self) -> str:
-        """Rich representation with color formatting."""
         from hud.utils.hud_console import hud_console
 
         content_summary = self._get_content_summary()
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
-# -----------------------------------------------------------------------------
-# Trajectory contract
-# -----------------------------------------------------------------------------
-
-#: Schema tag of the core step stream (the tool-agent family shares it).
+# Schema tag of the core step stream (the tool-agent family shares it).
 STEP_SCHEMA = "hud.step.v1"
 ROBOT_STEP_SCHEMA = "hud.robot.step.v1"
 
@@ -332,17 +308,11 @@ class TaskCall(BaseModel):
 class Step(BaseModel):
     """One ordered interaction unit in a task run — the shared skeleton.
 
-    Carries what every family and the harness need: position, ``source``,
-    timing, ``error``, and the harness payloads — ``messages`` (user/system
-    prompt turns, kept as structured ``PromptMessage``s so multimodal content
-    is preserved) and ``task_call`` (task lifecycle RPC). Agent families
-    subclass this with their own payload fields (e.g.
-    :class:`hud.agents.types.AgentStep`) and, for a new wire schema, their
-    own ``schema_tag``.
+    Agent families subclass it with their own payload fields (such as
+    ``hud.agents.types.AgentStep``) and, for a new wire schema, their own ``schema_tag``.
     """
 
-    #: Schema tag this step ships under; families with their own wire schema
-    #: override it (the platform's serializer registry dispatches on it).
+    # The platform's serializer registry dispatches on this tag.
     schema_tag: ClassVar[str] = STEP_SCHEMA
 
     # Sequential position in the trace, assigned by ``Trace`` (1-based).
@@ -360,8 +330,10 @@ class Step(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def emit(self, *, trace_id: str | None = None) -> None:
-        """Export this step as a span with its schema. No-op if trace context is missing.
-        Pass trace_id when emitting outside the rollout thread (e.g. from a background thread)."""
+        """Export this step as a span with its schema; a no-op without a trace context.
+
+        Pass ``trace_id`` when emitting outside the rollout's context, such as from a thread.
+        """
 
         task_run_id = trace_id or get_current_trace_id()
         if not task_run_id:
@@ -369,7 +341,6 @@ class Step(BaseModel):
 
         now = now_iso()
         payload = cast("JsonObject", self.model_dump(mode="json", exclude_none=True))
-        # make span from step
         span = Span(
             name=f"step.{self.source}",
             trace_id=normalize_trace_id(task_run_id),
@@ -389,32 +360,52 @@ class Step(BaseModel):
 
 TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
-#: Why the rollout stopped; anything but "done" means a limit cut it off.
+# Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
 
-#: The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
-#: conditions the loop may either stop on or answer with an error result.
+# The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
+# conditions the loop may either stop on or answer with an error result.
 StopCondition: TypeAlias = Literal["length", "malformed_tool_call"]
 
 
+class Grade(BaseModel):
+    """The environment's verdict: ``raw`` is its grade frame, ``content`` its message."""
+
+    reward: float = 0.0
+    done: bool = True
+    content: str | None = None
+    info: dict[str, Any] = Field(default_factory=dict)
+    is_error: bool = False
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+    _evaluation: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, context: Any, /) -> None:
+        # Malformed subscores fail here, where the grade is built, not when read.
+        evaluation = dict(self.raw)
+        if isinstance(subscores := evaluation.get("subscores"), list):
+            evaluation["subscores"] = [
+                SubScore.model_validate(subscore).to_summary() for subscore in subscores
+            ]
+        self._evaluation = evaluation
+
+    @property
+    def evaluation(self) -> dict[str, Any]:
+        """A persistence-safe view of ``raw``: subscores reduced to their summaries."""
+        return dict(self._evaluation)
+
+    @classmethod
+    def ungraded(cls) -> Grade:
+        """The grade of a trace that has not been graded."""
+        return cls(is_error=True, content="not graded")
+
+
 class Trace(BaseModel):
-    """The agent's trajectory for one rollout — ordered ``Step``s that ship as spans.
+    """The record of one evaluation: its ordered steps, the agent's answer and the grade.
 
-    A serializable list of ordered ``Step``s plus the run summary: ``status``
-    and the final ``content`` (the graded answer). Everything else the summary
-    exposes is *derived* from the steps — the steps are the record, the
-    summary is a view. :meth:`final` and :meth:`collect` are the two derivation
-    shapes (newest answer wins / every answer in order); ``error`` is a view
-    built on them, and family-specific reads use the same queries with family
-    vocabulary at the call site (e.g. the tool-agent family's reply citations,
-    or its token samples for an external trainer). The unit of training
-    data — family payloads on the steps carry the trainable record.
-    :meth:`record` is the single write path: it appends *and* streams the
-    step to the platform. The task lifecycle (prompt, reward, evaluation)
-    and the live connection live on ``Run``, not here.
-
-    ``steps`` hold family subclasses at runtime; dumps serialize each step by
-    its runtime type so family payloads survive serialization.
+    Summaries such as ``error`` derive from the steps through ``final`` and ``collect``.
     """
 
     steps: list[SerializeAsAny[Step]] = Field(default_factory=list[Step])
@@ -422,38 +413,42 @@ class Trace(BaseModel):
     status: TraceStatus | None = None
     stop_reason: StopReason | None = None
     content: str | None = Field(default=None)
+    grade: Grade = Field(default_factory=Grade.ungraded)
 
-    # Trajectory metadata that has no structured home (provider session info,
-    # external-SDK run stats). Never load-bearing for the platform.
+    # Metadata with no structured home, such as provider session info.
     extra: JsonObject = Field(default_factory=dict)
 
-    # Keys the server-side-collected trajectory; None for eval-only runs.
     trace_id: str | None = Field(default=None)
+    job_id: str | None = None
+    group_id: str | None = None
+    slug: str | None = None
+    # The control-channel url the evaluation ran over, or hud://trace/<id> when hosted.
+    runtime: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
-    def final(self, get: Callable[[Step], T | None]) -> T | None:
-        """The newest step's answer to *get* — the finalized-field query.
+    @classmethod
+    def failed(cls, error: str) -> Trace:
+        """The trace of an evaluation that failed before it started."""
+        return cls(status="error", steps=[Step(source="system", error=error)])
 
-        Asks steps newest-first and returns the first non-``None`` answer
-        (``None`` from a step means "no answer here", so falsy answers like
-        ``""`` or ``[]`` still win). ``None`` when no step answers. Derived
-        summary fields are views on this — see ``error``.
-        """
+    @property
+    def reward(self) -> float:
+        return self.grade.reward
+
+    @property
+    def evaluation(self) -> dict[str, Any]:
+        return self.grade.evaluation
+
+    def final(self, get: Callable[[Step], T | None]) -> T | None:
+        """The newest step's non-``None`` answer to ``get``; falsy answers count."""
         return next(
             (value for step in reversed(self.steps) if (value := get(step)) is not None),
             None,
         )
 
     def collect(self, get: Callable[[Step], T | None]) -> list[T]:
-        """Every step's answer to *get*, in step order — the gathering query.
-
-        Steps answering ``None`` are skipped. Family-specific reads keep
-        their vocabulary at the call site, e.g. the tool-agent family's
-        training samples::
-
-            trace.collect(lambda s: s.sample if isinstance(s, AgentStep) else None)
-        """
+        """Every step's non-``None`` answer to ``get``, in step order."""
         return [value for step in self.steps if (value := get(step)) is not None]
 
     @property
@@ -467,8 +462,20 @@ class Trace(BaseModel):
 
     @property
     def error(self) -> str | None:
-        """The most recent step error, if any (errors live on steps)."""
+        """The most recent step error."""
         return self.final(lambda step: step.error)
+
+    @property
+    def prompt_text(self) -> str | None:
+        """The opening user step's text turns, or ``None`` when no task started."""
+        user = next((step for step in self.steps if step.source == "user"), None)
+        if user is None:
+            return None
+        return "\n\n".join(
+            message.content.text
+            for message in user.messages
+            if isinstance(message.content, TextContent) and message.content.text
+        )
 
     @model_validator(mode="after")
     def _number_steps(self) -> Trace:
@@ -477,14 +484,7 @@ class Trace(BaseModel):
         return self
 
     def record(self, step: Step) -> None:
-        """Append one step and stream it to the platform — the single write path.
-
-        Numbers the step, stamps ``ended_at`` when unset (a step ends when
-        it's recorded), appends it, and emits it as a span (a no-op without
-        an ambient trace context). Callers stamp ``started_at`` themselves
-        when the step wraps awaited work — only the call site knows when
-        that began.
-        """
+        """Number, append and stream one step; callers stamp its ``started_at``."""
         step.step_id = len(self.steps) + 1
         if step.ended_at is None:
             step.ended_at = now_iso()
@@ -493,30 +493,3 @@ class Trace(BaseModel):
 
     def __len__(self) -> int:
         return len(self.steps)
-
-
-__all__ = [
-    "STEP_SCHEMA",
-    "AgentType",
-    "AudioContent",
-    "BlobResourceContents",
-    "ContentBlock",
-    "EmbeddedResource",
-    "ImageContent",
-    "JsonObject",
-    "JsonValue",
-    "PromptMessage",
-    "ResourceLink",
-    "Step",
-    "StepSource",
-    "StopCondition",
-    "StopReason",
-    "TaskCall",
-    "TextContent",
-    "TextResourceContents",
-    "Tool",
-    "ToolCall",
-    "ToolResult",
-    "Trace",
-    "TraceStatus",
-]

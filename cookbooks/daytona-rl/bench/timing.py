@@ -1,7 +1,7 @@
 """Wrap any HUD Provider to record how long acquiring its sandbox took.
 
 A Provider is just ``__call__(task) -> AsyncContextManager[Runtime]``
-(hud/eval/runtime.py:118), so timing one needs no SDK changes.
+(``hud.runtime.Provider``), so timing one needs no SDK changes.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 
 @dataclass
 class TimedProvider:
-    """Delegates to *inner*, appending each spin-up duration to :attr:`spin_ups`."""
+    """Delegates to *inner*, appending each spin-up duration to ``spin_ups``."""
 
     inner: Any
     spin_ups: list[float] = field(default_factory=list)

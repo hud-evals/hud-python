@@ -1,9 +1,4 @@
-"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC.
-
-Translates Claude's computer-use action vocabulary into ``RFBTool`` primitive
-calls. The same RFBTool helpers will back the future Gemini/OpenAI computer
-tools — only the LLM-facing schema differs.
-"""
+"""ClaudeComputerTool: Claude's native ``computer_use`` schema, driven over RFB/VNC."""
 
 from __future__ import annotations
 
@@ -12,9 +7,8 @@ import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err, tool_ok
-from hud.agents.tools.rfb import keysym
+from hud.agents.tools.rfb import RFBTool, keysym
 from hud.capabilities.rfb import ScreenshotEncoding, WebPScreenshotEncoding
 from hud.types import ImageContent, ToolResult
 
@@ -44,10 +38,8 @@ def _hold_keys(text: str | None) -> list[str] | None:
     return keys or None
 
 
-# ─── Claude tool specs (per-model gating) ───────────────────────────
-
-#: Current Claude models take the computer toolset; only the older models listed in
-#: ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
+# Current Claude models take the computer toolset; only the older models listed in
+# ``CLAUDE_COMPUTER_SPECS`` take a single computer tool.
 COMPUTER_TOOLSET_SPEC = ClaudeToolSpec(api_type="computer_toolset_20260801", api_name="computer")
 
 CLAUDE_COMPUTER_SPECS: tuple[ClaudeToolSpec, ...] = (
@@ -239,8 +231,6 @@ class ClaudeComputerTool(RFBTool):
             logger.exception("ClaudeComputerTool action %s failed", action)
             return tool_err(f"computer action {action!r} failed: {exc}")
 
-    # ─── action dispatch ──────────────────────────────────────────────
-
     async def _dispatch(self, action: str | None, arguments: dict[str, Any]) -> ToolResult:
         match action:
             case "screenshot":
@@ -355,8 +345,6 @@ class ClaudeComputerTool(RFBTool):
         # Most actions return the post-action screenshot so the model can verify.
         return await self.screenshot()
 
-    # ─── zoom ────────────────────────────────────────────────────────
-
     async def _zoom(self, arguments: dict[str, Any]) -> ToolResult:
         region = arguments.get("region")
         if not isinstance(region, (list, tuple)):
@@ -379,9 +367,6 @@ class ClaudeComputerTool(RFBTool):
                 )
             ],
         )
-
-
-# ─── helpers ─────────────────────────────────────────────────────────
 
 
 def _xy(coordinate: Any) -> tuple[int | None, int | None]:
@@ -454,11 +439,3 @@ def _crop_png(
     else:
         cropped.save(buf, format="PNG")
     return buf.getvalue(), encoding.mime_type
-
-
-__all__ = [
-    "CLAUDE_COMPUTER_SPECS",
-    "COMPUTER_TOOLSET_SPEC",
-    "GENERIC_COMPUTER_SPEC",
-    "ClaudeComputerTool",
-]

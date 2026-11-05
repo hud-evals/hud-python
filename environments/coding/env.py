@@ -11,7 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from hud.environment import Environment, Workspace
+from hud import Environment
+from hud.environment import Workspace
 from hud.graders import EvaluationResult, combine
 from hud.settings import settings
 from pydantic import Field

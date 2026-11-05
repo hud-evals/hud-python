@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from hud.agents.tools import RFBTool
 from hud.agents.tools.base import tool_err
+from hud.agents.tools.rfb import RFBTool
 from hud.types import ImageContent, TextContent, ToolResult
 
 from .base import OpenAIToolSpec
@@ -26,7 +26,6 @@ def last_image_data(result: ToolResult) -> str | None:
 
 
 def last_image_content(result: ToolResult) -> ImageContent | None:
-    """Most recent screenshot block in a tool result."""
     for block in reversed(result.content):
         if isinstance(block, ImageContent):
             return block
@@ -242,6 +241,3 @@ def _hold_keys(keys: Any) -> list[str] | None:
     if not isinstance(keys, list) or not all(isinstance(key, str) and key for key in keys):
         raise ValueError("keys must be a list of non-empty strings")
     return [_map_key(key) for key in cast("list[str]", keys)]
-
-
-__all__ = ["OPENAI_COMPUTER_SPEC", "OpenAIComputerTool"]

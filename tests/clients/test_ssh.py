@@ -16,11 +16,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Task
 from hud.capabilities import SSHClient
 from hud.clients import connect
-from hud.eval import LocalRuntime, Task
-from hud.eval.runtime import Runtime
+from hud.runtime import LocalRuntime, Runtime
 from tests.clients.conftest import Action, control_peer, relayed
 from tests.conftest import eventually
 from tests.fixtures.relay import FlakyRelay, relay

@@ -20,8 +20,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from hud import Task
 from hud.agents.base import Agent
-from hud.eval import (
+from hud.runtime import (
     DockerRuntime,
     HUDRuntime,
     LocalRuntime,
@@ -30,7 +31,6 @@ from hud.eval import (
     RuntimeConfig,
     Shared,
     SubprocessRuntime,
-    Task,
 )
 from tests.conftest import eventually
 from tests.eval.conftest import SESSION, SESSIONS, gone, host_on_runtime
@@ -40,7 +40,8 @@ from tests.fixtures.envs import source
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from hud.eval import Provider, Run
+    from hud import Run
+    from hud.runtime import Provider
     from tests.fixtures.services import FakeServices
 
 CONTAINER = pytest.param("DockerRuntime", marks=[pytest.mark.e2e, pytest.mark.docker])
@@ -178,8 +179,8 @@ async def test_a_runtime_places_the_env_carries_its_frames_and_leaves_nothing_be
         job = await row.run(ScriptedAgent(word or "x"), runtime=provider)
         await eventually(nothing_left)
 
-    (run,) = job.runs
-    assert (run.reward, run.trace.status) == (reward, status)
+    (trace,) = job.traces
+    assert (trace.reward, trace.status) == (reward, status)
 
 
 @pytest.mark.parametrize(
@@ -197,9 +198,9 @@ async def test_an_env_that_cannot_serve_fails_the_run_before_the_prompt_and_is_c
         job = await Task(env=fixture, id="never").run(ScriptedAgent("x"), runtime=provider)
         await eventually(nothing_left)
 
-    (run,) = job.runs
-    assert (run.trace.status, run.prompt, job.errors) == ("error", None, [run])
-    assert (run.trace.error or "").startswith(("[provisioning] ", "[starting task] "))
+    (trace,) = job.traces
+    assert (trace.status, trace.prompt_text, job.errors) == ("error", None, [trace])
+    assert (trace.error or "").startswith(("[provisioning] ", "[starting task] "))
 
 
 @pytest.mark.parametrize("runtime", EVERY_RUNTIME)
@@ -248,6 +249,6 @@ async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(
         job = await row.run(ScriptedAgent("secret"), runtime=provider)
         await eventually(nothing_left)
 
-    (run,) = job.runs
-    assert run.reward == reward
-    assert ("runtime session contains" in (run.trace.error or "")) is link
+    (trace,) = job.traces
+    assert trace.reward == reward
+    assert ("runtime session contains" in (trace.error or "")) is link

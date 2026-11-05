@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from hud import Task
 from hud.clients import connect
 from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 from tests.environment.conftest import wire
 
 if TYPE_CHECKING:

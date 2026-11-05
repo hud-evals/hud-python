@@ -22,7 +22,7 @@ a [`TrainingClient`](#trainingclient) except the last.
 | Client-side custom loss | `forward_backward_custom(trajectories, loss_fn)` | `optim_step(...)` |
 | Low-level | `forward(...)` then your loss then `backward(forward_id, weights)` | `optim_step(...)` |
 | Supervised (SFT) | any path with `loss_fn="cross_entropy"` (`BuiltinLoss.CROSS_ENTROPY`) | as above |
-| External RL stack | export each [`Run`](/v6/reference/types#run)'s `reward` and `trace_id`; no `TrainingClient` | owned by your stack |
+| External RL stack | export each [`Trace`](/v6/reference/types#trace)'s `reward` and `trace_id`; no `TrainingClient` | owned by your stack |
 
 Gradients accumulate across `forward_backward` / `forward_backward_custom` / `backward` calls until an
 `optim_step` (or `step`, which calls both) applies them, checkpoints, and promotes the new weights.
@@ -33,16 +33,16 @@ Gradients accumulate across `forward_backward` / `forward_backward_custom` / `ba
 | --- | --- |
 | Forked model slug | The gateway string you both sample and train; weights advance behind it in place. |
 | [`create_agent`](/v6/reference/agents#create-agent) `completion_kwargs` | Marks rollouts for token capture (`extra_body={"return_token_ids": True}`); OpenAIChatConfig-only (see [Token capture](#token-capture)). |
-| [`Job`](/v6/reference/types#job) / `group` | The receipt collecting a batch's graded [`Run`](/v6/reference/types#run)s; `group` sets rollouts per task, the GRPO group. |
-| [`Run`](/v6/reference/types#run) | One graded rollout; carries its `reward` and either inline token samples or a `trace_id`. |
+| [`Job`](/v6/reference/types#job) / `group` | The receipt collecting a batch's graded [traces](/v6/reference/types#trace); `group` sets rollouts per task, the GRPO group. |
+| [`Trace`](/v6/reference/types#trace) | One graded rollout; carries its `reward` and either inline token samples or a `trace_id`. |
 | `TrainingClient` | Drives managed training for one model slug. |
 | `CheckpointResponse` | One node in the model's checkpoint tree. |
 
 ## TrainingClient
 
 A `TrainingClient` drives managed training for one model: it accumulates gradients from rewarded
-trajectories and advances the weights behind the model's gateway slug in place. Inputs are `Run`s (sent
-inline) or `trace_id` strings (resolved server-side); the two can be mixed.
+trajectories and advances the weights behind the model's gateway slug in place. Inputs are graded
+traces (sent inline) or `trace_id` strings (resolved server-side); the two can be mixed.
 
 ```python
 TrainingClient(model, *, api_key=None, base_url=None, api_url=None)
@@ -74,7 +74,7 @@ Advantages are group-relative (GRPO-style) when `group_size` is set, normalized 
 **groups** of that size; `None` treats the whole batch as one group. The `loss_fn` selects the
 policy-gradient objective applied on top, defaulting to `importance_sampling` (not GRPO itself). The
 batch must divide evenly into groups - `forward_backward` rejects a partial final group before spending
-a forward pass - and runs that share a `group_id` must be adjacent, as in `job.runs`. `num_substeps`
+a forward pass - and traces that share a `group_id` must be adjacent, as in `job.traces`. `num_substeps`
 splits the batch for gradient accumulation.
 
 ## Inputs
@@ -85,12 +85,12 @@ A training input is a recorded trajectory by id, or an inline one:
 TrainInput = str | TrajectoryPayload          # trace_id, or inline tokens + reward
 ```
 
-The methods accept `str | Run | TrajectoryPayload`, mixed freely. A `Run` is converted automatically -
+The methods accept `str | Trace | TrajectoryPayload`, mixed freely. A trace is converted automatically -
 inline `TrajectoryPayload` when it carries token-level samples (local rollout), else its `trace_id`
-(remote rollout). Build a `TrajectoryPayload` yourself when the tokens didn't come from a `Run` at all -
+(remote rollout). Build a `TrajectoryPayload` yourself when the tokens didn't come from a trace at all -
 e.g. an opponent move sampled inside the environment during self-play, trained with its own reward.
-Timed-out runs and runs whose `grade.is_error` is true are rejected unless you provide an explicit
-`TrajectoryPayload` reward. With GRPO, exclude the entire `group_id`, not only the failed
+Timed-out traces and traces whose `grade.is_error` is true are rejected unless you provide an
+explicit `TrajectoryPayload` reward. With GRPO, exclude the entire `group_id`, not only the failed
 rollout, so the group baseline remains valid.
 
 | Type | Fields |
@@ -108,7 +108,7 @@ The token ids and logprobs a sample needs come from the gateway. `completion_kwa
 and it lives only on `OpenAIChatConfig`, so token capture runs through `OpenAIChatAgent` (the agent
 [`create_agent`](/v6/reference/agents#create-agent) selects for gateway models routed over Chat
 Completions). Setting `extra_body={"return_token_ids": True}` is enough: that agent sets `logprobs=True`
-automatically and writes a `Sample` onto each turn, which a `Run` converts to a `TrajectoryPayload` for
+automatically and writes a `Sample` onto each turn, which a trace converts to a `TrajectoryPayload` for
 training.
 
 ```python
@@ -203,5 +203,5 @@ Under the hood `forward` returns a `ForwardResult` (`forward_id` + `data: list[D
 | `hud models head <model> [--set <checkpoint-id>]` | Show, or set (rollback/select), the active checkpoint. |
 
 For the end-to-end loop see [training agents](/v6/guides/training-agents); for the
-[`Job`](/v6/reference/types#job) and [`Run`](/v6/reference/types#run) the trainer consumes see
+[`Job`](/v6/reference/types#job) and [`Trace`](/v6/reference/types#trace) the trainer consumes see
 [types](/v6/reference/types), and for where rollouts run see [runtimes](/v6/reference/runtime).

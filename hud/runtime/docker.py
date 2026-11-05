@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
-from hud.clients import DEFAULT_READY_TIMEOUT
+from hud.clients.client import DEFAULT_READY_TIMEOUT
 from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
@@ -29,16 +29,14 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
-logger = logging.getLogger("hud.eval.runtime")
+logger = logging.getLogger("hud.runtime")
 
 _SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
-#: DockerRuntime always serves HUD environments, so this is part of the
-#: provider contract rather than a per-image option. This is intentionally a
-#: default-allow compatibility profile: Workspace's bwrap sessions need the
-#: namespace and mount syscalls, while unrelated kernel interfaces stay denied.
-_DOCKER_SECCOMP_PROFILE = Path(__file__).parent.parent / "docker-seccomp.json"
+# Applied to every HUD environment, and default-allow on purpose: Workspace's bwrap
+# sessions need the namespace and mount syscalls; unrelated kernel interfaces stay denied.
+_DOCKER_SECCOMP_PROFILE = Path(__file__).parent / "docker-seccomp.json"
 _DOCKER_SECURITY_ARGS = (
     "--security-opt",
     f"seccomp={_DOCKER_SECCOMP_PROFILE}",

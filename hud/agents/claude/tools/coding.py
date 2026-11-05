@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 from hud.types import TextContent, ToolResult
 
 from .base import ClaudeToolSpec, is_anthropic_model
@@ -211,13 +211,3 @@ class ClaudeTextEditorTool(SSHTool):
             text += "\n"
         lines.insert(line, text)
         return await self.file_write(path, "".join(lines))
-
-
-__all__ = [
-    "CLAUDE_BASH_SPEC",
-    "CLAUDE_TEXT_EDITOR_SPEC",
-    "GENERIC_BASH_SPEC",
-    "GENERIC_TEXT_EDITOR_SPEC",
-    "ClaudeBashTool",
-    "ClaudeTextEditorTool",
-]

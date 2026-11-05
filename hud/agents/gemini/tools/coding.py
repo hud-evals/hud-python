@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from google.genai import types as genai_types
 
-from hud.agents.tools import SSHTool
 from hud.agents.tools.base import result_text, tool_err
+from hud.agents.tools.ssh import SSHTool
 
 from .base import GeminiToolSpec
 
@@ -138,6 +138,3 @@ def required_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} is required")
     return value
-
-
-__all__ = ["GeminiEditTool", "GeminiShellTool", "GeminiWriteTool"]

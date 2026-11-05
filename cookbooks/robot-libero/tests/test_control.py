@@ -11,7 +11,9 @@ import pytest
 from hud.agents.base import Agent
 from hud.environment import Environment
 from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
-from hud.eval import LocalRuntime, Task, rollout
+from hud import Task
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from hud.settings import settings
 
 if TYPE_CHECKING:
@@ -93,7 +95,6 @@ async def test_moving_and_gripping_through_the_tools_solves_the_task_and_returns
     DirectControl(
         reference=lambda data: np.r_[np.asarray(data["observation/state"]).reshape(-1)[:6], -1.0],
         max_step={"gripper.open_close": 2.0},
-        time_limit=20,
     ).attach(endpoint)
 
     @env.initialize

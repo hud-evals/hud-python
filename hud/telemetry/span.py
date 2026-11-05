@@ -1,12 +1,4 @@
-"""OpenTelemetry-shaped span types emitted by the SDK.
-
-Spans are the single wire format for platform ingest. The envelope carries
-domain data as a pair of namespaced attributes: ``hud.schema`` tags how to
-decode and ``hud.payload`` holds the one domain object the tag describes;
-``@instrument`` debug spans carry neither, only generic diagnostics. Domain
-schemas (e.g. the step stream) own their tag values and payload shapes —
-this module knows none of them.
-"""
+"""OpenTelemetry-shaped spans, the SDK's single wire format for platform ingest."""
 
 from __future__ import annotations
 
@@ -20,12 +12,12 @@ from hud.utils.serialization import JsonObject
 SpanKind: TypeAlias = Literal["INTERNAL", "SERVER", "CLIENT", "PRODUCER", "CONSUMER"]
 SpanStatusCode: TypeAlias = Literal["UNSET", "OK", "ERROR"]
 
-#: Attribute carrying the schema tag a backend serializer dispatches on.
+# Attribute carrying the schema tag a backend serializer dispatches on.
 SCHEMA_ATTRIBUTE = "hud.schema"
-#: Attribute carrying the schema-tagged domain object — one payload per span.
-#: Also the payload key on ``@instrument`` request/result span events.
+# Attribute carrying the schema-tagged domain object — one payload per span.
+# Also the payload key on ``@instrument`` request/result span events.
 PAYLOAD_ATTRIBUTE = "hud.payload"
-#: Attribute carrying the task-run id the exporter groups uploads by.
+# Attribute carrying the task-run id the exporter groups uploads by.
 TASK_RUN_ID_ATTRIBUTE = "hud.task_run_id"
 
 
@@ -38,11 +30,7 @@ class SpanEvent(BaseModel):
 
 
 class Span(BaseModel):
-    """Fine-grained, OpenTelemetry-shaped span.
-
-    Domain identifiers live in namespaced attributes such as
-    ``hud.task_run_id``; ``trace_id``/``span_id`` describe the telemetry graph.
-    """
+    """An OpenTelemetry-shaped span; its HUD trace id is the ``hud.task_run_id`` attribute."""
 
     name: str
     trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
@@ -73,16 +61,3 @@ def normalize_trace_id(trace_id: str) -> str:
         return uuid.UUID(trace_id).hex
     except ValueError:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"hud.task_run:{trace_id}").hex
-
-
-__all__ = [
-    "PAYLOAD_ATTRIBUTE",
-    "SCHEMA_ATTRIBUTE",
-    "TASK_RUN_ID_ATTRIBUTE",
-    "Span",
-    "SpanEvent",
-    "SpanKind",
-    "SpanStatusCode",
-    "new_span_id",
-    "normalize_trace_id",
-]

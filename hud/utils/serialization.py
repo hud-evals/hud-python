@@ -5,9 +5,8 @@ from typing import Any, TypeAlias
 
 import pydantic_core
 
-# JSON-compatible scalar/container values. Nested JSON payloads are intentionally
-# opaque to Pydantic; recursive aliases make schema generation fragile across
-# supported Python/Pydantic versions. (Public home: re-exported by ``hud.types``.)
+# Nested JSON payloads are intentionally opaque to Pydantic; recursive aliases make
+# schema generation fragile across supported Python/Pydantic versions.
 JsonValue: TypeAlias = str | int | float | bool | list[Any] | dict[str, Any] | None
 JsonObject: TypeAlias = dict[str, JsonValue]
 

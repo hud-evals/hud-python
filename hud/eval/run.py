@@ -1,22 +1,4 @@
-"""A run: its record (:class:`Run`) and the local driver that produces one
-(:func:`rollout`).
-
-:func:`rollout` connects to a substrate's control channel (wherever it is —
-loopback, a container, a cloud sandbox), starts the task, drives the agent,
-grades, and tears down, filling a :class:`Run` along the way::
-
-    run = await rollout(task, agent, runtime=LocalRuntime("env.py"))
-
-It is the *client-here* path: the agent loop runs in this process against a
-:class:`~hud.eval.runtime.Provider`'s channel. The same driver handles hosted
-execution once delegated, each ``Chat`` turn, and each ``AgentTool`` invocation.
-Delegated hosted execution is a different act — see
-:class:`hud.eval.runtime.HostedRuntime` — and the scheduler (:meth:`Taskset.run`)
-chooses between them; the atom itself never branches on placement.
-
-:class:`Run` is also the receipt a delegated execution folds its platform
-result into, so it lives here with the atom rather than importing back into it.
-"""
+"""The live handle an agent drives, and the rollout that grades it into a trace."""
 
 from __future__ import annotations
 
@@ -26,18 +8,17 @@ import logging
 import math
 import traceback
 import uuid
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from hud.agents.cli import CLIAgent
+from hud.agents.types import AgentConfig
 from hud.capabilities import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients import HudProtocolError, connect
-from hud.graders.results import SubScore
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import Grade, PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -50,10 +31,10 @@ if TYPE_CHECKING:
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
-    from hud.environment import WorkspaceRoute
+    from hud.environment.egress import WorkspaceRoute
+    from hud.runtime import Provider
+    from hud.runtime.core import RuntimeConfig
 
-    from .runtime import Provider
-    from .runtime.core import RuntimeConfig
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -124,16 +105,9 @@ def parent_trace(trace_id: str) -> uuid.UUID | None:
 
 
 def _prompt_messages(item: Any) -> list[PromptMessage]:
-    """Coerce one wire prompt turn onto the ``PromptMessage`` vocabulary.
-
-    Turns are env-authored: chat-style dicts (plain-string content wrapped as
-    text, roles outside the user/assistant vocabulary such as ``system``
-    coerced to ``user``), already-built ``PromptMessage``s, or anything else
-    stringified. A ``PromptMessage`` holds one content block, so a turn whose
-    content is a list of blocks becomes one message per block. Coercion may be
-    lossy — prompt context is what the agent is given, and the verbatim
-    payload stays on the setup ``task`` step's result.
-    """
+    # Lossy by design: the verbatim prompt stays on the setup task step. A
+    # PromptMessage holds one content block, so a multi-block turn becomes one
+    # message per block.
     if isinstance(item, PromptMessage):
         return [item]
     if not isinstance(item, dict):
@@ -155,13 +129,6 @@ def _prompt_messages(item: Any) -> list[PromptMessage]:
 
 
 def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Read the start frame's per-episode ``bindings`` (capability name -> data).
-
-    Episode-scoped connection data the template published alongside the
-    prompt, keyed like the manifest's bindings so an agent looks its
-    capability's entry up by name. A malformed frame raises rather than
-    silently handing the agent an empty mapping.
-    """
     raw = started.get("bindings")
     if raw is None:
         return {}
@@ -172,61 +139,26 @@ def _episode_bindings(started: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return cast("dict[str, dict[str, Any]]", raw)
 
 
-@dataclass(slots=True)
-class Grade:
-    """Structured result from grading one run."""
-
-    reward: float = 0.0
-    done: bool = True
-    content: str | None = None
-    info: dict[str, Any] = field(default_factory=dict)
-    is_error: bool = False
-    raw: dict[str, Any] = field(default_factory=dict)
-    evaluation: dict[str, Any] = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self.evaluation = dict(self.raw)
-        if isinstance(subscores := self.evaluation.get("subscores"), list):
-            self.evaluation["subscores"] = [
-                SubScore.model_validate(subscore).to_summary() for subscore in subscores
-            ]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Grade:
-        """Parse the wire grade frame (canonical keys: the server guarantees them)."""
-        score = data.get("score")
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, (int, float))
-            or not math.isfinite(score)
-        ):
-            raise HudProtocolError(
-                -32603, f"tasks.grade: result must include a finite numeric 'score', got {score!r}"
-            )
-        raw_info = data.get("info")
-        raw = dict(data)
-        return cls(
-            reward=float(score),
-            done=bool(data.get("done", True)),
-            content=data.get("content") if isinstance(data.get("content"), str) else None,
-            info=raw_info if isinstance(raw_info, dict) else {},
-            is_error=bool(data.get("isError", False)),
-            raw=raw,
+def parse_grade(frame: dict[str, Any]) -> Grade:
+    score = frame.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+        raise HudProtocolError(
+            -32603, f"tasks.grade: result must include a finite numeric 'score', got {score!r}"
         )
-
-    @classmethod
-    def ungraded(cls) -> Grade:
-        """The grade of a run that has not been graded."""
-        return cls(is_error=True, content="not graded")
+    info = frame.get("info")
+    content = frame.get("content")
+    return Grade(
+        reward=float(score),
+        done=bool(frame.get("done", True)),
+        content=content if isinstance(content, str) else None,
+        info=info if isinstance(info, dict) else {},
+        is_error=bool(frame.get("isError", False)),
+        raw=dict(frame),
+    )
 
 
 class Run:
-    """Live handle for one task: the task lifecycle plus the agent's ``Trace``.
-
-    ``client`` is absent on a :meth:`failed` run (a rollout that never
-    launched) and on delegated runs; accessing it there raises instead of
-    half-working.
-    """
+    """The live handle an agent drives for one task; its ``trace`` is graded on exit."""
 
     def __init__(
         self,
@@ -244,90 +176,31 @@ class Run:
         self._best_effort_grade = best_effort_grade
         self.runtime_config = runtime_config
         self.connections = {connection.name: connection for connection in connections}
-        #: The task's opening prompt as ``tasks.start`` returned it: plain
-        #: text, or a list of message dicts (``{"role", "content"}``) for
-        #: chat-style / multi-turn prompts. Agents consume the normalized
-        #: views: :attr:`prompt_messages` / :attr:`prompt_text`.
         self.prompt: str | list[Any] | None = None
-        #: Per-episode binding data by capability name, from the start frame's
-        #: ``bindings``: connection details that exist only for this episode —
-        #: a robot slot token, a per-episode url — refining the manifest's
-        #: env-lifetime bindings. Empty when the env published none.
+        # Episode-scoped connection data (a robot slot token, a per-episode url)
+        # refining the manifest's env-lifetime bindings.
         self.bindings: dict[str, dict[str, Any]] = {}
-        #: The structured grading result; :meth:`Grade.ungraded` until graded.
-        self.grade = Grade.ungraded()
         self.trace = Trace()
-        #: Batch this run belongs to (set by the runner); platform job + GRPO group.
-        self.job_id: str | None = None
-        self.group_id: str | None = None
-        #: The task slug this run came from (set by the rollout engine). Lets
-        #: ``Job.results`` key runs back to their task without positional zip.
-        self.slug: str | None = None
-        # Written by :func:`rollout` once placement is acquired.
-        self._runtime: str | None = None
 
     @property
     def client(self) -> HudClient:
-        """The live client driving this run."""
         if self._client is None:
-            raise RuntimeError(
-                "this run has no live client (delegated execution, or it failed before launch)"
-            )
+            raise RuntimeError("this run has no live client")
         return self._client
 
     @property
     def task_id(self) -> str:
-        """Which task of the environment this run started.
-
-        What an agent driving a whole taskset has to branch on: ``slug`` is
-        assigned by the runner and is not set while the agent is running.
-        """
         return self._task_id
 
     @property
-    def reward(self) -> float:
-        """The graded reward (``grade.reward``)."""
-        return self.grade.reward
-
-    @property
-    def evaluation(self) -> dict[str, Any]:
-        """A persistence-safe view of the task's evaluation result."""
-        return dict(self.grade.evaluation)
-
-    @property
-    def trace_id(self) -> str | None:
-        """Keys the agent's trajectory; pass the ``Run`` (or this id) to training."""
-        return self.trace.trace_id
-
-    @property
-    def runtime(self) -> str | None:
-        """Control-channel url of the runtime this run executed against.
-
-        The factual placement record for the receipt; ``None`` on a run that
-        failed before a substrate came up.
-        """
-        return self._runtime
-
-    @property
     def prompt_messages(self) -> list[PromptMessage]:
-        """The prompt as normalized ``PromptMessage`` turns.
-
-        The structured form agents consume and the opening ``user`` step
-        records: a text prompt (or none) is one user turn; chat-style lists
-        map turn by turn, a turn of several blocks to one message per block.
-        """
         if self.prompt is None or isinstance(self.prompt, str):
             return _prompt_messages({"content": self.prompt or ""})
         return [message for item in self.prompt for message in _prompt_messages(item)]
 
     @property
     def prompt_text(self) -> str:
-        """The prompt flattened to plain text, for string-only agent backends.
-
-        Text content of each turn joined by blank lines; non-text content
-        (images, resources) is dropped — consume :attr:`prompt_messages`
-        where structured turns are supported.
-        """
+        """The prompt's text turns joined by blank lines; images and resources are dropped."""
         return "\n\n".join(
             message.content.text
             for message in self.prompt_messages
@@ -335,7 +208,6 @@ class Run:
         )
 
     def record(self, step: Step) -> None:
-        """Record one step on the trace (:meth:`hud.types.Trace.record`)."""
         self.trace.record(step)
 
     async def __aenter__(self) -> Self:
@@ -365,7 +237,7 @@ class Run:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
-        # Ctrl-C isn't a gradable outcome: tear down without grading.
+        # Cancellation isn't a gradable outcome: tear down without grading.
         if exc_type is not None and issubclass(
             exc_type, asyncio.CancelledError | KeyboardInterrupt
         ):
@@ -382,13 +254,13 @@ class Run:
 
         try:
             evaluation = await self.client.grade(answer)
-            grade = Grade.from_dict(evaluation)
+            grade = parse_grade(evaluation)
         except Exception as grade_exc:
             if exc_type is None and not self._best_effort_grade:
                 raise
             detail = "".join(traceback.format_exception_only(grade_exc)).strip()
             logger.warning("best-effort grade failed: %s", detail)
-            self.grade = Grade(
+            self.trace.grade = Grade(
                 content=detail,
                 is_error=True,
                 raw={
@@ -402,7 +274,7 @@ class Run:
             self.record(Step(source="system", error=f"[grading] {detail}"))
             return False
 
-        self.grade = grade
+        self.trace.grade = grade
         self.record(
             Step(
                 source="task",
@@ -413,25 +285,12 @@ class Run:
                     result=evaluation,
                 ),
                 started_at=started_at,
-                error=self.grade.content if self.grade.is_error else None,
+                error=grade.content if grade.is_error else None,
             ),
         )
         if self.trace.status is None:
             self.trace.status = "completed"
         return False
-
-    @classmethod
-    def failed(cls, error: str) -> Run:
-        """A spent run representing a rollout that failed before launching.
-
-        Carries no live client; only the pre-launch failure path synthesizes
-        one — a rollout that failed *mid-run* keeps its real ``Run`` (prompt,
-        runtime, partial trace) with the error recorded on the trace.
-        """
-        run = cls(None, "", {})
-        run.trace.status = "error"
-        run.record(Step(source="system", error=error))
-        return run
 
 
 def _gateway_relay(
@@ -491,7 +350,7 @@ async def _verify(
     answer = {"answer": actor_result}
     started_at = now_iso()
     evaluation = await client.grade(answer)
-    run.grade = Grade.from_dict(evaluation)
+    grade = run.trace.grade = parse_grade(evaluation)
     run.record(
         Step(
             source="task",
@@ -502,7 +361,7 @@ async def _verify(
                 result=evaluation,
             ),
             started_at=started_at,
-            error=run.grade.content if run.grade.is_error else None,
+            error=grade.content if grade.is_error else None,
         )
     )
 
@@ -518,38 +377,15 @@ async def rollout(
     rollout_timeout: float | None = None,
     connections: Sequence[Connection] = (),
     workspace_routes: Sequence[WorkspaceRoute] = (),
-) -> Run:
-    """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
+) -> Trace:
+    """Drive ``agent`` through ``task`` on ``runtime`` and return the graded trace.
 
-    The local driver (*client-here*): acquire the provider's substrate,
-    connect, start the task, let ``agent`` fill ``run.trace``, grade on exit
-    (``run.reward``), tear down. The substrate may be anywhere — a local
-    subprocess, a container, a cloud sandbox — the channel bridges it; the
-    agent loop always runs in *this* process. Delegated hosted execution
-    does not come through here; see :class:`hud.eval.runtime.HostedRuntime`.
-
-    ``job_id``/``group_id`` are batch identities threaded by the scheduler;
-    there are no standalone traces, so when no ``job_id`` is given the atom
-    registers a single-run job itself. ``trace_id`` is minted per rollout
-    unless one is threaded in. It is bound into the trace context (so
-    ``@instrument`` spans attribute to it — always, even with telemetry off,
-    for local training) and the trace is reported to HUD.
-
-    Failures are isolated so one bad rollout never collapses a batch, without
-    erasing evidence: a failure *before* the run is live (provision, connect,
-    start) yields a synthesized :meth:`Run.failed`; a failure *mid-run* keeps
-    the real run — prompt, placement record, and the partial trace the agent
-    built — marked as errored, and still graded best-effort so a salvageable
-    reward is captured. Either way the logged warning names the lifecycle
-    phase (``provisioning``, ``starting task``, ``agent loop``, ``grading``,
-    ``cleanup``) so
-    callers can tell where the failure landed without reading the trace.
-
-    ``rollout_timeout`` bounds execution through grading. A timeout cancels the
-    env's task, lets provider teardown finish in the background, and returns an
-    errored run.
+    Failures come back on the trace instead of raising: one before the run is
+    live yields ``Trace.failed``; one mid-run keeps the partial trace,
+    errored and graded best-effort. ``rollout_timeout`` bounds everything
+    through grading; on expiry the env's task is cancelled.
     """
-    from .runtime.core import resolve_runtime_config
+    from hud.runtime.core import resolve_runtime_config  # hud.runtime imports this module
 
     actor_runtime_config = resolve_runtime_config(runtime, task)
     agent_timeout = validate_rollout_timeouts(
@@ -561,18 +397,12 @@ async def rollout(
             resolve_runtime_config(runtime, task.verifier) if task.verifier is not None else None
         ),
     )
-    if job_id is None:  # no standalone traces: a lone rollout is a job of one
+    if job_id is None:  # every trace reports under a job; a lone rollout is a job of one
         job_id = uuid.uuid4().hex
         await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
     parent = parent_trace(trace_id)
     parent_trace_id = parent.hex if parent is not None else None
-    # Report the model the agent will sample so the platform attributes the
-    # trace to it on enter. Only LLM tool agents carry an inference-model slug
-    # (``config.model``); robot/other agents have none. Local import avoids an
-    # eval<->agents import cycle.
-    from hud.agents.types import AgentConfig
-
     config = getattr(agent, "config", None)
     agent_model = config.model if isinstance(config, AgentConfig) else None
     with set_trace_context(trace_id, parent_trace_id=parent_trace_id):
@@ -585,6 +415,7 @@ async def rollout(
             parent_trace_id=parent_trace_id,
         )
         run: Run | None = None
+        failed: Trace | None = None
         cancellation: asyncio.CancelledError | None = None
         _phase = "provisioning"
         rollout_expired = False
@@ -634,9 +465,9 @@ async def rollout(
                         runtime_config=addr.config or actor_runtime_config,
                         connections=bound,
                     )
-                    live._runtime = addr.url  # the placement record for the receipt
-                    async with live:  # start on enter; complete on exit
-                        run = live  # bound only once live: an earlier failure synthesizes
+                    live.trace.runtime = addr.url
+                    async with live:
+                        run = live  # set once live; earlier failures yield Trace.failed
                         _phase = "agent loop"
                         try:
                             try:
@@ -668,12 +499,11 @@ async def rollout(
                         _phase = "grading"
 
                     if verifier is not None:
-                        actor_result = live.grade.raw
+                        actor_result = live.trace.grade.raw
                         assert actor_client.manifest is not None
                         actor_session_id = actor_client.manifest.session_id
-                        # The verifier is authoritative. Once its phase begins,
-                        # an actor-side grade must not survive a verifier failure.
-                        live.grade = Grade.ungraded()
+                        # The verifier is authoritative: no actor grade survives its failure.
+                        live.trace.grade = Grade.ungraded()
                     if shared_verifier:
                         assert verifier is not None
                         _phase = "verifying"
@@ -730,11 +560,12 @@ async def rollout(
                 detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
                 logger.warning(detail)
                 if run is None:
-                    run = Run.failed(detail)
+                    failed = Trace.failed(detail)
+                    failed.stop_reason = "timeout"
                 else:
                     run.trace.status = "error"
                     run.record(Step(source="system", error=detail))
-                run.trace.stop_reason = "timeout"
+                    run.trace.stop_reason = "timeout"
         except asyncio.CancelledError as cancel:
             if client is not None:
                 await client._abandon_task()
@@ -742,41 +573,42 @@ async def rollout(
             driver.add_done_callback(_consume_task_result)
             cancellation = cancel
             if run is None:
-                run = Run.failed(f"[{_phase}] cancelled")
-            run.trace.status = "cancelled"
+                failed = Trace.failed(f"[{_phase}] cancelled")
+                failed.status = "cancelled"
+            else:
+                run.trace.status = "cancelled"
         except Exception as exc:
-            # format_exception_only keeps __notes__ — a provider attaches what
-            # only it can see there, like the sandbox's env output on a failed
-            # handshake — where str(exc) would drop them.
+            # Unlike str(exc), this keeps the __notes__ providers attach (e.g. env output).
             detail = "".join(traceback.format_exception_only(exc)).strip()
             if run is None:
                 # No run exists yet, so this log is the only place the traceback survives.
                 logger.warning(
                     "rollout failed before launch (%s): %s", _phase, detail, exc_info=True
                 )
-                run = Run.failed(f"[{_phase}] {detail}")
+                failed = Trace.failed(f"[{_phase}] {detail}")
             else:
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
-        assert run is not None  # the body bound it, or the handler synthesized it
-        run.connections.clear()
-        run.trace.trace_id = trace_id
-        run.job_id = job_id
-        run.group_id = group_id
-        run.slug = task.slug
+        if run is not None:
+            run.connections.clear()
+            trace = run.trace
+        else:
+            assert failed is not None
+            trace = failed
+        trace.trace_id = trace_id
+        trace.job_id = job_id
+        trace.group_id = group_id
+        trace.slug = task.slug
         if cancellation is not None:
             # The platform still closes the trace; a hung report must not hold the cancel.
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(trace_exit(run), timeout=5.0)
+                await asyncio.wait_for(trace_exit(trace), timeout=5.0)
             raise cancellation
-        await trace_exit(run)
-    return run
+        await trace_exit(trace)
+    return trace
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:
     with contextlib.suppress(asyncio.CancelledError, Exception):
         task.result()
-
-
-__all__ = ["Grade", "Run", "rollout"]

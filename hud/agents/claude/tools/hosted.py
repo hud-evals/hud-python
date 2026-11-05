@@ -15,7 +15,7 @@ from anthropic.types.beta import (
 if TYPE_CHECKING:
     BetaUserLocationParam = Any
 
-from hud.agents.tools import HostedTool
+from hud.agents.tools.hosted import HostedTool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -25,8 +25,6 @@ class ClaudeHostedTool(HostedTool[BetaToolUnionParam]):
 
 @dataclass(frozen=True, kw_only=True)
 class ClaudeWebSearchTool(ClaudeHostedTool):
-    """Claude web search."""
-
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None
@@ -51,8 +49,6 @@ class ClaudeWebSearchTool(ClaudeHostedTool):
 
 @dataclass(frozen=True, kw_only=True)
 class ClaudeWebFetchTool(ClaudeHostedTool):
-    """Claude web fetch."""
-
     max_uses: int | None = None
     allowed_domains: list[str] | None = None
     blocked_domains: list[str] | None = None

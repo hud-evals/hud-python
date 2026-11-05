@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from hud.agents.tools.base import AgentToolSpec
 from hud.agents.tools.base import provider_tool_name as openai_compatible_tool_name
 from hud.types import ImageContent, TextContent, Tool
 
@@ -20,7 +19,6 @@ def format_chat_result(
     call: ToolCall,
     result: ToolResult,
 ) -> ChatCompletionMessageParam | list[ChatCompletionMessageParam]:
-    """Format a tool result for OpenAI-compatible chat completions."""
     text_parts: list[str] = []
     image_parts: list[dict[str, Any]] = []
     items: list[Any] = list(result.content)
@@ -147,12 +145,3 @@ def openai_compatible_tool_param(
             },
         },
     )
-
-
-__all__ = [
-    "AgentToolSpec",
-    "OpenAICompatibleToolParam",
-    "format_chat_result",
-    "openai_compatible_tool_name",
-    "openai_compatible_tool_param",
-]

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from hud.capabilities import Connection, SSHClient
     from hud.eval.run import Run
-    from hud.eval.runtime import RuntimeConfig
+    from hud.runtime import RuntimeConfig
 
 WINDOWS_SHELLS = ("cmd", "powershell")
 PROCESS_CLOSE_TIMEOUT_S = 5.0

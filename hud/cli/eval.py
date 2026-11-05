@@ -1,7 +1,4 @@
-"""``hud eval`` — run an agent over a taskset and report the graded job.
-
-Config precedence: CLI arguments > ``.hud_eval.toml`` > defaults.
-"""
+"""``hud eval`` — run an agent over a taskset; CLI arguments override ``.hud_eval.toml``."""
 
 from __future__ import annotations
 
@@ -21,7 +18,8 @@ from rich import box
 from rich.table import Table
 
 from hud.cli import CLI, CliError, Result, parse_key_value
-from hud.eval import (
+from hud.eval.taskset import Taskset
+from hud.runtime import (
     DaytonaRuntime,
     DockerRuntime,
     HostedRuntime,
@@ -29,7 +27,6 @@ from hud.eval import (
     ModalRuntime,
     Runtime,
     SubprocessRuntime,
-    Taskset,
 )
 from hud.settings import settings
 from hud.types import AgentType
@@ -41,7 +38,8 @@ from hud.utils.process import run_until_terminated
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
-    from hud.eval import Provider, Task
+    from hud.eval.task import Task
+    from hud.runtime import Provider
     from hud.utils.gateway import GatewayModelInfo
 
 hud_console = HUDConsole()
@@ -52,7 +50,7 @@ _CONFIG_PATH = Path(".hud_eval.toml")
 class Placement(StrEnum):
     """Named ``--runtime`` choices; a ``tcp://`` url attaches to a served env instead.
 
-    ``LOCAL`` is composed per row in the command; every other name is a provider
+    ``LOCAL`` starts each row in Docker or a subprocess; the other names are providers
     each row's ``runtime_config`` is handed to as-is.
     """
 
@@ -100,10 +98,6 @@ class EvalConfig(BaseModel):
     auto_respond: bool = False
     group_size: int = 1
     gateway: bool = False
-    #: ``LOCAL`` spawns each row's env (Docker for container rows, a subprocess
-    #: loading the task source otherwise); other names hand rows to that
-    #: provider; a ``tcp://`` url attaches to an already-served env. ``None``
-    #: infers from the source: a file on disk runs locally, a platform taskset hosted.
     runtime: Placement | TcpUrl | None = None
     agent_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
@@ -324,9 +318,7 @@ def eval_command(
     if cfg.agent_type is None:
         # Pick the agent type, then a current catalog model of that type, newest first.
         picked_type = AgentType(
-            hud_console.select(
-                "Select an agent:", choices=[agent.value for agent in AgentType], default=0
-            )
+            hud_console.select("Select an agent:", choices=[agent.value for agent in AgentType])
         )
         picked: dict[str, Any] = {"agent_type": picked_type}
         if settings.api_key:
@@ -351,7 +343,6 @@ def eval_command(
                         {"name": f"{m.name or m.model_name} ({m.model_name})", "value": m}
                         for m in models
                     ],
-                    default=0,
                 ),
             )
             picked["model"] = picked_model.model_name
@@ -522,37 +513,38 @@ def eval_command(
         )
     )
     elapsed = time.monotonic() - started
-    if job.runs and settings.telemetry_enabled and settings.api_key:
+    task_id_by_slug = {task.slug: task.id for task in taskset}
+    if job.traces and settings.telemetry_enabled and settings.api_key:
         hud_console.info(f"{settings.hud_web_url}/jobs/{UUID(job.id)}")
 
     errors = set(map(id, job.errors))
-    if job.runs:
+    if job.traces:
         hud_console.print(f"\n[bold]'{cfg.source}' Results[/bold]")
-        hud_console.print(f"  [dim]Runs:[/dim] {len(job.runs)}")
+        hud_console.print(f"  [dim]Runs:[/dim] {len(job.traces)}")
         hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
         hud_console.print(f"  [dim]Mean reward:[/dim] [green]{job.reward:.3f}[/green]")
         if errors:
             hud_console.print(f"  [dim]Errors:[/dim] [red]{len(errors)}[/red]")
-        failed_mid_run = sum(run.trace.is_error and not run.grade.is_error for run in job.runs)
+        failed_mid_run = sum(trace.is_error and not trace.grade.is_error for trace in job.traces)
         if failed_mid_run:
             hud_console.print(
                 f"  [dim]Failed mid-run, graded:[/dim] [yellow]{failed_mid_run}[/yellow]"
             )
-        if len(job.runs) <= 50:
+        if len(job.traces) <= 50:
             details = Table(title="Details", show_header=True, header_style="bold")
             details.add_column("#", style="dim", justify="right", width=4)
             details.add_column("Prompt", style="dim", max_width=35)
             details.add_column("Answer", style="dim", max_width=35)
             details.add_column("Reward", justify="right", style="green", width=8)
-            for index, run in enumerate(job.runs):
+            for index, trace in enumerate(job.traces):
                 cells = []
-                for text in (run.prompt, run.trace.content):
+                for text in (trace.prompt_text, trace.content):
                     flat = str(text).replace("\n", " ").strip() if text else ""
                     cells.append((flat[:33] + ".." if len(flat) > 35 else flat) or "—")
                 details.add_row(
                     str(index),
                     *cells,
-                    "[red]error[/red]" if id(run) in errors else f"{run.reward:.3f}",
+                    "[red]error[/red]" if id(trace) in errors else f"{trace.reward:.3f}",
                 )
             hud_console.print(details)
         hud_console.print()
@@ -560,21 +552,21 @@ def eval_command(
     result = {
         "job_id": job.id,
         "source": cfg.source,
-        "run_count": len(job.runs),
+        "run_count": len(job.traces),
         "mean_reward": job.reward,
         "error_count": len(errors),
         "elapsed_seconds": elapsed,
         "runs": [
             {
-                "task_id": run.task_id,
-                "slug": run.slug,
-                "reward": run.reward,
-                "is_error": id(run) in errors,
-                "trace_error": run.trace.error if run.trace.is_error else None,
-                "trace_id": run.trace_id,
+                "task_id": task_id_by_slug.get(trace.slug or ""),
+                "slug": trace.slug,
+                "reward": trace.reward,
+                "is_error": id(trace) in errors,
+                "trace_error": trace.error if trace.is_error else None,
+                "trace_id": trace.trace_id,
             }
-            for run in job.runs
+            for trace in job.traces
         ],
     }
     # Errored runs among graded ones still leave a measurement; none graded leaves nothing.
-    return Result(result) if len(errors) == len(job.runs) else result
+    return Result(result) if len(errors) == len(job.traces) else result

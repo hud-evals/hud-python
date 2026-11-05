@@ -19,7 +19,7 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.naming import normalize_environment_name
 from hud.version import __version__
 
-#: ``environments/<id>`` in the SDK repository, with the picker's description.
+# ``environments/<id>`` in the SDK repository, with the picker's description.
 EXAMPLES: dict[str, str] = {
     "coding": "Coding — A repository workspace with a SWE-bench task and hidden-test grading.",
     "cua": "Computer Use — A virtual Linux desktop with deterministic and model-judged grading.",
@@ -69,7 +69,6 @@ def init_command(
             preset = hud_console.select(
                 "Choose an example environment",
                 [{"name": label, "value": example} for example, label in EXAMPLES.items()],
-                default=0,
                 spaced=True,
             )
         elif name is not None:
@@ -168,9 +167,8 @@ def init_command(
                 encoding="utf-8",
             )
     except (httpx.HTTPError, tarfile.TarError, ValueError, OSError) as exc:
-        # Don't leave a half-written tree behind — it would trip the
-        # non-empty-directory guard on the next run. Only remove a directory
-        # this run created (never a dir the user already had).
+        # A half-written tree would trip the non-empty-directory guard on the next run;
+        # remove only a directory this run created.
         if created and target.exists():
             shutil.rmtree(target, ignore_errors=True)
         raise CliError(

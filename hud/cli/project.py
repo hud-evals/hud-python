@@ -79,7 +79,7 @@ class Placement:
     """The Project selected for the current directory, and what selected it."""
 
     project: Project | None
-    #: ``--project``, ``.hud/config.json``, ``HUD_DEFAULT_PROJECT``, or ``team default``.
+    # ``--project``, ``.hud/config.json``, ``HUD_DEFAULT_PROJECT``, or ``team default``.
     source: str
 
     @property

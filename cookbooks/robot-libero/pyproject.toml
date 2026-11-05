@@ -3,10 +3,15 @@ name = "robot-libero"
 version = "0.1.0"
 description = "LIBERO robot manipulation for policies and tool-calling agents (cookbook)"
 requires-python = ">=3.11,<3.13"
-dependencies = ["hud[robot]==0.6.22"]
+dependencies = ["hud[robot]"]
 
 [tool.uv]
 package = false
+
+# Track the SDK from this repo. If you copied this folder out, delete this
+# block to use the released hud from PyPI.
+[tool.uv.sources]
+hud = { path = "../..", editable = true }
 
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio"]

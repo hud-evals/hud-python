@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from google.genai import types as genai_types
 
-from hud.agents.tools import HostedTool
+from hud.agents.tools.hosted import HostedTool
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -16,8 +16,6 @@ class GeminiHostedTool(HostedTool[genai_types.Tool]):
 
 @dataclass(frozen=True, kw_only=True)
 class GeminiGoogleSearchTool(GeminiHostedTool):
-    """Gemini Google Search."""
-
     dynamic_threshold: float | None = None
 
     def to_params(self) -> genai_types.Tool:
@@ -28,15 +26,11 @@ class GeminiGoogleSearchTool(GeminiHostedTool):
 
 @dataclass(frozen=True, kw_only=True)
 class GeminiUrlContextTool(GeminiHostedTool):
-    """Gemini URL context."""
-
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(url_context=genai_types.UrlContext())
 
 
 @dataclass(frozen=True, kw_only=True)
 class GeminiCodeExecutionTool(GeminiHostedTool):
-    """Gemini code execution."""
-
     def to_params(self) -> genai_types.Tool:
         return genai_types.Tool(code_execution=genai_types.ToolCodeExecution())

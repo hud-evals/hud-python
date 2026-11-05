@@ -20,9 +20,11 @@ import numpy as np
 import pytest
 from mcp.shared.exceptions import MCPError
 
+from hud import Task
 from hud.agents.base import Agent
 from hud.environment.robot import DirectControl, wrap
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from tests.conftest import ROBOT_STEP_SCHEMA, steps
 
 from .sims import Arm, ScriptedLLM, arm_env, contract, move, reached
@@ -30,8 +32,8 @@ from .sims import Arm, ScriptedLLM, arm_env, contract, move, reached
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+    from hud import Run, Trace
     from hud.capabilities import MCPClient
-    from hud.eval.run import Run
     from hud.types import ToolResult
     from tests.fixtures.services import FakeServices
 
@@ -122,9 +124,9 @@ def frames_in(segments: list[dict[str, Any]]) -> int:
         return sum(1 for _ in container.decode(video=0))
 
 
-def recorded(run: Run) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def recorded(trace: Trace) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """The trace's observation steps and video segments, in order."""
-    payloads = steps(run.trace_id, schema=ROBOT_STEP_SCHEMA)
+    payloads = steps(trace.trace_id, schema=ROBOT_STEP_SCHEMA)
     return (
         [p for p in payloads if p.get("source") == "observation"],
         [p for p in payloads if p.get("source") == "video_segment"],
@@ -139,9 +141,9 @@ async def test_every_played_tick_streams_to_the_trace_as_state_and_one_video_per
     agent = ScriptedLLM(move("move_to", x=0.3), move("move_to", x=0.5))
 
     async with arm_env(sim, DirectControl()) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+        trace = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    observations, segments = recorded(run)
+    observations, segments = recorded(trace)
     starts = [datetime.fromisoformat(obs["started_at"]) for obs in observations]
     assert {segment["camera"] for segment in segments} == {"observation/image"}
     # The opening scene, then one observation and one frame per tick of both moves:
@@ -197,15 +199,15 @@ async def test_ending_the_episode_mid_move_ends_the_recording_with_the_ticks_pla
     agent = AbandonsMidMove(moving)
 
     async with arm_env(sim, DirectControl(speed=0.001)) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+        trace = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
     # The move was still playing when the episode ended: its call ended with the client.
     assert agent.playing is not None
     with pytest.raises(MCPError, match="Connection closed"):
         await agent.playing
-    observations, segments = recorded(run)
+    observations, segments = recorded(trace)
     ticks = [obs["tick"] for obs in observations]
-    assert run.trace.status == "error"
+    assert trace.status == "error"
     # The opening scene and the ticks played until the episode ended, in order. Ticks
     # the sim plays after that are not recorded.
     assert ticks == list(range(len(ticks)))
@@ -220,9 +222,9 @@ async def test_a_camera_the_encoder_cannot_encode_costs_the_video_not_the_rollou
     agent = ScriptedLLM(move("move_to", x=0.5), move("move_to", grip=1.0))
 
     async with arm_env(sim, DirectControl(max_step={"grip": 2.0})) as env:
-        run = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
+        trace = await rollout(Task(env="arm", id="reach"), agent, runtime=LocalRuntime(env))
 
-    observations, segments = recorded(run)
-    assert run.reward == 1.0
+    observations, segments = recorded(trace)
+    assert trace.reward == 1.0
     assert [obs["tick"] for obs in observations] == list(range(1 + len(sim.actions)))
     assert segments == []

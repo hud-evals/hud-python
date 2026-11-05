@@ -1,15 +1,17 @@
 """HUD environment authoring: declarations and the wire protocol that serves them.
 
-:class:`Environment` is the declaration (capabilities + tasks behind the wire
-protocol); ``load_environment`` resolves an env
-reference (source path, or dotted module attr/factory);
-:mod:`~hud.environment.server` is the serving entry point substrates run.
+``Environment`` (exported from ``hud``) is the declaration
+(capabilities + tasks behind the wire protocol); this package exports its
+building blocks (``Workspace``, ``Mount``, ``Answer``) and
+``load_environment``, which resolves an env reference (source path, or dotted
+module attr/factory); ``server`` is the serving entry point
+substrates run.
 How a substrate comes up — placement — belongs to the eval engine: see
-:mod:`hud.eval.runtime` (:class:`~hud.eval.runtime.Runtime`, the ``Provider``
+``hud.runtime`` (``Runtime``, the ``Provider``
 contract, ``LocalRuntime``, ``DockerRuntime``, ``HUDRuntime``).
 
 The env-side robot runtime (bridges, action providers, sim runners, contract
-tooling, recording glue) lives in :mod:`hud.environment.robot`; import it
+tooling, recording glue) lives in ``hud.environment.robot``; import it
 directly — it pulls optional dependencies (numpy/msgpack, the ``robot`` extra).
 """
 
@@ -19,13 +21,10 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-from hud.capabilities import Capability
 from hud.utils.modules import iter_modules
 
-from .arguments import DataFileArg, DataFileRef, DataFilesArg, GradingArg, PromptArg
-from .egress import Peer, WorkspaceRoute
 from .env import Answer, Environment
-from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, MountKind, Workspace
+from .workspace import DEFAULT_SYSTEM_MOUNTS, Mount, Workspace
 
 
 def load_environment(
@@ -34,7 +33,7 @@ def load_environment(
     name: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> Environment:
-    """Resolve an environment reference to the one :class:`Environment` it names.
+    """Resolve an environment reference to the one ``Environment`` it names.
 
     A source path (``.py`` file or directory) is scanned for ``Environment``
     instances and environments bound to exported tasks; *name* selects among
@@ -103,17 +102,7 @@ def load_environment(
 __all__ = [
     "DEFAULT_SYSTEM_MOUNTS",
     "Answer",
-    "Capability",
-    "DataFileArg",
-    "DataFileRef",
-    "DataFilesArg",
-    "Environment",
-    "GradingArg",
     "Mount",
-    "MountKind",
-    "Peer",
-    "PromptArg",
     "Workspace",
-    "WorkspaceRoute",
     "load_environment",
 ]
