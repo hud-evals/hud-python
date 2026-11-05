@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
-from hud.agents.openai_compatible import OpenAIChatAgent
+from hud import Environment, Task
+from hud.agents import OpenAIChatAgent
 from hud.agents.types import OpenAIChatConfig
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from tests.fixtures.models import Turn, call
 
 if TYPE_CHECKING:

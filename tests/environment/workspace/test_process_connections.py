@@ -23,12 +23,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 
+from hud import Task
 from hud.capabilities import Connection, SSHClient
 from hud.clients import HudClient, HudProtocolError, connect
-from hud.environment import Environment, Peer, WorkspaceRoute, process_guard
-from hud.environment.egress import ANY_HOST, BRIDGE_PORT
+from hud.environment import Environment, process_guard
+from hud.environment.egress import ANY_HOST, BRIDGE_PORT, Peer, WorkspaceRoute
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator

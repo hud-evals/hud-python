@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
+from hud import Task
 from hud.agents.openai.tools.strict_schema import ensure_strict_json_schema
 from hud.environment.robot import DirectControl
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 
 from .sims import (
     Arm,
@@ -34,7 +36,7 @@ from .sims import (
 )
 
 if TYPE_CHECKING:
-    from hud.eval.run import Run
+    from hud import Trace
 
 #: The default contract: an absolute ``[x, grip]`` action, x in [0, 1].
 REACH = contract("ee_abs", [0.0, -1.0], [1.0, 1.0])
@@ -45,12 +47,12 @@ async def drive(
     control: DirectControl,
     *calls: tuple[str, dict[str, Any]],
     max_ticks: float | None = None,
-) -> tuple[ScriptedLLM, Run]:
+) -> tuple[ScriptedLLM, Trace]:
     agent = ScriptedLLM(*calls)
     async with arm_env(sim, control) as env:
         task = Task(env="arm", id="reach", args={"max_ticks": max_ticks})
-        run = await rollout(task, agent, runtime=LocalRuntime(env))
-    return agent, run
+        trace = await rollout(task, agent, runtime=LocalRuntime(env))
+    return agent, trace
 
 
 async def test_move_to_interpolates_absolute_targets_until_the_sim_succeeds() -> None:
@@ -413,7 +415,7 @@ async def test_each_episode_has_its_own_tick_limit_and_budget() -> None:
 
 @pytest.mark.parametrize("max_ticks", [0, 1.5])
 async def test_a_tick_limit_must_be_a_positive_integer(max_ticks: float) -> None:
-    _, run = await drive(Arm(REACH, done=reached), DirectControl(), look(), max_ticks=max_ticks)
+    _, trace = await drive(Arm(REACH, done=reached), DirectControl(), look(), max_ticks=max_ticks)
 
-    assert run.trace.status == "error"
-    assert "max_ticks must be a positive integer" in (run.trace.error or "")
+    assert trace.status == "error"
+    assert "max_ticks must be a positive integer" in (trace.error or "")

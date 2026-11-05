@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 from hud.environment import load_environment
 from hud.environment.server import TaskRunner
-from hud.eval.task import Task
 from hud.eval.taskset import Taskset
 from hud.utils.naming import normalize_environment_name
 
 if TYPE_CHECKING:
     from hud.environment.env import Environment
+    from hud.eval.task import Task
 
 ALLOWED_PROTOCOLS = ("ssh", "mcp")
 DEFAULT_ANSWER_FILE = "/workspace/answer.txt"

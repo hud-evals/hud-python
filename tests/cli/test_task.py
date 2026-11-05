@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Task
 from hud.clients import connect
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from tests.conftest import Hud

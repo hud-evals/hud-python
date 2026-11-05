@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
+from hud import Chat, Environment, Task
 from hud.agents.base import Agent
-from hud.eval import Chat, LocalRuntime, Task
+from hud.runtime import LocalRuntime
 from hud.types import ImageContent, TextContent
 
 if TYPE_CHECKING:
-    from hud.eval import Run
+    from hud import Run
 
 
 def assistant(prompts: list[Any]) -> Environment:

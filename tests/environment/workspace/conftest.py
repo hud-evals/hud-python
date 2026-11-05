@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from hud import Task
 from hud.clients import connect
 from hud.environment import Environment
-from hud.eval import LocalRuntime, Task
+from hud.runtime import LocalRuntime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

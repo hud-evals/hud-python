@@ -9,16 +9,17 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud import Environment
+from hud import Environment, Task
 from hud.agents.base import Agent
 from hud.capabilities import Capability
-from hud.eval import LocalRuntime, Task, rollout
+from hud.eval.run import rollout
+from hud.runtime import LocalRuntime
 from tests.conftest import spans
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from hud.eval import Run
+    from hud import Run, Trace
     from tests.conftest import HudEnv
 
 SCHEMA = "hud.filetracking.v1"
@@ -64,11 +65,11 @@ def tracked(root: Path, *, track_files: bool = True, seed: int = 0) -> Environme
     return env
 
 
-def exported(run: Run) -> list[tuple[str, dict[str, Any]]]:
+def exported(trace: Trace) -> list[tuple[str, dict[str, Any]]]:
     """The run's file-tracking spans, in order, as (name, payload)."""
     return [
         (span["name"], span["attributes"]["hud.payload"])
-        for span in spans(run.trace_id)
+        for span in spans(trace.trace_id)
         if span["attributes"].get("hud.schema") == SCHEMA
     ]
 
@@ -79,11 +80,11 @@ async def test_a_tracked_rollout_exports_its_setup_a_snapshot_its_diffs_and_deli
     root = tmp_path / "ws"
     files = {"notes.md": b"# notes\n", "report.pdf": b"%PDF-1.4 report"}
 
-    run = await rollout(
+    trace = await rollout(
         Task(env="tracked", id="write"), Writer(root, files), runtime=LocalRuntime(tracked(root))
     )
 
-    tracking = exported(run)
+    tracking = exported(trace)
     payloads = dict(tracking)
     assert [name for name, _ in itertools.groupby(name for name, _ in tracking)] == [
         "filetracking.setup",
@@ -102,13 +103,13 @@ async def test_a_tracked_rollout_exports_its_setup_a_snapshot_its_diffs_and_deli
 async def test_a_large_workspace_snapshot_arrives_whole(tmp_path: Path) -> None:
     root = tmp_path / "ws"
 
-    run = await rollout(
+    trace = await rollout(
         Task(env="tracked", id="write"),
         Writer(root, {}),
         runtime=LocalRuntime(tracked(root, seed=1500)),
     )
 
-    payloads = dict(exported(run))
+    payloads = dict(exported(trace))
     assert len(payloads["filetracking.snapshot"]["files"]) == 1501
     assert len(payloads["filetracking.setup"]["patches"]) == 1501
 
@@ -116,13 +117,13 @@ async def test_a_large_workspace_snapshot_arrives_whole(tmp_path: Path) -> None:
 async def test_an_untracked_workspace_exports_no_file_tracking(tmp_path: Path) -> None:
     root = tmp_path / "ws"
 
-    run = await rollout(
+    trace = await rollout(
         Task(env="tracked", id="write"),
         Writer(root, {"notes.md": b"# notes\n"}),
         runtime=LocalRuntime(tracked(root, track_files=False)),
     )
 
-    assert (run.reward, exported(run)) == (1.0, [])
+    assert (trace.reward, exported(trace)) == (1.0, [])
 
 
 async def test_a_tracker_that_cannot_be_reached_exports_nothing_and_the_run_goes_on(
@@ -138,6 +139,6 @@ async def test_a_tracker_that_cannot_be_reached_exports_nothing_and_the_run_goes
         yield "write your files"
         yield 1.0
 
-    (run,) = (await write().run(Writer(tmp_path, {"notes.md": b"# notes\n"}))).runs
+    (trace,) = (await write().run(Writer(tmp_path, {"notes.md": b"# notes\n"}))).traces
 
-    assert (run.reward, exported(run)) == (1.0, [])
+    assert (trace.reward, exported(trace)) == (1.0, [])

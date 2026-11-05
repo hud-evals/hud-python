@@ -44,10 +44,10 @@ async def test_repeated_graders_are_named_apart_and_weighted_into_the_reward() -
             SubScore(name="BashGrader-1", value=0.0, weight=0.4),
         )
 
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
+    (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
-    assert run.reward == pytest.approx(0.6)
-    assert run.evaluation["subscores"] == [
+    assert trace.reward == pytest.approx(0.6)
+    assert trace.evaluation["subscores"] == [
         leaf("BashGrader-2", 0.3, 1.0),
         leaf("BashGrader-3", 0.3, 1.0),
         leaf("BashGrader-1", 0.4, 0.0),
@@ -70,10 +70,10 @@ async def test_a_negative_weight_is_a_penalty_taken_off_the_reward(
             SubScore(name="penalty", value=1.0, weight=-0.2),
         )
 
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
+    (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
-    assert run.reward == pytest.approx(reward)
-    assert [s["weight"] for s in run.evaluation["subscores"]] == [1.0, -0.2]
+    assert trace.reward == pytest.approx(reward)
+    assert [s["weight"] for s in trace.evaluation["subscores"]] == [1.0, -0.2]
 
 
 async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_penalties_kept() -> (
@@ -92,10 +92,10 @@ async def test_weights_not_summing_to_one_are_normalized_with_a_warning_and_pena
         )
 
     with pytest.warns(UserWarning, match="grader weights sum to 1.1000, not 1.0"):
-        (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
+        (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
-    assert run.reward == pytest.approx(0.8 / 1.1 - 0.1)
-    assert [s["weight"] for s in run.evaluation["subscores"]] == pytest.approx(
+    assert trace.reward == pytest.approx(0.8 / 1.1 - 0.1)
+    assert [s["weight"] for s in trace.evaluation["subscores"]] == pytest.approx(
         [0.5 / 1.1, 0.3 / 1.1, 0.3 / 1.1, -0.1]
     )
 
@@ -136,10 +136,10 @@ async def test_a_custom_grader_returns_a_number_a_pair_or_a_subscore() -> None:
             ),
         )
 
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
+    (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
-    info = {s["name"]: s["info"] for s in run.grade.raw["subscores"]}
-    assert run.reward == pytest.approx(0.8125)
+    info = {s["name"]: s["info"] for s in trace.grade.raw["subscores"]}
+    assert trace.reward == pytest.approx(0.8125)
     assert info.keys() == {"scaled", "explained", "renamed", "legacy"}
     assert (info["explained"]["source"], info["renamed"]["reason"], info["legacy"]["from"]) == (
         "pair",
@@ -182,10 +182,10 @@ async def test_the_bash_grader_scores_by_exit_code_and_reports_what_ran(
         yield await combine(BashGrader.grade(weight=1.0, command=command, timeout_seconds=limit))
 
     started = time.monotonic()
-    (run,) = (await check().run(ScriptedAgent(ANSWER))).runs
+    (trace,) = (await check().run(ScriptedAgent(ANSWER))).traces
 
-    (subscore,) = run.grade.raw["subscores"]
-    assert run.reward == value
+    (subscore,) = trace.grade.raw["subscores"]
+    assert trace.reward == value
     assert {key: subscore["info"][key] for key in info} == info
     assert time.monotonic() - started < 15
 
@@ -274,10 +274,10 @@ async def test_the_judge_asks_once_per_criterion_and_weighs_each_verdict(
 
     job = await check().run(ScriptedAgent(ANSWER))
 
-    (run,) = job.runs
-    assert (run.reward, run in job.errors) == (pytest.approx(reward), children is None)
+    (trace,) = job.traces
+    assert (trace.reward, trace in job.errors) == (pytest.approx(reward), children is None)
     if children is not None:
-        (judge,) = run.grade.raw["subscores"]
+        (judge,) = trace.grade.raw["subscores"]
         assert [
             (c["name"], c["weight"], c["value"], c["info"]["reason"]) for c in judge["children"]
         ] == children

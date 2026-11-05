@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
-from hud.clients import DEFAULT_READY_TIMEOUT
+from hud.clients.client import DEFAULT_READY_TIMEOUT
 from hud.environment.server import PORT_ANNOUNCEMENT
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
