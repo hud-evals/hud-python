@@ -30,11 +30,17 @@ if TYPE_CHECKING:
     from hud.eval.run import Run
     from tests.conftest import HudEnv
 
-#: (agent type, the executable it launches)
-CLIS = [("claude_cli", "claude"), ("codex_cli", "codex")]
-EVERY_CLI = pytest.mark.parametrize(("agent_type", "cli"), CLIS, ids=[row[0] for row in CLIS])
 UNSANDBOXED = pytest.mark.skipif(
     usable_bwrap() is not None, reason="this host sandboxes the workspace"
+)
+#: (agent type, the executable it launches). A sandboxed workspace connects Codex to
+#: its model only as its native binary, and the stub is a script.
+EVERY_CLI = pytest.mark.parametrize(
+    ("agent_type", "cli"),
+    [
+        pytest.param("claude_cli", "claude", id="claude_cli"),
+        pytest.param("codex_cli", "codex", id="codex_cli", marks=UNSANDBOXED),
+    ],
 )
 
 
@@ -47,7 +53,7 @@ def signed_in(hud_env: HudEnv) -> None:
 async def test_one_agent_drives_concurrent_rollouts_each_with_its_own_cli(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
+    stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     task, agent = workspace_task(tmp_path / "ws", env=stub.shell_env()), AgentType(agent_type).cls()
 
@@ -68,14 +74,17 @@ async def test_the_agent_timeout_ends_the_run_and_the_cli_while_the_workspace_li
     The timeout is a margin over a whole run on this machine just now, so the CLI has
     started before it lands."""
     kind = AgentType(agent_type).cls
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
+    stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     started = time.monotonic()
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
     await task().run(kind())
     timeout = 1.0 + 2 * (time.monotonic() - started)
     hung = clis.Stub(
-        tmp_path / "stub", cli, stdout=clis.answer(cli, "done").splitlines()[0] + "\n", hang=True
+        tmp_path / "ws" / ".stub",
+        cli,
+        stdout=clis.answer(cli, "done").splitlines()[0] + "\n",
+        hang=True,
     )
     hung.install()
     task = workspace_task(tmp_path / "ws", env=hung.shell_env())
@@ -144,7 +153,7 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
     error: str | None,
     tmp_path: Path,
 ) -> None:
-    stub = clis.Stub(tmp_path / "stub", "claude", stdout=stdout, stderr=stderr, exit=exit)
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
@@ -154,13 +163,15 @@ async def test_how_the_cli_exits_decides_how_the_run_ends(
     assert run.trace.error == (None if error is None else f"[agent loop] RuntimeError: {error}")
 
 
+# The bridge runs on the serving interpreter, which a sandbox does not show.
+@UNSANDBOXED
 async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: Path) -> None:
     actions: list[dict[str, Any]] = [
         {"action": "left_click", "coordinate": [3, 4]},
         {"action": "frobnicate"},
     ]
     stub = clis.Stub(
-        tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"), computer=actions
+        tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"), computer=actions
     )
     stub.install()
 
@@ -188,7 +199,7 @@ async def test_the_cli_drives_the_screen_through_the_computer_bridge(tmp_path: P
 async def test_without_a_sandbox_the_cli_holds_its_model_key(
     agent_type: str, cli: str, tmp_path: Path
 ) -> None:
-    stub = clis.Stub(tmp_path / "stub", cli, stdout=clis.answer(cli, "done"))
+    stub = clis.Stub(tmp_path / "ws" / ".stub", cli, stdout=clis.answer(cli, "done"))
     stub.install()
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
 
@@ -319,7 +330,7 @@ async def test_a_sandboxed_workspace_that_cannot_relay_is_refused_the_model_key(
 
 
 async def test_claude_code_runs_with_the_variables_its_config_adds(tmp_path: Path) -> None:
-    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
     agent = ClaudeCLIAgent(ClaudeCLIConfig(env={"ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku"}))
@@ -339,7 +350,7 @@ def test_claude_code_config_refuses_a_variable_name_no_shell_can_assign() -> Non
 async def test_claude_code_refuses_config_variables_the_agent_sets(
     variable: str, tmp_path: Path
 ) -> None:
-    stub = clis.Stub(tmp_path / "stub", "claude", stdout=clis.answer("claude", "done"))
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
     stub.install()
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
     agent = ClaudeCLIAgent(ClaudeCLIConfig(env={variable: "key"}))
@@ -350,6 +361,7 @@ async def test_claude_code_refuses_config_variables_the_agent_sets(
     assert stub.captures() == []
 
 
+@UNSANDBOXED  # the Codex stub is a script (see EVERY_CLI)
 @pytest.mark.parametrize(
     ("item", "name", "is_error", "texts"),
     [
@@ -426,7 +438,7 @@ async def test_each_item_codex_ran_lands_on_the_trace_as_a_tool_step(
     item: dict[str, Any], name: str, is_error: bool, texts: list[str], tmp_path: Path
 ) -> None:
     stdout = clis.jsonl(clis.CODEX_STARTED, item, clis.CODEX_COMPLETED)
-    stub = clis.Stub(tmp_path / "stub", "codex", stdout=stdout)
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "codex", stdout=stdout)
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())
@@ -438,6 +450,7 @@ async def test_each_item_codex_ran_lands_on_the_trace_as_a_tool_step(
     assert (recorded.call.name, recorded.result.isError, sent) == (name, is_error, texts)
 
 
+@UNSANDBOXED  # the Codex stub is a script (see EVERY_CLI)
 @pytest.mark.parametrize(
     ("stdout", "stderr", "exit", "content", "error"),
     [
@@ -480,7 +493,7 @@ async def test_each_item_codex_ran_lands_on_the_trace_as_a_tool_step(
 async def test_how_codex_exits_decides_how_the_run_ends(
     stdout: str, stderr: str, exit: int, content: str | None, error: str, tmp_path: Path
 ) -> None:
-    stub = clis.Stub(tmp_path / "stub", "codex", stdout=stdout, stderr=stderr, exit=exit)
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "codex", stdout=stdout, stderr=stderr, exit=exit)
     stub.install()
 
     task = workspace_task(tmp_path / "ws", env=stub.shell_env())

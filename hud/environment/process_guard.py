@@ -440,6 +440,17 @@ def _forward_signals(original: int) -> None:
             signal.signal(signum, forward)
 
 
+def _drop_to(identity: Optional[tuple[int, int]]) -> None:
+    """Become *identity*, with no supplementary groups; no-new-privs is already set."""
+    if identity is None:
+        return
+    assert sys.platform == "linux"
+    uid, gid = identity
+    os.setgroups([])
+    os.setresgid(gid, gid, gid)
+    os.setresuid(uid, uid, uid)
+
+
 def _exit_from_wait_status(status: int) -> NoReturn:
     if os.WIFEXITED(status):
         raise SystemExit(os.WEXITSTATUS(status))
@@ -454,6 +465,7 @@ def _trace_exec(
     protected: Collection[tuple[str, int]],
     allowed: Collection[tuple[str, int]],
     argv: Sequence[str],
+    identity: Optional[tuple[int, int]],
 ) -> NoReturn:
     if platform.machine() != "x86_64":
         raise RuntimeError("ptrace process connections currently require x86_64")
@@ -464,6 +476,7 @@ def _trace_exec(
             _ptrace(_PTRACE_TRACEME, 0)
             os.kill(os.getpid(), signal.SIGSTOP)
             _install_connect_trace()
+            _drop_to(identity)
             os.execvp(argv[0], list(argv))  # noqa: S606 - exact controller-built argv
         except BaseException:
             os._exit(127)
@@ -705,15 +718,21 @@ class ProcessConnectionGuard:
                     raise
 
 
-def guarded_exec(backend: GuardBackend, socket_path: str, argv: Sequence[str]) -> None:
-    """Install the guard, register this process, and replace it with ``argv``."""
+def guarded_exec(
+    backend: GuardBackend,
+    socket_path: str,
+    argv: Sequence[str],
+    identity: Optional[tuple[int, int]] = None,
+) -> None:
+    """Install the guard, register this process, and replace it with ``argv``,
+    run as *identity* when given."""
     if not argv:
         raise ValueError("guarded execution requires a command")
     channel = socket.socket(socket.AF_UNIX)
     channel.connect(socket_path)
     if backend == "ptrace":
         protected, allowed = _receive_policy(channel)
-        _trace_exec(channel, protected, allowed, argv)
+        _trace_exec(channel, protected, allowed, argv, identity)
     listener = _install_connect_listener()
     try:
         _send_fd(channel, listener)
@@ -727,6 +746,7 @@ def guarded_exec(backend: GuardBackend, socket_path: str, argv: Sequence[str]) -
         pass
     finally:
         registration.close()
+    _drop_to(identity)
     os.execvp(argv[0], list(argv))  # noqa: S606 - exact controller-built argv
 
 
@@ -734,6 +754,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--probe", choices=("auto", "notify", "ptrace"), nargs="?", const="auto")
     parser.add_argument("--backend", choices=("notify", "ptrace"))
+    parser.add_argument("--identity", metavar="UID:GID")
     parser.add_argument("socket", nargs="?")
     parser.add_argument("argv", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -757,7 +778,11 @@ def main() -> None:
     if args.socket is None:
         parser.error("socket is required")
     argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
-    guarded_exec(args.backend, args.socket, argv)
+    identity = None
+    if args.identity is not None:
+        uid, _, gid = args.identity.partition(":")
+        identity = (int(uid), int(gid))
+    guarded_exec(args.backend, args.socket, argv, identity)
 
 
 if __name__ == "__main__":

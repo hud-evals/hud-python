@@ -365,6 +365,46 @@ async def test_a_connection_bound_into_a_running_sandbox_reaches_its_upstream(
 
 @pytest.mark.e2e
 @pytest.mark.sandbox
+async def test_a_bound_session_runs_as_the_shell_uid_and_still_reaches_its_connection(
+    tmp_path: Path,
+) -> None:
+    with upstream() as (port, seen):
+        connection = Connection(
+            name="inference",
+            capability="ssh",
+            url=f"http://127.0.0.1:{port}",
+            headers={"Authorization": "Bearer dropped-token"},
+        )
+        env = Environment("process-connection")
+        env.workspace(
+            tmp_path / "root",
+            allowed_hosts={ANY_HOST},
+            require_isolation=True,
+            track_files=False,
+            shell_uid=1000,
+            shell_gid=2000,
+        )
+        async with (
+            LocalRuntime(env)(Task(env=env.name, id="test")) as runtime,
+            connect(runtime) as client,
+        ):
+            await client.bind((connection,))
+            ssh = cast("SSHClient", await client.open("ssh"))
+            process = await ssh.create_process(
+                "echo $(id -u) $(id -g) $(id -G); grep NoNewPrivs /proc/self/status; "
+                + python(fetch(connection.client_url)),
+                connections=(connection,),
+            )
+            completed = await process.wait()
+
+    identity, no_new_privs, fetched = cast("bytes", completed.stdout).decode().splitlines()
+    assert (completed.returncode, identity, fetched) == (0, "1000 2000 2000", "ok")
+    assert no_new_privs.split() == ["NoNewPrivs:", "1"]
+    assert seen == ["Bearer dropped-token"]
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
 async def test_a_later_session_cannot_launch_against_a_released_connection(
     tmp_path: Path,
 ) -> None:

@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Variables the CLI agents set for the process they launch.
 AGENT_VARIABLES = (
@@ -28,7 +29,8 @@ AGENT_VARIABLES = (
     "IS_SANDBOX",
 )
 
-STUB = """#!{python}
+# The session's python3: a sandbox shows /usr, not the interpreter running the tests.
+STUB = """#!/usr/bin/env python3
 import json, os, subprocess, sys, time
 
 behavior = json.load(open({behavior!r}))
@@ -89,7 +91,8 @@ if behavior.get("computer"):
     servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
     record["computer"] = drive_computer(servers["computer-use"], behavior["computer"])
 
-with open(os.path.join({captures!r}, str(os.getpid()) + ".json"), "w") as capture:
+# Named by time, not pid: sandboxed invocations share pids across pid namespaces.
+with open(os.path.join({captures!r}, f"{{time.time_ns()}}-{{os.getpid()}}.json"), "w") as capture:
     json.dump(record, capture)
 
 sys.stdout.write(behavior["stdout"])
@@ -143,8 +146,6 @@ class Stub:
         script = self.bin / self.name
         script.write_text(
             STUB.format(
-                # The base interpreter: a sandbox shows /usr, not a virtualenv.
-                python=Path(sys.executable).resolve(),
                 behavior=str(behavior),
                 name=self.name,
                 prefixes=AGENT_VARIABLES,

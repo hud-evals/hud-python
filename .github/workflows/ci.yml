@@ -23,8 +23,7 @@ permissions:
 
 jobs:
   test:
-    # Temporary: the unit suite starts workspace sandboxes too; see the Sandbox job.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
@@ -36,6 +35,11 @@ jobs:
 
       - name: Install Python
         run: uv python install ${{ matrix.python-version }}
+
+      # The unit suite drives agents against stub CLIs, which only an unsandboxed
+      # workspace can run; the Sandbox and Live lanes cover sandboxed workspaces.
+      - name: Leave workspaces unsandboxed
+        run: sudo apt-get purge -y bubblewrap
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --all-extras pytest -n auto
@@ -87,9 +91,7 @@ jobs:
 
   sandbox:
     name: Sandbox
-    # Temporary: Ubuntu 26.04 denies capabilities to everything bwrap runs, which
-    # the workspace sandbox needs for its namespace owner.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
@@ -113,7 +115,7 @@ jobs:
           --env UV_PROJECT_ENVIRONMENT=/opt/venv
           --env HUD_API_KEY
           python:3.12-bookworm
-          sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client >/dev/null
+          sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client busybox-static >/dev/null
           && pip install -q "uv>=0.12.2"
           && uv run --all-extras pytest -m "e2e and sandbox" -n 4 --timeout 600'
 

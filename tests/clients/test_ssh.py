@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -27,6 +26,7 @@ from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the workspace shell is POSIX")
@@ -38,7 +38,7 @@ async def shell(tmp_path: Path) -> AsyncIterator[tuple[SSHClient, FlakyRelay, Pa
     root = tmp_path / "workspace"
     root.mkdir()
     environment = Environment("ssh-faults")
-    environment.workspace(root, track_files=False)
+    environment.workspace(root, guest_path=str(root), track_files=False)
     task = Task(env=environment.name, id="scenario")
     async with (
         LocalRuntime(environment)(task) as runtime,
@@ -141,13 +141,13 @@ async def test_an_opened_client_retries_an_upstream_that_refuses_and_closes_with
     assert (flaky.accepted, peer.tunnels) == (3, 3)
 
 
-def running(pid_file: Path) -> bool:
-    """Whether the process whose pid ``pid_file`` holds is live (a zombie counts as gone)."""
-    stat = Path(f"/proc/{pid_file.read_text().strip()}/stat")
-    try:
-        return stat.read_text().split(") ", 1)[1][0] != "Z"
-    except FileNotFoundError:
-        return False
+async def ended(client: SSHClient, pid_file: str) -> bool:
+    """Whether the process whose pid ``pid_file`` holds is gone (a zombie counts as gone).
+
+    Asked through the workspace, whose pid namespace the pid belongs to.
+    """
+    stat = await client.run(f"cat /proc/$(cat {pid_file})/stat", check=False)
+    return stat.exit_status != 0 or str(stat.stdout).split(") ", 1)[1][0] == "Z"
 
 
 async def test_a_cancelled_and_a_timed_out_command_end_and_the_next_one_runs(
@@ -159,12 +159,12 @@ async def test_a_cancelled_and_a_timed_out_command_end_and_the_next_one_runs(
         command.cancel()
         with pytest.raises(asyncio.CancelledError):
             await command
-        await eventually(lambda: not running(root / "cancelled"))
+        await eventually(lambda: ended(client, "cancelled"))
 
         with pytest.raises(TimeoutError):
             await client.run("echo $$ > timed_out; exec sleep 30", timeout=0.5)
         await eventually(lambda: written(root / "timed_out"))
-        await eventually(lambda: not running(root / "timed_out"))
+        await eventually(lambda: ended(client, "timed_out"))
 
         result = await client.run("echo ok", timeout=10)
 

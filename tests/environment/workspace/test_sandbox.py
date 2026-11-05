@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from hud.environment import Peer, Workspace
+from hud.environment import Mount, Peer, Workspace
 from hud.environment.workspace import usable_bwrap
 
 from .conftest import SANDBOX, shell
@@ -66,7 +66,9 @@ async def test_a_session_runs_as_the_identity_the_workspace_was_given(
         no_new_privs = (await client.run("grep NoNewPrivs /proc/self/status", check=False)).stdout
 
     if expected is None:
-        assert str(identity).split()[0] == str(os.getuid())
+        # Off root, a sandboxed session is root of the sandbox it alone is mapped into.
+        sandboxed = usable_bwrap() is not None
+        assert str(identity).split()[0] == str(0 if sandboxed else os.getuid())
     else:
         assert str(identity).strip() == expected
     if "shell_uid" in options and expected is not None:
@@ -108,11 +110,6 @@ def isolation_unavailable(_: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, A
     return {"require_isolation": True}
 
 
-def setpriv_missing(_: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, Any]:
-    hud_env.set(PATH="/nonexistent")
-    return {"shell_uid": 1000}
-
-
 def chown_denied(monkeypatch: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, Any]:
     del hud_env
 
@@ -131,13 +128,6 @@ def chown_denied(monkeypatch: pytest.MonkeyPatch, hud_env: HudEnv) -> dict[str, 
             RuntimeError,
             "isolation was required",
             id="isolation-required-without-bwrap",
-        ),
-        pytest.param(
-            setpriv_missing,
-            RuntimeError,
-            "privileges cannot be dropped",
-            id="root-without-setpriv",
-            marks=SANDBOX,
         ),
         pytest.param(
             chown_denied, PermissionError, "not permitted", id="handoff-chown-denied", marks=SANDBOX
@@ -303,6 +293,46 @@ async def test_the_sandbox_keeps_every_id_the_container_has(tmp_path: Path) -> N
     assert [line.split() for line in mapped.splitlines()] == [
         [inside, inside, count] for inside, _, count in ranges
     ]
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
+async def test_a_task_image_without_util_linux_runs_its_processes_dropped() -> None:
+    """A view built from a minimal image (busybox, alpine, distroless) has no setpriv."""
+    busybox = shutil.which("busybox")
+    assert busybox is not None, "the sandbox lane installs busybox-static"
+    # Somewhere another identity can traverse: the processes run as uid 1000.
+    parent = Path(tempfile.mkdtemp(dir="/tmp"))
+    os.chmod(parent, 0o755)
+    image = parent / "image"
+    (image / "usr" / "bin").mkdir(parents=True)
+    shutil.copy(busybox, image / "usr" / "bin" / "busybox")
+    for applet in ("sh", "sleep", "env", "id", "grep"):
+        (image / "usr" / "bin" / applet).symlink_to("busybox")
+    report = ["sh", "-c", "id -u; id -g; grep CapBnd /proc/self/status"]
+    try:
+        async with shell(
+            parent / "root",
+            require_isolation=True,
+            system_mounts=[
+                Mount("ro", src=str(image / "usr"), dst="/usr"),
+                Mount("symlink", src="usr/bin", dst="/bin"),
+                Mount("proc", dst="/proc"),
+                Mount("dev", dst="/dev"),
+                Mount("tmpfs", dst="/tmp", mode=0o1777),
+            ],
+        ) as (workspace, _):
+            launched = await (await workspace.launch(report, identity=(1000, 2000))).complete()
+            isolated = await workspace.run(report, isolated=True, identity=(1000, 2000))
+    finally:
+        shutil.rmtree(parent, ignore_errors=True)
+
+    dropped = (1 << 21) | (1 << 12) | (1 << 13)  # sys_admin, net_admin, net_raw
+    for result in (launched, isolated):
+        assert (result.returncode, result.stderr) == (0, b"")
+        uid, gid, bounding = result.stdout.decode().splitlines()
+        assert (uid, gid) == ("1000", "2000")
+        assert int(bounding.split()[1], 16) & dropped == 0
 
 
 @pytest.mark.e2e
