@@ -12,6 +12,7 @@ import shutil
 import socket
 import struct
 import sys
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -65,26 +66,58 @@ def _child_pids(pid: int) -> list[int]:
         return sorted(children)
 
 
-#: What a process can join from a view: the nsenter option, and the view's /proc entry.
-_JOINS = {
-    "user": ("--user", "ns/user"),
-    "mnt": ("--mount", "ns/mnt"),
-    "net": ("--net", "ns/net"),
-    "cwd": ("--wd", "cwd"),
-}
+#: What a process can enter of a view, and the view's /proc entry that names it.
+_ENTRIES = {"user": "ns/user", "mnt": "ns/mnt", "net": "ns/net", "cwd": "cwd"}
 
 
-def sandbox_tool(name: Literal["nsenter", "unshare"]) -> str:
-    """The path of a util-linux tool the sandbox runs on; there is no sandbox without it."""
-    path = shutil.which(name)
+def unshare() -> str:
+    """The path of util-linux unshare, which the sandbox runs on; no sandbox without it."""
+    path = shutil.which("unshare")
     if path is None:
-        raise RuntimeError(f"workspace sandboxes require {name}")
+        raise RuntimeError("workspace sandboxes require unshare")
     return path
 
 
 def _scope_proc_argv() -> list[str]:
     """A private mount namespace whose /proc is the pid namespace it is entered from."""
-    return [sandbox_tool("unshare"), "--mount", "--propagation", "private", "--mount-proc", "--"]
+    return [unshare(), "--mount", "--propagation", "private", "--mount-proc", "--"]
+
+
+@dataclass(frozen=True)
+class Privileges:
+    """What a sandboxed process gives up as it enters the sandbox.
+
+    It always loses sys_admin, net_admin and net_raw from its capability
+    bounding set; *identity* is the (uid, gid) it switches to, with no
+    supplementary groups.
+    """
+
+    no_new_privs: bool = True
+    identity: tuple[int, int] | None = None
+
+
+def entry_argv(
+    argv: list[str],
+    *,
+    into: list[tuple[str, str]],
+    privileges: Privileges | None = None,
+) -> list[str]:
+    """The argv that runs *argv* entered *into* a view, under *privileges* when given.
+
+    *into* pairs a namespace (``user``, ``ipc``, ``uts``, ``net``, ``pid``,
+    ``mnt``) or ``cwd`` with the path that names it, such as
+    ``/proc/<pid>/ns/mnt`` or ``/proc/self/fd/<descriptor>``. Entry runs
+    ``enter.py`` from this interpreter, so the view supplies only *argv*.
+    """
+    options = [value for kind, path in into for value in ("--enter", f"{kind}={path}")]
+    if privileges is not None:
+        options.append("--drop-capabilities")
+        if privileges.no_new_privs:
+            options.append("--no-new-privs")
+        if privileges.identity is not None:
+            options.extend(["--identity", "{}:{}".format(*privileges.identity)])
+    script = str(Path(__file__).with_name("enter.py"))
+    return [sys.executable, "-I", "-S", script, *options, "--", *argv]
 
 
 async def start_holder(
@@ -176,37 +209,37 @@ async def _holder_error(holder: ProcessGroup) -> str:
 
 async def hold_view(
     argv: list[str],
-    joins: Sequence[Literal["user", "mnt", "net", "cwd"]],
+    kinds: Sequence[Literal["user", "mnt", "net", "cwd"]],
     *,
     bwrap: str,
     map_identities: bool = False,
     launcher_depth: int = 0,
-) -> tuple[list[str], list[int]]:
+) -> tuple[list[tuple[str, str]], list[int]]:
     """Build a view with a bwrap holder and keep it open once the holder is gone.
 
-    Payloads join a view rather than run under bwrap: Ubuntu's AppArmor
+    Payloads enter a view rather than run under bwrap: Ubuntu's AppArmor
     profile for bwrap strips capabilities from everything bwrap starts.
-    Returns the nsenter options that make a process join the view's *joins*,
-    and the descriptors they name, which hold the view open until the caller
-    passes them to that nsenter and closes them.
+    Returns the :func:`entry_argv` *into* for the view's *kinds*, and the
+    descriptors it names, which hold the view open until the caller passes
+    them to that command and closes them.
     """
     holder, pid = await start_holder(
         argv, bwrap=bwrap, map_identities=map_identities, launcher_depth=launcher_depth
     )
     descriptors: list[int] = []
     try:
-        descriptors.extend(os.open(f"/proc/{pid}/{_JOINS[join][1]}", os.O_RDONLY) for join in joins)
+        descriptors.extend(os.open(f"/proc/{pid}/{_ENTRIES[kind]}", os.O_RDONLY) for kind in kinds)
     except BaseException:
         for descriptor in descriptors:
             os.close(descriptor)
         raise
     finally:
         await holder.terminate()
-    options = [
-        f"{_JOINS[join][0]}=/proc/self/fd/{descriptor}"
-        for join, descriptor in zip(joins, descriptors, strict=True)
+    into: list[tuple[str, str]] = [
+        (kind, f"/proc/self/fd/{descriptor}")
+        for kind, descriptor in zip(kinds, descriptors, strict=True)
     ]
-    return options, descriptors
+    return into, descriptors
 
 
 def _map_identities(pid: int) -> None:
@@ -364,6 +397,7 @@ class NamespaceHost:
         persistent: bool = False,
         scope: Literal["session", "environment"] = "session",
         session_owned: bool = False,
+        privileges: Privileges | None = None,
     ) -> NamespaceProcess:
         connection = self._require_connection()
         request = json.dumps(
@@ -375,6 +409,7 @@ class NamespaceHost:
                 "persistent": persistent,
                 "scope": scope,
                 "session_owned": session_owned,
+                "privileges": None if privileges is None else asdict(privileges),
             }
         )
         if tty:
@@ -575,33 +610,36 @@ class _NamespaceHost:
         if held is None:
             raise RuntimeError(f"workspace {scope} holder is not running")
         _, holder_pid = held
-        in_scope = [
-            sandbox_tool("nsenter"),
-            "--target",
-            str(holder_pid),
-            "--pid",
-            "--uts",
-            "--ipc",
-            "--preserve-credentials",
-        ]
+        in_scope = [(kind, f"/proc/{holder_pid}/ns/{kind}") for kind in ("pid", "uts", "ipc")]
         command_prefix: list[str] = []
         view_fds: list[int] = []
         match mount_view:
             case "workspace":
-                mount = ["--mount", "--wd"]
+                mount = [("mnt", f"/proc/{holder_pid}/ns/mnt"), ("cwd", f"/proc/{holder_pid}/cwd")]
             case "host":
                 mount = []
                 command_prefix = _scope_proc_argv()
             case list():
                 mount, view_fds = await hold_view(
-                    [*in_scope, "--", *_scope_proc_argv(), *mount_view],
+                    entry_argv([*_scope_proc_argv(), *mount_view], into=in_scope),
                     ["mnt", "cwd"],
                     bwrap=self.bwrap,
                     launcher_depth=2,
                 )
             case _:
                 raise ValueError(f"unknown mount view {mount_view!r}")
-        argv = [*in_scope, *mount, "--", *command_prefix, *request["argv"]]
+        privileges: Privileges | None = None
+        if request["privileges"] is not None:
+            identity = request["privileges"]["identity"]
+            privileges = Privileges(
+                no_new_privs=request["privileges"]["no_new_privs"],
+                identity=None if identity is None else (identity[0], identity[1]),
+            )
+        argv = entry_argv(
+            [*command_prefix, *request["argv"]],
+            into=[*in_scope, *mount],
+            privileges=privileges,
+        )
         process: ProcessGroup | None = None
         outputs: list[ProcessOutput] = []
         output_tasks: list[asyncio.Task[None]] = []

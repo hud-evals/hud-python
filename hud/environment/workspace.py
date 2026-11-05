@@ -30,7 +30,14 @@ from hud.environment.egress import (
     hosts_text,
     proxy_environment,
 )
-from hud.environment.namespace import NamespaceHost, NamespaceProcess, hold_view, sandbox_tool
+from hud.environment.namespace import (
+    NamespaceHost,
+    NamespaceProcess,
+    Privileges,
+    entry_argv,
+    hold_view,
+    unshare,
+)
 from hud.environment.process_guard import ProcessConnectionGuard, process_connections_supported
 from hud.environment.utils import forward_output
 from hud.utils.process import ProcessGroup, ProcessOutput, ProcessResult, create_process_group_exec
@@ -80,12 +87,17 @@ def _guarded_process_argv(
     interpreter: str,
     guard: ProcessConnectionGuard,
     argv: Sequence[str],
+    *,
+    identity: tuple[int, int] | None,
 ) -> list[str]:
+    """*argv* under the process-connection guard, which drops it to *identity* once
+    guarded: the guard itself stays out of reach of the identity it drops to."""
     return [
         interpreter,
         guard.sandbox_helper,
         "--backend",
         guard.backend,
+        *(("--identity", "{}:{}".format(*identity)) if identity is not None else ()),
         guard.sandbox_socket,
         "--",
         *argv,
@@ -506,8 +518,8 @@ class Workspace:
     time. Drive it directly (``start()`` / :meth:`capability` / ``stop()``)
     to publish the capability yourself.
 
-    ``shell_uid`` and ``shell_gid`` drop agent sessions to that identity with
-    ``setpriv`` when the serving process is root — the privilege wall for
+    ``shell_uid`` and ``shell_gid`` drop agent sessions to that identity
+    when the serving process is root — the privilege wall for
     substrates where bwrap is unavailable and the env process holds secrets
     the agent must not read.
     No-op off root. Only the workspace directory itself is handed to the uid
@@ -741,39 +753,26 @@ class Workspace:
             raise RuntimeError(f"process connection {name!r} is not bound to that peer")
         del self._process_connections[name]
 
-    def _setpriv(self) -> str | None:
-        """Absolute path to ``setpriv``, resolved via the *server's* PATH.
+    def _shell_identity(self) -> tuple[int, int] | None:
+        """The (uid, gid) agent sessions drop to, if they drop at all.
 
-        Sessions must exec it by absolute path: session env can carry an
-        agent-writable PATH, and a bare name resolved through it would run
-        an agent-planted binary as root before the drop happens.
+        Only when serving as root on Linux: off root the option is a
+        documented no-op.
         """
-        return shutil.which("setpriv")
-
-    def _drops_privileges(self) -> bool:
-        """Whether sessions are dropped to the configured identity on this host.
-
-        Only when serving as root on Linux with ``setpriv`` present —
-        ``setpriv`` is a util-linux command and the drop is meaningless off
-        root. Off root the option is a documented no-op.
-        """
-        return (
-            self._shell_uid is not None
-            and _is_root()
-            and sys.platform == "linux"
-            and self._setpriv() is not None
-        )
+        if self._shell_uid is None or not _is_root() or sys.platform != "linux":
+            return None
+        return self._shell_uid, self._shell_uid if self._shell_gid is None else self._shell_gid
 
     def _prepare_runtime(self) -> None:
         """Materialize filesystem credentials and bind the SSH socket."""
         if self._sock is not None:
             return
-        if self._shell_uid is not None and _is_root() and not self._drops_privileges():
+        if self._shell_uid is not None and _is_root() and self._shell_identity() is None:
             # Fail closed: serving as root while unable to drop would run every
             # agent shell as root, exactly what shell_uid exists to prevent.
             raise RuntimeError(
-                "shell_uid is set and the server is root, but privileges cannot be dropped "
-                "(setpriv is required on Linux). Refusing to serve agent shells as root."
+                "shell_uid is set and the server is root, but privileges can only be "
+                "dropped on Linux. Refusing to serve agent shells as root."
             )
         if self._bwrap is None and sys.platform != "win32" and shutil.which("bwrap") is None:
             # Once per process: repeating this for every Workspace is noise, and
@@ -788,7 +787,7 @@ class Workspace:
                     "Install bubblewrap, or run inside a Linux container that has it.",
                 )
         self.root.mkdir(parents=True, exist_ok=True)
-        if self._drops_privileges():
+        if (identity := self._shell_identity()) is not None and self._hand_over_root:
             # Make the workspace dir itself writable by the dropped uid so a
             # fresh workspace is usable out of the box. This is O(1) and must
             # stay that way: it runs on the serving path, before the control
@@ -798,10 +797,7 @@ class Workspace:
             # readiness probe. Ownership of pre-staged content is the env
             # author's job, done where it's cheap and scoped: at build time
             # (`COPY --chown`) or in task setup over just what was staged.
-            assert self._shell_uid is not None
-            if self._hand_over_root:
-                gid = self._shell_uid if self._shell_gid is None else self._shell_gid
-                os.lchown(self.root, self._shell_uid, gid)
+            os.lchown(self.root, *identity)
         self._host_key, self._host_pubkey_str = self._load_or_generate_host_key()
         self._authorized_keys_path = self._ensure_authorized_keys_file()
         if self.owns_netns and self._bwrap is not None:
@@ -1044,7 +1040,7 @@ class Workspace:
         if allowed_hosts:
             raise ValueError("an isolated workspace command has no network")
 
-        join, view_fds = await hold_view(
+        view, view_fds = await hold_view(
             self._view_argv(
                 cwd=cwd, network=False, mount_hosts=False, isolate_processes=False, mounts=mounts
             ),
@@ -1054,14 +1050,13 @@ class Workspace:
         )
         try:
             process = await create_process_group_exec(
-                sandbox_tool("nsenter"),
-                *join,
-                "--preserve-credentials",
-                "--",
-                *self._cap_drop_argv(no_new_privs=no_new_privs),
-                *_payload_argv(
-                    [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
-                    self._command_env(process_env, inherit_workspace_env=inherit_workspace_env),
+                *entry_argv(
+                    _payload_argv(
+                        command,
+                        self._command_env(process_env, inherit_workspace_env=inherit_workspace_env),
+                    ),
+                    into=view,
+                    privileges=self._privileges(identity, no_new_privs=no_new_privs),
                 ),
                 cwd=self.root,
                 env={**os.environ, **process_env},
@@ -1093,13 +1088,10 @@ class Workspace:
         assert self._namespace is not None
         process_env = dict(env or {})
         return await self._namespace.spawn(
-            [
-                *self._cap_drop_argv(no_new_privs=no_new_privs),
-                *_payload_argv(
-                    [*self._identity_argv(identity, no_new_privs=no_new_privs), *command],
-                    self._command_env(process_env, inherit_workspace_env=inherit_workspace_env),
-                ),
-            ],
+            _payload_argv(
+                command,
+                self._command_env(process_env, inherit_workspace_env=inherit_workspace_env),
+            ),
             cwd=self.root,
             env={**os.environ, **process_env},
             mount_view=self._view_argv(
@@ -1112,6 +1104,7 @@ class Workspace:
             ),
             persistent=persistent,
             scope=scope,
+            privileges=self._privileges(identity, no_new_privs=no_new_privs),
         )
 
     # ─── sandbox ──────────────────────────────────────────────────────
@@ -1133,7 +1126,8 @@ class Workspace:
     ) -> list[str]:
         """Argv for a bwrap that builds a view and holds it with ``_SANDBOX_HOLDER``.
 
-        Nothing else runs under bwrap: processes join the view with nsenter.
+        Nothing else runs under bwrap: processes enter the view with
+        :func:`~hud.environment.namespace.entry_argv`.
         Every option here is one bubblewrap 0.4 understands.
         """
         if self._bwrap is None:
@@ -1204,7 +1198,7 @@ class Workspace:
         egress proxy, the workspace network's only route out.
         """
         proxy = self._egress.environment() if self._egress is not None else {}
-        if self._drops_privileges():
+        if self._shell_identity() is not None:
             base = {
                 "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
                 # The server's HOME (/root) is unreadable by the dropped uid;
@@ -1215,75 +1209,27 @@ class Workspace:
             return {**base, **self.env, **proxy, **(env or {})}
         return self._command_env({**proxy, **(env or {})})
 
-    def _identity_argv(
+    def _privileges(
         self,
         identity: int | tuple[int, int] | Literal["workspace"] | None,
         *,
         no_new_privs: bool,
-    ) -> list[str]:
-        if identity == "workspace":
-            return self._drop_argv(no_new_privs=no_new_privs)
-        if identity is None:
-            return []
-        current = (os.geteuid(), os.getegid()) if hasattr(os, "geteuid") else None
-        requested = identity if isinstance(identity, tuple) else (identity, identity)
-        if requested != current and not (_is_root() and self._setpriv() is not None):
-            raise RuntimeError("setpriv is required to run a workspace command as another user")
-        return self._drop_argv(identity, no_new_privs=no_new_privs)
+    ) -> Privileges:
+        """What a sandboxed process gives up as it enters the sandbox.
 
-    def _cap_drop_argv(self, *, no_new_privs: bool = True) -> list[str]:
-        """The ``setpriv`` prefix every sandboxed process starts under.
-
-        A namespace-root process must not be able to inspect or redirect the
-        authenticated verifier route while both briefly share its network.
+        ``"workspace"`` is the shell identity, if sessions drop to one; another
+        identity takes a root server unless it is the server's own.
         """
-        setpriv = self._setpriv()
-        if setpriv is None:
-            raise RuntimeError("workspace sandboxes require setpriv")
-        return [
-            setpriv,
-            "--bounding-set",
-            "-sys_admin,-net_admin,-net_raw",
-            *(["--no-new-privs"] if no_new_privs else []),
-            "--",
-        ]
-
-    def _drop_argv(
-        self,
-        identity: int | tuple[int, int] | None = None,
-        *,
-        no_new_privs: bool = True,
-    ) -> list[str]:
-        """The ``setpriv`` prefix that drops to the requested identity, if needed."""
+        if identity == "workspace":
+            return Privileges(no_new_privs=no_new_privs, identity=self._shell_identity())
         if identity is None:
-            if not self._drops_privileges():
-                return []
-            uid = self._shell_uid
-            gid = self._shell_uid if self._shell_gid is None else self._shell_gid
-        elif not (_is_root() and sys.platform == "linux" and self._setpriv() is not None):
-            return []
-        elif isinstance(identity, tuple):
-            uid, gid = identity
-        else:
-            uid = gid = identity
-        setpriv = self._setpriv()
-        assert setpriv is not None
-        assert uid is not None and gid is not None
-        uid_text = str(uid)
-        gid_text = str(gid)
-        # Without this, a setuid binary (or passwordless sudo) inside the
-        # workspace could let the dropped shell regain root.
-        no_new_privs_argv = ["--no-new-privs"] if no_new_privs else []
-        return [
-            setpriv,
-            "--reuid",
-            uid_text,
-            "--regid",
-            gid_text,
-            "--clear-groups",
-            *no_new_privs_argv,
-            "--",
-        ]
+            return Privileges(no_new_privs=no_new_privs)
+        requested = identity if isinstance(identity, tuple) else (identity, identity)
+        if _is_root():
+            return Privileges(no_new_privs=no_new_privs, identity=requested)
+        if requested != (os.geteuid(), os.getegid()):
+            raise RuntimeError("running a workspace command as another user requires a root server")
+        return Privileges(no_new_privs=no_new_privs)
 
     # ─── the sandbox sessions share ───────────────────────────────────────
 
@@ -1335,12 +1281,13 @@ class Workspace:
                 *(("--setup-loopback",) if self.owns_netns else ()),
                 *(value for port in sorted(self.ports) for value in ("--port", str(port))),
             ]
-            launcher: list[str] = []
+            if self.owns_netns:
+                host_argv = [unshare(), "--net", *host_argv]
             view_fds: list[int] = []
             if not staged:
                 # Only the staged owner already holds the privilege to build the
                 # sandbox; this one joins a user namespace of its own, as root.
-                join, view_fds = await hold_view(
+                view, view_fds = await hold_view(
                     [
                         bwrap.path,
                         "--die-with-parent",
@@ -1358,12 +1305,9 @@ class Workspace:
                     bwrap=bwrap.path,
                     map_identities=True,
                 )
-                launcher = [sandbox_tool("nsenter"), *join, "--preserve-credentials", "--"]
-            if self.owns_netns:
-                launcher.extend([sandbox_tool("unshare"), "--net"])
+                host_argv = entry_argv(host_argv, into=view)
             try:
                 self._sandbox = await asyncio.create_subprocess_exec(
-                    *launcher,
                     *host_argv,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -1580,6 +1524,7 @@ class Workspace:
     async def _handle_process(self, process: asyncssh.SSHServerProcess[bytes]) -> None:
         guard: ProcessConnectionGuard | None = None
         mount_view: Literal["workspace"] | list[str] = "workspace"
+        privileges: Privileges | None = None
         try:
             pid = await self.sandbox_pid()
             # Sessions start from an exact environment, so a terminal's TERM has to
@@ -1613,17 +1558,10 @@ class Workspace:
                     else ["bash", "-l"]
                 )
                 guarded_command = _guarded_process_argv(
-                    guard_interpreter,
-                    guard,
-                    [
-                        *self._drop_argv(),
-                        *shell_command,
-                    ],
+                    guard_interpreter, guard, shell_command, identity=self._shell_identity()
                 )
-                argv = [
-                    *self._cap_drop_argv(),
-                    *_payload_argv(guarded_command, self._full_env(session_env), ctty=wants_tty),
-                ]
+                argv = _payload_argv(guarded_command, self._full_env(session_env), ctty=wants_tty)
+                privileges = Privileges()
                 mount_view = self._view_argv(
                     network=True,
                     isolate_processes=False,
@@ -1636,13 +1574,12 @@ class Workspace:
                 )
             else:
                 # The session env reaches the shell only after any drop: an LD_PRELOAD
-                # in it must never be in the environment of the root-run setpriv.
-                argv = [
-                    *self._drop_argv(),
-                    *_payload_argv(process.command, self._full_env(session_env), ctty=wants_tty),
-                ]
+                # in it must never be in the environment of the root-run drop.
+                argv = _payload_argv(process.command, self._full_env(session_env), ctty=wants_tty)
                 if pid is not None:
-                    argv = [*self._cap_drop_argv(), *argv]
+                    privileges = self._privileges("workspace", no_new_privs=True)
+                elif (identity := self._shell_identity()) is not None:
+                    argv = entry_argv(argv, into=[], privileges=Privileges(identity=identity))
             if sys.platform != "win32":
                 # Namespace/process wrappers must not receive caller-controlled
                 # loader variables or server secrets. The inner payload injects
@@ -1819,6 +1756,7 @@ class Workspace:
                     terminal_size=process.get_terminal_size() if wants_tty else (80, 24, 0, 0),
                     persistent=guard is None,
                     session_owned=True,
+                    privileges=privileges,
                 )
                 if guard is not None:
                     await guard.wait_ready()

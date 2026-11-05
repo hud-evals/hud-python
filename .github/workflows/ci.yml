@@ -115,7 +115,7 @@ jobs:
           --env UV_PROJECT_ENVIRONMENT=/opt/venv
           --env HUD_API_KEY
           python:3.12-bookworm
-          sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client >/dev/null
+          sh -c 'apt-get update -qq && apt-get install -y -qq bubblewrap openssh-client busybox-static >/dev/null
           && pip install -q "uv>=0.12.2"
           && uv run --all-extras pytest -m "e2e and sandbox" -n 4 --timeout 600'
 
