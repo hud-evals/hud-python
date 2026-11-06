@@ -12,5 +12,6 @@ from __future__ import annotations
 
 from .binding import Binding
 from .dataset import Cursor, Dataset, Row
+from .materialize import Materialization, RowStream
 
-__all__ = ["Binding", "Cursor", "Dataset", "Row"]
+__all__ = ["Binding", "Cursor", "Dataset", "Materialization", "Row", "RowStream"]
