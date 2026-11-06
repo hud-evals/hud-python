@@ -518,6 +518,7 @@ async def rollout(
     rollout_timeout: float | None = None,
     connections: Sequence[Connection] = (),
     workspace_routes: Sequence[WorkspaceRoute] = (),
+    report: bool = True,
 ) -> Run:
     """Drive one task to a graded :class:`Run` here, against ``runtime``'s channel.
 
@@ -548,6 +549,11 @@ async def rollout(
     ``rollout_timeout`` bounds execution through grading. A timeout cancels the
     env's task, lets provider teardown finish in the background, and returns an
     errored run.
+
+    ``report=False`` runs the rollout without a trace: no trace context is
+    bound, so no step ships as a span and the platform is told neither enter nor
+    exit. The graded ``Run`` is still returned; this is how a batch keeps full
+    traces for a sample of its rows instead of every one.
     """
     from .runtime.core import resolve_runtime_config
 
@@ -563,7 +569,8 @@ async def rollout(
     )
     if job_id is None:  # no standalone traces: a lone rollout is a job of one
         job_id = uuid.uuid4().hex
-        await job_enter(job_id, name=task.id, group=1)
+        if report:
+            await job_enter(job_id, name=task.id, group=1)
     trace_id = trace_id or uuid.uuid4().hex
     parent = parent_trace(trace_id)
     parent_trace_id = parent.hex if parent is not None else None
@@ -575,15 +582,21 @@ async def rollout(
 
     config = getattr(agent, "config", None)
     agent_model = config.model if isinstance(config, AgentConfig) else None
-    with set_trace_context(trace_id, parent_trace_id=parent_trace_id):
-        await trace_enter(
-            trace_id,
-            job_id=job_id,
-            group_id=group_id,
-            task_slug=task.slug,
-            model=agent_model,
-            parent_trace_id=parent_trace_id,
-        )
+    trace_context = (
+        set_trace_context(trace_id, parent_trace_id=parent_trace_id)
+        if report
+        else contextlib.nullcontext()
+    )
+    with trace_context:
+        if report:
+            await trace_enter(
+                trace_id,
+                job_id=job_id,
+                group_id=group_id,
+                task_slug=task.slug,
+                model=agent_model,
+                parent_trace_id=parent_trace_id,
+            )
         run: Run | None = None
         cancellation: asyncio.CancelledError | None = None
         _phase = "provisioning"
@@ -767,10 +780,12 @@ async def rollout(
         run.slug = task.slug
         if cancellation is not None:
             # The platform still closes the trace; a hung report must not hold the cancel.
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(trace_exit(run), timeout=5.0)
+            if report:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(trace_exit(run), timeout=5.0)
             raise cancellation
-        await trace_exit(run)
+        if report:
+            await trace_exit(run)
     return run
 
 

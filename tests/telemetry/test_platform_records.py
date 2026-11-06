@@ -18,6 +18,7 @@ from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.capabilities import MCPClient
 from hud.eval import Job, LocalRuntime, Runtime, Task, Taskset, rollout
+from hud.telemetry import flush
 from hud.telemetry.context import set_trace_context
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.asgi import mcp_server
@@ -249,3 +250,20 @@ async def test_the_trace_record_names_the_parent_trace(
 
     (entered,) = reporting.bodies("api", "POST", "/v2/trace/{id}/enter")
     assert entered.get("parent_trace_id") == parent
+
+
+async def test_an_unreported_rollout_is_graded_but_leaves_no_trace_behind(
+    reporting: FakeServices,
+) -> None:
+    run = await rollout(
+        Task(env="checked", id="check"),
+        ScriptedAgent("yes"),
+        runtime=LocalRuntime(checked()),
+        report=False,
+    )
+
+    assert run.reward == 1.0
+    assert run.trace_id is not None and len(run.trace.steps) == 3  # setup, prompt, evaluate
+    assert flush(timeout=10)
+    assert reporting.requests("api") == []
+    assert reporting.requests("telemetry") == []

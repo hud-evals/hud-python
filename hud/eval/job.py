@@ -41,6 +41,15 @@ class Job:
     #: Platform taskset id this job runs, when it's a synced taskset
     #: (``Taskset.from_api``). Links the job to that taskset on the platform.
     taskset_id: str | None = None
+    #: Batch this job runs (``hud.batch``), when rows come from a dataset rather
+    #: than a taskset. Mutually exclusive with ``taskset_id``.
+    batch_id: str | None = None
+    #: Where a batch job may resume from: reader index -> cursor data, as the
+    #: scheduler last checkpointed it. ``None`` for taskset jobs.
+    cursor: dict[str, Any] | None = None
+    rows_done: int = 0
+    rows_failed: int = 0
+    rows_total_estimate: int | None = None
 
     @classmethod
     async def start(cls, name: str, *, group: int = 1, taskset_id: str | None = None) -> Job:
