@@ -13,7 +13,6 @@ from enum import StrEnum
 from pathlib import Path
 from string import Template
 from typing import TYPE_CHECKING, Annotated, Any, assert_never, cast
-from uuid import UUID
 
 import typer
 from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, UrlConstraints
@@ -512,18 +511,28 @@ def eval_command(
 
     agent_instance = agent_type.cls.load(agent_kwargs)
 
+    job_logger = logging.getLogger("hud.eval.job")
+    previous_level, previous_propagate = job_logger.level, job_logger.propagate
+    handler = logging.StreamHandler()
+    job_logger.addHandler(handler)
+    job_logger.setLevel(logging.INFO)
+    job_logger.propagate = False
     started = time.monotonic()
-    job = run_until_terminated(
-        taskset.run(
-            agent_instance,
-            runtime=placement,
-            group=cfg.group_size,
-            max_concurrent=cfg.max_concurrent,
+    try:
+        job = run_until_terminated(
+            taskset.run(
+                agent_instance,
+                runtime=placement,
+                group=cfg.group_size,
+                max_concurrent=cfg.max_concurrent,
+            )
         )
-    )
+    finally:
+        job_logger.removeHandler(handler)
+        handler.close()
+        job_logger.setLevel(previous_level)
+        job_logger.propagate = previous_propagate
     elapsed = time.monotonic() - started
-    if job.runs and settings.telemetry_enabled and settings.api_key:
-        hud_console.info(f"{settings.hud_web_url}/jobs/{UUID(job.id)}")
 
     errors = set(map(id, job.errors))
     if job.runs:
