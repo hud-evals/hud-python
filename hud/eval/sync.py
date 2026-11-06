@@ -11,7 +11,6 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator, with_config
 from typing_extensions import TypedDict
@@ -44,9 +43,8 @@ class TaskUploadResult(TypedDict):
     tasks_updated: int
 
 
-class _TasksetName(BaseModel):
-    taskset_id: str
-    name: str
+class _TasksetPage(BaseModel):
+    items: list[TasksetRecord]
 
 
 class _TasksetExport(BaseModel):
@@ -128,7 +126,9 @@ def diff(local: Taskset, remote: Taskset) -> SyncPlan:
 def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, str]:
     """Resolve a taskset name to ``(uuid, display_name)``; uuid is "" if not found.
 
-    A UUID is returned as given, without checking that the taskset exists.
+    A UUID is returned as given, without checking that the taskset exists. A name
+    is matched exactly, after the platform normalizes it, across every Project the
+    caller can read; a name held in several Projects raises ``ValueError``.
     """
     try:
         uuid.UUID(name_or_id)
@@ -136,13 +136,16 @@ def resolve_taskset_id(platform: PlatformClient, name_or_id: str) -> tuple[str, 
     except ValueError:
         pass
 
-    try:
-        found = platform.get(f"/tasksets/by-name/{quote(name_or_id, safe='')}", _TasksetName)
-    except HudRequestError as e:
-        if e.status_code == 404:
-            return "", name_or_id
-        raise
-    return found.taskset_id, found.name
+    page = platform.get("/tasksets", _TasksetPage, params={"name": name_or_id, "limit": 2})
+    if not page.items:
+        return "", name_or_id
+    if len(page.items) > 1:
+        raise ValueError(
+            f"Taskset name {name_or_id!r} is held by tasksets in more than one Project, "
+            f"including {' and '.join(str(t.id) for t in page.items)}; "
+            "pass the taskset id instead."
+        )
+    return str(page.items[0].id), page.items[0].name
 
 
 def fetch_taskset_tasks(
