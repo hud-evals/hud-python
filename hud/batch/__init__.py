@@ -10,6 +10,7 @@ brings the Parquet readers.
 
 from __future__ import annotations
 
+from .binding import Binding
 from .dataset import Cursor, Dataset, Row
 
-__all__ = ["Cursor", "Dataset", "Row"]
+__all__ = ["Binding", "Cursor", "Dataset", "Row"]
