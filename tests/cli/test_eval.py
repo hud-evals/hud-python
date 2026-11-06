@@ -329,13 +329,17 @@ def test_eval_runs_each_row_where_its_placement_says(
     argv: list[str],
     hosted: bool,
 ) -> None:
+    taskset_id = "eeeeeeee-0000-4000-8000-000000000001"
     signed_in.route(
-        "api", "GET", "/v2/tasksets/by-name/My Tasks", json={"taskset_id": "ts", "name": "My Tasks"}
+        "api",
+        "GET",
+        "/v2/tasksets",
+        json={"items": [{"id": taskset_id, "name": "My Tasks"}], "total": 1},
     )
     signed_in.route(
         "api",
         "GET",
-        "/v2/tasksets/ts/export",
+        f"/v2/tasksets/{taskset_id}/export",
         json={"name": "My Tasks", "tasks": [{"name": "one", "env": "demo", "scenario": "solve"}]},
     )
     signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
