@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -88,6 +89,10 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         return super().dump()
 
     async def __call__(self, run: Run) -> None:
+        if self.config.one_shot:
+            state = await self._initialize_state(prompt=run.prompt_messages)
+            await self._answer_once(run, state)
+            return
         connections: dict[str, CapabilityClient] = {}
         opened_protocols: set[str] = set()
         manifest = run.client.manifest
@@ -158,6 +163,44 @@ class ToolAgent(Agent[ConfigT], Generic[MessageT, ConfigT]):
         )
 
         return tools, params
+
+    def _one_shot_system_prompt(self) -> str | None:
+        parts = [self.config.system_prompt] if self.config.system_prompt else []
+        if self.config.response_schema is not None:
+            parts.append(
+                "Reply with exactly one JSON object matching this JSON Schema, and nothing else:\n"
+                + json.dumps(self.config.response_schema)
+            )
+        return "\n\n".join(parts) if parts else None
+
+    async def _answer_once(self, run: Run, state: RunState[MessageT]) -> None:
+        """One model call, no tools: the reply is the answer (``config.one_shot``)."""
+        trace = run.trace
+        started_at = now_iso()
+        try:
+            step = await self.get_response(
+                state,
+                system_prompt=self._one_shot_system_prompt(),
+                citations_enabled=self.config.citations_enabled,
+            )
+        except (TimeoutError, asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as exc:
+            logger.exception("one-shot answer failed")
+            trace.status = "error"
+            run.record(Step(source="system", error=str(exc)))
+            return
+        step.started_at = step.started_at or started_at
+        step.model = step.model or self.config.model
+        run.record(step)
+        trace.content = step.content
+        trace.status = "error" if step.error else "completed"
+        if step.error:
+            trace.stop_reason = step.stop_reason
+        elif step.finish_reason in TRUNCATION_FINISH_REASONS:
+            trace.stop_reason = "length"
+        else:
+            trace.stop_reason = "done"
 
     async def _loop(
         self,

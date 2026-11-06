@@ -79,6 +79,12 @@ class ToolAgentConfig(AgentConfig):
     #: Conditions that end the rollout instead of being answered with an error
     #: result the model can react to; training configs typically stop on both.
     stop_on: set[StopCondition] = Field(default_factory=set[StopCondition])
+    #: Answer in one model call with no tools: the reply is the final answer. For
+    #: rows that need no environment interaction (a batch's one-shot mode).
+    one_shot: bool = False
+    #: JSON Schema the one-shot reply must match; appended to the system prompt so
+    #: the env's ``returns=`` type can parse it. Ignored unless ``one_shot``.
+    response_schema: dict[str, Any] | None = None
     hosted_tools: list[HostedTool[object]] = Field(
         default_factory=list[HostedTool[object]], exclude=True
     )
