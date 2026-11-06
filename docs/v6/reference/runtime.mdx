@@ -88,9 +88,10 @@ when booting from an already-built snapshot. `LocalRuntime` rejects a
 per-task `runtime_config`.
 
 `run_timeout_s` bounds the lifetime of the provisioned environment, not the complete rollout.
-Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` and HUD-hosted Modal
-rollouts allow the task's agent timeout (`agent_config.timeout_seconds`) plus 3600 seconds for
-startup, grading, and teardown.
+Without one, `DockerRuntime` sets no lifetime bound, while `ModalRuntime` allows the task's agent
+timeout (`agent_config.timeout_seconds`) plus 3600 seconds for startup, grading, and teardown.
+A run still using its environment when that lifetime ends stops with status `error` and stop reason
+`timeout`. For HUD-hosted runs, see [limits](/platform/limits#runs).
 The optional `rollout_timeout` passed to `Task.run` or `Taskset.run` is the execution deadline
 through grading, including submission, queueing, and provisioning. It is not an upper bound on
 method-return latency: cancellation and trace reporting still run after expiry, and `Taskset.run`
@@ -260,11 +261,14 @@ custom `model_client` must use `HUDRuntime` or `LocalRuntime`.
 ### `Runtime`
 
 ```python
-Runtime(url, params=..., config=...)
+Runtime(url, params=..., config=..., expires_at=None)
 ```
 
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
+- **`expires_at`** - when the provider ends the substrate at its run limit, as a
+  `time.monotonic()` reading; a run still using the substrate then ends as timed out. A custom
+  provider that enforces a run limit sets it on the runtime it yields.
 
 Provisioned runtimes expose `snapshot_session(session_id)` and
 `restore_session(session_id, archive)` for transferring session files to an

@@ -162,14 +162,18 @@ class Runtime:
     local process, ``tcp://sandbox-abc.hud.so:443`` for a hosted box).
     ``params`` carries connection-time data a transport may need (auth token,
     sandbox id). ``config`` is the effective runtime configuration used to
-    construct the runtime. Constructed directly, it is also a provider — the
-    borrowed, shared case: it yields itself with a no-op lifecycle, since
-    whoever provisioned the substrate owns its teardown.
+    construct the runtime. ``expires_at`` is when the provider ends the substrate
+    at its run limit, as a :func:`time.monotonic` reading, or ``None`` when it
+    sets none; a rollout still using the substrate then ends as timed out.
+    Constructed directly, it is also a provider — the borrowed, shared case: it
+    yields itself with a no-op lifecycle, since whoever provisioned the substrate
+    owns its teardown.
     """
 
     url: str
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
+    expires_at: float | None = None
 
     #: Whether :meth:`snapshot_session` can export a control session for another
     #: runtime to restore. Without it, a verifier must run beside the actor.

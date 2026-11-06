@@ -8,6 +8,7 @@ import os
 import sys
 import tarfile
 import tempfile
+import time
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
@@ -66,15 +67,15 @@ def _require_free_disk(output: str, storage_mb: int) -> None:
 
 @asynccontextmanager
 async def _docker_deadline(
-    seconds: float | None,
+    expires_at: float | None,
     teardown: tuple[str, ...],
 ) -> AsyncIterator[None]:
-    if seconds is None:
+    if expires_at is None:
         yield
         return
 
     async def expire() -> None:
-        await asyncio.sleep(seconds)
+        await asyncio.sleep(expires_at - time.monotonic())
         await _docker(*teardown, check=False)
 
     expiry = asyncio.create_task(expire())
@@ -292,11 +293,13 @@ class DockerRuntime:
                             _require_free_disk(free_disk, resources.storage_mb)
                         mapping, _ = await _docker(*command, "port", port_service, str(self.port))
                         host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-                        async with _docker_deadline(run_timeout, teardown):
+                        expires_at = None if run_timeout is None else time.monotonic() + run_timeout
+                        async with _docker_deadline(expires_at, teardown):
                             yield DockerEndpoint(
                                 f"tcp://127.0.0.1:{host_port}",
                                 params=params,
                                 config=config if config.model_dump(exclude_none=True) else None,
+                                expires_at=expires_at,
                                 container=container,
                             )
                 finally:
@@ -364,11 +367,13 @@ class DockerRuntime:
                     _require_free_disk(free_disk, resources.storage_mb)
                 mapping, _ = await _docker("port", container, str(self.port))
                 host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-                async with _docker_deadline(run_timeout, teardown):
+                expires_at = None if run_timeout is None else time.monotonic() + run_timeout
+                async with _docker_deadline(expires_at, teardown):
                     yield DockerEndpoint(
                         f"tcp://127.0.0.1:{host_port}",
                         params=params,
                         config=config,
+                        expires_at=expires_at,
                         container=container,
                     )
         finally:

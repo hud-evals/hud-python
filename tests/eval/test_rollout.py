@@ -4,6 +4,8 @@ deadline did decides the run's reward, status and error."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -383,6 +385,32 @@ async def test_the_rollout_timeout_ends_a_run_still_being_provisioned() -> None:
     (run,) = job.runs
     assert (run.trace.status, run.trace.stop_reason, run.runtime) == ("error", "timeout", None)
     assert "during provisioning" in (run.trace.error or "")
+
+
+@pytest.mark.parametrize(
+    ("agent", "stop_reason"),
+    [
+        pytest.param(ScriptedAgent("yes", delay=30), "timeout", id="a-run-still-going-at-it"),
+        pytest.param(
+            ScriptedAgent(fail_before=RuntimeError("boom")),
+            None,
+            id="a-run-that-failed-before-it-while-its-teardown-outlasts-it",
+        ),
+    ],
+)
+async def test_a_runtimes_run_limit_ends_only_a_run_still_using_it(
+    agent: Agent, stop_reason: str | None
+) -> None:
+    @asynccontextmanager
+    async def limited(task: Task) -> AsyncIterator[Runtime]:
+        async with LocalRuntime(checked())(task) as runtime:
+            yield dataclasses.replace(runtime, expires_at=time.monotonic() + 0.5)
+        await asyncio.sleep(1)
+
+    job = await Task(env="checked", id="check").run(agent, runtime=limited)
+
+    (run,) = job.runs
+    assert (run.trace.status, run.trace.stop_reason) == ("error", stop_reason)
 
 
 async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_finish() -> None:

@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -45,7 +46,7 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
     from hud.environment import WorkspaceRoute
 
     from .runtime import Provider
-    from .runtime.core import RuntimeConfig
+    from .runtime.core import Runtime, RuntimeConfig
     from .task import Task
 
 logger = logging.getLogger("hud.eval.run")
@@ -547,7 +548,8 @@ async def rollout(
 
     ``rollout_timeout`` bounds execution through grading. A timeout cancels the
     env's task, lets provider teardown finish in the background, and returns an
-    errored run.
+    errored run. The run limit of the substrate the run is using
+    (:attr:`Runtime.expires_at`) ends it the same way.
     """
     from .runtime.core import resolve_runtime_config
 
@@ -590,6 +592,29 @@ async def rollout(
         rollout_expired = False
 
         client: HudClient | None = None
+        # Set when the substrate the run is using reaches its provider's run limit.
+        run_limit_reached = asyncio.Event()
+        run_limit_timer: asyncio.TimerHandle | None = None
+
+        def watch_run_limit(substrate: Runtime | None) -> None:
+            nonlocal run_limit_timer
+            if run_limit_timer is not None:
+                run_limit_timer.cancel()
+                run_limit_timer = None
+            if substrate is not None and substrate.expires_at is not None:
+                run_limit_timer = asyncio.get_running_loop().call_later(
+                    max(0.0, substrate.expires_at - time.monotonic()), run_limit_reached.set
+                )
+
+        @contextlib.asynccontextmanager
+        async def unwatched_on_failure() -> AsyncIterator[None]:
+            # A failure is the run's outcome; a run limit that passes while grading,
+            # cleanup or teardown unwinds it does not become the cause.
+            try:
+                yield
+            except BaseException:
+                watch_run_limit(None)
+                raise
 
         async def _drive() -> None:
             nonlocal client, run, _phase
@@ -608,6 +633,8 @@ async def rollout(
 
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
+                watch_run_limit(addr)
+                actor.callback(watch_run_limit, None)
                 if (
                     verifier is not None
                     and not shared_verifier
@@ -635,7 +662,8 @@ async def rollout(
                         connections=bound,
                     )
                     live._runtime = addr.url  # the placement record for the receipt
-                    async with live:  # start on enter; complete on exit
+                    # start on enter; complete on exit
+                    async with unwatched_on_failure(), live:
                         run = live  # bound only once live: an earlier failure synthesizes
                         _phase = "agent loop"
                         try:
@@ -657,6 +685,7 @@ async def rollout(
                                             run.trace.stop_reason = "timeout"
                                             run.record(Step(source="system", error=detail))
                             except Exception as exc:
+                                watch_run_limit(None)
                                 if task.verifier is None:
                                     raise
                                 detail = "".join(traceback.format_exception_only(exc)).strip()
@@ -667,7 +696,9 @@ async def rollout(
                             run.connections.clear()
                         _phase = "grading"
 
-                    if verifier is not None:
+                    if verifier is None:
+                        watch_run_limit(None)
+                    else:
                         actor_result = live.grade.raw
                         assert actor_client.manifest is not None
                         actor_session_id = actor_client.manifest.session_id
@@ -677,7 +708,9 @@ async def rollout(
                     if shared_verifier:
                         assert verifier is not None
                         _phase = "verifying"
-                        await _verify(live, actor_client, verifier, actor_result)
+                        async with unwatched_on_failure():
+                            await _verify(live, actor_client, verifier, actor_result)
+                        watch_run_limit(None)
                         _phase = "cleanup"
                         return
 
@@ -692,6 +725,7 @@ async def rollout(
                 assert actor_session_id is not None
                 _phase = "snapshotting actor"
                 async with addr.snapshot_session(actor_session_id) as archive:
+                    watch_run_limit(None)
                     _phase = "actor cleanup"
                     await actor.aclose()
                     client = None
@@ -699,23 +733,30 @@ async def rollout(
                         return
                     _phase = "provisioning verifier"
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
+                    watch_run_limit(verifier_addr)
+                    scope.callback(watch_run_limit, None)
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
-                    if archive is not None:
-                        assert verifier_client.manifest is not None
-                        await verifier_addr.restore_session(
-                            verifier_client.manifest.session_id,
-                            archive,
-                        )
-                    client = verifier_client
-                    _phase = "verifying"
-                    await _verify(live, verifier_client, verifier, actor_result)
+                    async with unwatched_on_failure():
+                        if archive is not None:
+                            assert verifier_client.manifest is not None
+                            await verifier_addr.restore_session(
+                                verifier_client.manifest.session_id,
+                                archive,
+                            )
+                        client = verifier_client
+                        _phase = "verifying"
+                        await _verify(live, verifier_client, verifier, actor_result)
+                    watch_run_limit(None)
                 _phase = "cleanup"
 
         driver = asyncio.create_task(_drive())
+        run_limit = asyncio.create_task(run_limit_reached.wait())
         try:
             # Unlike awaiting it, asyncio.wait leaves the driver running if this task is cancelled.
-            done, _ = await asyncio.wait({driver}, timeout=rollout_timeout)
-            if done:
+            done, _ = await asyncio.wait(
+                {driver, run_limit}, timeout=rollout_timeout, return_when=asyncio.FIRST_COMPLETED
+            )
+            if driver in done:
                 await driver
             else:
                 rollout_expired = True
@@ -727,7 +768,11 @@ async def rollout(
                 if phase not in {"actor cleanup", "cleanup"}:
                     driver.cancel()
                 driver.add_done_callback(_consume_task_result)
-                detail = f"rollout timed out after {rollout_timeout:g}s during {phase}"
+                detail = (
+                    f"environment reached its run limit during {phase}"
+                    if run_limit in done
+                    else f"rollout timed out after {rollout_timeout:g}s during {phase}"
+                )
                 logger.warning(detail)
                 if run is None:
                     run = Run.failed(detail)
@@ -759,6 +804,9 @@ async def rollout(
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+        finally:
+            watch_run_limit(None)
+            run_limit.cancel()
         assert run is not None  # the body bound it, or the handler synthesized it
         run.connections.clear()
         run.trace.trace_id = trace_id

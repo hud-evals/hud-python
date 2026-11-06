@@ -224,6 +224,34 @@ async def test_cancelling_a_rollout_propagates_and_leaves_nothing_behind(
         await eventually(nothing_left, within=10)
 
 
+@pytest.mark.parametrize(
+    ("runtime", "run_limit"),
+    [
+        pytest.param("DockerRuntime", 2, marks=[pytest.mark.e2e, pytest.mark.docker]),
+        # A Modal sandbox's run limit also covers its startup.
+        pytest.param("ModalRuntime", 60, marks=[pytest.mark.e2e, pytest.mark.modal]),
+    ],
+)
+async def test_a_run_that_outlives_its_environments_run_limit_ends_timed_out(
+    runtime: str, run_limit: int, request: pytest.FixtureRequest
+) -> None:
+    row = Task(
+        env="echo",
+        id="echo",
+        args={"word": "tangerine"},
+        runtime_config=RuntimeConfig.model_validate({"limits": {"run_timeout_s": run_limit}}),
+    )
+
+    async with placed(runtime, "echo", request) as (provider, nothing_left):
+        agent = ScriptedAgent("tangerine", delay=run_limit + 3)
+        job = await row.run(agent, runtime=provider)
+        await eventually(nothing_left)
+
+    (run,) = job.runs
+    assert (run.trace.status, run.trace.stop_reason) == ("error", "timeout")
+    assert "environment reached its run limit" in (run.trace.error or "")
+
+
 @pytest.mark.parametrize("runtime", [CONTAINER, MODAL])
 @pytest.mark.parametrize(("link", "reward"), [(False, 1.0), (True, 0.0)], ids=["files", "a-link"])
 async def test_a_verifier_in_its_own_sandbox_receives_the_actors_session_files(

@@ -9,6 +9,7 @@ import math
 import shlex
 import sys
 import tempfile
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -292,6 +293,7 @@ class ModalRuntime:
                 *self.command,
             )
         )
+        expires_at = time.monotonic() + run_timeout
         sb = await modal.Sandbox.create.aio(
             *command,
             app=app,
@@ -401,6 +403,7 @@ class ModalRuntime:
                     **({"ready_timeout": ready_timeout} if compose is not None else {}),
                 },
                 config=config if config.model_dump(exclude_none=True) else None,
+                expires_at=expires_at,
                 sandbox=sb,
                 compose=compose_path,
             )
