@@ -35,6 +35,7 @@ from .types import Trace
 from .version import __version__
 
 __all__ = [
+    "Batch",
     "Chat",
     "ComposeProject",
     "Connection",
@@ -62,3 +63,12 @@ __all__ = [
     "connect",
     "instrument",
 ]
+
+
+def __getattr__(name: str) -> object:
+    # ``Batch`` needs the batch extra (pyarrow), so it loads on first use.
+    if name == "Batch":
+        from .batch import Batch
+
+        return Batch
+    raise AttributeError(f"module 'hud' has no attribute {name!r}")

@@ -10,8 +10,24 @@ brings the Parquet readers.
 
 from __future__ import annotations
 
+from .batch import Batch, Execution
 from .binding import Binding
 from .dataset import Cursor, Dataset, Row
+from .ledger import Ledger, RowResult
 from .materialize import Materialization, RowStream
+from .scheduler import BatchHalted, BatchScheduler
 
-__all__ = ["Binding", "Cursor", "Dataset", "Materialization", "Row", "RowStream"]
+__all__ = [
+    "Batch",
+    "BatchHalted",
+    "BatchScheduler",
+    "Binding",
+    "Cursor",
+    "Dataset",
+    "Execution",
+    "Ledger",
+    "Materialization",
+    "Row",
+    "RowResult",
+    "RowStream",
+]
