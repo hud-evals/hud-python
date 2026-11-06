@@ -17,6 +17,7 @@ from .hosted import HostedRuntime
 from .hud import HUDRuntime
 from .local import LocalRuntime, SubprocessRuntime
 from .modal import ModalRuntime
+from .pool import InstancePool
 
 __all__ = [
     "ComposeProject",
@@ -25,6 +26,7 @@ __all__ = [
     "DockerRuntime",
     "HUDRuntime",
     "HostedRuntime",
+    "InstancePool",
     "LocalRuntime",
     "ModalRuntime",
     "Provider",

@@ -149,6 +149,13 @@ class _ConfiguredProvider(Protocol):
     runtime_config: RuntimeConfig | None
 
 
+@runtime_checkable
+class _WrappingProvider(Protocol):
+    """A placement that delegates provisioning to ``inner`` (``Shared``, ``InstancePool``)."""
+
+    inner: Provider
+
+
 def validate_session_id(session_id: str) -> None:
     if not session_id or session_id in {".", ".."} or "/" in session_id or "\\" in session_id:
         raise ValueError("runtime session id must be a single path component")
@@ -284,7 +291,7 @@ class Shared:
 
 def resolve_runtime_config(provider: Provider, task: Task) -> RuntimeConfig | None:
     """Return the runtime configuration a provider will apply to a task."""
-    if isinstance(provider, Shared):
+    if isinstance(provider, _WrappingProvider):
         return resolve_runtime_config(provider.inner, task)
     if isinstance(provider, Runtime):
         return provider.config if provider.config is not None else task.runtime_config
