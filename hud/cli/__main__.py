@@ -19,6 +19,7 @@ from dotenv import dotenv_values
 from packaging.version import parse as parse_version
 
 from hud.cli import CLI, CliError, parse_key_value, set_env_values
+from hud.cli.batch import batch_app
 from hud.cli.deploy import deploy_command
 from hud.cli.eval import eval_command
 from hud.cli.harbor import harbor_app
@@ -293,6 +294,7 @@ app.add_typer(sync_app, name="sync")
 app.add_typer(harbor_app, name="harbor")
 app.add_typer(qa_app, name="qa")
 app.add_typer(jobs_app, name="jobs")
+app.add_typer(batch_app, name="batch")
 app.command(name="cancel", hidden=True, deprecated=True)(cancel_job_command)
 app.add_typer(trace_app, name="trace")
 app.add_typer(models_app, name="models")

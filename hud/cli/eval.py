@@ -41,6 +41,7 @@ from hud.utils.process import run_until_terminated
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
+    from hud.batch import Batch
     from hud.eval import Provider, Task
     from hud.utils.gateway import GatewayModelInfo
 
@@ -139,6 +140,147 @@ class EvalConfig(BaseModel):
         )
 
 
+def _agent_kwargs(cfg: EvalConfig, agent_type: AgentType) -> dict[str, Any]:
+    """The agent's config kwargs: its TOML section, then --model and the run flags on top."""
+    agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
+    if cfg.model:
+        agent_kwargs["model"] = cfg.model
+    agent_kwargs["max_steps"] = cfg.max_steps
+    if cfg.auto_respond and not agent_type.is_cli:
+        agent_kwargs["auto_respond"] = True
+    if cfg.gateway:
+        agent_kwargs["gateway"] = True
+    return agent_kwargs
+
+
+def _batch_source(source: str) -> Batch | None:
+    """The :class:`~hud.batch.Batch` a Python source defines, if it defines one."""
+    path = Path(source)
+    if not path.exists() or not (path.suffix == ".py" or path.is_dir()):
+        return None
+    try:
+        from hud.batch import Batch
+    except ImportError:
+        return None  # without the batch extra a source cannot define a Batch
+    try:
+        return Batch.from_file(path)
+    except ValueError as exc:
+        if str(exc).startswith("no Batch"):
+            return None
+        raise
+
+
+def _eval_batch(
+    batch: Batch,
+    cfg: EvalConfig,
+    *,
+    source: str,
+    ledger: str | None,
+    one_shot: bool,
+    instances: int | None,
+    yes: bool,
+) -> dict[str, Any] | Result:
+    """``hud eval batch.py <model> --full``: every eligible row, through warm instances."""
+    from hud.batch import BatchHalted, Ledger
+
+    agent_type = cfg.agent_type
+    assert agent_type is not None and cfg.runtime is not None
+    if one_shot or instances is not None:
+        execution = batch.execution.model_copy(
+            update={
+                **({"mode": "one_shot"} if one_shot else {}),
+                **({"instances": instances} if instances is not None else {}),
+            }
+        )
+        batch = batch.model_copy(update={"execution": execution})
+
+    inner: Provider | HostedRuntime
+    source_path = Path(source).resolve()
+    match cfg.runtime:
+        case AnyUrl():
+            inner = Runtime(str(cfg.runtime))
+        case Placement.LOCAL:
+            inner = SubprocessRuntime(source_path)
+        case Placement.HUD:
+            inner = HUDRuntime()
+        case Placement.HOSTED:
+            inner = HostedRuntime()
+        case Placement.DOCKER:
+            inner = DockerRuntime()
+        case Placement.MODAL:
+            inner = ModalRuntime()
+        case Placement.DAYTONA:
+            inner = DaytonaRuntime()
+        case _:
+            assert_never(cfg.runtime)
+
+    ledger_path = Path(ledger) if ledger else batch_ledger_path(source_path, batch.id)
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    store = Ledger(ledger_path)
+    before = store.summary(batch.id)
+
+    table = Table(title="Batch Settings", title_style="bold cyan", box=box.ROUNDED)
+    table.add_column("Setting", style="yellow")
+    table.add_column("Value", style="green")
+    table.add_row("batch", f"{batch.name} ({batch.id})")
+    table.add_row("dataset", batch.dataset.uri)
+    table.add_row("runtime", str(cfg.runtime))
+    table.add_row("agent", f"{agent_type.value} ({cfg.model or 'default model'})")
+    table.add_row("mode", batch.execution.mode)
+    table.add_row(
+        "instances",
+        f"{batch.execution.instances} x {batch.execution.sessions_per_instance} sessions",
+    )
+    table.add_row("shard", f"{batch.materialization.shard + 1}/{batch.materialization.shards}")
+    table.add_row("ledger", str(ledger_path))
+    if before["completed"] or before["error"]:
+        table.add_row("resuming", f"{before['completed']} done, {before['error']} failed")
+    hud_console.print(table)
+    CLI.confirm_or_abort("Proceed?", yes=yes, default=True)
+
+    agent_instance = agent_type.cls.load(_agent_kwargs(cfg, agent_type))
+    started = time.monotonic()
+    halted: str | None = None
+    try:
+        job = run_until_terminated(batch.run(agent_instance, runtime=inner, ledger=store))
+    except BatchHalted as stop:
+        job, halted = stop.job, stop.reason
+        hud_console.warning(f"Batch halted: {halted}")
+    elapsed = time.monotonic() - started
+    summary = store.summary(batch.id)
+    if settings.telemetry_enabled and settings.api_key:
+        hud_console.info(f"{settings.hud_web_url}/jobs/{UUID(job.id)}")
+    hud_console.print(f"\n[bold]'{batch.name}' Results[/bold]")
+    hud_console.print(f"  [dim]Rows this run:[/dim] {job.rows_done} done, {job.rows_failed} failed")
+    hud_console.print(
+        f"  [dim]Rows in ledger:[/dim] {summary['completed']} done, {summary['error']} failed"
+    )
+    hud_console.print(f"  [dim]Time:[/dim] {elapsed:.1f}s")
+    if summary["mean_reward"] is not None:
+        hud_console.print(f"  [dim]Mean reward:[/dim] [green]{summary['mean_reward']:.3f}[/green]")
+    hud_console.print()
+
+    result = {
+        "job_id": job.id,
+        "batch_id": batch.id,
+        "source": source,
+        "ledger": str(ledger_path),
+        "rows_done": job.rows_done,
+        "rows_failed": job.rows_failed,
+        "cursor": job.cursor,
+        "halted": halted,
+        "elapsed_seconds": elapsed,
+        **summary,
+    }
+    return Result(result) if job.rows_done == 0 and job.rows_failed else result
+
+
+def batch_ledger_path(source: Path, batch_id: str) -> Path:
+    """Where ``hud eval`` keeps a batch's ledger when ``--ledger`` is not passed."""
+    root = source if source.is_dir() else source.parent
+    return root / ".hud" / "batches" / f"{batch_id}.sqlite"
+
+
 def eval_command(
     source: str | None = typer.Argument(None, help="Tasks file (.py, .json) or platform taskset"),
     agent: str | None = typer.Argument(
@@ -196,16 +338,40 @@ def eval_command(
         "--remote",
         help="Run the whole rollout on the HUD platform (same as --runtime hosted)",
     ),
+    sample: int | None = typer.Option(
+        None,
+        "--sample",
+        min=1,
+        help="Batch source: run this many sampled rows as an ordinary taskset (default 1).",
+    ),
+    ledger: str | None = typer.Option(
+        None,
+        "--ledger",
+        help="Batch source: SQLite ledger of row results and resume state "
+        "(default .hud/batches/<batch id>.sqlite beside the source).",
+    ),
+    one_shot: bool = typer.Option(
+        False, "--one-shot", help="Batch source: one model call per row, no tools."
+    ),
+    instances: int | None = typer.Option(
+        None, "--instances", min=1, help="Batch source: warm environment instances to keep."
+    ),
 ) -> dict[str, Any] | Result:
     """Run evaluation on datasets or individual tasks with agents.
 
     A tasks file (tasks.py, a directory, or JSON/JSONL beside its env source) runs
     locally, each rollout in a fresh subprocess; a platform taskset runs hosted.
 
+    A source defining a ``hud.Batch`` samples one row by default (``--sample N`` for
+    more) and runs every eligible row with ``--full``, through warm environment
+    instances, recording results in a ledger that a rerun resumes from.
+
     Examples:
         hud eval tasks.py claude-sonnet-4-6
         hud eval tasks.py claude
         hud eval "My Tasks" claude-sonnet-4-6 --full   # Platform taskset, run on the platform
+        hud eval batch.py claude --sample 20           # 20 sampled rows as a taskset
+        hud eval batch.py claude --full --one-shot     # the whole batch, one call per row
         hud eval tasks.py claude --config max_tokens=32768
         hud eval tasks.py claude --gateway             # Route LLM calls through HUD Gateway
         hud eval tasks.json claude-sonnet-4-6 --runtime hud  # Use the HUD runtime tunnel
@@ -381,7 +547,31 @@ def eval_command(
     ):
         raise ValueError("Model name is required for OpenAI compatible agent; use --model.")
 
-    if Path(source).exists():
+    batch = _batch_source(source)
+    batch_options = {"--ledger": ledger, "--one-shot": one_shot or None, "--instances": instances}
+    if batch is None and (sample is not None or any(v for v in batch_options.values())):
+        names = ", ".join(["--sample", *batch_options])
+        raise ValueError(f"{names} apply to a Batch source; {source} defines none")
+
+    if batch is not None and cfg.all and sample is None:
+        return _eval_batch(
+            batch,
+            cfg,
+            source=source,
+            ledger=ledger,
+            one_shot=one_shot,
+            instances=instances,
+            yes=yes,
+        )
+    if batch is not None:
+        rows = sample or 1
+        hud_console.info(f"Sampling {rows} row(s) of batch {batch.name}")
+        taskset = run_until_terminated(batch.sample(rows))
+        if rows > 1 or sample is None:
+            hud_console.warning(
+                f"Running a sample of {len(taskset)} row(s). Add --full to run the whole batch."
+            )
+    elif Path(source).exists():
         hud_console.info(f"Loading tasks from: {source}")
         taskset = Taskset.from_file(source)
     else:
@@ -402,7 +592,7 @@ def eval_command(
         if not taskset:
             raise ValueError(f"No tasks matching: {', '.join(cfg.task_ids)}")
         hud_console.info(f"Filtered to {len(taskset)} task(s)")
-    elif not cfg.all:
+    elif not cfg.all and batch is None:
         total = len(taskset)
         taskset = taskset.filter([next(iter(taskset.tasks))])
         if total > 1:
@@ -460,15 +650,7 @@ def eval_command(
         case _:
             assert_never(cfg.runtime)
 
-    # The agent's config kwargs: its TOML section, then --model on top.
-    agent_kwargs = dict(cfg.agent_config.get(agent_type.value, {}))
-    if cfg.model:
-        agent_kwargs["model"] = cfg.model
-    agent_kwargs["max_steps"] = cfg.max_steps
-    if cfg.auto_respond and not agent_type.is_cli:
-        agent_kwargs["auto_respond"] = True
-    if cfg.gateway:
-        agent_kwargs["gateway"] = True
+    agent_kwargs = _agent_kwargs(cfg, agent_type)
 
     table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
     table.add_column("Setting", style="yellow")

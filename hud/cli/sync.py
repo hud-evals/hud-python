@@ -305,6 +305,57 @@ def sync_tasks_command(
     }
 
 
+BATCH_CONFIG_PATH = Path(".hud") / "batch.json"
+
+
+@sync_app.command("batch")
+def sync_batch_command(
+    source: str = typer.Argument(
+        ".",
+        help="Python source defining the Batch (a .py file or directory)",
+    ),
+    name: str | None = typer.Option(None, "--name", help="Which Batch, if several"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and print the batch without writing anything."
+    ),
+) -> Any:
+    """Validate a Batch and record its definition in ``.hud/batch.json``.
+
+    [not dim]Checks that the binding fits the template, that the dataset's files
+    resolve, and that the selected columns cover the binding; then writes the
+    batch's stored form (with its id) beside the source, so later runs and
+    exports refer to the same batch.
+
+    Examples:
+        hud sync batch batch.py
+        hud sync batch batch.py --dry-run --json[/not dim]
+    """
+    from hud.batch import Batch
+
+    hud_console = HUDConsole()
+    hud_console.header("Sync Batch", icon="")
+
+    batch = Batch.from_file(source, name=name)
+    files = batch.dataset.files()
+    row_groups = len(batch.dataset.row_groups())
+    hud_console.success(
+        f"{batch.name} ({batch.id}): {batch.env}/{batch.task} over {len(files)} file(s), "
+        f"{row_groups} row group(s)"
+    )
+    stored = {"id": batch.id, **batch.model_dump(mode="json", exclude_none=True)}
+    if dry_run:
+        hud_console.info("--dry-run: nothing written")
+        return {"dry_run": True, "action": "sync_batch", "batch": stored}
+
+    source_path = Path(source).resolve()
+    root = source_path if source_path.is_dir() else source_path.parent
+    target = root / BATCH_CONFIG_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(stored, indent=2) + "\n", encoding="utf-8")
+    hud_console.dim_info("Batch saved to:", str(target))
+    return {"action": "sync_batch", "path": str(target), "batch_id": batch.id, "files": len(files)}
+
+
 @sync_app.command("env")
 def sync_env_command(
     name: str | None = typer.Argument(
