@@ -1,159 +1,154 @@
-# HUD Python Agent Guide
+# HUD Python SDK
 
 This repository is the Python SDK and CLI for HUD: environments, capabilities,
-tasks, agents, the rollout engine, telemetry, and command-line workflows for
-building and running agent evaluations.
+tasks, agents, the rollout engine, telemetry, and the command-line workflows
+for building and running agent evaluations. Customers build environments on it
+and pin released versions, so its public API and CLI are what they program
+against.
 
-Priorities: solve the requested problem, keep scope tight, preserve public SDK
-behavior where it is actually shipped, and improve code quality rather than
-adding local workarounds.
+The bar is production-grade code: one clear design per problem, no hacks, no
+monkey patches, no partial solutions. When the only way to ship a request is a
+hack, add the missing support cleanly, or stop and say what the SDK lacks.
 
-## Where To Look First
+## Contracts
 
-- `README.md` for the protocol, product concepts, and common CLI workflows.
-- `docs/v6/` for the live SDK docs: quickstart, reference (environment, tasks,
-  capabilities, agents, graders, types, cli), run guides, and cookbooks.
-- `CONTRIBUTING.md` for setup, test, lint, and type-check commands.
-- `pyproject.toml` for supported Python versions, dependencies, optional extras,
-  ruff, ty, pytest, and coverage configuration.
-- Source files and their tests for exact behavior. Trust code and tests over
-  stale prose.
-- `cookbooks/` for runnable end-to-end examples (each is its own uv project).
+These hold absolutely. If a change cannot satisfy one, stop and say so.
 
-Keep this file stable. Do not turn it into a release runbook, command matrix, or
-inventory of current incidents.
+- **Public repository.** Tracked files, commits, issues, and PR descriptions
+  carry no internal hostnames, account or team IDs, customer names, runbooks,
+  or operational details.
+- **Shipped behavior.** Preserve observable behavior, persisted contracts, and
+  security invariants of released versions. When the design requires a shipped
+  contract to change, migrate it explicitly. Accidental internal structure is
+  not a contract.
+- **Compatibility is for real consumers.** Keep an old interface only for a
+  consumer outside the change, such as a released API or CLI flag. Private and
+  unreleased code cuts over in one step, with no shims or aliases left behind.
 
-## Repository Map
+## Agent protocol
 
-- Core flow: `hud/environment/` (spec: capabilities, tasks, serving) →
-  `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
-  connected by `hud/capabilities/` and `hud/clients/`.
-- `hud/cli/` is the Typer surface over the same modules.
-- `hud/integrations/` contains packaged adapters for external task formats.
-- `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture environments
-  and fakes for what CI cannot reach.
-- `cookbooks/` contains standalone runnable examples outside the `hud` package.
+- **Verify, don't guess.** Follow the execution path instead of guessing from
+  abstractions (see **Debugging**). In reports, label what you observed and
+  what you inferred, and cite the file, test, trace, or command output.
+- **Ask, flag, or do.** Ask first when scope, public API compatibility, or
+  ownership is unclear. Choose and flag when naming, test boundaries, or local
+  structure are ambiguous but the direction is clear. Just do formatting,
+  obvious bug fixes with a clear root cause, tightened types, and slop removal
+  that does not change behavior.
+- **Scope.** Keep edits to the requested behavior and follow nearby patterns.
+  Do not clean up unrelated code. Prefer editing existing docs to creating new
+  ones unless asked.
+- **Final report.** End each task with what was verified and how, anything you
+  are not confident in or that could be fragile, and a `Friction:` line.
 
-## Working Style
+### Friction
 
-- Run commands from the repository root unless a tool explicitly requires a
-  subdirectory.
-- Use `uv` for Python commands. Do not rely on an activated virtualenv.
-- Read files before editing them and follow nearby patterns.
-- Keep edits focused on the requested behavior. Do not clean up unrelated code.
-- Prefer editing existing docs over creating new docs unless the user asks for a
-  new document.
-- Do not introduce hacks, monkey patches, or partial workarounds. If a robust
-  solution needs missing support, add that support cleanly or report the blocker.
-- Report any part of a change that is uncertain, fragile, or intentionally left
-  unverified.
+Agents are among HUD's heaviest users, so what they work around is product
+feedback. In the `Friction:` line, list each place the SDK, CLI, or platform
+made you work around it: what you tried, what you expected, what happened, and
+the workaround. Examples are reading source to learn a flag or behavior the
+docs and `--help` don't state, retrying past an error that didn't name its
+cause, calling an API by hand because the CLI can't do it, and a recorded value
+that doesn't match what ran. Write `Friction: none` when there was none. Offer
+to file each item as a GitHub issue, following **Public repository**, and file
+only when the user agrees.
 
-## Setup And Checks
+## Principles
 
-Use the commands in `CONTRIBUTING.md` as the source of truth. Common commands:
+- **Question the need.** A new module, option, stage, or dependency earns its
+  place: name the simpler design and why it fails. A flag for behavior that
+  should always happen is a design bug. Optional provider, tool, or integration
+  dependencies go behind their extra.
+- **One way.** Each concept has one contract, one data model, one execution
+  path, one name. Find the layer that owns a concept and keep its policy
+  there; adapters translate external formats into native SDK concepts at the
+  boundary and then use the normal path. Reuse by meaning, not code
+  similarity: a helper earns its place by centralizing an invariant, not by
+  sharing lines.
+- **Fail loud.** Surface failures with their cause. No silent fallbacks, broad
+  exception swallowing, or defensive branches that hide broken invariants.
+  Errors you write name the failing input and the remedy.
+- **Root cause first.** Find the exact cause from evidence before changing
+  code, and fix it at the boundary where the fault is. Retries, longer
+  timeouts, and special-case paths are workarounds unless the state they
+  handle is legitimate.
+- **Not narrow.** A defect or review comment is one instance of a rule. Fix
+  every path the same rule covers.
+- **Does it run.** Prove a change on the real path, smallest real surface
+  first. A build, a type check, or a mocked test is not proof.
+- **No fake tests.** Write a test only when it would catch a break a user
+  would notice. Drive the SDK as a user does (CLI, public API) and assert what
+  they see: reward, status, errors, files, exit codes, and what the platform
+  records, not prompt text, rendered output, or argv. Fake only what CI cannot
+  run (HUD services, model providers, Docker), and never touch `hud`
+  internals; ruff's SLF001 enforces this. A change needs no test by default;
+  a regression test must fail with the fix reverted.
+
+Before calling a change done, check its diff:
+
+- Does it add a second way to do something that already has one?
+- Does it add a public knob, wrapper, or layer that hides nothing?
+- Does any failure path return a normal-looking result?
+- Does a compatibility path survive without a named external consumer?
+- Did the real changed path run, and which test fails if it breaks?
+
+## Code
+
+- Type public APIs and cross-module contracts with Pydantic models or typed
+  structures, not ad-hoc dictionaries. Keep `Any` to genuinely dynamic
+  payloads such as provider JSON. `cast(...)` and `assert` are fine for real
+  narrowing; broad `# type: ignore` is not.
+- Imports at the top of the module, except an existing lazy
+  optional-dependency pattern or a documented import cycle. Use
+  `TYPE_CHECKING` for type-only imports that would add runtime cost or cycles.
+- Public APIs expose user operations and domain concepts, not construction
+  stages or compatibility scaffolding.
+- Every new `if`, `try`, nullable mode, or compatibility path earns its keep.
+  Before finishing, remove slop: obvious comments, abnormal defensive checks,
+  broad `try` blocks, type bypasses, deep nesting, and thin wrappers.
+- Comments are rare and explain non-obvious intent. Delete dead code. Decompose
+  a file past 1000 lines when a focused module is there to extract.
+- Use `uv` for Python commands; do not rely on an activated virtualenv. Run
+  commands from the repository root.
+
+## Checks
+
+`CONTRIBUTING.md` holds the commands. Locally, ruff and ty are the loop; CI
+runs the test suite and the `e2e` lanes. Run the tests you touched.
 
 ```bash
 uv sync --extra dev
 uv run ruff format . --check
 uv run ruff check .
 uv run --extra dev --extra train ty check
-uv run pytest -n auto
 ```
 
-Locally, ruff and ty are the loop; CI runs the test suite. Run the tests you
-touched, and leave the full suite and the `e2e` lanes to CI.
+## Repository map
 
-Tests run on Python 3.11 and 3.12 in CI. `pyproject.toml` currently supports
-Python `>=3.11, <3.13`.
+- Core flow: `hud/environment/` (spec: capabilities, tasks, serving) →
+  `hud/eval/` (engine: rollout, runtimes, jobs) → `hud/agents/` (harnesses),
+  connected by `hud/capabilities/` and `hud/clients/`.
+- `hud/cli/` is the Typer surface over the same modules.
+- `hud/integrations/` holds adapters for external task formats.
+- `tests/` mirrors the SDK's subsystems; `tests/fixtures` holds fixture
+  environments and fakes for what CI cannot reach.
+- `cookbooks/` holds standalone runnable examples, each its own uv project.
+- `README.md` covers the protocol and product concepts, `docs/v6/` the live SDK
+  docs, and `pyproject.toml` supported Pythons, extras, and tool config.
+  Source and tests beat stale prose.
 
-## Code Quality Bar
+## Debugging
 
-- Prefer direct, typed, maintainable code over clever or magical abstractions.
-- Fail fast and loudly. Avoid silent fallbacks, broad exception swallowing, and
-  defensive branches that hide broken invariants.
-- Minimize branching. Every new `if`, `try`, compatibility path, or nullable mode
-  should earn its keep.
-- Prefer explicit contracts over optional, loosely shaped, or cast-heavy data.
-- Delete dead code. Do not keep obsolete paths around "just in case."
-- Keep comments rare and useful. Explain non-obvious intent, not what the next
-  line mechanically does.
-- Remove AI-generated slop before finishing: unnecessary comments, abnormal
-  defensive checks, broad `try` blocks, type bypasses, deep nesting, and thin
-  wrappers that do not reduce real complexity.
-- Be suspicious of files pushed past 1000 lines. Decompose when there is a clear
-  focused module to extract.
-- Avoid new core dependencies. If a dependency is only needed for optional
-  provider, tool, or integration behavior, put it behind the relevant extra.
+- CLI: the command module, then config and settings, then the SDK module it
+  exercises.
+- Agents and providers: gateway resolution, the provider adapter,
+  capability-backed tool wiring, and recorded request and response shapes.
+- Environments and tasks: the task lifecycle (start, grade), the
+  control-channel server and client, and capability routing and tunneling.
+- Execution: the rollout engine, from runtime acquisition and `connect` through
+  the `Run` lifecycle to job and trace reporting.
+- Telemetry: instrumentation boundaries and exporter behavior before call
+  sites.
 
-## Architecture And Simplification
-
-- Before changing cross-module behavior, identify the layer that owns the concept.
-  Keep its policy and invariants there; other layers should translate or delegate.
-- Before introducing an abstraction, find the existing abstraction that owns the
-  same semantics. Reuse or extend it instead of building a partial copy elsewhere.
-- Reuse abstractions by meaning, not code similarity. Duplication is a reason to
-  inspect ownership, not automatic justification for a shared helper.
-- Prefer one canonical contract, data model, and execution path for each concept.
-  Express legitimate variation through owned configuration or policy rather than
-  parallel implementations.
-- Keep adapters thin: translate external representations into native SDK concepts
-  at the boundary, then use the normal implementation.
-- Add a helper, wrapper, or module only when it reduces total conceptual
-  complexity, centralizes an invariant, or provides meaningful reuse. Inline
-  ceremonial indirection.
-- Public APIs should expose stable user operations and domain concepts, not
-  internal construction stages or compatibility scaffolding.
-- Preserve observable behavior, persisted contracts, and security invariants, not
-  accidental internal structure. Prefer explicit migrations when architecture
-  requires a shipped contract to change.
-
-## Typing And Imports
-
-- Type public APIs and cross-module contracts. Prefer explicit Pydantic models or
-  typed structures over ad-hoc dictionaries at boundaries.
-- `cast(...)` and `assert ...` are acceptable for real type narrowing. Broad
-  `# type: ignore` comments are not.
-- Keep `Any` contained to genuinely dynamic payloads such as provider JSON,
-  metadata, or third-party integration blobs.
-- Keep imports at the top of the module. Use inline imports only for an existing
-  lazy optional-dependency pattern or a documented circular-import constraint.
-- Use `TYPE_CHECKING` imports for type-only imports that would otherwise add
-  runtime dependency cost or cycles.
-
-## Testing
-
-Write a test only when it would catch a break a user would notice.
-
-- Drive the SDK as a user does (CLI, public API) and assert what they see:
-  reward, status, errors, files, exit codes, and what the HUD platform records.
-  Not prompt text, rendered output or argv.
-- Fake only what CI cannot run (HUD services, model providers, Docker). Never
-  touch `hud` internals; ruff's SLF001 enforces this.
-- A change needs no test by default. Add one when a fix could plausibly regress; it
-  must fail with the fix reverted.
-
-## Operational Debugging
-
-- Follow the execution path instead of guessing from abstractions.
-- For CLI issues, start with the command module, then config/settings, then the
-  SDK module being exercised.
-- For agent/provider issues, inspect gateway resolution, provider adapter code,
-  capability-backed tool wiring, and recorded request/response shapes.
-- For environment/task issues, inspect the task lifecycle (start/grade), the
-  control-channel server and client, and capability routing/tunneling.
-- For execution issues, inspect the rollout engine: runtime provider
-  acquisition, `connect`, the `Run` lifecycle, and job/trace reporting.
-- For telemetry issues, inspect instrumentation boundaries and exporter behavior
-  before changing call sites.
-- Report what was verified, what remains inferred, and which file, test, trace,
-  or command output supports the conclusion.
-
-## Decision Protocol
-
-Ask first when scope, public API compatibility, or ownership is unclear.
-
-Choose and flag when naming, test boundaries, or local structure are ambiguous
-but the direction is straightforward.
-
-Just do it when fixing formatting, applying an obvious bug fix with clear root
-cause, tightening types, or removing slop that does not change behavior.
+Keep this file stable: no release runbooks, command matrices, or current
+incidents.
