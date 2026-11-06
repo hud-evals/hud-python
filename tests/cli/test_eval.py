@@ -6,7 +6,9 @@ import json
 import os
 import signal
 import time
+from threading import Event, Thread
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 import pytest
 
@@ -415,3 +417,70 @@ def test_terminating_eval_tears_down_the_environments_it_spawned(
     assert len(spawned) == 2
     assert running == []
     assert process.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.parametrize(
+    ("verbosity", "reporting"),
+    [
+        pytest.param([], True, id="default"),
+        pytest.param(["-v"], True, id="verbose"),
+        pytest.param(["-vv"], True, id="debug"),
+        pytest.param([], False, id="unreported"),
+    ],
+)
+def test_eval_prints_its_job_link_once_before_hosted_execution_finishes(
+    hud: Hud,
+    hud_env: HudEnv,
+    signed_in: FakeServices,
+    tasks: Path,
+    verbosity: list[str],
+    reporting: bool,
+) -> None:
+    hud_env.set(HUD_TELEMETRY_ENABLED=str(int(reporting)), HUD_WEB_URL="https://hud.test")
+    signed_in.route("api", "POST", "/v2/trace/job/{id}/enter", json={})
+    signed_in.route("api", "POST", "/v2/rollouts/submit", json={"status": "queued"})
+    signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "running"})
+    process = hud.start("eval", "tasks.py", *SCRIPTED, "--remote", "--yes", "--json", *verbosity)
+    assert process.stderr is not None
+    assert process.stdout is not None
+    stderr: list[str] = []
+    link_seen = Event()
+
+    def read_stderr() -> None:
+        assert process.stderr is not None
+        for line in process.stderr:
+            stderr.append(line)
+            if "https://hud.test/jobs/" in line:
+                link_seen.set()
+
+    reader = Thread(target=read_stderr)
+    reader.start()
+    try:
+        deadline = time.monotonic() + 60
+        while not signed_in.requests("api", "GET", "/v2/trace/{id}"):
+            assert process.poll() is None, "hud eval exited before polling its rollout"
+            assert time.monotonic() < deadline, "hud eval never polled its rollout"
+            time.sleep(0.05)
+        if reporting:
+            assert link_seen.wait(5), "the running job has no console link"
+        else:
+            assert not link_seen.is_set()
+        assert process.poll() is None
+        signed_in.route("api", "GET", "/v2/trace/{id}", json={"status": "completed", "reward": 0.5})
+        process.wait(timeout=30)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=30)
+        reader.join(timeout=10)
+
+    assert not reader.is_alive()
+    assert process.returncode == 0, "".join(stderr)
+    assert json.loads(process.stdout.read())["mean_reward"] == 0.5
+    registrations = signed_in.requests("api", "POST", "/v2/trace/job/{id}/enter")
+    assert len(registrations) == int(reporting)
+    if reporting:
+        job_id = UUID(registrations[0].path.split("/")[-2])
+        assert "".join(stderr).count(f"https://hud.test/jobs/{job_id}") == 1
+    else:
+        assert "https://hud.test/jobs/" not in "".join(stderr)
