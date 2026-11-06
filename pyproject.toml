@@ -123,9 +123,18 @@ bedrock = [
     "anthropic[bedrock]>=2.1,<3",
 ]
 
+# Batches (hud.batch): Parquet datasets read lazily from HF / S3 / GCS / local disk
+batch = [
+    "pyarrow>=15",
+    "fsspec>=2024.2",
+    "huggingface_hub>=0.23",  # registers the hf:// filesystem
+]
+
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud[agents]",  # Include agents for dev
+    "hud[batch]",  # tests/batch read Parquet fixtures
+    "pyarrow<21",  # pyarrow 21+ imports only against numpy 2; openpi-client (robot) pins numpy<2
     "hud[robot]",  # the robot scenarios in tests/robot run the real wire
     "dotenv>=0.9.9",
     # Testing and linting
