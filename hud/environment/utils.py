@@ -14,6 +14,10 @@ if TYPE_CHECKING:
 CONTROL_FRAME_LIMIT_BYTES = 16 * 1024 * 1024
 
 
+class InvalidFrameError(ValueError):
+    """A control-channel frame is not a JSON object."""
+
+
 class FrameTooLargeError(ValueError):
     """An encoded JSON-RPC frame exceeds its channel's byte limit."""
 
@@ -75,7 +79,13 @@ async def read_frame(
             break
     if not line:
         return None
-    return json.loads(line)
+    try:
+        msg = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise InvalidFrameError("frame is not valid JSON") from exc
+    if not isinstance(msg, dict):
+        raise InvalidFrameError("frame must be a JSON object")
+    return msg
 
 
 def reply(msg_id: int | str, result: dict[str, Any]) -> dict[str, Any]:

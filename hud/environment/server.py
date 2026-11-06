@@ -35,6 +35,7 @@ from .env import Answer, current_session_id
 from .utils import (
     CONTROL_FRAME_LIMIT_BYTES,
     FrameTooLargeError,
+    InvalidFrameError,
     encode_frame,
     error,
     read_frame,
@@ -613,6 +614,8 @@ async def bind(env: Environment, host: str = "127.0.0.1", port: int = 0) -> asyn
                 await _stream(env, first, reader, writer)
             else:
                 await channel.session(first, reader, writer)
+        except InvalidFrameError as exc:
+            LOGGER.warning("rejecting control frame: %s", exc)
         except FrameTooLargeError as exc:
             await _send_control_error(writer, None, -32000, str(exc))
         finally:

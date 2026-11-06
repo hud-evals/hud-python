@@ -323,3 +323,28 @@ async def test_raw_bytes_sent_with_the_preface_reach_the_daemon(
 
     assert opened == {"jsonrpc": "2.0", "id": 1, "result": {"capability": "echo"}}
     assert echoed == b"raw bytes"
+
+
+@pytest.mark.parametrize("frame", [b"\n", b"\xff\n", b"[]\n"], ids=["json", "encoding", "shape"])
+@pytest.mark.parametrize("after_hello", [False, True], ids=["first-frame", "session-frame"])
+async def test_malformed_frames_close_only_their_connection_without_a_traceback(
+    frame: bytes, after_hello: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    env = Environment("malformed")
+    async with LocalRuntime(env)(Task(env="malformed", id="x")) as runtime:
+        async with wire(runtime.url) as peer:
+            if after_hello:
+                await peer.call("hello")
+            await peer.write(frame)
+            assert await peer.read() is None
+        async with wire(runtime.url) as healthy:
+            response = await healthy.call("hello")
+            assert response["result"]["env"]["name"] == "malformed"
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.name == "hud.environment.server" and record.levelname == "WARNING"
+    ]
+    assert len(warnings) == 1
+    assert not any(record.exc_info for record in caplog.records)
