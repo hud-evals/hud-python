@@ -4,6 +4,7 @@ deadline did decides the run's reward, status and error."""
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,7 @@ from hud.agents.base import Agent
 from hud.agents.types import AgentConfig
 from hud.capabilities import Connection
 from hud.eval import LocalRuntime, Runtime, Task, rollout
+from hud.types import ClassifiedError
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.environments import checked
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hud.eval import Run
+    from tests.fixtures.services import FakeServices
 
 
 @pytest.mark.parametrize(
@@ -405,3 +408,46 @@ async def test_a_rollout_timeout_in_teardown_keeps_the_grade_and_lets_teardown_f
     assert (run.reward, run.trace.stop_reason) == (1.0, "timeout")
     assert "during actor cleanup" in (run.trace.error or "")
     await eventually(lambda: events == ["torn down"])
+
+
+class ImagePullDenied(ClassifiedError):
+    def __init__(self) -> None:
+        super().__init__("registry refused the pull", code="image_pull_denied", source="user")
+
+
+@pytest.mark.parametrize(
+    ("when", "code", "source"),
+    [
+        pytest.param("placing", "image_pull_denied", "user", id="placing-the-box"),
+        pytest.param("mid-run", "box_lost", "provider", id="mid-run"),
+        pytest.param("unclassified", None, None, id="an-unclassified-error"),
+    ],
+)
+async def test_a_classified_failure_reaches_the_trace_exit_with_its_code_and_source(
+    when: str, code: str | None, source: str | None, reporting: FakeServices
+) -> None:
+    failing = {
+        "placing": ImagePullDenied(),
+        "mid-run": ClassifiedError("the box went away", code="box_lost", source="provider"),
+        "unclassified": RuntimeError("something else"),
+    }[when]
+
+    class Fails(Agent):
+        async def __call__(self, run: Run) -> None:
+            raise failing
+
+    @asynccontextmanager
+    async def provider(task: Task) -> AsyncIterator[Runtime]:
+        if when == "placing":
+            raise failing
+        async with LocalRuntime(checked())(task) as runtime:
+            yield runtime
+
+    run = await rollout(Task(env="checked", id="check"), Fails(), runtime=provider)
+
+    assert run.trace.status == "error"
+    assert (run.trace.error_code, run.trace.error_source) == (code, source)
+    (exit,) = reporting.requests("api", "POST", "/v2/trace/{id}/exit")
+    reported = json.loads(exit.body)
+    assert (reported.get("error_code"), reported.get("error_source")) == (code, source)
+    assert reported["status"] == "error"

@@ -148,6 +148,8 @@ async def trace_exit(run: Run) -> None:
             # Recovered step errors stay on the steps; only an errored run
             # reports a trace-level error.
             "error": run.trace.error if run.trace.is_error else None,
+            "error_code": run.trace.error_code,
+            "error_source": run.trace.error_source,
             "evaluation_result": run.evaluation or None,
             "stop_reason": run.trace.stop_reason,
             # Trajectory metadata the platform stores on the trace for display;

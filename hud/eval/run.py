@@ -37,7 +37,7 @@ from hud.graders.results import SubScore
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import ClassifiedError, PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -664,6 +664,7 @@ async def rollout(
                                 detail = "".join(traceback.format_exception_only(exc)).strip()
                                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                                 run.trace.status = "error"
+                                _classify(run, exc)
                                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         finally:
                             run.connections.clear()
@@ -768,6 +769,7 @@ async def rollout(
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+            _classify(run, exc)
         assert run is not None  # the body bound it, or the handler synthesized it
         run.connections.clear()
         run.trace.trace_id = trace_id
@@ -781,6 +783,13 @@ async def rollout(
             raise cancellation
         await trace_exit(run)
     return run
+
+
+def _classify(run: Run, exc: BaseException) -> None:
+    """Record the classification of the error that ended ``run``, when it carries one."""
+    if isinstance(exc, ClassifiedError):
+        run.trace.error_code = exc.code
+        run.trace.error_source = exc.source
 
 
 async def _explain(addr: Runtime, exc: BaseException) -> None:
