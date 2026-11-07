@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import os
 import sys
 import tarfile
 import tempfile
@@ -15,7 +14,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Self
-from urllib.parse import urlsplit
 
 from hud.clients.client import DEFAULT_READY_TIMEOUT
 from hud.environment.server import DEFAULT_PORT, PORT_ANNOUNCEMENT
@@ -172,7 +170,7 @@ class DockerRuntime:
     against its project ``.env``) and started with a provider override: the control-channel
     port is published on the service that owns ``main``'s network, and ``main`` gets HUD's
     nested-workspace security profile, session volumes, bind mounts, env vars, resource
-    limits and, with ``service_access``, the Docker socket.
+    limits and, with ``service_access``, a Docker daemon private to ``main``.
     """
 
     def __init__(
@@ -182,7 +180,6 @@ class DockerRuntime:
         port: int = DEFAULT_PORT,
         run_args: Sequence[str] = (),
         bind_mounts: Sequence[DockerBindMount] = (),
-        compose_service_socket: str | Path | None = None,
         runtime_config: RuntimeConfig | dict[str, Any] | None = None,
         env_vars: Mapping[str, str] | None = None,
     ) -> None:
@@ -190,9 +187,6 @@ class DockerRuntime:
         self.run_args = tuple(run_args)
         self.bind_mounts = tuple(bind_mounts)
         self.env_vars = dict(env_vars or {})
-        self.compose_service_socket = (
-            str(Path(compose_service_socket)) if compose_service_socket is not None else None
-        )
         config = RuntimeConfig(image=image) if image is not None else RuntimeConfig()
         if runtime_config is not None:
             config = config.with_overrides(RuntimeConfig.model_validate(runtime_config))
@@ -224,32 +218,12 @@ class DockerRuntime:
                 and resources.gpu.type is not None
             ):
                 raise ValueError("DockerRuntime cannot select Compose GPUs by type")
-            service_socket = None
-            if compose_project.service_access:
-                service_socket = self.compose_service_socket
-                if service_socket is None:
-                    endpoint = os.environ.get("DOCKER_HOST")
-                    if not endpoint:
-                        endpoint, _ = await _docker(
-                            "context",
-                            "inspect",
-                            "--format",
-                            "{{.Endpoints.docker.Host}}",
-                        )
-                        endpoint = endpoint.strip()
-                    parsed = urlsplit(endpoint)
-                    if parsed.scheme != "unix" or not parsed.path:
-                        raise ValueError(
-                            "DockerRuntime Compose service access through a remote daemon "
-                            "requires compose_service_socket"
-                        )
-                    service_socket = parsed.path
             project = f"hud-{uuid.uuid4().hex[:12]}"
             with compose_project.stage(
                 f"127.0.0.1::{self.port}",
                 port_service=port_service,
                 seccomp=SECCOMP_PROFILE,
-                service_socket=service_socket,
+                docker=bool(compose_project.service_access),
                 bind_mounts=self.bind_mounts,
                 env_vars=self.env_vars,
                 cpu=resources.cpu if resources is not None else None,

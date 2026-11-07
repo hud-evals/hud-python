@@ -141,14 +141,8 @@ runtime, the phases remain isolated:
   `reward` or `score` number), else `/logs/verifier/reward.txt`. A boolean, non-finite, or
   missing reward, or a verifier past its timeout, is an error result.
 
-`RuntimeConfig.compose.service_access=True` mounts a Docker socket in the generated `main` service.
-
-<Warning>
-Under local `DockerRuntime`, the mounted socket is the **host's own Docker daemon** (remote Docker
-endpoints are rejected). Code in `main` can then control every container on the machine - grant
-this only to environment code you trust. Under hosted execution, the daemon is private to the
-rollout.
-</Warning>
+`RuntimeConfig.compose.service_access=True` gives the generated `main` service a Docker daemon of
+its own; see [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 See [Compose environments](/v6/experimental/compose#runtime-behavior) for the complete runtime
 behavior.

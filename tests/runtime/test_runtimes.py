@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import socket
 import tarfile
+import textwrap
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -26,6 +28,7 @@ from hud import Task
 from hud.agents.base import Agent
 from hud.eval.run import rollout
 from hud.runtime import (
+    ComposeProject,
     DockerRuntime,
     HUDRuntime,
     LocalRuntime,
@@ -391,3 +394,115 @@ async def test_a_box_past_its_memory_limit_dies_and_the_run_names_the_reason(
     (trace,) = job.traces
     assert trace.status == "error"
     assert "exit code 137" in (trace.error or "")
+
+
+@asynccontextmanager
+async def placed_compose(
+    runtime: str, request: pytest.FixtureRequest
+) -> AsyncGenerator[tuple[Provider, Callable[[], Awaitable[bool]]]]:
+    """A provider for Compose rows written by ``compose_row``, and its cleanliness check."""
+    limits = RuntimeConfig.model_validate({"limits": {"startup_timeout_s": 120}})
+    match runtime:
+        case "DockerRuntime":
+            working_dir = str(request.getfixturevalue("tmp_path"))
+
+            async def removed() -> bool:
+                listing = await asyncio.create_subprocess_exec(
+                    "docker",
+                    "ps",
+                    "--all",
+                    "--quiet",
+                    "--filter",
+                    f"label=com.docker.compose.project.working_dir={working_dir}",
+                    stdout=asyncio.subprocess.PIPE,
+                )
+                listed, _ = await listing.communicate()
+                return listed.split() == []
+
+            yield DockerRuntime(runtime_config=limits), removed
+        case _:
+            raise AssertionError(runtime)
+
+
+def compose_row(
+    runtime: str, request: pytest.FixtureRequest, services: str, *, docker: bool = False
+) -> Task:
+    """A ``box`` task whose environment is a Compose project of ``main`` and ``services``.
+
+    ``main`` serves the box fixture; ``services`` is YAML for the services beside it.
+    """
+    match runtime:
+        case "DockerRuntime":
+            main = request.getfixturevalue("fixture_image")("box")
+        case _:
+            raise AssertionError(runtime)
+    path = request.getfixturevalue("tmp_path") / "compose.yaml"
+    path.write_text(
+        "services:\n"
+        f"  main:\n    image: {main}\n"
+        + "\n".join("  " + line for line in textwrap.dedent(services).strip("\n").splitlines())
+        + "\n"
+    )
+    return Task(
+        env="box",
+        id="write",
+        args={"path": "/work/a.txt", "text": "composed"},
+        runtime_config=RuntimeConfig(
+            compose=ComposeProject(document=path, service_access=docker or None)
+        ),
+    )
+
+
+@pytest.mark.parametrize("runtime", [CONTAINER])
+async def test_sibling_services_are_reached_by_exec_and_collect(
+    runtime: str, request: pytest.FixtureRequest, tmp_path: Path
+) -> None:
+    row = compose_row(
+        runtime,
+        request,
+        """
+        side:
+          image: python:3.12-slim
+          command: sleep infinity
+        """,
+    )
+
+    async with placed_compose(runtime, request) as (provider, nothing_left):
+        async with provider(row) as box:
+            trace = await rollout(row, ScriptedAgent("composed"), runtime=box)
+            noted = await box.exec(["sh", "-c", "hostname > /tmp/who; echo noted"], service="side")
+            with pytest.raises(ValueError, match="'nobody'"):
+                await box.exec(["true"], service="nobody")
+            (who,) = await box.collect(["/tmp/who"], tmp_path / "side", service="side")
+            (mine,) = await box.collect(["/work/a.txt"], tmp_path / "main")
+        await eventually(nothing_left)
+
+    assert trace.reward == 1.0
+    assert noted.stdout == "noted\n"
+    assert who.read_text().strip() and who.read_text() != mine.read_text()
+    assert mine.read_text() == "composed"
+
+
+@pytest.mark.parametrize("runtime", [CONTAINER])
+async def test_main_gets_a_docker_daemon_of_its_own(
+    runtime: str, request: pytest.FixtureRequest
+) -> None:
+    row = compose_row(runtime, request, "", docker=True)
+    probe = (
+        "import json, os, urllib.request\n"
+        "base = os.environ['DOCKER_HOST'].replace('tcp://', 'http://')\n"
+        "version = json.load(urllib.request.urlopen(base + '/version'))\n"
+        "containers = json.load(urllib.request.urlopen(base + '/containers/json?all=1'))\n"
+        "print(json.dumps([version['Version'], containers]))\n"
+    )
+
+    async with placed_compose(runtime, request) as (provider, nothing_left):
+        async with provider(row) as box:
+            trace = await rollout(row, ScriptedAgent("composed"), runtime=box)
+            seen = await box.exec(["python3", "-c", probe])
+        await eventually(nothing_left)
+
+    assert trace.reward == 1.0
+    assert seen.returncode == 0, seen.stderr
+    version, containers = json.loads(seen.stdout)
+    assert version.startswith("28.") and containers == []

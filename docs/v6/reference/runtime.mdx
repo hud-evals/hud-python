@@ -176,8 +176,8 @@ DockerRuntime(image=None, *, port=8765, run_args=(), bind_mounts=(), compose_ser
 For Compose environments, the service named `main` must serve HUD's control
 channel on `port`. `DockerRuntime` starts the project and publishes that
 service's control port. Constructor-level `image` is shorthand for
-`runtime_config.image`. Project structure, build hooks, service access, and the
-security override are documented in
+`runtime_config.image`. Project structure, build hooks, the private Docker
+daemon, and the security override are documented in
 [Compose environments](/v6/experimental/compose#runtime-behavior).
 
 ### `ModalRuntime`
