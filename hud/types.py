@@ -7,6 +7,7 @@ import json
 import uuid
 import warnings
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeAlias, cast
 
 from pydantic import (
@@ -20,6 +21,7 @@ from pydantic import (
     SerializationInfo,
     SerializeAsAny,
     SerializerFunctionWrapHandler,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -425,8 +427,56 @@ class SubScore(BaseModel):
         )
 
 
+def absolute_path_below_root(value: str) -> str:
+    """Validate a path inside a box: absolute, beneath ``/``, with no ``..`` component."""
+    path = PurePosixPath(value)
+    if not path.is_absolute() or len(path.parts) == 1 or ".." in path.parts:
+        raise ValueError("path must name a location beneath /")
+    return str(path)
+
+
+class CollectCommand(BaseModel):
+    """Run ``command`` with ``sh -c`` in a service of the actor's environment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service: str = Field(min_length=1)
+    command: str = Field(min_length=1)
+    timeout_sec: float = Field(gt=0)
+
+
+class CollectFiles(BaseModel):
+    """Copy ``path`` out of a service of the actor's environment into the actor's session.
+
+    It lands at ``into``, a path relative to the session, where a separate verifier finds it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    service: str = Field(min_length=1)
+    path: str
+    into: str = Field(min_length=1, pattern=r"^[^/]")
+    # Skip a path the service does not have instead of failing the run.
+    missing_ok: bool = False
+
+    _path_below_root = field_validator("path")(absolute_path_below_root)
+
+    @field_validator("into")
+    @classmethod
+    def _inside_the_session(cls, value: str) -> str:
+        if ".." in value.split("/"):
+            raise ValueError("into must stay inside the session")
+        return value
+
+
 class EvaluationResult(BaseModel):
-    """The grade a task yields: a reward and an optional ``subscores`` breakdown."""
+    """The grade a task yields: a reward and an optional ``subscores`` breakdown.
+
+    ``collect`` is what an actor asks the runtime to gather from the other
+    services of its environment before its box is torn down, in order, for
+    the separate verifier that grades it. Only the runtime can reach those
+    services from outside the box.
+    """
 
     reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
     done: bool = Field(default=True, description="Whether the task/episode is complete")
@@ -437,6 +487,7 @@ class EvaluationResult(BaseModel):
         default=None,
         description="Optional breakdown of score components for debugging",
     )
+    collect: list[CollectCommand | CollectFiles] | None = None
 
     model_config = ConfigDict(extra="allow")
 

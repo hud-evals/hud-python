@@ -308,6 +308,20 @@ class ModalEndpoint(Runtime):
                 collected.append(destination / source.name)
         return collected
 
+    async def put(self, source: Path, path: str | PurePosixPath, *, service: str = "main") -> None:
+        target = PurePosixPath(path)
+        with tempfile.TemporaryDirectory(prefix="hud-put-") as directory:
+            archive = Path(directory) / "put.tar.gz"
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(source, arcname=target.name)
+            await self._target(service).filesystem.copy_from_local.aio(archive, _ARCHIVE)
+        parent = shlex.quote(str(target.parent))
+        await self._sh(
+            f"rm -rf {shlex.quote(str(target))} && mkdir -p {parent} && "
+            f"tar -xzf {_ARCHIVE} -C {parent}",
+            service=service,
+        )
+
     @asynccontextmanager
     async def checkpoint(self, scope: CheckpointScope) -> AsyncGenerator[Checkpoint]:
         self._check_watcher()

@@ -6,9 +6,13 @@ import asyncio
 import contextlib
 import logging
 import math
+import tempfile
 import traceback
 import uuid
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
+
+from pydantic import TypeAdapter
 
 from hud.agents.cli import CLIAgent
 from hud.agents.types import AgentConfig
@@ -19,7 +23,17 @@ from hud.runtime.core import RuntimeUnsupportedError, SessionScope, resolve_runt
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import ClassifiedError, Grade, PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import (
+    ClassifiedError,
+    CollectCommand,
+    CollectFiles,
+    Grade,
+    PromptMessage,
+    Step,
+    TaskCall,
+    TextContent,
+    Trace,
+)
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -507,6 +521,11 @@ async def rollout(
                         live.trace.grade = Grade.ungraded()
                     if shared_verifier:
                         assert verifier is not None
+                        assert actor_session_id is not None
+                        _phase = "collecting"
+                        with tempfile.TemporaryDirectory(prefix="hud-") as collected:
+                            gathered = await _collect(addr, actor_result, Path(collected))
+                            await _deliver(addr, gathered, SessionScope(actor_session_id).path)
                         _phase = "verifying"
                         await _verify(live, actor_client, verifier, actor_result)
                         _phase = "cleanup"
@@ -525,6 +544,12 @@ async def rollout(
                 # runtime transports sessions; elsewhere a verifier in another
                 # env starts from nothing.
                 async with contextlib.AsyncExitStack() as moved:
+                    _phase = "collecting"
+                    gathered = await _collect(
+                        addr,
+                        actor_result,
+                        Path(moved.enter_context(tempfile.TemporaryDirectory(prefix="hud-"))),
+                    )
                     session = None
                     if addr.transports_sessions:
                         _phase = "snapshotting actor"
@@ -540,11 +565,11 @@ async def rollout(
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
                     await scope.enter_async_context(_explained(verifier_addr))
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
+                    assert verifier_client.manifest is not None
+                    verifier_session = SessionScope(verifier_client.manifest.session_id)
                     if session is not None:
-                        assert verifier_client.manifest is not None
-                        await verifier_addr.restore(
-                            session, SessionScope(verifier_client.manifest.session_id)
-                        )
+                        await verifier_addr.restore(session, verifier_session)
+                    await _deliver(verifier_addr, gathered, verifier_session.path)
                     client = verifier_client
                     _phase = "verifying"
                     await _verify(live, verifier_client, verifier, actor_result)
@@ -625,6 +650,53 @@ def _classify(trace: Trace, exc: BaseException) -> None:
     if isinstance(exc, ClassifiedError):
         trace.error_code = exc.code
         trace.error_source = exc.source
+
+
+async def _collect(
+    addr: Runtime, actor_result: dict[str, Any], into: Path
+) -> list[tuple[str, Path]]:
+    """Carry out the actor's ``collect`` requests while its box is still up.
+
+    Commands run in the named service and files land under ``into``. Returns each
+    file's session-relative destination with its local copy.
+    """
+    requests = TypeAdapter(list[CollectCommand | CollectFiles]).validate_python(
+        actor_result.get("collect") or []
+    )
+    gathered: list[tuple[str, Path]] = []
+    for index, request in enumerate(requests):
+        if isinstance(request, CollectCommand):
+            try:
+                result = await addr.exec(
+                    ["sh", "-c", request.command],
+                    service=request.service,
+                    max_wait=request.timeout_sec,
+                )
+            except TimeoutError:
+                raise TimeoutError(
+                    f"collect hook on {request.service!r} timed out after {request.timeout_sec:g}s"
+                ) from None
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"collect hook on {request.service!r} failed: {result.stderr.strip()}"
+                )
+            continue
+        if request.missing_ok:
+            present = await addr.exec(
+                ["sh", "-c", 'test -e "$1" || test -L "$1"', "hud-collect", request.path],
+                service=request.service,
+            )
+            if present.returncode != 0:
+                continue
+        (local,) = await addr.collect([request.path], into / str(index), service=request.service)
+        gathered.append((request.into, local))
+    return gathered
+
+
+async def _deliver(addr: Runtime, gathered: list[tuple[str, Path]], session: PurePosixPath) -> None:
+    """Place what was collected into the verifier's session, where it grades."""
+    for into, local in gathered:
+        await addr.put(local, session / into)
 
 
 async def _explain(addr: Runtime, exc: Exception) -> None:

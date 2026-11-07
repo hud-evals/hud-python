@@ -314,9 +314,17 @@ async with box.checkpoint(RootScope()) as image:
 |-----------|--------------|
 | `exec(argv, *, service="main", max_wait=None)` | Runs a command in the environment, or in a sibling Compose service, and returns its `returncode`, `stdout` and `stderr`. A command still running after `max_wait` seconds is stopped and the call raises `TimeoutError`. |
 | `collect(paths, destination, *, service="main")` | Copies files and directories out of the box into `destination` (each at `destination / path.name`); a link to an absolute path or outside `destination` is rejected. |
+| `put(source, path, *, service="main")` | Copies a local file or directory into the box at `path`, replacing what is there. |
 | `checkpoint(scope)` | Captures a `SessionScope(session_id)`, a `WorkspaceScope(path)` or the `RootScope()` for the duration of the `async with`. Session and workspace checkpoints are archives of regular files and directories; a root checkpoint is an image the same provider boots from `runtime_config.image`. |
 | `restore(checkpoint, scope)` | Replaces a session or workspace in a running box with a checkpoint of the same kind (`ValueError` otherwise). A root checkpoint is restored by starting a new box from it. |
 | `terminated()` | Why the box stopped (its exit code, and whether the memory limit killed it), or `None` while it runs. A rollout that fails while the box is held adds this to the recorded error. |
+
+An actor graded by a separate verifier can ask the runtime for what only the runtime reaches:
+its `EvaluationResult.collect` lists `CollectCommand(service, command, timeout_sec)` and
+`CollectFiles(service, path, into, missing_ok)` requests, carried out in order while the
+actor's box is still up (commands with `sh -c` in the named service, files copied out) and
+delivered into the verifier's session at `into` once the session itself has moved. A failed or
+timed-out command fails the run.
 
 `transports_sessions` says whether a runtime moves control sessions this way. A rollout whose
 verifier declares its own `runtime_config` in the actor's environment gets its own box only on

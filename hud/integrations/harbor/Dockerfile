@@ -10,7 +10,6 @@ FROM ${VERIFIER_IMAGE} AS verifier-root
 
 # bubblewrap cannot sandbox under emulation, so the controller builds natively.
 FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.8.15 AS uv
-FROM --platform=$BUILDPLATFORM docker:28.3.3-cli AS docker-cli
 FROM --platform=$BUILDPLATFORM python:3.12-slim AS runtime
 
 USER root
@@ -30,8 +29,5 @@ CMD ["/controller/venv/bin/hud", "serve", "hud.integrations.harbor.env:env", "--
 
 FROM runtime AS plain
 
-FROM runtime AS service-access
-COPY --from=docker-cli /usr/local/bin/docker /controller/bin/docker
-
-FROM service-access AS verifier
+FROM runtime AS verifier
 COPY --from=verifier-root / /verifier

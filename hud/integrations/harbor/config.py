@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from hud.environment.egress import Peer
 from hud.environment.workspace import Mount
+from hud.types import absolute_path_below_root
 
 if TYPE_CHECKING:
     from hud.runtime.compose import ComposeHealthcheck
@@ -22,23 +23,17 @@ if TYPE_CHECKING:
 class Artifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source: str = Field(pattern=r"^/")
+    source: str
     destination: str | None = None
     exclude: list[str] = Field(default_factory=list)
     service: str = Field(default="main", min_length=1)
+
+    _source_below_root = field_validator("source")(absolute_path_below_root)
 
     @model_validator(mode="before")
     @classmethod
     def expand_path(cls, value: Any) -> Any:
         return {"source": value} if isinstance(value, str) else value
-
-    @field_validator("source")
-    @classmethod
-    def normalize_source(cls, value: str) -> str:
-        path = PurePosixPath(value)
-        if len(path.parts) == 1 or ".." in path.parts:
-            raise ValueError("artifact source must name a path beneath /")
-        return str(path)
 
     @field_validator("destination")
     @classmethod

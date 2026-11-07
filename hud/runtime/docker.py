@@ -531,6 +531,23 @@ class DockerEndpoint(Runtime):
             collected.append(destination / source.name)
         return collected
 
+    async def put(self, source: Path, path: str | PurePosixPath, *, service: str = "main") -> None:
+        container = await self._service_container(service)
+        target = PurePosixPath(path)
+        await _docker(
+            "exec",
+            "--user",
+            "0",
+            container,
+            "sh",
+            "-c",
+            'rm -rf "$1" && mkdir -p "$2"',
+            "hud-put",
+            str(target),
+            str(target.parent),
+        )
+        await _docker("cp", str(source), f"{container}:{target}")
+
     @asynccontextmanager
     async def checkpoint(self, scope: CheckpointScope) -> AsyncGenerator[Checkpoint]:
         if isinstance(scope, RootScope):

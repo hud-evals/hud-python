@@ -269,9 +269,9 @@ class Runtime:
     Constructed directly, it is also a provider that yields itself and leaves teardown
     to whoever provisioned the host.
 
-    A provisioned runtime also owns the box's filesystem operations: ``exec``
-    and ``collect`` reach the environment and, for a Compose project, its
-    sibling services; ``checkpoint`` and ``restore`` move a session, a
+    A provisioned runtime also owns the box's filesystem operations: ``exec``,
+    ``collect`` and ``put`` reach the environment and, for a Compose project,
+    its sibling services; ``checkpoint`` and ``restore`` move a session, a
     workspace directory, or the root filesystem. A borrowed runtime declines
     them all with ``RuntimeUnsupportedError``, as does any provider for
     a scope its host cannot capture faithfully.
@@ -322,6 +322,16 @@ class Runtime:
         path or outside ``destination`` is rejected (``tarfile.FilterError``).
         """
         raise self._unsupported("collect", "it did not provision the host")
+
+    async def put(
+        self,
+        source: Path,
+        path: str | PurePosixPath,
+        *,
+        service: str = "main",
+    ) -> None:
+        """Copy the local file or directory ``source`` over ``path`` in ``service``."""
+        raise self._unsupported("put", "it did not provision the host")
 
     def checkpoint(self, scope: CheckpointScope) -> AbstractAsyncContextManager[Checkpoint]:
         """Capture ``scope`` for the duration of the returned context.
