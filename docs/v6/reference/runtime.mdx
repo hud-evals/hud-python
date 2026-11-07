@@ -336,3 +336,9 @@ whoever provisioned the host owns teardown.
 
 Placement can also vary per task: a runtime is called once per rollout with the task row being placed,
 so one callable can route heavier rows to heavier hosts.
+
+A failure your runtime can name travels with its name. Raise `hud.types.ClassifiedError` (or a
+subclass) with a `code` and a `source` of `user`, `platform` or `provider`, while placing the box
+or from code that runs mid-rollout, and the run records them as `trace.error_code` and
+`trace.error_source`, which the trace exit reports; an unclassified exception ends the run the
+same way without them.

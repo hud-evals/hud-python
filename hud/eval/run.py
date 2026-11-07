@@ -19,7 +19,7 @@ from hud.runtime.core import resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
-from hud.types import Grade, PromptMessage, Step, TaskCall, TextContent, Trace
+from hud.types import ClassifiedError, Grade, PromptMessage, Step, TaskCall, TextContent, Trace
 from hud.utils.gateway import routes_to_gateway
 from hud.utils.time import now_iso
 
@@ -487,6 +487,7 @@ async def rollout(
                                 detail = "".join(traceback.format_exception_only(exc)).strip()
                                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                                 run.trace.status = "error"
+                                _classify(run.trace, exc)
                                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
                         finally:
                             run.connections.clear()
@@ -580,10 +581,12 @@ async def rollout(
                     "rollout failed before launch (%s): %s", _phase, detail, exc_info=True
                 )
                 failed = Trace.failed(f"[{_phase}] {detail}")
+                _classify(failed, exc)
             else:
                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                 run.trace.status = "error"
                 run.record(Step(source="system", error=f"[{_phase}] {detail}"))
+                _classify(run.trace, exc)
         if run is not None:
             run.connections.clear()
             trace = run.trace
@@ -601,6 +604,13 @@ async def rollout(
             raise cancellation
         await trace_exit(trace)
     return trace
+
+
+def _classify(trace: Trace, exc: BaseException) -> None:
+    """Record the classification of the error that ended ``trace``, when it carries one."""
+    if isinstance(exc, ClassifiedError):
+        trace.error_code = exc.code
+        trace.error_source = exc.source
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

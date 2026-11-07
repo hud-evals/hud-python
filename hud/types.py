@@ -350,6 +350,26 @@ TraceStatus: TypeAlias = Literal["completed", "error", "cancelled"]
 
 # Why the rollout stopped; anything but "done" means a limit cut it off.
 StopReason: TypeAlias = Literal["done", "max_steps", "length", "timeout", "malformed_tool_call"]
+# Who owns a classified failure: the task's author (``user``), the platform
+# running the rollout (``platform``), or the host's provider (``provider``).
+FailureSource: TypeAlias = Literal["user", "platform", "provider"]
+
+
+class ClassifiedError(RuntimeError):
+    """An error a rollout reports under a classification.
+
+    ``code`` names the failure for whoever reads the trace (``container_start_failed``,
+    ``image_pull_denied``); ``source`` says who owns it. A provider or a runner raises
+    one, or a subclass of one, and ``rollout`` records the
+    classification on the trace it ends. An unclassified exception ends the run the
+    same way without one.
+    """
+
+    def __init__(self, message: str, *, code: str, source: FailureSource) -> None:
+        super().__init__(message)
+        self.code = code
+        self.source = source
+
 
 # The configurable subset of stop reasons (``ToolAgentConfig.stop_on``): policy
 # conditions the loop may either stop on or answer with an error result.
@@ -496,6 +516,9 @@ class Trace(BaseModel):
 
     status: TraceStatus | None = None
     stop_reason: StopReason | None = None
+    # The classification of the error that ended the run, when it carried one.
+    error_code: str | None = None
+    error_source: FailureSource | None = None
     content: str | None = Field(default=None)
     grade: Grade = Field(default_factory=Grade.ungraded)
 
