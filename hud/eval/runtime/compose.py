@@ -34,6 +34,13 @@ if TYPE_CHECKING:
 
 _COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
+#: The Docker Engine that serves ``main`` when a project asks for Docker: a
+#: daemon private to the environment, reached over ``DOCKER_HOST``.
+DOCKER_DAEMON_IMAGE = "docker:28.3.3-dind"
+DOCKER_DAEMON_SERVICE = "hud-docker"
+DOCKER_DAEMON_PORT = 2375
+DOCKER_HOST = f"tcp://{DOCKER_DAEMON_SERVICE}:{DOCKER_DAEMON_PORT}"
+
 
 class ComposeUnboundVariableError(ValueError):
     """A Compose variable depends on values outside the packaged project."""
@@ -517,6 +524,9 @@ class ComposeProject(BaseModel):
 
     document: Path | ComposeConfig
     root: Path | ComposeProjectRef | None = None
+    #: Give ``main`` a Docker daemon of its own, reachable at ``DOCKER_HOST``.
+    #: The daemon sees only what ``main`` runs on it, never the project's other
+    #: services or the host's containers.
     service_access: bool | None = None
 
     @field_validator("document", "root", mode="before")
@@ -578,7 +588,7 @@ class ComposeProject(BaseModel):
         *,
         port_service: str = "main",
         seccomp: str | Path,
-        service_socket: str | None = None,
+        docker: bool = False,
         bind_mounts: Sequence[DockerBindMount] = (),
         env_vars: Mapping[str, str] | None = None,
         cpu: float | None = None,
@@ -598,15 +608,6 @@ class ComposeProject(BaseModel):
             for target in ("/runtime/sessions", "/media/hud/sessions")
         ]
         volumes.extend(mount.compose_volume() for mount in bind_mounts)
-        if service_socket is not None:
-            volumes.extend(
-                {
-                    "type": "bind",
-                    "source": service_socket,
-                    "target": target,
-                }
-                for target in ("/var/run/docker.sock", "/media/hud/docker.sock")
-            )
         main: dict[str, Any] = {
             "security_opt": [
                 f"seccomp={seccomp}",
@@ -615,8 +616,24 @@ class ComposeProject(BaseModel):
             ],
             "volumes": volumes,
         }
-        if env_vars:
-            main["environment"] = dict(env_vars)
+        services: dict[str, Any] = {"main": main}
+        environment = dict(env_vars or {})
+        if docker:
+            environment["DOCKER_HOST"] = DOCKER_HOST
+            main["depends_on"] = {DOCKER_DAEMON_SERVICE: {"condition": "service_healthy"}}
+            services[DOCKER_DAEMON_SERVICE] = {
+                "image": DOCKER_DAEMON_IMAGE,
+                "privileged": True,
+                "environment": {"DOCKER_TLS_CERTDIR": ""},
+                "healthcheck": {
+                    "test": ["CMD", "docker", "info"],
+                    "interval": "2s",
+                    "timeout": "5s",
+                    "retries": 30,
+                },
+            }
+        if environment:
+            main["environment"] = environment
         if cpu is not None:
             main["cpus"] = cpu
         if memory_mb is not None:
@@ -635,12 +652,7 @@ class ComposeProject(BaseModel):
             )
             override = root / "override.json"
             override.write_text(
-                json.dumps(
-                    {
-                        "services": {"main": main},
-                        "volumes": {"hud-runtime-sessions": {}},
-                    }
-                ),
+                json.dumps({"services": services, "volumes": {"hud-runtime-sessions": {}}}),
                 encoding="utf-8",
             )
             ports = root / "ports.yaml"

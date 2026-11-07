@@ -168,15 +168,17 @@ project with `hud deploy --runtime-config runtime.json`. The command uploads the
 configuration to the builder. See the [Harbor deployment example](/v6/experimental/harbor#deploy-and-sync)
 for a file-backed Compose configuration. Declared `RuntimeResources` apply.
 
-`RuntimeConfig.compose.service_access=True` mounts a Docker socket at `/media/hud/docker.sock` in
-`main`. It is an explicit capability for environment code that must inspect or copy from sibling
-service containers, and what it grants differs by placement:
+`RuntimeConfig.compose.service_access=True` gives `main` a Docker daemon of its own: the runtime
+adds a `hud-docker` service running Docker Engine and sets `DOCKER_HOST=tcp://hud-docker:2375`
+in `main`, which the Docker CLI and client libraries honor. Environment code can build and run
+containers there. The daemon is private to the environment: it never sees the project's other
+services or the containers of the machine running the project. Sibling services are reached by
+the runtime, not by `main`: [`exec` and `collect`](/v6/reference/runtime#filesystem-interface)
+take a `service=` argument.
 
 <Warning>
-Under local `DockerRuntime`, the mounted socket is the **host's own Docker daemon** (remote Docker
-endpoints are rejected). Code in `main` can then control every container on the machine - grant
-this only to environment code you trust. Under hosted execution, the daemon is private to the
-rollout.
+Under local `DockerRuntime`, the `hud-docker` service runs privileged on your own daemon, as
+Docker-in-Docker requires. Grant it only to environment code you trust.
 </Warning>
 
 ## Build on owned infrastructure
