@@ -1,4 +1,4 @@
 base = "sidecar-reachability"
 
 reward = 0.0
-error = "artifact /link contains a symbolic link"
+error = "is a link to an absolute path"

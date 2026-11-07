@@ -78,11 +78,39 @@ class SubScore(BaseModel):
         return self.value
 
 
+class CollectCommand(BaseModel):
+    """Run ``command`` with ``sh -c`` in a service of the actor's environment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service: str = Field(min_length=1)
+    command: str = Field(min_length=1)
+    timeout_sec: float = Field(gt=0)
+
+
+class CollectFiles(BaseModel):
+    """Copy ``path`` out of a service of the actor's environment into the actor's session
+    at ``into`` (a relative path), where a separate verifier finds it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service: str = Field(min_length=1)
+    path: str = Field(pattern=r"^/")
+    into: str = Field(min_length=1, pattern=r"^[^/]")
+    #: Skip a path the service does not have instead of failing the run.
+    missing_ok: bool = False
+
+
 class EvaluationResult(BaseModel):
     """Result of a task's evaluate phase.
 
     In eval mode, populate reward and subscores for scoring.
     In production, use content and info for diagnostics and stats.
+
+    ``collect`` is what an actor asks the runtime to gather from the other
+    services of its environment before its box is torn down, in order, for
+    the separate verifier that grades it. Only the runtime can reach those
+    services from outside the box.
     """
 
     reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
@@ -94,6 +122,7 @@ class EvaluationResult(BaseModel):
         default=None,
         description="Optional breakdown of score components for debugging",
     )
+    collect: list[CollectCommand | CollectFiles] | None = None
 
     model_config = ConfigDict(extra="allow")
 

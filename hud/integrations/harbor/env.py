@@ -9,7 +9,6 @@ import os
 import re
 import shlex
 import shutil
-import socket
 import tempfile
 from collections.abc import AsyncGenerator, Iterator  # noqa: TC003
 from dataclasses import dataclass
@@ -21,8 +20,9 @@ from hud.environment import Environment, Mount, Workspace
 from hud.environment.egress import ANY_HOST
 from hud.environment.env import current_session_id
 from hud.graders import EvaluationResult
+from hud.graders.results import CollectCommand, CollectFiles
 from hud.integrations.harbor.config import Artifact, ControllerConfig, TaskSpec
-from hud.utils.process import ProcessResult, bound_shell_output, create_process_group_exec
+from hud.utils.process import ProcessResult, bound_shell_output
 
 if TYPE_CHECKING:
     from hud.environment.namespace import NamespaceProcess
@@ -32,12 +32,10 @@ TESTS = Path("/tests")
 LOGS = Path("/logs")
 VERIFIER_LOGS = LOGS / "verifier"
 AGENT_ANSWER = LOGS / "agent_answer.txt"
-DOCKER = CONTROLLER_ROOT / "bin" / "docker"
 CONFIG = ControllerConfig.model_validate_json((CONTROLLER_ROOT / "config.json").read_text("utf-8"))
 TASK_ROOT = Path("/rootfs")
 RUNTIME_ROOT = Path("/runtime")
 SESSIONS = RUNTIME_ROOT / "sessions"
-DOCKER_SOCKET = Path("/var/run/docker.sock")
 MANAGED_AGENTS = Path("/usr/local/lib/agents")
 
 ENV_TEMPLATE = re.compile(r"\$\{([^}:]+)(?::-(.*))?\}")
@@ -255,51 +253,6 @@ async def wait_until_healthy(entrypoint: NamespaceProcess | None) -> None:
             delay = healthcheck.interval_sec
 
 
-async def docker(*args: str, max_wait: float = 60.0, check: bool = True) -> ProcessResult:
-    process = await create_process_group_exec(
-        str(DOCKER),
-        "--host",
-        f"unix://{DOCKER_SOCKET}",
-        *args,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    result = await process.complete(max_wait=max_wait)
-    if result.timed_out:
-        raise TimeoutError(f"docker {' '.join(args)} timed out after {max_wait:g}s")
-    if check and result.returncode != 0:
-        detail = result.stderr.decode("utf-8", "replace").strip()
-        raise RuntimeError(f"docker {' '.join(args)} failed: {detail}")
-    return result
-
-
-async def compose_containers() -> dict[str, str]:
-    if not await asyncio.to_thread(DOCKER_SOCKET.exists):
-        raise RuntimeError("Compose service access is unavailable in this runtime")
-    project = await docker(
-        "inspect",
-        "--format",
-        '{{ index .Config.Labels "com.docker.compose.project" }}',
-        socket.gethostname(),
-    )
-    project_name = project.stdout.decode().strip()
-    if not project_name:
-        raise RuntimeError("the Harbor container has no Compose project label")
-    listed = await docker(
-        "ps",
-        "--filter",
-        f"label=com.docker.compose.project={project_name}",
-        "--format",
-        '{{.ID}} {{.Label "com.docker.compose.service"}}',
-    )
-    return {
-        service: container_id
-        for line in listed.stdout.decode().splitlines()
-        for container_id, service in (line.split(maxsplit=1),)
-    }
-
-
 def exclude_artifact_paths(root: Path, patterns: list[str]) -> None:
     if not patterns or not root.is_dir() or root.is_symlink():
         return
@@ -354,75 +307,64 @@ def artifact_path(artifact: Artifact, artifacts: Path) -> Path:
     return artifacts / relative
 
 
-async def collect(task: TaskSpec, artifacts: Path) -> None:
+async def collect(task: TaskSpec, artifacts: Path) -> list[CollectCommand | CollectFiles]:
+    """Run ``main``'s collect hooks and stage ``main``'s artifacts under ``artifacts``.
+
+    Hooks on other services and artifacts from them are returned as requests:
+    only the runtime reaches those services, from outside the box, and it
+    stages what it collects at the same session paths for the verifier.
+    """
     clear(artifacts)
-    services: dict[str, str] = {}
-
-    async def container(service: str) -> str:
-        if service == "main":
-            return ""
-        if service in services:
-            return services[service]
-        if not services:
-            services.update(await compose_containers())
-        try:
-            return services[service]
-        except KeyError as error:
-            raise RuntimeError(f"Compose service {service!r} is not running") from error
-
+    requests: list[CollectCommand | CollectFiles] = []
     for hook in task.collect:
-        service = hook.service
-        container_id = await container(service)
-        if container_id:
-            await docker(
-                "exec",
-                container_id,
-                "sh",
-                "-c",
-                hook.command,
-                max_wait=hook.timeout_sec,
-            )
-        else:
-            execution = await workspace.run(
-                ["sh", "-c", hook.command],
-                mounts=task_mounts,
-                env=TASK_ENV,
-                identity=image_identity,
-                inherit_workspace_env=False,
-                allowed_hosts=None,
-                no_new_privs=False,
-                max_wait=hook.timeout_sec,
-            )
-            if execution.timed_out:
-                raise TimeoutError(
-                    f"collect hook on {service!r} timed out after {hook.timeout_sec:g}s"
+        if hook.service != "main":
+            requests.append(
+                CollectCommand(
+                    service=hook.service, command=hook.command, timeout_sec=hook.timeout_sec
                 )
-            if execution.returncode != 0:
-                detail = execution.stderr.decode("utf-8", "replace").strip()
-                raise RuntimeError(f"collect hook on {service!r} failed: {detail}")
+            )
+            continue
+        execution = await workspace.run(
+            ["sh", "-c", hook.command],
+            mounts=task_mounts,
+            env=TASK_ENV,
+            identity=image_identity,
+            inherit_workspace_env=False,
+            allowed_hosts=None,
+            no_new_privs=False,
+            max_wait=hook.timeout_sec,
+        )
+        if execution.timed_out:
+            raise TimeoutError(
+                f"collect hook on {hook.service!r} timed out after {hook.timeout_sec:g}s"
+            )
+        if execution.returncode != 0:
+            detail = execution.stderr.decode("utf-8", "replace").strip()
+            raise RuntimeError(f"collect hook on {hook.service!r} failed: {detail}")
 
     for artifact in task.artifacts:
         source = artifact.source
         target = artifact_path(artifact, artifacts)
-        exclude = artifact.exclude
-        service = artifact.service
-        container_id = await container(service)
-        if container_id:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            copied = await docker(
-                "cp",
-                f"{container_id}:{source.rstrip('/') or '/'}",
-                str(target),
-                max_wait=task.verifier_timeout,
-                check=False,
+        if artifact.service != "main":
+            requests.append(
+                CollectFiles(
+                    service=artifact.service,
+                    path=source.rstrip("/") or "/",
+                    into=target.relative_to(artifacts.parent).as_posix(),
+                    missing_ok=True,
+                )
             )
-            if copied.returncode != 0:
-                continue
-            exclude_artifact_paths(target, exclude)
-        else:
-            copy_artifact(task_path(source), target, exclude, name=source)
-        if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
-            raise RuntimeError(f"artifact {source} contains a symbolic link")
+            continue
+        copy_artifact(task_path(source), target, artifact.exclude, name=source)
+        check_artifact(artifact, target)
+    return requests
+
+
+def check_artifact(artifact: Artifact, target: Path) -> None:
+    """Apply an artifact's exclusions and refuse any symbolic link in it."""
+    exclude_artifact_paths(target, artifact.exclude)
+    if target.is_symlink() or any(path.is_symlink() for path in target.rglob("*")):
+        raise RuntimeError(f"artifact {artifact.source} contains a symbolic link")
 
 
 @env.template(id="run", description="Run a Harbor task")
@@ -445,11 +387,14 @@ async def run(instruction: str, task: TaskSpec) -> AsyncGenerator[Any, Any]:
                 raise RuntimeError("Harbor actor is not running in an environment session")
             await workspace.terminate_sessions()
             try:
-                await collect(task, SESSIONS / session_id / "artifacts")
+                requests = await collect(task, SESSIONS / session_id / "artifacts")
             except Exception as error:
                 yield EvaluationResult(isError=True, content=str(error))
             else:
-                yield EvaluationResult(info={"answer": "" if answer is None else str(answer)})
+                yield EvaluationResult(
+                    info={"answer": "" if answer is None else str(answer)},
+                    collect=requests or None,
+                )
         else:
             yield await grade(task.id, task.verifier_timeout, answer)
     finally:
@@ -474,6 +419,11 @@ if CONFIG.verifier_root is not None:
         if not session.is_dir():
             raise ValueError("Harbor actor session files are unavailable in this runtime")
         try:
+            # What the runtime collected from other services arrives as it was there.
+            for artifact in task.artifacts:
+                staged = artifact_path(artifact, session / "artifacts")
+                if artifact.service != "main" and (staged.exists() or staged.is_symlink()):
+                    check_artifact(artifact, staged)
             yield await grade_separate(task, session / "artifacts", actor.info["answer"])
         finally:
             clear_grading_files()

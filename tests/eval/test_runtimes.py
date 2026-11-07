@@ -489,6 +489,10 @@ async def test_sibling_services_are_reached_by_exec_and_collect(
         async with provider(row) as box:
             run = await rollout(row, ScriptedAgent("composed"), runtime=box)
             noted = await box.exec(["sh", "-c", "hostname > /tmp/who; echo noted"], service="side")
+            (tmp_path / "in").mkdir()
+            (tmp_path / "in" / "note.txt").write_text("delivered")
+            await box.put(tmp_path / "in", "/srv/in", service="side")
+            delivered = await box.exec(["cat", "/srv/in/note.txt"], service="side")
             with pytest.raises(ValueError, match="'nobody'"):
                 await box.exec(["true"], service="nobody")
             (who,) = await box.collect(["/tmp/who"], tmp_path / "side", service="side")
@@ -497,6 +501,7 @@ async def test_sibling_services_are_reached_by_exec_and_collect(
 
     assert run.reward == 1.0
     assert noted.stdout == "noted\n"
+    assert delivered.stdout == "delivered"
     assert who.read_text().strip() and who.read_text() != mine.read_text()
     assert mine.read_text() == "composed"
 
