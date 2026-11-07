@@ -266,10 +266,36 @@ Runtime(url, params=..., config=...)
 - **`url`** - control-channel address of an already-running substrate (e.g. `tcp://host:8765`).
 - **`params`** - connection-time data a transport may need (auth token, sandbox id).
 
-Provisioned runtimes expose `snapshot_session(session_id)` and
-`restore_session(session_id, archive)` for transferring session files to an
-independent verifier. The base runtime is a no-op; providers such as Docker and
-Modal implement the transfer directly on their provisioned endpoint.
+### Filesystem interface
+
+A runtime a provider yielded also owns the box's filesystem. `DockerRuntime` and `ModalRuntime`
+implement these on their endpoint; a `Runtime(url)` you constructed, `LocalRuntime`,
+`SubprocessRuntime` and `HUDRuntime` raise `RuntimeUnsupportedError` (with `.runtime`,
+`.operation` and `.reason`) instead of approximating them.
+
+```python
+from hud.eval.runtime import RootScope, SessionScope, WorkspaceScope
+
+result = await box.exec(["sh", "-c", "redis-cli save"], service="redis")   # ExecResult
+copies = await box.collect(["/data/dump.rdb", "/logs"], tmp_dir, service="redis")
+async with box.checkpoint(WorkspaceScope("/work")) as work:
+    await other.restore(work, WorkspaceScope("/work"))
+async with box.checkpoint(RootScope()) as image:
+    await task.run(agent, runtime=provider_for(RuntimeConfig(image=image.ref)))
+```
+
+| Operation | What it does |
+|-----------|--------------|
+| `exec(argv, *, service="main")` | Runs a command in the environment, or in a sibling Compose service, and returns its `returncode`, `stdout` and `stderr`. Cancelling the call stops the command. |
+| `collect(paths, destination, *, service="main")` | Copies files and directories out of the box into `destination` (each at `destination / path.name`); a link to an absolute path or outside `destination` is rejected. |
+| `checkpoint(scope)` | Captures a `SessionScope(session_id)`, a `WorkspaceScope(path)` or the `RootScope()` for the duration of the `async with`. Session and workspace checkpoints are archives of regular files and directories; a root checkpoint is an image the same provider boots from `runtime_config.image`. |
+| `restore(checkpoint, scope)` | Replaces a session or workspace in a running box with a checkpoint of the same kind. A root checkpoint is restored by starting a new box from it. |
+| `terminated()` | Why the box stopped (its exit code, and whether the memory limit killed it), or `None` while it runs. A rollout that fails while the box is held adds this to the recorded error. |
+
+`transports_sessions` says whether a runtime moves control sessions this way. A rollout whose
+verifier declares its own `runtime_config` in the actor's environment gets its own box only on
+such a runtime; elsewhere the verifier runs beside the actor and a warning says so. Modal declines
+root checkpoints on its default runtime, whose filesystem snapshots do not preserve file modes.
 
 ### `Shared`
 

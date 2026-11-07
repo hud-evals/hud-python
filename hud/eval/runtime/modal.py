@@ -8,6 +8,7 @@ import logging
 import math
 import shlex
 import sys
+import tarfile
 import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -17,7 +18,17 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from hud.utils.process import finish_output, stream_output
 
 from .compose import ComposeConfig
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import (
+    SESSION_ROOT,
+    Checkpoint,
+    CheckpointScope,
+    ExecResult,
+    RootScope,
+    Runtime,
+    RuntimeConfig,
+    SessionScope,
+    validate_archive,
+)
 from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
@@ -31,8 +42,7 @@ logger = logging.getLogger("hud.eval.runtime")
 
 _MODAL_COMPOSE_CPU = 4.0
 _MODAL_COMPOSE_MEMORY_MB = 8192
-_SESSION_ROOT = "/runtime/sessions"
-_SESSION_ARCHIVE = "/runtime/session.tar.gz"
+_ARCHIVE = "/runtime/transfer.tar.gz"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -53,6 +63,10 @@ class ModalEndpoint(Runtime):
             "--file /hud/ports.yaml ps --quiet main); "
         )
 
+    async def terminated(self) -> str | None:
+        code = await self.sandbox.poll.aio()
+        return None if code is None else f"sandbox exited with code {code}"
+
     async def _exec(self, command: str) -> str:
         process = await self.sandbox.exec.aio("sh", "-c", command)
         returncode = await process.wait.aio()
@@ -61,55 +75,109 @@ class ModalEndpoint(Runtime):
             raise RuntimeError((await process.stderr.read.aio()).strip())
         return stdout
 
+    async def exec(self, argv: Sequence[str], *, service: str = "main") -> ExecResult:
+        if service != "main":
+            raise ValueError(f"service {service!r}: only the environment is reachable")
+        if self.compose is None:
+            process = await self.sandbox.exec.aio(*argv)
+        else:
+            process = await self.sandbox.exec.aio(
+                "sh",
+                "-c",
+                self._container() + 'exec docker exec "$CONTAINER" "$@"',
+                "hud-exec",
+                *argv,
+            )
+        returncode = await process.wait.aio()
+        return ExecResult(
+            returncode, await process.stdout.read.aio(), await process.stderr.read.aio()
+        )
+
+    async def collect(
+        self,
+        paths: Sequence[str | PurePosixPath],
+        destination: Path,
+        *,
+        service: str = "main",
+    ) -> list[Path]:
+        if service != "main":
+            raise ValueError(f"service {service!r}: only the environment is reachable")
+        collected: list[Path] = []
+        with tempfile.TemporaryDirectory(prefix="hud-collect-") as directory:
+            for path in paths:
+                source = PurePosixPath(path)
+                parent, name = shlex.quote(str(source.parent)), shlex.quote(source.name)
+                if self.compose is None:
+                    command = f"tar -czf {_ARCHIVE} -C {parent} {name}"
+                else:
+                    command = (
+                        self._container()
+                        + f'docker exec "$CONTAINER" tar -czf - -C {parent} {name} > {_ARCHIVE}'
+                    )
+                await self._exec(command)
+                archive = Path(directory) / "collect.tar.gz"
+                await self.sandbox.filesystem.copy_to_local.aio(_ARCHIVE, archive)
+                with tarfile.open(archive) as tar:
+                    tar.extractall(destination, filter="data")
+                collected.append(destination / source.name)
+        return collected
+
     @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-        validate_session_id(session_id)
-        with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
-            destination = Path(directory) / "session.tar.gz"
-            session = f"{_SESSION_ROOT}/{session_id}"
+    async def checkpoint(self, scope: CheckpointScope) -> AsyncIterator[Checkpoint]:
+        if isinstance(scope, RootScope):
+            raise self._unsupported(
+                "checkpoint the root filesystem",
+                "the environment runs inside the sandbox's Docker daemon"
+                if self.compose is not None
+                else "Modal filesystem snapshots on this runtime do not preserve file modes",
+            )
+        with tempfile.TemporaryDirectory(prefix="hud-checkpoint-") as directory:
+            destination = Path(directory) / "checkpoint.tar.gz"
+            path = shlex.quote(str(scope.path))
+            optional = isinstance(scope, SessionScope)
             if self.compose is None:
-                root = session
+                root = path
                 command = ""
-                check = f"if [ -d {root} ]; then printf 1; fi"
             else:
-                root = "/runtime/session-export"
+                root = "/runtime/checkpoint-export"
                 command = (
                     self._container()
                     + f"rm -rf {root} && mkdir -p {root} && "
-                    + f'docker cp "$CONTAINER":{session}/. {root} && '
+                    + (f'if docker exec "$CONTAINER" test -d {path}; then ' if optional else "")
+                    + f'docker cp "$CONTAINER":{path}/. {root}'
+                    + ("; fi && " if optional else " && ")
                 )
-                check = (
-                    self._container()
-                    + f'docker exec "$CONTAINER" test -d {session} && printf 1 || true'
-                )
-            if not (await self._exec(check)).strip():
-                yield None
-                return
             command += (
-                f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
-                "then echo 'runtime session contains an unsupported entry' >&2; exit 1; fi; "
-                f"tar -czf {_SESSION_ARCHIVE} -C {root} ."
+                (f"if [ ! -d {root} ]; then mkdir -p {root}; fi; " if optional else "")
+                + f"if [ ! -d {root} ]; then echo '{root} is not a directory' >&2; exit 1; fi; "
+                + f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
+                + "then echo 'runtime archive contains an unsupported entry' >&2; exit 1; fi; "
+                + f"tar -czf {_ARCHIVE} -C {root} ."
             )
             await self._exec(command)
-            await self.sandbox.filesystem.copy_to_local.aio(_SESSION_ARCHIVE, destination)
-            yield destination
+            await self.sandbox.filesystem.copy_to_local.aio(_ARCHIVE, destination)
+            yield Checkpoint(scope, str(destination))
 
-    async def restore_session(self, session_id: str, source: Path) -> None:
-        validate_session_id(session_id)
-        session = f"{_SESSION_ROOT}/{session_id}"
-        await self.sandbox.filesystem.copy_from_local.aio(source, _SESSION_ARCHIVE)
-        if self.compose is None:
-            command = (
-                f"rm -rf {session} && mkdir -p {session} && "
-                f"tar -xzf {_SESSION_ARCHIVE} -C {session}"
+    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
+        if isinstance(scope, RootScope) or isinstance(checkpoint.scope, RootScope):
+            raise self._unsupported(
+                "restore a root checkpoint into a running sandbox",
+                f"start a new sandbox from runtime_config.image={checkpoint.ref!r}",
             )
+        if type(checkpoint.scope) is not type(scope):
+            raise ValueError("a checkpoint restores into a scope of its own kind")
+        validate_archive(Path(checkpoint.ref))
+        target = shlex.quote(str(scope.path))
+        await self.sandbox.filesystem.copy_from_local.aio(checkpoint.ref, _ARCHIVE)
+        if self.compose is None:
+            command = f"rm -rf {target} && mkdir -p {target} && tar -xzf {_ARCHIVE} -C {target}"
         else:
             command = (
                 self._container()
-                + "rm -rf /runtime/session-import && mkdir -p /runtime/session-import && "
-                + f"tar -xzf {_SESSION_ARCHIVE} -C /runtime/session-import && "
-                + f'docker exec "$CONTAINER" sh -c "rm -rf {session} && mkdir -p {session}" && '
-                + f'docker cp /runtime/session-import/. "$CONTAINER":{session}'
+                + "rm -rf /runtime/restore && mkdir -p /runtime/restore && "
+                + f"tar -xzf {_ARCHIVE} -C /runtime/restore && "
+                + f'docker exec "$CONTAINER" sh -c "rm -rf {target} && mkdir -p {target}" && '
+                + f'docker cp /runtime/restore/. "$CONTAINER":{target}'
             )
         await self._exec(command)
 
@@ -284,9 +352,9 @@ class ModalRuntime:
             else (
                 "sh",
                 "-c",
-                "mkdir -p /runtime/sessions /media/hud && "
+                f"mkdir -p {SESSION_ROOT} /media/hud && "
                 "rm -rf /media/hud/sessions && "
-                "ln -s /runtime/sessions /media/hud/sessions && "
+                f"ln -s {SESSION_ROOT} /media/hud/sessions && "
                 'exec "$@"',
                 "hud-runtime",
                 *self.command,

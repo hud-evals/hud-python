@@ -45,14 +45,14 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
     from hud.environment import WorkspaceRoute
 
-    from .runtime import Provider
+    from .runtime import Provider, Runtime
     from .runtime.core import RuntimeConfig
     from .task import Task
 
@@ -549,7 +549,7 @@ async def rollout(
     env's task, lets provider teardown finish in the background, and returns an
     errored run.
     """
-    from .runtime.core import resolve_runtime_config
+    from .runtime.core import SessionScope, resolve_runtime_config
 
     actor_runtime_config = resolve_runtime_config(runtime, task)
     agent_timeout = validate_rollout_timeouts(
@@ -608,6 +608,7 @@ async def rollout(
 
                 scope.push_async_callback(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
+                await scope.enter_async_context(_explained(addr))
                 if (
                     verifier is not None
                     and not shared_verifier
@@ -659,6 +660,7 @@ async def rollout(
                             except Exception as exc:
                                 if task.verifier is None:
                                     raise
+                                await _explain(addr, exc)
                                 detail = "".join(traceback.format_exception_only(exc)).strip()
                                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                                 run.trace.status = "error"
@@ -690,8 +692,16 @@ async def rollout(
                     return
 
                 assert actor_session_id is not None
-                _phase = "snapshotting actor"
-                async with addr.snapshot_session(actor_session_id) as archive:
+                # The actor's session moves to the verifier's box only where the
+                # runtime transports sessions; elsewhere a verifier in another
+                # env starts from nothing.
+                async with contextlib.AsyncExitStack() as moved:
+                    session = None
+                    if addr.transports_sessions:
+                        _phase = "snapshotting actor"
+                        session = await moved.enter_async_context(
+                            addr.checkpoint(SessionScope(actor_session_id))
+                        )
                     _phase = "actor cleanup"
                     await actor.aclose()
                     client = None
@@ -700,11 +710,10 @@ async def rollout(
                     _phase = "provisioning verifier"
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
-                    if archive is not None:
+                    if session is not None:
                         assert verifier_client.manifest is not None
-                        await verifier_addr.restore_session(
-                            verifier_client.manifest.session_id,
-                            archive,
+                        await verifier_addr.restore(
+                            session, SessionScope(verifier_client.manifest.session_id)
                         )
                     client = verifier_client
                     _phase = "verifying"
@@ -772,6 +781,30 @@ async def rollout(
             raise cancellation
         await trace_exit(run)
     return run
+
+
+async def _explain(addr: Runtime, exc: BaseException) -> None:
+    """Add why the box stopped to an error raised while it was held: a box that died
+    under the rollout (an OOM kill, a crash) explains the failure better than the
+    dropped connection does."""
+    if not isinstance(exc, Exception):
+        return
+    # A provider learns of the box's exit a moment after the connection drops.
+    deadline = asyncio.get_running_loop().time() + 3
+    while (reason := await addr.terminated()) is None:
+        if asyncio.get_running_loop().time() >= deadline:
+            return
+        await asyncio.sleep(0.2)
+    exc.add_note(reason)
+
+
+@contextlib.asynccontextmanager
+async def _explained(addr: Runtime) -> AsyncIterator[None]:
+    try:
+        yield
+    except Exception as exc:
+        await _explain(addr, exc)
+        raise
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

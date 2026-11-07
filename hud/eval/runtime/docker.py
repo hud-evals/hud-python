@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import sys
@@ -12,7 +13,7 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -22,7 +23,17 @@ from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import ComposeConfig, DockerBindMount
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import (
+    SESSION_ROOT,
+    Checkpoint,
+    CheckpointScope,
+    ExecResult,
+    RootScope,
+    Runtime,
+    RuntimeConfig,
+    SessionScope,
+    extract_archive,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
@@ -31,7 +42,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.eval.runtime")
 
-_SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
 #: DockerRuntime always serves HUD environments, so this is part of the
@@ -298,6 +308,7 @@ class DockerRuntime:
                                 params=params,
                                 config=config if config.model_dump(exclude_none=True) else None,
                                 container=container,
+                                project=project,
                             )
                 finally:
                     await _docker(*teardown, check=False)
@@ -343,7 +354,7 @@ class DockerRuntime:
                 *mount_args,
                 *_DOCKER_SECURITY_ARGS,
                 "--mount",
-                f"type=volume,source={session_volume},target={_SESSION_ROOT}",
+                f"type=volume,source={session_volume},target={SESSION_ROOT}",
                 "--mount",
                 f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
                 "--publish",
@@ -379,46 +390,137 @@ class DockerRuntime:
             await _docker("volume", "rm", "--force", session_volume, check=False)
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class DockerEndpoint(Runtime):
-    transports_sessions: ClassVar[bool] = True
-
-    container: str
-
-    @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
-        validate_session_id(session_id)
-        with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
-            destination = Path(directory) / "session.tar.gz"
-            root = f"{_SESSION_ROOT}/{session_id}"
-            exists, _ = await _docker(
-                "exec",
-                self.container,
-                "sh",
-                "-c",
-                'if [ -d "$1" ]; then printf 1; fi',
-                "hud-session",
-                root,
-            )
-            if not exists:
-                yield None
-                return
-            archive = f"/runtime/session-export-{uuid.uuid4().hex}.tar.gz"
-            script = """
+_ARCHIVE_SCRIPT = """
 import sys
 import tarfile
 from pathlib import Path
 
 root = Path(sys.argv[1])
-entries = list(root.rglob("*"))
+entries = list(root.rglob("*")) if root.exists() else []
+if sys.argv[3] == "required" and not root.is_dir():
+    raise FileNotFoundError(f"{root} is not a directory")
 if any(entry.is_symlink() for entry in entries):
-    raise ValueError("runtime session contains a symbolic link")
+    raise ValueError("runtime archive contains a symbolic link")
 if any(not (entry.is_file() or entry.is_dir()) for entry in entries):
-    raise ValueError("runtime session contains an unsupported entry")
+    raise ValueError("runtime archive contains an unsupported entry")
 with tarfile.open(sys.argv[2], "w:gz") as output:
     for entry in entries:
         output.add(entry, arcname=entry.relative_to(root), recursive=False)
 """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DockerEndpoint(Runtime):
+    transports_sessions: ClassVar[bool] = True
+
+    container: str
+    #: The Compose project name when the environment is a project; its other
+    #: services are the siblings ``exec`` and ``collect`` reach by name.
+    project: str | None = None
+
+    async def terminated(self) -> str | None:
+        state, _ = await _docker(
+            "inspect",
+            "--format",
+            "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}",
+            self.container,
+            check=False,
+        )
+        fields = state.split()
+        if len(fields) != 3 or fields[0] == "running":
+            return None
+        status, code, oom = fields
+        return f"container {status} with exit code {code}" + (
+            " (killed by the memory limit)" if oom == "true" else ""
+        )
+
+    async def _service_container(self, service: str) -> str:
+        if service == "main":
+            return self.container
+        if self.project is None:
+            raise ValueError(f"service {service!r}: this environment is a single container")
+        listed, _ = await _docker(
+            "ps",
+            "--quiet",
+            "--filter",
+            f"label=com.docker.compose.project={self.project}",
+            "--filter",
+            f"label=com.docker.compose.service={service}",
+        )
+        container = listed.strip()
+        if not container:
+            raise ValueError(f"Compose service {service!r} is not running")
+        return container
+
+    async def exec(self, argv: Sequence[str], *, service: str = "main") -> ExecResult:
+        container = await self._service_container(service)
+        group = await create_process_group_exec(
+            "docker",
+            "exec",
+            container,
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await group.process.communicate()
+        except asyncio.CancelledError:
+            await group.terminate()
+            raise
+        assert group.process.returncode is not None
+        return ExecResult(
+            group.process.returncode,
+            out.decode("utf-8", "replace"),
+            err.decode("utf-8", "replace"),
+        )
+
+    async def collect(
+        self,
+        paths: Sequence[str | PurePosixPath],
+        destination: Path,
+        *,
+        service: str = "main",
+    ) -> list[Path]:
+        container = await self._service_container(service)
+        collected: list[Path] = []
+        for path in paths:
+            source = PurePosixPath(path)
+            group = await create_process_group_exec(
+                "docker",
+                "cp",
+                f"{container}:{source}",
+                "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                archive, err = await group.process.communicate()
+            except asyncio.CancelledError:
+                await group.terminate()
+                raise
+            if group.process.returncode != 0:
+                raise RuntimeError(
+                    f"collecting {source} from {service!r} failed: "
+                    f"{err.decode('utf-8', 'replace').strip()}"
+                )
+            with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+                tar.extractall(destination, filter="data")
+            collected.append(destination / source.name)
+        return collected
+
+    @asynccontextmanager
+    async def checkpoint(self, scope: CheckpointScope) -> AsyncIterator[Checkpoint]:
+        if isinstance(scope, RootScope):
+            out, _ = await _docker("commit", self.container)
+            image = out.strip()
+            try:
+                yield Checkpoint(scope, image)
+            finally:
+                await _docker("image", "rm", "--force", image, check=False)
+            return
+        with tempfile.TemporaryDirectory(prefix="hud-checkpoint-") as directory:
+            destination = Path(directory) / "checkpoint.tar.gz"
+            archive = f"/runtime/checkpoint-{uuid.uuid4().hex}.tar.gz"
             try:
                 await _docker(
                     "exec",
@@ -427,34 +529,30 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
                     self.container,
                     "python3",
                     "-c",
-                    script,
-                    root,
+                    _ARCHIVE_SCRIPT,
+                    str(scope.path),
                     archive,
+                    "optional" if isinstance(scope, SessionScope) else "required",
                 )
                 await _docker("cp", f"{self.container}:{archive}", str(destination))
             finally:
                 await _docker(
                     "exec", "--user", "0", self.container, "rm", "-f", archive, check=False
                 )
-            yield destination
+            yield Checkpoint(scope, str(destination))
 
-    async def restore_session(self, session_id: str, source: Path) -> None:
-        validate_session_id(session_id)
-        target = f"{_SESSION_ROOT}/{session_id}"
-        with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
+    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
+        if isinstance(scope, RootScope) or isinstance(checkpoint.scope, RootScope):
+            raise self._unsupported(
+                "restore a root checkpoint into a running container",
+                f"start a new container from runtime_config.image={checkpoint.ref!r}",
+            )
+        if type(checkpoint.scope) is not type(scope):
+            raise ValueError("a checkpoint restores into a scope of its own kind")
+        with tempfile.TemporaryDirectory(prefix="hud-restore-") as directory:
             root = Path(directory)
-            _extract_session_archive(source, root)
+            extract_archive(Path(checkpoint.ref), root)
+            target = str(scope.path)
             await _docker("exec", "--user", "0", self.container, "rm", "-rf", target)
             await _docker("exec", "--user", "0", self.container, "mkdir", "-p", target)
-            await _docker(
-                "cp",
-                f"{root}/.",
-                f"{self.container}:{target}",
-            )
-
-
-def _extract_session_archive(source: Path, destination: Path) -> None:
-    with tarfile.open(source, "r:gz") as archive:
-        if any(not (member.isfile() or member.isdir()) for member in archive.getmembers()):
-            raise ValueError("runtime session archive contains an unsupported entry")
-        archive.extractall(destination, filter="data")
+            await _docker("cp", f"{root}/.", f"{self.container}:{target}")

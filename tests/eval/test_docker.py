@@ -29,7 +29,7 @@ from hud.eval import (
     Task,
     rollout,
 )
-from hud.eval.runtime import DockerBindMount
+from hud.eval.runtime import Checkpoint, DockerBindMount, SessionScope
 from hud.eval.runtime.docker import DockerEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
@@ -162,10 +162,11 @@ async def test_a_restored_session_archive_may_hold_only_files_and_directories(
         tar.addfile(link, io.BytesIO())
 
     async with DockerRuntime(fixture_image("echo"))(ECHO) as runtime:
-        with pytest.raises(
-            ValueError, match="runtime session archive contains an unsupported entry"
-        ):
-            await runtime.restore_session("sess-12345678", archive)
+        with pytest.raises(ValueError, match="runtime archive contains an unsupported entry"):
+            await runtime.restore(
+                Checkpoint(SessionScope("sess-00000000"), str(archive)),
+                SessionScope("sess-12345678"),
+            )
 
 
 @pytest.mark.e2e
