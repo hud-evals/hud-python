@@ -684,11 +684,6 @@ def adapt(
 
         tag = hashlib.sha256(f"{_tree_hash(payload)}\0{requirement}".encode()).hexdigest()[:16]
         image = f"hud-harbor:{environment_name}-{tag}"
-        group_service_access = any(
-            item.service != "main"
-            for task in group
-            for item in (*task.config.verifier.collect, *task.config.artifacts)
-        )
         runtime_command = [
             "/controller/venv/bin/hud",
             "serve",
@@ -737,9 +732,7 @@ def adapt(
 
         wrapper_build: dict[str, Any] = {
             "context": "./main",
-            "target": (
-                "verifier" if separate else "service-access" if group_service_access else "plain"
-            ),
+            "target": "verifier" if separate else "plain",
             "args": {
                 "BASE_IMAGE": "hud-base" if base_build is not None else base_image,
                 "VERIFIER_IMAGE": "hud-verifier" if separate else base_image,
@@ -808,9 +801,6 @@ def adapt(
                 verifier_environment.runtime_resources if verifier_environment else None
             )
             verifier_limits = verifier_environment.runtime_limits if verifier_environment else None
-            needs_service_access = any(
-                item.service != "main" for item in (*config.verifier.collect, *config.artifacts)
-            )
             runtime_limits = config.environment.runtime_limits
             verifier_uses_actor = (
                 verifier_resources == task.resources and verifier_limits == runtime_limits
@@ -833,11 +823,7 @@ def adapt(
                 ),
                 columns=columns or None,
                 runtime_config=RuntimeConfig(
-                    compose=ComposeProject(
-                        document=compose_document,
-                        root=context,
-                        service_access=(True if needs_service_access else None),
-                    ),
+                    compose=ComposeProject(document=compose_document, root=context),
                     resources=task.resources,
                     limits=runtime_limits,
                 ),

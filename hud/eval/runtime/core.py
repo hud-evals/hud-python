@@ -291,9 +291,9 @@ class Runtime:
     borrowed, shared case: it yields itself with a no-op lifecycle, since
     whoever provisioned the substrate owns its teardown.
 
-    A provisioned runtime also owns the box's filesystem operations: ``exec``
-    and ``collect`` reach the environment and, for a Compose project, its
-    sibling services; ``checkpoint`` and ``restore`` move a session, a
+    A provisioned runtime also owns the box's filesystem operations: ``exec``,
+    ``collect`` and ``put`` reach the environment and, for a Compose project,
+    its sibling services; ``checkpoint`` and ``restore`` move a session, a
     workspace directory, or the root filesystem. A borrowed runtime declines
     them all with :class:`RuntimeUnsupportedError`, as does any provider for
     a scope its substrate cannot capture faithfully.
@@ -342,6 +342,17 @@ class Runtime:
         path or outside ``destination`` is rejected (:class:`tarfile.FilterError`).
         """
         raise self._unsupported("collect", "it did not provision the substrate")
+
+    async def put(
+        self,
+        source: Path,
+        path: str | PurePosixPath,
+        *,
+        service: str = "main",
+    ) -> None:
+        """Copy the local file or directory ``source`` into ``service`` at ``path``,
+        replacing whatever is there."""
+        raise self._unsupported("put", "it did not provision the substrate")
 
     def checkpoint(self, scope: CheckpointScope) -> AbstractAsyncContextManager[Checkpoint]:
         """Capture ``scope`` for the duration of the returned context.

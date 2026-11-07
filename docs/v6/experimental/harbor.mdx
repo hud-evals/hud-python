@@ -129,8 +129,9 @@ The adapter handles:
 - HTTP MCP servers (`sse` and `streamable-http`), healthchecks, network modes,
   allowlists, phase users, environment variables, and placement requirements;
 - inline verifier scripts and separate verifier Dockerfiles;
-- verifier collect hooks and declared artifact paths from `main` or a sidecar,
-  including directory exclusions and host-side destinations.
+- verifier collect hooks and declared artifact paths from `main` or a sidecar
+  (the runtime reaches a sidecar from outside the box), including directory
+  exclusions and host-side destinations.
 
 Placement requirements are copied to the task that declares them: the main
 environment configures the actor task, and a separate verifier environment can
