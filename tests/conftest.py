@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 # The fixture environments that need nothing but the SDK, so a container can serve them.
-IMAGE_FIXTURES = ("echo", "faulty", "sessions", "broken", "stalls")
+IMAGE_FIXTURES = ("echo", "faulty", "sessions", "broken", "stalls", "box")
 
 # Rows that need Linux, root and bubblewrap: they run in the sandbox lane
 # (``-m "e2e and sandbox"``), where every workspace session runs in the sandbox.

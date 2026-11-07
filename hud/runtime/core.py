@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import tarfile
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pydantic import (
@@ -21,10 +23,14 @@ from pydantic import (
 from .compose import ComposeProject
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Sequence
     from pathlib import Path
 
     from hud.eval.task import Task
+
+# Where an environment keeps each control session's files; the verifier of a
+# task reads the actor's session here after the runtime moves it.
+SESSION_ROOT = PurePosixPath("/runtime/sessions")
 
 
 class RuntimeGPU(BaseModel):
@@ -146,37 +152,189 @@ def validate_session_id(session_id: str) -> None:
         raise ValueError("runtime session id must be a single path component")
 
 
+class RuntimeUnsupportedError(RuntimeError):
+    """The runtime cannot perform an operation its contract allows a provider to decline."""
+
+    def __init__(self, runtime: str, operation: str, reason: str) -> None:
+        super().__init__(f"{runtime} cannot {operation}: {reason}")
+        self.runtime = runtime
+        self.operation = operation
+        self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class SessionScope:
+    """One control session's files under ``SESSION_ROOT``."""
+
+    session_id: str
+
+    def __post_init__(self) -> None:
+        validate_session_id(self.session_id)
+
+    @property
+    def path(self) -> PurePosixPath:
+        return SESSION_ROOT / self.session_id
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceScope:
+    """One directory of the environment's filesystem."""
+
+    path: PurePosixPath
+
+    def __init__(self, path: str | PurePosixPath) -> None:
+        resolved = PurePosixPath(path)
+        if not resolved.is_absolute() or resolved == PurePosixPath("/"):
+            raise ValueError("workspace scope must be an absolute directory below /")
+        object.__setattr__(self, "path", resolved)
+
+
+@dataclass(frozen=True, slots=True)
+class RootScope:
+    """The environment's whole filesystem."""
+
+
+CheckpointScope = SessionScope | WorkspaceScope | RootScope
+
+
+@dataclass(frozen=True, slots=True)
+class Checkpoint:
+    """A checkpoint the runtime that took it can restore.
+
+    ``ref`` is the provider's handle: for a session or workspace scope a local
+    archive of files and directories, for the root scope an image the same
+    provider boots from ``runtime_config.image``. It is valid inside the
+    ``checkpoint`` scope that yielded it.
+    """
+
+    scope: CheckpointScope
+    ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExecResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def validate_archive(archive: Path) -> None:
+    """Reject a session or workspace archive holding anything but files and directories."""
+    with tarfile.open(archive, "r:gz") as tar:
+        if any(not (member.isfile() or member.isdir()) for member in tar.getmembers()):
+            raise ValueError("runtime archive contains an unsupported entry")
+
+
+def extract_archive(archive: Path, destination: Path) -> None:
+    validate_archive(archive)
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(destination, filter="data")
+
+
+def check_restorable(checkpoint: Checkpoint, scope: CheckpointScope) -> None:
+    """Reject a restore the checkpoint contract rules out."""
+    if isinstance(scope, RootScope) or isinstance(checkpoint.scope, RootScope):
+        raise ValueError(
+            "a root checkpoint is restored by starting a new box from "
+            f"runtime_config.image={checkpoint.ref!r}"
+        )
+    if type(checkpoint.scope) is not type(scope):
+        raise ValueError("a checkpoint restores into a scope of its own kind")
+
+
+# Runs ``exec``'s command inside the box with its pid recorded in the file named by
+# ``$0``, so that a call ending early can have the box kill it with ``KILL_TREE``.
+# Ending the provider's client, or the provider's own deadline, stops only the
+# command's first process; its descendants would run on.
+EXEC_LAUNCHER = '"$@" & echo $! > "$0"; wait $!; status=$?; rm -f "$0"; exit $status'
+# Kills the process whose pid the file named by ``$0`` holds, descendants first.
+KILL_TREE = """
+kill_tree() {
+    for p in /proc/[0-9]*; do
+        if [ "$(sed -n 's/^PPid:[[:space:]]*//p' "$p/status" 2>/dev/null)" = "$1" ]; then
+            kill_tree "${p#/proc/}"
+        fi
+    done
+    kill -9 "$1" 2>/dev/null
+}
+kill_tree "$(cat "$0")"
+rm -f "$0"
+"""
+
+
 @dataclass(frozen=True)
 class Runtime:
     """A provisioned host's control-channel ``url`` plus connection-time ``params``.
 
     Constructed directly, it is also a provider that yields itself and leaves teardown
     to whoever provisioned the host.
+
+    A provisioned runtime also owns the box's filesystem operations: ``exec``
+    and ``collect`` reach the environment and, for a Compose project, its
+    sibling services; ``checkpoint`` and ``restore`` move a session, a
+    workspace directory, or the root filesystem. A borrowed runtime declines
+    them all with ``RuntimeUnsupportedError``, as does any provider for
+    a scope its host cannot capture faithfully.
     """
 
     url: str
     params: dict[str, Any] = field(default_factory=dict)
     config: RuntimeConfig | None = None
 
-    # Whether ``snapshot_session`` can export a control session for another
-    # runtime to restore. Without it, a verifier must run beside the actor.
+    # Whether ``checkpoint`` and ``restore`` move a control session
+    # between boxes. Without it, a verifier must run beside the actor.
     transports_sessions: ClassVar[bool] = False
 
     def __call__(self, task: Task) -> AbstractAsyncContextManager[Runtime]:
         return nullcontext(self)
 
-    @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
-        """Yield a portable archive of one control session's files when present.
+    def _unsupported(self, operation: str, reason: str) -> RuntimeUnsupportedError:
+        return RuntimeUnsupportedError(type(self).__name__, operation, reason)
 
-        ``None`` means this runtime cannot export the session.
+    async def terminated(self) -> str | None:
+        """Why the box stopped, or ``None`` while it runs."""
+        raise self._unsupported("report termination", "it did not provision the host")
+
+    async def exec(
+        self,
+        argv: Sequence[str],
+        *,
+        service: str = "main",
+        max_wait: float | None = None,
+    ) -> ExecResult:
+        """Run ``argv`` inside ``service`` (``main`` is the environment) and return its outcome.
+
+        A command still running after ``max_wait`` seconds is stopped and the
+        call raises ``TimeoutError``.
         """
-        validate_session_id(session_id)
-        yield None
+        raise self._unsupported("exec", "it did not provision the host")
 
-    async def restore_session(self, session_id: str, source: Path) -> None:
-        """Restore a portable archive into one control session."""
-        validate_session_id(session_id)
+    async def collect(
+        self,
+        paths: Sequence[str | PurePosixPath],
+        destination: Path,
+        *,
+        service: str = "main",
+    ) -> list[Path]:
+        """Copy each of ``paths`` out of ``service`` into ``destination``; returns the copies.
+
+        Each path lands at ``destination / path.name``. A link to an absolute
+        path or outside ``destination`` is rejected (``tarfile.FilterError``).
+        """
+        raise self._unsupported("collect", "it did not provision the host")
+
+    def checkpoint(self, scope: CheckpointScope) -> AbstractAsyncContextManager[Checkpoint]:
+        """Capture ``scope`` for the duration of the returned context.
+
+        A session or workspace checkpoint is an archive of regular files and
+        directories (a session that was never written is an empty archive).
+        A root checkpoint is an image this provider starts a new box from.
+        """
+        raise self._unsupported("checkpoint", "it did not provision the host")
+
+    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
+        """Replace ``scope`` in this box with ``checkpoint``; the scopes must be of one kind."""
+        raise self._unsupported("restore", "it did not provision the host")
 
 
 class Shared:

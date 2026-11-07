@@ -15,7 +15,7 @@ from hud.agents.types import AgentConfig
 from hud.capabilities.connection import Connection
 from hud.capabilities.mcp import get_mcp_trace_id
 from hud.clients.client import HudProtocolError, connect
-from hud.runtime.core import resolve_runtime_config
+from hud.runtime.core import RuntimeUnsupportedError, SessionScope, resolve_runtime_config
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id, get_trace_headers, set_trace_context
 from hud.telemetry.span import normalize_trace_id
@@ -27,13 +27,13 @@ from .file_tracking import file_tracking_observer
 from .job import job_enter, trace_enter, trace_exit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncGenerator, Sequence
     from types import TracebackType
 
     from hud.agents.base import Agent
     from hud.clients.client import HudClient
     from hud.environment.egress import WorkspaceRoute
-    from hud.runtime.core import Provider, RuntimeConfig
+    from hud.runtime.core import Provider, Runtime, RuntimeConfig
 
     from .task import Task
 
@@ -426,13 +426,18 @@ async def rollout(
                 actor = contextlib.AsyncExitStack()
                 await actor.__aenter__()
 
-                async def close_actor() -> None:
-                    cleanup = asyncio.create_task(actor.aclose())
+                async def close_actor(
+                    exc_type: type[BaseException] | None,
+                    exc: BaseException | None,
+                    tb: TracebackType | None,
+                ) -> None:
+                    cleanup = asyncio.create_task(actor.__aexit__(exc_type, exc, tb))
                     cleanup.add_done_callback(_consume_task_result)
                     await asyncio.shield(cleanup)
 
-                scope.push_async_callback(close_actor)
+                scope.push_async_exit(close_actor)
                 addr = await actor.enter_async_context(runtime(task))
+                await actor.enter_async_context(_explained(addr))
                 if (
                     verifier is not None
                     and not shared_verifier
@@ -484,6 +489,7 @@ async def rollout(
                             except Exception as exc:
                                 if task.verifier is None:
                                     raise
+                                await _explain(addr, exc)
                                 detail = "".join(traceback.format_exception_only(exc)).strip()
                                 logger.warning("rollout failed mid-run (%s): %s", _phase, detail)
                                 run.trace.status = "error"
@@ -515,8 +521,16 @@ async def rollout(
                     return
 
                 assert actor_session_id is not None
-                _phase = "snapshotting actor"
-                async with addr.snapshot_session(actor_session_id) as archive:
+                # The actor's session moves to the verifier's box only where the
+                # runtime transports sessions; elsewhere a verifier in another
+                # env starts from nothing.
+                async with contextlib.AsyncExitStack() as moved:
+                    session = None
+                    if addr.transports_sessions:
+                        _phase = "snapshotting actor"
+                        session = await moved.enter_async_context(
+                            addr.checkpoint(SessionScope(actor_session_id))
+                        )
                     _phase = "actor cleanup"
                     await actor.aclose()
                     client = None
@@ -524,12 +538,12 @@ async def rollout(
                         return
                     _phase = "provisioning verifier"
                     verifier_addr = await scope.enter_async_context(runtime(verifier))
+                    await scope.enter_async_context(_explained(verifier_addr))
                     verifier_client = await scope.enter_async_context(connect(verifier_addr))
-                    if archive is not None:
+                    if session is not None:
                         assert verifier_client.manifest is not None
-                        await verifier_addr.restore_session(
-                            verifier_client.manifest.session_id,
-                            archive,
+                        await verifier_addr.restore(
+                            session, SessionScope(verifier_client.manifest.session_id)
                         )
                     client = verifier_client
                     _phase = "verifying"
@@ -611,6 +625,42 @@ def _classify(trace: Trace, exc: BaseException) -> None:
     if isinstance(exc, ClassifiedError):
         trace.error_code = exc.code
         trace.error_source = exc.source
+
+
+async def _explain(addr: Runtime, exc: Exception) -> None:
+    """Add why the box stopped to ``exc``, an error raised while the box was held.
+
+    A box that died under the rollout (an OOM kill, a crash) explains the failure
+    better than the dropped connection does. The box is asked once, except after a
+    dropped connection, which gets a moment: a provider registers the exit just after
+    the drop.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + (3 if isinstance(exc, (EOFError, OSError)) else 0)
+    while True:
+        try:
+            reason = await addr.terminated()
+        except RuntimeUnsupportedError:
+            return
+        except Exception as failure:  # the run's own error stays the error
+            exc.add_note(f"the box's state could not be read: {failure}")
+            return
+        if reason is not None:
+            exc.add_note(reason)
+            return
+        if loop.time() >= deadline:
+            return
+        await asyncio.sleep(0.2)
+
+
+@contextlib.asynccontextmanager
+async def _explained(addr: Runtime) -> AsyncGenerator[None]:
+    """Explain, by the box ``addr`` names, an error that leaves the scope while it is held."""
+    try:
+        yield
+    except Exception as exc:
+        await _explain(addr, exc)
+        raise
 
 
 def _consume_task_result(task: asyncio.Future[Any]) -> None:

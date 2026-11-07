@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import sys
@@ -12,17 +13,31 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 from urllib.parse import urlsplit
 
 from hud.clients.client import DEFAULT_READY_TIMEOUT
 from hud.environment.server import DEFAULT_PORT, PORT_ANNOUNCEMENT
+from hud.types import ClassifiedError
 from hud.utils.docker import docker as _docker
 from hud.utils.process import create_process_group_exec, finish_output, stream_output
 
 from .compose import SECCOMP_PROFILE, ComposeConfig, DockerBindMount
-from .core import Runtime, RuntimeConfig, validate_session_id
+from .core import (
+    EXEC_LAUNCHER,
+    KILL_TREE,
+    SESSION_ROOT,
+    Checkpoint,
+    CheckpointScope,
+    ExecResult,
+    RootScope,
+    Runtime,
+    RuntimeConfig,
+    SessionScope,
+    check_restorable,
+    extract_archive,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -31,7 +46,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.runtime")
 
-_SESSION_ROOT = "/runtime/sessions"
 _SESSION_ALIAS_ROOT = "/media/hud/sessions"
 
 _DOCKER_SECURITY_ARGS = (
@@ -59,25 +73,31 @@ def _require_free_disk(output: str, storage_mb: int) -> None:
         )
 
 
-@asynccontextmanager
-async def _docker_deadline(
-    seconds: float | None,
-    teardown: tuple[str, ...],
-) -> AsyncGenerator[None]:
-    if seconds is None:
-        yield
-        return
+class _RunDeadline:
+    """Tears the box down when the run limit expires, and remembers that it did."""
 
-    async def expire() -> None:
-        await asyncio.sleep(seconds)
-        await _docker(*teardown, check=False)
+    def __init__(self, seconds: float | None, teardown: tuple[str, ...]) -> None:
+        self._seconds = seconds
+        self._teardown = teardown
+        self._expiry: asyncio.Task[None] | None = None
+        # Why the box is gone once the limit has expired.
+        self.expired: str | None = None
 
-    expiry = asyncio.create_task(expire())
-    try:
-        yield
-    finally:
-        expiry.cancel()
-        await asyncio.gather(expiry, return_exceptions=True)
+    async def _expire(self) -> None:
+        assert self._seconds is not None
+        await asyncio.sleep(self._seconds)
+        self.expired = f"the box was removed when the run limit of {self._seconds:g}s expired"
+        await _docker(*self._teardown, check=False)
+
+    async def __aenter__(self) -> Self:
+        if self._seconds is not None:
+            self._expiry = asyncio.create_task(self._expire())
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        if self._expiry is not None:
+            self._expiry.cancel()
+            await asyncio.gather(self._expiry, return_exceptions=True)
 
 
 async def _wait_serving(container: str, name: str, seconds: float) -> None:
@@ -109,11 +129,19 @@ async def _wait_serving(container: str, name: str, seconds: float) -> None:
             # The log follow ends when the container stops.
             code, _ = await _docker("wait", container)
     except TimeoutError:
-        raise TimeoutError(f"{name} did not serve within {seconds:.0f}s") from None
+        raise ClassifiedError(
+            f"{name} did not serve within {seconds:.0f}s",
+            code="container_start_failed",
+            source="user",
+        ) from None
     finally:
         await logs.terminate()
     output = "\n".join(tail).strip() or "(no output)"
-    raise RuntimeError(f"{name} exited with code {code.strip()} before serving:\n{output}")
+    raise ClassifiedError(
+        f"{name} exited with code {code.strip()} before serving:\n{output}",
+        code="container_start_failed",
+        source="user",
+    )
 
 
 @asynccontextmanager
@@ -251,28 +279,35 @@ class DockerRuntime:
                     None if startup_timeout is None else loop.time() + startup_timeout
                 )
                 try:
-                    await _docker(
-                        *command,
-                        "up",
-                        "--detach",
-                        "--build",
-                        "--remove-orphans",
-                        timeout_s=startup_timeout,
-                    )
-                    if awaited := compose_config.healthchecked_services():
+                    try:
                         await _docker(
                             *command,
                             "up",
-                            "--wait",
-                            "--no-deps",
-                            "--no-recreate",
-                            "--no-build",
-                            *awaited,
-                            timeout_s=(
-                                None if startup_deadline is None else startup_deadline - loop.time()
-                            ),
+                            "--detach",
+                            "--build",
+                            "--remove-orphans",
+                            timeout_s=startup_timeout,
                         )
-                    out, _ = await _docker(*command, "ps", "--all", "--quiet", "main")
+                        if awaited := compose_config.healthchecked_services():
+                            await _docker(
+                                *command,
+                                "up",
+                                "--wait",
+                                "--no-deps",
+                                "--no-recreate",
+                                "--no-build",
+                                *awaited,
+                                timeout_s=(
+                                    None
+                                    if startup_deadline is None
+                                    else startup_deadline - loop.time()
+                                ),
+                            )
+                        out, _ = await _docker(*command, "ps", "--all", "--quiet", "main")
+                    except RuntimeError as exc:
+                        raise ClassifiedError(
+                            str(exc), code="compose_execution_failed", source="user"
+                        ) from exc
                     container = out.strip()
                     async with _docker_output(*command, "logs", "--follow", "--no-color"):
                         await _wait_serving(
@@ -287,14 +322,23 @@ class DockerRuntime:
                                 *command, "exec", "-T", "main", "df", "-Pk", "/"
                             )
                             _require_free_disk(free_disk, resources.storage_mb)
-                        mapping, _ = await _docker(*command, "port", port_service, str(self.port))
+                        try:
+                            mapping, _ = await _docker(
+                                *command, "port", port_service, str(self.port)
+                            )
+                        except RuntimeError as exc:  # the service owning the network is gone
+                            raise ClassifiedError(
+                                str(exc), code="compose_execution_failed", source="user"
+                            ) from exc
                         host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-                        async with _docker_deadline(run_timeout, teardown):
+                        async with _RunDeadline(run_timeout, teardown) as deadline:
                             yield DockerEndpoint(
                                 f"tcp://127.0.0.1:{host_port}",
                                 params=params,
                                 config=config if config.model_dump(exclude_none=True) else None,
                                 container=container,
+                                project=project,
+                                deadline=deadline,
                             )
                 finally:
                     await _docker(*teardown, check=False)
@@ -331,23 +375,28 @@ class DockerRuntime:
         container = ""
         try:
             await _docker("volume", "create", session_volume, timeout_s=startup_timeout)
-            out, _ = await _docker(
-                "run",
-                "--detach",
-                *self.run_args,
-                *env_args,
-                *resource_args,
-                *mount_args,
-                *_DOCKER_SECURITY_ARGS,
-                "--mount",
-                f"type=volume,source={session_volume},target={_SESSION_ROOT}",
-                "--mount",
-                f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
-                "--publish",
-                f"127.0.0.1::{self.port}",
-                config.image,
-                timeout_s=startup_timeout,
-            )
+            try:
+                out, _ = await _docker(
+                    "run",
+                    "--detach",
+                    *self.run_args,
+                    *env_args,
+                    *resource_args,
+                    *mount_args,
+                    *_DOCKER_SECURITY_ARGS,
+                    "--mount",
+                    f"type=volume,source={session_volume},target={SESSION_ROOT}",
+                    "--mount",
+                    f"type=volume,source={session_volume},target={_SESSION_ALIAS_ROOT}",
+                    "--publish",
+                    f"127.0.0.1::{self.port}",
+                    config.image,
+                    timeout_s=startup_timeout,
+                )
+            except RuntimeError as exc:
+                raise ClassifiedError(
+                    str(exc), code="container_start_failed", source="user"
+                ) from exc
             container = out.strip()
             teardown = ("rm", "--force", container)
             async with _docker_output("logs", "--follow", container):
@@ -361,12 +410,13 @@ class DockerRuntime:
                     _require_free_disk(free_disk, resources.storage_mb)
                 mapping, _ = await _docker("port", container, str(self.port))
                 host_port = int(mapping.strip().splitlines()[0].rsplit(":", 1)[1])
-                async with _docker_deadline(run_timeout, teardown):
+                async with _RunDeadline(run_timeout, teardown) as deadline:
                     yield DockerEndpoint(
                         f"tcp://127.0.0.1:{host_port}",
                         params=params,
                         config=config,
                         container=container,
+                        deadline=deadline,
                     )
         finally:
             # check=False: teardown must not shadow the run's own error, and
@@ -376,6 +426,25 @@ class DockerRuntime:
             await _docker("volume", "rm", "--force", session_volume, check=False)
 
 
+_ARCHIVE_SCRIPT = """
+import sys
+import tarfile
+from pathlib import Path
+
+root = Path(sys.argv[1])
+entries = list(root.rglob("*")) if root.exists() else []
+if sys.argv[3] == "required" and not root.is_dir():
+    raise FileNotFoundError(f"{root} is not a directory")
+if any(entry.is_symlink() for entry in entries):
+    raise ValueError("runtime archive contains a symbolic link")
+if any(not (entry.is_file() or entry.is_dir()) for entry in entries):
+    raise ValueError("runtime archive contains an unsupported entry")
+with tarfile.open(sys.argv[2], "w:gz") as output:
+    for entry in entries:
+        output.add(entry, arcname=entry.relative_to(root), recursive=False)
+"""
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DockerEndpoint(Runtime):
     """The ``Runtime`` a ``DockerRuntime`` yields: its control channel and ``container`` id."""
@@ -383,41 +452,124 @@ class DockerEndpoint(Runtime):
     transports_sessions: ClassVar[bool] = True
 
     container: str
+    # The Compose project name when the environment is a project; its other
+    # services are the siblings ``exec`` and ``collect`` reach by name.
+    project: str | None = None
+    # The run limit that removes the box when it expires.
+    deadline: _RunDeadline | None = None
+
+    async def terminated(self) -> str | None:
+        if self.deadline is not None and self.deadline.expired is not None:
+            return self.deadline.expired
+        state, _ = await _docker(
+            "inspect",
+            "--format",
+            "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}",
+            self.container,
+        )
+        status, code, oom = state.split()
+        if status == "running":
+            return None
+        return f"container {status} with exit code {code}" + (
+            " (killed by the memory limit)" if oom == "true" else ""
+        )
+
+    async def _service_container(self, service: str) -> str:
+        if service == "main":
+            return self.container
+        if self.project is None:
+            raise ValueError(f"service {service!r}: this environment is a single container")
+        listed, _ = await _docker(
+            "ps",
+            "--quiet",
+            "--filter",
+            f"label=com.docker.compose.project={self.project}",
+            "--filter",
+            f"label=com.docker.compose.service={service}",
+        )
+        container = listed.strip()
+        if not container:
+            raise ValueError(f"Compose service {service!r} is not running")
+        return container
+
+    async def exec(
+        self, argv: Sequence[str], *, service: str = "main", max_wait: float | None = None
+    ) -> ExecResult:
+        container = await self._service_container(service)
+        pidfile = f"/tmp/hud-exec-{uuid.uuid4().hex}.pid"  # noqa: S108 - inside the box
+        group = await create_process_group_exec(
+            "docker",
+            "exec",
+            container,
+            "sh",
+            "-c",
+            EXEC_LAUNCHER,
+            pidfile,
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            async with asyncio.timeout(max_wait):
+                out, err = await group.process.communicate()
+        except (asyncio.CancelledError, TimeoutError):
+            await group.terminate()
+            await _docker("exec", container, "sh", "-c", KILL_TREE, pidfile, check=False)
+            raise
+        assert group.process.returncode is not None
+        return ExecResult(
+            group.process.returncode,
+            out.decode("utf-8", "replace"),
+            err.decode("utf-8", "replace"),
+        )
+
+    async def collect(
+        self,
+        paths: Sequence[str | PurePosixPath],
+        destination: Path,
+        *,
+        service: str = "main",
+    ) -> list[Path]:
+        container = await self._service_container(service)
+        collected: list[Path] = []
+        for path in paths:
+            source = PurePosixPath(path)
+            group = await create_process_group_exec(
+                "docker",
+                "cp",
+                f"{container}:{source}",
+                "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                archive, err = await group.process.communicate()
+            except asyncio.CancelledError:
+                await group.terminate()
+                raise
+            if group.process.returncode != 0:
+                raise RuntimeError(
+                    f"collecting {source} from {service!r} failed: "
+                    f"{err.decode('utf-8', 'replace').strip()}"
+                )
+            with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+                tar.extractall(destination, filter="data")
+            collected.append(destination / source.name)
+        return collected
 
     @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
-        validate_session_id(session_id)
-        with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
-            destination = Path(directory) / "session.tar.gz"
-            root = f"{_SESSION_ROOT}/{session_id}"
-            exists, _ = await _docker(
-                "exec",
-                self.container,
-                "sh",
-                "-c",
-                'if [ -d "$1" ]; then printf 1; fi',
-                "hud-session",
-                root,
-            )
-            if not exists:
-                yield None
-                return
-            archive = f"/runtime/session-export-{uuid.uuid4().hex}.tar.gz"
-            script = """
-import sys
-import tarfile
-from pathlib import Path
-
-root = Path(sys.argv[1])
-entries = list(root.rglob("*"))
-if any(entry.is_symlink() for entry in entries):
-    raise ValueError("runtime session contains a symbolic link")
-if any(not (entry.is_file() or entry.is_dir()) for entry in entries):
-    raise ValueError("runtime session contains an unsupported entry")
-with tarfile.open(sys.argv[2], "w:gz") as output:
-    for entry in entries:
-        output.add(entry, arcname=entry.relative_to(root), recursive=False)
-"""
+    async def checkpoint(self, scope: CheckpointScope) -> AsyncGenerator[Checkpoint]:
+        if isinstance(scope, RootScope):
+            out, _ = await _docker("commit", self.container)
+            image = out.strip()
+            try:
+                yield Checkpoint(scope, image)
+            finally:
+                await _docker("image", "rm", "--force", image, check=False)
+            return
+        with tempfile.TemporaryDirectory(prefix="hud-checkpoint-") as directory:
+            destination = Path(directory) / "checkpoint.tar.gz"
+            archive = f"/runtime/checkpoint-{uuid.uuid4().hex}.tar.gz"
             try:
                 await _docker(
                     "exec",
@@ -426,34 +578,25 @@ with tarfile.open(sys.argv[2], "w:gz") as output:
                     self.container,
                     "python3",
                     "-c",
-                    script,
-                    root,
+                    _ARCHIVE_SCRIPT,
+                    str(scope.path),
                     archive,
+                    "optional" if isinstance(scope, SessionScope) else "required",
                 )
                 await _docker("cp", f"{self.container}:{archive}", str(destination))
             finally:
                 await _docker(
                     "exec", "--user", "0", self.container, "rm", "-f", archive, check=False
                 )
-            yield destination
+            yield Checkpoint(scope, str(destination))
 
-    async def restore_session(self, session_id: str, source: Path) -> None:
-        validate_session_id(session_id)
-        target = f"{_SESSION_ROOT}/{session_id}"
-        with tempfile.TemporaryDirectory(prefix="hud-session-import-") as directory:
+    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
+        check_restorable(checkpoint, scope)
+        assert not isinstance(scope, RootScope)
+        with tempfile.TemporaryDirectory(prefix="hud-restore-") as directory:
             root = Path(directory)
-            _extract_session_archive(source, root)
+            extract_archive(Path(checkpoint.ref), root)
+            target = str(scope.path)
             await _docker("exec", "--user", "0", self.container, "rm", "-rf", target)
             await _docker("exec", "--user", "0", self.container, "mkdir", "-p", target)
-            await _docker(
-                "cp",
-                f"{root}/.",
-                f"{self.container}:{target}",
-            )
-
-
-def _extract_session_archive(source: Path, destination: Path) -> None:
-    with tarfile.open(source, "r:gz") as archive:
-        if any(not (member.isfile() or member.isdir()) for member in archive.getmembers()):
-            raise ValueError("runtime session archive contains an unsupported entry")
-        archive.extractall(destination, filter="data")
+            await _docker("cp", f"{root}/.", f"{self.container}:{target}")
