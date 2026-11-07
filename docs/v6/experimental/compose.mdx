@@ -163,6 +163,11 @@ and an unhealthy service fails startup. Services without a healthcheck count as 
 started, so one-shot services may exit. The wait shares the runtime's startup timeout
 (`RuntimeLimits.startup_timeout_s`). Hosted execution starts projects the same way.
 
+**`ModalRuntime`** runs the whole project in one Modal sandbox: `main` as its main container,
+every other service as a sidecar reached by name, with `depends_on`, healthchecks and `restart`
+applied by the runtime. Service images must be pre-built; see
+[`ModalRuntime`](/v6/reference/runtime#modalruntime) for what a sandbox cannot do.
+
 **Hosted execution** uses `HostedRuntime`. Pass a JSON `RuntimeConfig` containing the Compose
 project with `hud deploy --runtime-config runtime.json`. The command uploads the project root and supplies the
 configuration to the builder. See the [Harbor deployment example](/v6/experimental/harbor#deploy-and-sync)
