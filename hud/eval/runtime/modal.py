@@ -394,7 +394,7 @@ class ModalRuntime:
                     f"{self.port}:{self.port}",
                     port_service=port_service,
                     seccomp="/hud/docker-seccomp.json",
-                    service_socket=("/var/run/docker.sock" if project.service_access else None),
+                    docker=bool(project.service_access),
                     env_vars=self.env_vars,
                     cpu=resources.cpu if resources is not None else None,
                     memory_mb=resources.memory_mb if resources is not None else None,
