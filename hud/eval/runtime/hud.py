@@ -12,12 +12,11 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from websockets.exceptions import ConnectionClosedOK
 
 from hud.eval.run import Run, rollout
 from hud.telemetry.context import get_current_trace_id
 
-from .core import Runtime
+from .core import Runtime, splice_websocket
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -196,7 +195,7 @@ class HUDRuntime:
                 additional_headers={"Authorization": f"Bearer {api_key}"},
                 max_size=None,
             ) as websocket:
-                await _splice_websocket(reader, writer, websocket)
+                await splice_websocket(reader, writer, websocket)
         finally:
             if not writer.is_closing():
                 writer.close()
@@ -209,39 +208,3 @@ def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:
     scheme = "wss" if parts.scheme == "https" else "ws"
     path = f"{parts.path.rstrip('/')}/runtime/tunnels/{session_id}"
     return urlunsplit((scheme, parts.netloc, path, "", ""))
-
-
-async def _splice_websocket(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    websocket: Any,
-) -> None:
-    async def tcp_to_ws() -> None:
-        while data := await reader.read(65536):
-            await websocket.send(data)
-
-    async def ws_to_tcp() -> None:
-        async for message in websocket:
-            data = message.encode("utf-8") if isinstance(message, str) else message
-            writer.write(data)
-            await writer.drain()
-
-    tasks = [
-        asyncio.create_task(tcp_to_ws()),
-        asyncio.create_task(ws_to_tcp()),
-    ]
-    try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        done_results = await asyncio.gather(*done, return_exceptions=True)
-        await asyncio.gather(*pending, return_exceptions=True)
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    for result in done_results:
-        if isinstance(result, BaseException) and not isinstance(result, ConnectionClosedOK):
-            raise result

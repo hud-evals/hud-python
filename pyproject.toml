@@ -152,7 +152,7 @@ robot = [
 
 # Modal placement (ModalRuntime): per-rollout cloud sandboxes from a built image
 modal = [
-    "modal>=1.0",
+    "modal==1.6.3",
 ]
 
 # Daytona placement (DaytonaRuntime): per-rollout cloud sandboxes from a snapshot
