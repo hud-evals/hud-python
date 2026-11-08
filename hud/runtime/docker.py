@@ -23,17 +23,12 @@ from hud.utils.process import create_process_group_exec, finish_output, stream_o
 
 from .compose import SECCOMP_PROFILE, ComposeConfig, DockerBindMount
 from .core import (
-    EXEC_LAUNCHER,
-    KILL_TREE,
     SESSION_ROOT,
     Checkpoint,
-    CheckpointScope,
     ExecResult,
-    RootScope,
     Runtime,
     RuntimeConfig,
     SessionScope,
-    check_restorable,
     extract_archive,
 )
 
@@ -407,8 +402,6 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 entries = list(root.rglob("*")) if root.exists() else []
-if sys.argv[3] == "required" and not root.is_dir():
-    raise FileNotFoundError(f"{root} is not a directory")
 if any(entry.is_symlink() for entry in entries):
     raise ValueError("runtime archive contains a symbolic link")
 if any(not (entry.is_file() or entry.is_dir()) for entry in entries):
@@ -470,15 +463,10 @@ class DockerEndpoint(Runtime):
         self, argv: Sequence[str], *, service: str = "main", max_wait: float | None = None
     ) -> ExecResult:
         container = await self._service_container(service)
-        pidfile = f"/tmp/hud-exec-{uuid.uuid4().hex}.pid"  # noqa: S108 - inside the box
         group = await create_process_group_exec(
             "docker",
             "exec",
             container,
-            "sh",
-            "-c",
-            EXEC_LAUNCHER,
-            pidfile,
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -488,7 +476,6 @@ class DockerEndpoint(Runtime):
                 out, err = await group.process.communicate()
         except (asyncio.CancelledError, TimeoutError):
             await group.terminate()
-            await _docker("exec", container, "sh", "-c", KILL_TREE, pidfile, check=False)
             raise
         assert group.process.returncode is not None
         return ExecResult(
@@ -549,15 +536,7 @@ class DockerEndpoint(Runtime):
         await _docker("cp", str(source), f"{container}:{target}")
 
     @asynccontextmanager
-    async def checkpoint(self, scope: CheckpointScope) -> AsyncGenerator[Checkpoint]:
-        if isinstance(scope, RootScope):
-            out, _ = await _docker("commit", self.container)
-            image = out.strip()
-            try:
-                yield Checkpoint(scope, image)
-            finally:
-                await _docker("image", "rm", "--force", image, check=False)
-            return
+    async def checkpoint(self, scope: SessionScope) -> AsyncGenerator[Checkpoint]:
         with tempfile.TemporaryDirectory(prefix="hud-checkpoint-") as directory:
             destination = Path(directory) / "checkpoint.tar.gz"
             archive = f"/runtime/checkpoint-{uuid.uuid4().hex}.tar.gz"
@@ -572,7 +551,6 @@ class DockerEndpoint(Runtime):
                     _ARCHIVE_SCRIPT,
                     str(scope.path),
                     archive,
-                    "optional" if isinstance(scope, SessionScope) else "required",
                 )
                 await _docker("cp", f"{self.container}:{archive}", str(destination))
             finally:
@@ -581,9 +559,7 @@ class DockerEndpoint(Runtime):
                 )
             yield Checkpoint(scope, str(destination))
 
-    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
-        check_restorable(checkpoint, scope)
-        assert not isinstance(scope, RootScope)
+    async def restore(self, checkpoint: Checkpoint, scope: SessionScope) -> None:
         with tempfile.TemporaryDirectory(prefix="hud-restore-") as directory:
             root = Path(directory)
             extract_archive(Path(checkpoint.ref), root)

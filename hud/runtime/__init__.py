@@ -3,10 +3,8 @@
 from .compose import ComposeProject, DockerBindMount
 from .core import (
     Checkpoint,
-    CheckpointScope,
     ExecResult,
     Provider,
-    RootScope,
     Runtime,
     RuntimeConfig,
     RuntimeGPU,
@@ -16,7 +14,6 @@ from .core import (
     RuntimeUnsupportedError,
     SessionScope,
     Shared,
-    WorkspaceScope,
 )
 from .daytona import DaytonaRuntime
 from .docker import DockerEndpoint, DockerRuntime
@@ -27,7 +24,6 @@ from .modal import ModalEndpoint, ModalRuntime
 
 __all__ = [
     "Checkpoint",
-    "CheckpointScope",
     "ComposeProject",
     "DaytonaRuntime",
     "DockerBindMount",
@@ -40,7 +36,6 @@ __all__ = [
     "ModalEndpoint",
     "ModalRuntime",
     "Provider",
-    "RootScope",
     "Runtime",
     "RuntimeConfig",
     "RuntimeGPU",
@@ -51,5 +46,4 @@ __all__ = [
     "SessionScope",
     "Shared",
     "SubprocessRuntime",
-    "WorkspaceScope",
 ]

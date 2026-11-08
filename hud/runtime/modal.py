@@ -18,9 +18,6 @@ from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
-from urllib.parse import urlsplit, urlunsplit
-
-import websockets
 
 from hud.environment.server import DEFAULT_PORT, default_serve_command
 from hud.types import ClassifiedError
@@ -35,20 +32,14 @@ from .compose import (
     ComposeHealthcheck,
 )
 from .core import (
-    EXEC_LAUNCHER,
-    KILL_TREE,
     SESSION_ROOT,
     Checkpoint,
-    CheckpointScope,
     ExecResult,
-    RootScope,
     Runtime,
     RuntimeConfig,
     SessionScope,
-    check_restorable,
     validate_archive,
 )
-from .tunnel import splice_websocket
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -60,16 +51,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hud.runtime")
 
-_BRIDGE_SOURCE = Path(__file__).with_name("modal_bridge.py").read_text(encoding="utf-8")
-# The sandbox port the connect token routes to; the bridge listens here and
-# splices each WebSocket to the environment's own port on loopback.
-_BRIDGE_PORT = 18765
+# Created once the services ``main`` depends on are up; ``main`` waits for it.
 _START_FILE = "/hud/start"
-_ARCHIVE = "/tmp/hud-transfer.tar.gz"  # noqa: S108 - inside the sandbox, every image has /tmp
 # Memory the VM runtime reserves for the Docker daemon sidecar; the sandbox's
 # own request does not cover sidecars there.
 _DOCKER_DAEMON_MEMORY_MIB = 1024
-_RESTART_POLL_SECONDS = 2.0
 
 _BYTES = re.compile(r"^(\d+)([kmg]?)b?$", re.IGNORECASE)
 
@@ -97,7 +83,6 @@ class _Service:
     # ``depends_on`` as {service: condition}.
     dependencies: dict[str, str]
     healthcheck: ComposeHealthcheck | None
-    restart: str
     memory_mib: int | None
 
 
@@ -164,6 +149,13 @@ def _plan(compose: ComposeConfig, *, docker: bool, gpu: bool, memory_mib: int | 
                 f"ModalRuntime cannot apply network_mode to Compose service {name!r}; "
                 "services share the sandbox's network and reach each other by name"
             )
+        if service.restart not in (None, "no"):
+            logger.warning(
+                "ModalRuntime does not restart Compose service %r (restart: %s): a sidecar "
+                "that exits stays down",
+                name,
+                service.restart,
+            )
         if service.user is not None:
             raise ValueError(
                 f"ModalRuntime cannot run Compose service {name!r} as user {service.user!r}"
@@ -215,7 +207,6 @@ def _plan(compose: ComposeConfig, *, docker: bool, gpu: bool, memory_mib: int | 
             workdir=service.working_dir,
             dependencies=dependencies,
             healthcheck=healthchecks.get(name),
-            restart=service.restart or "no",
             memory_mib=_mebibytes(memory) if memory is not None else None,
         )
     graph = {name: set(service.dependencies) for name, service in services.items()}
@@ -238,21 +229,10 @@ class ModalEndpoint(Runtime):
     transports_sessions: ClassVar[bool] = True
 
     sandbox: modal.Sandbox
-    # Live sidecar handles by Compose service name; a restart replaces one.
+    # Sidecar handles by Compose service name.
     sidecars: dict[str, SidecarContainer] = field(default_factory=dict)
-    # The task applying the sidecars' restart policies, for a Compose project.
-    watcher: asyncio.Task[None] | None = None
-    # Whether the sandbox runs on Modal's VM runtime, whose filesystem
-    # snapshots are faithful; the default gVisor runtime's are not.
-    vm: bool = False
-
-    def _check_watcher(self) -> None:
-        if self.watcher is not None and self.watcher.done() and not self.watcher.cancelled():
-            failure = self.watcher.exception()
-            raise RuntimeError(f"the sidecar watcher stopped: {failure}") from failure
 
     def _target(self, service: str) -> modal.Sandbox | SidecarContainer:
-        self._check_watcher()
         if service == "main":
             return self.sandbox
         try:
@@ -268,15 +248,9 @@ class ModalEndpoint(Runtime):
         self, argv: Sequence[str], *, service: str = "main", max_wait: float | None = None
     ) -> ExecResult:
         target = self._target(service)
-        pidfile = f"/tmp/hud-exec-{uuid.uuid4().hex}.pid"  # noqa: S108 - inside the sandbox
-        try:
-            async with asyncio.timeout(max_wait):
-                process = await target.exec.aio("sh", "-c", EXEC_LAUNCHER, pidfile, *argv)
-                returncode = await process.wait.aio()
-        except (asyncio.CancelledError, TimeoutError):
-            killer = await target.exec.aio("sh", "-c", KILL_TREE, pidfile)
-            await killer.wait.aio()
-            raise
+        async with asyncio.timeout(max_wait):
+            process = await target.exec.aio(*argv)
+            returncode = await process.wait.aio()
         return ExecResult(
             returncode, await process.stdout.read.aio(), await process.stderr.read.aio()
         )
@@ -300,9 +274,13 @@ class ModalEndpoint(Runtime):
             archive = Path(directory) / "collect.tar.gz"
             for path in paths:
                 source = PurePosixPath(path)
+                staged = _staging_path()
                 parent, name = shlex.quote(str(source.parent)), shlex.quote(source.name)
-                await self._sh(f"tar -czf {_ARCHIVE} -C {parent} {name}", service=service)
-                await target.filesystem.copy_to_local.aio(_ARCHIVE, archive)
+                await self._sh(f"tar -czf {staged} -C {parent} {name}", service=service)
+                try:
+                    await target.filesystem.copy_to_local.aio(staged, archive)
+                finally:
+                    await self._sh(f"rm -f {staged}", service=service)
                 with tarfile.open(archive) as tar:
                     tar.extractall(destination, filter="data")
                 collected.append(destination / source.name)
@@ -310,53 +288,51 @@ class ModalEndpoint(Runtime):
 
     async def put(self, source: Path, path: str | PurePosixPath, *, service: str = "main") -> None:
         target = PurePosixPath(path)
+        staged = _staging_path()
         with tempfile.TemporaryDirectory(prefix="hud-put-") as directory:
             archive = Path(directory) / "put.tar.gz"
             with tarfile.open(archive, "w:gz") as tar:
                 tar.add(source, arcname=target.name)
-            await self._target(service).filesystem.copy_from_local.aio(archive, _ARCHIVE)
+            await self._target(service).filesystem.copy_from_local.aio(archive, staged)
         parent = shlex.quote(str(target.parent))
         await self._sh(
             f"rm -rf {shlex.quote(str(target))} && mkdir -p {parent} && "
-            f"tar -xzf {_ARCHIVE} -C {parent}",
+            f"tar -xzf {staged} -C {parent}; status=$?; rm -f {staged}; exit $status",
             service=service,
         )
 
     @asynccontextmanager
-    async def checkpoint(self, scope: CheckpointScope) -> AsyncGenerator[Checkpoint]:
-        self._check_watcher()
-        if isinstance(scope, RootScope):
-            if not self.vm:
-                raise self._unsupported(
-                    "checkpoint the root filesystem",
-                    "Modal's default runtime strips setuid, setgid and sticky bits from "
-                    "filesystem snapshots; only the VM runtime, which an environment with "
-                    "a Docker daemon runs on, snapshots faithfully",
-                )
-            image = await self.sandbox.snapshot_filesystem.aio()
-            yield Checkpoint(scope, f"modal://{image.object_id}")
-            return
+    async def checkpoint(self, scope: SessionScope) -> AsyncGenerator[Checkpoint]:
+        staged = _staging_path()
         with tempfile.TemporaryDirectory(prefix="hud-checkpoint-") as directory:
             destination = Path(directory) / "checkpoint.tar.gz"
             root = shlex.quote(str(scope.path))
             await self._sh(
-                (f"mkdir -p {root}; " if isinstance(scope, SessionScope) else "")
-                + f"if [ ! -d {root} ]; then echo '{root} is not a directory' >&2; exit 1; fi; "
-                + f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
-                + "then echo 'runtime archive contains an unsupported entry' >&2; exit 1; fi; "
-                + f"tar -czf {_ARCHIVE} -C {root} ."
+                f"mkdir -p {root}; "
+                f"if find {root} -mindepth 1 ! -type f ! -type d -print -quit | grep -q .; "
+                "then echo 'runtime archive contains an unsupported entry' >&2; exit 1; fi; "
+                f"tar -czf {staged} -C {root} ."
             )
-            await self.sandbox.filesystem.copy_to_local.aio(_ARCHIVE, destination)
+            try:
+                await self.sandbox.filesystem.copy_to_local.aio(staged, destination)
+            finally:
+                await self._sh(f"rm -f {staged}")
             yield Checkpoint(scope, str(destination))
 
-    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
-        self._check_watcher()
-        check_restorable(checkpoint, scope)
-        assert not isinstance(scope, RootScope)
+    async def restore(self, checkpoint: Checkpoint, scope: SessionScope) -> None:
         validate_archive(Path(checkpoint.ref))
+        staged = _staging_path()
         target = shlex.quote(str(scope.path))
-        await self.sandbox.filesystem.copy_from_local.aio(checkpoint.ref, _ARCHIVE)
-        await self._sh(f"rm -rf {target} && mkdir -p {target} && tar -xzf {_ARCHIVE} -C {target}")
+        await self.sandbox.filesystem.copy_from_local.aio(checkpoint.ref, staged)
+        await self._sh(
+            f"rm -rf {target} && mkdir -p {target} && tar -xzf {staged} -C {target}; "
+            f"status=$?; rm -f {staged}; exit $status"
+        )
+
+
+def _staging_path() -> str:
+    """A path inside the box for one transfer's archive; every image has ``/tmp``."""
+    return f"/tmp/hud-transfer-{uuid.uuid4().hex}.tar.gz"  # noqa: S108 - inside the sandbox
 
 
 class ModalRuntime:
@@ -365,14 +341,14 @@ class ModalRuntime:
     The environment is the sandbox's main container, where a requested GPU
     attaches. A Compose project's other services run as sidecars of the same
     sandbox, reached by service name; the runtime starts them in ``depends_on``
-    order, waits on their healthchecks, and restarts them by their ``restart``
-    policy. Every service image must be pre-built: a registry reference, or
+    order and waits on their healthchecks. A sidecar that exits is not
+    restarted. Every service image must be pre-built: a registry reference, or
     ``modal://<image id>``. A project with ``service_access`` gets a Docker
     daemon sidecar, which needs Modal's VM runtime and so excludes a GPU.
 
-    The control channel is reached through a connect-token WebSocket on the
-    sandbox: a local listener mints a token for every connection and splices
-    it to the environment's port. Sandboxes run in the caller's own region
+    The control channel is the environment's port behind a Modal encrypted
+    port: the runtime's address is ``tls://<host>:<port>``, and whoever holds
+    that address can connect, so it stays out of logs. Sandboxes run in the caller's own region
     (``MODAL_REGION``) unless ``region`` says otherwise, carry ``tags``, and
     treat declared ``cpu`` and ``memory_mb`` as hard limits. Acquisitions are
     independent, so a batch fans out into isolated sandboxes.
@@ -548,23 +524,15 @@ class ModalRuntime:
                 argv = plan.main.argv
             # The environment starts once what it depends on is up, as under Compose.
             held_back = bool(plan.main.dependencies) or plan.docker
+        wait_for_start = f"until [ -e {_START_FILE} ]; do sleep 0.2; done && " if held_back else ""
         command = (
             "sh",
             "-c",
             f"mkdir -p {SESSION_ROOT} /media/hud /hud && "
             "rm -rf /media/hud/sessions && "
             f"ln -s {SESSION_ROOT} /media/hud/sessions && "
-            'exec "$@"',
+            f'{wait_for_start}exec "$@"',
             "hud-runtime",
-            "python3",
-            "-c",
-            _BRIDGE_SOURCE,
-            "--listen",
-            str(_BRIDGE_PORT),
-            "--upstream",
-            str(self.port),
-            *(("--start-file", _START_FILE) if held_back else ()),
-            "--",
             *argv,
         )
         sb = await modal.Sandbox.create.aio(
@@ -573,6 +541,7 @@ class ModalRuntime:
             image=image,
             env=environment or None,
             workdir=workdir,
+            encrypted_ports=[self.port],
             readiness_probe=modal.Probe.with_tcp(self.port),
             # Modal types both timeouts as int seconds; floats raise at proto encode.
             timeout=run_timeout,
@@ -583,8 +552,6 @@ class ModalRuntime:
             asyncio.create_task(stream_output(sb.stderr, sys.stderr)),
         )
         sidecars: dict[str, SidecarContainer] = {}
-        watcher: asyncio.Task[None] | None = None
-        server: asyncio.Server | None = None
         try:
             try:
                 async with asyncio.timeout(ready_timeout):
@@ -617,16 +584,9 @@ class ModalRuntime:
                     code="container_start_failed",
                     source="user",
                 ) from None
-            if plan is not None:
-                watcher = asyncio.create_task(
-                    _restart_exited(sb, sidecars, plan, sidecar_images, vm)
-                )
-            server = await asyncio.start_server(
-                lambda reader, writer: _forward(sb, reader, writer), "127.0.0.1", 0
-            )
-            port = server.sockets[0].getsockname()[1]
+            host, port = (await sb.tunnels.aio())[self.port].tls_socket
             yield ModalEndpoint(
-                url=f"tcp://127.0.0.1:{port}",
+                url=f"tls://{host}:{port}",
                 params={
                     "provider": "modal",
                     "instance_id": sb.object_id,
@@ -635,22 +595,8 @@ class ModalRuntime:
                 config=config if config.model_dump(exclude_none=True) else None,
                 sandbox=sb,
                 sidecars=sidecars,
-                watcher=watcher,
-                vm=vm,
             )
         finally:
-            if watcher is not None:
-                watcher.cancel()
-                await asyncio.gather(watcher, return_exceptions=True)
-                if not watcher.cancelled() and (failure := watcher.exception()) is not None:
-                    # A dead watcher left the sidecars' restart policies unapplied.
-                    failing = sys.exc_info()[1]
-                    if failing is None:
-                        raise RuntimeError("the sidecar watcher stopped") from failure
-                    failing.add_note(f"the sidecar watcher stopped: {failure}")
-            if server is not None:
-                server.close()
-                await server.wait_closed()
             # Best-effort teardown: never shadow the run's own error.
             with contextlib.suppress(Exception):
                 await sb.terminate.aio()
@@ -736,37 +682,6 @@ async def _start_services(
             await _healthy(handle(name), name, check)
 
 
-async def _restart_exited(
-    sb: modal.Sandbox,
-    sidecars: dict[str, SidecarContainer],
-    plan: _Plan,
-    images: Mapping[str, modal.Image],
-    vm: bool,
-) -> None:
-    """Apply each sidecar's ``restart`` policy, as the Compose runtime would."""
-    failures: dict[str, int] = {}
-    while True:
-        await asyncio.sleep(_RESTART_POLL_SECONDS)
-        for service in plan.sidecars:
-            code = await sidecars[service.name].poll.aio()
-            if code is None:
-                continue
-            policy, _, limit = service.restart.partition(":")
-            if policy == "no" or (policy == "on-failure" and code == 0):
-                continue
-            failures[service.name] = failures.get(service.name, 0) + 1
-            if policy == "on-failure" and limit and failures[service.name] > int(limit):
-                logger.warning(
-                    "Compose service %r exited with code %s; its restart limit %s is reached",
-                    service.name,
-                    code,
-                    limit,
-                )
-                continue
-            logger.warning("Compose service %r exited with code %s; restarting", service.name, code)
-            sidecars[service.name] = await _create_sidecar(sb, service, images[service.name], vm=vm)
-
-
 async def _healthy(
     handle: modal.Sandbox | SidecarContainer, name: str, check: ComposeHealthcheck
 ) -> None:
@@ -798,26 +713,3 @@ async def _healthy(
         await asyncio.sleep(
             check.start_interval_sec if loop.time() < grace_until else check.interval_sec
         )
-
-
-async def _forward(
-    sb: modal.Sandbox, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-) -> None:
-    """Carry one local control connection to the sandbox over a fresh connect token."""
-    try:
-        credentials = await sb.create_connect_token.aio(port=_BRIDGE_PORT)
-        parts = urlsplit(credentials.url)
-        url = urlunsplit(
-            ("wss", parts.netloc, "/", f"_modal_connect_token={credentials.token}", "")
-        )
-        async with websockets.connect(url, max_size=None) as websocket:
-            await splice_websocket(reader, writer, websocket)
-    except Exception as exc:
-        # The local client retries until the environment answers; a sandbox
-        # that is gone fails the rollout with the sandbox's own reason.
-        logger.warning("modal control connection failed: %s", exc)
-    finally:
-        if not writer.is_closing():
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()

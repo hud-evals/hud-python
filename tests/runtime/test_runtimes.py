@@ -33,7 +33,6 @@ from hud.runtime import (
     HUDRuntime,
     LocalRuntime,
     ModalRuntime,
-    RootScope,
     Runtime,
     RuntimeConfig,
     RuntimeGPU,
@@ -41,9 +40,7 @@ from hud.runtime import (
     RuntimeUnsupportedError,
     Shared,
     SubprocessRuntime,
-    WorkspaceScope,
 )
-from hud.runtime.modal import ModalEndpoint
 from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
@@ -293,17 +290,7 @@ async def test_a_runtime_exposes_filesystem_operations_or_declines_them_by_type(
                 result = await box.exec(["sh", "-c", "echo out; echo err >&2; exit 3"])
                 assert (result.returncode, result.stdout, result.stderr) == (3, "out\n", "err\n")
                 with pytest.raises(TimeoutError):
-                    await box.exec(["sh", "-c", "sleep 60"], max_wait=1)
-                # A command past max_wait is gone from the box, children included.
-                left = await box.exec(
-                    [
-                        "sh",
-                        "-c",
-                        "for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo;"
-                        " done | grep -c '^sleep 60 $' || true",
-                    ]
-                )
-                assert left.stdout.strip() == "0", left.stdout
+                    await box.exec(["sleep", "60"], max_wait=1)
             else:
                 with pytest.raises(RuntimeUnsupportedError) as declined:
                     await box.exec(["true"])
@@ -331,59 +318,6 @@ async def test_collect_copies_files_and_directories_out_of_the_box(
     assert copies == [tmp_path / "got" / "out", tmp_path / "got" / "extra.txt"]
     assert (tmp_path / "got" / "out" / "answer.txt").read_text() == "forty-two"
     assert (tmp_path / "got" / "extra.txt").read_text() == "extra\n"
-
-
-@pytest.mark.parametrize("runtime", BOXED)
-async def test_a_workspace_checkpoint_restores_into_another_box(
-    runtime: str, request: pytest.FixtureRequest
-) -> None:
-    writer = Task(env="box", id="write", args={"path": "/work/notes/a.txt", "text": "kept"})
-    reader = Task(env="box", id="read", args={"path": "/work/notes/a.txt"})
-
-    async with placed(runtime, "box", request) as (provider, nothing_left):
-        async with provider(writer) as first:
-            await rollout(writer, ScriptedAgent("kept"), runtime=first)
-            with pytest.raises(RuntimeError, match="not a directory"):
-                async with first.checkpoint(WorkspaceScope("/work/missing")):
-                    pass
-            async with (
-                first.checkpoint(WorkspaceScope("/work/notes")) as notes,
-                provider(reader) as second,
-            ):
-                await second.restore(notes, WorkspaceScope("/work/notes"))
-                trace = await rollout(reader, ScriptedAgent("kept"), runtime=second)
-        await eventually(nothing_left)
-
-    assert trace.reward == 1.0
-
-
-@pytest.mark.parametrize("runtime", BOXED)
-async def test_a_root_checkpoint_boots_a_new_box_with_the_files(
-    runtime: str, request: pytest.FixtureRequest
-) -> None:
-    writer = Task(env="box", id="write", args={"path": "/opt/mark.txt", "text": "stamped"})
-    reader = Task(env="box", id="read", args={"path": "/opt/mark.txt"})
-
-    async with placed(runtime, "box", request) as (provider, nothing_left):
-        async with provider(writer) as first:
-            await rollout(writer, ScriptedAgent("stamped"), runtime=first)
-            if runtime == "ModalRuntime":  # its default runtime declines root checkpoints
-                with pytest.raises(RuntimeUnsupportedError) as declined:
-                    async with first.checkpoint(RootScope()):
-                        pass
-                assert declined.value.operation == "checkpoint the root filesystem"
-                return
-            async with first.checkpoint(RootScope()) as image:
-                with pytest.raises(ValueError, match="starting a new box"):
-                    await first.restore(image, RootScope())
-                restored = reader.model_copy(
-                    update={"runtime_config": RuntimeConfig(image=image.ref)}
-                )
-                job = await restored.run(ScriptedAgent("stamped"), runtime=provider)
-        await eventually(nothing_left)
-
-    (graded,) = job.traces
-    assert graded.reward == 1.0
 
 
 @pytest.mark.parametrize("runtime", BOXED)
@@ -582,26 +516,16 @@ async def test_main_gets_a_docker_daemon_of_its_own(
         "print(json.dumps([version['Version'], containers]))\n"
     )
 
-    reader = Task(env="box", id="read", args={"path": "/work/a.txt"})
-
     async with placed_compose(runtime, request) as (provider, nothing_left):
         async with provider(row) as box:
             trace = await rollout(row, ScriptedAgent("composed"), runtime=box)
             seen = await box.exec(["python3", "-c", probe])
-            # A box that hosts a daemon runs where root checkpoints are faithful.
-            async with box.checkpoint(RootScope()) as image:
-                restored = reader.model_copy(
-                    update={"runtime_config": RuntimeConfig(image=image.ref)}
-                )
-                read_job = await restored.run(ScriptedAgent("composed"), runtime=provider)
         await eventually(nothing_left)
 
     assert trace.reward == 1.0
     assert seen.returncode == 0, seen.stderr
     version, containers = json.loads(seen.stdout)
     assert version.startswith("28.") and containers == []
-    (graded,) = read_job.traces
-    assert graded.reward == 1.0
 
 
 @pytest.mark.parametrize("runtime", [MODAL])
@@ -624,36 +548,6 @@ async def test_a_gpu_request_attaches_a_gpu_to_the_environment(
 
     assert trace.reward == 1.0
     assert "T4" in listed.stdout, listed.stderr
-
-
-@pytest.mark.parametrize("runtime", [MODAL])
-async def test_a_sidecar_with_a_restart_policy_is_restarted(
-    runtime: str, request: pytest.FixtureRequest
-) -> None:
-    row = await compose_row(
-        runtime,
-        request,
-        """
-        side:
-          image: python:3.12-slim
-          command: sh -c "sleep 3; exit 1"
-          restart: always
-        """,
-    )
-
-    async with placed_compose(runtime, request) as (provider, nothing_left):
-        async with provider(row) as box:
-            assert isinstance(box, ModalEndpoint)
-            first = box.sidecars["side"].object_id
-
-            async def replaced() -> bool:
-                return box.sidecars["side"].object_id != first
-
-            await eventually(replaced, within=30)
-            alive = await box.exec(["true"], service="side")
-        await eventually(nothing_left)
-
-    assert alive.returncode == 0
 
 
 @pytest.mark.parametrize(

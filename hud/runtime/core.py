@@ -177,37 +177,14 @@ class SessionScope:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceScope:
-    """One directory of the environment's filesystem."""
-
-    path: PurePosixPath
-
-    def __init__(self, path: str | PurePosixPath) -> None:
-        resolved = PurePosixPath(path)
-        if not resolved.is_absolute() or resolved == PurePosixPath("/"):
-            raise ValueError("workspace scope must be an absolute directory below /")
-        object.__setattr__(self, "path", resolved)
-
-
-@dataclass(frozen=True, slots=True)
-class RootScope:
-    """The environment's whole filesystem."""
-
-
-CheckpointScope = SessionScope | WorkspaceScope | RootScope
-
-
-@dataclass(frozen=True, slots=True)
 class Checkpoint:
-    """A checkpoint the runtime that took it can restore.
+    """A control session's files, which another box of the same provider restores.
 
-    ``ref`` is the provider's handle: for a session or workspace scope a local
-    archive of files and directories, for the root scope an image the same
-    provider boots from ``runtime_config.image``. It is valid inside the
+    ``ref`` is a local archive of regular files and directories, valid inside the
     ``checkpoint`` scope that yielded it.
     """
 
-    scope: CheckpointScope
+    scope: SessionScope
     ref: str
 
 
@@ -219,7 +196,7 @@ class ExecResult:
 
 
 def validate_archive(archive: Path) -> None:
-    """Reject a session or workspace archive holding anything but files and directories."""
+    """Reject a session archive holding anything but files and directories."""
     with tarfile.open(archive, "r:gz") as tar:
         if any(not (member.isfile() or member.isdir()) for member in tar.getmembers()):
             raise ValueError("runtime archive contains an unsupported entry")
@@ -231,37 +208,6 @@ def extract_archive(archive: Path, destination: Path) -> None:
         tar.extractall(destination, filter="data")
 
 
-def check_restorable(checkpoint: Checkpoint, scope: CheckpointScope) -> None:
-    """Reject a restore the checkpoint contract rules out."""
-    if isinstance(scope, RootScope) or isinstance(checkpoint.scope, RootScope):
-        raise ValueError(
-            "a root checkpoint is restored by starting a new box from "
-            f"runtime_config.image={checkpoint.ref!r}"
-        )
-    if type(checkpoint.scope) is not type(scope):
-        raise ValueError("a checkpoint restores into a scope of its own kind")
-
-
-# Runs ``exec``'s command inside the box with its pid recorded in the file named by
-# ``$0``, so that a call ending early can have the box kill it with ``KILL_TREE``.
-# Ending the provider's client, or the provider's own deadline, stops only the
-# command's first process; its descendants would run on.
-EXEC_LAUNCHER = '"$@" & echo $! > "$0"; wait $!; status=$?; rm -f "$0"; exit $status'
-# Kills the process whose pid the file named by ``$0`` holds, descendants first.
-KILL_TREE = """
-kill_tree() {
-    for p in /proc/[0-9]*; do
-        if [ "$(sed -n 's/^PPid:[[:space:]]*//p' "$p/status" 2>/dev/null)" = "$1" ]; then
-            kill_tree "${p#/proc/}"
-        fi
-    done
-    kill -9 "$1" 2>/dev/null
-}
-kill_tree "$(cat "$0")"
-rm -f "$0"
-"""
-
-
 @dataclass(frozen=True)
 class Runtime:
     """A provisioned host's control-channel ``url`` plus connection-time ``params``.
@@ -271,10 +217,9 @@ class Runtime:
 
     A provisioned runtime also owns the box's filesystem operations: ``exec``,
     ``collect`` and ``put`` reach the environment and, for a Compose project,
-    its sibling services; ``checkpoint`` and ``restore`` move a session, a
-    workspace directory, or the root filesystem. A borrowed runtime declines
-    them all with ``RuntimeUnsupportedError``, as does any provider for
-    a scope its host cannot capture faithfully.
+    its sibling services; ``checkpoint`` and ``restore`` move a control session
+    to another box. A borrowed runtime declines them all with
+    ``RuntimeUnsupportedError``.
     """
 
     url: str
@@ -304,8 +249,8 @@ class Runtime:
     ) -> ExecResult:
         """Run ``argv`` inside ``service`` (``main`` is the environment) and return its outcome.
 
-        A command still running after ``max_wait`` seconds is stopped and the
-        call raises ``TimeoutError``.
+        After ``max_wait`` seconds the call raises ``TimeoutError`` without
+        waiting for the command, which may run on until the box is torn down.
         """
         raise self._unsupported("exec", "it did not provision the host")
 
@@ -333,17 +278,16 @@ class Runtime:
         """Copy the local file or directory ``source`` over ``path`` in ``service``."""
         raise self._unsupported("put", "it did not provision the host")
 
-    def checkpoint(self, scope: CheckpointScope) -> AbstractAsyncContextManager[Checkpoint]:
-        """Capture ``scope`` for the duration of the returned context.
+    def checkpoint(self, scope: SessionScope) -> AbstractAsyncContextManager[Checkpoint]:
+        """Capture the session's files for the duration of the returned context.
 
-        A session or workspace checkpoint is an archive of regular files and
-        directories (a session that was never written is an empty archive).
-        A root checkpoint is an image this provider starts a new box from.
+        The checkpoint is an archive of regular files and directories, empty for a session
+        never written.
         """
         raise self._unsupported("checkpoint", "it did not provision the host")
 
-    async def restore(self, checkpoint: Checkpoint, scope: CheckpointScope) -> None:
-        """Replace ``scope`` in this box with ``checkpoint``; the scopes must be of one kind."""
+    async def restore(self, checkpoint: Checkpoint, scope: SessionScope) -> None:
+        """Replace the session ``scope`` names in this box with ``checkpoint``."""
         raise self._unsupported("restore", "it did not provision the host")
 
 
