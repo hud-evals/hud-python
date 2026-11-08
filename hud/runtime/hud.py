@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import uuid
@@ -11,8 +10,6 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
-import websockets
-from websockets.exceptions import ConnectionClosedOK
 
 from hud.settings import settings
 from hud.telemetry.context import get_current_trace_id
@@ -32,8 +29,8 @@ _RUNTIME_READY_TIMEOUT = 300.0
 class HUDRuntime:
     """HUD tunnel placement: local agent loop against a HUD-hosted environment.
 
-    Each acquisition leases a runtime session by environment name and tunnels its
-    control channel to a local port.
+    Each acquisition leases a runtime session by environment name and yields the
+    gateway's WebSocket tunnel to its control channel.
     """
 
     def __init__(
@@ -86,32 +83,17 @@ class HUDRuntime:
             raise RuntimeError("HUD runtime tunnel requires HUD_API_KEY")
         runtime_url = (self.runtime_url or settings.hud_runtime_url).rstrip("/")
         session_id = await self._create_runtime_session(runtime_url, api_key, task)
-        server: asyncio.Server | None = None
         try:
-            server = await asyncio.start_server(
-                lambda reader, writer: self._forward_runtime_connection(
-                    runtime_url,
-                    api_key,
-                    session_id,
-                    reader,
-                    writer,
-                ),
-                "127.0.0.1",
-                0,
-            )
-            port = server.sockets[0].getsockname()[1]
             yield Runtime(
-                f"tcp://127.0.0.1:{port}",
+                _runtime_tunnel_ws_url(runtime_url, session_id),
                 params={
+                    "headers": {"Authorization": f"Bearer {api_key}"},
                     "session_id": session_id,
                     "gateway_url": runtime_url,
                     "ready_timeout": _RUNTIME_READY_TIMEOUT,
                 },
             )
         finally:
-            if server is not None:
-                server.close()
-                await server.wait_closed()
             await self._delete_runtime_session(runtime_url, api_key, session_id)
 
     async def _create_runtime_session(self, runtime_url: str, api_key: str, task: Task) -> str:
@@ -155,67 +137,9 @@ class HUDRuntime:
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
 
-    async def _forward_runtime_connection(
-        self,
-        runtime_url: str,
-        api_key: str,
-        session_id: str,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        ws_url = _runtime_tunnel_ws_url(runtime_url, session_id)
-        try:
-            async with websockets.connect(
-                ws_url,
-                additional_headers={"Authorization": f"Bearer {api_key}"},
-                max_size=None,
-            ) as websocket:
-                await _splice_websocket(reader, writer, websocket)
-        finally:
-            if not writer.is_closing():
-                writer.close()
-                with contextlib.suppress(Exception):
-                    await writer.wait_closed()
-
 
 def _runtime_tunnel_ws_url(runtime_url: str, session_id: str) -> str:
     parts = urlsplit(runtime_url.rstrip("/"))
     scheme = "wss" if parts.scheme == "https" else "ws"
     path = f"{parts.path.rstrip('/')}/runtime/tunnels/{session_id}"
     return urlunsplit((scheme, parts.netloc, path, "", ""))
-
-
-async def _splice_websocket(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    websocket: Any,
-) -> None:
-    async def tcp_to_ws() -> None:
-        while data := await reader.read(65536):
-            await websocket.send(data)
-
-    async def ws_to_tcp() -> None:
-        async for message in websocket:
-            data = message.encode("utf-8") if isinstance(message, str) else message
-            writer.write(data)
-            await writer.drain()
-
-    tasks = [
-        asyncio.create_task(tcp_to_ws()),
-        asyncio.create_task(ws_to_tcp()),
-    ]
-    try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        done_results = await asyncio.gather(*done, return_exceptions=True)
-        await asyncio.gather(*pending, return_exceptions=True)
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    for result in done_results:
-        if isinstance(result, BaseException) and not isinstance(result, ConnectionClosedOK):
-            raise result
