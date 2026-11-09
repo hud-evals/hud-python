@@ -133,6 +133,8 @@ class ClaudeCLIAgent(CLIAgent[ClaudeCLIConfig]):
                 args.extend(["--system-prompt", self.config.system_prompt])
             for tool in self.config.allowed_tools:
                 args.extend(["--allowedTools", tool])
+            for tool in self.config.disallowed_tools:
+                args.extend(["--disallowedTools", tool])
             if mcp_servers:
                 args.extend(["--mcp-config", MCP_CONFIG_PATH])
 
