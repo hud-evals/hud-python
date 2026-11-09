@@ -76,6 +76,8 @@ directly. Every knob
 (`model`, `max_steps`, `timeout_seconds`, `tool_timeout_seconds`, `system_prompt`, `citations_enabled`, `stop_on`) lives on the
 config; `__call__(run)` takes only the run.
 
+`ClaudeConfig.effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`, subject to the model, and is sent as the request's `output_config.effort`; unset uses the model's default.
+
 `OpenAIConfig.max_output_tokens` and `GeminiConfig.max_output_tokens` are unset by default, so each request gets the model's own output limit. Set them to cap output per turn. Gemini counts thinking tokens toward the cap, so a low cap can truncate a thinking model before it answers.
 
 `GeminiConfig.temperature`, `top_p`, and `top_k` are unset by default, so each request uses the model's own sampling; Gemini 4 models ignore them. `GeminiConfig.thinking_level` accepts `minimal`, `low`, `medium`, or `high`, subject to the model (Gemini 4 Argon rejects `minimal`); unset uses the model's default.

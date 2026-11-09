@@ -4,7 +4,8 @@ One provider-neutral script answers the four wire protocols hud's agents speak:
 
 - OpenAI Chat Completions: ``POST /chat/completions``
 - OpenAI Responses: ``POST /responses``
-- Anthropic Messages, streamed as server-sent events: ``POST /v1/messages``
+- Anthropic Messages, streamed as server-sent events: ``POST /v1/messages``, or
+  unstreamed through Bedrock: ``POST /model/{model}/invoke``
 - Gemini: ``POST /v1beta/models/{model}:generateContent``, or ``:streamGenerateContent``
   as server-sent events
 
@@ -177,6 +178,7 @@ class Models:
         services.route("gateway", "POST", "/chat/completions", handler=self._chat)
         services.route("gateway", "POST", "/responses", handler=self._responses_api)
         services.route("gateway", "POST", "/v1/messages", handler=self._anthropic)
+        services.route("gateway", "POST", "/model/{model}/invoke", handler=self._anthropic)
         services.route(
             "gateway", "POST", "/v1beta/models/{model}:generateContent", handler=self._gemini
         )
@@ -232,6 +234,9 @@ class Models:
             turn = sum(1 for m in body.get("messages", []) if m.get("role") == "assistant")
         elif raw.path == "/v1/messages":
             protocol, model = "anthropic", body.get("model", "")
+            turn = sum(1 for m in body.get("messages", []) if m.get("role") == "assistant")
+        elif raw.path.startswith("/model/"):
+            protocol, model = "anthropic", raw.params["model"]
             turn = sum(1 for m in body.get("messages", []) if m.get("role") == "assistant")
         elif raw.path == "/responses":
             protocol, model = "responses", body.get("model", "")

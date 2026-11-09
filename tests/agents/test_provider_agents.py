@@ -8,10 +8,11 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from anthropic import AsyncAnthropicBedrock
 from fastmcp import FastMCP
 
 from hud.agents import ClaudeAgent, GeminiAgent
-from hud.agents.types import ClaudeConfig, GeminiConfig
+from hud.agents.types import ClaudeConfig, ClaudeEffort, GeminiConfig
 from hud.capabilities import Capability
 from hud.types import AgentType
 from tests.fixtures.asgi import mcp_server
@@ -128,6 +129,35 @@ async def test_an_error_inside_the_stream_is_retried_only_when_transient(
     (run,) = (await task().run(ClaudeAgent(ClaudeConfig(model=CLAUDE_MODEL)))).runs
 
     assert (run.trace.status, len(models.requests())) == (status, requests)
+
+
+@pytest.mark.parametrize(
+    ("effort", "sent"),
+    [("high", {"output_config": {"effort": "high"}}), (None, {})],
+    ids=["set", "unset"],
+)
+@pytest.mark.parametrize("bedrock", [False, True], ids=["anthropic", "bedrock"])
+async def test_the_configured_effort_reaches_claude_only_when_set(
+    effort: ClaudeEffort | None,
+    sent: dict[str, object],
+    bedrock: bool,
+    models: Models,
+    tmp_path: Path,
+) -> None:
+    models.script([Turn(text="done")])
+    client = (
+        AsyncAnthropicBedrock(api_key="bedrock-key", aws_region="us-east-1", base_url=models.url)
+        if bedrock
+        else None
+    )
+    config = ClaudeConfig(model=CLAUDE_MODEL, effort=effort, model_client=client)
+
+    task = workspace_task(tmp_path / "ws")
+    (run,) = (await task().run(ClaudeAgent(config))).runs
+
+    (request,) = models.requests()
+    assert run.trace.status == "completed"
+    assert {key: request.body[key] for key in request.body.keys() & {"output_config"}} == sent
 
 
 async def test_an_excluded_computer_action_reaches_the_environment_tool_of_that_name(

@@ -122,6 +122,7 @@ class ClaudeConfig(ToolAgentConfig):
     use_computer_beta: bool = True
     screenshot_encoding: ScreenshotEncoding = Field(default_factory=WebPScreenshotEncoding)
     thinking: ClaudeThinkingConfig | None = None
+    effort: ClaudeEffort | None = None
     max_tool_result_images: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
