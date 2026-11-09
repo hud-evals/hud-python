@@ -14,14 +14,14 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 from urllib.parse import urlsplit
 from uuid import UUID
 
 import typer
 from dotenv import set_key
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
-from typer.core import TyperCommand, TyperGroup, TyperOption
+from typer.core import TyperCommand, TyperGroup
 
 from hud.utils.exceptions import HudAuthenticationError, HudRequestError, HudTimeoutError
 from hud.utils.hud_console import HUDConsole
@@ -271,22 +271,25 @@ def map_exception(exc: BaseException, *, input: dict[str, Any] | None = None) ->
     return CliError(error="failure", message=str(exc), input=input)
 
 
-def _add_json_option(command: Any) -> None:
-    command.params.append(
-        TyperOption(
-            param_decls=["--json"],
-            is_flag=True,
-            is_eager=True,
-            expose_value=False,
-            help="Write JSON to stdout.",
-        )
-    )
+def _json_option() -> Any:
+    app = typer.Typer(add_completion=False)
+
+    @app.command()
+    def command(
+        json: Annotated[
+            bool, typer.Option("--json", is_eager=True, help="Write JSON to stdout.")
+        ] = False,
+    ) -> None: ...
+
+    (option,) = typer.main.get_command(app).params
+    option.expose_value = False
+    return option
 
 
 class CLICommand(TyperCommand):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        _add_json_option(self)
+        self.params.append(_json_option())
 
 
 class CLIGroup(TyperGroup):
@@ -312,7 +315,7 @@ class CLIGroup(TyperGroup):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         if self.name != "hud":
-            _add_json_option(self)
+            self.params.append(_json_option())
 
     def list_commands(self, ctx: Any) -> list[str]:
         names = super().list_commands(ctx)
