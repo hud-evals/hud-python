@@ -238,6 +238,7 @@ class ClaudeCLIConfig(AgentConfig):
             "WebFetch",
         ],
     )
+    disallowed_tools: list[str] = Field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------
