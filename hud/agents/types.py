@@ -238,6 +238,10 @@ class ClaudeCLIConfig(AgentConfig):
             "WebFetch",
         ],
     )
+    #: Maps to the CLI's ``--disallowedTools``: the CLI removes these tools from the
+    #: model's context and from the subagents it runs, but not from a separate CLI the
+    #: model starts through Bash. ``allowed_tools`` only skips permission prompts, so
+    #: it cannot take a tool away.
     disallowed_tools: list[str] = Field(default_factory=list)
 
 

@@ -87,9 +87,34 @@ def drive_computer(server, actions):
 
 
 
+REACH = '''
+import os, socket, urllib.parse
+url = urllib.parse.urlsplit(os.environ["ANTHROPIC_BASE_URL"])
+try:
+    socket.create_connection((url.hostname, url.port or 80), timeout=5).close()
+    reached = True
+except OSError:
+    reached = False
+'''
+
+
+def reaches_model():
+    scope = {{}}
+    exec(REACH, scope)
+    return scope["reached"]
+
+
+def child_reaches_model():
+    script = REACH + "\\nraise SystemExit(0 if reached else 1)"
+    return subprocess.run([sys.executable, "-c", script]).returncode == 0
+
+
 if behavior.get("computer"):
     servers = json.load(open(".hud_mcp_config.json"))["mcpServers"]
     record["computer"] = drive_computer(servers["computer-use"], behavior["computer"])
+
+if behavior.get("reach_model"):
+    record["reach_model"] = {{"cli": reaches_model(), "child": child_reaches_model()}}
 
 # Named by time, not pid: sandboxed invocations share pids across pid namespaces.
 with open(os.path.join({captures!r}, f"{{time.time_ns()}}-{{os.getpid()}}.json"), "w") as capture:
@@ -116,6 +141,8 @@ class Stub:
     exit: int = 0
     hang: bool = False
     computer: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    #: Record whether the stub, and a process it starts, can connect to its model.
+    reach_model: bool = False
 
     @property
     def bin(self) -> Path:
@@ -140,6 +167,7 @@ class Stub:
                     "exit": self.exit,
                     "hang": self.hang,
                     "computer": self.computer,
+                    "reach_model": self.reach_model,
                 }
             )
         )

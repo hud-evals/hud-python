@@ -248,6 +248,28 @@ async def test_in_a_sandbox_the_cli_reaches_its_model_without_its_key(
 
 @pytest.mark.e2e
 @pytest.mark.sandbox
+async def test_in_a_sandbox_a_process_the_cli_starts_cannot_reach_its_model(
+    tmp_path: Path,
+) -> None:
+    """What keeps a ``claude -p`` the model runs through Bash, which no CLI flag of the
+    agent's binds, from reaching the model and its server-side tools."""
+    stub = clis.Stub(
+        tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"), reach_model=True
+    )
+    stub.install()
+    task = workspace_task(
+        tmp_path / "ws", env=stub.shell_env(), require_isolation=True, track_files=False
+    )
+
+    run = await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env))
+
+    (capture,) = stub.captures()
+    assert run.trace.status == "completed"
+    assert capture["reach_model"] == {"cli": True, "child": False}
+
+
+@pytest.mark.e2e
+@pytest.mark.sandbox
 async def test_cli_rollouts_one_after_another_on_a_shared_sandbox_each_reach_their_model(
     tmp_path: Path,
 ) -> None:
@@ -339,6 +361,31 @@ async def test_claude_code_runs_with_the_variables_its_config_adds(tmp_path: Pat
 
     (capture,) = stub.captures()
     assert capture["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "haiku"
+
+
+async def test_claude_code_is_denied_the_tools_its_config_disallows(tmp_path: Path) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+    agent = ClaudeCLIAgent(ClaudeCLIConfig(disallowed_tools=["WebSearch", "WebFetch"]))
+
+    await rollout(task(), agent, runtime=LocalRuntime(task.env))
+
+    (capture,) = stub.captures()
+    argv: list[str] = capture["argv"]
+    denied = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--disallowedTools"]
+    assert denied == ["WebSearch", "WebFetch"]
+
+
+async def test_claude_code_is_denied_no_tools_by_default(tmp_path: Path) -> None:
+    stub = clis.Stub(tmp_path / "ws" / ".stub", "claude", stdout=clis.answer("claude", "done"))
+    stub.install()
+    task = workspace_task(tmp_path / "ws", env=stub.shell_env())
+
+    await rollout(task(), ClaudeCLIAgent(), runtime=LocalRuntime(task.env))
+
+    (capture,) = stub.captures()
+    assert "--disallowedTools" not in capture["argv"]
 
 
 def test_claude_code_config_refuses_a_variable_name_no_shell_can_assign() -> None:
