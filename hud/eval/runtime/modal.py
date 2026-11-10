@@ -21,7 +21,7 @@ from .core import Runtime, RuntimeConfig, validate_session_id
 from .docker import _DOCKER_SECCOMP_PROFILE
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncGenerator, Mapping, Sequence
 
     import modal
 
@@ -62,7 +62,7 @@ class ModalEndpoint(Runtime):
         return stdout
 
     @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+    async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
         validate_session_id(session_id)
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"
@@ -180,7 +180,7 @@ class ModalRuntime:
         self._image_lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+    async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         import modal
 
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
@@ -301,7 +301,7 @@ class ModalRuntime:
             readiness_probe=(None if compose is not None else modal.Probe.with_tcp(self.port)),
             # Modal types both timeouts as int seconds; floats raise at proto encode.
             timeout=run_timeout,
-            **({"experimental_options": {"vm_runtime": True}} if compose is not None else {}),
+            experimental_options={"vm_runtime": True} if compose is not None else None,
             **sandbox_kwargs,
         )
         output_tasks: tuple[asyncio.Task[None], ...] = ()

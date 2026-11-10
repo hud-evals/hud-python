@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 class FlakyRelay:
@@ -124,7 +124,7 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 
 
 @asynccontextmanager
-async def relay(host: str, port: int) -> AsyncIterator[FlakyRelay]:
+async def relay(host: str, port: int) -> AsyncGenerator[FlakyRelay]:
     """Serve a :class:`FlakyRelay` to ``host:port`` on a loopback port for the block."""
     controls = FlakyRelay((host, port))
     server = await asyncio.start_server(controls.handle, "127.0.0.1", 0)

@@ -29,7 +29,7 @@ from pydantic import (
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
 
 _COMPOSE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -585,7 +585,7 @@ class ComposeProject(BaseModel):
         memory_mb: int | None = None,
         gpu_count: int | None = None,
         archive: bool = False,
-    ) -> Iterator[ComposeLaunchFiles]:
+    ) -> Generator[ComposeLaunchFiles]:
         if not isinstance(self.document, Path):
             raise ValueError("Compose project is not available on the local filesystem")
         compose = self.document.resolve()

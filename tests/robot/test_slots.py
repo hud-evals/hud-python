@@ -25,7 +25,7 @@ from hud.environment.robot import RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime, Task
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from contextlib import AbstractAsyncContextManager
 
     from numpy.typing import NDArray
@@ -79,7 +79,7 @@ class Sim(RobotBridge):
 
 
 @asynccontextmanager
-async def serving(sim: Sim) -> AsyncIterator[tuple[int, RobotEndpoint, Capability]]:
+async def serving(sim: Sim) -> AsyncGenerator[tuple[int, RobotEndpoint, Capability]]:
     """Serve ``sim``: its control port, a started endpoint on it, and the ``robot`` capability."""
     await sim.start()
     control = await sim.serve_control()

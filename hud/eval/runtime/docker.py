@@ -25,7 +25,7 @@ from .compose import ComposeConfig, DockerBindMount
 from .core import Runtime, RuntimeConfig, validate_session_id
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncGenerator, Mapping, Sequence
 
     from hud.eval.task import Task
 
@@ -68,7 +68,7 @@ def _require_free_disk(output: str, storage_mb: int) -> None:
 async def _docker_deadline(
     seconds: float | None,
     teardown: tuple[str, ...],
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     if seconds is None:
         yield
         return
@@ -122,7 +122,7 @@ async def _wait_serving(container: str, name: str, seconds: float) -> None:
 
 
 @asynccontextmanager
-async def _docker_output(*args: str) -> AsyncIterator[None]:
+async def _docker_output(*args: str) -> AsyncGenerator[None]:
     process = await create_process_group_exec(
         "docker",
         *args,
@@ -174,7 +174,7 @@ class DockerRuntime:
         self.runtime_config = config if config.model_dump(exclude_none=True) else None
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+    async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         config = (self.runtime_config or RuntimeConfig()).with_overrides(task.runtime_config)
         startup_timeout = config.limits.startup_timeout_s if config.limits is not None else None
         run_timeout = config.limits.run_timeout_s if config.limits is not None else None
@@ -386,7 +386,7 @@ class DockerEndpoint(Runtime):
     container: str
 
     @asynccontextmanager
-    async def snapshot_session(self, session_id: str) -> AsyncIterator[Path | None]:
+    async def snapshot_session(self, session_id: str) -> AsyncGenerator[Path | None]:
         validate_session_id(session_id)
         with tempfile.TemporaryDirectory(prefix="hud-session-") as directory:
             destination = Path(directory) / "session.tar.gz"

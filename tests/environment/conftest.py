@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 #: The control channel's frame limit, in bytes, excluding the newline.
@@ -69,7 +69,7 @@ class Wire:
 
 
 @asynccontextmanager
-async def wire(url: str) -> AsyncIterator[Wire]:
+async def wire(url: str) -> AsyncGenerator[Wire]:
     """Open a raw connection to the JSON-RPC port at ``tcp://host:port``."""
     address = urlsplit(url)
     reader, writer = await asyncio.open_connection(

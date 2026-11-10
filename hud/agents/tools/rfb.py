@@ -20,7 +20,7 @@ from hud.capabilities.rfb import PngScreenshotEncoding, ScreenshotEncoding
 from hud.types import ImageContent, ToolResult
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable
+    from collections.abc import AsyncGenerator, Iterable
 
     from hud.agents.types import ToolAgentConfig
 
@@ -249,7 +249,7 @@ class RFBTool(AgentTool[RFBClient]):
     # ─── internal ────────────────────────────────────────────────────
 
     @asynccontextmanager
-    async def _with_keys(self, keys: Iterable[str] | None) -> AsyncIterator[None]:
+    async def _with_keys(self, keys: Iterable[str] | None) -> AsyncGenerator[None]:
         if not keys:
             yield
             return

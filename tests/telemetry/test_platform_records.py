@@ -24,7 +24,7 @@ from tests.fixtures.asgi import mcp_server
 from tests.fixtures.environments import checked
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from hud.eval import Run
     from tests.conftest import HudEnv
@@ -148,7 +148,7 @@ async def test_a_rollout_that_never_launched_reports_where_it_failed(
     reporting: FakeServices,
 ) -> None:
     @asynccontextmanager
-    async def unavailable(task: Task) -> AsyncIterator[Runtime]:
+    async def unavailable(task: Task) -> AsyncGenerator[Runtime]:
         raise RuntimeError("no substrate")
         yield Runtime("tcp://127.0.0.1:1")
 

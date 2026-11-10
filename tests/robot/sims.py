@@ -24,7 +24,7 @@ from hud.environment.robot import DirectControl, RobotBridge, RobotEndpoint
 from hud.eval import LocalRuntime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import Callable
 
     from numpy.typing import NDArray
 
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 @asynccontextmanager
 async def sim_env(
     sim: RobotBridge, name: str, *, control: DirectControl | None = None
-) -> AsyncIterator[tuple[Environment, RobotEndpoint]]:
+) -> AsyncGenerator[tuple[Environment, RobotEndpoint]]:
     """The docs' custom-bridge env for *sim*, which this process serves, started.
 
     ``RobotEndpoint.remote`` attaches to a sim someone else runs; here that is
@@ -252,7 +252,7 @@ def look(duration: float | None = None) -> tuple[str, dict[str, Any]]:
 
 
 @asynccontextmanager
-async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncIterator[Environment]:
+async def arm_env(sim: RobotBridge, control: DirectControl) -> AsyncGenerator[Environment]:
     """*sim* with direct control attached, as the ``arm`` env whose ``reach`` the sim grades."""
     async with sim_env(sim, "arm", control=control) as (env, endpoint):
 
@@ -333,7 +333,7 @@ class StubSim(RobotBridge):
 
 
 @asynccontextmanager
-async def stub_episode(sim: StubSim, name: str) -> AsyncIterator[Provider]:
+async def stub_episode(sim: StubSim, name: str) -> AsyncGenerator[Provider]:
     """*sim* as env *name*, whose ``episode`` the sim grades, placed in this process."""
     async with sim_env(sim, name) as (env, endpoint):
 

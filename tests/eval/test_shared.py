@@ -14,7 +14,7 @@ from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from hud.eval import Run
 
@@ -89,7 +89,7 @@ async def test_each_environment_and_runtime_configuration_gets_its_own_substrate
         return env
 
     @asynccontextmanager
-    async def sized(task: Task) -> AsyncIterator[Runtime]:
+    async def sized(task: Task) -> AsyncGenerator[Runtime]:
         assert task.runtime_config is not None and task.runtime_config.resources is not None
         placed.append((task.env, task.runtime_config.resources.cpu))
         unsized = task.model_copy(update={"runtime_config": None})
@@ -118,7 +118,7 @@ async def test_a_failed_boot_fails_its_own_lease_and_the_next_lease_boots_again(
         yield 1.0
 
     @asynccontextmanager
-    async def flaky(task: Task) -> AsyncIterator[Runtime]:
+    async def flaky(task: Task) -> AsyncGenerator[Runtime]:
         attempts.append(task.slug)
         if len(attempts) == 1:
             raise RuntimeError("boot failed")

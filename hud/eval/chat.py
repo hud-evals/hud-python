@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hud.agents.types import AgentStep
 from hud.types import (
@@ -51,8 +51,6 @@ def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     """Normalize message content to a list of ContentBlocks."""
     if isinstance(content, str):
         return [TextContent(type="text", text=content)]
-    if isinstance(content, list):
-        return cast("list[ContentBlock]", content)
     return list(content)
 
 

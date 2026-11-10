@@ -29,7 +29,7 @@ from hud.capabilities import Capability
 from hud.capabilities.rfb import RFBClient, ScreenshotEncoding
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncGenerator, Mapping
 
     from hud.capabilities import SSHClient
 
@@ -119,7 +119,7 @@ async def bridge_computer_mcp(
     screenshot_encoding: ScreenshotEncoding,
     *,
     shell: str,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Bridge a controller-side computer MCP process into a remote POSIX shell."""
     if shell in WINDOWS_SHELLS:
         raise RuntimeError("ClaudeCLIAgent computer use requires a POSIX workspace")

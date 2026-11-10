@@ -19,7 +19,7 @@ from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
 from cryptography.hazmat.primitives.ciphers import Cipher, modes
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 @dataclass(frozen=True)
@@ -150,7 +150,7 @@ async def fake_screen(
     *,
     drop_on_update: int = 0,
     password: str | None = None,
-) -> AsyncIterator[FakeScreen]:
+) -> AsyncGenerator[FakeScreen]:
     """Serve a :class:`FakeScreen` on loopback for the duration of the block."""
     screen = FakeScreen(width, height, color, drop_on_update=drop_on_update, password=password)
     server = await asyncio.start_server(screen.session, "127.0.0.1", 0)

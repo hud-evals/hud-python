@@ -48,7 +48,7 @@ if sys.platform != "win32":  # the pty a session runs on has no Windows analogue
     import termios
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+    from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 
     from hud.capabilities import Capability
 
@@ -646,7 +646,7 @@ class Workspace:
         self._visitor_lock = asyncio.Lock()
 
     @contextlib.asynccontextmanager
-    async def visiting(self, allowed: Collection[str] | None) -> AsyncIterator[dict[str, str]]:
+    async def visiting(self, allowed: Collection[str] | None) -> AsyncGenerator[dict[str, str]]:
         """A way out for a process joining this network without being a session.
 
         Yields the proxy variables it should run under. A visitor is behind the

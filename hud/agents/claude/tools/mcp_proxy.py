@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from inspect import cleandoc
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from hud.agents.tools import MCPTool
 
 from .base import ClaudeToolSpec
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import BetaToolParam, BetaToolUnionParam
+    from anthropic.types.beta import BetaToolUnionParam
 
 
 class ClaudeMCPProxyTool(MCPTool):
@@ -29,15 +29,12 @@ class ClaudeMCPProxyTool(MCPTool):
                 Add a docstring to your @mcp.tool function and pydantic Field() annotations.
                 """),
             )
-        return cast(
-            "BetaToolParam",
-            {
-                "name": self.provider_name,
-                "description": self.mcp_tool.description,
-                "input_schema": self.mcp_tool.inputSchema,
-                "eager_input_streaming": True,
-            },
-        )
+        return {
+            "name": self.provider_name,
+            "description": self.mcp_tool.description,
+            "input_schema": self.mcp_tool.inputSchema,
+            "eager_input_streaming": True,
+        }
 
 
 __all__ = ["ClaudeMCPProxyTool"]

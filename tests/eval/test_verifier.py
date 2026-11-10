@@ -19,7 +19,7 @@ from tests.conftest import eventually
 from tests.fixtures.agents import ScriptedAgent
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 def verified(actor: Environment, judge: Environment) -> Task:
@@ -184,7 +184,7 @@ async def test_a_verifier_that_cannot_be_placed_leaves_the_run_ungraded() -> Non
         yield {"score": 0.25, "answer": answer}
 
     @asynccontextmanager
-    async def actor_only(task: Task) -> AsyncIterator[Runtime]:
+    async def actor_only(task: Task) -> AsyncGenerator[Runtime]:
         if task.env != "actor":
             raise RuntimeError("no judge here")
         async with LocalRuntime(actor)(task) as runtime:

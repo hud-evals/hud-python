@@ -136,17 +136,14 @@ def openai_compatible_tool_param(
         if parameters
         else {"type": "object", "properties": {}}
     )
-    return cast(
-        "OpenAICompatibleToolParam",
-        {
-            "type": "function",
-            "function": {
-                "name": name or openai_compatible_tool_name(tool.name),
-                "description": tool.description or f"Call {tool.name}",
-                "parameters": sanitized,
-            },
+    return {
+        "type": "function",
+        "function": {
+            "name": name or openai_compatible_tool_name(tool.name),
+            "description": tool.description or f"Call {tool.name}",
+            "parameters": sanitized,
         },
-    )
+    }
 
 
 __all__ = [

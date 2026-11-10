@@ -38,7 +38,7 @@ from tests.fixtures.agents import ScriptedAgent
 from tests.fixtures.envs import source
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from hud.eval import Provider, Run
     from tests.fixtures.services import FakeServices
@@ -68,7 +68,7 @@ def serves(url: str) -> bool:
 @asynccontextmanager
 async def placed(
     runtime: str, fixture: str, request: pytest.FixtureRequest, startup: int = 120
-) -> AsyncIterator[tuple[Provider, Callable[[], Awaitable[bool]]]]:
+) -> AsyncGenerator[tuple[Provider, Callable[[], Awaitable[bool]]]]:
     """Place fixture env ``fixture`` on ``runtime``; yield it and its cleanliness check."""
     path = source(fixture)
     log = request.getfixturevalue("tmp_path") / "lifecycle.log"
@@ -135,7 +135,7 @@ async def placed(
             sandboxes = []
 
             @asynccontextmanager
-            async def recorded(task: Task) -> AsyncIterator[Runtime]:
+            async def recorded(task: Task) -> AsyncGenerator[Runtime]:
                 async with inner(task) as placed_runtime:
                     sandboxes.append(placed_runtime.params["instance_id"])
                     yield placed_runtime

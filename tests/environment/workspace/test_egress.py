@@ -37,7 +37,7 @@ from tests.conftest import eventually
 from .conftest import shell
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+    from collections.abc import Callable, Generator, Mapping
 
 REQUEST = (
     b"POST /v1/echo HTTP/1.1\r\nHost: upstream\r\nContent-Length: 12\r\n"
@@ -91,7 +91,7 @@ def internet(
 
 
 @contextmanager
-def sockets() -> Iterator[Path]:
+def sockets() -> Generator[Path]:
     """A socket directory outside the pytest tmp dir: unix socket paths cap near 104 bytes."""
     directory = Path(tempfile.mkdtemp(dir="/tmp"))
     try:
@@ -101,7 +101,7 @@ def sockets() -> Iterator[Path]:
 
 
 @contextmanager
-def proxy(allowed: set[str], **options: Any) -> Iterator[Egress]:
+def proxy(allowed: set[str], **options: Any) -> Generator[Egress]:
     with sockets() as directory:
         egress = Egress(directory, allowed, **options)
         egress.start()
@@ -315,7 +315,7 @@ def test_the_proxy_relays_an_upstream_header_only_as_the_upstream_sent_it(
 
 
 @contextmanager
-def serving(handler: type[BaseHTTPRequestHandler]) -> Iterator[int]:
+def serving(handler: type[BaseHTTPRequestHandler]) -> Generator[int]:
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -328,7 +328,7 @@ def serving(handler: type[BaseHTTPRequestHandler]) -> Iterator[int]:
 
 
 @contextmanager
-def raw_upstream(answer: bytes, listener: socket.socket | None = None) -> Iterator[int]:
+def raw_upstream(answer: bytes, listener: socket.socket | None = None) -> Generator[int]:
     """A server that reads one request to its blank line and answers ``answer``."""
     server = listener or socket.create_server(("127.0.0.1", 0))
     server.settimeout(5)
@@ -349,7 +349,7 @@ def raw_upstream(answer: bytes, listener: socket.socket | None = None) -> Iterat
 
 
 @contextmanager
-def half_close_upstream(listener: socket.socket) -> Iterator[list[bytes]]:
+def half_close_upstream(listener: socket.socket) -> Generator[list[bytes]]:
     """Reads a connection to its EOF, records it, then answers ``RESPONSE``."""
     requests: list[bytes] = []
     listener.settimeout(5)
@@ -371,7 +371,7 @@ def half_close_upstream(listener: socket.socket) -> Iterator[list[bytes]]:
 @contextmanager
 def bridge(
     egress: Egress, cwd: Path, **options: Any
-) -> Iterator[tuple[int, subprocess.Popen[bytes]]]:
+) -> Generator[tuple[int, subprocess.Popen[bytes]]]:
     """The bridge process serving ``egress`` on a free loopback port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as holder:
         holder.bind(("127.0.0.1", 0))
@@ -394,7 +394,7 @@ def bridge(
 @contextmanager
 def through_the_bridge(
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[tuple[socket.socket, list[bytes]]]:
+) -> Generator[tuple[socket.socket, list[bytes]]]:
     del monkeypatch
     with sockets() as directory:
         egress = Egress(directory, {"example.com"})
@@ -412,7 +412,7 @@ def through_the_bridge(
 @contextmanager
 def through_a_connect_tunnel(
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[tuple[socket.socket, list[bytes]]]:
+) -> Generator[tuple[socket.socket, list[bytes]]]:
     upstream = socket.create_server(("127.0.0.1", 0))
     internet(monkeypatch, servers={"example.com": upstream.getsockname()[1]})
     with (
@@ -431,7 +431,7 @@ def through_a_connect_tunnel(
 
 
 @contextmanager
-def through_a_peer_forward(_: pytest.MonkeyPatch) -> Iterator[tuple[socket.socket, list[bytes]]]:
+def through_a_peer_forward(_: pytest.MonkeyPatch) -> Generator[tuple[socket.socket, list[bytes]]]:
     upstream = socket.create_server(("127.0.0.1", 0))
     with (
         half_close_upstream(upstream) as requests,
@@ -447,7 +447,7 @@ def through_a_peer_forward(_: pytest.MonkeyPatch) -> Iterator[tuple[socket.socke
 @contextmanager
 def through_a_connection_relay(
     _: pytest.MonkeyPatch,
-) -> Iterator[tuple[socket.socket, list[bytes]]]:
+) -> Generator[tuple[socket.socket, list[bytes]]]:
     requests: list[bytes] = []
 
     class Upstream(BaseHTTPRequestHandler):
@@ -665,7 +665,7 @@ async def test_a_verifier_run_is_held_to_the_policy_it_runs_under(
 
 
 @contextmanager
-def relay_to(upstream: type[BaseHTTPRequestHandler], **connection: Any) -> Iterator[int]:
+def relay_to(upstream: type[BaseHTTPRequestHandler], **connection: Any) -> Generator[int]:
     """A connection relay in front of ``upstream``, holding the controller's credential."""
     with serving(upstream) as port:
         relay = ConnectionRelay(

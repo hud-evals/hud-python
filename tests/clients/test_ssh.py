@@ -25,7 +25,7 @@ from tests.conftest import eventually
 from tests.fixtures.relay import FlakyRelay, relay
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
 
@@ -33,7 +33,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the workspace s
 
 
 @asynccontextmanager
-async def shell(tmp_path: Path) -> AsyncIterator[tuple[SSHClient, FlakyRelay, Path]]:
+async def shell(tmp_path: Path) -> AsyncGenerator[tuple[SSHClient, FlakyRelay, Path]]:
     """A client connected to a served workspace's ``ssh`` binding through a relay."""
     root = tmp_path / "workspace"
     root.mkdir()

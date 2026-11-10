@@ -13,7 +13,7 @@ from hud.utils.process import finish_output, output_writer
 from .core import Runtime, RuntimeConfig
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from daytona import Image as DaytonaImage
     from daytona.common.snapshot import Snapshot as DaytonaSnapshot
@@ -110,7 +110,7 @@ class DaytonaRuntime:
         self._snapshot_lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def __call__(self, task: Task) -> AsyncIterator[Runtime]:
+    async def __call__(self, task: Task) -> AsyncGenerator[Runtime]:
         import asyncssh
         from daytona import (
             AsyncDaytona,

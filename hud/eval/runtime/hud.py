@@ -20,7 +20,7 @@ from hud.telemetry.context import get_current_trace_id
 from .core import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from hud.agents.base import Agent
     from hud.eval.task import Task
@@ -79,7 +79,7 @@ class HUDRuntime:
         return self._runtime_session(task)
 
     @asynccontextmanager
-    async def _runtime_session(self, task: Task) -> AsyncIterator[Runtime]:
+    async def _runtime_session(self, task: Task) -> AsyncGenerator[Runtime]:
         from hud.settings import settings as sdk_settings
 
         if task.runtime_config is not None:
