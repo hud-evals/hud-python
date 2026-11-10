@@ -22,6 +22,7 @@ from typing import Any
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.prompt import Confirm, IntPrompt
 from rich.table import Table
 
 # HUD Brand Colors - Optimized for both light and dark modes
@@ -321,71 +322,44 @@ class HUDConsole:
         default: int | None = None,
         spaced: bool = False,
     ) -> str:
-        """Interactive selection with arrow key navigation.
+        """Numbered selection: list the choices and read the number of one.
 
         Args:
             message: The prompt message to display
             choices: List of choices. Can be strings or dicts with 'name' and 'value' keys
-            default: Default selection (matches against choice name/string)
+            default: Index of the choice Enter picks
             spaced: Insert a blank line between choices for a roomier list
 
         Returns:
-            The selected choice value
+            The selected choice value; Ctrl+C or end of input cancels the command.
         """
-        import questionary
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.keys import Keys
-        from questionary import Style
-
-        # Convert choices to questionary format, optionally interleaving blank
-        # (non-selectable) separators so the list breathes.
-        q_choices: list[Any] = []
-
+        options: list[tuple[str, Any]] = []
         for choice in choices:
-            if spaced and q_choices:
-                q_choices.append(questionary.Separator(" "))
             if isinstance(choice, dict):
                 name = choice.get("name", str(choice.get("value", "")))
-                value = choice.get("value", name)
-                q_choices.append(questionary.Choice(title=name, value=value))
+                options.append((name, choice.get("value", name)))
             else:
-                q_choices.append(choice)
+                options.append((choice, choice))
 
-        # Custom style for better visibility of selection
-        custom_style = Style(
-            [
-                ("qmark", "fg:cyan bold"),
-                ("question", "bold"),
-                ("pointer", "fg:cyan bold"),
-                ("highlighted", "fg:cyan bold"),
-            ]
+        console = self._stderr_console
+        console.print(f"[bold]{escape(message)}[/bold]")
+        for number, (name, _) in enumerate(options, start=1):
+            if spaced and number > 1:
+                console.print()
+            console.print(f"  [{GOLD}]{number}[/{GOLD}] {escape(name)}")
+        prompt = IntPrompt(
+            "Number",
+            console=console,
+            choices=[str(number) for number in range(1, len(options) + 1)],
+            show_choices=False,
         )
-
-        question = questionary.select(
-            message,
-            choices=q_choices,
-            instruction="(Use ↑/↓ arrows, Enter to select, Esc to cancel)",
-            style=custom_style,
-        )
-
-        # questionary only aborts on Ctrl+C out of the box. Bind Esc to cancel
-        # too. Non-eager so it doesn't swallow the Esc-prefixed arrow sequences.
-        key_bindings = question.application.key_bindings
-        assert isinstance(key_bindings, KeyBindings)
-
-        @key_bindings.add(Keys.Escape)
-        def _cancel(event: Any) -> None:
-            event.app.exit(result=None)
-
-        result = _ask(question)
-
-        # No selection (Ctrl+C or Esc) → cancel the command.
-        if result is None:
+        try:
+            number = prompt() if default is None else prompt(default=default + 1)
+        except (KeyboardInterrupt, EOFError):
             import typer
 
-            raise typer.Exit(1)
-
-        return result
+            raise typer.Exit(1) from None
+        return options[number - 1][1]
 
     def format_tool_call(self, name: str, arguments: dict[str, Any] | str | None = None) -> str:
         """Format a tool call in compact HUD style.
@@ -439,17 +413,10 @@ class HUDConsole:
 
     def confirm(self, message: str, default: bool = True) -> bool:
         """Prompt for a yes/no confirmation; Ctrl+C / EOF answers no."""
-        import questionary
-
-        return bool(_ask(questionary.confirm(message, default=default, qmark="")))
-
-
-def _ask(question: Any) -> Any:
-    """Run a prompt on its own thread and loop, so async commands can prompt; Ctrl+C is None."""
-    try:
-        return question.application.run(in_thread=True)
-    except KeyboardInterrupt:
-        return None
+        try:
+            return Confirm.ask(message, console=self._stderr_console, default=default)
+        except (KeyboardInterrupt, EOFError):
+            return False
 
 
 # Global design instance for convenience

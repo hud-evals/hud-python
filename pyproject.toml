@@ -22,8 +22,6 @@ dependencies = [
     "google-genai>=2.30.1",
     "typer==0.29.0",
     "rich>=13.0.0",
-    "questionary==2.1.0",
-    "prompt-toolkit==3.0.51",
     "asyncssh>=2.23.0",
     "cryptography>=43",
     "keysymdef>=1.2",
